@@ -234,10 +234,16 @@ transcript (agent text + tool calls) from the coder presenter; **claude-cli / sa
 tool-call frames the daemon already captures (persisting agent *text* for those hook-driven types is
 a follow-up — see Scope).
 
-### Server-side replay (persisted transcript → ACP) (Updated: 2026-07-24)
+### Server-side replay (persisted transcript → ACP) (Updated: 2026-08-02)
 
 The replay simply **reads `acp-transcript.jsonl` and re-emits its frames** (snapshot), then tails
-live. It no longer parses `conversation.jsonl` or joins `agent-activity.jsonl` for the transcript —
+live. Since 2026-08-02 the resolved transcript is read once and serves all three transcript modes:
+all of it (`SNAPSHOT_THEN_LIVE`), its newest page (`TAIL_THEN_LIVE`, via
+`tddy_service::acp_replay::tail_page`), or none of it (`LIVE_ONLY`) — which still reads it, because a
+live frame's `seq` is a position in the whole recording and claiming 0 against a transcript of
+hundreds is worse than a local file read. `page_before` serves the reverse cursor behind
+`GetAcpReplayPage`; both are pure functions over the already-coalesced view, so paging, counting and
+snapshot replay agree about what a frame *is*. It no longer parses `conversation.jsonl` or joins `agent-activity.jsonl` for the transcript —
 those keep their existing roles. Hosting mirrors `StreamSessionActivity` end-to-end: the **coder
 participant** replays the persisted snapshot then tails `presenter_events` (mapped + appended by the
 same writer) for a live session; the **daemon** serves snapshot-only from the file for a dormant one
@@ -254,6 +260,79 @@ same writer) for a live session; the **daemon** serves snapshot-only from the fi
   elapsed badge per entry.
 - `AgentActivityOverlay` swaps its data source to `useAcpReplay` and renders `<AgentChatView readOnly>`
   as the panel body (keeping the top-bar icon, unread badge, and open/close behavior).
+
+## Tail-first, auto-scrolling transcript with a reverse cursor (Added: 2026-08-02)
+
+The transcript behaves like a chat log: **it opens at the end, it follows the end, and older history
+arrives on demand as the operator scrolls back toward the beginning.** Before this it opened on its
+*oldest* entry, never followed live activity, and transferred a session's whole persisted history to
+render a screenful of its end.
+
+### Opening and following
+
+- The transcript feed opens in **`TAIL_THEN_LIVE`** with a page size of **100** frames: the newest
+  100 persisted frames, in recorded order *within* the page, then the live tail. The viewport lands
+  on the newest entry, not on the page's first.
+- It is **pinned** while the viewport is within 32 px of the bottom, and opens pinned. While pinned,
+  an arriving frame scrolls into view.
+- Scrolling up **detaches**. Frames still arrive and still render; the offset does not move. A
+  **jump-to-latest** affordance appears carrying the number of entries that arrived since detaching,
+  and re-attaches on click; scrolling back to the bottom re-attaches too. The counter counts
+  *entries*, not frames — a tool call refined from `running` to `completed` coalesces into the row it
+  already had and does not increment it.
+
+### Paging backwards
+
+- Reaching the top of the loaded range (within 64 px) fetches `GetAcpReplayPage(before_seq = cursor)`.
+  Exactly one page is in flight at a time.
+- The page **prepends** and the cursor moves to its `first_seq`; the offset moves by exactly the
+  height the page added, so the entry being read stays under the same pixel.
+- A page carrying `at_oldest` closes the range: no further fetch, no returning indicator.
+- A failed fetch leaves the range exactly as it was and clears the in-flight flag, so a later scroll
+  retries. Nothing fabricated, no partial page, and the range is **not** closed — an empty page means
+  "you are at the head", which a failure is not.
+
+### Positions (`seq`)
+
+Every transcript frame carries `seq`, its absolute 0-based position in the resolved transcript. The
+first frame of a tail page doubles as the reverse cursor. Both hosts map `tool_call_id → seq`,
+pre-seeded from the resolved transcript, because a tool call broadcasts twice (running, then
+terminal) but coalesces into one entry — numbering per delivered record would drift one position
+ahead per completed call.
+
+One divergence remains: coalescing keeps a call at its *last* record's slot, so a re-read orders tool
+rows by completion time while the live tail can only number by first-record time. Two interleaved
+calls therefore get swapped positions. Closing it would mean renumbering frames already sent, which
+the wire cannot express — a frame carries one immutable `seq`. It does not reach the client: the
+cursor comes off the tail page's first frame, and live frames merge by `tool_call_id`.
+
+### The scroll container must declare its own layout
+
+The transcript root, its message list, and every element above them on the chain (the Activities pane
+root, the overlay panel) declare `display`/`flex`/`min-height`/`overflow-y` **inline** as well as in
+Tailwind. A bounded height that stops one level above the scroll container bounds nothing. This is
+not defensive styling — the Cypress component harness loads no stylesheet, so a class-only
+declaration leaves the container unscrollable and every follow/paging test vacuous.
+
+`agent-chat-scroll-state` is a hidden mirror of the viewport (`data-pinned`, `data-scroll-top`,
+`data-scroll-height`, `data-client-height`) and the declared source of truth for scroll assertions,
+so a style change cannot quietly turn one green.
+
+### Interaction with the count feed
+
+Unchanged. `COUNT_THEN_LIVE` still drives `hasActivity`, `countLoaded` and the unread badge at no
+transcript cost. The unread **badge** (activity since the overlay was last opened) and the
+jump-to-latest **counter** (entries since the viewport detached) answer different questions and are
+tracked separately.
+
+### Per-session scroll state
+
+The transcript is keyed by `sessionId` at both call sites. Neither surface is remounted on a session
+switch, so without the key a reader scrolled up in one session would land in the next still detached,
+have a phantom prepend compensated against the previous transcript's height, and — since entry keys
+are scoped by position, which two sessions can share — see a jump-to-latest count from the other
+session. Reachable whenever the target session is already cached, which is the documented
+switch-back case.
 
 ## Persisted, lazily-counted activity (Added: 2026-07-25)
 

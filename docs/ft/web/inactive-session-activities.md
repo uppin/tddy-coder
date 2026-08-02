@@ -2,8 +2,8 @@
 
 **Component:** `SessionMainPane`, `SessionActivitiesPane`, `SessionInspectorDrawer`
 **Route:** `#/sessions/:sessionId`
-**Updated:** 2026-08-01
-**Status:** Planned
+**Updated:** 2026-08-02
+**Status:** Shipped
 
 ## Overview
 
@@ -46,11 +46,14 @@ exactly one surface: the terminal base view, which for an inactive session was t
 ### Activities view
 
 - Renders the session's recorded ACP transcript, read-only: agent text interleaved with enriched
-  tool calls, each carrying its elapsed `+Ns` badge — the same `AgentChatView` the Agent Activity
+  tool calls, each carrying its elapsed `+Ns` badge — the same transcript surface the Agent Activity
   overlay uses.
-- The transcript **snapshot loads eagerly** on mount. The overlay pulls it lazily because it is a
-  popover the operator may never open; here it is the view itself, so there is nothing to defer.
-- Streams over `StreamAcpReplay` in `SNAPSHOT_THEN_LIVE` via the session's owning-daemon client. An
+- The transcript **loads eagerly** on mount. The overlay pulls it lazily because it is a popover the
+  operator may never open; here it is the view itself, so there is nothing to defer.
+- Streams over `StreamAcpReplay` in **`TAIL_THEN_LIVE`** via the session's owning-daemon client: the
+  newest page only, opened at the newest entry, with older history paged in as the operator scrolls
+  back. A long-running session no longer transfers its whole recorded history to show the end of it.
+  See [Agent Activity pane § Tail-first, auto-scrolling transcript](agent-activity-pane.md). An
   inactive session has no LiveKit room, so the stream rides the daemon-level client rather than a
   session-scoped one.
 - Clicking a tool entry opens the existing tool-call detail dialog (`GetAcpToolCallDetail`).

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
-import { AgentChatView } from "../chat/AgentChat";
+import { AgentChatView, TRANSCRIPT_ROOT_STYLE } from "../chat/AgentChat";
 import type { ChatMessage } from "../chat/useAgentChat";
 import { useAcpReplay } from "../chat/useAcpReplay";
 import { AgentActivityDetailDialog } from "./AgentActivityDetailDialog";
@@ -40,6 +40,7 @@ export function SessionActivitiesPane({
 
   const chat = useAcpReplay({ sessionId, sessionToken, client: resolvedClient });
   const { hasActivity, countLoaded, unreadCount, markSeen, loadSnapshot } = chat;
+  const { atOldest, loadingOlder, loadOlder } = chat;
 
   const [detail, setDetail] = useState<ChatMessage | null>(null);
 
@@ -60,13 +61,32 @@ export function SessionActivitiesPane({
     <div
       data-testid="sessions-activities-pane"
       className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
+      // The transcript inside can only scroll if every element above it bounds its height, this pane
+      // included — see `TRANSCRIPT_ROOT_STYLE` (PRD § Inline layout contract).
+      style={TRANSCRIPT_ROOT_STYLE}
     >
       {/* "Recorded no activity" is a claim about the session, so it waits for the count feed to
           actually say so. Until then the pane shows nothing rather than a statement it cannot yet
           support — and a feed that fails never answers, so a failed read never turns into a false
           "nothing happened here" either (PRD § Edge cases). */}
       {hasActivity ? (
-        <AgentChatView room={null} readOnly chat={chat} onToolClick={setDetail} />
+        // Keyed by session so the transcript's scroll state belongs to the session it was measured
+        // against. The pane itself is not remounted on a switch, so without this a reader scrolled
+        // up in one session would land in the next one still detached, have a phantom prepend
+        // compensated against the previous transcript's height, and — since entry keys are scoped by
+        // position, which two sessions can share — see a jump-to-latest count from the wrong
+        // session. The cached transcript is held in the module-level registry, so re-keying re-reads
+        // nothing.
+        <AgentChatView
+          key={sessionId}
+          room={null}
+          readOnly
+          chat={chat}
+          onToolClick={setDetail}
+          onLoadOlder={loadOlder}
+          hasOlder={!atOldest}
+          loadingOlder={loadingOlder}
+        />
       ) : countLoaded ? (
         <div
           data-testid="sessions-activities-empty"

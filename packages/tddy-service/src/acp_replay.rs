@@ -169,7 +169,12 @@ fn latest_state_per_tool_call(frames: Vec<AcpAgentMessage>) -> Vec<AcpAgentMessa
 }
 
 /// The `tool_call_id` of a `tool_call` frame, or `None` for any other frame shape.
-fn tool_call_id_of(frame: &AcpAgentMessage) -> Option<&str> {
+///
+/// Public because a live relay has to recognise the *second* record of a call it has already
+/// numbered: a tool call broadcasts twice (its `running` then its terminal record) but coalesces
+/// into a single transcript entry, so the refinement must reuse that entry's position rather than
+/// take a new one. [`tool_call_ids`] answers only "which calls", not "at which position".
+pub fn tool_call_id_of(frame: &AcpAgentMessage) -> Option<&str> {
     match &frame.msg {
         Some(acp_agent_message::Msg::SessionUpdate(n)) => {
             match n.update.as_ref().and_then(|u| u.update.as_ref()) {
@@ -227,6 +232,61 @@ pub fn count_activity_entries(frames: &[AcpAgentMessage]) -> u64 {
         }
     }
     count
+}
+
+/// How many transcript frames a page carries when the caller does not ask for a size (the proto's
+/// `page_size = 0`): comfortably more than a viewport of entries, two orders of magnitude below a
+/// large session's transcript.
+pub const DEFAULT_REPLAY_PAGE_SIZE: usize = 100;
+
+/// One page of the resolved transcript, oldest-first within the page.
+///
+/// `first_seq` is the absolute 0-based position of `frames[0]` in the whole transcript — the reverse
+/// cursor a reader pages backwards from. It is meaningless when `frames` is empty, which is why
+/// `at_oldest` is carried explicitly: an empty page (the cursor already sits at the head) would
+/// otherwise be indistinguishable from a one-frame page at the head.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TranscriptPage<'a> {
+    pub first_seq: u64,
+    pub frames: &'a [AcpAgentMessage],
+    pub at_oldest: bool,
+}
+
+/// The newest `page_size` frames, oldest-first within the page — what a tail-first replay opens on.
+///
+/// `page_size == 0` falls back to [`DEFAULT_REPLAY_PAGE_SIZE`]. A transcript shorter than one page
+/// tails to the whole transcript, reported `at_oldest`.
+pub fn tail_page(frames: &[AcpAgentMessage], page_size: usize) -> TranscriptPage<'_> {
+    // The newest page is exactly the page before the transcript's end.
+    page_before(frames, frames.len() as u64, page_size)
+}
+
+/// The page of frames immediately older than `before_seq` (exclusive), oldest-first within the page.
+///
+/// `page_size == 0` falls back to [`DEFAULT_REPLAY_PAGE_SIZE`]. `before_seq == 0` yields an empty
+/// `at_oldest` page — there is nothing older than the head. A `before_seq` beyond the transcript's
+/// length clamps to that length, so a cursor held across a rewritten (shorter) transcript resolves
+/// to the newest page rather than to nothing.
+pub fn page_before(
+    frames: &[AcpAgentMessage],
+    before_seq: u64,
+    page_size: usize,
+) -> TranscriptPage<'_> {
+    let page_size = if page_size == 0 {
+        DEFAULT_REPLAY_PAGE_SIZE
+    } else {
+        page_size
+    };
+    // A cursor too wide for `usize` is still a cursor past the end, and clamps the same way.
+    let end = usize::try_from(before_seq)
+        .unwrap_or(usize::MAX)
+        .min(frames.len());
+    let start = end.saturating_sub(page_size);
+    TranscriptPage {
+        first_seq: start as u64,
+        frames: &frames[start..end],
+        at_oldest: start == 0,
+    }
 }
 
 /// Wrap a `SessionUpdate` in a `SessionNotification` frame stamped at `at_unix_ms`.
@@ -771,5 +831,174 @@ mod tests {
 
         // Then — no detail is found
         assert_eq!(detail, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Paging: the tail page and the reverse cursor
+    //
+    // Both operate on the already-resolved transcript, so a `seq` means the same position to the
+    // pager, the counter and the snapshot replay.
+    // -----------------------------------------------------------------------
+
+    /// A recorded transcript of `entry_count` agent-text frames, one second apart, labelled
+    /// `Entry 1` … `Entry N` (**1-based**, so an assertion names the entry's position in the whole
+    /// transcript rather than its index inside whichever page came back).
+    fn a_recorded_transcript(entry_count: usize) -> Vec<AcpAgentMessage> {
+        (1..=entry_count)
+            .map(|n| agent_text_frame(&format!("Entry {n}"), 1_000 * n as i64))
+            .collect()
+    }
+
+    /// The (oldest, newest) entry texts of a page — the boundaries, which is what paging decides.
+    /// Panics on an empty page: a test asserting boundaries on nothing is asserting nothing.
+    fn page_bounds(page: &TranscriptPage<'_>) -> (String, String) {
+        let texts: Vec<String> = page.frames.iter().map(|f| agent_chunk(f).0).collect();
+        let oldest = texts.first().expect("page carries no frames").clone();
+        let newest = texts.last().expect("page carries no frames").clone();
+        (oldest, newest)
+    }
+
+    #[test]
+    fn tail_page_returns_the_newest_frames_stamped_with_the_seq_of_its_first_frame() {
+        // Given — 250 recorded entries
+        let transcript = a_recorded_transcript(250);
+
+        // When — the newest page of 100 is taken
+        let page = tail_page(&transcript, 100);
+
+        // Then — it starts 150 frames in, and is not the head
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (150, 100, false)
+        );
+        // …carrying entries 151 → 250, oldest-first *within* the page
+        assert_eq!(
+            page_bounds(&page),
+            ("Entry 151".to_string(), "Entry 250".to_string())
+        );
+    }
+
+    #[test]
+    fn a_transcript_shorter_than_the_page_size_tails_to_the_whole_transcript_at_its_head() {
+        // Given — fewer entries than one page holds
+        let transcript = a_recorded_transcript(40);
+
+        // When
+        let page = tail_page(&transcript, 100);
+
+        // Then — the tail page IS the whole transcript, and it reaches the head
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (0, 40, true)
+        );
+        assert_eq!(
+            page_bounds(&page),
+            ("Entry 1".to_string(), "Entry 40".to_string())
+        );
+    }
+
+    #[test]
+    fn tail_page_of_an_empty_transcript_is_empty_and_at_the_head() {
+        // Given — a session that recorded nothing
+        let transcript: Vec<AcpAgentMessage> = Vec::new();
+
+        // When
+        let page = tail_page(&transcript, 100);
+
+        // Then — an empty page at the head; there is nothing to page back to
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (0, 0, true)
+        );
+    }
+
+    #[test]
+    fn a_page_size_of_zero_falls_back_to_the_default_page_size() {
+        // Given — twenty entries more than the server's default page holds
+        let transcript = a_recorded_transcript(DEFAULT_REPLAY_PAGE_SIZE + 20);
+
+        // When — the caller leaves `page_size` at the proto zero value
+        let page = tail_page(&transcript, 0);
+
+        // Then — the default bounds the page, rather than the whole transcript being served
+        assert_eq!(
+            (page.first_seq, page.frames.len()),
+            (20, DEFAULT_REPLAY_PAGE_SIZE)
+        );
+    }
+
+    #[test]
+    fn page_before_returns_the_frames_immediately_older_than_the_cursor() {
+        // Given — 250 entries, of which the newest page handed out a cursor of 150
+        let transcript = a_recorded_transcript(250);
+
+        // When — the reader scrolls back past it
+        let page = page_before(&transcript, 150, 100);
+
+        // Then — the 100 entries directly behind the cursor, with the head still further back
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (50, 100, false)
+        );
+        assert_eq!(
+            page_bounds(&page),
+            ("Entry 51".to_string(), "Entry 150".to_string())
+        );
+    }
+
+    #[test]
+    fn page_before_the_head_returns_nothing_and_reports_at_oldest() {
+        // Given — a cursor already sitting at the transcript head
+        let transcript = a_recorded_transcript(250);
+
+        // When
+        let page = page_before(&transcript, 0, 100);
+
+        // Then — an empty page that says it is the head. `at_oldest` is why this is distinguishable
+        // from a one-frame page at the head, which `first_seq == 0` alone could not express.
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (0, 0, true)
+        );
+    }
+
+    #[test]
+    fn page_before_reports_at_oldest_when_the_page_reaches_the_first_frame() {
+        // Given — 150 entries: one tail page of 100 leaves exactly 50 behind it
+        let transcript = a_recorded_transcript(150);
+
+        // When — the reader pages back from that tail page's cursor
+        let page = page_before(&transcript, 50, 100);
+
+        // Then — a short page carrying the remaining entries, flagged as the head so the client
+        // closes the range instead of fetching again
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (0, 50, true)
+        );
+        assert_eq!(
+            page_bounds(&page),
+            ("Entry 1".to_string(), "Entry 50".to_string())
+        );
+    }
+
+    #[test]
+    fn page_before_a_cursor_past_the_transcript_end_returns_the_newest_page() {
+        // Given — a transcript rewritten shorter than the cursor a client is still holding
+        let transcript = a_recorded_transcript(120);
+
+        // When — the stale cursor points past its end
+        let page = page_before(&transcript, 500, 100);
+
+        // Then — the cursor clamps to the length, so the client gets a real page of the transcript
+        // that exists now rather than nothing at all
+        assert_eq!(
+            (page.first_seq, page.frames.len(), page.at_oldest),
+            (20, 100, false)
+        );
+        assert_eq!(
+            page_bounds(&page),
+            ("Entry 21".to_string(), "Entry 120".to_string())
+        );
     }
 }

@@ -476,6 +476,18 @@ export const TEST_IDS = {
   agentChatQuestionOtherSubmit: "agent-chat-question-other-submit",
   agentChatMultiSelectSubmit: "agent-chat-multiselect-submit",
 
+  // Read-only transcript scroll behaviour (tail-first open, auto-follow, backwards paging)
+  /** Affordance shown while the reader has scrolled away from the newest entry; its text carries the
+   *  number of entries that arrived since detaching. Clicking it returns to the newest entry. */
+  agentChatJumpToLatest: "agent-chat-jump-to-latest",
+  /** Top-edge indicator shown while an older page (`GetAcpReplayPage`) is in flight. */
+  agentChatOlderLoading: "agent-chat-older-loading",
+  /** Hidden mirror of the transcript viewport — `data-pinned`, `data-scroll-top`,
+   *  `data-scroll-height`, `data-client-height`. The declared source of truth for scroll assertions
+   *  (mirroring `terminal-page-scrollbar`), so a style change cannot silently turn a scroll test
+   *  green by making the container unscrollable. */
+  agentChatScrollState: "agent-chat-scroll-state",
+
   // Agent Activity pane (per-session, top-bar overlay of the agent's own tool calls)
   /** Top-bar icon button — rendered only when the session has ≥1 tool-call record. */
   agentActivityButton: "agent-activity-button",

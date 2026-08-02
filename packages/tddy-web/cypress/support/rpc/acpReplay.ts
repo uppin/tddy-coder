@@ -317,6 +317,195 @@ export function aReplayBackendWithHeldSnapshot(config: {
   return { backend, opens, releaseSnapshot: () => release() };
 }
 
+// ---------------------------------------------------------------------------
+// Tail-first replay: paged transcript + live tail
+// ---------------------------------------------------------------------------
+
+/**
+ * The wire value of `StreamMode.TAIL_THEN_LIVE` — replay only the newest `page_size` persisted
+ * frames, oldest-first within the page, then tail live. Re-exported as a plain number because the
+ * fake compares it against `Number(req.mode)` and specs assert it inside a recorded request.
+ */
+export const TAIL_THEN_LIVE: number = StreamMode.TAIL_THEN_LIVE;
+
+/** The server's default page size when a request leaves `page_size` at 0 — mirrors
+ *  `tddy_service::acp_replay::DEFAULT_REPLAY_PAGE_SIZE`. */
+export const DEFAULT_REPLAY_PAGE_SIZE = 100;
+
+/**
+ * A recorded transcript of `entryCount` agent-text entries, one second apart, labelled `Entry 1` …
+ * `Entry N` (**1-based**, so the label names the entry's position in the whole transcript rather than
+ * its index within whichever page happens to be loaded). A spec asserting "the newest page opens at
+ * Entry 151" therefore states the position it means.
+ */
+export function aRecordedTranscript(entryCount: number): AcpAgentMessage[] {
+  return Array.from({ length: entryCount }, (_, i) =>
+    replayAgentText(`Entry ${i + 1}`, 1_000 + i * 1_000),
+  );
+}
+
+/** One subscription to the transcript feed, as the client opened it. */
+export interface TranscriptOpen {
+  /** `StreamMode` wire value — {@link TAIL_THEN_LIVE} for a paged open, 0 for the whole-history one. */
+  readonly mode: number;
+  /** Requested `page_size`; 0 means the client asked for the server default. */
+  readonly pageSize: number;
+}
+
+export interface TailReplayScenario {
+  /** The session's whole recorded transcript, oldest-first — what the daemon holds on disk. */
+  transcript: AcpAgentMessage[];
+  /** Frames the server serves per page. Defaults to {@link DEFAULT_REPLAY_PAGE_SIZE}. */
+  serverPageSize?: number;
+  /** When set, every `GetAcpReplayPage` fails with this code instead of serving a page — the cursor
+   *  is still recorded, so a spec can prove a failed fetch is retried. */
+  failPagesWith?: Code;
+  /** When set, `GetAcpReplayPage` is received but stays silent until this resolves — see
+   *  {@link aTailReplayWithHeldPages}. */
+  holdPages?: Promise<void>;
+  details?: Record<string, ToolDetail>;
+}
+
+/**
+ * A tail-replay scenario whose **older-page** fetch is received but unanswered until
+ * `releasePage()` is called.
+ *
+ * The in-flight window is the only state in which the paging indicator exists, and a fake that
+ * answers instantly closes it before a spec can look. Without this, `agent-chat-older-loading` can
+ * only ever be asserted absent — which a component that never renders it would satisfy too.
+ * Mirrors {@link aReplayBackendWithHeldSnapshot}, one surface over.
+ */
+export function aTailReplayWithHeldPages(config: TailReplayScenario) {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    replay: aTailReplayBackend({ ...config, holdPages: held }),
+    releasePage: () => release(),
+  };
+}
+
+export interface TailReplayBackend {
+  backend: InMemoryRpcBackend;
+  /** Every transcript-feed subscription, in order. Streams are not recorded by the testkit, so the
+   *  fake tallies its own — this is how a spec pins *which mode and page size* the client opened. */
+  transcriptOpens: () => TranscriptOpen[];
+  /** The `before_seq` of every `GetAcpReplayPage` the client issued, in order — including calls the
+   *  scenario then failed. */
+  pageCursors: () => number[];
+  /** Append one frame to the live tail of every open transcript stream, stamped with the position it
+   *  would have on a later re-read (continuing from the recorded transcript's length). */
+  pushLive: (frame: AcpAgentMessage) => void;
+}
+
+/**
+ * A `StreamAcpReplay` backend that serves the **paged** transcript protocol over a fixed recorded
+ * transcript, modelling the daemon faithfully in both directions:
+ *
+ * - `COUNT_THEN_LIVE` → one `activity_count` frame of `transcript.length`, then stays open.
+ * - {@link TAIL_THEN_LIVE} → the newest `page_size` frames, oldest-first within the page, each
+ *   stamped with its absolute `seq`, then tails whatever {@link TailReplayBackend.pushLive} appends.
+ * - any other mode (i.e. `SNAPSHOT_THEN_LIVE`) → the **whole** transcript head-first, as the server
+ *   does today. Modelling this rather than serving a tail page for every mode is what makes a spec
+ *   fail when the client opens the wrong mode, instead of passing on the fake's generosity.
+ *
+ * `GetAcpReplayPage` answers the reverse cursor: frames strictly older than `before_seq`, oldest
+ * first, reporting `at_oldest` once the page reaches the transcript head.
+ */
+export function aTailReplayBackend(config: TailReplayScenario): TailReplayBackend {
+  const serverPageSize = config.serverPageSize ?? DEFAULT_REPLAY_PAGE_SIZE;
+  const opens: TranscriptOpen[] = [];
+  const cursors: number[] = [];
+  const live = aLiveTail();
+
+  const handlers = {
+    async *streamAcpReplay(req: { mode: StreamMode; pageSize?: number }) {
+      if (req.mode === StreamMode.COUNT_THEN_LIVE) {
+        yield* countFrames([config.transcript.length]);
+        // Keep the count feed open, as the daemon does.
+        await new Promise<void>(() => {});
+        return;
+      }
+
+      const requestedSize = Number(req.pageSize ?? 0);
+      opens.push({ mode: Number(req.mode), pageSize: requestedSize });
+
+      const size = requestedSize || serverPageSize;
+      const firstSeq =
+        Number(req.mode) === TAIL_THEN_LIVE ? Math.max(0, config.transcript.length - size) : 0;
+      yield* seqStampedFrames(config.transcript.slice(firstSeq), firstSeq);
+      yield* live.framesFrom(config.transcript.length);
+    },
+
+    async getAcpReplayPage(req: { beforeSeq: bigint; pageSize: number }) {
+      const beforeSeq = Number(req.beforeSeq);
+      cursors.push(beforeSeq);
+      if (config.holdPages) await config.holdPages;
+      if (config.failPagesWith) {
+        throw new ConnectError("replay host unreachable", config.failPagesWith);
+      }
+      const size = Number(req.pageSize) || serverPageSize;
+      const firstSeq = Math.max(0, beforeSeq - size);
+      const frames = config.transcript.slice(firstSeq, beforeSeq);
+      return {
+        frames: frames.map((frame) => toBinary(AcpAgentMessageSchema, frame)),
+        firstSeq: BigInt(firstSeq),
+        atOldest: firstSeq === 0,
+      };
+    },
+
+    getAcpToolCallDetail: (req: { toolCallId: string }) => detailOrNotFound(config.details, req),
+  };
+
+  const backend = anInMemoryRpcBackend().implement(ConnectionService, handlers);
+
+  return {
+    backend,
+    transcriptOpens: () => opens.slice(),
+    pageCursors: () => cursors.slice(),
+    pushLive: (frame) => live.push(frame),
+  };
+}
+
+/**
+ * The shared live tail behind every open transcript stream. Frames are held in one list and each
+ * subscriber walks it at its own cursor, so a remount (two concurrent streams) sees the same tail
+ * rather than splitting it — and the generator never returns, keeping the stream open.
+ */
+function aLiveTail() {
+  const pushed: AcpAgentMessage[] = [];
+  const wakers = new Set<() => void>();
+  return {
+    push(frame: AcpAgentMessage) {
+      pushed.push(frame);
+      const waiting = [...wakers];
+      wakers.clear();
+      for (const wake of waiting) wake();
+    },
+    async *framesFrom(firstSeq: number) {
+      let cursor = 0;
+      for (;;) {
+        while (cursor < pushed.length) {
+          yield* seqStampedFrames([pushed[cursor]], firstSeq + cursor);
+          cursor += 1;
+        }
+        await new Promise<void>((resolve) => wakers.add(resolve));
+      }
+    },
+  };
+}
+
+/** Transcript frames stamped with their absolute 0-based position, `frames[0]` sitting at `firstSeq`. */
+function* seqStampedFrames(frames: AcpAgentMessage[], firstSeq: number) {
+  for (const [offset, frame] of frames.entries()) {
+    yield create(AcpReplayFrameSchema, {
+      acpAgentMessage: toBinary(AcpAgentMessageSchema, frame),
+      seq: BigInt(firstSeq + offset),
+    });
+  }
+}
+
 /** Count-only frames (no transcript payload) — the cheap icon/badge feed. */
 function* countFrames(counts: number[]) {
   for (const count of counts) {
