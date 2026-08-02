@@ -3,7 +3,28 @@
 //! These tests fully specify the expected argv so that the implementation
 //! can be verified independently of process spawning.
 
-use tddy_vm::{PortForward, QemuVmArgs, VmConfig};
+use tddy_vm::{PortForward, QemuVmArgs, VmAccel, VmArch, VmConfig, VmLogin};
+
+/// The fields these tests do not exercise: architecture, resources, firmware, and login.
+/// Each test overrides only what it asserts on, via `..a_default_config()`.
+fn a_default_config() -> VmConfig {
+    VmConfig {
+        qcow2_path: String::new(),
+        extra_hostfwd: vec![],
+        ssh_host_port: 2222,
+        arch: VmArch::host(),
+        accel: VmAccel::host_default(),
+        memory: "2048M".to_string(),
+        cpus: 2,
+        firmware: None,
+        login: VmLogin {
+            username: "root".to_string(),
+            private_key_path: None,
+        },
+        seed_iso: None,
+        nine_p_shares: vec![],
+    }
+}
 
 // ── hostfwd spec formatting ──────────────────────────────────────────────────
 
@@ -44,6 +65,7 @@ fn qemu_args_netdev_includes_ssh_forward() {
         qcow2_path: "/tmp/test.qcow2".to_string(),
         extra_hostfwd: vec![],
         ssh_host_port: 2222,
+        ..a_default_config()
     };
     let arg = QemuVmArgs::netdev_arg(&config);
     assert!(
@@ -66,6 +88,7 @@ fn qemu_args_multiple_hostfwds_combined() {
             guest_port: 80,
         }],
         ssh_host_port: 2222,
+        ..a_default_config()
     };
     let arg = QemuVmArgs::netdev_arg(&config);
     assert!(
@@ -90,6 +113,7 @@ fn qemu_args_full_argv_has_required_elements() {
             guest_port: 80,
         }],
         ssh_host_port: 2222,
+        ..a_default_config()
     };
     let args = QemuVmArgs::build(&config);
 

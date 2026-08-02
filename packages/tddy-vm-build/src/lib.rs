@@ -6,12 +6,13 @@
 //! images/02-prepared-base) instead of a bare caller-chosen output directory.
 
 use clap::Parser;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tddy_vm::cloud_init::{
-    build_cloud_init_image, cloud_init_library_paths, CloudInitBuildOptions, CloudInitUserData,
-    IsoTool,
+    build_cloud_init_image, cloud_init_library_paths, promote_prepared_base_pair,
+    CloudInitBuildOptions, CloudInitUserData, IsoTool,
 };
-use tddy_vm::{set_readonly_file, ImageFormat, VmLibrary};
+use tddy_vm::qemu::uefi_firmware_for;
+use tddy_vm::{ImageFormat, VmAccel, VmArch, VmLibrary};
 
 /// Resolve the default VM & Image Library root when `--library-root` is not given:
 /// the profile default (`tmp/.tddy` in debug), falling back to `$HOME/.tddy` — the
@@ -190,6 +191,7 @@ pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<Pa
     let paths = cloud_init_library_paths(&library, &name, &name);
     let scratch_dir = library.prepared_base_dir().join(&name);
 
+    let arch = VmArch::host();
     let opts = CloudInitBuildOptions {
         name: name.clone(),
         base_image_src: args.base_image,
@@ -202,47 +204,20 @@ pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<Pa
         timeout: std::time::Duration::from_secs(args.timeout_secs),
         iso_tool: IsoTool::Xorriso,
         ssh_public_key: args.ssh_public_key,
+        arch,
+        accel: VmAccel::host_default(),
+        firmware: uefi_firmware_for(arch, &scratch_dir, &name)
+            .map_err(|e| anyhow::anyhow!("failed to prepare the bake's UEFI firmware: {e}"))?,
+        nine_p_shares: vec![],
     };
 
     build_cloud_init_image(&opts, &|line| eprintln!("{line}"))
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    move_scratch_output(
-        &scratch_dir,
-        &format!("{name}-base.qcow2"),
-        &paths.prepared_base_output,
-    )
-    .await?;
-    move_scratch_output(
-        &scratch_dir,
-        &format!("{name}.qcow2"),
-        &paths.prepared_overlay_output,
-    )
-    .await?;
-
-    set_readonly_file(&paths.prepared_base_output)
-        .map_err(|e| anyhow::anyhow!("failed to lock the prepared base read-only: {e}"))?;
-    set_readonly_file(&paths.prepared_overlay_output)
-        .map_err(|e| anyhow::anyhow!("failed to lock the provisioned overlay read-only: {e}"))?;
+    promote_prepared_base_pair(&scratch_dir, &name, &paths)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(paths.prepared_overlay_output)
-}
-
-/// Move `scratch_dir.join(filename)` to `dest` — used to promote a finished qcow2 file
-/// out of the per-image scratch subdirectory to its flat `images/02-prepared-base/`
-/// location, once `build_cloud_init_image` has produced it.
-async fn move_scratch_output(
-    scratch_dir: &Path,
-    filename: &str,
-    dest: &Path,
-) -> anyhow::Result<()> {
-    let src = scratch_dir.join(filename);
-    tokio::fs::rename(&src, dest).await.map_err(|e| {
-        anyhow::anyhow!(
-            "failed to move {} to {}: {e}",
-            src.display(),
-            dest.display()
-        )
-    })
 }

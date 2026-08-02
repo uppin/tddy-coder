@@ -4,7 +4,7 @@
 //! backed by — mirroring `~/Code/makers-lt`'s `build.ts` manifests and this crate's
 //! existing [`crate::registry::VmSpec`] persistence shape.
 
-use crate::vm::PortForward;
+use crate::vm::{PortForward, VmAccel, VmArch};
 use serde::{Deserialize, Serialize};
 
 /// The full manifest for one VM in the library.
@@ -27,8 +27,8 @@ pub struct VmManifest {
     pub login: LoginPolicy,
 }
 
-/// How the VM is run: resources, disk sizing for a prepared-base-derived overlay, and
-/// network port forwards.
+/// How the VM is run: architecture and acceleration, resources, disk sizing for a
+/// prepared-base-derived overlay, and network port forwards.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunPolicy {
     pub memory: String,
@@ -37,6 +37,14 @@ pub struct RunPolicy {
     pub ssh_host_port: u16,
     #[serde(default)]
     pub port_forwards: Vec<PortForward>,
+    /// The guest's architecture. Defaulted to the host's so manifests written before this
+    /// field existed still parse — those VMs were, necessarily, host-architecture guests.
+    #[serde(default = "VmArch::host")]
+    pub arch: VmArch,
+    /// The accelerator to run under, defaulted to the best this host offers for the same
+    /// backwards-compatibility reason.
+    #[serde(default = "VmAccel::host_default")]
+    pub accel: VmAccel,
 }
 
 /// The VM's login policy: the SSH username and, for prepared-base-derived VMs, the

@@ -190,6 +190,12 @@ impl VmLibrary {
     /// path to `images/02-prepared-base/<manifest.prepared_base>.qcow2` (sized per
     /// `manifest.run.disk_size`), and write `manifest.yaml`. Returns the overlay path.
     ///
+    /// A fresh per-VM SSH keypair is generated into `vm/<name>/` and recorded in the
+    /// persisted manifest's [`crate::vm_manifest::LoginPolicy`], so the launcher can reach
+    /// the guest as its own user with its own key rather than as `root` with whatever the
+    /// ambient agent happens to hold. Any key paths on the caller's `manifest` are
+    /// superseded by the generated pair.
+    ///
     /// Requires `manifest.prepared_base` to be `Some` — this is the prepared-base-driven
     /// creation path; manifests that instead set `image_path` reference an
     /// already-existing, library-unmanaged image and are persisted via
@@ -212,9 +218,77 @@ impl VmLibrary {
             vm_overlay_create_argv(&prepared_base_path, &overlay_path, &manifest.run.disk_size);
         run_qemu_img(&args).await.map_err(VmError::BuildFailed)?;
 
-        self.write_manifest(manifest)?;
+        let keys = generate_vm_ssh_keypair(&vm_dir, &manifest.name)?;
+        let mut manifest = manifest.clone();
+        manifest.login.ssh_private_key = Some(keys.private_key_path.display().to_string());
+        manifest.login.ssh_public_key = Some(keys.public_key_path.display().to_string());
+
+        self.write_manifest(&manifest)?;
         Ok(overlay_path)
     }
+}
+
+/// The per-VM SSH keypair written alongside a VM's manifest and overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VmSshKeypair {
+    pub private_key_path: PathBuf,
+    pub public_key_path: PathBuf,
+}
+
+/// Generate a fresh ed25519 keypair at `<dir>/id_<name>` and `<dir>/id_<name>.pub`.
+///
+/// Shells out to `ssh-keygen` — the same tool [`crate::cloud_init`] uses to mint the key a
+/// seed authorizes — so the on-disk formats are exactly what OpenSSH expects. Any existing
+/// pair at those paths is replaced: `ssh-keygen` refuses to overwrite non-interactively,
+/// and a half-written pair from a failed earlier attempt must not block a retry.
+///
+/// The private key is left at mode `0600`; OpenSSH refuses to use anything more permissive.
+pub fn generate_vm_ssh_keypair(dir: &Path, name: &str) -> Result<VmSshKeypair, VmError> {
+    let private_key_path = dir.join(format!("id_{name}"));
+    let public_key_path = dir.join(format!("id_{name}.pub"));
+    let _ = std::fs::remove_file(&private_key_path);
+    let _ = std::fs::remove_file(&public_key_path);
+
+    let output = std::process::Command::new("ssh-keygen")
+        .args(["-q", "-t", "ed25519", "-N", "", "-C"])
+        .arg(format!("tddy-vm-{name}"))
+        .arg("-f")
+        .arg(&private_key_path)
+        .output()
+        .map_err(|e| VmError::BuildFailed(format!("failed to spawn ssh-keygen: {e}")))?;
+    if !output.status.success() {
+        return Err(VmError::BuildFailed(format!(
+            "ssh-keygen exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    set_owner_only_file(&private_key_path)?;
+    Ok(VmSshKeypair {
+        private_key_path,
+        public_key_path,
+    })
+}
+
+/// Restrict `path` to owner read/write (chmod `0o600`), as OpenSSH requires of a private
+/// key and as [`crate::cloud_init`] requires of the rendered `user-data` seed.
+///
+/// No-op on non-unix platforms — file mode bits have no equivalent there.
+#[cfg(unix)]
+pub(crate) fn set_owner_only_file(path: &Path) -> Result<(), VmError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to restrict {} to owner-only: {e}",
+            path.display()
+        ))
+    })
+}
+
+#[cfg(not(unix))]
+pub(crate) fn set_owner_only_file(_path: &Path) -> Result<(), VmError> {
+    Ok(())
 }
 
 /// Lock `path` read-only (chmod `0o444`). Used to protect files placed into
@@ -247,15 +321,9 @@ pub fn vm_overlay_create_argv(
     overlay: &Path,
     disk_size: &str,
 ) -> Vec<String> {
-    vec![
-        "create".to_string(),
-        "-f".to_string(),
-        "qcow2".to_string(),
-        "-F".to_string(),
-        "qcow2".to_string(),
-        "-b".to_string(),
-        prepared_base_abs.display().to_string(),
-        overlay.display().to_string(),
-        disk_size.to_string(),
-    ]
+    crate::cloud_init::qcow2_overlay_create_argv(
+        &prepared_base_abs.display().to_string(),
+        overlay,
+        disk_size,
+    )
 }

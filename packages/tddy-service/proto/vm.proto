@@ -10,6 +10,10 @@ service VmService {
   rpc StopVm        (StopVmRequest)         returns (StopVmResponse);
   rpc GetVmStatus   (GetVmStatusRequest)    returns (GetVmStatusResponse);
   rpc RemoveVm      (RemoveVmRequest)       returns (RemoveVmResponse);
+
+  // Daemon-spawned tddy host VM: bake once, create many.
+  rpc BuildTddyHostImage       (BuildTddyHostImageRequest)       returns (stream BuildTddyHostImageProgress);
+  rpc CreateVmFromPreparedBase (CreateVmFromPreparedBaseRequest) returns (CreateVmFromPreparedBaseResponse);
 }
 
 // --- Build ---
@@ -150,4 +154,68 @@ message RemoveVmRequest {
 message RemoveVmResponse {
   bool   ok      = 1;
   string message = 2;
+}
+
+// --- Tddy host VM ---
+
+// How a VM is run: resources, network, and the emulation target.
+message VmRunPolicyProto {
+  string memory        = 1;  // QEMU -m syntax, e.g. "2048M"
+  uint32 cpus          = 2;
+  string disk_size     = 3;  // qemu-img size for the mutable overlay, e.g. "40G"
+  uint32 ssh_host_port = 4;
+  repeated VmPortForward port_forwards = 5;
+  string arch          = 6;  // "aarch64" | "x86_64"; empty means the host's architecture
+  string accel         = 7;  // "hvf" | "kvm" | "tcg"; empty means the host's best accelerator
+}
+
+// The LiveKit common room the baked guest daemon announces itself on, so the operator's
+// other daemons discover it as a peer.
+message TddyHostLiveKit {
+  string url         = 1;
+  string api_key     = 2;
+  string api_secret  = 3;
+  string common_room = 4;
+}
+
+message BuildTddyHostImageRequest {
+  string session_token   = 1;
+  string name            = 2;  // prepared-base name, e.g. "debian-12-tddy"
+  string base_image_name = 3;  // imported base image name in images/01-base, e.g. "debian-12"
+  string base_image_path = 4;  // caller-supplied Debian cloud image; never downloaded here
+  string source_dir      = 5;  // operator's working copy, attached read-only over virtio-9p
+  TddyHostLiveKit livekit = 6;
+  // Resources for the baking VM, and the arch/accel VMs created from the result will run
+  // under. The bake itself always runs on the host architecture with the host's
+  // accelerator — an emulated cross-architecture bake of a real distro image is not viable.
+  VmRunPolicyProto run   = 7;
+}
+
+message BuildTddyHostImageProgress {
+  enum Stage {
+    STAGE_UNKNOWN   = 0;
+    STAGE_IMPORTING = 1;
+    STAGE_SEEDING   = 2;
+    STAGE_BAKING    = 3;
+    STAGE_DONE      = 4;
+    STAGE_ERROR     = 5;
+  }
+  Stage  stage               = 1;
+  string message             = 2;  // serial-console line or error description
+  string prepared_base_name  = 3;  // populated only when stage == STAGE_DONE
+}
+
+message CreateVmFromPreparedBaseRequest {
+  string session_token = 1;
+  string name          = 2;
+  string prepared_base = 3;  // name of a prepared base in images/02-prepared-base
+  VmRunPolicyProto run = 4;
+  string ssh_username  = 5;  // must match the account baked into the prepared base
+}
+
+message CreateVmFromPreparedBaseResponse {
+  bool   ok             = 1;
+  string message        = 2;
+  string overlay_path   = 3;  // vm/<name>/<name>.qcow2
+  string ssh_public_key = 4;  // the generated per-VM public key, for the caller to record
 }

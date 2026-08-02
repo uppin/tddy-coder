@@ -7528,6 +7528,27 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 })
                 .collect(),
             ssh_host_port,
+            // Pinned to what the launcher did before any of this was configurable, because
+            // nothing here knows the demo image's architecture — `demo-plan.md` names a
+            // build target, and `tddy-build-qemu` produces x86_64 images. Deriving these
+            // from the *host* would run an aarch64 emulator against an x86_64 image on an
+            // Apple Silicon machine, and `virt` has no BIOS for it to fall back to.
+            // TCG likewise matches the previous behaviour and avoids making the demo path
+            // newly dependent on the daemon user's access to /dev/kvm.
+            arch: tddy_vm::VmArch::X86_64,
+            accel: tddy_vm::VmAccel::Tcg,
+            // The resources the launcher hard-coded before they were configurable.
+            memory: "512M".to_string(),
+            cpus: 1,
+            // The demo images boot through their own BIOS; they carry no cloud-init seed
+            // and share nothing from the host.
+            firmware: None,
+            login: tddy_vm::VmLogin {
+                username: "root".to_string(),
+                private_key_path: None,
+            },
+            seed_iso: None,
+            nine_p_shares: vec![],
         };
 
         // Reject if already booting/running for this session.

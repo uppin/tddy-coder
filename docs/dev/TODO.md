@@ -36,6 +36,48 @@ easy to lose among these:
 
 ## Future Enhancements
 
+### VM — daemon-spawned tddy host VM follow-ups (source: daemon-spawned-tddy-host-vm changeset, 2026-08-02)
+
+- **`SerialConsole` should be able to quiesce the guest kernel console.** `ttyAMA0` is shared
+  between the login shell and the kernel log, so a `printk` landing mid-command is captured as
+  another line of that command's output (observed: a `mount` returning
+  `[ 7.790602] 9p: Installing v9fs 9p2000 file system support`). The acceptance tests now run
+  `dmesg -n 1` after login to make exact-output assertions deterministic, but any production
+  consumer driving a guest over UART faces the same interleaving — a `quiesce_kernel_console`
+  on the driver is the natural home.
+- **A possible ordering bug in the cloud-init completion script (found statically, unverified).**
+  Upstream `cloud.cfg.tmpl` runs `scripts_per_boot` *before* `scripts_user`, so the completion
+  script — which lives in `/var/lib/cloud/scripts/per-boot/` — appears to run before `runcmd`;
+  and `cloud-init status --wait` loops while `status.json` exists without `result.json`, which
+  is the state during the final stage. Statically that reads as either a deadlock or a token
+  emitted before provisioning ran, which would let the host seal a half-baked image. This
+  contradicts the existing claim of multiple verified real boots, so it may be a misreading of
+  the upstream ordering — it needs a real bake to settle either way. Predates this changeset
+  (the completion mechanism came with the 2026-07-02 cloud-init work).
+- **Guest console log-level control.** The bake streams every serial line as RPC progress —
+  ~713 lines in the first 17 seconds, almost all kernel and systemd chatter. `cloud_init_boot_argv`
+  and `QemuVmArgs::build` emit no kernel cmdline at all, so there is no `loglevel=`/`quiet` knob.
+  There is no prior art to copy: `~/Code/makers-lt` has no guest-side loglevel control either
+  (no `printk`, `dmesg -n`, or `console=`, and its `qemu-vm-builder` exposes no `-append`); it
+  handles noise host-side via sentinel matching and a `debug`-namespace gate. Deferred until the
+  bake's real signal-to-noise is known.
+- **`VmManager::start` still rejects `build_target` specs** (`registry.rs:177-180`) — only
+  `image_path` works. Untouched by this changeset.
+- **The bake pays a kernel swap it may not need.** Every `genericcloud` base costs an extra
+  ~3 min, a ~100 MB download and a reboot to get a 9p-capable kernel. Supplying a Debian
+  *generic* base image skips it entirely (the step is guarded on `uname -r`), so documenting
+  or defaulting to a generic base would remove the cost. Alternatively, shipping the working
+  copy as a second ISO9660 disk needs no 9p at all — iso9660 and virtio-blk are in the cloud
+  kernel, as the seed ISO already proves.
+- **`QemuVm` reports no real guest exit code from `deploy`.** Now that `serial_shell` can capture
+  an exit code over UART, the SSH path's error reporting could be brought up to the same standard.
+- **Reuse `serial_shell` for the cloud-init bake's completion detection.** `build_cloud_init_image`
+  still uses the single-token `classify_serial_line` matcher; with a console driver available it
+  could log into a guest that failed and interrogate it, instead of only reporting that the token
+  never arrived.
+- **A `ListPreparedBases` RPC.** `CreateVmFromPreparedBase` takes a prepared-base name with no way
+  to discover what has been baked — the same gap `ListVmImages` filled for built images.
+
 ### tddy-web — inactive session activities follow-ups (source: inactive-session-activities changeset, 2026-08-01)
 
 - **The component harness renders without any CSS, so no Cypress component test can assert layout.**
