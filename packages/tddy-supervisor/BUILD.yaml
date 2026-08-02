@@ -1,0 +1,18 @@
+schema_version: 1
+targets:
+  - id: "tddy-supervisor:bin"
+    name: "tddy-supervisor"
+    deps:
+      - "tddy-rpc:lib"
+    config:
+      type: rust_binary
+      package: tddy-supervisor
+      bin_name: tddy-supervisor
+      srcs:
+        - "packages/tddy-supervisor/src/**/*.rs"
+        - "packages/tddy-supervisor/proto/**/*.proto"
+        - "packages/tddy-supervisor/build.rs"
+        - "packages/tddy-supervisor/Cargo.toml"
+      outputs:
+        - path: "target/debug/tddy-supervisor"
+          kind: file

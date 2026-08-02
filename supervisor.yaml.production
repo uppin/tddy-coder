@@ -1,0 +1,90 @@
+# Production template for tddy-supervisor (installed to $INSTALL_CONFIG_DIR/supervisor.yaml).
+#
+# This file is the ENTIRE privilege surface of the host. tddy-supervisor is the only root process in
+# the stack; tddy-daemon runs as an unprivileged child declared below and asks the supervisor for the
+# few operations that need privilege. Nothing the daemon sends can widen what is written here.
+#
+# Placeholders replaced at install time:
+#   __INSTALL_BIN_DIR__          — binary directory (default: /usr/local/bin)
+#   __DAEMON_CONFIG_PATH__       — installed daemon.yaml (default: /etc/tddy/daemon.yaml)
+#   __SUPERVISOR_SOCKET_PATH__   — privileged RPC socket (INSTALL_SUPERVISOR_SOCKET_PATH)
+#   __DAEMON_SOCKET_PATH__       — the daemon's client-facing socket, bound here and handed to it
+#                                  (INSTALL_DAEMON_SOCKET_PATH); the same value goes into daemon.yaml
+#   __SOCKET_GROUP__             — group granted access to that socket (INSTALL_SOCKET_GROUP)
+#   __DAEMON_USER__              — unprivileged service user (INSTALL_DAEMON_USER)
+#   __DAEMON_GROUP__             — service group (INSTALL_DAEMON_GROUP)
+#
+# Unknown keys are a startup failure, not a silently ignored setting: a typo'd security setting must
+# fail loudly. Every path here must be absolute.
+
+# The privileged RPC socket. Always owned by root; `group` + `mode` are the whole access grant.
+# tddy-supervisor.socket (written by ./install) creates it with the same path/group/mode and passes
+# the listening fd, so nothing binds in /run at runtime. Keep the two in sync if you change either.
+socket:
+  path: __SUPERVISOR_SOCKET_PATH__
+  group: __SOCKET_GROUP__
+  mode: "0660"
+
+# Processes the supervisor starts (in this order), reaps, restarts with backoff, and terminates on
+# shutdown. `user: root` is rejected at load — a root child would defeat the point of the supervisor.
+# Add `working_dir:` / `env:` per service if a service needs more than the supervisor's own cwd and
+# environment (the daemon does not: daemon.yaml uses absolute paths).
+services:
+  - name: tddy-daemon
+    exec_start: __INSTALL_BIN_DIR__/tddy-daemon
+    args: ["-c", "__DAEMON_CONFIG_PATH__"]
+    user: __DAEMON_USER__
+    group: __DAEMON_GROUP__
+    # The daemon's local ConnectionService listener. The supervisor binds it as root before the
+    # daemon starts and hands it over as fd 3 (LISTEN_FDS/LISTEN_PID), which is the job
+    # tddy-daemon.socket used to do — an unprivileged child cannot bind in /run for itself. The
+    # path must match `local.socket_path` in daemon.yaml, and the group is what gates client access.
+    socket:
+      path: __DAEMON_SOCKET_PATH__
+      group: __SOCKET_GROUP__
+      mode: "0660"
+    restart:
+      max_retries: 5
+      initial_backoff_ms: 500
+      max_backoff_ms: 30000
+      stability_threshold_ms: 10000
+
+# Seconds managed services get after SIGTERM before they are SIGKILLed. Keep tddy-supervisor.service's
+# TimeoutStopSec above this value so systemd lets the supervisor finish its own shutdown first.
+shutdown_grace_secs: 20
+
+# What the daemon may ask the supervisor to spawn, and on whose behalf. DELIBERATELY ABSENT: with no
+# spawn_policy the supervisor grants no privilege at all — every SpawnSession/SpawnSandbox is denied.
+# Uncomment and fill in to enable multi-user sessions. Entries are matched verbatim (absolute paths,
+# no `..`, no symlink resolution), and `root` is rejected as a session user.
+# spawn_policy:
+#   allowed_session_users: [alice, bob]          # OS accounts a session may run as
+#   allowed_tool_paths:                          # tools a session may exec
+#     - __INSTALL_BIN_DIR__/tddy-coder
+#     - __INSTALL_BIN_DIR__/tddy-tools
+#   allowed_mount_roots: [/home, /srv/repos]     # roots a sandbox bind-mount source must fall under
+#   allowed_env_keys: [RUST_LOG, TZ]             # env keys a caller may set on a session
+#
+# allowed_env_keys is a DENY, not a filter: a request carrying a key that is not listed is refused
+# outright rather than having the key dropped. That is deliberate — silently discarding an
+# environment variable a caller believed it had set is worse than telling it no. Consequence for
+# whoever wires the daemon's spawn path: send no `env` at all, or list every key you send here, or
+# every spawn is denied. Loader variables (LD_*, MALLOC_*, GCONV_PATH, NLSPATH, LOCPATH,
+# HOSTALIASES, RESOLV_HOST_CONF) can never be listed — they are rejected at config load, because
+# LD_PRELOAD on an allowlisted tool is arbitrary code execution as the session user and would make
+# allowed_tool_paths meaningless. Sessions otherwise get a minimal environment (fixed PATH, plus
+# LANG/TZ forwarded from the supervisor); HOME/USER/LOGNAME always come from the resolved account
+# and cannot be overridden by a request.
+
+# Delegated cgroup v2 subtree and the ceilings every requested limit is CLAMPED to (a session asking
+# for more gets less; it is not rejected). DELIBERATELY ABSENT: with no ceilings nothing is clamped.
+# The base is derived from /proc/self/cgroup at runtime (the unit's Delegate=yes subtree), so
+# base_override is only for pinning it explicitly.
+# cgroup:
+#   base_override: /sys/fs/cgroup/system.slice/tddy-supervisor.service
+#   mount_root: /sys/fs/cgroup
+#   controllers: [memory, cpu, pids]
+#   supervisor_leaf: supervisor          # leaf the supervisor moves its own process into
+#   memory_max_ceiling: 2147483648       # 2 GiB
+#   cpu_max_ceiling: "100000 100000"     # 1 CPU, kernel cpu.max format: "<quota_us> <period_us>"
+#   pids_max_ceiling: 512
