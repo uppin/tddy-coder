@@ -1,11 +1,21 @@
-# Example systemd unit for tddy-daemon.
+# Example systemd unit for tddy-daemon WITHOUT a supervisor — the fallback deployment.
+#
+# ./install --systemd does NOT write this unit anymore: it installs tddy-supervisor.service, and the
+# supervisor starts tddy-daemon as an unprivileged managed child. Use this template only for a host
+# that deliberately runs no supervisor. The trade-off is the feature the supervisor exists to deliver:
+# without it every session runs as the single service account below (same_user), with no isolation
+# between users, and the daemon needs the two host grants further down to sandbox at all.
+# Do not install this unit alongside tddy-supervisor.service — the daemon would be started twice.
+#
+# For the supervised deployment, see tddy-supervisor.service.example (and remove `supervisor:` from
+# daemon.yaml here, or the daemon will fail every spawn trying to reach a supervisor that is absent).
+#
 # Runs unprivileged (User=tddy) with cgroup v2 delegation + an AppArmor userns grant, so the Linux
 # sandbox works without root. Copy to /etc/systemd/system/tddy-daemon.service and adjust.
 #
-# Prefer automated install from the repo root: sudo ./install --systemd
-# (optional: ./install --systemd --build to run ./release first). ./install also creates the tddy
-# service user, chowns the log/auth dirs, and installs+loads the AppArmor profile. See
-# daemon.yaml.production and docs/ft/daemon/systemd-install.md.
+# ./install --systemd (repo root) also creates the tddy service user, chowns the log/auth dirs, and
+# installs+loads the AppArmor profile this unit references. See daemon.yaml.production and
+# docs/ft/daemon/systemd-install.md.
 #
 # Manual install: sudo cp tddy-daemon.service.example /etc/systemd/system/tddy-daemon.service
 # Enable:  sudo systemctl enable tddy-daemon

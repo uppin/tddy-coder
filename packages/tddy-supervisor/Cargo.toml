@@ -1,0 +1,48 @@
+[package]
+name = "tddy-supervisor"
+version = "0.1.0"
+edition = "2021"
+description = "Root-run mini-init and policy-gated privileged broker in front of tddy-daemon"
+
+[lib]
+name = "tddy_supervisor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-supervisor"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+log = "0.4"
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+# The wire protocol: `supervisor.proto` is owned by this crate (see build.rs) and rides tddy-rpc's
+# frame codec over AF_UNIX via tddy-stdio's duplex endpoint.
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
+# Multi-thread runtime for the socket server only. Deliberately no `process` feature: every fork/exec
+# goes through `spawn_broker::ForkBroker`'s own thread with `std::process::Command`, because a fork
+# must not happen on a runtime worker that may hold an allocator lock.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+
+[build-dependencies]
+prost-build = "0.13"
+tddy-codegen = { path = "../tddy-codegen" }
+
+[target.'cfg(unix)'.dependencies]
+# Every syscall this crate makes goes through raw libc, so the post-fork paths stay visibly
+# allocation- and lock-free. `nix` was declared here once and used nowhere; it is left out until the
+# Milestone 5 jail actually needs `sched`/`mount`, because this is the one binary on the host running
+# as uid 0 and its dependency tree is meant to be small enough to read.
+libc = "0.2"
+
+[dev-dependencies]
+libc = "0.2"
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

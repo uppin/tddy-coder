@@ -28,7 +28,15 @@ easy to lose among these:
   `sandboxed_cursor_cli_*`, plus `cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available`:
   the test scripts do not build `tddy-sandbox-runner`. `start_session_sandbox_unsupported_on_non_darwin`
   is macOS-only.
+  **Refinement (2026-08-02):** building `tddy-sandbox-runner` first is not sufficient on a host with
+  `kernel.apparmor_restrict_unprivileged_userns=1`. With the runner built they still fail, with
+  `spawn sandbox runner in cgroups jail failed: Operation not permitted (os error 1)` — the jail's
+  `unshare` is denied to any binary without a matching AppArmor profile, and a `cargo test` binary in
+  `target/debug/deps/` has none. The self-skip that should cover this does not fire; see
+  "`unprivileged_userns_available()` under-approximates what the jail needs" below.
 - `session_token::tests::verify_rejects_a_token_with_a_tampered_signature` — `packages/tddy-github`.
+  Root cause found 2026-08-02: a ~1-in-64 base64 canonicalization flake, not a signature bug. See
+  the dedicated entry under Future Enhancements for the exact mechanism and the fix.
 - `cursor_cli::tests::cursor_agent_prerequisite_reads_include_install_dir_and_share_root` —
   `packages/tddy-sandbox-recipes`.
 - `cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` — already tracked above.
@@ -98,6 +106,109 @@ easy to lose among these:
   never arrived.
 - **A `ListPreparedBases` RPC.** `CreateVmFromPreparedBase` takes a prepared-base name with no way
   to discover what has been baked — the same gap `ListVmImages` filled for built images.
+
+### `verify_rejects_a_token_with_a_tampered_signature` is flaky ~1-in-64 (found 2026-08-02, pre-existing)
+
+`packages/tddy-github/src/session_token.rs` — the test asserts `InvalidSignature` but intermittently
+gets `Malformed`. Diagnosed exactly:
+
+```rust
+fn with_tampered_signature(token: &str) -> String {   // :232
+    chars[last] = if chars[last] == 'A' { 'B' } else { 'A' };
+```
+
+An HMAC-SHA256 tag is 32 bytes → 43 base64url characters, and 43 mod 4 == 3, so the final character
+carries 2 significant bits plus 4 bits that **must be zero** for the encoding to be canonical. `'A'`
+is 0 and always decodes; `'B'` is 1 and leaves a non-zero trailing bit, which a strict decoder
+rejects. So whenever the untampered tag happens to end in `'A'` — about 1 in 64 runs — the helper
+substitutes `'B'` and the token fails to *decode*, never reaching the signature check.
+
+Deterministic per token, probabilistic across runs, because the tag depends on the expiry timestamp
+baked into each freshly minted token. Fix: tamper a character that keeps the encoding canonical (flip
+one in the middle of the tag), or assert on the tampered *bytes* rather than a re-encoded string.
+
+Verified pre-existing: fails on this branch only inside a full run, passes 11/11 in isolation, and
+`session_token`'s 10 tests pass at `master` (2851a1b3) — `tddy-github` is untouched by the
+tddy-supervisor changeset.
+
+### `./test` hides every target after the first failure (found 2026-08-02, pre-existing)
+
+`./test` runs bare `cargo test`, which **aborts remaining test targets on the first failing one**
+unless `--no-fail-fast` is passed. On any host where an earlier target fails, every later package
+silently never runs — and the summary still looks like a complete run, because the passed-count is
+simply the truncated total.
+
+This bit for real: the pre-existing `action_sandbox_acceptance` failure (see below) meant
+`packages/tddy-supervisor` — alphabetically later — was never executed by `./test`, while the printed
+total was indistinguishable from a full pass. `./test --no-fail-fast` works today (the script forwards
+`"$@"`), so the fix is to make that the default, or to say so loudly in the usage comment. Given
+`./test`'s stated purpose is agent-readable verification evidence, a summary that can silently omit
+whole packages is the wrong default.
+
+### `unprivileged_userns_available()` under-approximates what the jail needs (found 2026-08-02, pre-existing — not caused by the tddy-supervisor changeset)
+
+`packages/tddy-daemon/tests/action_sandbox_acceptance.rs` →
+`sandboxed_bash_action_writes_to_output_dir` **fails instead of skipping** on a host with
+`kernel.apparmor_restrict_unprivileged_userns=1`:
+
+```
+sandbox I/O error: spawn sandbox runner in cgroups jail failed:
+Operation not permitted (os error 1) (the host may forbid unprivileged user namespaces)
+```
+
+The test has the correct self-skip guard, and the guard *passes* — `unprivileged_userns_available()`
+returns true. The probe (`probe_unprivileged_userns`) only performs `unshare(CLONE_NEWUSER)` plus the
+uid/gid-map writes, whereas `enter_rootless_jail` additionally does
+`unshare(CLONE_NEWNS|CLONE_NEWNET)`, `mount(/, MS_REC|MS_PRIVATE)` and the cgroup scope write. So the
+probe answers a strictly easier question than the one the caller is asking, and the self-skip
+contract silently fails to fire.
+
+Two things to fix, and they are separable:
+1. The probe should exercise the same steps the jail does (or the jail's extra steps need their own
+   probe), so "available" means available.
+2. The error message's parenthetical is a guess appended by the caller; it named userns when userns
+   was fine. It should report which syscall actually returned `EPERM`.
+
+Verified pre-existing by inspection: the whole `tddy-daemon` diff on this branch is 20 added lines
+(one `pub mod`, one `Option` config field defaulting to `None`) with zero deletions, and
+`tddy-sandbox-cgroups`, `tddy-sandbox`, `tddy-actions`, `sandbox_session.rs`, `spawner.rs` and
+`spawn_worker.rs` are untouched.
+
+### tddy-supervisor follow-ups (source: tddy-supervisor changeset, 2026-08-02)
+
+- **PTY spawning still drops privilege by shelling out to `setpriv`.**
+  `packages/tddy-daemon/src/pty_runtime.rs` (`pty_requires_privilege_drop`,
+  `wrap_argv_for_privilege_drop`) prefixes terminal argv with
+  `setpriv --reuid --regid --init-groups --`, a second, unrelated privilege-drop mechanism next to
+  the supervisor's `setuid`. It should route through `SpawnSession` so there is exactly one path
+  and one allowlist. Out of scope here because PTY spawning also carries the pty master fd, which
+  has to cross the socket via `SCM_RIGHTS` — its own design problem.
+- **`spawn_worker.rs`'s fork-before-tokio machinery becomes dead weight on supervised hosts.**
+  `fork_spawn_worker()` exists only because `fork()` from a multi-threaded process can deadlock;
+  with the supervisor as *parent*, the daemon never needs to fork at all. Keep it while the
+  no-supervisor deployment is supported, then delete it (along with the JSON-over-pipes
+  `WorkerRequest`/`WorkerResponse` protocol and the `spawn_worker_request_timeout_secs` setting).
+- **`tddy-sandbox-app` on Linux can stop routing through the daemon.**
+  `packages/tddy-sandbox/docs/architecture.md` explains it delegates to the daemon purely because
+  cgroup v2 delegation containment stops an unprivileged app placing its own child in a limited
+  scope. A supervisor that owns the delegated subtree removes that reason — the app could hold a
+  supervisor client directly and skip the daemon hop entirely.
+- **`supervisor.proto` is outside `buf lint` coverage.**
+  `packages/tddy-service/buf.yaml` lints that crate's whole `proto/` directory; moving
+  `supervisor.proto` into `packages/tddy-supervisor/proto/` to keep the uid-0 binary's dependency
+  tree small took it out of lint scope. `tddy-terminal-rpc` has the same gap, so this is a
+  workspace-wide pattern rather than a new regression — but the *privileged surface's* proto is the
+  one most worth linting. A 4-line `buf.yaml` per proto-owning crate closes it.
+- **`cpu_max_ceiling` cannot express the kernel's `"max <period>"` form.**
+  `policy::CpuMax::from_str` accepts exactly two integers, because that is all the tests pin. But
+  the kernel writes `cpu.max` as `"max 100000"` when a cgroup is uncapped, so an operator who
+  copies that value into `cgroup.cpu_max_ceiling` gets a `SupervisorError::Invalid` on *every*
+  scope creation — at runtime, not at config load. Fixing it needs an explicit `CpuMax::Max`
+  variant with its own tests, plus load-time validation of the ceiling, not a quiet parse
+  fallback. Discovered implementing Milestone 1.
+- **`detect_and_prepare_base`'s process-global `OnceLock` means a cgroup topology change needs a
+  supervisor restart.** Acceptable today (the base is stable for a boot), but worth revisiting if
+  the supervisor ever has to survive a re-delegation.
 
 ### tddy-web — inactive session activities follow-ups (source: inactive-session-activities changeset, 2026-08-01)
 

@@ -8,4 +8,5 @@ targets:
         - "tddy-coder:bin"
         - "tddy-tools:bin"
         - "tddy-daemon:bin"
+        - "tddy-supervisor:bin"
         - "tddy-web:build"

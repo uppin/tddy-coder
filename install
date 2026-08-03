@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# Install tddy-daemon (and tddy-coder, tddy-tools) as a systemd service.
+# Install tddy-supervisor (and tddy-daemon, tddy-coder, tddy-tools) as a systemd service.
+#
+# tddy-supervisor is the only systemd unit and the only root process: it starts tddy-daemon as an
+# unprivileged managed child (declared in supervisor.yaml) and brokers the operations that need
+# privilege over its socket. No tddy-daemon.service is installed — the supervisor owns the daemon's
+# lifecycle, and a second unit would start the daemon twice. An inherited tddy-daemon.socket /
+# tddy-daemon.service is stopped, disabled and MASKED (in that order, socket first) so neither a
+# stray connect() nor a later `systemctl preset-all` can bring a second daemon back.
+#
+# --user AND THE SUPERVISOR ARE MUTUALLY EXCLUSIVE, and --user means NO SUPERVISOR AT ALL: that mode
+# installs a tddy-daemon.service *user* unit and no supervisor unit, no supervisor.yaml and no
+# `supervisor:` block in daemon.yaml. Two reasons, both structural. A rootless supervisor can neither
+# setuid to another OS user, nor own a delegated cgroup subtree, nor bind a root-owned socket — it
+# would broker nothing, so it is pure overhead. And a single-user install has no privilege separation
+# to provide in the first place: the daemon already runs as the only user involved. --user is therefore
+# the no-supervisor deployment described in docs/dev/tddy-daemon.service.example (that example is the
+# system-unit form of it), and it does NOT mask the legacy tddy-daemon.* units — in that mode the
+# tddy-daemon unit IS the deployment.
 #
 # Usage: sudo ./install --systemd [--build] [--headless]
 #        ./install --systemd --user [--build] [--headless]
 #
-#   --systemd   Required. Install release binaries, config template, unit file; enable+start service.
+#   --systemd   Required. Install release binaries, config templates, unit files; enable+start service.
 #   --build     Optional. Run ./release before copying binaries.
 #   --user      Optional. Install as a per-user systemd service (systemctl --user) instead of a
 #               system service. No root required: paths default to XDG user locations
 #               (~/.local/bin, ~/.config/tddy, ~/.config/systemd/user, ...), the unit runs as the
 #               invoking user (no User=/Group=/AppArmorProfile, WantedBy=default.target), and no
 #               dedicated service user, /var provisioning, or AppArmor profile is created. Sessions
-#               spawn as this same user (no multi-user setuid). Env path overrides still apply.
+#               spawn as this same user (no multi-user setuid), by the daemon's own forked spawn
+#               worker. No supervisor is installed (see above). Env path overrides still apply.
 #   --headless  Optional. Do not require or ship the built tddy-web bundle. Skips the
 #               packages/tddy-web/dist check and the static-bundle copy; web_bundle_path is left
 #               pointing at an (empty) WEB_BUNDLE_DIR so the daemon still starts and serves /rpc and
@@ -26,27 +44,68 @@
 # list `id: codex-acp` under allowed_agents, or set INSTALL_BUNDLE_CODEX_ACP=1. Otherwise a missing
 # or unsupported-platform npm package is skipped (use TDDY_CODEX_ACP_CLI / PATH at runtime).
 #
-# Environment (install paths — override for tests or non-FHS layouts):
-#   INSTALL_PREFIX       Base prefix (default: /usr/local). Binaries go to INSTALL_PREFIX/bin
-#                        unless INSTALL_BIN_DIR is set.
+# Environment (install paths — override for tests or non-FHS layouts). Every destination this script
+# writes is one of these four directories, plus the daemon's log and token-storage directories, which
+# are substituted into daemon.yaml rather than named literally by its template and are therefore
+# overridable too:
+#   INSTALL_PREFIX       Base prefix (default: /usr/local; --user: $HOME/.local). Binaries go to
+#                        INSTALL_PREFIX/bin unless INSTALL_BIN_DIR is set.
 #   INSTALL_BIN_DIR      Destination for binaries (default: ${INSTALL_PREFIX}/bin).
-#   INSTALL_CONFIG_DIR   Config directory (default: /etc/tddy); daemon.yaml lives here.
-#   INSTALL_SYSTEMD_DIR   systemd unit directory (default: /etc/systemd/system).
+#   INSTALL_CONFIG_DIR   Config directory (default: /etc/tddy; --user:
+#                        ${XDG_CONFIG_HOME:-~/.config}/tddy). supervisor.yaml + daemon.yaml live here.
+#   INSTALL_SYSTEMD_DIR   systemd unit directory (default: /etc/systemd/system; --user:
+#                        ${XDG_CONFIG_HOME:-~/.config}/systemd/user).
 #   INSTALL_WEB_BUNDLE_DIR  Directory for tddy-web static files (default: ${INSTALL_PREFIX}/share/tddy/web).
 #
 #   INSTALL_DAEMON_LOG_DIR   Daemon file-log dir (default: /var/log/tddy-daemon; --user:
 #                        ${XDG_STATE_HOME:-~/.local/state}/tddy-daemon). Substituted into daemon.yaml.
 #   INSTALL_AUTH_STORAGE_DIR OAuth/token storage base (default: /var/lib/tddy; --user:
-#                        ${XDG_DATA_HOME:-~/.local/share}/tddy). Substituted into daemon.yaml.
+#                        ${XDG_DATA_HOME:-~/.local/share}/tddy). Substituted into daemon.yaml, whose
+#                        template appends /auth — that child is the directory the daemon opens, so it
+#                        is the one install creates, chowns and locks down to mode 0700.
 #
-#   INSTALL_NO_SYSTEMCTL=1  Skip root check and systemctl (for automated tests).
+#   INSTALL_SUPERVISOR_SOCKET_PATH  Where tddy-supervisor.socket creates the privileged RPC socket
+#                        (default: /run/tddy-supervisor.sock). Written into the socket unit,
+#                        supervisor.yaml and daemon.yaml's supervisor.socket_path, so all three agree.
+#                        Ignored by --user, which installs no supervisor.
+#   INSTALL_DAEMON_SOCKET_PATH  Where the supervisor binds the daemon's client-facing socket
+#                        (default: /run/tddy-daemon.sock). Written into the tddy-daemon service's
+#                        socket: block in supervisor.yaml and daemon.yaml's local.socket_path.
+#                        The supervisor binds it as root and passes it as fd 3. Under --user there is
+#                        no supervisor and /run is not writable, so it defaults to
+#                        ${XDG_RUNTIME_DIR}/tddy-daemon.sock and the daemon binds it itself.
+#                        Only a file this run CREATES gets the value substituted: an existing config
+#                        or unit is preserved, so changing this on a later run does not rewrite them.
+#                        Install re-checks the files it kept and warns about any disagreement.
+#
+#   INSTALL_NO_SYSTEMCTL=1  Skip the root check and every action that needs root: systemctl (reload,
+#                        enable/restart, masking the legacy units, the is-active verification),
+#                        groupadd/useradd/usermod, the daemon log + token-storage directories and
+#                        their chown, and the AppArmor profile. It does NOT redirect anything:
+#                        binaries, the web bundle, the configs and the unit files are still written to
+#                        the four INSTALL_*_DIR destinations above, which therefore have to be
+#                        overridden as well for a test install — otherwise a writable /usr/local and
+#                        /etc are written for real. The resolved paths are echoed before anything is
+#                        copied.
 #
 #   INSTALL_BUNDLE_CODEX_ACP=1  Always install ${BIN_DIR}/codex-acp from node_modules; fail if the
 #                        platform package or native binary is missing.
 #
-#   INSTALL_OVERWRITE_SYSTEMD_UNIT=1  Replace tddy-daemon.service with the template from this script.
-#                        Default: if the unit file already exists, it is not overwritten (preserves
-#                        User=, Group=, drop-ins content in the main file, ExecStart edits, etc.).
+#   INSTALL_OVERWRITE_SYSTEMD_UNIT=1  Replace tddy-supervisor.service (and .socket), or the --user
+#                        tddy-daemon.service, with the templates from this script. Default: if a unit
+#                        file already exists, it is not overwritten (preserves Delegate=, ExecStart
+#                        edits, drop-in content, etc.). A host installed before the supervisor existed
+#                        has no tddy-supervisor.* unit, so its units are written without this flag; it
+#                        is only needed to pull in template changes (e.g. Conflicts=, ListenStream=)
+#                        on a host that has them.
+#
+# Nothing this script generates is ever overwritten in place: the configs, the unit files and the
+# AppArmor profile are rendered to a temp file and moved into place only once the whole content
+# exists, and an existing file is kept rather than replaced (see the guards below).
+#
+# After enable+start, the installed unit must actually be running: Type=simple makes `systemctl
+# restart` succeed as soon as fork/exec does, so the unit's state is sampled across a settle window
+# and install FAILS if it is not active. Skipped entirely under INSTALL_NO_SYSTEMCTL=1.
 #
 # Progress: lines prefixed with "install:" go to stdout (paths, files touched, log dirs).
 set -euo pipefail
@@ -77,6 +136,25 @@ if ! "$want_systemd"; then
   exit 1
 fi
 
+# The single switch for "is this the supervised deployment": everything supervisor-shaped below hangs
+# off it, and it is derived from --user rather than being a flag of its own, because the two are
+# mutually exclusive (see the header). The assertion right after is not dead weight: a future flag
+# that sets want_supervisor on its own must fail here rather than half-install a rootless supervisor
+# that can broker nothing next to a daemon that dials it and fails every spawn.
+if "$want_user"; then
+  want_supervisor=false
+else
+  want_supervisor=true
+fi
+
+if "$want_user" && "$want_supervisor"; then
+  echo "install: --user and a supervisor install are mutually exclusive." >&2
+  echo "install: A rootless supervisor cannot setuid to another user, own a delegated cgroup subtree" >&2
+  echo "install: or bind a root-owned socket, so it would broker nothing — and a single-user install" >&2
+  echo "install: has no privilege separation to provide. Install one or the other, not both." >&2
+  exit 1
+fi
+
 # Path defaults differ for a per-user install (--user): everything lands under XDG user locations
 # and needs no root. Explicit INSTALL_* env overrides always win in both modes.
 if "$want_user"; then
@@ -89,48 +167,359 @@ if "$want_user"; then
   SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-${XDG_CONFIG}/systemd/user}"
   DAEMON_LOG_DIR="${INSTALL_DAEMON_LOG_DIR:-${XDG_STATE}/tddy-daemon}"
   AUTH_STORAGE_DIR="${INSTALL_AUTH_STORAGE_DIR:-${XDG_DATA}/tddy}"
+  # No supervisor binds this one, and an unprivileged user cannot create a node in /run: the daemon
+  # binds it itself, so it has to be somewhere this user owns. XDG_RUNTIME_DIR is the right home for a
+  # socket (tmpfs, cleaned up with the session); where the session manager set none, the XDG state
+  # directory is. Deliberately not derived from DAEMON_LOG_DIR: moving the log dir must not move the
+  # socket every client dials.
+  DAEMON_SOCKET_PATH="${INSTALL_DAEMON_SOCKET_PATH:-${XDG_RUNTIME_DIR:-${XDG_STATE}/tddy-daemon}/tddy-daemon.sock}"
 else
   BIN_DIR="${INSTALL_BIN_DIR:-${INSTALL_PREFIX:-/usr/local}/bin}"
   WEB_BUNDLE_DIR="${INSTALL_WEB_BUNDLE_DIR:-${INSTALL_PREFIX:-/usr/local}/share/tddy/web}"
   CONFIG_DIR="${INSTALL_CONFIG_DIR:-/etc/tddy}"
   SYSTEMD_DIR="${INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
-  # Paths referenced by daemon.yaml.production (log + auth); children use per-repo tmp/logs at runtime.
+  # Paths substituted into daemon.yaml (log + token storage); children use per-repo tmp/logs at runtime.
   DAEMON_LOG_DIR="${INSTALL_DAEMON_LOG_DIR:-/var/log/tddy-daemon}"
   AUTH_STORAGE_DIR="${INSTALL_AUTH_STORAGE_DIR:-/var/lib/tddy}"
+  # The daemon's own client-facing socket. The supervisor binds it and hands it over, so this one value
+  # is substituted into both supervisor.yaml and daemon.yaml — for a file this run CREATES. An existing
+  # config is preserved, so on an upgrade nothing is substituted and the two can already disagree; that
+  # is what warn_unless_file_declares reports below.
+  DAEMON_SOCKET_PATH="${INSTALL_DAEMON_SOCKET_PATH:-/run/tddy-daemon.sock}"
 fi
+
+# daemon.yaml.production declares `auth_storage: __AUTH_STORAGE_DIR__/auth`, so the directory the
+# daemon actually opens is that child, not the base above. The daemon REFUSES TO START when it is not
+# writable (a failed token write would fail every login), so install must create, chown and lock down
+# the directory the config names — creating only the base left a fresh host with a daemon that
+# crash-looped until its restart budget ran out.
+AUTH_STORAGE_PATH="${AUTH_STORAGE_DIR}/auth"
 
 WEB_DIST_SRC="${ROOT_DIR}/packages/tddy-web/dist"
 CONFIG_FILE="${CONFIG_DIR}/daemon.yaml"
-UNIT_PATH="${SYSTEMD_DIR}/tddy-daemon.service"
+SUPERVISOR_CONFIG_FILE="${CONFIG_DIR}/supervisor.yaml"
 NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
 OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
 
-# `systemctl` invocation: a --user install targets the invoking user's manager.
+# The one unit each mode installs. A --user install installs the daemon directly (no supervisor to own
+# its lifecycle), which is why the same unit name is the legacy one masked in a system install: the two
+# names live in different managers and never collide.
+if "$want_supervisor"; then
+  SERVICE_UNIT="tddy-supervisor.service"
+else
+  SERVICE_UNIT="tddy-daemon.service"
+fi
+UNIT_PATH="${SYSTEMD_DIR}/${SERVICE_UNIT}"
+
+# `systemctl`/`journalctl` invocation: a --user install targets the invoking user's manager.
 if "$want_user"; then
   SYSTEMCTL=(systemctl --user)
+  JOURNALCTL=(journalctl --user)
 else
   SYSTEMCTL=(systemctl)
+  JOURNALCTL=(journalctl)
 fi
 
-# The unprivileged OS user/group the daemon runs as (system install only; --user runs as the
-# invoking user). Configurable so nothing is hardcoded; set INSTALL_DAEMON_USER=root for multi-user
-# setuid spawning instead.
+# Units this script installed before the supervisor existed. The supervisor now starts the daemon, so
+# an inherited daemon unit is stopped, disabled and masked below rather than left to start a second
+# daemon. Only in a system install: under --user the tddy-daemon user unit IS the deployment.
+#
+# THE SOCKET COMES FIRST AND THE ORDER IS LOAD-BEARING. Stopping tddy-daemon.service does not stop the
+# tddy-daemon.socket it was activated from, and that socket keeps listening on the very path the
+# supervisor is about to bind (INSTALL_DAEMON_SOCKET_PATH defaults to the same /run/tddy-daemon.sock).
+# With the service disarmed first, any connect() in the window in between re-activates the legacy
+# daemon, which then holds the daemon's web port and its token storage while the supervisor unlinks the
+# socket node and binds its own — two daemons, and the supervisor's own child failing to bind until it
+# exhausts its restart budget.
+LEGACY_DAEMON_UNITS=(tddy-daemon.socket tddy-daemon.service)
+
+# The unprivileged OS user/group the daemon runs as (declared in supervisor.yaml, not in a unit).
+# Configurable so nothing is hardcoded. `root` is rejected: the supervisor refuses a root-run managed
+# service at config load, and multi-user session spawning is now the supervisor's job, not the
+# daemon's (list the target accounts under spawn_policy.allowed_session_users in supervisor.yaml).
+# Unused under --user, which runs the daemon as the invoking user.
 DAEMON_USER="${INSTALL_DAEMON_USER:-tddy}"
 DAEMON_GROUP="${INSTALL_DAEMON_GROUP:-$DAEMON_USER}"
 
-# Group that gates access to the local Unix socket (docker-model). systemd creates the socket
-# as root via tddy-daemon.socket and chowns it to ${DAEMON_USER}:${SOCKET_GROUP} mode 0660, so
-# same-host clients (tddy-sandbox-app, and humans added to this group) can connect without root.
+# Group that gates access to the supervisor's privileged RPC socket (docker-model). systemd creates
+# the socket as root via tddy-supervisor.socket at mode 0660, so the daemon — and any other member of
+# this group — can connect without root. Every request is still authorized by SO_PEERCRED against the
+# uids of declared services, so group membership alone grants nothing.
 SOCKET_GROUP="${INSTALL_SOCKET_GROUP:-tddy-clients}"
-UNIT_SOCKET_PATH="${SYSTEMD_DIR}/tddy-daemon.socket"
-# Where systemd creates the local socket. Must match daemon.yaml local.socket_path (the daemon's
-# fallback when unset is /run/tddy-daemon.sock, which matches this default).
-SOCKET_LISTEN_PATH="${INSTALL_SOCKET_PATH:-/run/tddy-daemon.sock}"
+UNIT_SOCKET_PATH="${SYSTEMD_DIR}/tddy-supervisor.socket"
+# Where systemd creates the supervisor socket. Written into the socket unit's ListenStream, and into
+# both supervisor.yaml (socket.path) and daemon.yaml (supervisor.socket_path) when this run creates
+# them; the supervisor adopts the passed fd instead of binding it.
+SUPERVISOR_SOCKET_PATH="${INSTALL_SUPERVISOR_SOCKET_PATH:-/run/tddy-supervisor.sock}"
 
-# AppArmor profile granting the unprivileged user namespaces the Linux cgroups sandbox needs.
+# AppArmor profile granting the daemon binary the unprivileged user namespaces the Linux cgroups
+# sandbox needs. The profile is attached by binary path with flags=(unconfined) — it grants `userns`
+# and confines nothing — so it applies whenever the daemon itself builds a jail, which it still does
+# for sandboxes the supervisor does not broker. No installed unit references AppArmorProfile= anymore.
 APPARMOR_DIR="${INSTALL_APPARMOR_DIR:-/etc/apparmor.d}"
 APPARMOR_PROFILE_SRC="${ROOT_DIR}/packages/tddy-daemon/apparmor/tddy-daemon"
 APPARMOR_PROFILE_PATH="${APPARMOR_DIR}/tddy-daemon"
+
+# How many times the installed unit's state is sampled (one second apart) after enable+start before
+# install accepts it as running. See verify_unit_running.
+UNIT_SETTLE_SAMPLES=5
+
+# --- generated files --------------------------------------------------------------------------
+#
+# Every file this script generates goes through atomically_write or render_template. A redirect onto
+# the destination truncates it *before* the content is produced, so any failure mid-write leaves a
+# 0-byte file behind — and because an existing config/unit is deliberately kept rather than
+# overwritten, the next `sudo ./install --systemd` would preserve that empty file forever and the
+# host could never be repaired by installing again.
+
+# atomically_write DEST < content
+#
+# Writes stdin to a temp file next to DEST (same directory, so the move is a rename, not a copy) and
+# moves it into place only after the whole content was written. DEST is untouched on failure.
+atomically_write() {
+  local dest="$1" tmp
+  tmp="$(mktemp "${dest}.XXXXXX")" || {
+    echo "install: cannot create a temporary file next to ${dest}" >&2
+    exit 1
+  }
+  if ! cat >"$tmp"; then
+    rm -f "$tmp"
+    echo "install: failed writing ${dest}; it is left unchanged" >&2
+    exit 1
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+# render_template SRC DEST __NAME__=VALUE...
+#
+# Substitutes each __NAME__ placeholder with its value literally — no character in a value is
+# interpreted — and installs the result atomically.
+#
+# `sed` is deliberately not used. Its replacement text is syntax, not data: the delimiter (`#` here)
+# ends the expression, `&` expands to the whole match, and `\` escapes. A path containing `#` aborted
+# the write, and a path containing `&` produced a config that was wrong in both files identically.
+# awk's index/substr loop below copies each value byte for byte. Values reach awk through the
+# environment rather than `-v`, because `-v` expands escape sequences (`\n`, `\t`) inside the value.
+render_template() {
+  local src="$1" dest="$2"
+  shift 2
+
+  local pair name value names=""
+  for pair in "$@"; do
+    name="${pair%%=*}"
+    value="${pair#*=}"
+    if [[ "$value" == *$'\n'* ]]; then
+      echo "install: refusing to substitute ${name}: the value spans more than one line" >&2
+      echo "install: (it would render ${dest} as broken YAML; fix the INSTALL_* override that set it)" >&2
+      exit 1
+    fi
+    names+="${name} "
+    export "TDDY_RENDER_VALUE_${name}=${value}"
+  done
+  export TDDY_RENDER_NAMES="$names"
+
+  local tmp
+  tmp="$(mktemp "${dest}.XXXXXX")" || {
+    echo "install: cannot create a temporary file next to ${dest}" >&2
+    exit 1
+  }
+  # Single left-to-right pass: at each step the earliest remaining placeholder wins, so a substituted
+  # value is never rescanned for placeholders of its own.
+  if ! awk '
+    BEGIN { count = split(ENVIRON["TDDY_RENDER_NAMES"], names, " ") }
+    {
+      line = $0
+      out = ""
+      while (1) {
+        first = 0
+        winner = ""
+        for (i = 1; i <= count; i++) {
+          at = index(line, names[i])
+          if (at > 0 && (first == 0 || at < first)) {
+            first = at
+            winner = names[i]
+          }
+        }
+        if (first == 0) break
+        out = out substr(line, 1, first - 1) ENVIRON["TDDY_RENDER_VALUE_" winner]
+        line = substr(line, first + length(winner))
+      }
+      print out line
+    }
+  ' "$src" >"$tmp"; then
+    rm -f "$tmp"
+    echo "install: failed rendering ${dest} from ${src}; it is left unchanged" >&2
+    exit 1
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+# drop_top_level_yaml_block FILE KEY
+#
+# Removes a top-level `KEY:` mapping from a file this run just rendered — the key line, everything
+# indented under it, and the comment block documenting it directly above — and installs the result
+# atomically. The comment goes with the block because a config that explains a setting it does not
+# have is worse than either alone.
+#
+# Used for `supervisor:` in a --user install. daemon.yaml.production declares that block for the
+# supervised deployment, and an unreachable supervisor FAILS every spawn by design (there is no
+# fallback to in-process spawning), so a rootless daemon that would dial a socket nothing binds must
+# not carry it at all.
+drop_top_level_yaml_block() {
+  local file="$1" key="$2" tmp
+  tmp="$(mktemp "${file}.XXXXXX")" || {
+    echo "install: cannot create a temporary file next to ${file}" >&2
+    exit 1
+  }
+  if ! awk -v key="${key}:" '
+    function flush() { for (i = 1; i <= buffered; i++) print buffer[i]; buffered = 0 }
+    {
+      # Hold comments and blank lines back: whether they document the next key or the one being
+      # dropped is only decided by the line that follows them.
+      if ($0 ~ /^#/ || $0 == "") { buffer[++buffered] = $0; next }
+      if (dropping) {
+        if ($0 ~ /^[[:space:]]/) { buffered = 0; next }
+        dropping = 0
+      }
+      if ($0 == key) { buffered = 0; dropping = 1; next }
+      flush()
+      print
+    }
+    END { flush() }
+  ' "$file" >"$tmp"; then
+    rm -f "$tmp"
+    echo "install: failed removing the ${key} block from ${file}; it is left unchanged" >&2
+    exit 1
+  fi
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$file"
+  if grep -q "^${key}:" "$file"; then
+    echo "install: ${file} still declares a top-level ${key}: block after removing it — the template" >&2
+    echo "install: ${ROOT_DIR}/daemon.yaml.production must have changed shape. A --user install has no" >&2
+    echo "install: supervisor, and the daemon fails every spawn dialing one that is absent." >&2
+    exit 1
+  fi
+}
+
+# verify_unit_running UNIT SAMPLES
+#
+# `systemctl restart` on a Type=simple unit returns as soon as fork/exec succeeded, so a supervisor
+# that parses its config and exits 1 a millisecond later is indistinguishable from a healthy one at
+# that instant. Sample the state SAMPLES times, a second apart, and fail if it is ever not `active`:
+# a crash loop reports `activating` (auto-restart) or `failed`, and a unit that exhausted
+# Restart=on-failure reports `failed`. This matters most on upgrade — the inherited
+# tddy-daemon.service has already been disabled by then, so a crash-looping supervisor means nothing
+# is serving, and install must say so instead of printing "done" and exiting 0.
+verify_unit_running() {
+  local unit="$1" samples="$2" i state
+  for ((i = 1; i <= samples; i++)); do
+    # The system units are asked of the system manager; a --user install asks the invoking user's
+    # manager about its one unit. Same question, different manager.
+    if "$want_user"; then
+      state="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+    else
+      state="$(systemctl is-active "$unit" 2>/dev/null || true)"
+    fi
+    if [[ "$state" != "active" ]]; then
+      echo "install: FAILED: ${unit} is '${state:-unknown}', not active." >&2
+      if "$want_supervisor"; then
+        echo "install: nothing is serving: the inherited ${LEGACY_DAEMON_UNITS[0]} was disabled above." >&2
+        echo "install: likely causes — an existing ${SUPERVISOR_CONFIG_FILE} carrying a key this build" >&2
+        echo "install: rejects (unknown keys are a startup failure, not an ignored setting), or a socket" >&2
+        echo "install: group (${SOCKET_GROUP}) or service user (${DAEMON_USER}) that cannot be resolved." >&2
+      else
+        echo "install: likely causes — an existing ${CONFIG_FILE} carrying a key this build rejects" >&2
+        echo "install: (unknown keys are a startup failure, not an ignored setting), or a path this user" >&2
+        echo "install: cannot write: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_PATH}, ${DAEMON_SOCKET_PATH}." >&2
+      fi
+      "${SYSTEMCTL[@]}" status --no-pager --full "$unit" >&2 || true
+      "${JOURNALCTL[@]}" -u "$unit" -n 30 --no-pager >&2 || true
+      exit 1
+    fi
+    if [[ "$i" -lt "$samples" ]]; then
+      sleep 1
+    fi
+  done
+  echo "install:   ${unit} is active (state sampled ${samples}× over $((samples - 1))s)"
+}
+
+# disarm_legacy_unit UNIT — stop, disable and mask a daemon unit inherited from a pre-supervisor
+# install. All three are needed: `stop` alone leaves it enabled, and `disable` only removes the
+# WantedBy symlink — it neither disarms an already-listening socket nor survives a `systemctl
+# preset-all`, a package upgrade or a rollback putting the symlink back. Masking is what makes the
+# disarm stick, and this script deliberately leaves the operator's unit files on disk, so without it
+# they stay one enable away from running a second daemon.
+disarm_legacy_unit() {
+  local unit="$1"
+  echo "install: disarming inherited ${unit} (tddy-supervisor owns the daemon's lifecycle now)"
+  if ! systemctl stop "$unit"; then
+    echo "install:   WARNING: systemctl stop ${unit} failed; it may still be running" >&2
+  fi
+  if ! systemctl disable "$unit"; then
+    echo "install:   WARNING: systemctl disable ${unit} failed; it may still be enabled" >&2
+  fi
+  # `mask` puts a symlink to /dev/null at ${SYSTEMD_DIR}/${unit}, so it fails when the unit file
+  # itself is that path — which is exactly where a pre-supervisor install of this script wrote it.
+  # `--force` would delete the operator's file; this script never does that, so report the remedy.
+  if systemctl mask "$unit"; then
+    echo "install:   ${unit} stopped, disabled and masked"
+  else
+    echo "install:   WARNING: could not mask ${unit} — its unit file is most likely ${SYSTEMD_DIR}/${unit}," >&2
+    echo "install:   which is where the mask symlink would have to go. It is stopped and disabled, but a" >&2
+    echo "install:   preset-all or a package upgrade can re-arm it, and a second daemon would then fight" >&2
+    echo "install:   this one for the web port, ${DAEMON_SOCKET_PATH} and ${AUTH_STORAGE_PATH}." >&2
+    echo "install:   Move the file aside yourself (this script never deletes your files) and re-run:" >&2
+    echo "install:     mv ${SYSTEMD_DIR}/${unit} ${SYSTEMD_DIR}/${unit}.pre-supervisor && systemctl daemon-reload" >&2
+  fi
+}
+
+# harden_installed_path PATH... — remove group/other write and, on a privileged system install, take
+# root ownership.
+#
+# Only ever narrows: an operator's stricter mode survives. `sudo` inherits the caller's umask on most
+# distributions, so `umask 000 && sudo ./install --systemd` would otherwise leave a world-writable
+# ${CONFIG_DIR} — and any local user could then replace supervisor.yaml, which is the entire policy the
+# root broker enforces. Re-asserted on every run, including for files that were preserved, so a host
+# that was once installed badly is repaired by installing again.
+#
+# The chown is skipped for a --user install (there is no root, and the files belong to the invoking
+# user by design) and under INSTALL_NO_SYSTEMCTL=1; narrowing the mode bits still applies in both.
+harden_installed_path() {
+  local path
+  for path in "$@"; do
+    chmod go-w "$path"
+    if [[ "$NO_SYSTEMCTL" != "1" ]] && "$want_supervisor"; then
+      chown root:root "$path"
+    fi
+  done
+}
+
+# warn_unless_file_declares FILE NEEDLE WHAT REMEDY
+#
+# "One value substituted into both files, so they cannot drift" holds by construction only for a file
+# this run CREATED. An existing config or unit is preserved on purpose, so on an upgrade the
+# substitution never happens: a pre-supervisor daemon.yaml has no `local:` block at all, and changing
+# INSTALL_DAEMON_SOCKET_PATH on a second run rewrites nothing. Install cannot fix that without
+# overwriting an operator's file — but it must not leave the disagreement silent either.
+warn_unless_file_declares() {
+  local file="$1" needle="$2" what="$3" remedy="$4"
+  if grep -Fq -- "$needle" "$file"; then
+    return 0
+  fi
+  echo "install:   WARNING: ${file} does not name ${needle} (${what})." >&2
+  echo "install:   This run resolved that path from the environment, but the file was preserved rather" >&2
+  echo "install:   than created, so nothing was substituted into it — the two sides of the socket" >&2
+  echo "install:   handover disagree. ${remedy}" >&2
+}
+
+if "$want_supervisor" && [[ "$DAEMON_USER" == "root" ]]; then
+  echo "install: INSTALL_DAEMON_USER=root is not supported: tddy-supervisor rejects a root-run managed" >&2
+  echo "install: service at config load. Multi-user session spawning is the supervisor's job now — list" >&2
+  echo "install: the target accounts under spawn_policy.allowed_session_users in ${SUPERVISOR_CONFIG_FILE}." >&2
+  exit 1
+fi
 
 # Production (system) installs require root unless testing mode is enabled. A --user install targets
 # the invoking user's systemd manager and never needs root.
@@ -146,7 +535,13 @@ if "$want_build"; then
   "${ROOT_DIR}/release"
 fi
 
-for name in tddy-daemon tddy-coder tddy-tools; do
+# tddy-supervisor is required only where it is installed: a --user install runs the daemon directly.
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools)
+if "$want_supervisor"; then
+  INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
+fi
+
+for name in "${INSTALLED_BINARIES[@]}"; do
   src="${ROOT_DIR}/target/release/${name}"
   if [[ ! -f "$src" ]]; then
     echo "install: missing release binary: ${src}" >&2
@@ -225,58 +620,77 @@ install_codex_acp_from_node_modules() {
 }
 
 echo "install: paths — BIN_DIR=${BIN_DIR}"
-echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml)"
-echo "install: paths — SYSTEMD_DIR=${SYSTEMD_DIR}"
+if "$want_supervisor"; then
+  echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (supervisor.yaml, daemon.yaml)"
+  echo "install: paths — SYSTEMD_DIR=${SYSTEMD_DIR} (tddy-supervisor.service, tddy-supervisor.socket)"
+  echo "install: paths — SUPERVISOR_SOCKET_PATH=${SUPERVISOR_SOCKET_PATH} (root:${SOCKET_GROUP} mode 0660)"
+  echo "install: paths — DAEMON_SOCKET_PATH=${DAEMON_SOCKET_PATH} (bound by the supervisor, handed to the daemon)"
+else
+  echo "install: paths — CONFIG_DIR=${CONFIG_DIR} (daemon.yaml; no supervisor.yaml in --user mode)"
+  echo "install: paths — SYSTEMD_DIR=${SYSTEMD_DIR} (${SERVICE_UNIT}, user manager)"
+  echo "install: paths — DAEMON_SOCKET_PATH=${DAEMON_SOCKET_PATH} (bound by the daemon itself; no supervisor)"
+fi
 echo "install: paths — WEB_BUNDLE_DIR=${WEB_BUNDLE_DIR}"
 echo "install: logging — daemon process file log (from daemon.yaml.production): ${DAEMON_LOG_DIR}/daemon"
-echo "install: logging — OAuth/token storage (auth_storage): ${AUTH_STORAGE_DIR}"
+echo "install: logging — OAuth/token storage (auth_storage, mode 0700): ${AUTH_STORAGE_PATH}"
 echo "install: logging — spawned tddy-coder sessions write under each repo: <repo>/tmp/logs/coder and <repo>/tmp/logs/child/ (runtime; not created by this script)"
 echo "install: per–OS-user spawn PATH (e.g. Cursor agent): ~/.tddy/config.yaml on the target user (spawn_path_extra); not created by this script"
 echo "install: codex-acp — if present under node_modules, copied to \${BIN_DIR}/codex-acp (mandatory when allowed_agents lists id codex-acp or INSTALL_BUNDLE_CODEX_ACP=1)"
 
 mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
+# A freshly created directory takes its mode from the umask, which sudo inherits from the caller.
+echo "install: hardening directory permissions (no group/other write) on the four install directories"
+harden_installed_path "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$WEB_BUNDLE_DIR"
 
 if "$want_user"; then
-  # --user: the daemon runs as the invoking user, so there is no dedicated service user to create
-  # and nothing to chown — just ensure the (user-owned) log + auth dirs exist.
-  echo "install: (--user) ensuring log + auth dirs: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
-  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+  # --user: the daemon runs as the invoking user, so there is no dedicated service user to create and
+  # nothing to chown — but the token-storage directory the config names still has to exist and stay
+  # private, because the daemon refuses to start when it cannot write there.
+  echo "install: (--user) ensuring log + token-storage dirs: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_PATH}"
+  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_PATH"
+  chmod 0700 "$AUTH_STORAGE_PATH"
 elif [[ "$NO_SYSTEMCTL" != "1" ]]; then
-  if [[ "$DAEMON_USER" != "root" ]]; then
-    echo "install: ensuring service user/group ${DAEMON_USER}:${DAEMON_GROUP}"
-    if ! getent group "$DAEMON_GROUP" >/dev/null; then
-      groupadd --system "$DAEMON_GROUP"
-    fi
-    if ! id -u "$DAEMON_USER" >/dev/null 2>&1; then
-      useradd --system --gid "$DAEMON_GROUP" --home-dir "$AUTH_STORAGE_DIR" \
-        --shell /usr/sbin/nologin "$DAEMON_USER"
-    fi
+  echo "install: ensuring service user/group ${DAEMON_USER}:${DAEMON_GROUP}"
+  if ! getent group "$DAEMON_GROUP" >/dev/null; then
+    groupadd --system "$DAEMON_GROUP"
+  fi
+  if ! id -u "$DAEMON_USER" >/dev/null 2>&1; then
+    useradd --system --gid "$DAEMON_GROUP" --home-dir "$AUTH_STORAGE_DIR" \
+      --shell /usr/sbin/nologin "$DAEMON_USER"
   fi
   echo "install: ensuring socket-access group ${SOCKET_GROUP} (add same-host client users with: usermod -aG ${SOCKET_GROUP} <user>)"
   if ! getent group "$SOCKET_GROUP" >/dev/null; then
     groupadd --system "$SOCKET_GROUP"
   fi
-  echo "install: ensuring system dirs for daemon log + auth: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_DIR}"
-  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+  echo "install: adding ${DAEMON_USER} to ${SOCKET_GROUP} so the daemon can open the supervisor socket"
+  usermod -aG "$SOCKET_GROUP" "$DAEMON_USER"
+  echo "install: ensuring system dirs for daemon log + token storage: ${DAEMON_LOG_DIR}, ${AUTH_STORAGE_PATH}"
+  mkdir -p "$DAEMON_LOG_DIR" "$AUTH_STORAGE_PATH"
   echo "install: chowning ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_DIR} to ${DAEMON_USER}:${DAEMON_GROUP}"
   chown -R "${DAEMON_USER}:${DAEMON_GROUP}" "$DAEMON_LOG_DIR" "$AUTH_STORAGE_DIR"
+  # Retained GitHub access tokens live here (github-tokens.json, mode 0600) — no reason for anyone
+  # but the daemon user to reach them, and the umask must not get a say.
+  chmod 0700 "$AUTH_STORAGE_PATH"
 fi
 
 echo "install: installing binaries -> ${BIN_DIR}/"
-install -m 0755 "${ROOT_DIR}/target/release/tddy-daemon" "${BIN_DIR}/tddy-daemon"
-echo "install:   updated ${BIN_DIR}/tddy-daemon"
-install -m 0755 "${ROOT_DIR}/target/release/tddy-coder" "${BIN_DIR}/tddy-coder"
-echo "install:   updated ${BIN_DIR}/tddy-coder"
-install -m 0755 "${ROOT_DIR}/target/release/tddy-tools" "${BIN_DIR}/tddy-tools"
-echo "install:   updated ${BIN_DIR}/tddy-tools"
+for name in "${INSTALLED_BINARIES[@]}"; do
+  install -m 0755 "${ROOT_DIR}/target/release/${name}" "${BIN_DIR}/${name}"
+  echo "install:   updated ${BIN_DIR}/${name}"
+done
 install_codex_acp_from_node_modules
 
 if "$want_headless"; then
   echo "install: --headless — not copying web bundle; ${WEB_BUNDLE_DIR}/ left empty (daemon serves /rpc + /api/config, no UI)"
 else
   echo "install: copying web static bundle ${WEB_DIST_SRC}/ -> ${WEB_BUNDLE_DIR}/"
-  cp -a "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"
-  echo "install:   web bundle deployed (e.g. index.html)"
+  # `cp -R` rather than `cp -a`, deliberately: `-a` implies `--preserve=all`, which would stamp the
+  # *build* user's uid/gid onto the files the daemon serves, so whoever built the release could rewrite
+  # the dashboard's JavaScript afterwards. `-R` leaves the copy owned by the installing user (root).
+  # GNU's `--no-preserve=ownership` would say this more explicitly, but BSD/macOS `cp` rejects the flag
+  # and the e2e install tests do run there.
+  cp -R "${WEB_DIST_SRC}/." "$WEB_BUNDLE_DIR/"
+  echo "install:   web bundle deployed (e.g. index.html), owned by the installing user"
 fi
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -284,22 +698,76 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "install: missing ${ROOT_DIR}/daemon.yaml.production" >&2
     exit 1
   fi
-  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__, __DAEMON_LOG_DIR__, __AUTH_STORAGE_DIR__)"
-  sed -e "s#__INSTALL_BIN_DIR__#${BIN_DIR}#g" -e "s#__WEB_BUNDLE_PATH__#${WEB_BUNDLE_DIR}#g" \
-    -e "s#__DAEMON_LOG_DIR__#${DAEMON_LOG_DIR}#g" -e "s#__AUTH_STORAGE_DIR__#${AUTH_STORAGE_DIR}#g" \
-    "${ROOT_DIR}/daemon.yaml.production" >"$CONFIG_FILE"
-  chmod 0644 "$CONFIG_FILE"
+  echo "install: creating ${CONFIG_FILE} from daemon.yaml.production (placeholders: __INSTALL_BIN_DIR__, __WEB_BUNDLE_PATH__, __DAEMON_LOG_DIR__, __AUTH_STORAGE_DIR__, __SUPERVISOR_SOCKET_PATH__, __DAEMON_SOCKET_PATH__)"
+  render_template "${ROOT_DIR}/daemon.yaml.production" "$CONFIG_FILE" \
+    "__INSTALL_BIN_DIR__=${BIN_DIR}" \
+    "__WEB_BUNDLE_PATH__=${WEB_BUNDLE_DIR}" \
+    "__DAEMON_LOG_DIR__=${DAEMON_LOG_DIR}" \
+    "__AUTH_STORAGE_DIR__=${AUTH_STORAGE_DIR}" \
+    "__SUPERVISOR_SOCKET_PATH__=${SUPERVISOR_SOCKET_PATH}" \
+    "__DAEMON_SOCKET_PATH__=${DAEMON_SOCKET_PATH}"
+  if ! "$want_supervisor"; then
+    echo "install: (--user) removing the supervisor: block from ${CONFIG_FILE} (no supervisor is installed)"
+    drop_top_level_yaml_block "$CONFIG_FILE" supervisor
+    echo "install:   sessions stay with the daemon's own forked spawn worker, as the invoking user"
+  fi
 else
   echo "install: keeping existing config (not overwriting): ${CONFIG_FILE}"
+  if "$want_supervisor"; then
+    if ! grep -q '^supervisor:' "$CONFIG_FILE"; then
+      echo "install:   NOTE: ${CONFIG_FILE} declares no supervisor socket. Sessions are spawned by the" >&2
+      echo "install:   daemon's own forked worker as ${DAEMON_USER} either way today — no daemon code path" >&2
+      echo "install:   reads this block yet — but declaring it now means the host delegates spawning (and" >&2
+      echo "install:   fails closed instead of silently downgrading) as soon as that wiring lands:" >&2
+      echo "install:     supervisor:" >&2
+      echo "install:       socket_path: ${SUPERVISOR_SOCKET_PATH}" >&2
+    fi
+  elif grep -q '^supervisor:' "$CONFIG_FILE"; then
+    echo "install:   WARNING: ${CONFIG_FILE} declares a supervisor socket, but a --user install installs" >&2
+    echo "install:   no supervisor — nothing binds that path. Once the daemon routes spawning through a" >&2
+    echo "install:   supervisor, an unreachable one FAILS every spawn (there is deliberately no fallback" >&2
+    echo "install:   to in-process spawning). Remove the supervisor: block from ${CONFIG_FILE}." >&2
+  fi
+fi
+
+if "$want_supervisor"; then
+  if [[ ! -f "$SUPERVISOR_CONFIG_FILE" ]]; then
+    if [[ ! -f "${ROOT_DIR}/supervisor.yaml.production" ]]; then
+      echo "install: missing ${ROOT_DIR}/supervisor.yaml.production" >&2
+      exit 1
+    fi
+    echo "install: creating ${SUPERVISOR_CONFIG_FILE} from supervisor.yaml.production (declares tddy-daemon as user ${DAEMON_USER})"
+    render_template "${ROOT_DIR}/supervisor.yaml.production" "$SUPERVISOR_CONFIG_FILE" \
+      "__INSTALL_BIN_DIR__=${BIN_DIR}" \
+      "__DAEMON_CONFIG_PATH__=${CONFIG_FILE}" \
+      "__SUPERVISOR_SOCKET_PATH__=${SUPERVISOR_SOCKET_PATH}" \
+      "__SOCKET_GROUP__=${SOCKET_GROUP}" \
+      "__DAEMON_SOCKET_PATH__=${DAEMON_SOCKET_PATH}" \
+      "__DAEMON_USER__=${DAEMON_USER}" \
+      "__DAEMON_GROUP__=${DAEMON_GROUP}"
+    echo "install:   spawn_policy and cgroup ceilings are left empty — no session may be spawned as another"
+    echo "install:   user until an operator declares them (an empty policy grants no privilege)"
+  else
+    echo "install: keeping existing supervisor config (not overwriting): ${SUPERVISOR_CONFIG_FILE}"
+  fi
+fi
+
+# supervisor.yaml is the whole policy the root broker enforces, and daemon.yaml decides what the
+# daemon serves — neither may be writable by anyone but its owner, whichever run created them.
+echo "install: hardening ${CONFIG_DIR} configs (no group/other write)"
+harden_installed_path "$CONFIG_DIR" "$CONFIG_FILE"
+if "$want_supervisor"; then
+  harden_installed_path "$SUPERVISOR_CONFIG_FILE"
 fi
 
 if [[ -f "$UNIT_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
   echo "install: keeping existing systemd unit (not overwriting): ${UNIT_PATH}"
-  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (ExecStart, User=, etc.)"
-else
+  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (ExecStart, etc.)"
+elif "$want_user"; then
   echo "install: writing systemd unit ${UNIT_PATH}"
-  if "$want_user"; then
-    cat >"$UNIT_PATH" <<UNIT
+  # Unquoted heredoc: ${...} is expanded on purpose, so a backtick or $( ) inside would RUN — keep
+  # prose out of backticks here (a systemctl invocation in a comment once really did run).
+  atomically_write "$UNIT_PATH" <<UNIT
 [Unit]
 Description=tddy-daemon (per-user service)
 After=network.target
@@ -309,122 +777,218 @@ Type=simple
 ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
 Restart=on-failure
 RestartSec=5
-# Per-user install: runs in the invoking user's \`systemctl --user\` manager, as that user. No
-# privilege separation and no multi-user setuid spawning — sessions run as this same user. Delegate=yes
-# hands the service a writable cgroup v2 subtree for the sandbox; on Ubuntu 24.04, unprivileged user
-# namespaces may still be restricted (no AppArmor profile is attached here — the user manager cannot
-# load one). If the sandbox cannot create user namespaces, relax kernel.apparmor_restrict_unprivileged_userns.
+# Per-user install: runs in the invoking user's own systemd manager, as that user, and is the whole
+# deployment — no supervisor, because a rootless one could neither setuid to another account nor bind
+# a root-owned socket, and there is no second account here to separate from anyway. Sessions run as
+# this same user, spawned by the daemon's own forked worker; it binds its client socket itself
+# (local.socket_path in the config above). Delegate=yes hands the service a writable cgroup v2 subtree
+# for the sandbox; on Ubuntu 24.04, unprivileged user namespaces may still be restricted (no AppArmor
+# profile is attached here — the user manager cannot load one). If the sandbox cannot create user
+# namespaces, relax kernel.apparmor_restrict_unprivileged_userns.
 Delegate=yes
 
 [Install]
 WantedBy=default.target
 UNIT
-  else
-    cat >"$UNIT_PATH" <<UNIT
+  echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
+else
+  echo "install: writing systemd unit ${UNIT_PATH}"
+  # Unquoted heredoc: ${...} is expanded on purpose, so a backtick or $( ) inside would RUN — keep
+  # prose out of backticks here (a systemctl invocation in a comment once really did run).
+  atomically_write "$UNIT_PATH" <<UNIT
 [Unit]
-Description=tddy-daemon multi-user daemon
+Description=tddy-supervisor privileged broker and mini-init
 After=network.target
-# The socket unit creates the local Unix socket (as root, group ${SOCKET_GROUP}) and passes the
-# listening fd to this service via socket activation, so the unprivileged daemon never has to bind
-# in /run itself. Requires= keeps them lifecycled together.
-Requires=tddy-daemon.socket
-After=tddy-daemon.socket
+# The socket unit creates the privileged RPC socket (as root, group ${SOCKET_GROUP}) and passes the
+# listening fd to this service via socket activation, so nothing binds in /run at runtime.
+# Requires= keeps them lifecycled together.
+Requires=tddy-supervisor.socket
+After=tddy-supervisor.socket
+# tddy-daemon is a managed child of this supervisor, so a second unit starting it would run two
+# daemons against the same config, web port, client socket and token storage. install stops, disables
+# and masks the inherited units; this is the backstop for a host where masking could not be applied
+# and someone starts them by hand. Conflicts= is symmetric, deliberately: if the legacy daemon does
+# come up, systemd stops this unit rather than letting both serve.
+Conflicts=tddy-daemon.service tddy-daemon.socket
 
 [Service]
 Type=simple
-ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}
+ExecStart=${BIN_DIR}/tddy-supervisor -c ${SUPERVISOR_CONFIG_FILE}
 Restart=on-failure
 RestartSec=5
-# Runs unprivileged as ${DAEMON_USER}. Delegate=yes hands the service a writable cgroup v2 subtree so
-# the Linux sandbox can create per-session scopes with memory/cpu/pids limits; AppArmorProfile grants
-# the unprivileged user namespaces the sandbox needs (Ubuntu 24.04 restricts these by default).
-# NOTE: as a non-root user the daemon spawns sessions as itself (same_user=true) — multi-user setuid
-# spawning needs root: re-run with INSTALL_DAEMON_USER=root (Delegate=/AppArmorProfile= are then
-# harmless but unnecessary). Ensure auth_storage, config dir, and listen port are usable by the user.
-User=${DAEMON_USER}
-Group=${DAEMON_GROUP}
+# The ONLY root process in the stack, and the only unit: tddy-daemon is a managed child declared in
+# ${SUPERVISOR_CONFIG_FILE} and runs as ${DAEMON_USER}. Delegate=yes hands the supervisor a writable
+# cgroup v2 subtree that it carves per-session scopes out of on the daemon's behalf — the daemon needs
+# no delegation of its own. Root privilege is used only to choose a session's target uid and to write
+# cgroup scopes, and is dropped before any namespace exists (see the supervisor architecture doc).
+User=root
+Group=root
 Delegate=yes
-AppArmorProfile=tddy-daemon
+# KillMode=mixed sends SIGTERM to the supervisor only, so it can forward the signal to its children
+# and honor shutdown_grace_secs; anything still alive at TimeoutStopSec is SIGKILLed cgroup-wide, so
+# no session process outlives the unit. Keep TimeoutStopSec above supervisor.yaml shutdown_grace_secs.
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  fi
-  chmod 0644 "$UNIT_PATH"
-  echo "install:   ExecStart=${BIN_DIR}/tddy-daemon -c ${CONFIG_FILE}"
+  echo "install:   ExecStart=${BIN_DIR}/tddy-supervisor -c ${SUPERVISOR_CONFIG_FILE}"
 fi
 
-# The socket unit is system-only: it binds in /run and chowns the socket to ${DAEMON_USER}:${SOCKET_GROUP},
-# neither of which a user manager can do. A --user install runs without socket activation — the daemon
-# self-binds ${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock (its default local.socket_path), which is why the
-# --user service unit carries no Requires=tddy-daemon.socket.
+# The socket unit is system-only: it creates the privileged socket in /run as root:${SOCKET_GROUP},
+# neither of which a user manager can do — and there is no supervisor to hand the fd to under --user,
+# where the daemon binds ${DAEMON_SOCKET_PATH} itself.
 if "$want_user"; then
-  echo "install: (--user) skipping socket unit; daemon self-binds its local socket under \${XDG_RUNTIME_DIR}"
+  echo "install: (--user) skipping the supervisor socket unit; the daemon binds ${DAEMON_SOCKET_PATH} itself"
 elif [[ -f "$UNIT_SOCKET_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
   echo "install: keeping existing systemd socket unit (not overwriting): ${UNIT_SOCKET_PATH}"
   echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (SocketGroup, ListenStream, etc.)"
 else
-  echo "install: writing systemd socket unit ${UNIT_SOCKET_PATH} (ListenStream=${SOCKET_LISTEN_PATH}, group ${SOCKET_GROUP})"
-  cat >"$UNIT_SOCKET_PATH" <<SOCKET
+  echo "install: writing systemd socket unit ${UNIT_SOCKET_PATH} (ListenStream=${SUPERVISOR_SOCKET_PATH}, group ${SOCKET_GROUP})"
+  atomically_write "$UNIT_SOCKET_PATH" <<SOCKET
 [Unit]
-Description=tddy-daemon local ConnectionService socket
+Description=tddy-supervisor privileged RPC socket
 
 [Socket]
-# systemd creates this socket as root, then chowns it to ${DAEMON_USER}:${SOCKET_GROUP} at mode 0660
-# (the docker.sock model). Same-host clients in ${SOCKET_GROUP} can connect; the daemon adopts the
-# passed fd via LISTEN_FDS. Must match daemon.yaml local.socket_path (unset -> ${SOCKET_LISTEN_PATH}).
-ListenStream=${SOCKET_LISTEN_PATH}
-SocketUser=${DAEMON_USER}
+# systemd creates this socket as root:${SOCKET_GROUP} at mode 0660 (the docker.sock model) and the
+# supervisor adopts the passed fd via LISTEN_FDS. Group membership only gets a client as far as
+# connect(): every request is authorized by SO_PEERCRED against the uids of declared services.
+# Must match supervisor.yaml socket.path/group/mode and daemon.yaml supervisor.socket_path.
+ListenStream=${SUPERVISOR_SOCKET_PATH}
+SocketUser=root
 SocketGroup=${SOCKET_GROUP}
 SocketMode=0660
 
 [Install]
 WantedBy=sockets.target
 SOCKET
-  chmod 0644 "$UNIT_SOCKET_PATH"
-  echo "install:   ListenStream=${SOCKET_LISTEN_PATH} SocketUser=${DAEMON_USER} SocketGroup=${SOCKET_GROUP} SocketMode=0660"
+  echo "install:   ListenStream=${SUPERVISOR_SOCKET_PATH} SocketUser=root SocketGroup=${SOCKET_GROUP} SocketMode=0660"
 fi
 
-# AppArmor profile granting the daemon binary unprivileged user namespaces. Loaded before the service
-# starts because the unit's AppArmorProfile= transition fails if the profile is not present. Skipped
-# for --user installs: the user unit has no AppArmorProfile= and loading a profile needs root.
-if [[ "$NO_SYSTEMCTL" != "1" ]] && ! "$want_user"; then
-  if [[ -f "$APPARMOR_PROFILE_SRC" ]]; then
-    echo "install: installing AppArmor profile -> ${APPARMOR_PROFILE_PATH} (userns grant for ${BIN_DIR}/tddy-daemon)"
-    mkdir -p "$APPARMOR_DIR"
-    sed -e "s#__INSTALL_BIN_DIR__#${BIN_DIR}#g" "$APPARMOR_PROFILE_SRC" >"$APPARMOR_PROFILE_PATH"
-    chmod 0644 "$APPARMOR_PROFILE_PATH"
-    if command -v apparmor_parser >/dev/null 2>&1; then
-      apparmor_parser -r "$APPARMOR_PROFILE_PATH"
+# A unit file writable by anyone but its owner is an ExecStart= anyone can rewrite.
+echo "install: hardening ${SYSTEMD_DIR} units (no group/other write)"
+harden_installed_path "$UNIT_PATH"
+if "$want_supervisor"; then
+  harden_installed_path "$UNIT_SOCKET_PATH"
+
+  # Cross-file agreement. Only a file this run CREATED carries the paths resolved above; everything the
+  # run preserved may still name something else, and nothing downstream would say so. A --user install
+  # writes a single config, so there is no second side that could disagree.
+  echo "install: checking the installed files agree on both socket paths"
+  warn_unless_file_declares "$CONFIG_FILE" "$DAEMON_SOCKET_PATH" \
+    "local.socket_path — the listener the supervisor binds as root and hands over as fd 3" \
+    "Set local.socket_path to it, or delete ${CONFIG_FILE} and re-run install to regenerate it."
+  warn_unless_file_declares "$SUPERVISOR_CONFIG_FILE" "$DAEMON_SOCKET_PATH" \
+    "the socket: block of the tddy-daemon service" \
+    "Set that service's socket.path to it, or delete ${SUPERVISOR_CONFIG_FILE} and re-run install."
+  warn_unless_file_declares "$SUPERVISOR_CONFIG_FILE" "$SUPERVISOR_SOCKET_PATH" \
+    "socket.path — the privileged RPC socket systemd creates and the supervisor adopts" \
+    "Set socket.path to it, or delete ${SUPERVISOR_CONFIG_FILE} and re-run install."
+  warn_unless_file_declares "$CONFIG_FILE" "$SUPERVISOR_SOCKET_PATH" \
+    "supervisor.socket_path — the privileged socket the daemon dials" \
+    "Set supervisor.socket_path to it, or delete ${CONFIG_FILE} and re-run install to regenerate it."
+  warn_unless_file_declares "$UNIT_SOCKET_PATH" "ListenStream=${SUPERVISOR_SOCKET_PATH}" \
+    "ListenStream — where systemd actually creates the privileged socket" \
+    "Re-run with INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to rewrite the unit from this script's template."
+fi
+
+# AppArmor profile granting the daemon binary unprivileged user namespaces. Still installed on a
+# supervised host: the profile attaches by binary path (not via a unit's AppArmorProfile=), and the
+# daemon keeps building jails itself for anything the supervisor does not broker. It grants `userns`
+# under flags=(unconfined), so it removes no capability from the daemon and confines nothing. Skipped
+# for a --user install: loading a profile needs root, and a user manager cannot do it.
+if [[ "$NO_SYSTEMCTL" != "1" ]] && "$want_supervisor"; then
+  if [[ ! -f "$APPARMOR_PROFILE_SRC" ]]; then
+    echo "install: WARNING: AppArmor profile source missing: ${APPARMOR_PROFILE_SRC}" >&2
+  else
+    # Guarded like the configs and units: an operator's edits to the profile survive a reinstall.
+    if [[ -f "$APPARMOR_PROFILE_PATH" ]]; then
+      echo "install: keeping existing AppArmor profile (not overwriting): ${APPARMOR_PROFILE_PATH}"
+      echo "install:   delete it to have this script render ${APPARMOR_PROFILE_SRC} again"
+    else
+      echo "install: installing AppArmor profile -> ${APPARMOR_PROFILE_PATH} (userns grant for ${BIN_DIR}/tddy-daemon)"
+      mkdir -p "$APPARMOR_DIR"
+      render_template "$APPARMOR_PROFILE_SRC" "$APPARMOR_PROFILE_PATH" \
+        "__INSTALL_BIN_DIR__=${BIN_DIR}"
+    fi
+    # Load whatever is now on disk. A host with no AppArmor LSM loaded has apparmor_parser fail (or
+    # not exist at all); that costs the daemon its userns grant for the jails it still builds itself,
+    # which is worth a warning — but not an abort half way through an otherwise complete install,
+    # before the units are enabled and started.
+    if ! command -v apparmor_parser >/dev/null 2>&1; then
+      echo "install:   WARNING: apparmor_parser not found; profile written but not loaded" >&2
+    elif apparmor_parser -r "$APPARMOR_PROFILE_PATH"; then
       echo "install:   AppArmor profile loaded"
     else
-      echo "install:   WARNING: apparmor_parser not found; profile written but not loaded" >&2
+      echo "install:   WARNING: apparmor_parser -r ${APPARMOR_PROFILE_PATH} failed (no AppArmor LSM on" >&2
+      echo "install:   this host?); profile written but not loaded. On a host with" >&2
+      echo "install:   kernel.apparmor_restrict_unprivileged_userns=1 the daemon's own sandbox jails" >&2
+      echo "install:   will fail to create a user namespace until the profile loads." >&2
     fi
-  else
-    echo "install: WARNING: AppArmor profile source missing: ${APPARMOR_PROFILE_SRC}" >&2
   fi
 fi
 
 if [[ "$NO_SYSTEMCTL" != "1" ]]; then
   if "$want_user"; then
-    echo "install: ${SYSTEMCTL[*]} daemon-reload; enable + start tddy-daemon"
+    # No legacy units are disarmed here: this user unit IS the no-supervisor deployment those units
+    # describe (docs/dev/tddy-daemon.service.example), and masking tddy-daemon in the user manager
+    # would mask what is being installed.
+    echo "install: ${SYSTEMCTL[*]} daemon-reload; enable + start ${SERVICE_UNIT}"
     "${SYSTEMCTL[@]}" daemon-reload
     "${SYSTEMCTL[@]}" enable tddy-daemon
     "${SYSTEMCTL[@]}" restart tddy-daemon
-    echo "install: done (user service started). journal: journalctl --user -u tddy-daemon -f"
+
+    # Type=simple: the restart above returned as soon as fork/exec did, which a daemon that rejects
+    # its config a millisecond later also satisfies.
+    echo "install: verifying the unit is running (a Type=simple restart returns before a crash would)"
+    verify_unit_running tddy-daemon "$UNIT_SETTLE_SAMPLES"
+
+    echo "install: done (user service started and verified active). journal: journalctl --user -u tddy-daemon -f"
     echo "install:   tip: 'loginctl enable-linger $(id -un)' keeps the user service running after logout"
-    echo "install:   local socket: self-bound by the daemon at \${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock (no socket unit in --user mode)"
+    echo "install:   local socket: bound by the daemon itself at ${DAEMON_SOCKET_PATH} (no socket unit in --user mode)"
   else
-    echo "install: ${SYSTEMCTL[*]} daemon-reload; enable + start tddy-daemon.socket and tddy-daemon"
-    "${SYSTEMCTL[@]}" daemon-reload
+    # Upgrade path: the supervisor starts tddy-daemon itself, so a unit inherited from an install made
+    # before the supervisor existed would run a second daemon against the same config, web port and token
+    # storage. Stop, disable and mask them — socket first, see LEGACY_DAEMON_UNITS. Their unit files are
+    # left on disk (see docs/dev/tddy-daemon.service.example for the no-supervisor deployment they belong
+    # to, which is also what --user installs) — this script never deletes an operator's files, which is
+    # also why masking can fail and is reported rather than forced.
+    #
+    # The daemon does not bind its own ConnectionService socket on a supervised host: the tddy-daemon
+    # entry in supervisor.yaml declares it, the supervisor binds it as root before the daemon starts, and
+    # hands it over as fd 3 (LISTEN_FDS) — the job tddy-daemon.socket used to do, on the same path.
+    for legacy_unit in "${LEGACY_DAEMON_UNITS[@]}"; do
+      if systemctl cat "$legacy_unit" >/dev/null 2>&1; then
+        disarm_legacy_unit "$legacy_unit"
+      fi
+    done
+
+    echo "install: systemctl daemon-reload; enable + start tddy-supervisor.socket and tddy-supervisor"
+    systemctl daemon-reload
     # Start the socket first so the listening fd exists before the service is (re)started and adopts it.
-    "${SYSTEMCTL[@]}" enable tddy-daemon.socket
-    "${SYSTEMCTL[@]}" restart tddy-daemon.socket
-    "${SYSTEMCTL[@]}" enable tddy-daemon
-    "${SYSTEMCTL[@]}" restart tddy-daemon
-    echo "install: done (socket + service started). journal: journalctl -u tddy-daemon -f"
-    echo "install: verify socket: ls -l ${SOCKET_LISTEN_PATH}  (expect srw-rw---- ${DAEMON_USER}:${SOCKET_GROUP})"
+    systemctl enable tddy-supervisor.socket
+    systemctl restart tddy-supervisor.socket
+    systemctl enable tddy-supervisor
+    systemctl restart tddy-supervisor
+
+    # Neither restart above proves anything is running: the socket unit only has to bind, and the
+    # service is Type=simple. Nothing may report success until both units are observed active.
+    echo "install: verifying the units are running (a Type=simple restart returns before a crash would)"
+    verify_unit_running tddy-supervisor.socket 1
+    verify_unit_running tddy-supervisor "$UNIT_SETTLE_SAMPLES"
+
+    echo "install: done (socket + service started and verified active). journal: journalctl -u tddy-supervisor -f"
+    echo "install: verify socket: ls -l ${SUPERVISOR_SOCKET_PATH}  (expect srw-rw---- root:${SOCKET_GROUP})"
+    echo "install: verify the daemon is an unprivileged child: systemctl status tddy-supervisor  (expect ${DAEMON_USER} for tddy-daemon)"
   fi
+elif "$want_user"; then
+  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl --user, enable/start and the is-active"
+  echo "install:   verification. Binaries, the web bundle, ${CONFIG_FILE} and ${SERVICE_UNIT} WERE"
+  echo "install:   written, to the paths echoed above.)"
 else
-  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped systemctl; skipped enable/start)"
+  echo "install: done (INSTALL_NO_SYSTEMCTL=1: skipped the root check, systemctl, the service user/group,"
+  echo "install:   mkdir+chown of ${DAEMON_LOG_DIR} and ${AUTH_STORAGE_PATH}, the AppArmor profile, disarming"
+  echo "install:   ${LEGACY_DAEMON_UNITS[*]}, enable/start and the is-active verification. Binaries, the web"
+  echo "install:   bundle, both configs and both unit files WERE written, to the paths echoed above.)"
 fi
