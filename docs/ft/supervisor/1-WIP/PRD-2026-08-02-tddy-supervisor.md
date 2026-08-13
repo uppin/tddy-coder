@@ -208,15 +208,15 @@ supervisor's own leaf keeps that name and the docs call out the distinction.
 
 - [ ] A host installed with `./install --systemd` runs exactly one tddy systemd unit, as root,
       and `tddy-daemon` appears as its unprivileged child.
-- [ ] Killing `tddy-daemon` results in the supervisor restarting it; killing it repeatedly and
+- [x] Killing `tddy-daemon` results in the supervisor restarting it; killing it repeatedly and
       immediately stops after the configured retry ceiling rather than spinning.
 - [ ] `systemctl stop tddy-supervisor` terminates the daemon and every session process.
 - [ ] A session started for a GitHub user mapped to OS user `alice` runs as `alice`, while the
       daemon continues to run as `tddy`.
-- [ ] A request from a process that owns no declared service is rejected, and the rejection
+- [x] A request from a process that owns no declared service is rejected, and the rejection
       does not reveal whether the requested user or path exists.
-- [ ] A request naming an OS user or tool path outside the root-owned allowlists is rejected.
-- [ ] A request for memory/cpu/pids limits above the policy ceiling is clamped down, not
+- [x] A request naming an OS user or tool path outside the root-owned allowlists is rejected.
+- [x] A request for memory/cpu/pids limits above the policy ceiling is clamped down, not
       honored and not rejected.
 - [ ] A sandbox session receives a cgroup scope with the resolved limits applied, and the scope
       directory is removed when the session ends.

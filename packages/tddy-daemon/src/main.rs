@@ -108,8 +108,11 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("tddy-daemon loaded config from {}", config_path.display());
 
-    // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock.
-    let spawn_client = tddy_daemon::spawn_worker::fork_spawn_worker()?;
+    // Fork spawn worker before tokio — fork() from multi-threaded process can deadlock. Skipped
+    // entirely on a supervised host: there, `tddy-supervisor` spawns sessions, and a worker the
+    // daemon could reach for would be a way to spawn one with less isolation than it asked for.
+    let spawn_backend = tddy_daemon::supervisor_client::spawn_backend_choice(&config);
+    let spawn_client = tddy_daemon::supervisor_client::spawn_worker_for(&spawn_backend)?;
     #[cfg(unix)]
     if let Some((_, worker_pid)) = spawn_client.as_ref() {
         log::info!(

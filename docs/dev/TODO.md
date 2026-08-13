@@ -28,11 +28,20 @@ easy to lose among these:
   `sandboxed_cursor_cli_*`, plus `cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available`:
   the test scripts do not build `tddy-sandbox-runner`. `start_session_sandbox_unsupported_on_non_darwin`
   is macOS-only.
-  **Refinement (2026-08-02):** building `tddy-sandbox-runner` first is not sufficient on a host with
-  `kernel.apparmor_restrict_unprivileged_userns=1`. With the runner built they still fail, with
-  `spawn sandbox runner in cgroups jail failed: Operation not permitted (os error 1)` — the jail's
-  `unshare` is denied to any binary without a matching AppArmor profile, and a `cargo test` binary in
-  `target/debug/deps/` has none. The self-skip that should cover this does not fire; see
+  **Refinement (2026-08-03):** building `tddy-sandbox-runner` first is not sufficient. With the runner
+  built they still fail, with `spawn sandbox runner in cgroups jail failed: Operation not permitted
+  (os error 1)`, and the self-skip that should cover it does not fire.
+  **The error's parenthetical ("the host may forbid unprivileged user namespaces") is a red herring,
+  and it misled an earlier diagnosis here.** This host has
+  `kernel.apparmor_restrict_unprivileged_userns=1` *and*
+  `apparmor_restrict_unprivileged_unconfined=0` — the second exempts unconfined processes, and a
+  `cargo test` binary is unconfined, so `unshare(CLONE_NEWUSER)` is in fact **permitted**. Verified
+  directly: the supervisor's own jail (the same `unshare` + uid/gid-map sequence) runs to completion
+  on this host, producing `uid=0(root)` inside the namespace.
+  So the `EPERM` comes from a **later** step, most plausibly the cgroup write — cgroup v2 delegation
+  containment, which `packages/tddy-sandbox/docs/architecture.md` already documents as the reason an
+  unprivileged process cannot place its own child in a limited scope. Whoever picks this up should
+  make the error name the syscall that actually failed before theorising further; see
   "`unprivileged_userns_available()` under-approximates what the jail needs" below.
 - `session_token::tests::verify_rejects_a_token_with_a_tampered_signature` — `packages/tddy-github`.
   Root cause found 2026-08-02: a ~1-in-64 base64 canonicalization flake, not a signature bug. See

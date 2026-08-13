@@ -1066,22 +1066,33 @@ pub struct TelegramWorkflowSpawn {
     pub claude_cli_manager: Arc<crate::cli_session_manager::CliSessionManager>,
 }
 
+/// What a Telegram-started workflow session runs, resolved from config and the project registry
+/// before any spawn backend is involved.
+struct TelegramSpawnInputs {
+    livekit: spawner::LiveKitCreds,
+    tool_path: String,
+    repo_path: PathBuf,
+    agent: Option<String>,
+    recipe: Option<String>,
+    mouse: bool,
+}
+
 impl TelegramWorkflowSpawn {
-    /// Blocking spawn (call from [`tokio::task::spawn_blocking`]).
-    pub fn spawn_blocking(
+    /// Resolve and validate what to spawn: LiveKit credentials, the project's working copy, the
+    /// tool, and the agent/recipe the request asked for.
+    fn resolve_spawn_inputs(
         &self,
         project_id: &str,
         agent: Option<&str>,
         recipe: Option<&str>,
-        new_session_id: &str,
-    ) -> anyhow::Result<spawner::SpawnResult> {
+    ) -> anyhow::Result<TelegramSpawnInputs> {
         let livekit = spawner::livekit_creds_from_config(&self.config)
             .ok_or_else(|| anyhow::anyhow!("LiveKit not configured"))?;
         let projects_dir = projects_path_for_user(&self.os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| anyhow::anyhow!("could not resolve projects path"))?;
         let project = project_storage::find_project(&projects_dir, project_id)?
             .ok_or_else(|| anyhow::anyhow!("project not found"))?;
-        let repo_path = Path::new(&project.main_repo_path);
+        let repo_path = PathBuf::from(&project.main_repo_path);
         if !repo_path.exists() {
             anyhow::bail!("project main repo path does not exist");
         }
@@ -1097,48 +1108,41 @@ impl TelegramWorkflowSpawn {
                 }
             }
         }
-        let tool_path = self.config.default_tool_path();
-        let spawn_mouse = self.config.spawn_mouse;
-        let agent_for_spawn = agent.and_then(|a| {
-            let t = a.trim();
-            if t.is_empty() {
-                None
-            } else {
-                Some(t)
-            }
-        });
-        let recipe_for_spawn: Option<String> = recipe
-            .map(normalize_recipe_name_for_tddy_coder_cli)
-            .and_then(|s| {
-                let t = s.trim().to_string();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t)
-                }
-            });
-        let opts = SpawnOptions {
-            resume_session_id: None,
-            new_session_id: Some(new_session_id),
-            project_id: Some(project_id),
-            agent: agent_for_spawn,
-            mouse: spawn_mouse,
-            recipe: recipe_for_spawn.as_deref(),
-            stack_parent: None,
-            model: None,
-            // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
-            // TODO(stdio-relay): telegram path.
-            host_session_socket: None,
-        };
+        Ok(TelegramSpawnInputs {
+            livekit,
+            tool_path: self.config.default_tool_path(),
+            repo_path,
+            agent: agent
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+                .map(str::to_string),
+            recipe: recipe
+                .map(normalize_recipe_name_for_tddy_coder_cli)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            mouse: self.config.spawn_mouse,
+        })
+    }
+
+    /// Blocking spawn (call from [`tokio::task::spawn_blocking`]).
+    pub fn spawn_blocking(
+        &self,
+        project_id: &str,
+        agent: Option<&str>,
+        recipe: Option<&str>,
+        new_session_id: &str,
+    ) -> anyhow::Result<spawner::SpawnResult> {
+        let inputs = self.resolve_spawn_inputs(project_id, agent, recipe)?;
+        let opts = telegram_spawn_options(&inputs, project_id, new_session_id);
         let coder_log_yaml =
             spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref());
         if let Some(ref client) = self.spawn_client {
             let req = spawn_worker::build_spawn_request(
                 &self.os_user,
-                &tool_path,
+                &inputs.tool_path,
                 &self.tddy_data_dir,
-                repo_path,
-                &livekit,
+                &inputs.repo_path,
+                &inputs.livekit,
                 opts,
                 self.config.log.as_ref(),
                 coder_log_yaml,
@@ -1149,16 +1153,97 @@ impl TelegramWorkflowSpawn {
                 spawner::child_log_yaml_tuning(self.config.log.as_ref());
             spawner::spawn_as_user(
                 &self.os_user,
-                &tool_path,
+                &inputs.tool_path,
                 &self.tddy_data_dir,
-                repo_path,
-                &livekit,
+                &inputs.repo_path,
+                &inputs.livekit,
                 opts,
                 child_log_level.as_str(),
                 child_log_format.as_str(),
                 coder_log_yaml.as_deref(),
             )
         }
+    }
+
+    /// Spawn through whichever backend this host uses, bounded by `spawn_worker_request_timeout`.
+    ///
+    /// With a supervisor configured, the session is started by it — an unreachable supervisor fails
+    /// the start rather than spawning the session as the daemon's own user.
+    pub async fn spawn_session(
+        &self,
+        project_id: &str,
+        agent: Option<&str>,
+        recipe: Option<&str>,
+        new_session_id: &str,
+    ) -> anyhow::Result<spawner::SpawnResult> {
+        let timeout = self.config.spawn_worker_request_timeout();
+        match crate::supervisor_client::spawn_backend_choice(&self.config) {
+            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                let inputs = self.resolve_spawn_inputs(project_id, agent, recipe)?;
+                let req = spawn_worker::build_spawn_request(
+                    &self.os_user,
+                    &inputs.tool_path,
+                    &self.tddy_data_dir,
+                    &inputs.repo_path,
+                    &inputs.livekit,
+                    telegram_spawn_options(&inputs, project_id, new_session_id),
+                    self.config.log.as_ref(),
+                    spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref()),
+                );
+                match tokio::time::timeout(
+                    timeout,
+                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &req),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_elapsed) => {
+                        anyhow::bail!("spawn via tddy-supervisor timed out after {:?}", timeout)
+                    }
+                }
+            }
+            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                let deps = self.clone();
+                let project_id = project_id.to_string();
+                let agent = agent.map(str::to_string);
+                let recipe = recipe.map(str::to_string);
+                let new_session_id = new_session_id.to_string();
+                let join = tokio::task::spawn_blocking(move || {
+                    deps.spawn_blocking(
+                        &project_id,
+                        agent.as_deref(),
+                        recipe.as_deref(),
+                        &new_session_id,
+                    )
+                });
+                match tokio::time::timeout(timeout, join).await {
+                    Ok(Ok(result)) => result,
+                    Ok(Err(join_e)) => anyhow::bail!("spawn task join: {join_e}"),
+                    Err(_elapsed) => anyhow::bail!("spawn timed out after {:?}", timeout),
+                }
+            }
+        }
+    }
+}
+
+/// The child flags a Telegram-started workflow session gets, identical whichever backend starts it.
+fn telegram_spawn_options<'a>(
+    inputs: &'a TelegramSpawnInputs,
+    project_id: &'a str,
+    new_session_id: &'a str,
+) -> SpawnOptions<'a> {
+    SpawnOptions {
+        resume_session_id: None,
+        new_session_id: Some(new_session_id),
+        project_id: Some(project_id),
+        agent: inputs.agent.as_deref(),
+        mouse: inputs.mouse,
+        recipe: inputs.recipe.as_deref(),
+        stack_parent: None,
+        model: None,
+        // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
+        // TODO(stdio-relay): telegram path.
+        host_session_socket: None,
     }
 }
 
@@ -2094,27 +2179,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             }
         }
 
-        let timeout = deps.config.spawn_worker_request_timeout();
-        let session_id_owned = session_id.to_string();
-        let project_id_owned = project_id.to_string();
-        let agent_owned = agent.map(|s| s.to_string());
-        let recipe_owned = recipe;
-        let deps_for_spawn = deps.clone();
-        let join = tokio::task::spawn_blocking(move || {
-            deps_for_spawn.spawn_blocking(
-                &project_id_owned,
-                agent_owned.as_deref(),
-                recipe_owned.as_deref(),
-                &session_id_owned,
-            )
-        });
-        let result = tokio::time::timeout(timeout, join).await;
-        let result = match result {
-            Err(_elapsed) => anyhow::bail!("spawn timed out after {:?}", timeout),
-            Ok(Ok(Ok(r))) => r,
-            Ok(Ok(Err(e))) => return Err(e),
-            Ok(Err(join_e)) => anyhow::bail!("spawn task join: {join_e}"),
-        };
+        let result = deps
+            .spawn_session(project_id, agent, recipe.as_deref(), session_id)
+            .await?;
         {
             let mut g = child_grpc_registry
                 .lock()

@@ -7,6 +7,10 @@
 //!
 //! 1. **tie the child's lifetime to the supervisor's** — a supervisor that is killed rather than
 //!    asked to stop must not leave the daemon and every session running unsupervised on the host.
+//!    Asked for first, and then *again* after every later step that clears it: `commit_creds()` sets
+//!    `pdeath_signal` back to 0 on any change of effective ids or capability set, so the privilege
+//!    drop in step 4 and the `unshare(CLONE_NEWUSER)` in step 6 each disarm it. Only the last arming
+//!    survives into the `exec`, which is why the plan re-arms rather than arms.
 //! 2. **lead its own process group** — the daemon signals sessions with `kill(-pid, …)`, so a child
 //!    that stayed in the supervisor's group would make a signal aimed at one session either miss
 //!    entirely or hit the supervisor and every service under it.
@@ -18,10 +22,13 @@
 //!    would allocate and enter NSS, neither of which is safe after a fork.
 //! 5. **`chdir` into the working directory** — deliberately *after* the drop, so a caller-supplied
 //!    directory is traversed with the target user's authority and not with root's.
-//! 6. **namespace and mount setup** (not yet implemented, see [`CompiledStep::compile`]) — must
-//!    stay after step 4. A user namespace created by root maps the child to *real* uid 0 against
-//!    the host; created by the unprivileged target it maps to the target, which is what today's
-//!    rootless jail already does.
+//! 6. **namespace and mount setup** — must stay after step 4. A user namespace created by root maps
+//!    the child to *real* uid 0 against the host; created by the unprivileged target it maps to the
+//!    target, which is what today's rootless jail already does. The maps are therefore built from
+//!    the plan's target rather than from `geteuid()`, which before the fork is still root — see
+//!    [`single_id_map`]. A jail always takes a mount namespace, because that is where its mounts
+//!    happen; it takes a network namespace only when it asked to be isolated from the host's network,
+//!    because one it did not ask for is an *empty* network rather than a shared one.
 //!
 //! That order is *data*, not statements: [`pre_exec_plan`] builds it as a [`Vec<PreExecStep>`] a
 //! test can assert on any host, and the child does nothing but walk the very same plan, compiled
@@ -42,7 +49,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixListener;
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
@@ -304,6 +311,11 @@ pub struct JailMount {
 pub enum PreExecStep {
     /// Ask the kernel to signal this child if the supervisor dies, so a killed supervisor does not
     /// leave sessions reparented to init.
+    ///
+    /// Appears more than once in a plan, and has to: `commit_creds()` sets `pdeath_signal` back to 0
+    /// on any change of effective ids or capability set, so both [`Self::DropPrivilege`] and the
+    /// `unshare(CLONE_NEWUSER)` in [`Self::EnterUserNamespace`] silently disarm it. Each is therefore
+    /// followed by another arming, and the last one is what the child carries through the `exec`.
     SetParentDeathSignal,
     /// `setsid`, making the child the leader of its own session and process group.
     ///
@@ -316,8 +328,12 @@ pub enum PreExecStep {
     DropPrivilege { uid: u32, gid: u32 },
     /// `unshare(CLONE_NEWUSER)`, the uid/gid maps and `setgroups=deny`.
     EnterUserNamespace,
-    /// `unshare(CLONE_NEWNS | CLONE_NEWNET)`.
-    EnterMountAndNetworkNamespaces,
+    /// `unshare(CLONE_NEWNS)`. Every jail takes one: the private remount and the bind mounts below
+    /// have nowhere else to happen.
+    EnterMountNamespace,
+    /// `unshare(CLONE_NEWNET)`. Only for a jail that asked to be isolated from the host's network —
+    /// a namespace nobody asked for is an *empty* network, not a shared one.
+    EnterNetworkNamespace,
     /// `mount(/, MS_REC | MS_PRIVATE)`, so later mounts do not propagate to the host.
     MakeRootMountPrivate,
     /// One bind mount inside the jail.
@@ -354,6 +370,9 @@ pub fn pre_exec_plan(plan: &SpawnPlan) -> Vec<PreExecStep> {
 
     if let Some((uid, gid)) = privilege_to_drop(&plan.target) {
         steps.push(PreExecStep::DropPrivilege { uid, gid });
+        // The kernel clears `pdeath_signal` on every change of effective credentials, so the arming
+        // above is now gone — see [`PreExecStep::SetParentDeathSignal`].
+        steps.push(PreExecStep::SetParentDeathSignal);
     }
 
     // After the drop, so a caller-supplied directory is traversed with the target user's authority
@@ -366,7 +385,17 @@ pub fn pre_exec_plan(plan: &SpawnPlan) -> Vec<PreExecStep> {
         // Every namespace is created after the drop, so it is owned by the unprivileged target user
         // and its uid map is the same rootless map the daemon builds today.
         steps.push(PreExecStep::EnterUserNamespace);
-        steps.push(PreExecStep::EnterMountAndNetworkNamespaces);
+        // The `unshare` above hands the child a full capability set inside its new namespace, which is
+        // another change of credentials, and so clears the signal again.
+        steps.push(PreExecStep::SetParentDeathSignal);
+        // Whatever the jail asked for, the mount namespace is unconditional: the private remount and
+        // the bind mounts below have nowhere else to happen. The *network* namespace is not, because
+        // a jail that asked to share the host's network and got one of its own would get an empty
+        // network with its loopback down — worse than either answer the request can ask for.
+        steps.push(PreExecStep::EnterMountNamespace);
+        if jail.isolate_network {
+            steps.push(PreExecStep::EnterNetworkNamespace);
+        }
         // Before any bind mount, or every mount below propagates back out to the host.
         steps.push(PreExecStep::MakeRootMountPrivate);
         for mount in &jail.mounts {
@@ -377,8 +406,8 @@ pub fn pre_exec_plan(plan: &SpawnPlan) -> Vec<PreExecStep> {
             });
         }
         if jail.isolate_network {
-            // Inside the new network namespace, so this configures the jail's loopback and not the
-            // host's.
+            // Inside the network namespace unshared above, so this configures the jail's loopback and
+            // not the host's.
             steps.push(PreExecStep::BringLoopbackUp);
         }
     }
@@ -586,6 +615,7 @@ impl PreExecSteps {
 
 /// One [`PreExecStep`] in the form the child can execute: no owned paths left to convert, no
 /// lookups left to perform, nothing that would need the allocator.
+#[derive(Debug)]
 enum CompiledStep {
     SetParentDeathSignal,
     LeadOwnProcessGroup,
@@ -601,6 +631,23 @@ enum CompiledStep {
     ChangeDirectory {
         path: CString,
     },
+    EnterUserNamespace {
+        /// `0 <uid> 1\n` for `/proc/self/uid_map` — see [`single_id_map`].
+        uid_map: Box<[u8]>,
+        /// `0 <gid> 1\n` for `/proc/self/gid_map`.
+        gid_map: Box<[u8]>,
+    },
+    EnterMountNamespace,
+    EnterNetworkNamespace,
+    MakeRootMountPrivate,
+    BindMount {
+        /// The source path, which the child resolves to a descriptor of its own before binding it —
+        /// see [`bind_mount`].
+        source: CString,
+        target: CString,
+        readonly: bool,
+    },
+    BringLoopbackUp,
 }
 
 impl CompiledStep {
@@ -620,29 +667,26 @@ impl CompiledStep {
             PreExecStep::ChangeDirectory { path } => Ok(CompiledStep::ChangeDirectory {
                 path: path_to_c_string(&path)?,
             }),
-            // TODO(supervisor/milestone-5): implement the jail. Each of these becomes the syscall
-            // `tddy_sandbox_cgroups::enter_rootless_jail` performs today —
-            // `unshare(CLONE_NEWUSER)` with `uid_map`/`setgroups=deny`/`gid_map`,
-            // `unshare(CLONE_NEWNS | CLONE_NEWNET)`, `mount(/, MS_REC | MS_PRIVATE)`, the bind
-            // mounts, and the loopback bring-up. Until then a jailed spawn is refused *here*, in
-            // the parent, where the caller gets a real message: silently spawning the session
-            // without its jail would be the one outcome worse than refusing it.
-            PreExecStep::EnterUserNamespace
-            | PreExecStep::EnterMountAndNetworkNamespaces
-            | PreExecStep::MakeRootMountPrivate
-            | PreExecStep::BindMount { .. }
-            | PreExecStep::BringLoopbackUp => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "sandbox namespace and mount setup is not implemented; the supervisor will not \
-                 spawn a session it cannot isolate",
-            )),
+            PreExecStep::EnterUserNamespace => Ok(CompiledStep::EnterUserNamespace {
+                uid_map: single_id_map(plan.target.uid),
+                gid_map: single_id_map(plan.target.gid),
+            }),
+            PreExecStep::EnterMountNamespace => Ok(CompiledStep::EnterMountNamespace),
+            PreExecStep::EnterNetworkNamespace => Ok(CompiledStep::EnterNetworkNamespace),
+            PreExecStep::MakeRootMountPrivate => Ok(CompiledStep::MakeRootMountPrivate),
+            PreExecStep::BindMount {
+                source,
+                target,
+                readonly,
+            } => compile_bind_mount(&source, &target, readonly),
+            PreExecStep::BringLoopbackUp => Ok(CompiledStep::BringLoopbackUp),
         }
     }
 
     fn execute(&self, supervisor_pid: libc::pid_t) -> std::io::Result<()> {
         // SAFETY: every call below runs after `fork` and touches only this process's own
-        // credentials, working directory, process group or descriptors. Each `CString` is owned by
-        // this step and outlives the call.
+        // credentials, working directory, process group, descriptors, or the namespaces it has just
+        // created for itself. Each `CString` and buffer is owned by this step and outlives the call.
         unsafe {
             match self {
                 CompiledStep::SetParentDeathSignal => set_parent_death_signal(supervisor_pid),
@@ -652,12 +696,28 @@ impl CompiledStep {
                     drop_privilege(*uid, *gid, groups)
                 }
                 CompiledStep::ChangeDirectory { path } => change_directory(path),
+                CompiledStep::EnterUserNamespace { uid_map, gid_map } => {
+                    enter_user_namespace(uid_map, gid_map)
+                }
+                CompiledStep::EnterMountNamespace => enter_mount_namespace(),
+                CompiledStep::EnterNetworkNamespace => enter_network_namespace(),
+                CompiledStep::MakeRootMountPrivate => make_root_mount_private(),
+                CompiledStep::BindMount {
+                    source,
+                    target,
+                    readonly,
+                } => bind_mount(source, target, *readonly),
+                CompiledStep::BringLoopbackUp => bring_loopback_up(),
             }
         }
     }
 }
 
 /// Ask the kernel to signal us when the supervisor dies, and check it has not died already.
+///
+/// Called once per [`PreExecStep::SetParentDeathSignal`], which a plan contains once per operation
+/// that clears the signal plus one: an arming is not sticky, and `commit_creds()` drops it on any
+/// change of effective ids or capability set.
 ///
 /// # Safety
 ///
@@ -729,6 +789,400 @@ unsafe fn change_directory(path: &CStr) -> std::io::Result<()> {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// The map that makes a jail rootless: one id, the account the child has already become, mapped to
+/// root *inside* the new namespace and to nothing at all outside it.
+///
+/// Built from [`SpawnPlan::target`] and never from `geteuid()`, and that is the security property of
+/// the whole feature rather than a detail. `compile` runs before the fork, where the effective uid is
+/// still the supervisor's 0; a map written from it would name real host root as the child's outside
+/// identity, which is precisely what putting the namespace steps after `DropPrivilege` exists to
+/// prevent. The target *is* the effective id at the moment the step runs: either `DropPrivilege`
+/// preceded it, or [`privilege_to_drop`] found nothing to drop because the supervisor already runs as
+/// the target.
+///
+/// A single mapped id is also all the kernel will accept from an unprivileged writer — see
+/// [`enter_user_namespace`]. Which is the other reason the value cannot be read in the child: by then
+/// the `unshare` has happened, and an id read *inside* an unmapped namespace is the overflow uid
+/// (65534), which the kernel refuses to accept as a mapping with `EPERM`.
+fn single_id_map(id: u32) -> Box<[u8]> {
+    format!("0 {id} 1\n").into_bytes().into_boxed_slice()
+}
+
+/// Refuse a bind mount whose source cannot be resolved, before a process exists to fail.
+///
+/// The resolution the *bind* uses happens in the child ([`bind_mount`]) and cannot happen here: a
+/// descriptor opened before `unshare(CLONE_NEWNS)` belongs to the mount namespace the child was
+/// cloned from, and `mount(2)` refuses a bind source from another namespace with `EINVAL`. So this is
+/// the same check made twice, deliberately — the habit `resolve_session_user` follows in refusing
+/// `root` that the loader already refused — and it earns its place twice over:
+///
+/// * the child cannot explain itself. `std` carries a `pre_exec` failure back to the parent as an
+///   errno and nothing else, so a symlinked or absent source would reach an operator as
+///   `No such file or directory` with no mention of which of a session's mounts it was.
+/// * a request that is already unbindable does not cost a fork.
+fn compile_bind_mount(
+    source: &Path,
+    target: &Path,
+    readonly: bool,
+) -> std::io::Result<CompiledStep> {
+    let source_path = path_to_c_string(source)?;
+    // The descriptor is dropped with the statement: it is the answer that matters here, not the
+    // reference — the child opens one the mount will accept.
+    open_without_following_symlinks(&source_path)
+        .map_err(|error| unresolvable_mount_source(source, &error))?;
+    Ok(CompiledStep::BindMount {
+        source: source_path,
+        target: path_to_c_string(target)?,
+        readonly,
+    })
+}
+
+/// Why a bind mount source could not be pinned to one object, in terms an operator can act on.
+///
+/// Every outcome refuses the spawn. `ENOSYS` is named because it is not a bad request but a kernel
+/// with no `openat2(2)` (Linux 5.6) to ask, and `Function not implemented` against a path would tell
+/// nobody that. There is no path-based check to fall back to — that check *is* the race.
+fn unresolvable_mount_source(source: &Path, error: &std::io::Error) -> std::io::Error {
+    if error.raw_os_error() == Some(libc::ENOSYS) {
+        return std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "this host has no openat2(2) (Linux 5.6 or newer), so bind mount source {} cannot \
+                 be resolved without a symlink race; the supervisor will not spawn a session it \
+                 cannot isolate",
+                source.display()
+            ),
+        );
+    }
+    std::io::Error::new(
+        error.kind(),
+        format!(
+            "bind mount source {} could not be resolved (symlinks are not followed): {error}",
+            source.display()
+        ),
+    )
+}
+
+/// Open an absolute path as a bare reference, refusing to traverse a single symlink on the way.
+fn open_without_following_symlinks(path: &CStr) -> std::io::Result<OwnedFd> {
+    open_resolved(libc::AT_FDCWD, path, libc::RESOLVE_NO_SYMLINKS)
+}
+
+/// Open a directory to resolve other paths against.
+///
+/// Symlinks *are* followed here, deliberately: the only caller passes a mount root out of the
+/// root-owned policy file, which is root describing its own filesystem — the same trust
+/// `policy::resolve_tool_path` places in an allowlisted tool path. What must not be followed is
+/// anything below it, and that is [`open_resolved`]'s job.
+pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> {
+    // SAFETY: `path` is a live C string; the call returns a descriptor nothing else owns.
+    let fd = unsafe {
+        libc::open(
+            path.as_ptr(),
+            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `open` just returned `fd` and nothing else owns it.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// `openat2(2)` under the given `RESOLVE_*` flags, as an `O_PATH` reference.
+///
+/// A raw `syscall` because `libc` carries `open_how` and `SYS_openat2` but no wrapper, and because a
+/// kernel older than 5.6 has to report `ENOSYS` to its caller rather than have the supervisor guess
+/// at containment. `openat2` rather than `open`: it is the only one that can be told not to follow
+/// symlinks in the *intermediate* components of a path.
+///
+/// `O_PATH` because the descriptor is only ever used as a name (`/proc/self/fd/<n>`): it needs no
+/// read permission on the object, does not block on a fifo, and does not open a device.
+///
+/// Safe to call after a `fork`: one syscall over a stack-allocated struct, no allocation and no lock.
+pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io::Result<OwnedFd> {
+    // SAFETY: `open_how` is plain data; zeroing initialises every field the kernel may read.
+    let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+    how.flags = (libc::O_PATH | libc::O_CLOEXEC) as u64;
+    how.resolve = resolve;
+    // SAFETY: `path` is a live C string and `how` a live struct whose size is passed explicitly. A
+    // kernel without `openat2` reports `ENOSYS` without reading either.
+    let fd = unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            dirfd as libc::c_long,
+            path.as_ptr(),
+            &how as *const libc::open_how,
+            std::mem::size_of::<libc::open_how>() as libc::c_long,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `openat2` just returned `fd` and nothing else owns it.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
+}
+
+/// The files a fresh user namespace is configured through, and the switch that has to be thrown
+/// between them.
+const UID_MAP_PATH: &CStr = c"/proc/self/uid_map";
+const SETGROUPS_PATH: &CStr = c"/proc/self/setgroups";
+const GID_MAP_PATH: &CStr = c"/proc/self/gid_map";
+const SETGROUPS_DENY: &[u8] = b"deny";
+
+/// Enter a user namespace owned by the account the child has already become.
+///
+/// Three details are load-bearing, in this order:
+///
+/// * **`unshare` first, then the maps.** `map_write` requires the *opener* of `uid_map` to hold
+///   `CAP_SYS_ADMIN` over the namespace being configured; a descriptor opened before the `unshare`
+///   carries the credentials of a process that had no such namespace, so the write is refused.
+/// * **`PR_SET_DUMPABLE` before opening anything under `/proc/self`.** The `setuid` in
+///   [`drop_privilege`] left this process non-dumpable: the kernel does that on any change of
+///   effective ids (`fs.suid_dumpable` is 0 or 2 on an ordinary host), and it then reports every
+///   `/proc/<pid>` inode as owned by root. `uid_map` is mode 0644, so without this the child gets
+///   `EACCES` opening its own map — measured, not inferred. Restoring dumpability weakens nothing:
+///   the `execve` moments later sets it for this process anyway, because the tool is not setuid.
+/// * **`setgroups=deny` before `gid_map`.** Since Linux 3.19 an unprivileged writer must give up
+///   `setgroups(2)` inside the namespace before a single-id `gid_map` is accepted — a jail that kept
+///   the ability to re-add supplementary groups would carry group access the drop surrendered. Not
+///   best-effort: a jail that could not be closed is not a jail.
+///
+/// # Safety
+///
+/// Runs after `fork`, so only async-signal-safe syscalls: `unshare`, `prctl` and small `/proc`
+/// writes. `uid_map` and `gid_map` must remain valid for the call.
+unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Result<()> {
+    if libc::unshare(libc::CLONE_NEWUSER) != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if libc::prctl(libc::PR_SET_DUMPABLE, 1 as libc::c_ulong) != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    write_small_file(UID_MAP_PATH, uid_map)?;
+    write_small_file(SETGROUPS_PATH, SETGROUPS_DENY)?;
+    write_small_file(GID_MAP_PATH, gid_map)?;
+    Ok(())
+}
+
+/// Write a buffer to a file in one call, allocation-free.
+///
+/// # Safety
+///
+/// Runs after `fork`. `path` and `bytes` must remain valid for the call; `open`, `write` and `close`
+/// are async-signal-safe, and `std::io::Error` for an errno holds the code inline rather than
+/// allocating.
+unsafe fn write_small_file(path: &CStr, bytes: &[u8]) -> std::io::Result<()> {
+    let fd = libc::open(path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let written = libc::write(fd, bytes.as_ptr().cast(), bytes.len());
+    // Read before `close`, which is free to overwrite `errno` on its own way out.
+    let failure = (written < 0).then(std::io::Error::last_os_error);
+    libc::close(fd);
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+    if written as usize != bytes.len() {
+        // A half-written map file is a half-built namespace, which is not a namespace anybody asked
+        // for. `/proc` takes these in one write or not at all.
+        return Err(std::io::Error::from(std::io::ErrorKind::WriteZero));
+    }
+    Ok(())
+}
+
+/// Take a mount table of our own, so the jail can be built without rearranging the host's.
+///
+/// # Safety
+///
+/// Runs after `fork`, and after [`enter_user_namespace`] — `CLONE_NEWNS` needs `CAP_SYS_ADMIN`, which
+/// the child has only inside the user namespace it just created. `unshare` changes nothing outside
+/// this process.
+unsafe fn enter_mount_namespace() -> std::io::Result<()> {
+    if libc::unshare(libc::CLONE_NEWNS) != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Take an empty network of our own.
+///
+/// Separate from [`enter_mount_namespace`] because a jail chooses these independently: one that asked
+/// to share the host's network keeps it, and unsharing anyway would leave it with an empty network and
+/// a loopback that is down — the opposite of what it asked for.
+///
+/// # Safety
+///
+/// Runs after `fork`, and after [`enter_user_namespace`] — `CLONE_NEWNET` needs `CAP_SYS_ADMIN`, which
+/// the child has only inside the user namespace it just created. `unshare` changes nothing outside
+/// this process.
+unsafe fn enter_network_namespace() -> std::io::Result<()> {
+    if libc::unshare(libc::CLONE_NEWNET) != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Stop this mount namespace from propagating anything back to the host.
+///
+/// Without it every bind mount below would be shared with the namespace we were cloned from — the
+/// host's — so building the jail would rearrange the host's filesystem.
+///
+/// # Safety
+///
+/// Runs after `fork`, inside the mount namespace [`enter_mount_namespace`] created. The
+/// path is a literal C string.
+unsafe fn make_root_mount_private() -> std::io::Result<()> {
+    if libc::mount(
+        std::ptr::null(),
+        c"/".as_ptr(),
+        std::ptr::null(),
+        libc::MS_REC | libc::MS_PRIVATE,
+        std::ptr::null(),
+    ) != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// `/proc/self/fd/`, plus room for every digit of a descriptor and the nul.
+const DESCRIPTOR_PATH_PREFIX: &[u8] = b"/proc/self/fd/";
+const DESCRIPTOR_DIGITS: usize = 10;
+const DESCRIPTOR_PATH_LEN: usize = DESCRIPTOR_PATH_PREFIX.len() + DESCRIPTOR_DIGITS + 1;
+
+/// Name a descriptor as a path, in a buffer the caller already owns.
+///
+/// `mount(2)` takes its source as a path, and this is the path of the descriptor itself. Formatted by
+/// hand rather than with `format!` because the only caller runs after `fork`, where there is no
+/// allocator — the bargain [`join_cgroup_scope`] and [`write_listen_pid`] make with the same problem.
+fn write_descriptor_path(fd: RawFd, buffer: &mut [u8; DESCRIPTOR_PATH_LEN]) {
+    buffer[..DESCRIPTOR_PATH_PREFIX.len()].copy_from_slice(DESCRIPTOR_PATH_PREFIX);
+    let mut digits = [0u8; DESCRIPTOR_DIGITS];
+    let mut written = 0;
+    let mut remaining = fd as u32;
+    loop {
+        digits[written] = b'0' + (remaining % 10) as u8;
+        remaining /= 10;
+        written += 1;
+        if remaining == 0 {
+            break;
+        }
+    }
+    let start = DESCRIPTOR_PATH_PREFIX.len();
+    for (offset, digit) in digits[..written].iter().rev().enumerate() {
+        buffer[start + offset] = *digit;
+    }
+    buffer[start + written] = 0;
+}
+
+/// Bind one source into the jail, and mark it read-only if that is what was asked for.
+///
+/// The source is resolved *here*, and the mount names the descriptor rather than the path, for two
+/// reasons that both point the same way:
+///
+/// * **`RESOLVE_NO_SYMLINKS` and the bind are the same object.** A bind mount follows symlinks in its
+///   source, and `SpawnPolicy::allowed_mount_roots` are prefixes over trees session users write into,
+///   so a source approved by path and a source walked by `mount(2)` are two resolutions with a window
+///   between them. There is no window between an `openat2` and the `mount` that names its descriptor.
+/// * **it cannot be done any earlier.** A descriptor opened before `unshare(CLONE_NEWNS)` belongs to
+///   the mount namespace the child was cloned from, and the kernel refuses a bind source from another
+///   namespace with `EINVAL`. Resolving in the jail also means the walk happens with the target user's
+///   authority rather than root's, which is the same argument that puts `chdir` after the drop.
+///
+/// A second `mount` is what makes a bind read-only: `MS_RDONLY` is a property of a mount rather than
+/// of a bind, and passing it to the first call is silently ignored.
+///
+/// TODO(supervisor/jail): that remount marks this mount read-only but not the submounts `MS_REC`
+/// brought with it. Recursive read-only needs `mount_setattr(AT_RECURSIVE)` (Linux 5.12); until then
+/// this matches the daemon's own jail (`tddy_sandbox_cgroups::apply_bind_mounts`).
+///
+/// # Safety
+///
+/// Runs after `fork`, inside the private mount namespace [`make_root_mount_private`] prepared. Both C
+/// strings must remain valid for the call. `openat2` allocates nothing and takes no lock, and the
+/// descriptor it returns is closed on the way out of this function — before the `exec`, which is the
+/// only thing that would otherwise close it.
+unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::Result<()> {
+    let source_fd = open_without_following_symlinks(source)?;
+    let mut source_link = [0u8; DESCRIPTOR_PATH_LEN];
+    write_descriptor_path(source_fd.as_raw_fd(), &mut source_link);
+
+    if libc::mount(
+        source_link.as_ptr().cast(),
+        target.as_ptr(),
+        std::ptr::null(),
+        libc::MS_BIND | libc::MS_REC,
+        std::ptr::null(),
+    ) != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    if !readonly {
+        return Ok(());
+    }
+    if libc::mount(
+        std::ptr::null(),
+        target.as_ptr(),
+        std::ptr::null(),
+        libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
+        std::ptr::null(),
+    ) != 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// Bring `lo` up inside the jail's own network namespace, so a loopback-only session can still talk
+/// to itself.
+///
+/// The `SIOCSIFFLAGS` ioctl rather than the `ip` binary: there is nothing to guarantee one exists,
+/// and this runs between `fork` and `exec` where spawning anything is out of the question. Same
+/// mechanism as `tddy_sandbox_cgroups::bring_loopback_up`.
+///
+/// # Safety
+///
+/// Runs after `fork`, inside the network namespace [`enter_network_namespace`] created.
+/// `socket`, `ioctl` and `close` touch nothing outside this process, and the request struct is a
+/// zeroed local.
+unsafe fn bring_loopback_up() -> std::io::Result<()> {
+    /// `struct ifreq` as `SIOCGIFFLAGS`/`SIOCSIFFLAGS` read it: a name, then flags in a union whose
+    /// remaining bytes the kernel ignores.
+    #[repr(C)]
+    struct InterfaceRequest {
+        name: [libc::c_char; libc::IF_NAMESIZE],
+        flags: libc::c_short,
+        _rest: [u8; 22],
+    }
+
+    let socket = libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0);
+    if socket < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut request: InterfaceRequest = std::mem::zeroed();
+    for (slot, byte) in request.name.iter_mut().zip(b"lo") {
+        *slot = *byte as libc::c_char;
+    }
+
+    // Read the current flags rather than assuming them: `SIOCSIFFLAGS` writes the whole set, so a
+    // fabricated one would clear flags the kernel put there.
+    let read = libc::ioctl(socket, libc::SIOCGIFFLAGS, &mut request);
+    let result = if read < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        request.flags |= (libc::IFF_UP | libc::IFF_RUNNING) as libc::c_short;
+        if libc::ioctl(socket, libc::SIOCSIFFLAGS, &request) < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    };
+    libc::close(socket);
+    result
 }
 
 /// Put a listener the supervisor created where an activated service looks for it.
@@ -959,7 +1413,7 @@ unsafe fn join_cgroup_scope(procs_path: &CStr) -> std::io::Result<()> {
     Ok(())
 }
 
-fn path_to_c_string(path: &std::path::Path) -> std::io::Result<CString> {
+pub(crate) fn path_to_c_string(path: &Path) -> std::io::Result<CString> {
     CString::new(path.as_os_str().as_bytes()).map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -1006,6 +1460,23 @@ mod tests {
     impl SpawnPlanBuilder {
         fn with_requested_env(mut self, key: &str, value: &str) -> Self {
             self.plan.env.insert(key.to_string(), value.to_string());
+            self
+        }
+
+        /// Credentials distinct from each other, so a test can tell a uid map from a gid map.
+        fn for_an_account_with(mut self, uid: u32, gid: u32) -> Self {
+            self.plan.target.uid = uid;
+            self.plan.target.gid = gid;
+            self
+        }
+
+        /// The account the supervisor itself runs as, so the plan has no privilege to surrender.
+        fn for_the_account_the_supervisor_runs_as(mut self) -> Self {
+            // SAFETY: both accessors only read this process's own credentials, which is what
+            // `privilege_to_drop` compares the target against.
+            let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+            self.plan.target.uid = uid;
+            self.plan.target.gid = gid;
             self
         }
 
@@ -1066,6 +1537,23 @@ mod tests {
         })
     }
 
+    /// Every index at which the plan asks the kernel for a parent-death signal.
+    fn parent_death_signals_at(steps: &[PreExecStep]) -> Vec<usize> {
+        steps
+            .iter()
+            .enumerate()
+            .filter(|(_, step)| **step == PreExecStep::SetParentDeathSignal)
+            .map(|(at, _)| at)
+            .collect()
+    }
+
+    /// The last such index — the arming that is still in force when the child execs.
+    fn last_parent_death_signal_at(steps: &[PreExecStep]) -> usize {
+        *parent_death_signals_at(steps)
+            .last()
+            .unwrap_or_else(|| panic!("no SetParentDeathSignal step in plan: {steps:#?}"))
+    }
+
     #[test]
     fn drops_privilege_before_creating_any_namespace() {
         // Given a jailed sandbox spawn
@@ -1096,12 +1584,19 @@ mod tests {
         let steps = pre_exec_plan(&plan);
 
         // Then
-        let namespaces = position_of(&steps, "EnterMountAndNetworkNamespaces", |step| {
-            matches!(step, PreExecStep::EnterMountAndNetworkNamespaces)
+        let mount_namespace = position_of(&steps, "EnterMountNamespace", |step| {
+            matches!(step, PreExecStep::EnterMountNamespace)
+        });
+        let network_namespace = position_of(&steps, "EnterNetworkNamespace", |step| {
+            matches!(step, PreExecStep::EnterNetworkNamespace)
         });
         assert!(
-            drop_privilege_at(&steps) < namespaces,
-            "privilege must be dropped before unsharing mount/net, got: {steps:#?}"
+            drop_privilege_at(&steps) < mount_namespace,
+            "privilege must be dropped before unsharing the mount namespace, got: {steps:#?}"
+        );
+        assert!(
+            drop_privilege_at(&steps) < network_namespace,
+            "privilege must be dropped before unsharing the network namespace, got: {steps:#?}"
         );
     }
 
@@ -1195,15 +1690,15 @@ mod tests {
         let steps = pre_exec_plan(&plan);
 
         // Then — bringing `lo` up before the unshare would reconfigure the *host's* loopback.
-        let namespaces = position_of(&steps, "EnterMountAndNetworkNamespaces", |step| {
-            matches!(step, PreExecStep::EnterMountAndNetworkNamespaces)
+        let network_namespace = position_of(&steps, "EnterNetworkNamespace", |step| {
+            matches!(step, PreExecStep::EnterNetworkNamespace)
         });
         let loopback = position_of(&steps, "BringLoopbackUp", |step| {
             matches!(step, PreExecStep::BringLoopbackUp)
         });
         assert!(
-            namespaces < loopback,
-            "loopback must come up inside the new namespace, got: {steps:#?}"
+            network_namespace < loopback,
+            "loopback must come up inside the new network namespace, got: {steps:#?}"
         );
     }
 
@@ -1215,10 +1710,31 @@ mod tests {
         // When
         let steps = pre_exec_plan(&plan);
 
-        // Then
+        // Then — there is no network namespace of its own to configure, and `lo` here is the host's.
         assert!(
             !steps.contains(&PreExecStep::BringLoopbackUp),
             "a jail sharing the host network must not touch its loopback, got: {steps:#?}"
+        );
+    }
+
+    #[test]
+    fn keeps_the_hosts_network_but_still_takes_a_mount_namespace_when_asked_to_share_it() {
+        // Given
+        let plan = a_spawn_plan().jailed().sharing_the_hosts_network().build();
+
+        // When
+        let steps = pre_exec_plan(&plan);
+
+        // Then — a jail that unshared the network anyway would get an *empty* network with loopback
+        // down, which is neither the host's network nor an isolated one anybody asked for. The
+        // private remount and the bind mounts need the mount namespace either way.
+        assert!(
+            steps.contains(&PreExecStep::EnterMountNamespace),
+            "a jail always needs a mount namespace of its own, got: {steps:#?}"
+        );
+        assert!(
+            !steps.contains(&PreExecStep::EnterNetworkNamespace),
+            "a jail sharing the host network must not unshare one, got: {steps:#?}"
         );
     }
 
@@ -1255,6 +1771,57 @@ mod tests {
     }
 
     #[test]
+    fn re_arms_the_parent_death_signal_after_surrendering_privilege() {
+        // Given a spawn with root to give up
+        let plan = a_spawn_plan().build();
+
+        // When
+        let steps = pre_exec_plan(&plan);
+
+        // Then — the kernel zeroes `pdeath_signal` on any change of effective ids, so a plan that
+        // asked for it only once would hand every child that changes account no signal at all.
+        assert!(
+            last_parent_death_signal_at(&steps) > drop_privilege_at(&steps),
+            "the parent-death signal must be asked for again after the drop clears it, got: \
+             {steps:#?}"
+        );
+    }
+
+    #[test]
+    fn re_arms_the_parent_death_signal_after_entering_the_user_namespace() {
+        // Given
+        let plan = a_spawn_plan().jailed().build();
+
+        // When
+        let steps = pre_exec_plan(&plan);
+
+        // Then — `unshare(CLONE_NEWUSER)` hands the child a full capability set inside the new
+        // namespace, which is a credential change, and so clears the signal a second time.
+        let user_namespace = position_of(&steps, "EnterUserNamespace", |step| {
+            matches!(step, PreExecStep::EnterUserNamespace)
+        });
+        assert!(
+            last_parent_death_signal_at(&steps) > user_namespace,
+            "the parent-death signal must be asked for again after the user namespace clears it, \
+             got: {steps:#?}"
+        );
+    }
+
+    #[test]
+    fn asks_for_the_parent_death_signal_once_when_nothing_in_the_plan_can_clear_it() {
+        // Given a supervisor already running as the target, and no jail
+        let plan = a_spawn_plan()
+            .for_the_account_the_supervisor_runs_as()
+            .build();
+
+        // When
+        let steps = pre_exec_plan(&plan);
+
+        // Then — the re-arming is keyed to the steps that clear the signal, not added blindly.
+        assert_eq!(parent_death_signals_at(&steps), vec![0]);
+    }
+
+    #[test]
     fn plans_no_namespace_steps_for_a_session_that_asked_for_no_jail() {
         // Given a plain session spawn
         let plan = a_spawn_plan().build();
@@ -1269,7 +1836,8 @@ mod tests {
                 matches!(
                     step,
                     PreExecStep::EnterUserNamespace
-                        | PreExecStep::EnterMountAndNetworkNamespaces
+                        | PreExecStep::EnterMountNamespace
+                        | PreExecStep::EnterNetworkNamespace
                         | PreExecStep::MakeRootMountPrivate
                         | PreExecStep::BindMount { .. }
                         | PreExecStep::BringLoopbackUp
@@ -1280,6 +1848,207 @@ mod tests {
             jail_steps,
             Vec::<&PreExecStep>::new(),
             "an unjailed spawn must build no namespaces"
+        );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The jail, compiled before the fork
+    //
+    // What the child then *does* with these values needs a host that permits unprivileged user
+    // namespaces, which is operator smoke — see `tests/supervisor_sandbox.rs`. What the supervisor
+    // hands it is decided here, and that is what these assert.
+    // -----------------------------------------------------------------------------------------
+
+    /// The one step, compiled, or a failure naming what came back instead.
+    fn compiled(step: PreExecStep, plan: &SpawnPlan) -> CompiledStep {
+        CompiledStep::compile(step, plan)
+            .unwrap_or_else(|error| panic!("compile a jail step: {error}"))
+    }
+
+    #[test]
+    fn compiles_every_step_a_jailed_plan_asks_for() {
+        // Given a jail with a bind mount whose source is really on disk
+        let source = tempfile::tempdir().expect("a bind mount source");
+        let plan = a_spawn_plan()
+            .jailed()
+            .with_bind_mount(
+                source.path().to_str().expect("a utf-8 source path"),
+                "/workspace",
+                false,
+            )
+            .build();
+        let planned = pre_exec_plan(&plan);
+
+        // When
+        let compiled = planned
+            .iter()
+            .cloned()
+            .map(|step| CompiledStep::compile(step, &plan))
+            .collect::<std::io::Result<Vec<CompiledStep>>>();
+
+        // Then — the namespace and mount steps are performed rather than refused. Refusing a jail
+        // the supervisor cannot build is right; refusing one it can is a session that never runs.
+        assert_eq!(
+            compiled.expect("compile a jailed plan").len(),
+            planned.len()
+        );
+    }
+
+    #[test]
+    fn maps_the_account_the_child_has_become_to_root_inside_the_jail() {
+        // Given
+        let plan = a_spawn_plan()
+            .jailed()
+            .for_an_account_with(4001, 4002)
+            .build();
+
+        // When
+        let compiled = compiled(PreExecStep::EnterUserNamespace, &plan);
+
+        // Then — the map is the target's uid because this step runs *after* `DropPrivilege`, so the
+        // effective uid at that moment is the target's. Read from `geteuid()` here it would be the
+        // supervisor's own 0, and the jail would map to real host root.
+        let CompiledStep::EnterUserNamespace { uid_map, .. } = compiled else {
+            panic!("compiling EnterUserNamespace produced another step");
+        };
+        assert_eq!(uid_map.as_ref(), b"0 4001 1\n");
+    }
+
+    #[test]
+    fn maps_the_group_the_child_has_become_to_the_root_group_inside_the_jail() {
+        // Given
+        let plan = a_spawn_plan()
+            .jailed()
+            .for_an_account_with(4001, 4002)
+            .build();
+
+        // When
+        let compiled = compiled(PreExecStep::EnterUserNamespace, &plan);
+
+        // Then
+        let CompiledStep::EnterUserNamespace { gid_map, .. } = compiled else {
+            panic!("compiling EnterUserNamespace produced another step");
+        };
+        assert_eq!(gid_map.as_ref(), b"0 4002 1\n");
+    }
+
+    #[test]
+    fn names_the_descriptor_it_binds_without_reaching_for_the_allocator() {
+        // Given the buffer the child brings to the mount
+        let mut buffer = [0u8; DESCRIPTOR_PATH_LEN];
+
+        // When
+        write_descriptor_path(1234, &mut buffer);
+
+        // Then — the child mounts this path, so it names the descriptor it just resolved rather than
+        // the source path, and it is formatted in place because there is no allocator after a fork.
+        assert_eq!(
+            CStr::from_bytes_until_nul(&buffer).expect("a nul-terminated path"),
+            c"/proc/self/fd/1234"
+        );
+    }
+
+    #[test]
+    fn compiles_a_readonly_bind_mount_as_one_the_child_remounts_readonly() {
+        // Given
+        let source = tempfile::tempdir().expect("a bind mount source");
+        let plan = a_spawn_plan().jailed().build();
+
+        // When
+        let compiled = compiled(
+            PreExecStep::BindMount {
+                source: source.path().to_path_buf(),
+                target: PathBuf::from("/usr/lib"),
+                readonly: true,
+            },
+            &plan,
+        );
+
+        // Then — `MS_RDONLY` is a property of a mount rather than of a bind, so the flag has to
+        // survive to the child, which spends a second `mount` on it.
+        let CompiledStep::BindMount { readonly, .. } = compiled else {
+            panic!("compiling BindMount produced another step");
+        };
+        assert!(readonly, "a readonly mount compiled as writable");
+    }
+
+    #[test]
+    fn refuses_a_bind_mount_source_that_is_reached_through_a_symlink() {
+        // Given a session user's own escape, planted under a directory policy permits
+        let root = tempfile::tempdir().expect("a mount root");
+        let escape = root.path().join("esc");
+        std::os::unix::fs::symlink("/", &escape).expect("plant the escape");
+        let plan = a_spawn_plan().jailed().build();
+
+        // When
+        let refused = CompiledStep::compile(
+            PreExecStep::BindMount {
+                source: escape.clone(),
+                target: PathBuf::from("/workspace"),
+                readonly: false,
+            },
+            &plan,
+        )
+        .expect_err("a symlinked source must be refused");
+
+        // Then — `mount(2)` follows symlinks in its source, so this is `/` bound into the jail. The
+        // resolution refuses to traverse one at all.
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "bind mount source {} could not be resolved (symlinks are not followed): {}",
+                escape.display(),
+                std::io::Error::from_raw_os_error(libc::ELOOP)
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_bind_mount_source_that_does_not_exist_rather_than_skipping_it() {
+        // Given
+        let root = tempfile::tempdir().expect("a mount root");
+        let missing = root.path().join("never-created");
+        let plan = a_spawn_plan().jailed().build();
+
+        // When
+        let refused = CompiledStep::compile(
+            PreExecStep::BindMount {
+                source: missing.clone(),
+                target: PathBuf::from("/workspace"),
+                readonly: false,
+            },
+            &plan,
+        )
+        .expect_err("an absent source must be refused");
+
+        // Then — the daemon's own jail skips a source that is not there. A supervisor that did the
+        // same would hand back a session whose jail is quietly missing a mount it asked for.
+        assert_eq!(
+            refused.to_string(),
+            format!(
+                "bind mount source {} could not be resolved (symlinks are not followed): {}",
+                missing.display(),
+                std::io::Error::from_raw_os_error(libc::ENOENT)
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_a_bind_mount_on_a_kernel_that_cannot_resolve_a_path_without_a_symlink_race() {
+        // Given the answer a kernel older than 5.6 gives to `openat2`
+        let unsupported = std::io::Error::from_raw_os_error(libc::ENOSYS);
+
+        // When
+        let refused = unresolvable_mount_source(Path::new("/srv/tddy/repos/alice"), &unsupported);
+
+        // Then — there is nothing to fall back to: a path-based check is exactly the race this
+        // resolution exists to remove, so the session is not spawned.
+        assert_eq!(refused.kind(), std::io::ErrorKind::Unsupported);
+        assert_eq!(
+            refused.to_string(),
+            "this host has no openat2(2) (Linux 5.6 or newer), so bind mount source \
+             /srv/tddy/repos/alice cannot be resolved without a symlink race; the supervisor will \
+             not spawn a session it cannot isolate"
         );
     }
 

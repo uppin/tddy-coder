@@ -9,12 +9,21 @@ found and closed three escalation paths and one silent-wedge bug — see Validat
 
 ## Affected Packages
 
-- [ ] `tddy-supervisor` — **new**: root-run mini-init + policy-gated privileged broker (lib + bin), owning `proto/supervisor.proto` and its tddy-rpc-flavored codegen
-- [ ] `tddy-daemon` — supervisor client; session/clone/sandbox spawning routes through it when configured; config gains a `supervisor` block
-- [ ] `tddy-sandbox` — `SandboxPlan` gains the shape the supervisor needs to execute a jail on a caller's behalf
-- [ ] `tddy-sandbox-cgroups` — jail/scope mechanics become callable by a privileged parent for a target uid, not only for self
-- [ ] `tddy-e2e` — install contract tests for the supervisor unit/socket/config
-- [ ] repo root — `Cargo.toml` members, `BUILD.yaml`, `install`, `release`, `supervisor.yaml.production`, `dev.supervisor.yaml`
+- [x] `tddy-supervisor` — **new**: root-run mini-init + policy-gated privileged broker (lib + bin), owning `proto/supervisor.proto` and its tddy-rpc-flavored codegen
+- [x] `tddy-daemon` — supervisor client; session and clone spawning route through it when configured; config gains a `supervisor` block. **Sandbox, claude-cli, cursor-cli and PTY sessions do not** — see Known incomplete.
+- [x] ~~`tddy-sandbox` — `SandboxPlan` gains the shape the supervisor needs~~ — **not needed.** The
+  supervisor carries its own `SandboxJail`/`JailMount` in `spawn_broker.rs`, deliberately: `SandboxPlan`
+  and its sub-specs derive neither `Serialize` nor `Deserialize`, so they cannot cross the RPC boundary,
+  and half of what they carry (macOS `PolicySpec`, secrets materialization, copies/symlinks) is not the
+  supervisor's business. `tddy-sandbox` is untouched.
+- [x] ~~`tddy-sandbox-cgroups` — jail/scope mechanics become callable for a target uid~~ — **not needed,
+  and reusing it would have been worse.** Its `enter_rootless_jail` builds the uid map from `geteuid()`,
+  which is correct only for a process that was never privileged; from the supervisor that would map the
+  child to real host root. The supervisor implements the same sequence from `plan.target.uid` instead.
+  The duplication is deliberate and documented; `tddy-sandbox-cgroups` is untouched, so the
+  no-supervisor deployment keeps working exactly as before.
+- [x] `tddy-e2e` — install contract tests for the supervisor unit/socket/config
+- [x] repo root — `Cargo.toml` members, `BUILD.yaml`, `install`, `release`, `supervisor.yaml.production`, `dev.supervisor.yaml`
 
 ## State A (Current)
 
@@ -146,38 +155,38 @@ is surrendered before any namespace exists.
 - [x] Create changeset
 
 ### Milestone 1: Config and policy (pure, no syscalls)
-- [ ] `SupervisorConfig` + `deny_unknown_fields` + load-time validation
-- [ ] `policy.rs` — user/tool-path/mount-root resolution, limit clamping
-- [ ] `authz.rs` — peer-credential authorization
-- [ ] `restart.rs` — backoff state machine
+- [x] `SupervisorConfig` + `deny_unknown_fields` + load-time validation
+- [x] `policy.rs` — user/tool-path/mount-root resolution, limit clamping
+- [x] `authz.rs` — peer-credential authorization
+- [x] `restart.rs` — backoff state machine
 
 ### Milestone 2: Mini-init
-- [ ] `ServiceSupervisor` start in declaration order with privilege drop
-- [ ] `reaper.rs` — SIGCHLD reap and exit attribution
-- [ ] Restart with backoff; give up at the ceiling; reset after the stability threshold
-- [ ] `signals.rs` — SIGTERM → grace → SIGKILL → exit
+- [x] `ServiceSupervisor` start in declaration order with privilege drop
+- [x] `reaper.rs` — SIGCHLD reap and exit attribution
+- [x] Restart with backoff; give up at the ceiling; reset after the stability threshold
+- [x] `signals.rs` — SIGTERM → grace → SIGKILL → exit
 
 ### Milestone 3: Privileged RPC surface
-- [ ] `supervisor.proto` and codegen through `tddy-supervisor/build.rs`
-- [ ] `socket.rs` — UDS bind/activation, ownership and mode
-- [ ] `server.rs` — authz → policy → broker wiring for every method
+- [x] `supervisor.proto` and codegen through `tddy-supervisor/build.rs`
+- [x] `socket.rs` — UDS bind/activation, ownership and mode
+- [x] `server.rs` — authz → policy → broker wiring for every method
 
 ### Milestone 4: Cgroup broker
-- [ ] Scope create/limits/attach/destroy against an injected base
+- [x] Scope create/limits/attach/destroy against an injected base
 - [ ] Supervisor owns the delegated subtree; scope cleanup on session end
 
 ### Milestone 5: Session and sandbox spawn brokers
-- [ ] `spawn_session` — setuid/setgid/initgroups against the allowlist
-- [ ] `spawn_sandbox` — privilege drop **then** namespace/mount setup, plus scope placement
+- [x] `spawn_session` — setuid/setgid/initgroups against the allowlist
+- [x] `spawn_sandbox` — privilege drop **then** namespace/mount setup, plus scope placement
 
 ### Milestone 6: Daemon integration
-- [ ] `SupervisorClient` and `supervisor` config block
-- [ ] Route spawn/clone/sandbox through the supervisor; fail closed with no fallback
-- [ ] No-supervisor path unchanged
+- [x] `SupervisorClient` and `supervisor` config block
+- [x] Route spawn/clone through the supervisor; fail closed with no fallback (sandbox/PTY paths excepted — see Known incomplete)
+- [x] No-supervisor path unchanged
 
 ### Milestone 7: Install and docs
-- [ ] `install` writes the supervisor unit/socket/config and disables the old daemon unit
-- [ ] `release` builds the supervisor
+- [x] `install` writes the supervisor unit/socket/config and disables the old daemon unit
+- [x] `release` builds the supervisor
 - [ ] Docs: `packages/tddy-supervisor/docs/architecture.md`, `systemd-install.md`, service example
 
 ## Testing Strategy
@@ -216,34 +225,34 @@ code; only the injected base and target user differ.
 All 20 are written and failing. Harness: `packages/tddy-supervisor/tests/support/mod.rs`.
 
 **Mini-init** — `packages/tddy-supervisor/tests/supervisor_lifecycle.rs`
-- [ ] `starts_every_declared_service_and_reports_it_running`
-- [ ] `reports_every_declared_service_in_declaration_order`
-- [ ] `restarts_a_managed_service_that_exits_and_reports_a_new_pid`
-- [ ] `stops_restarting_a_service_once_the_retry_ceiling_is_reached`
-- [ ] `terminates_every_managed_service_when_the_supervisor_is_asked_to_shut_down`
+- [x] `starts_every_declared_service_and_reports_it_running`
+- [x] `reports_every_declared_service_in_declaration_order`
+- [x] `restarts_a_managed_service_that_exits_and_reports_a_new_pid`
+- [x] `stops_restarting_a_service_once_the_retry_ceiling_is_reached`
+- [x] `terminates_every_managed_service_when_the_supervisor_is_asked_to_shut_down`
 
 **Privileged surface** — `packages/tddy-supervisor/tests/supervisor_authorization.rs`
-- [ ] `rejects_a_session_spawn_from_a_peer_that_owns_no_declared_service`
-- [ ] `rejects_a_session_spawn_for_an_os_user_outside_the_allowlist`
-- [ ] `rejects_a_session_spawn_for_a_tool_path_outside_the_allowlist`
-- [ ] `spawns_an_allowlisted_tool_for_an_allowlisted_user_as_a_child_of_the_supervisor`
+- [x] `rejects_a_session_spawn_from_a_peer_that_owns_no_declared_service`
+- [x] `rejects_a_session_spawn_for_an_os_user_outside_the_allowlist`
+- [x] `rejects_a_session_spawn_for_a_tool_path_outside_the_allowlist`
+- [x] `spawns_an_allowlisted_tool_for_an_allowlisted_user_as_a_child_of_the_supervisor`
 
 **Cgroup broker** — `packages/tddy-supervisor/tests/supervisor_cgroups.rs`
-- [ ] `creates_a_scope_with_the_requested_limits_when_they_are_under_the_ceiling`
-- [ ] `clamps_requested_limits_down_to_the_policy_ceiling`
-- [ ] `places_a_spawned_session_into_the_scope_it_asked_for`
-- [ ] `removes_the_scope_directory_when_the_scope_is_destroyed`
+- [x] `creates_a_scope_with_the_requested_limits_when_they_are_under_the_ceiling`
+- [x] `clamps_requested_limits_down_to_the_policy_ceiling`
+- [x] `places_a_spawned_session_into_the_scope_it_asked_for`
+- [x] `removes_the_scope_directory_when_the_scope_is_destroyed`
 
 **Daemon integration** — `packages/tddy-daemon/tests/supervisor_routing.rs`
-- [ ] `delegates_spawning_to_the_supervisor_when_the_config_declares_a_socket`
-- [ ] `keeps_the_forked_spawn_worker_when_no_supervisor_is_declared`
-- [ ] `fails_to_reach_a_declared_supervisor_whose_socket_is_absent`
+- [x] `delegates_spawning_to_the_supervisor_when_the_config_declares_a_socket`
+- [x] `keeps_the_forked_spawn_worker_when_no_supervisor_is_declared`
+- [x] `fails_to_reach_a_declared_supervisor_whose_socket_is_absent`
 
 **Install contract** — `packages/tddy-e2e/tests/install_supervisor.rs`
-- [ ] `installs_a_root_supervisor_unit_that_delegates_a_cgroup_subtree`
-- [ ] `installs_a_supervisor_config_declaring_the_daemon_as_an_unprivileged_service`
-- [ ] `no_longer_installs_a_standalone_daemon_unit`
-- [ ] `installs_the_supervisor_binary_alongside_the_daemon`
+- [x] `installs_a_root_supervisor_unit_that_delegates_a_cgroup_subtree`
+- [x] `installs_a_supervisor_config_declaring_the_daemon_as_an_unprivileged_service`
+- [x] `no_longer_installs_a_standalone_daemon_unit`
+- [x] `installs_the_supervisor_binary_alongside_the_daemon`
 
 ### Unit Tests (77, inline `#[cfg(test)] mod tests`)
 
@@ -448,12 +457,97 @@ honest test can be written for it.
 
 ## ⚠️ Known incomplete — needs a decision before this ships
 
-### ⚠️ 0. `SpawnSandbox` — the surface exists and is gated; the jail itself does not execute
+### ✅ 0. RESOLVED — `SpawnSandbox` builds a real jail
+
+The five namespace/mount steps now execute: `unshare(CLONE_NEWUSER)` with a `0 <target> 1` uid/gid map
+and `setgroups=deny`, `unshare(CLONE_NEWNS)`, `mount(/, MS_REC|MS_PRIVATE)`, the bind mounts, and — only
+when `isolate_network` is set — `unshare(CLONE_NEWNET)` plus loopback bring-up.
+
+**Verified on a real kernel**, contrary to an earlier note in this changeset claiming it could not be:
+this host has `apparmor_restrict_unprivileged_userns=1` *but* `apparmor_restrict_unprivileged_unconfined=0`,
+and an unconfined process is exempt. Driving the production code through a jailed spawn produced
+`uid=0(root)` inside the namespace, a working bind mount, a read-only mount refusing writes, a netns
+containing only `lo` (UP), and no mount propagation to the host. No test depends on that, since a host
+running under a confining profile would fail it — the plan's *ordering* is what the unit tests pin.
+
+Three things the implementation had to get right that the unprivileged reference version never faced:
+
+- **The uid map is built from `plan.target.uid`, never from `geteuid()`.** Pre-fork `geteuid()` is the
+  supervisor's 0, which would map the jail to *real host root*; post-`unshare` it is the overflow uid
+  65534, which the kernel refuses outright.
+- **`setuid` leaves the process non-dumpable, so it gets `EACCES` opening its own `/proc/self/uid_map`.**
+  Every jailed spawn would have failed without a `PR_SET_DUMPABLE` re-arm.
+- **A pre-fork descriptor cannot be used for the bind.** An fd opened before `unshare(CLONE_NEWNS)`
+  belongs to the old mount namespace and `mount(2)` rejects it (`EINVAL`, measured). The authoritative
+  `openat2(RESOLVE_NO_SYMLINKS)` therefore happens in the child immediately before the bind, so check
+  and use are the same object with no window; `compile` keeps a pre-fork resolution purely to carry a
+  readable message, because only an errno escapes `pre_exec`.
+
+### ✅ `resolve_mount_source` symlink hole — RESOLVED
+
+Closed with `openat2(RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)` against the matching allowed root. A
+kernel without `openat2` **refuses** the mount rather than falling back to a path check — the fallback
+would be the exact TOCTOU the change removes. `ENOENT` is deliberately not a policy denial (the bind
+refuses a missing source anyway, and a denial reading "no such directory" sends operators hunting a
+policy bug); verified that `openat2` returns `ELOOP` even for a *dangling* symlink, so nothing is
+smuggled through that branch.
+
+### ✅ Milestone 6 — session and clone spawning now route through the supervisor
+
+`spawner::plan_session_child` was extracted as the single place that decides *what* to run — passwd
+resolution, session id, LiveKit room and identity, the child config, the grpc port, and the whole argv.
+`spawn_as_user` is now only the fork; the supervised path sends the same plan's program/args to
+`SpawnSession` and assembles `SpawnResult` from the plan plus the returned pid. **The argv exists in one
+place.** Both backends watch startup on the same schedule — the supervised one by polling
+`session_status`, since `waitpid` is not available to a non-parent.
+
+On a supervised host `main.rs` does **not** fork a spawn worker at all. Every `ForkedWorker` arm is the
+pre-existing code unchanged, and no `spawn_as_user`/`clone_as_user` call survives outside one.
+
+**Operator prerequisites this creates**, both because an unlisted value is *refused* rather than
+adjusted: `allowed_tool_paths` must contain git's absolute path (`which git` on the daemon's PATH) or
+cloning is denied; and `allowed_env_keys` must contain `PATH` if any session user's
+`~/.tddy/config.yaml` sets `spawn_path_extra`. An ordinary spawn sends no env, so the shipped empty
+policy works.
+
+**Design choice worth review:** the client is connected per operation from `config.supervisor.socket_path`
+rather than held on `ConnectionServiceImpl`. That avoided changing a constructor signature used by ~40
+test files, and it survives a supervisor restart under a long-lived daemon with no reconnect logic. Cost
+is one AF_UNIX connect per spawn or clone.
+
+### ⚠️ Still spawned by the daemon on a supervised host — two gaps, neither previously recorded
+
+- **`SignalSession` will fail with `EPERM`.** `connection_service.rs` calls `libc::kill(pid, sig)`
+  directly, which an unprivileged daemon cannot do to a session running as another user. `SIGTERM` and
+  `SIGKILL` map onto the supervisor's `stop_session`; **`SIGINT` has no equivalent**, so closing this
+  needs a protocol decision (add a `SignalSession` rpc, or accept TERM/KILL only) and its own red phase.
+  Deliberately not guessed at.
+- **claude-cli, cursor-cli and PTY sessions still spawn from the daemon.** `pty_runtime.rs` drops
+  privilege by shelling out to `setpriv --reuid`, which an unprivileged daemon cannot do — so on a
+  supervised host those session types run as the daemon user. Same class as the sandbox path, but it
+  was not called out anywhere until now. The fix is routing them through `SpawnSession`, which needs the
+  pty master fd to cross the socket via `SCM_RIGHTS` — the one place the "paths, not fds" decision does
+  not stretch.
+
+### ⚠️ Two defects the jail work exposed, both fixed
+
+- **`PR_SET_PDEATHSIG` was silently cleared by the privilege drop.** `commit_creds()` zeroes
+  `pdeath_signal` on any change of effective ids, so step 1 of the ordering contract was undone by
+  step 3 for **every** child that drops privilege — and again by `unshare(CLONE_NEWUSER)`. A killed
+  supervisor *did* leave its daemon and sessions running. This was invisible because the acceptance
+  suite declares the invoking user as the service user, so no drop is planned: the property held in
+  tests and failed in production. Now re-armed after *each* credential-changing step rather than after
+  whichever is currently last, so a future step cannot silently invalidate it.
+- **`isolate_network: false` produced an empty netns with loopback down.** `pre_exec_plan` emitted a
+  combined `CLONE_NEWNS|CLONE_NEWNET` unconditionally and gated only the loopback. Split into
+  `EnterMountNamespace` (always, for a jailed plan) and `EnterNetworkNamespace` (only when isolating).
+
+### ~~0. `SpawnSandbox` — the surface exists and is gated; the jail itself does not execute~~ (superseded)
 
 **Updated.** The proto rpc, the client method, the policy gate and 6 acceptance tests all now exist.
 What remains missing is only the *execution* of the jail's five namespace/mount steps.
 
-`pre_exec_plan` plans them — that is what the 11 ordering unit tests pin — but
+`pre_exec_plan` plans them — that is what the ordering unit tests pin — but
 `spawn_broker::CompiledStep::compile` **refuses** them before the fork with `ErrorKind::Unsupported`,
 so a policy-passing `SpawnSandbox` fails with:
 

@@ -33,6 +33,35 @@ pub fn spawn_backend_choice(config: &DaemonConfig) -> SpawnBackendChoice {
     }
 }
 
+/// Fork the pre-tokio spawn worker, unless the supervisor is what spawns on this host.
+///
+/// The worker exists only because `fork` from a multi-threaded process can deadlock, so it has to be
+/// created before tokio starts. A supervised daemon spawns nothing itself, so it forks nothing —
+/// there is no worker to fall back to, which is the point: no code path can quietly downgrade a
+/// session isolated as its own user to one running as the daemon.
+#[cfg(unix)]
+pub fn spawn_worker_for(
+    choice: &SpawnBackendChoice,
+) -> anyhow::Result<Option<(crate::spawn_worker::SpawnClient, libc::pid_t)>> {
+    match choice {
+        SpawnBackendChoice::Supervisor { socket_path } => {
+            log::info!(
+                "spawn backend: tddy-supervisor at {} (no spawn worker forked)",
+                socket_path.display()
+            );
+            Ok(None)
+        }
+        SpawnBackendChoice::ForkedWorker => crate::spawn_worker::fork_spawn_worker(),
+    }
+}
+
+#[cfg(not(unix))]
+pub fn spawn_worker_for(
+    _choice: &SpawnBackendChoice,
+) -> anyhow::Result<Option<(crate::spawn_worker::SpawnClient, i32)>> {
+    crate::spawn_worker::fork_spawn_worker()
+}
+
 /// Connect to the supervisor.
 ///
 /// An unreachable supervisor is a hard error. The caller must fail the operation rather than

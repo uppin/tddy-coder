@@ -33,14 +33,22 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # says where to reach its privileged RPC socket. It is parsed and validated at startup, and the same
 # path is written into supervisor.yaml, so the two agree.
 #
-# NOT YET CONSULTED FOR SPAWNING. No daemon code path routes session spawning, cloning or sandbox
-# spawning through the supervisor yet (the client exists but has no callers — see "Known incomplete"
-# in docs/dev/1-WIP/CS-2026-08-02-tddy-supervisor.md). Today every session is still spawned by the
-# daemon's own forked spawn worker and runs as the daemon user, whether this block is present or not.
-# It is left declared rather than commented out so that the host is already configured correctly when
-# that wiring lands: from then on a spawn is delegated over this socket, and an unreachable or
-# refusing supervisor FAILS the operation — there is deliberately no fallback to in-process spawning,
-# which would silently downgrade an isolated session to one running as the daemon user.
+# The presence of this block is the switch. With it, session spawning and repo cloning are delegated
+# over this socket, and the daemon does not fork a spawn worker at all. An unreachable or refusing
+# supervisor FAILS the operation — there is deliberately no fallback to in-process spawning, because
+# that would silently downgrade an isolated session to one running as the daemon user. Remove the
+# block to go back to the daemon's own forked worker.
+#
+# For a delegated spawn to be permitted, supervisor.yaml's spawn_policy must list the tool paths the
+# daemon will name — including git's absolute path for cloning — and, if any session user's
+# ~/.tddy/config.yaml sets spawn_path_extra, the PATH key under allowed_env_keys. An unlisted tool,
+# user or env key is refused rather than silently adjusted.
+#
+# STILL SPAWNED BY THE DAEMON ITSELF, and therefore still running as the daemon user on a supervised
+# host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /
+# cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which
+# an unprivileged daemon cannot do). Both are recorded under "Known incomplete" in
+# docs/dev/1-WIP/CS-2026-08-02-tddy-supervisor.md.
 #
 # Remove this block only for a no-supervisor deployment (no supervisor unit, daemon started directly).
 supervisor:

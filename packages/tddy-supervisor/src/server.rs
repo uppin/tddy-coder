@@ -84,10 +84,12 @@ impl PrivilegedSurface {
 
     /// Resolve a sandbox request against policy and hand the jail plan to the supervisor.
     ///
-    // TODO(supervisor/milestone-5): a request that passes policy still cannot succeed. The jail is
-    // planned here but `spawn_broker::CompiledStep::compile` refuses its namespace and mount steps
-    // before the fork, so the caller gets that refusal verbatim. Deliberate: an unjailed process
-    // returned from `SpawnSandbox` would be worse than no process at all.
+    /// The jail is only *described* here. `spawn_broker::pre_exec_plan` decides the order its steps
+    /// happen in, and the child performs them between `fork` and `exec`. A jail that cannot be built
+    /// fails the spawn at whichever of the two points discovers it — `CompiledStep::compile` before
+    /// the fork for a bind mount source it cannot resolve, the child itself for a namespace the host
+    /// refuses it — and the caller gets that failure verbatim. Deliberate: an unjailed process
+    /// returned from `SpawnSandbox` would be worse than no process at all.
     async fn spawn_sandbox(
         &self,
         request: SpawnSandboxRequest,
@@ -181,9 +183,9 @@ impl PrivilegedSurface {
         os_user: &str,
     ) -> Result<SpawnedProcess, SupervisorError> {
         // A failure here is reported as what it is. In particular a jail the supervisor cannot build
-        // surfaces as `OperationFailed` carrying the reason: dressing it as a denial would hide an
-        // unimplemented jail behind a policy-shaped error, and spawning the session without the jail
-        // it asked for would be worse than either.
+        // surfaces as `OperationFailed` carrying the reason: dressing it as a denial would hide a
+        // host that cannot jail behind a policy-shaped error, and spawning the session without the
+        // jail it asked for would be worse than either.
         let pid = self.supervisor.spawn_session(plan).await.map_err(|error| {
             SupervisorError::OperationFailed {
                 message: format!("spawn {kind}: {error}"),

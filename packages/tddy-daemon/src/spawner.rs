@@ -462,6 +462,14 @@ fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
     ))
 }
 
+/// How long a freshly started session gets to prove it did not exit on startup. A successful
+/// `fork`+`exec` says nothing about whether the tool survived its own argument parsing, so both
+/// backends watch the child for this long before reporting a session — the forking one with
+/// `try_wait`, the supervised one by polling `SessionStatus`.
+pub const STARTUP_GRACE_PERIOD: Duration = Duration::from_millis(500);
+/// How often the startup watch looks, within [`STARTUP_GRACE_PERIOD`].
+pub const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
 /// Result of spawning a session.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SpawnResult {
@@ -690,22 +698,27 @@ pub fn run_capture_as_user(
     anyhow::bail!("run_capture_as_user is only supported on Unix")
 }
 
-/// Spawn a tddy-* process as the given OS user.
+/// The target OS account a child runs as, resolved from passwd once.
 #[cfg(unix)]
-#[allow(clippy::too_many_arguments)] // os_user/tool_path/tddy_data_dir/repo_path/livekit/opts/log level+format; a struct would obscure call sites for a spawn-time argument bundle.
-pub fn spawn_as_user(
-    os_user: &str,
-    tool_path: &str,
-    tddy_data_dir: &Path,
-    repo_path: &Path,
-    livekit: &LiveKitCreds,
-    opts: SpawnOptions<'_>,
-    child_log_level: &str,
-    child_log_format: &str,
-    coder_log_config_yaml: Option<&str>,
-) -> anyhow::Result<SpawnResult> {
-    use std::os::unix::process::CommandExt;
+struct TargetAccount {
+    uid: libc::uid_t,
+    gid: libc::gid_t,
+    /// `initgroups(3)` requires a non-NULL user name; NULL yields EINVAL on Linux.
+    pw_name: std::ffi::CString,
+    home_dir: String,
+}
 
+#[cfg(unix)]
+impl TargetAccount {
+    /// True when the child would run as the account this process already is, in which case
+    /// `spawn_as_user` skips `pre_exec` entirely (and the supervisor skips the privilege drop).
+    fn is_this_process(&self) -> bool {
+        self.uid == unsafe { libc::getuid() } && self.gid == unsafe { libc::getgid() }
+    }
+}
+
+#[cfg(unix)]
+fn resolve_target_account(os_user: &str) -> anyhow::Result<TargetAccount> {
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut buf = vec![0u8; 16384];
     let mut result = std::ptr::null_mut();
@@ -724,15 +737,78 @@ pub fn spawn_as_user(
         anyhow::bail!("user '{}' not found", os_user);
     }
     let passwd = unsafe { &*result };
-    let uid = passwd.pw_uid;
-    let gid = passwd.pw_gid;
     if passwd.pw_dir.is_null() {
         anyhow::bail!("user '{}' has no home directory", os_user);
     }
     if passwd.pw_name.is_null() {
         anyhow::bail!("user '{}' has no passwd pw_name", os_user);
     }
-    let pw_name = unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() };
+    Ok(TargetAccount {
+        uid: passwd.pw_uid,
+        gid: passwd.pw_gid,
+        pw_name: unsafe { std::ffi::CStr::from_ptr(passwd.pw_name).to_owned() },
+        home_dir: unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
+            .to_string_lossy()
+            .into_owned(),
+    })
+}
+
+/// Everything about a session's child process that is decided before any process exists.
+///
+/// One computation, two ways to start it: [`spawn_as_user`] forks and execs it here, and
+/// [`crate::supervisor_spawn`] hands the same program and argv to `tddy-supervisor`. The session id
+/// a caller is told about, the LiveKit room the tool joins and the gRPC port a client dials are all
+/// fixed here — so which backend started the child cannot change what the child *is*.
+#[cfg(unix)]
+pub struct SessionChildPlan {
+    /// Absolute path of the tool to exec.
+    pub program: PathBuf,
+    /// Full argv (excluding argv[0]).
+    pub args: Vec<String>,
+    /// The session's repository; the child's cwd.
+    pub working_dir: PathBuf,
+    pub session_id: String,
+    pub livekit_room: String,
+    pub livekit_server_identity: String,
+    /// gRPC listen port the child was told to bind (see [`allocate_verified_grpc_listen_port`]).
+    pub grpc_port: u16,
+    /// `spawn_path_extra` from the target user's `~/.tddy/config.yaml`, when they set one. The
+    /// child's full `PATH` is [`merge_spawn_child_path`] of this.
+    pub path_extra: Option<String>,
+    /// Resolved passwd identity, used by the forking backend's `pre_exec`.
+    target: TargetAccount,
+    /// The child's `--config` document (named in `args`, so both backends route the session's logs
+    /// the same way) plus open stdout/stderr sinks. Only a backend that forks the child itself can
+    /// hand it descriptors, so the two sinks go unused on the supervised path — there the session's
+    /// raw output is the supervisor's to place, and its `log:` config is what carries the session's
+    /// own diagnostics.
+    logs: ChildProcessLogFiles,
+}
+
+/// One `--flag value` pair of a child's argv.
+fn push_flag(args: &mut Vec<String>, name: &str, value: &str) {
+    args.push(name.to_string());
+    args.push(value.to_string());
+}
+
+/// Decide what a session's child process is, without starting it.
+///
+/// Performs the I/O a decision needs — resolving the account, writing the child's `--config`,
+/// picking a free gRPC port — but never forks. See [`SessionChildPlan`].
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)] // Mirrors spawn_as_user's spawn-time argument bundle.
+pub fn plan_session_child(
+    os_user: &str,
+    tool_path: &str,
+    tddy_data_dir: &Path,
+    repo_path: &Path,
+    livekit: &LiveKitCreds,
+    opts: SpawnOptions<'_>,
+    child_log_level: &str,
+    child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
+) -> anyhow::Result<SessionChildPlan> {
+    let target = resolve_target_account(os_user)?;
 
     if opts.resume_session_id.is_some() && opts.new_session_id.is_some() {
         anyhow::bail!("resume_session_id and new_session_id are mutually exclusive");
@@ -750,12 +826,6 @@ pub fn spawn_as_user(
         .filter(|s| !s.is_empty());
     let identity = livekit_server_identity_for_session(instance, &session_id);
 
-    let home_dir = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }
-        .to_string_lossy()
-        .into_owned();
-
-    let same_user = uid == unsafe { libc::getuid() } && gid == unsafe { libc::getgid() };
-
     let logs = create_child_log_config_and_streams(
         repo_path,
         &session_id,
@@ -764,9 +834,9 @@ pub fn spawn_as_user(
         coder_log_config_yaml,
     )?;
 
-    let user_cfg = Path::new(&home_dir).join(".tddy").join("config.yaml");
-    let path_extra = tddy_user_config::spawn_path_extra_for_home(Path::new(&home_dir));
-    let child_path = merge_spawn_child_path(path_extra.as_deref());
+    let home = Path::new(&target.home_dir);
+    let user_cfg = home.join(".tddy").join("config.yaml");
+    let path_extra = tddy_user_config::spawn_path_extra_for_home(home);
     if let Some(ref extra) = path_extra {
         log::info!(
             "spawner: child PATH prepends spawn_path_extra from {}: {}",
@@ -788,61 +858,52 @@ pub fn spawn_as_user(
     let resolved_tool_path = resolve_tool_path(tool_path, &daemon_toolchain_root);
     let resolved_tddy_data_dir = resolve_tddy_data_dir(tddy_data_dir, &daemon_toolchain_root);
 
-    let mut cmd = std::process::Command::new(&resolved_tool_path);
-    // Legacy stdio wiring (stdin=/dev/null, stdout → log file). The reverse `spawn_conversation`
-    // channel now rides a per-session unix socket (`--host-session-socket`, added below), not the
-    // child's stdin/stdout — so those pipes stay untouched and the channel survives the forked
-    // `spawn_worker` boundary (OS fds can't cross it; a socket path can).
-    cmd.current_dir(repo_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(logs.stdout))
-        .stderr(Stdio::from(logs.stderr))
-        .env("HOME", &home_dir)
-        .env("PATH", &child_path)
-        .arg("--daemon")
-        .arg("--grpc")
-        .arg(grpc_port.to_string())
-        .arg("--livekit-url")
-        .arg(&livekit.url)
-        .arg("--livekit-api-key")
-        .arg(&livekit.api_key)
-        .arg("--livekit-api-secret")
-        .arg(&livekit.api_secret)
-        .arg("--livekit-room")
-        .arg(&livekit_room)
-        .arg("--livekit-identity")
-        .arg(&identity)
-        .arg("--tddy-data-dir")
-        .arg(&resolved_tddy_data_dir);
+    let mut args: Vec<String> = vec![
+        "--daemon".to_string(),
+        "--grpc".to_string(),
+        grpc_port.to_string(),
+        "--livekit-url".to_string(),
+        livekit.url.clone(),
+        "--livekit-api-key".to_string(),
+        livekit.api_key.clone(),
+        "--livekit-api-secret".to_string(),
+        livekit.api_secret.clone(),
+        "--livekit-room".to_string(),
+        livekit_room.clone(),
+        "--livekit-identity".to_string(),
+        identity.clone(),
+        "--tddy-data-dir".to_string(),
+        resolved_tddy_data_dir.display().to_string(),
+    ];
 
     if let Some(resume_id) = opts.resume_session_id {
-        cmd.arg("--resume-from").arg(resume_id);
+        push_flag(&mut args, "--resume-from", resume_id);
     } else {
-        cmd.arg("--session-id").arg(&session_id);
+        push_flag(&mut args, "--session-id", &session_id);
     }
 
     if let Some(pid) = opts.project_id {
         if !pid.is_empty() {
-            cmd.arg("--project-id").arg(pid);
+            push_flag(&mut args, "--project-id", pid);
         }
     }
 
     if let Some(a) = opts.agent {
         let a = a.trim();
         if !a.is_empty() {
-            cmd.arg("--agent").arg(a);
+            push_flag(&mut args, "--agent", a);
         }
     }
 
     if opts.mouse {
-        cmd.arg("--mouse");
+        args.push("--mouse".to_string());
     }
 
     if let Some(r) = opts.recipe {
         let r = r.trim();
         if !r.is_empty() {
             log::debug!("spawner: passing --recipe {}", r);
-            cmd.arg("--recipe").arg(r);
+            push_flag(&mut args, "--recipe", r);
         }
     }
 
@@ -850,7 +911,7 @@ pub fn spawn_as_user(
         let m = m.trim();
         if !m.is_empty() {
             log::debug!("spawner: passing --model {}", m);
-            cmd.arg("--model").arg(m);
+            push_flag(&mut args, "--model", m);
         }
     }
 
@@ -858,15 +919,94 @@ pub fn spawn_as_user(
         let sp = sp.trim();
         if !sp.is_empty() {
             log::debug!("spawner: passing --stack-parent {}", sp);
-            cmd.arg("--stack-parent").arg(sp);
+            push_flag(&mut args, "--stack-parent", sp);
         }
     }
 
     if let Some(sock) = opts.host_session_socket {
-        cmd.arg("--host-session-socket").arg(sock);
+        push_flag(&mut args, "--host-session-socket", sock);
     }
 
-    cmd.arg("--config").arg(&logs.config_path);
+    push_flag(
+        &mut args,
+        "--config",
+        &logs.config_path.display().to_string(),
+    );
+
+    Ok(SessionChildPlan {
+        program: resolved_tool_path,
+        args,
+        working_dir: repo_path.to_path_buf(),
+        session_id,
+        livekit_room,
+        livekit_server_identity: identity,
+        grpc_port,
+        path_extra,
+        target,
+        logs,
+    })
+}
+
+/// Spawn a tddy-* process as the given OS user.
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)] // os_user/tool_path/tddy_data_dir/repo_path/livekit/opts/log level+format; a struct would obscure call sites for a spawn-time argument bundle.
+pub fn spawn_as_user(
+    os_user: &str,
+    tool_path: &str,
+    tddy_data_dir: &Path,
+    repo_path: &Path,
+    livekit: &LiveKitCreds,
+    opts: SpawnOptions<'_>,
+    child_log_level: &str,
+    child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
+) -> anyhow::Result<SpawnResult> {
+    use std::os::unix::process::CommandExt;
+
+    let SessionChildPlan {
+        program: resolved_tool_path,
+        args,
+        working_dir,
+        session_id,
+        livekit_room,
+        livekit_server_identity: identity,
+        grpc_port,
+        path_extra,
+        target,
+        logs,
+    } = plan_session_child(
+        os_user,
+        tool_path,
+        tddy_data_dir,
+        repo_path,
+        livekit,
+        opts,
+        child_log_level,
+        child_log_format,
+        coder_log_config_yaml,
+    )?;
+
+    let same_user = target.is_this_process();
+    let TargetAccount {
+        uid,
+        gid,
+        pw_name,
+        home_dir,
+    } = target;
+    let child_path = merge_spawn_child_path(path_extra.as_deref());
+
+    let mut cmd = std::process::Command::new(&resolved_tool_path);
+    // Legacy stdio wiring (stdin=/dev/null, stdout → log file). The reverse `spawn_conversation`
+    // channel now rides a per-session unix socket (`--host-session-socket`, in the planned argv),
+    // not the child's stdin/stdout — so those pipes stay untouched and the channel survives the
+    // forked `spawn_worker` boundary (OS fds can't cross it; a socket path can).
+    cmd.current_dir(&working_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(logs.stdout))
+        .stderr(Stdio::from(logs.stderr))
+        .env("HOME", &home_dir)
+        .env("PATH", &child_path)
+        .args(&args);
 
     let cfg_abs = logs
         .config_path
@@ -959,8 +1099,6 @@ pub fn spawn_as_user(
     // SpawnResult with a session_id that never becomes a real session. Poll non-blockingly
     // (`try_wait`, not `wait`) so a healthy long-running child is never delayed beyond this
     // fixed window.
-    const STARTUP_GRACE_PERIOD: Duration = Duration::from_millis(500);
-    const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(25);
     let mut waited = Duration::ZERO;
     let early_exit = loop {
         match child.try_wait() {

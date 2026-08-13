@@ -1,7 +1,12 @@
 //! Resolving a request against root-owned policy.
 //!
-//! Everything here is pure. It is also the security boundary, so it denies by default: a value
-//! that is not explicitly permitted is refused, and a refusal is opaque.
+//! Everything here is pure but one thing: [`resolve_mount_source`] has the kernel resolve the source
+//! it is about to approve, because a mount root is a *prefix* over a tree the session user writes
+//! into and no amount of string comparison can tell a directory from a symlink to `/`. Its own docs
+//! carry the argument.
+//!
+//! This is the security boundary, so it denies by default: a value that is not explicitly permitted
+//! is refused, and a refusal is opaque.
 //!
 //! The distinction between [`SupervisorError::Denied`] and [`SupervisorError::Invalid`] matters.
 //! `Denied` covers anything that could otherwise be used as an existence oracle — "is there a user
@@ -10,12 +15,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use crate::config::{is_loader_env_key, CgroupPolicy, SpawnPolicy, ROOT_USER};
 use crate::error::SupervisorError;
 use crate::request::{AppliedLimits, RequestedLimits};
+use crate::spawn_broker;
 
 /// The kernel's `cpu.max` pair: `"<quota_us> <period_us>"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +147,8 @@ pub fn resolve_env(
     Ok(requested.clone())
 }
 
-/// Resolve a bind-mount source for a sandbox. Must sit under one of the permitted roots.
+/// Resolve a bind-mount source for a sandbox. Must sit under one of the permitted roots, and must
+/// still be under it once the kernel has resolved it.
 pub fn resolve_mount_source(
     policy: &SpawnPolicy,
     requested: &Path,
@@ -148,14 +156,70 @@ pub fn resolve_mount_source(
     let requested = plain_absolute_path(requested)?;
     // `starts_with` compares whole path components, so `/srv/tddy/repos-backup` is not under
     // `/srv/tddy/repos` — a string prefix test would let it through.
-    if policy
+    let root = policy
         .allowed_mount_roots
         .iter()
-        .any(|root| requested.starts_with(root))
-    {
-        Ok(requested.to_path_buf())
+        .find(|root| requested.starts_with(root))
+        .ok_or(SupervisorError::Denied)?;
+    refuse_a_source_the_kernel_will_not_resolve_beneath(root, requested)?;
+    Ok(requested.to_path_buf())
+}
+
+/// Refuse a source that is only *textually* beneath its root.
+///
+/// Component-wise containment plus a ban on `..` is exactly right for [`resolve_tool_path`], whose
+/// allowlist is equality against paths only root can write. It does not carry over to a mount root,
+/// which is a prefix over a whole tree the session user owns: `alice` can create
+/// `/srv/tddy/repos/alice/esc -> /`, name it as a source, pass a component-wise check with it, and
+/// have `mount(2)` follow the link and bind `/` into her jail.
+///
+/// So the kernel resolves it, once, with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`: a symlink anywhere
+/// in the path is `ELOOP`, and a resolution that would leave the root is `EXDEV`. `spawn_broker`
+/// resolves the same path the same way when it opens the descriptor the child actually binds, so what
+/// is mounted is the object that was checked rather than the same name walked a second time.
+fn refuse_a_source_the_kernel_will_not_resolve_beneath(
+    root: &Path,
+    requested: &Path,
+) -> Result<(), SupervisorError> {
+    let root_path = spawn_broker::path_to_c_string(root).map_err(|_| SupervisorError::Denied)?;
+    let beneath = requested
+        .strip_prefix(root)
+        .map_err(|_| SupervisorError::Denied)?;
+    // `openat2` has no empty path, and the root is `.` relative to itself.
+    let beneath = if beneath.as_os_str().is_empty() {
+        Path::new(".")
     } else {
-        Err(SupervisorError::Denied)
+        beneath
+    };
+    let beneath = spawn_broker::path_to_c_string(beneath).map_err(|_| SupervisorError::Denied)?;
+
+    containment_of(
+        spawn_broker::open_directory_reference(&root_path).and_then(|root| {
+            spawn_broker::open_resolved(
+                root.as_raw_fd(),
+                &beneath,
+                libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS,
+            )
+        }),
+    )
+}
+
+/// What the kernel's answer to that resolution means for the request.
+fn containment_of(resolved: std::io::Result<OwnedFd>) -> Result<(), SupervisorError> {
+    match resolved {
+        // Resolved whole, without following a symlink and without leaving the root: this source is
+        // the object its name says it is.
+        Ok(_) => Ok(()),
+        // Nothing exists yet for a symlink to point at, and a denial that meant "no such directory"
+        // would send an operator looking for a policy mistake instead of a typo. The descriptor the
+        // child binds is resolved the same way, so a source created as a symlink in between is
+        // refused there rather than bound.
+        Err(error) if error.raw_os_error() == Some(libc::ENOENT) => Ok(()),
+        // Everything else is a resolution the kernel refused to perform — a symlink (`ELOOP`), an
+        // escape (`EXDEV`), or a kernel with no `openat2` to ask (`ENOSYS`). A source that cannot be
+        // shown to be contained is not granted: the path-based check that would be the alternative is
+        // the race this exists to remove.
+        Err(_) => Err(SupervisorError::Denied),
     }
 }
 
@@ -537,6 +601,95 @@ mod tests {
 
         // Then — containment is by path component, not by string prefix.
         assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    /// A mount root that really exists, so the kernel has something to resolve against.
+    ///
+    /// The escape tests need a directory a session user could write into, and there is no way to
+    /// assert a symlink is refused without a symlink on disk to refuse.
+    fn a_real_mount_root() -> tempfile::TempDir {
+        tempfile::tempdir().expect("a mount root on disk")
+    }
+
+    fn policy_allowing(root: &Path) -> SpawnPolicy {
+        a_spawn_policy()
+            .allowing_mount_root(root.to_str().expect("a utf-8 mount root"))
+            .build()
+    }
+
+    #[test]
+    fn accepts_a_mount_source_the_kernel_resolves_inside_its_allowed_root() {
+        // Given
+        let root = a_real_mount_root();
+        let project = root.path().join("alice").join("project");
+        std::fs::create_dir_all(&project).expect("create the source directory");
+
+        // When
+        let resolved = resolve_mount_source(&policy_allowing(root.path()), &project);
+
+        // Then
+        assert_eq!(resolved, Ok(project));
+    }
+
+    #[test]
+    fn denies_a_mount_source_that_leaves_its_allowed_root_through_a_symlink() {
+        // Given the escape a session user can plant for herself: the mount roots are trees she
+        // writes into, so containment by path component says nothing about where the path leads.
+        let root = a_real_mount_root();
+        let escape = root.path().join("esc");
+        std::os::unix::fs::symlink("/", &escape).expect("plant the escape");
+
+        // When
+        let resolved = resolve_mount_source(&policy_allowing(root.path()), &escape);
+
+        // Then — component-wise this *is* under the allowed root, and `mount(2)` would follow it and
+        // bind `/` into the jail.
+        assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    #[test]
+    fn denies_a_mount_source_whose_parent_directory_is_a_symlink_out_of_the_root() {
+        // Given
+        let root = a_real_mount_root();
+        std::os::unix::fs::symlink("/etc", root.path().join("esc")).expect("plant the escape");
+
+        // When
+        let resolved = resolve_mount_source(
+            &policy_allowing(root.path()),
+            &root.path().join("esc/shadow"),
+        );
+
+        // Then — every component is resolved, not just the last one.
+        assert_eq!(resolved, Err(SupervisorError::Denied));
+    }
+
+    #[test]
+    fn accepts_a_mount_source_that_does_not_exist_yet_and_leaves_the_bind_to_refuse_it() {
+        // Given
+        let root = a_real_mount_root();
+        let absent = root.path().join("not-created-yet");
+
+        // When
+        let resolved = resolve_mount_source(&policy_allowing(root.path()), &absent);
+
+        // Then — a policy denial that meant "no such directory" would send an operator looking for a
+        // policy mistake instead of a typo, and there is nothing here for a symlink to point at yet.
+        // The descriptor the child actually binds is resolved the same way, so a source created as a
+        // symlink between now and then is refused there.
+        assert_eq!(resolved, Ok(absent));
+    }
+
+    #[test]
+    fn denies_every_mount_source_on_a_kernel_that_cannot_resolve_one_without_a_symlink_race() {
+        // Given the answer a kernel older than 5.6 gives to `openat2`
+        let unsupported = Err(std::io::Error::from_raw_os_error(libc::ENOSYS));
+
+        // When
+        let contained = containment_of(unsupported);
+
+        // Then — falling back to the path-based check would be falling back to the race this
+        // resolution exists to remove.
+        assert_eq!(contained, Err(SupervisorError::Denied));
     }
 
     #[test]
