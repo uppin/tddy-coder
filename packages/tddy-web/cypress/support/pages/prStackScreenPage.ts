@@ -48,6 +48,14 @@ import {
   TEST_IDS,
 } from "../testIds";
 
+/** The fields the "New planned PR" form collects. Only `title` is required by the form itself. */
+export interface AddPlannedPrFormFields {
+  title: string;
+  description?: string;
+  branchSuggestion?: string;
+  ancestorNodeIds?: string[];
+}
+
 export const prStackScreenPage = {
   // ---------------------------------------------------------------------------
   // Screen root
@@ -398,16 +406,14 @@ export const prStackScreenPage = {
   },
 
   /**
-   * Fill and submit the "New planned PR" form: types the title (and optional description /
-   * branch suggestion), checks the given ancestor node ids, then clicks submit. Assumes the
-   * form is already open.
+   * Fill the "New planned PR" form's fields *without* submitting: types the title (and optional
+   * description / branch suggestion) and checks the given ancestor node ids. Assumes the form is
+   * already open.
+   *
+   * The form has two terminal actions ("Add planned PR" and "Add & start session") that differ only
+   * in the button they click, so the filling lives here once and each action is a thin wrapper.
    */
-  fillAndSubmitAddPlannedPrForm(options: {
-    title: string;
-    description?: string;
-    branchSuggestion?: string;
-    ancestorNodeIds?: string[];
-  }) {
+  fillAddPlannedPrForm(options: AddPlannedPrFormFields) {
     byTestId(TEST_IDS.prStackAddPlannedPrTitleInput).clear().type(options.title);
     if (options.description) {
       byTestId(TEST_IDS.prStackAddPlannedPrDescriptionInput).clear().type(options.description);
@@ -420,8 +426,31 @@ export const prStackScreenPage = {
     for (const nodeId of options.ancestorNodeIds ?? []) {
       byTestId(prStackAddPlannedPrAncestorCheckbox(nodeId)).click();
     }
+  },
+
+  /**
+   * Fill the "New planned PR" form and submit it through "Add planned PR", which appends the node and
+   * leaves it planned for later.
+   */
+  fillAndSubmitAddPlannedPrForm(options: AddPlannedPrFormFields) {
+    prStackScreenPage.fillAddPlannedPrForm(options);
     byTestId(TEST_IDS.prStackAddPlannedPrSubmitBtn).click();
   },
+
+  /**
+   * Fill the "New planned PR" form and submit it through "Add & start session", which adds the node
+   * and opens the Start-session dialog for it in one step. Same fields as
+   * `fillAndSubmitAddPlannedPrForm`, different terminal action — so a test picks the action it means
+   * rather than passing a flag.
+   */
+  fillAddPlannedPrFormAndStartSession(options: AddPlannedPrFormFields) {
+    prStackScreenPage.fillAddPlannedPrForm(options);
+    byTestId(TEST_IDS.prStackAddPlannedPrStartBtn).click();
+  },
+
+  /** The "Add & start session" action on the add-planned-PR form. */
+  addPlannedPrStartBtn: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.prStackAddPlannedPrStartBtn, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Chat window

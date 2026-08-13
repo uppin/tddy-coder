@@ -374,6 +374,7 @@ A toggle at the top of the form switches between:
 | Agent/coder | tool | yes — dropdown from `ListAgents` |
 | Recipe | tool | no — `<select>` with all 9 workflow recipes (default: `tdd`) |
 | PR stack parent | both | conditional — `<select>` listing PR-stack orchestrator sessions; hidden when none exist |
+| Base the stack on | tool | conditional — `<select>` naming the existing session that seeds the new stack's bottom node; shown only while the recipe is `pr-stack` (see [Stack Base Session Picker](#stack-base-session-picker)) |
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
@@ -431,6 +432,29 @@ For **claude-cli** sessions: the daemon writes `orchestrator_session_id` into th
 `resolve_chain_integration_base_ref_from_parent_session` so the child worktree is based off
 `origin/<parent-branch>` (git PR-stack chaining).
 
+### Stack Base Session Picker
+
+> **Added: 2026-08-13** — a new `pr-stack` orchestrator can be created **on top of a session that
+> already exists**, instead of leaving the agent to plan a stack from a feature description.
+
+A **"Base the stack on"** `<select>` (`create-session-pr-stack-base-session-select`) appears when the
+session type is **tool**, the recipe is `pr-stack`, and the pane is not in peer mode. It reads the same
+`ListSessions` fetch as the [parent picker](#pr-stack-parent-picker), filtered by
+`stackBaseSessionCandidates()` in `src/utils/stackParents.ts` to the sessions that **own a branch**, are
+in the form's effective project, are on its effective host, and are not already a node of another
+orchestrator's stack. Options read `<session id> — <branch>`; the default option is empty and reads
+*"None (agent plans the stack)"*.
+
+Choosing one sends `StartSessionRequest.pr_stack_base_session_id` (field 31), and the created
+orchestrator comes up with a one-node stack bound to that session's branch and id, already in its
+`orchestrate` operator loop. Switching project or host clears the choice, and the field is only ever
+sent while the recipe is still `pr-stack`.
+
+The daemon validates the choice **before it spawns anything**, so a base session that cannot seed a
+stack (no branch, unresolvable, another repository, already owned by another orchestrator) is reported
+in the form's own error strip and nothing is created. Rules, refusals and the seeded node's contents:
+[PR stacking § Seeding the stack from an existing session](../coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13).
+
 ### Post-Create
 
 On success, `SessionsDrawerScreen` navigates to `/sessions/:newId` and auto-attaches
@@ -460,7 +484,7 @@ interface CreateSessionPaneProps {
 - `ListProjects` — project dropdown
 - `ListTools` — auto-select tool binary
 - `ListAgents` — agent dropdown (tool sessions)
-- `ListSessions` — populate PR stack parent picker (best-effort; failure hides the picker)
+- `ListSessions` — populate the PR stack parent picker and the stack-base picker from one fetch (best-effort; failure hides both)
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
 - `StartSession` — create + start the session
 
@@ -756,6 +780,19 @@ CTA rather than in place of it:
 > [PR-Stack live status § Repointing a dead-end planned PR](../coder/pr-stack-live-status.md#repointing-a-dead-end-planned-pr-added-2026-07-26).
 > The Repoint control reads **"Repoint to `<target>`"** (`pr-stack-repoint-<nodeId>`), is disabled while
 > its call is in flight, and reports a refusal inline as `pr-stack-repoint-error-<nodeId>`.
+
+**"+ New planned PR" can start the node's session too** *(2026-08-13)*. The add form
+(`pr-stack-add-planned-pr-form`) carries two submits: **"Add planned PR"**
+(`pr-stack-add-planned-pr-submit-btn`), which only appends the node, and **"Add & start session"**
+(`pr-stack-add-planned-pr-start-btn`), which appends it and then opens the same
+[Start session](#start-session-cta) dialog the new row's CTA would open — pre-filled identically —
+so adding a PR and starting work on it is one action rather than a hunt for the row that was just
+added. The node is identified by `AddPlannedPrResponse.node_id`, named by the daemon rather than
+inferred by diffing the returned plan: the orchestrator agent appends to the same stack, so one
+response can carry several ids the panel has never seen. A response whose plan does not contain the
+node it named still updates the list — the node was appended — but starts nothing and says so in the
+form's error strip. See
+[PR stacking § Add and start in one step](../coder/pr-stacking.md#add-and-start-in-one-step-added-2026-08-13).
 
 ### Start session CTA
 

@@ -463,6 +463,10 @@ message StartSessionRequest {
   // Opt-in by design: only a surface that can prompt an operator asks to be rejected. See
   // docs/ft/daemon/session-branch-conflict.md.
   string on_branch_conflict = 30;
+  // Existing session whose branch seeds a new pr-stack orchestrator's stack as its single root
+  // node. Refused unless `recipe` resolves to "pr-stack". Empty leaves the stack unseeded, which is
+  // the pre-existing behaviour (the agent plans it).
+  string pr_stack_base_session_id = 31;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -1218,6 +1222,12 @@ message AddPlannedPrResponse {
   // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23)
   // — callers re-use the existing `parseStackPlan` parser rather than a second message schema.
   string stack_plan_json = 1;
+  // Node id of the node this call appended, assigned server-side. Named explicitly because the
+  // caller cannot infer it: the orchestrator agent appends nodes too, so a plan returned to a web
+  // client that last refreshed one poll ago can hold more than one node the client has never seen,
+  // and picking any of them by position would open the "Add & start session" dialog on somebody
+  // else's node. See docs/ft/coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13.
+  string node_id = 2;
 }
 
 // --- PR-Stack Chat Screen: live PR status & repoint (docs/ft/coder/pr-stack-live-status.md) ---

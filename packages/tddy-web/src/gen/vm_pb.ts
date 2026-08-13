@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vm.proto.
  */
 export const file_vm: GenFile = /*@__PURE__*/
-  fileDesc("Cgh2bS5wcm90bxICdm0iRAoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDmJ1aWxkcm9vdF9zcGVjGAIgASgJIugBChRCdWlsZFZtSW1hZ2VQcm9ncmVzcxItCgVzdGFnZRgBIAEoDjIeLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCSJ8CgVTdGFnZRIRCg1TVEFHRV9VTktOT1dOEAASFQoRU1RBR0VfQ09ORklHVVJJTkcQARISCg5TVEFHRV9CVUlMRElORxACEhQKEFNUQUdFX0NPTlZFUlRJTkcQAxIOCgpTVEFHRV9ET05FEAQSDwoLU1RBR0VfRVJST1IQBSI2Cg1WbVBvcnRGb3J3YXJkEhEKCWhvc3RfcG9ydBgBIAEoDRISCgpndWVzdF9wb3J0GAIgASgNIoYBCgtWbVNwZWNQcm90bxIMCgRuYW1lGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCRISCgppbWFnZV9wYXRoGAMgASgJEigKDXBvcnRfZm9yd2FyZHMYBCADKAsyES52bS5WbVBvcnRGb3J3YXJkEhUKDXNzaF9ob3N0X3BvcnQYBSABKA0iRwoPRGVmaW5lVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSHQoEc3BlYxgCIAEoCzIPLnZtLlZtU3BlY1Byb3RvIi8KEERlZmluZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJzCgZWbUluZm8SDAoEbmFtZRgBIAEoCRIaCgVzdGF0ZRgCIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgDIAEoDRIRCglzaGFyZV91cmwYBCABKAkSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSInCg5MaXN0Vm1zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIioKD0xpc3RWbXNSZXNwb25zZRIXCgN2bXMYASADKAsyCi52bS5WbUluZm8iLAoTTGlzdFZtSW1hZ2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIlcKC1ZtSW1hZ2VJbmZvEgwKBHBhdGgYASABKAkSDAoEbmFtZRgCIAEoCRISCgpzaXplX2J5dGVzGAMgASgEEhgKEG1vZGlmaWVkX3VuaXhfbXMYBCABKAQiNwoUTGlzdFZtSW1hZ2VzUmVzcG9uc2USHwoGaW1hZ2VzGAEgAygLMg8udm0uVm1JbWFnZUluZm8iNQoOU3RhcnRWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIj4KD1N0YXJ0Vm1SZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSDwoHbWVzc2FnZRgCIAEoCSI0Cg1TdG9wVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSItCg5TdG9wVm1SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjkKEkdldFZtU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkibAoTR2V0Vm1TdGF0dXNSZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIRCglzaGFyZV91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCSI2Cg9SZW1vdmVWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIi8KEFJlbW92ZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSqLAQoHVm1TdGF0ZRIUChBWTV9TVEFURV9VTktOT1dOEAASFAoQVk1fU1RBVEVfREVGSU5FRBABEhQKEFZNX1NUQVRFX0JPT1RJTkcQAhIUChBWTV9TVEFURV9SVU5OSU5HEAMSFAoQVk1fU1RBVEVfU1RPUFBFRBAEEhIKDlZNX1NUQVRFX0VSUk9SEAUy2gMKCVZtU2VydmljZRJDCgxCdWlsZFZtSW1hZ2USFy52bS5CdWlsZFZtSW1hZ2VSZXF1ZXN0Ghgudm0uQnVpbGRWbUltYWdlUHJvZ3Jlc3MwARI1CghEZWZpbmVWbRITLnZtLkRlZmluZVZtUmVxdWVzdBoULnZtLkRlZmluZVZtUmVzcG9uc2USMgoHTGlzdFZtcxISLnZtLkxpc3RWbXNSZXF1ZXN0GhMudm0uTGlzdFZtc1Jlc3BvbnNlEkEKDExpc3RWbUltYWdlcxIXLnZtLkxpc3RWbUltYWdlc1JlcXVlc3QaGC52bS5MaXN0Vm1JbWFnZXNSZXNwb25zZRIyCgdTdGFydFZtEhIudm0uU3RhcnRWbVJlcXVlc3QaEy52bS5TdGFydFZtUmVzcG9uc2USLwoGU3RvcFZtEhEudm0uU3RvcFZtUmVxdWVzdBoSLnZtLlN0b3BWbVJlc3BvbnNlEj4KC0dldFZtU3RhdHVzEhYudm0uR2V0Vm1TdGF0dXNSZXF1ZXN0Ghcudm0uR2V0Vm1TdGF0dXNSZXNwb25zZRI1CghSZW1vdmVWbRITLnZtLlJlbW92ZVZtUmVxdWVzdBoULnZtLlJlbW92ZVZtUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("Cgh2bS5wcm90bxICdm0iRAoTQnVpbGRWbUltYWdlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhYKDmJ1aWxkcm9vdF9zcGVjGAIgASgJIugBChRCdWlsZFZtSW1hZ2VQcm9ncmVzcxItCgVzdGFnZRgBIAEoDjIeLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSEgoKaW1hZ2VfcGF0aBgDIAEoCSJ8CgVTdGFnZRIRCg1TVEFHRV9VTktOT1dOEAASFQoRU1RBR0VfQ09ORklHVVJJTkcQARISCg5TVEFHRV9CVUlMRElORxACEhQKEFNUQUdFX0NPTlZFUlRJTkcQAxIOCgpTVEFHRV9ET05FEAQSDwoLU1RBR0VfRVJST1IQBSI2Cg1WbVBvcnRGb3J3YXJkEhEKCWhvc3RfcG9ydBgBIAEoDRISCgpndWVzdF9wb3J0GAIgASgNIoYBCgtWbVNwZWNQcm90bxIMCgRuYW1lGAEgASgJEhQKDGJ1aWxkX3RhcmdldBgCIAEoCRISCgppbWFnZV9wYXRoGAMgASgJEigKDXBvcnRfZm9yd2FyZHMYBCADKAsyES52bS5WbVBvcnRGb3J3YXJkEhUKDXNzaF9ob3N0X3BvcnQYBSABKA0iRwoPRGVmaW5lVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSHQoEc3BlYxgCIAEoCzIPLnZtLlZtU3BlY1Byb3RvIi8KEERlZmluZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJzCgZWbUluZm8SDAoEbmFtZRgBIAEoCRIaCgVzdGF0ZRgCIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgDIAEoDRIRCglzaGFyZV91cmwYBCABKAkSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSInCg5MaXN0Vm1zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIioKD0xpc3RWbXNSZXNwb25zZRIXCgN2bXMYASADKAsyCi52bS5WbUluZm8iLAoTTGlzdFZtSW1hZ2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIlcKC1ZtSW1hZ2VJbmZvEgwKBHBhdGgYASABKAkSDAoEbmFtZRgCIAEoCRISCgpzaXplX2J5dGVzGAMgASgEEhgKEG1vZGlmaWVkX3VuaXhfbXMYBCABKAQiNwoUTGlzdFZtSW1hZ2VzUmVzcG9uc2USHwoGaW1hZ2VzGAEgAygLMg8udm0uVm1JbWFnZUluZm8iNQoOU3RhcnRWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIj4KD1N0YXJ0Vm1SZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSDwoHbWVzc2FnZRgCIAEoCSI0Cg1TdG9wVm1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCSItCg5TdG9wVm1SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjkKEkdldFZtU3RhdHVzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEgwKBG5hbWUYAiABKAkibAoTR2V0Vm1TdGF0dXNSZXNwb25zZRIaCgVzdGF0ZRgBIAEoDjILLnZtLlZtU3RhdGUSFQoNc3NoX2hvc3RfcG9ydBgCIAEoDRIRCglzaGFyZV91cmwYAyABKAkSDwoHbWVzc2FnZRgEIAEoCSI2Cg9SZW1vdmVWbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJIi8KEFJlbW92ZVZtUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSKhAQoQVm1SdW5Qb2xpY3lQcm90bxIOCgZtZW1vcnkYASABKAkSDAoEY3B1cxgCIAEoDRIRCglkaXNrX3NpemUYAyABKAkSFQoNc3NoX2hvc3RfcG9ydBgEIAEoDRIoCg1wb3J0X2ZvcndhcmRzGAUgAygLMhEudm0uVm1Qb3J0Rm9yd2FyZBIMCgRhcmNoGAYgASgJEg0KBWFjY2VsGAcgASgJIlgKD1RkZHlIb3N0TGl2ZUtpdBILCgN1cmwYASABKAkSDwoHYXBpX2tleRgCIAEoCRISCgphcGlfc2VjcmV0GAMgASgJEhMKC2NvbW1vbl9yb29tGAQgASgJIs8BChlCdWlsZFRkZHlIb3N0SW1hZ2VSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSDAoEbmFtZRgCIAEoCRIXCg9iYXNlX2ltYWdlX25hbWUYAyABKAkSFwoPYmFzZV9pbWFnZV9wYXRoGAQgASgJEhIKCnNvdXJjZV9kaXIYBSABKAkSJAoHbGl2ZWtpdBgGIAEoCzITLnZtLlRkZHlIb3N0TGl2ZUtpdBIhCgNydW4YByABKAsyFC52bS5WbVJ1blBvbGljeVByb3RvIvUBChpCdWlsZFRkZHlIb3N0SW1hZ2VQcm9ncmVzcxIzCgVzdGFnZRgBIAEoDjIkLnZtLkJ1aWxkVGRkeUhvc3RJbWFnZVByb2dyZXNzLlN0YWdlEg8KB21lc3NhZ2UYAiABKAkSGgoScHJlcGFyZWRfYmFzZV9uYW1lGAMgASgJInUKBVN0YWdlEhEKDVNUQUdFX1VOS05PV04QABITCg9TVEFHRV9JTVBPUlRJTkcQARIRCg1TVEFHRV9TRUVESU5HEAISEAoMU1RBR0VfQkFLSU5HEAMSDgoKU1RBR0VfRE9ORRAEEg8KC1NUQUdFX0VSUk9SEAUilgEKH0NyZWF0ZVZtRnJvbVByZXBhcmVkQmFzZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIMCgRuYW1lGAIgASgJEhUKDXByZXBhcmVkX2Jhc2UYAyABKAkSIQoDcnVuGAQgASgLMhQudm0uVm1SdW5Qb2xpY3lQcm90bxIUCgxzc2hfdXNlcm5hbWUYBSABKAkibQogQ3JlYXRlVm1Gcm9tUHJlcGFyZWRCYXNlUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIUCgxvdmVybGF5X3BhdGgYAyABKAkSFgoOc3NoX3B1YmxpY19rZXkYBCABKAkqiwEKB1ZtU3RhdGUSFAoQVk1fU1RBVEVfVU5LTk9XThAAEhQKEFZNX1NUQVRFX0RFRklORUQQARIUChBWTV9TVEFURV9CT09USU5HEAISFAoQVk1fU1RBVEVfUlVOTklORxADEhQKEFZNX1NUQVRFX1NUT1BQRUQQBBISCg5WTV9TVEFURV9FUlJPUhAFMpgFCglWbVNlcnZpY2USQwoMQnVpbGRWbUltYWdlEhcudm0uQnVpbGRWbUltYWdlUmVxdWVzdBoYLnZtLkJ1aWxkVm1JbWFnZVByb2dyZXNzMAESNQoIRGVmaW5lVm0SEy52bS5EZWZpbmVWbVJlcXVlc3QaFC52bS5EZWZpbmVWbVJlc3BvbnNlEjIKB0xpc3RWbXMSEi52bS5MaXN0Vm1zUmVxdWVzdBoTLnZtLkxpc3RWbXNSZXNwb25zZRJBCgxMaXN0Vm1JbWFnZXMSFy52bS5MaXN0Vm1JbWFnZXNSZXF1ZXN0Ghgudm0uTGlzdFZtSW1hZ2VzUmVzcG9uc2USMgoHU3RhcnRWbRISLnZtLlN0YXJ0Vm1SZXF1ZXN0GhMudm0uU3RhcnRWbVJlc3BvbnNlEi8KBlN0b3BWbRIRLnZtLlN0b3BWbVJlcXVlc3QaEi52bS5TdG9wVm1SZXNwb25zZRI+CgtHZXRWbVN0YXR1cxIWLnZtLkdldFZtU3RhdHVzUmVxdWVzdBoXLnZtLkdldFZtU3RhdHVzUmVzcG9uc2USNQoIUmVtb3ZlVm0SEy52bS5SZW1vdmVWbVJlcXVlc3QaFC52bS5SZW1vdmVWbVJlc3BvbnNlElUKEkJ1aWxkVGRkeUhvc3RJbWFnZRIdLnZtLkJ1aWxkVGRkeUhvc3RJbWFnZVJlcXVlc3QaHi52bS5CdWlsZFRkZHlIb3N0SW1hZ2VQcm9ncmVzczABEmUKGENyZWF0ZVZtRnJvbVByZXBhcmVkQmFzZRIjLnZtLkNyZWF0ZVZtRnJvbVByZXBhcmVkQmFzZVJlcXVlc3QaJC52bS5DcmVhdGVWbUZyb21QcmVwYXJlZEJhc2VSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message vm.BuildVmImageRequest
@@ -545,6 +545,306 @@ export const RemoveVmResponseSchema: GenMessage<RemoveVmResponse> = /*@__PURE__*
   messageDesc(file_vm, 19);
 
 /**
+ * How a VM is run: resources, network, and the emulation target.
+ *
+ * @generated from message vm.VmRunPolicyProto
+ */
+export type VmRunPolicyProto = Message<"vm.VmRunPolicyProto"> & {
+  /**
+   * QEMU -m syntax, e.g. "2048M"
+   *
+   * @generated from field: string memory = 1;
+   */
+  memory: string;
+
+  /**
+   * @generated from field: uint32 cpus = 2;
+   */
+  cpus: number;
+
+  /**
+   * qemu-img size for the mutable overlay, e.g. "40G"
+   *
+   * @generated from field: string disk_size = 3;
+   */
+  diskSize: string;
+
+  /**
+   * @generated from field: uint32 ssh_host_port = 4;
+   */
+  sshHostPort: number;
+
+  /**
+   * @generated from field: repeated vm.VmPortForward port_forwards = 5;
+   */
+  portForwards: VmPortForward[];
+
+  /**
+   * "aarch64" | "x86_64"; empty means the host's architecture
+   *
+   * @generated from field: string arch = 6;
+   */
+  arch: string;
+
+  /**
+   * "hvf" | "kvm" | "tcg"; empty means the host's best accelerator
+   *
+   * @generated from field: string accel = 7;
+   */
+  accel: string;
+};
+
+/**
+ * Describes the message vm.VmRunPolicyProto.
+ * Use `create(VmRunPolicyProtoSchema)` to create a new message.
+ */
+export const VmRunPolicyProtoSchema: GenMessage<VmRunPolicyProto> = /*@__PURE__*/
+  messageDesc(file_vm, 20);
+
+/**
+ * The LiveKit common room the baked guest daemon announces itself on, so the operator's
+ * other daemons discover it as a peer.
+ *
+ * @generated from message vm.TddyHostLiveKit
+ */
+export type TddyHostLiveKit = Message<"vm.TddyHostLiveKit"> & {
+  /**
+   * @generated from field: string url = 1;
+   */
+  url: string;
+
+  /**
+   * @generated from field: string api_key = 2;
+   */
+  apiKey: string;
+
+  /**
+   * @generated from field: string api_secret = 3;
+   */
+  apiSecret: string;
+
+  /**
+   * @generated from field: string common_room = 4;
+   */
+  commonRoom: string;
+};
+
+/**
+ * Describes the message vm.TddyHostLiveKit.
+ * Use `create(TddyHostLiveKitSchema)` to create a new message.
+ */
+export const TddyHostLiveKitSchema: GenMessage<TddyHostLiveKit> = /*@__PURE__*/
+  messageDesc(file_vm, 21);
+
+/**
+ * @generated from message vm.BuildTddyHostImageRequest
+ */
+export type BuildTddyHostImageRequest = Message<"vm.BuildTddyHostImageRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * prepared-base name, e.g. "debian-12-tddy"
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * imported base image name in images/01-base, e.g. "debian-12"
+   *
+   * @generated from field: string base_image_name = 3;
+   */
+  baseImageName: string;
+
+  /**
+   * caller-supplied Debian cloud image; never downloaded here
+   *
+   * @generated from field: string base_image_path = 4;
+   */
+  baseImagePath: string;
+
+  /**
+   * operator's working copy, attached read-only over virtio-9p
+   *
+   * @generated from field: string source_dir = 5;
+   */
+  sourceDir: string;
+
+  /**
+   * @generated from field: vm.TddyHostLiveKit livekit = 6;
+   */
+  livekit?: TddyHostLiveKit;
+
+  /**
+   * Resources for the baking VM, and the arch/accel VMs created from the result will run
+   * under. The bake itself always runs on the host architecture with the host's
+   * accelerator — an emulated cross-architecture bake of a real distro image is not viable.
+   *
+   * @generated from field: vm.VmRunPolicyProto run = 7;
+   */
+  run?: VmRunPolicyProto;
+};
+
+/**
+ * Describes the message vm.BuildTddyHostImageRequest.
+ * Use `create(BuildTddyHostImageRequestSchema)` to create a new message.
+ */
+export const BuildTddyHostImageRequestSchema: GenMessage<BuildTddyHostImageRequest> = /*@__PURE__*/
+  messageDesc(file_vm, 22);
+
+/**
+ * @generated from message vm.BuildTddyHostImageProgress
+ */
+export type BuildTddyHostImageProgress = Message<"vm.BuildTddyHostImageProgress"> & {
+  /**
+   * @generated from field: vm.BuildTddyHostImageProgress.Stage stage = 1;
+   */
+  stage: BuildTddyHostImageProgress_Stage;
+
+  /**
+   * serial-console line or error description
+   *
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * populated only when stage == STAGE_DONE
+   *
+   * @generated from field: string prepared_base_name = 3;
+   */
+  preparedBaseName: string;
+};
+
+/**
+ * Describes the message vm.BuildTddyHostImageProgress.
+ * Use `create(BuildTddyHostImageProgressSchema)` to create a new message.
+ */
+export const BuildTddyHostImageProgressSchema: GenMessage<BuildTddyHostImageProgress> = /*@__PURE__*/
+  messageDesc(file_vm, 23);
+
+/**
+ * @generated from enum vm.BuildTddyHostImageProgress.Stage
+ */
+export enum BuildTddyHostImageProgress_Stage {
+  /**
+   * @generated from enum value: STAGE_UNKNOWN = 0;
+   */
+  UNKNOWN = 0,
+
+  /**
+   * @generated from enum value: STAGE_IMPORTING = 1;
+   */
+  IMPORTING = 1,
+
+  /**
+   * @generated from enum value: STAGE_SEEDING = 2;
+   */
+  SEEDING = 2,
+
+  /**
+   * @generated from enum value: STAGE_BAKING = 3;
+   */
+  BAKING = 3,
+
+  /**
+   * @generated from enum value: STAGE_DONE = 4;
+   */
+  DONE = 4,
+
+  /**
+   * @generated from enum value: STAGE_ERROR = 5;
+   */
+  ERROR = 5,
+}
+
+/**
+ * Describes the enum vm.BuildTddyHostImageProgress.Stage.
+ */
+export const BuildTddyHostImageProgress_StageSchema: GenEnum<BuildTddyHostImageProgress_Stage> = /*@__PURE__*/
+  enumDesc(file_vm, 23, 0);
+
+/**
+ * @generated from message vm.CreateVmFromPreparedBaseRequest
+ */
+export type CreateVmFromPreparedBaseRequest = Message<"vm.CreateVmFromPreparedBaseRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * name of a prepared base in images/02-prepared-base
+   *
+   * @generated from field: string prepared_base = 3;
+   */
+  preparedBase: string;
+
+  /**
+   * @generated from field: vm.VmRunPolicyProto run = 4;
+   */
+  run?: VmRunPolicyProto;
+
+  /**
+   * must match the account baked into the prepared base
+   *
+   * @generated from field: string ssh_username = 5;
+   */
+  sshUsername: string;
+};
+
+/**
+ * Describes the message vm.CreateVmFromPreparedBaseRequest.
+ * Use `create(CreateVmFromPreparedBaseRequestSchema)` to create a new message.
+ */
+export const CreateVmFromPreparedBaseRequestSchema: GenMessage<CreateVmFromPreparedBaseRequest> = /*@__PURE__*/
+  messageDesc(file_vm, 24);
+
+/**
+ * @generated from message vm.CreateVmFromPreparedBaseResponse
+ */
+export type CreateVmFromPreparedBaseResponse = Message<"vm.CreateVmFromPreparedBaseResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * vm/<name>/<name>.qcow2
+   *
+   * @generated from field: string overlay_path = 3;
+   */
+  overlayPath: string;
+
+  /**
+   * the generated per-VM public key, for the caller to record
+   *
+   * @generated from field: string ssh_public_key = 4;
+   */
+  sshPublicKey: string;
+};
+
+/**
+ * Describes the message vm.CreateVmFromPreparedBaseResponse.
+ * Use `create(CreateVmFromPreparedBaseResponseSchema)` to create a new message.
+ */
+export const CreateVmFromPreparedBaseResponseSchema: GenMessage<CreateVmFromPreparedBaseResponse> = /*@__PURE__*/
+  messageDesc(file_vm, 25);
+
+/**
  * @generated from enum vm.VmState
  */
 export enum VmState {
@@ -652,6 +952,24 @@ export const VmService: GenService<{
     methodKind: "unary";
     input: typeof RemoveVmRequestSchema;
     output: typeof RemoveVmResponseSchema;
+  },
+  /**
+   * Daemon-spawned tddy host VM: bake once, create many.
+   *
+   * @generated from rpc vm.VmService.BuildTddyHostImage
+   */
+  buildTddyHostImage: {
+    methodKind: "server_streaming";
+    input: typeof BuildTddyHostImageRequestSchema;
+    output: typeof BuildTddyHostImageProgressSchema;
+  },
+  /**
+   * @generated from rpc vm.VmService.CreateVmFromPreparedBase
+   */
+  createVmFromPreparedBase: {
+    methodKind: "unary";
+    input: typeof CreateVmFromPreparedBaseRequestSchema;
+    output: typeof CreateVmFromPreparedBaseResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_vm, 0);

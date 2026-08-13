@@ -281,6 +281,27 @@ export function PrStackScreen({
       childRecipe: "",
     });
     setStackPlanOverride(res.stackPlanJson);
+    if (input.startSession) {
+      // The node the server says it created. Deliberately NOT the node this plan has and the one
+      // held before the call did not: the orchestrator *agent* appends nodes to the same stack, and
+      // `stack` only refreshes when the session list is refetched — so within one poll interval the
+      // returned plan can hold several ids this screen has never seen, and any positional pick
+      // (first, last) could open the dialog on the agent's node instead of the operator's.
+      const added = parseStackPlan(res.stackPlanJson).nodes.find(
+        (node) => node.nodeId === res.nodeId,
+      );
+      if (!added) {
+        // The node the response named is absent from the plan the same response carried — the two
+        // halves disagree, so there is nothing trustworthy to start. Reported through the form
+        // (which stays open) rather than starting a session for a guessed node.
+        throw new Error(
+          "The added planned PR is missing from the returned stack plan — no session was started.",
+        );
+      }
+      // The same path the row's own "Start session" CTA takes, so the dialog and its pre-filled
+      // values are derived once.
+      setStartSessionNode(added);
+    }
     setIsAddingPlannedPr(false);
   };
 

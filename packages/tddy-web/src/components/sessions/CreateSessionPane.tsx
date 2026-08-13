@@ -11,7 +11,7 @@ import {
   type BranchFieldOverrides,
   type BranchWorktreeIntent,
 } from "../../lib/branchConflict";
-import { prStackOrchestrators } from "../../utils/stackParents";
+import { prStackOrchestrators, stackBaseSessionCandidates } from "../../utils/stackParents";
 import { useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useAgentModels } from "../../rpc/useAgentModels";
 import {
@@ -144,6 +144,10 @@ export function CreateSessionPane({
   const [agent, setAgent] = useState("");
   const [recipe, setRecipe] = useState(initialValues?.recipe ?? "tdd");
   const [stackParent, setStackParent] = useState(initialValues?.stackParent ?? "");
+  // The existing session whose branch seeds a new pr-stack orchestrator's stack as its single root
+  // node. Empty leaves the stack unseeded, which is what every caller sent before this control
+  // existed — the agent then plans it.
+  const [prStackBaseSessionId, setPrStackBaseSessionId] = useState("");
   const [toolPath, setToolPath] = useState("");
   const [model, setModel] = useState(initialValues?.model ?? "");
   const [permissionMode, setPermissionMode] = useState(initialValues?.permissionMode ?? "auto");
@@ -182,6 +186,9 @@ export function CreateSessionPane({
   const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
   const [managedCodebase, setManagedCodebase] = useState(false);
   const [semanticIndex, setSemanticIndex] = useState(false);
+  // The whole session list as the daemon reported it. Kept raw because two pickers draw different
+  // views of it — the orchestrators that can parent this session, and the sessions that own a branch
+  // a stack can be seeded from — and one fetch feeds both.
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -193,6 +200,9 @@ export function CreateSessionPane({
   // One option per logical project: aggregated `ListProjects` returns a row per (project, host), and
   // this form's Project selector submits only a project id (the host has its own selector).
   const projectOptions = useMemo(() => projectSelectOptions(projects), [projects]);
+
+  // The orchestrators this session can be stack-parented to.
+  const stackParentOptions = useMemo(() => prStackOrchestrators(sessions), [sessions]);
 
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
@@ -225,11 +235,11 @@ export function CreateSessionPane({
       .listSessions({ sessionToken })
       .then((resp) => {
         if (cancelled) return;
-        const loadedSessions = prStackOrchestrators(resp.sessions as SessionEntry[]);
-        setSessions(loadedSessions);
+        setSessions(resp.sessions as SessionEntry[]);
       })
       .catch(() => {
-        // Session list is best-effort; failing to fetch it just hides the parent picker.
+        // Session list is best-effort; failing to fetch it just leaves the stack-parent and
+        // stack-base pickers with nothing to offer.
       });
 
     // Fetch subagents separately (best-effort, like sessions above) — a daemon that doesn't
@@ -333,6 +343,26 @@ export function CreateSessionPane({
     ? (initialValues?.daemonInstanceId ?? "")
     : daemonInstanceId;
 
+  // The sessions whose branch can seed this orchestrator's stack — scoped to the project and host
+  // the form will actually create it on, because a base session in another repository (or on another
+  // daemon's checkout) owns a branch this stack cannot base anything off. Derived here rather than
+  // beside the parent picker above because it depends on the effective project/host resolved just now.
+  const stackBaseSessionOptions = useMemo(
+    () =>
+      stackBaseSessionCandidates(sessions, {
+        projectId: effectiveProjectId,
+        daemonInstanceId: effectiveDaemonInstanceId,
+      }),
+    [sessions, effectiveProjectId, effectiveDaemonInstanceId],
+  );
+
+  // A base session belongs to one project on one host, so switching either abandons the choice. Reset
+  // it *visibly* — the control returns to "None (agent plans the stack)", which is what submit would
+  // now do — instead of leaving a value the picker no longer offers selected behind a blank <select>.
+  useEffect(() => {
+    setPrStackBaseSessionId("");
+  }, [effectiveProjectId, effectiveDaemonInstanceId]);
+
   // The attach rows and everything that follows from them: the effective size cap, the refusal shown
   // next to a bad row, the upload of local files on submit, and the streamed start that reports the
   // host's materialization progress.
@@ -410,6 +440,11 @@ export function CreateSessionPane({
         agent,
         recipe,
         stackParent,
+        // Only the tool branch can create an orchestrator, so only it can name a session to seed the
+        // orchestrator's stack from. Sent only for the recipe whose picker offered it — the daemon
+        // refuses a base session named beside any other recipe rather than dropping it silently, so a
+        // choice made before switching recipes must not leak into the request.
+        prStackBaseSessionId: recipe === "pr-stack" ? prStackBaseSessionId : "",
         sessionType: "",
         model,
         permissionMode: "",
@@ -689,6 +724,35 @@ export function CreateSessionPane({
             </select>
           </div>
 
+          {/* Base the stack on — seeds the new orchestrator's stack with one existing session's
+              branch as its single root node, instead of leaving the agent to plan a stack it cannot
+              know about. Hangs off the recipe rather than the branch mode: an orchestrator has no
+              branch of its own, so there is no branch mode for the control to qualify. Hidden in peer
+              mode, where the pane creates a peer on another session's worktree, not an orchestrator. */}
+          {recipe === "pr-stack" && !peerMode && (
+            <div>
+              <label className={labelClass} htmlFor="create-session-pr-stack-base-session">
+                Base the stack on
+              </label>
+              <select
+                id="create-session-pr-stack-base-session"
+                data-testid="create-session-pr-stack-base-session-select"
+                className={inputClass}
+                value={prStackBaseSessionId}
+                onChange={(e) => setPrStackBaseSessionId(e.target.value)}
+              >
+                <option value="">None (agent plans the stack)</option>
+                {/* Labelled by the branch as well as the id: the branch is what the seeded node is
+                    bound to, and what every descendant is based on. */}
+                {stackBaseSessionOptions.map((s) => (
+                  <option key={s.sessionId} value={s.sessionId}>
+                    {`${s.sessionId} — ${s.branch}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {modelField}
         </>
       )}
@@ -950,7 +1014,7 @@ export function CreateSessionPane({
 
       {/* PR stack parent picker — shown for both session types when orchestrators are available.
           Hidden in peer mode: the peer's parent is locked to the orchestrating session. */}
-      {sessions.length > 0 && !peerMode && (
+      {stackParentOptions.length > 0 && !peerMode && (
         <div>
           <label className={labelClass} htmlFor="create-session-stack-parent">
             PR stack parent
@@ -963,7 +1027,7 @@ export function CreateSessionPane({
             onChange={(e) => setStackParent(e.target.value)}
           >
             <option value="">None (standalone session)</option>
-            {sessions.map((s) => (
+            {stackParentOptions.map((s) => (
               <option key={s.sessionId} value={s.sessionId}>
                 {s.sessionId}
               </option>

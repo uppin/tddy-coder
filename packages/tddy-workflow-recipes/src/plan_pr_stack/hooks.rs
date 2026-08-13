@@ -168,7 +168,10 @@ impl RunnerHooks for PlanPrStackHooks {
                 std::fs::write(dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
                     .map_err(|e| format!("write {PR_STACK_PLAN_MD_BASENAME}: {e}"))?;
 
-                set_changeset_state(&dir, WorkflowState::new("StackPlanned"));
+                set_changeset_state(
+                    &dir,
+                    WorkflowState::new(crate::pr_stack::STATE_STACK_PLANNED),
+                );
             }
             _ => {}
         }
