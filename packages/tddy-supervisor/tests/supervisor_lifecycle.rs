@@ -3,11 +3,17 @@
 
 mod support;
 
-use support::{
-    a_service, a_supervisor, process_is_alive, ServiceListAssertions, ServiceStatusAssertions,
-};
+use support::{a_service, a_supervisor, ServiceListAssertions};
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
+use support::{process_is_alive, ServiceStatusAssertions};
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 use tddy_supervisor::ServiceState;
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn starts_every_declared_service_and_reports_it_running() {
     // Given
@@ -49,6 +55,9 @@ async fn reports_every_declared_service_in_declaration_order() {
     services.assert_names_in_order(&["tddy-daemon", "tddy-relay"]);
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn restarts_a_managed_service_that_exits_and_reports_a_new_pid() {
     // Given
@@ -80,6 +89,9 @@ async fn restarts_a_managed_service_that_exits_and_reports_a_new_pid() {
     );
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stops_restarting_a_service_once_the_retry_ceiling_is_reached() {
     // Given
@@ -107,6 +119,9 @@ async fn stops_restarting_a_service_once_the_retry_ceiling_is_reached() {
     );
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn terminates_every_managed_service_when_the_supervisor_is_asked_to_shut_down() {
     // Given

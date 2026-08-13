@@ -7,9 +7,11 @@
 mod support;
 
 use support::{
-    a_service, a_supervisor, a_tool_that_records_its_parent, current_username, process_is_alive,
-    DenialAssertions,
+    a_service, a_supervisor, a_tool_that_records_its_parent, current_username, DenialAssertions,
 };
+// Only the spawning test below looks at a live child, and that test is Linux-only.
+#[cfg(target_os = "linux")]
+use support::process_is_alive;
 use tddy_supervisor::SpawnSessionRequest;
 
 fn a_session_spawn(os_user: &str, tool_path: &std::path::Path) -> SpawnSessionRequest {
@@ -90,6 +92,9 @@ async fn rejects_a_session_spawn_for_a_tool_path_outside_the_allowlist() {
     result.assert_denied_without_disclosure();
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn spawns_an_allowlisted_tool_for_an_allowlisted_user_as_a_child_of_the_supervisor() {
     // Given

@@ -76,6 +76,24 @@ pub struct SpawnRequest {
     /// spawner synthesizes a minimal config from `child_log_level` / `child_log_format`.
     #[serde(default)]
     pub coder_log_config_yaml: Option<String>,
+    /// How long the worker watches the spawned child for an immediate exit (daemon
+    /// `spawn_startup_grace_period_ms`). It travels with the request because the worker is forked
+    /// before the daemon's config is even env-overridden, so it cannot read it. Omit in JSON for
+    /// legacy clients.
+    #[serde(default = "default_startup_grace_period_ms")]
+    pub startup_grace_period_ms: u64,
+    /// How often that watch polls (daemon `spawn_startup_poll_interval_ms`). Omit in JSON for
+    /// legacy clients.
+    #[serde(default = "default_startup_poll_interval_ms")]
+    pub startup_poll_interval_ms: u64,
+}
+
+fn default_startup_grace_period_ms() -> u64 {
+    spawner::StartupWatch::default().as_millis().0
+}
+
+fn default_startup_poll_interval_ms() -> u64 {
+    spawner::StartupWatch::default().as_millis().1
 }
 
 fn default_child_log_level() -> String {
@@ -324,6 +342,10 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
                     req.coder_log_config_yaml.as_deref(),
+                    spawner::StartupWatch::from_millis(
+                        req.startup_grace_period_ms,
+                        req.startup_poll_interval_ms,
+                    ),
                 );
                 log::info!(
                     "spawn_worker: spawn_as_user returned session_id={}",
@@ -396,8 +418,10 @@ pub fn build_spawn_request(
     opts: SpawnOptions<'_>,
     daemon_log: Option<&tddy_core::LogConfig>,
     coder_log_config_yaml: Option<String>,
+    startup: spawner::StartupWatch,
 ) -> SpawnRequest {
     let (child_log_level, child_log_format) = spawner::child_log_yaml_tuning(daemon_log);
+    let (startup_grace_period_ms, startup_poll_interval_ms) = startup.as_millis();
     SpawnRequest {
         os_user: os_user.to_string(),
         tool_path: tool_path.to_string(),
@@ -420,12 +444,16 @@ pub fn build_spawn_request(
         child_log_level,
         child_log_format,
         coder_log_config_yaml,
+        startup_grace_period_ms,
+        startup_poll_interval_ms,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::Duration;
 
     fn a_livekit() -> LiveKitCreds {
         LiveKitCreds {
@@ -437,28 +465,85 @@ mod tests {
         }
     }
 
+    fn a_spawn_request_with(
+        opts: SpawnOptions<'_>,
+        startup: spawner::StartupWatch,
+    ) -> SpawnRequest {
+        build_spawn_request(
+            "dev",
+            "/usr/bin/tddy-coder",
+            Path::new("/data"),
+            Path::new("/repo"),
+            &a_livekit(),
+            opts,
+            None,
+            None,
+            startup,
+        )
+    }
+
     #[test]
     fn build_spawn_request_carries_the_model_through_to_the_spawn_request() {
         // Given — a tool spawn whose selected model is opus
-        let livekit = a_livekit();
         let opts = SpawnOptions {
             model: Some("opus"),
             ..Default::default()
         };
 
         // When
-        let req = build_spawn_request(
-            "dev",
-            "/usr/bin/tddy-coder",
-            Path::new("/data"),
-            Path::new("/repo"),
-            &livekit,
-            opts,
-            None,
-            None,
-        );
+        let req = a_spawn_request_with(opts, spawner::StartupWatch::default());
 
         // Then — the model rides along so the worker can pass `--model opus`
         assert_eq!(req.model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn build_spawn_request_carries_the_configured_startup_watch_across_the_fork() {
+        // Given a daemon whose configured startup watch is not the default one
+        let startup = spawner::StartupWatch {
+            grace: Duration::from_millis(4000),
+            poll: Duration::from_millis(200),
+        };
+
+        // When building the request the forked worker will act on
+        let req = a_spawn_request_with(SpawnOptions::default(), startup);
+
+        // Then the worker can reconstruct that same watch — it cannot read the daemon's config
+        assert_eq!(req.startup_grace_period_ms, 4000);
+        assert_eq!(req.startup_poll_interval_ms, 200);
+        assert_eq!(
+            spawner::StartupWatch::from_millis(
+                req.startup_grace_period_ms,
+                req.startup_poll_interval_ms
+            ),
+            startup
+        );
+    }
+
+    #[test]
+    fn a_spawn_request_from_a_legacy_client_watches_for_the_production_default() {
+        // Given a request JSON written before the startup watch was configurable
+        let json = r#"{
+            "os_user": "dev",
+            "tool_path": "/usr/bin/tddy-coder",
+            "tddy_data_dir": "/data",
+            "repo_path": "/repo",
+            "livekit_url": "ws://localhost:7880",
+            "livekit_api_key": "key",
+            "livekit_api_secret": "secret",
+            "resume_session_id": null
+        }"#;
+
+        // When the worker decodes it
+        let req: SpawnRequest = serde_json::from_str(json).expect("decode legacy spawn request");
+
+        // Then it watches for exactly as long as it always did
+        assert_eq!(
+            spawner::StartupWatch::from_millis(
+                req.startup_grace_period_ms,
+                req.startup_poll_interval_ms
+            ),
+            spawner::StartupWatch::default()
+        );
     }
 }

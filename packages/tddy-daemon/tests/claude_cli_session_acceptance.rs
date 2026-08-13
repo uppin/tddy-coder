@@ -8,10 +8,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
-use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, ResumeSessionRequest,
     StartSessionRequest,
@@ -27,8 +30,6 @@ const TEST_PROJECT_ID: &str = "test-project";
 // the stub's `ARGV:` line appears (~0.3s locally), so this only guards against false failures when
 // a real PTY subprocess spawn + relay is starved under parallel-test CPU load. Matches the 10s
 // RPC-stub ceiling below.
-const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
-const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
 /// The OS user the test process runs as — a real, resolvable user (same-user, so the interactive
 /// claude-cli spawn needs no privilege drop). Fixtures use this rather than a fabricated name so
@@ -147,24 +148,6 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
         std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     script_path
-}
-
-/// Poll `handle.capture` until its UTF-8 contents contain `needle` or the timeout elapses.
-/// Returns `true` if `needle` was found within the timeout.
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 /// **claude_cli_session_metadata_fields_persisted**: after `StartSession` with
@@ -741,14 +724,8 @@ async fn claude_cli_session_passes_initial_prompt_as_positional_arg() {
         .expect("start with echo-argv stub and initial_prompt must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: to PTY output within 2s"
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("build a hello world app"),
         "initial_prompt must appear in ARGV output; got: {:?}",
@@ -786,14 +763,8 @@ async fn claude_cli_session_empty_prompt_adds_no_positional_arg() {
         .expect("start with empty initial_prompt must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: to PTY output within 2s"
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))
@@ -874,15 +845,8 @@ async fn start_session_claude_cli_threads_initial_prompt_from_request() {
         .await
         .expect("session must be present in the shared ClaudeCliSessionManager after start");
 
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_RPC_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: within {}ms; session_id={}",
-        PTY_RPC_STUB_OUTPUT_TIMEOUT_MS, session_id
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("hello from rpc"),
         "initial_prompt from StartSession RPC must appear in ARGV output; got: {:?}",
@@ -927,11 +891,8 @@ async fn resume_does_not_replay_initial_prompt() {
         .expect("resume must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle2, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(found, "stub script must write ARGV: within 2s on resume");
+    let output = a_capture_showing(&handle2, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle2.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))

@@ -4,10 +4,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::Request;
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
@@ -22,10 +25,6 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
-/// Direct `manager.start()` PTY tests — stub echoes argv quickly.
-const PTY_STUB_OUTPUT_TIMEOUT_MS: u64 = 2_000;
-/// Full `StartSession` RPC path includes git worktree setup before the PTY spawns.
-const PTY_RPC_STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 
 /// The OS user the test process runs as — a real, resolvable user (same-user, so the interactive
 /// claude-cli spawn needs no privilege drop). Fixtures use this rather than a fabricated name so
@@ -129,22 +128,6 @@ fn write_echo_argv_script(dir: &std::path::Path) -> std::path::PathBuf {
         std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     script_path
-}
-
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -375,15 +358,8 @@ async fn claude_cli_session_pty_argv_includes_default_permission_mode() {
         .expect("start with echo-argv stub and no permission_mode must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: to PTY output within {}ms",
-        PTY_STUB_OUTPUT_TIMEOUT_MS
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("--permission-mode"),
         "PTY ARGV must include --permission-mode flag; got: {:?}",
@@ -421,15 +397,8 @@ async fn claude_cli_session_pty_argv_includes_explicit_permission_mode() {
         .expect("start with bypassPermissions must succeed");
 
     // Then
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: within {}ms",
-        PTY_STUB_OUTPUT_TIMEOUT_MS
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("bypassPermissions"),
         "PTY ARGV must include bypassPermissions; got: {:?}",
@@ -500,12 +469,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
         .await
         .expect("session must be registered in the shared manager");
 
-    let found = wait_for_capture_contains(&handle, "ARGV:", PTY_RPC_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: within {}ms (StartSession RPC + worktree setup)",
-        PTY_RPC_STUB_OUTPUT_TIMEOUT_MS
-    );
+    a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -714,15 +678,8 @@ async fn resume_pty_argv_uses_default_permission_mode() {
         .expect("resume must succeed without permission_mode");
 
     // Then
-    let found = wait_for_capture_contains(&handle2, "ARGV:", PTY_STUB_OUTPUT_TIMEOUT_MS).await;
-    assert!(
-        found,
-        "stub script must write ARGV: within {}ms on resume",
-        PTY_STUB_OUTPUT_TIMEOUT_MS
-    );
+    let output = a_capture_showing(&handle2, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle2.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     let argv_line = output
         .lines()
         .find(|l| l.trim_start().starts_with("ARGV:"))

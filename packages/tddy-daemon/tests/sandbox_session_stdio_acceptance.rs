@@ -160,6 +160,8 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
             capture,
             stdin_rx,
             Arc::new(Vec::new()),
+            tmp.path().join("session"),
+            Arc::new(tddy_daemon::connection_service::AgentActivityHub::default()),
         ),
     )
     .await

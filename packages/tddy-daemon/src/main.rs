@@ -65,6 +65,7 @@ fn apply_env_overrides(config: &mut tddy_daemon::config::DaemonConfig) {
     }
     config.apply_oauth_loopback_proxy_env_override();
     config.apply_telegram_env_overrides();
+    config.apply_timing_env_overrides();
 }
 
 fn env_var(name: &str) -> Option<String> {

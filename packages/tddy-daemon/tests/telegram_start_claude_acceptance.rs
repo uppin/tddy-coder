@@ -15,9 +15,12 @@ use std::sync::{Arc, Mutex};
 use tddy_core::changeset::read_changeset;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::{ClaudeCliConfig, DaemonConfig};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartClaudeCommand,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, CLAUDE_CLI_MODELS, CURSOR_CLI_MODELS,
@@ -133,23 +136,6 @@ fn build_harness(
         None,
     );
     (harness, sender)
-}
-
-/// Poll `capture` until it contains `needle` within `timeout_ms`.
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,15 +504,8 @@ async fn start_claude_uses_shared_manager() {
         .expect("session must be in ClaudeCliSessionManager after Telegram spawn");
 
     // And the PTY process is running (stub wrote ARGV output).
-    let found = wait_for_capture_contains(&handle, "ARGV:", 2000).await;
-    assert!(
-        found,
-        "stub script must write ARGV: to PTY capture within 2s; session_id={}",
-        session_id
-    );
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
     assert!(
         output.contains("build a search feature"),
         "initial_prompt must be passed as positional arg via Telegram flow; got: {:?}",
