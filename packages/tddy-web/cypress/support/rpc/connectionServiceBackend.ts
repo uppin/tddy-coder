@@ -228,6 +228,11 @@ export interface ConnectionServiceScenario {
    *  identifying frame tagged with this offset (and `atOldest`), mirroring the daemon's lazy
    *  replay. Default: 0n (no offset metadata — legacy shape). */
   terminalReplayEndOffset?: bigint;
+  /** How many `StreamTerminalOutput` subscriptions **end** after their first frame instead of
+   *  staying open — the daemon dropping a terminal feed (a closed data-channel stream, a `pty_done`).
+   *  The first `n` opened streams drop; every later one stays open, so a test can drop a feed once
+   *  and still observe what the screen does to recover. Default 0 (no stream ever ends). */
+  droppedTerminalStreams?: number;
   /** Older history chunks returned by `GetTerminalHistory`, in the order they should be yielded
    *  across successive calls (one chunk per call). Each chunk's `startOffset`/`endOffset`/`atOldest`
    *  is used verbatim. The backend pops one chunk per `getTerminalHistory` call. */
@@ -544,7 +549,10 @@ export function aConnectionServiceBackend(
       // `endOffset` + `atOldest` so the lazy scroll-up loader can anchor older-history fetches.
       // The frame carries the session and RESOLVED terminal id it came from, as the daemon stamps
       // every frame — a pane drops frames that are not its own.
+      // `scenario.droppedTerminalStreams` makes the first n subscriptions *return* after that frame,
+      // which is how the daemon dropping the feed reaches the browser.
       streamTerminalOutput: async function* (req) {
+        const openIndex = streamedTerminals.length;
         streamedTerminals.push({ sessionId: req.sessionId, terminalId: req.terminalId });
         const terminalId = req.terminalId || "main";
         yield create(SessionTerminalOutputSchema, {
@@ -554,6 +562,7 @@ export function aConnectionServiceBackend(
           sessionId: req.sessionId,
           terminalId,
         });
+        if (openIndex < (scenario.droppedTerminalStreams ?? 0)) return;
         await new Promise<never>(() => undefined);
       },
       // Lazy scroll-up history — yield one chunk per call from `scenario.terminalHistory` (popped

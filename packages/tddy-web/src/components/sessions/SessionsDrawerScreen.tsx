@@ -299,9 +299,18 @@ export function SessionsDrawerScreen({
 
   // Disconnect a runtime terminal. Evicts the session's runtime; if it is the focused/attached
   // session, also resets the attachment so the screen re-evaluates state for the next selection.
+  //
+  // The attach the claim records dies with the runtime, so the claim goes with it. A feed can drop
+  // under a session the daemon still reports alive (a `pty_done` on a live agent), and holding a
+  // claim for an attach that no longer exists is what would strand the pane on the reconnect
+  // placeholder — the liveness effect below returns early on the claim, and a live session offers no
+  // Resume button to recover by hand. Releasing it hands the re-attach back to that effect, which
+  // re-attaches on the next list snapshot *if the session is still alive*: a session that has
+  // genuinely gone reads dormant there and is left alone rather than attached over and over.
   const onSessionDisconnect = useCallback(
     (sessionId: string) => {
       runtimeRegistry.disconnect(sessionId);
+      if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
       if (sessionId === connectedSessionId) resetAttachment();
     },
     [runtimeRegistry, connectedSessionId, resetAttachment],
