@@ -41,4 +41,13 @@ export const daemonSelectorPage = {
   expectEmpty() {
     daemonSelectorPage.trigger().should("contain.text", "Select daemon");
   },
+
+  /**
+   * Asserts the selector says the daemon list is empty *because the common room could not be
+   * joined*, not because no daemon is running — the distinction the "Select daemon" placeholder
+   * hides.
+   */
+  expectUnreachable() {
+    daemonSelectorPage.trigger().should("contain.text", "Common room unreachable");
+  },
 };

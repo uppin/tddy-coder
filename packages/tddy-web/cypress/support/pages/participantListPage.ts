@@ -42,4 +42,12 @@ export const participantListPage = {
 
   videoPreview: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId("participant-video-preview", options),
+
+  /**
+   * Asserts the panel tells the operator that joining the presence room failed, and quotes the
+   * reason LiveKit gave — rather than sitting on the "Connecting…" placeholder.
+   */
+  expectConnectionFailure(reason: string) {
+    participantListPage.error().should("contain.text", reason);
+  },
 };
