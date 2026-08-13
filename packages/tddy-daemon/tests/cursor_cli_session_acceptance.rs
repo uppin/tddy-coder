@@ -464,9 +464,35 @@ async fn cursor_cli_peer_spawn_reuses_the_orchestrator_worktree_when_repo_path_i
     );
 }
 
+/// An orchestrating session on disk for a peer's `stack_parent` to name: a code session on `main`
+/// in the project repo the peer is spawned into.
+///
+/// A peer that creates its own branch bases it off the parent's, which is read from the parent's
+/// changeset — so the parent has to exist. A `stack_parent` that resolves to nothing is refused
+/// (`FailedPrecondition`) rather than quietly based off the default branch, which is why this
+/// fixture writes a real one instead of the id alone.
+fn an_orchestrator_session(
+    sessions_base: &std::path::Path,
+    session_id: &str,
+    repo: &std::path::Path,
+) {
+    let session_dir = sessions_base.join("sessions").join(session_id);
+    std::fs::create_dir_all(&session_dir).expect("create the orchestrator's session dir");
+    tddy_core::changeset::write_changeset(
+        &session_dir,
+        &tddy_core::changeset::Changeset {
+            branch: Some("main".to_string()),
+            repo_path: Some(repo.to_string_lossy().into_owned()),
+            ..Default::default()
+        },
+    )
+    .expect("write the orchestrator's changeset");
+}
+
 #[tokio::test]
 async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path() {
-    // Given — a registered project repo, no client repo_path (standalone worktree path)
+    // Given — a registered project repo, an orchestrating session to chain from, and no client
+    // repo_path (standalone worktree path)
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
@@ -475,6 +501,11 @@ async fn cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_p
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
 
     let orchestrator_session_id = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
+    an_orchestrator_session(
+        sessions_tmp.path(),
+        orchestrator_session_id,
+        repo_dir.path(),
+    );
 
     // When — a cursor-cli spawn that carries only a stack_parent (no repo_path),
     // creating its own worktree as before but still linked to the orchestrator

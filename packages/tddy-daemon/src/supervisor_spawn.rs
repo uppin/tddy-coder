@@ -10,7 +10,7 @@
 //! - **The daemon is not the child's parent.** It cannot `waitpid` a process it did not fork, so the
 //!   startup watch every spawn does (did the tool survive its own argument parsing?) polls
 //!   `SessionStatus` instead of `try_wait`, on the same schedule
-//!   ([`crate::spawner::STARTUP_GRACE_PERIOD`]).
+//!   ([`crate::spawner::StartupWatch`], carried in the request).
 //! - **There is no fallback.** A supervisor that cannot be reached, or that refuses a request, fails
 //!   the operation. Spawning the session here instead would run it as the daemon's own user with no
 //!   isolation — exactly the regression the supervisor exists to remove.
@@ -32,8 +32,7 @@ use tddy_supervisor::SupervisorClient;
 
 use crate::spawn_worker::SpawnRequest;
 use crate::spawner::{
-    self, LiveKitCreds, SessionChildPlan, SpawnOptions, SpawnResult, STARTUP_GRACE_PERIOD,
-    STARTUP_POLL_INTERVAL,
+    self, LiveKitCreds, SessionChildPlan, SpawnOptions, SpawnResult, StartupWatch,
 };
 use crate::supervisor_client::connect_supervisor;
 
@@ -193,7 +192,9 @@ pub async fn spawn_session_via_supervisor(
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to spawn the session: {e}"))?;
 
-    watch_session_startup(&client, spawned.pid, &plan).await?;
+    let startup =
+        StartupWatch::from_millis(req.startup_grace_period_ms, req.startup_poll_interval_ms);
+    watch_session_startup(&client, spawned.pid, &plan, startup).await?;
 
     log::info!(
         "supervisor_spawn: session_id={} pid={} livekit_room={} livekit_server_identity={}",
@@ -219,6 +220,7 @@ async fn watch_session_startup(
     client: &SupervisorClient,
     pid: u32,
     plan: &SessionChildPlan,
+    startup: StartupWatch,
 ) -> anyhow::Result<()> {
     let mut waited = std::time::Duration::ZERO;
     loop {
@@ -242,10 +244,10 @@ async fn watch_session_startup(
                     }
                 ));
             }
-            SessionState::Running if waited >= STARTUP_GRACE_PERIOD => return Ok(()),
+            SessionState::Running if waited >= startup.grace => return Ok(()),
             SessionState::Running => {
-                tokio::time::sleep(STARTUP_POLL_INTERVAL).await;
-                waited += STARTUP_POLL_INTERVAL;
+                tokio::time::sleep(startup.poll).await;
+                waited += startup.poll;
             }
         }
     }
@@ -302,6 +304,11 @@ pub async fn clone_repo_via_supervisor(
 /// Unbounded on purpose: how long a clone may take is the caller's deadline
 /// (`spawn_worker_request_timeout`), not this function's to guess.
 async fn wait_for_exit(client: &SupervisorClient, pid: u32) -> anyhow::Result<Option<i32>> {
+    /// How often a clone in progress is checked. Its own constant, not the spawn-startup knob: an
+    /// operator retuning how long a *session* is watched for an early exit is saying nothing about
+    /// how often a clone should be polled.
+    const CLONE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(25);
+
     loop {
         let status = client
             .session_status(pid)
@@ -309,7 +316,7 @@ async fn wait_for_exit(client: &SupervisorClient, pid: u32) -> anyhow::Result<Op
             .map_err(|e| anyhow::anyhow!("tddy-supervisor could not report process {pid}: {e}"))?;
         match status.state {
             SessionState::Exited => return Ok(status.exit_code),
-            SessionState::Running => tokio::time::sleep(STARTUP_POLL_INTERVAL).await,
+            SessionState::Running => tokio::time::sleep(CLONE_POLL_INTERVAL).await,
         }
     }
 }

@@ -18,27 +18,43 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
-use tddy_stdio::spawn_child_endpoint;
+use tddy_stdio::{spawn_child_endpoint, ChildEndpoint};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
 
-/// Bounded safety net around calls otherwise driven entirely by async channels (see fluent-tests
-/// "Testing Async Code"). Generous enough to absorb the fixture process's startup even under a
-/// loaded machine (a full `cargo test --workspace` run alongside this one has been observed to
-/// need close to 500ms for the child's first response), but still well under the 1s
-/// integration-test ceiling.
-const CALL_TIMEOUT: Duration = Duration::from_millis(900);
+/// How long the fixture process gets to start and announce itself. A safety net covering
+/// fork/exec, dynamic linking and tokio start-up, all of which stretch under a parallel suite —
+/// deliberately generous, because waiting longer costs nothing when the announcement is prompt.
+const FIXTURE_READY: Duration = Duration::from_secs(5);
 
-/// The fixture never calls back into this test process — any inbound request here would be a
-/// bug, so it fails loudly rather than silently no-op'ing.
-struct NoCallbackService;
+/// Bounded safety net around a single tool call, which by then is driven entirely by async
+/// channels (see fluent-tests "Testing Async Code"). It covers the call and nothing else: the
+/// fixture is already serving before any test starts the clock.
+const CALL_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The parent half of the fixture's readiness handshake. The fixture calls
+/// `parent.FixtureReadyService/Ready` once its endpoint is serving, and calls nothing else — any
+/// other inbound request is a bug, so it fails loudly rather than silently no-op'ing.
+struct FixtureReadySignal {
+    announced: mpsc::Sender<()>,
+}
 
 #[async_trait]
-impl RpcService for NoCallbackService {
+impl RpcService for FixtureReadySignal {
     async fn handle_rpc(&self, service: &str, method: &str, _message: &RpcMessage) -> RpcResult {
-        RpcResult::Unary(Err(Status::unimplemented(format!(
-            "test process hosts no callback service, got {service}/{method}"
-        ))))
+        match (service, method) {
+            ("parent.FixtureReadyService", "Ready") => {
+                self.announced
+                    .send(())
+                    .await
+                    .expect("hand the readiness announcement to the waiting test");
+                RpcResult::Unary(Ok(Vec::new()))
+            }
+            _ => RpcResult::Unary(Err(Status::unimplemented(format!(
+                "test process hosts only the readiness handshake, got {service}/{method}"
+            )))),
+        }
     }
 }
 
@@ -46,12 +62,31 @@ fn execute_tool_fixture_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_execute-tool-stdio-fixture"))
 }
 
+/// A spawned fixture that has announced, over the RPC channel itself, that it is serving.
+///
+/// Waiting for that announcement instead of budgeting for it is what lets [`CALL_TIMEOUT`] measure
+/// the call alone.
+async fn a_fixture_endpoint_ready_to_serve() -> ChildEndpoint {
+    let (announced, mut announcements) = mpsc::channel(1);
+    let endpoint = spawn_child_endpoint(
+        execute_tool_fixture_command(),
+        FixtureReadySignal { announced },
+    )
+    .await
+    .expect("spawn execute-tool-stdio-fixture");
+
+    timeout(FIXTURE_READY, announcements.recv())
+        .await
+        .expect("the fixture never announced itself ready")
+        .expect("the fixture's readiness channel closed before it announced itself");
+
+    endpoint
+}
+
 #[tokio::test]
 async fn dispatches_a_tool_call_over_stdio_rpc_and_returns_the_result_json() {
     // Given an RPC client wired to a fake ConnectionService/ExecuteTool handler over stdio
-    let endpoint = spawn_child_endpoint(execute_tool_fixture_command(), NoCallbackService)
-        .await
-        .expect("spawn execute-tool-stdio-fixture");
+    let endpoint = a_fixture_endpoint_ready_to_serve().await;
     let client: Arc<dyn tddy_rpc::RpcClientTransport> = endpoint.client.clone();
 
     // When dispatching a tool call through the new stdio-RPC path
@@ -72,9 +107,7 @@ async fn round_trips_a_payload_larger_than_a_single_socket_read_without_truncati
     // Given an RPC client wired to a fake ConnectionService/ExecuteTool handler over stdio, and a
     // tool result payload comfortably larger than the 64KB buffer the old unframed tool-IPC
     // protocol used for its single read() — the old protocol would silently truncate this
-    let endpoint = spawn_child_endpoint(execute_tool_fixture_command(), NoCallbackService)
-        .await
-        .expect("spawn execute-tool-stdio-fixture");
+    let endpoint = a_fixture_endpoint_ready_to_serve().await;
     let client: Arc<dyn tddy_rpc::RpcClientTransport> = endpoint.client.clone();
     let large_value = "x".repeat(256 * 1024);
     let args = serde_json::json!({"content": large_value});

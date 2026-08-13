@@ -12,10 +12,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle, MAIN_TERMINAL_ID};
+use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, MAIN_TERMINAL_ID};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListTerminalSessionsRequest, SessionTerminalInput,
     StartTerminalSessionRequest, StopTerminalSessionRequest, StreamReplayMode,
@@ -109,23 +112,6 @@ async fn start_main_terminal(manager: &ClaudeCliSessionManager) -> tempfile::Tem
         .await
         .expect("main claude terminal must start");
     worktree
-}
-
-/// Poll `handle.capture` until its UTF-8 contents contain `needle` or the timeout elapses.
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 }
 
 #[cfg(unix)]
@@ -226,11 +212,7 @@ async fn started_terminal_runs_login_shell_in_worktree() {
     let _ = handle.stdin_tx.send(Bytes::from_static(b"pwd\n"));
 
     // Then — the worktree's unique directory name appears in the captured output.
-    let found = wait_for_capture_contains(&handle, &marker, 3000).await;
-    assert!(
-        found,
-        "shell 'pwd' output must contain the worktree dir name '{marker}'"
-    );
+    a_capture_showing(&handle, &marker, PTY_STUB_OUTPUT).await;
 }
 
 /// **get_terminal_resolves_started_terminal_by_id**: `get_terminal` returns the started terminal
@@ -618,8 +600,7 @@ async fn send_terminal_input_targets_identified_terminal() {
         .get_terminal(SESSION_ID, &started)
         .await
         .expect("started terminal must exist");
-    let found = wait_for_capture_contains(&shell_handle, marker, 3000).await;
-    assert!(found, "input must reach the addressed terminal");
+    a_capture_showing(&shell_handle, marker, PTY_STUB_OUTPUT).await;
 
     // ...and the main terminal never sees it.
     let main_handle = manager

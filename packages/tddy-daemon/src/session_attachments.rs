@@ -311,7 +311,15 @@ mod tests {
     /// A session directory plus a separate directory holding the files an attachment is copied from,
     /// so a source never has to live inside the session tree it is attached to.
     struct SessionUnderTest {
-        session: TempDir,
+        /// Held for its drop guard only — every path the fixture hands out comes from
+        /// `session_path`.
+        _session: TempDir,
+        /// The session directory as the writers under test report it. Both writers resolve their
+        /// target through `contained_canonical_dir`, so the path they return has every symlink
+        /// resolved. On macOS `TempDir` hands back `/tmp/...`, and `/tmp` is itself a symlink to
+        /// `/private/tmp` — resolving it once here is what lets the tests compare like with like
+        /// instead of asserting on which of the two spellings the fixture happened to produce.
+        session_path: PathBuf,
         sources: TempDir,
     }
 
@@ -324,15 +332,18 @@ mod tests {
 
     /// A brand-new session directory with nothing in it yet.
     fn a_session_without_an_artifacts_dir() -> SessionUnderTest {
+        let session = tempfile::tempdir().expect("create session dir");
+        let session_path = fs::canonicalize(session.path()).expect("canonicalize session dir");
         SessionUnderTest {
-            session: tempfile::tempdir().expect("create session dir"),
+            _session: session,
+            session_path,
             sources: tempfile::tempdir().expect("create sources dir"),
         }
     }
 
     impl SessionUnderTest {
         fn path(&self) -> &Path {
-            self.session.path()
+            &self.session_path
         }
 
         fn attachments_dir(&self) -> PathBuf {

@@ -15,16 +15,41 @@ use tddy_service::proto::connection::{
     ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
     StreamReplayMode, StreamTerminalOutputRequest,
 };
-use tddy_testing_commons::process_is_alive;
+use tddy_testing_commons::{a_stub_http_endpoint_answering_ok, process_is_alive};
 
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "composer-2.5";
 const TEST_PROJECT_ID: &str = "sandbox-cursor-test-project";
 
+/// The warm-up budget a loopback stub deserves. The production default is two minutes, sized for a
+/// GPU host bringing a model up from cold; an in-repo stub either answers immediately or is not
+/// running at all, so the production budget would only turn a broken fixture into a two-minute
+/// hang. Supplied through the same `agent_warmup` config the operator uses — the test environment
+/// picks test values, it does not get a test-only code path.
+const AGENT_WARMUP_FOR_A_LOOPBACK_STUB: &str = r#"
+agent_warmup:
+  timeout_secs: 10
+  retry_interval_ms: 50
+  request_timeout_secs: 5
+"#;
+
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 fn write_config_with_cursor_binary(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+    write_daemon_config(stub_binary, "")
+}
+
+/// The config the specialized-agent test runs with: the same stub binary as everywhere else, plus
+/// [`AGENT_WARMUP_FOR_A_LOOPBACK_STUB`].
+fn write_config_with_fast_agent_warmup(stub_binary: &str) -> (tempfile::TempDir, DaemonConfig) {
+    write_daemon_config(stub_binary, AGENT_WARMUP_FOR_A_LOOPBACK_STUB)
+}
+
+fn write_daemon_config(
+    stub_binary: &str,
+    extra_sections: &str,
+) -> (tempfile::TempDir, DaemonConfig) {
     let dir = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -36,12 +61,27 @@ allowed_tools:
     label: true
 cursor_cli:
   binary_path: {stub_binary}
-"#
+{extra_sections}"#
     );
     let config_path = dir.path().join("daemon.yaml");
     std::fs::write(&config_path, yaml).unwrap();
     let config = DaemonConfig::load(&config_path).expect("config must parse");
     (dir, config)
+}
+
+/// Write a `fastcontext` def under `<tddyhome>/agents` whose endpoint is `base_url`. A user def
+/// fully replaces the same-named builtin, so this is what points the start-time readiness gate at
+/// an in-repo stub instead of the builtin's `http://localhost:30000` inference server.
+fn an_agent_def_pointing_fastcontext_at(tddy_data_dir: &std::path::Path, base_url: &str) {
+    let agents_dir = tddy_data_dir.join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("fastcontext.yaml"),
+        format!(
+            "name: fastcontext\nmodel: a-stubbed-model\nbase_url: {base_url}\nreplaces:\n  - Grep\n  - Glob\n"
+        ),
+    )
+    .unwrap();
 }
 
 fn minimal_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceImpl {
@@ -318,6 +358,9 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
 
 /// **sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata**: specialized agent
 /// selection persists in metadata and reaches the jailed process env.
+///
+/// Start gates on every specialized agent's endpoint being awake, so the agent def points at an
+/// in-repo stub endpoint. Nothing outside the repo has to be running for this to pass.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[tokio::test]
 async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() {
@@ -330,8 +373,10 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
     create_test_repo_with_origin(repo_dir.path());
     let sessions_tmp = tempfile::tempdir().unwrap();
     register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+    let inference_endpoint = a_stub_http_endpoint_answering_ok().await;
+    an_agent_def_pointing_fastcontext_at(sessions_tmp.path(), &inference_endpoint.base_url());
     let stub = write_echo_argv_and_subagent_env_script(repo_dir.path());
-    let (_cfg_dir, config) = write_config_with_cursor_binary(stub.to_str().unwrap());
+    let (_cfg_dir, config) = write_config_with_fast_agent_warmup(stub.to_str().unwrap());
     let service = minimal_service(config, sessions_tmp.path().to_path_buf());
     let request = StartSessionRequest {
         specialized_agents: vec!["fastcontext".to_string()],

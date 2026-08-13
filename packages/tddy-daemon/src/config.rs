@@ -17,6 +17,60 @@ fn default_common_room_set_metadata_timeout_secs() -> u64 {
     60
 }
 
+/// How long a freshly spawned session process is watched for an immediate exit before it is
+/// reported as started. Long enough to catch a binary that dies on its own arguments, short
+/// enough not to stall the caller.
+pub(crate) fn default_spawn_startup_grace_period_ms() -> u64 {
+    500
+}
+
+/// How often that watch checks. Fine-grained so a healthy spawn returns promptly.
+pub(crate) fn default_spawn_startup_poll_interval_ms() -> u64 {
+    25
+}
+
+/// Matches the sandbox-ready timeout: a cold model load is allowed to take minutes.
+fn default_agent_warmup_timeout_secs() -> u64 {
+    120
+}
+
+fn default_agent_warmup_retry_interval_ms() -> u64 {
+    1000
+}
+
+fn default_agent_warmup_request_timeout_secs() -> u64 {
+    120
+}
+
+/// Timing budget for the specialized-subagent warm-up gate (`agent_warmup:` YAML section).
+///
+/// The defaults reproduce `tddy_discovery::warmup::WarmupOptions::default()` exactly — this
+/// section exists so a host whose agents live somewhere faster (or slower) than a cold local
+/// model server can say so, without any code path branching on how it was started.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentWarmupConfig {
+    /// Total budget to get a single agent ready before the session fails to start.
+    #[serde(default = "default_agent_warmup_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Wait between transient-failure retries.
+    #[serde(default = "default_agent_warmup_retry_interval_ms")]
+    pub retry_interval_ms: u64,
+    /// Per-probe HTTP timeout — a cold model load must fit inside it.
+    #[serde(default = "default_agent_warmup_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+}
+
+impl Default for AgentWarmupConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_agent_warmup_timeout_secs(),
+            retry_interval_ms: default_agent_warmup_retry_interval_ms(),
+            request_timeout_secs: default_agent_warmup_request_timeout_secs(),
+        }
+    }
+}
+
 fn default_codex_oauth_loopback_proxy_eligible() -> bool {
     true
 }
@@ -143,6 +197,16 @@ pub struct DaemonConfig {
     /// `clone_as_user`). Minimum effective value is 1.
     #[serde(default = "default_spawn_worker_request_timeout_secs")]
     pub spawn_worker_request_timeout_secs: u64,
+    /// How long a freshly spawned session process is watched for an immediate exit before the
+    /// spawn is reported as successful. Minimum effective value is 1ms.
+    #[serde(default = "default_spawn_startup_grace_period_ms")]
+    pub spawn_startup_grace_period_ms: u64,
+    /// How often that watch polls. Minimum effective value is 1ms.
+    #[serde(default = "default_spawn_startup_poll_interval_ms")]
+    pub spawn_startup_poll_interval_ms: u64,
+    /// Timing budget for the specialized-subagent warm-up gate (see [`AgentWarmupConfig`]).
+    #[serde(default)]
+    pub agent_warmup: AgentWarmupConfig,
     /// Stable id for this daemon in a shared LiveKit room (multi-host). When set, spawned tools
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     /// Overridable at startup via the `TDDY_DAEMON_INSTANCE_ID` env var (see `apply_env_overrides`
@@ -247,6 +311,9 @@ impl Default for DaemonConfig {
             repos_base_path: None,
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
+            spawn_startup_grace_period_ms: default_spawn_startup_grace_period_ms(),
+            spawn_startup_poll_interval_ms: default_spawn_startup_poll_interval_ms(),
+            agent_warmup: AgentWarmupConfig::default(),
             daemon_instance_id: None,
             daemon_instance_id_append_startup_timestamp: false,
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
@@ -911,6 +978,28 @@ impl DaemonConfig {
         Duration::from_secs(secs)
     }
 
+    /// How long to watch a freshly spawned session process for an immediate exit.
+    pub fn spawn_startup_grace_period(&self) -> Duration {
+        Duration::from_millis(self.spawn_startup_grace_period_ms.max(1))
+    }
+
+    /// How often that watch polls.
+    pub fn spawn_startup_poll_interval(&self) -> Duration {
+        Duration::from_millis(self.spawn_startup_poll_interval_ms.max(1))
+    }
+
+    /// The warm-up gate's timing budget, in the form `tddy_discovery` takes it.
+    ///
+    /// On a default config this is exactly `WarmupOptions::default()` — the config path is a way
+    /// to say something different, not a change of production behaviour.
+    pub fn agent_warmup_options(&self) -> tddy_discovery::warmup::WarmupOptions {
+        tddy_discovery::warmup::WarmupOptions {
+            timeout: Duration::from_secs(self.agent_warmup.timeout_secs.max(1)),
+            retry_interval: Duration::from_millis(self.agent_warmup.retry_interval_ms.max(1)),
+            request_timeout: Duration::from_secs(self.agent_warmup.request_timeout_secs.max(1)),
+        }
+    }
+
     /// Wall-clock budget for one common-room daemon-advertisement `set_metadata` round (the LiveKit SDK
     /// still uses **5 s per attempt**; we retry until this budget elapses or the publish succeeds).
     pub fn common_room_set_metadata_attempt_budget(&self) -> Duration {
@@ -971,6 +1060,55 @@ impl DaemonConfig {
                     "TDDY_CODEX_OAUTH_LOOPBACK_PROXY_ELIGIBLE: expected true/false/1/0/yes/no/on/off, ignoring"
                 );
             }
+        }
+    }
+
+    /// Override the spawn-startup watch and the warm-up budget from the environment — the last
+    /// layer of `defaults ← daemon.yaml ← TDDY_*`. Call after YAML load.
+    ///
+    /// All five take a whole number; an unparseable value warns and keeps the file/default value:
+    /// - `TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS`
+    /// - `TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS`
+    /// - `TDDY_AGENT_WARMUP_TIMEOUT_SECS`
+    /// - `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS`
+    /// - `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS`
+    pub fn apply_timing_env_overrides(&mut self) {
+        merge_timing_env(self, non_empty_env);
+    }
+}
+
+/// The pure half of [`DaemonConfig::apply_timing_env_overrides`]. `lookup` stands in for the
+/// process environment so the precedence rules are testable without mutating it — which no test
+/// running alongside others can do safely.
+fn merge_timing_env(config: &mut DaemonConfig, lookup: impl Fn(&str) -> Option<String>) {
+    if let Some(ms) = env_u64(&lookup, "TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS") {
+        config.spawn_startup_grace_period_ms = ms;
+    }
+    if let Some(ms) = env_u64(&lookup, "TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS") {
+        config.spawn_startup_poll_interval_ms = ms;
+    }
+    if let Some(secs) = env_u64(&lookup, "TDDY_AGENT_WARMUP_TIMEOUT_SECS") {
+        config.agent_warmup.timeout_secs = secs;
+    }
+    if let Some(ms) = env_u64(&lookup, "TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS") {
+        config.agent_warmup.retry_interval_ms = ms;
+    }
+    if let Some(secs) = env_u64(&lookup, "TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS") {
+        config.agent_warmup.request_timeout_secs = secs;
+    }
+}
+
+/// A whole-number environment override, or `None` (with a warning) when it is not one.
+fn env_u64(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Option<u64> {
+    let raw = lookup(name)?;
+    match raw.trim().parse() {
+        Ok(parsed) => Some(parsed),
+        Err(_) => {
+            log::warn!(
+                target: "tddy_daemon::config",
+                "{name}: expected a whole number, ignoring {raw:?}"
+            );
+            None
         }
     }
 }
@@ -1221,6 +1359,218 @@ mod spawn_timeout_tests {
     fn codex_oauth_loopback_proxy_eligible_defaults_true() {
         let c = DaemonConfig::default();
         assert!(c.codex_oauth_loopback_proxy_eligible);
+    }
+}
+
+#[cfg(test)]
+mod startup_and_warmup_timing_tests {
+    use super::*;
+
+    use tddy_discovery::warmup::WarmupOptions;
+
+    fn a_daemon_configured_by(yaml: &str) -> DaemonConfig {
+        serde_yaml::from_str(yaml).expect("parse daemon config")
+    }
+
+    #[test]
+    fn a_default_configuration_watches_a_spawn_for_half_a_second() {
+        // Given a daemon configured with nothing at all
+        let config = DaemonConfig::default();
+
+        // Then the startup watch keeps the values the spawner used before they were configurable
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            config.spawn_startup_poll_interval(),
+            Duration::from_millis(25)
+        );
+    }
+
+    #[test]
+    fn a_default_configuration_warms_agents_up_on_the_library_defaults() {
+        // Given a daemon configured with nothing at all
+        let config = DaemonConfig::default();
+
+        // Then the warm-up gate gets exactly the budget it had before it was configurable —
+        // making the knob a way to say something else, not a change of production behaviour
+        assert_eq!(config.agent_warmup_options(), WarmupOptions::default());
+    }
+
+    #[test]
+    fn a_yaml_startup_watch_overrides_the_defaults() {
+        // Given a daemon YAML naming its own startup watch
+        let config = a_daemon_configured_by(
+            "spawn_startup_grace_period_ms: 2500\nspawn_startup_poll_interval_ms: 100\n",
+        );
+
+        // Then both values come from the file
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(2500)
+        );
+        assert_eq!(
+            config.spawn_startup_poll_interval(),
+            Duration::from_millis(100)
+        );
+    }
+
+    #[test]
+    fn a_yaml_warmup_section_overrides_the_defaults() {
+        // Given a daemon YAML naming its own warm-up budget
+        let config = a_daemon_configured_by(
+            "agent_warmup:\n  timeout_secs: 5\n  retry_interval_ms: 50\n  request_timeout_secs: 3\n",
+        );
+
+        // Then the gate is handed that budget
+        assert_eq!(
+            config.agent_warmup_options(),
+            WarmupOptions {
+                timeout: Duration::from_secs(5),
+                retry_interval: Duration::from_millis(50),
+                request_timeout: Duration::from_secs(3),
+            }
+        );
+    }
+
+    #[test]
+    fn a_partial_warmup_section_keeps_the_default_for_what_it_omits() {
+        // Given a daemon YAML naming only the total budget
+        let config = a_daemon_configured_by("agent_warmup:\n  timeout_secs: 5\n");
+
+        // Then the omitted fields stay at their production values
+        assert_eq!(
+            config.agent_warmup_options(),
+            WarmupOptions {
+                timeout: Duration::from_secs(5),
+                ..WarmupOptions::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_zero_startup_watch_is_clamped_to_one_millisecond() {
+        // Given a daemon YAML asking for no watch at all
+        let config = a_daemon_configured_by(
+            "spawn_startup_grace_period_ms: 0\nspawn_startup_poll_interval_ms: 0\n",
+        );
+
+        // Then the watch still runs once, rather than dividing by zero or spinning
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            config.spawn_startup_poll_interval(),
+            Duration::from_millis(1)
+        );
+    }
+
+    /// A stand-in for the process environment: only the named variables are set.
+    fn an_environment_with<'a>(
+        vars: &'a [(&'a str, &'a str)],
+    ) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    #[test]
+    fn an_environment_override_wins_over_the_yaml_it_was_loaded_with() {
+        // Given a daemon configured by YAML, and an environment naming other values
+        let mut config = a_daemon_configured_by(
+            "spawn_startup_grace_period_ms: 2500\nagent_warmup:\n  timeout_secs: 60\n",
+        );
+
+        // When the environment layer is applied
+        merge_timing_env(
+            &mut config,
+            an_environment_with(&[
+                ("TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS", "7000"),
+                ("TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS", "5"),
+                ("TDDY_AGENT_WARMUP_TIMEOUT_SECS", "9"),
+                ("TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS", "40"),
+                ("TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS", "8"),
+            ]),
+        );
+
+        // Then the environment values are the ones in effect
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(7000)
+        );
+        assert_eq!(
+            config.spawn_startup_poll_interval(),
+            Duration::from_millis(5)
+        );
+        assert_eq!(
+            config.agent_warmup_options(),
+            WarmupOptions {
+                timeout: Duration::from_secs(9),
+                retry_interval: Duration::from_millis(40),
+                request_timeout: Duration::from_secs(8),
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_environment_leaves_the_yaml_values_alone() {
+        // Given a daemon configured by YAML, and an environment naming none of the knobs
+        let mut config = a_daemon_configured_by(
+            "spawn_startup_grace_period_ms: 2500\nagent_warmup:\n  timeout_secs: 60\n",
+        );
+
+        // When the environment layer is applied
+        merge_timing_env(&mut config, an_environment_with(&[]));
+
+        // Then the file's values survive
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(2500)
+        );
+        assert_eq!(
+            config.agent_warmup_options().timeout,
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn an_unparseable_environment_override_keeps_the_yaml_value() {
+        // Given a daemon configured by YAML, and an environment naming a value that is not a number
+        let mut config = a_daemon_configured_by("spawn_startup_grace_period_ms: 2500\n");
+
+        // When the environment layer is applied
+        merge_timing_env(
+            &mut config,
+            an_environment_with(&[("TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS", "soon")]),
+        );
+
+        // Then the file's value survives rather than silently collapsing to a default
+        assert_eq!(
+            config.spawn_startup_grace_period(),
+            Duration::from_millis(2500)
+        );
+    }
+
+    #[test]
+    fn a_zero_warmup_budget_is_clamped_to_one_unit() {
+        // Given a daemon YAML asking for a zero warm-up budget
+        let config = a_daemon_configured_by(
+            "agent_warmup:\n  timeout_secs: 0\n  retry_interval_ms: 0\n  request_timeout_secs: 0\n",
+        );
+
+        // Then each budget is clamped to its smallest usable value
+        assert_eq!(
+            config.agent_warmup_options(),
+            WarmupOptions {
+                timeout: Duration::from_secs(1),
+                retry_interval: Duration::from_millis(1),
+                request_timeout: Duration::from_secs(1),
+            }
+        );
     }
 }
 

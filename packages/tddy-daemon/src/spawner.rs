@@ -489,13 +489,56 @@ fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
     ))
 }
 
-/// How long a freshly started session gets to prove it did not exit on startup. A successful
-/// `fork`+`exec` says nothing about whether the tool survived its own argument parsing, so both
-/// backends watch the child for this long before reporting a session — the forking one with
+/// How long a freshly started session is watched to prove it did not exit on startup, and how
+/// often that watch looks.
+///
+/// A successful `fork`+`exec` says nothing about whether the tool survived its own argument
+/// parsing, so both backends watch the child before reporting a session — the forking one with
 /// `try_wait`, the supervised one by polling `SessionStatus`.
-pub const STARTUP_GRACE_PERIOD: Duration = Duration::from_millis(500);
-/// How often the startup watch looks, within [`STARTUP_GRACE_PERIOD`].
-pub const STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(25);
+///
+/// This travels *with* a spawn rather than being read where it is used: `spawn_as_user` also runs
+/// inside the forked spawn worker, which holds no [`DaemonConfig`] (it is forked before the
+/// environment overrides are even applied). [`Default`] is the production setting, taken from the
+/// same `config::default_spawn_*` functions that back `spawn_startup_*_ms`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartupWatch {
+    /// Total time the child is watched before it counts as started.
+    pub grace: Duration,
+    /// Interval between checks.
+    pub poll: Duration,
+}
+
+impl Default for StartupWatch {
+    fn default() -> Self {
+        Self {
+            grace: Duration::from_millis(crate::config::default_spawn_startup_grace_period_ms()),
+            poll: Duration::from_millis(crate::config::default_spawn_startup_poll_interval_ms()),
+        }
+    }
+}
+
+impl StartupWatch {
+    /// The watch this daemon is configured for.
+    pub fn from_config(config: &DaemonConfig) -> Self {
+        Self {
+            grace: config.spawn_startup_grace_period(),
+            poll: config.spawn_startup_poll_interval(),
+        }
+    }
+
+    /// The watch as a pair of millisecond counts, for carrying across the spawn-worker JSON IPC.
+    pub fn as_millis(&self) -> (u64, u64) {
+        (self.grace.as_millis() as u64, self.poll.as_millis() as u64)
+    }
+
+    /// Rebuild from millisecond counts received over that IPC.
+    pub fn from_millis(grace_ms: u64, poll_ms: u64) -> Self {
+        Self {
+            grace: Duration::from_millis(grace_ms.max(1)),
+            poll: Duration::from_millis(poll_ms.max(1)),
+        }
+    }
+}
 
 /// Result of spawning a session.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -985,6 +1028,7 @@ pub fn spawn_as_user(
     child_log_level: &str,
     child_log_format: &str,
     coder_log_config_yaml: Option<&str>,
+    startup: StartupWatch,
 ) -> anyhow::Result<SpawnResult> {
     use std::os::unix::process::CommandExt;
 
@@ -1128,10 +1172,10 @@ pub fn spawn_as_user(
     let early_exit = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
-            Ok(None) if waited >= STARTUP_GRACE_PERIOD => break None,
+            Ok(None) if waited >= startup.grace => break None,
             Ok(None) => {
-                std::thread::sleep(STARTUP_POLL_INTERVAL);
-                waited += STARTUP_POLL_INTERVAL;
+                std::thread::sleep(startup.poll);
+                waited += startup.poll;
             }
             Err(e) => {
                 log::warn!(
@@ -1204,6 +1248,7 @@ pub fn spawn_as_user(
     _child_log_level: &str,
     _child_log_format: &str,
     _coder_log_config_yaml: Option<&str>,
+    _startup: StartupWatch,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }
@@ -1395,11 +1440,42 @@ mod grpc_listen_port_tests {
 
     use super::verify_tcp_listen_port_free;
 
+    /// A port outside the range the kernel hands out on its own.
+    ///
+    /// Binding `:0` draws from the ephemeral range (49152+ on macOS, 32768+ on Linux) — the very
+    /// range the kernel re-issues to any other test binding `:0` at the same moment. A port
+    /// sourced that way can therefore be taken between this test dropping its listener and
+    /// asserting the port is free, which reads as "the production check is broken" when it is
+    /// only the fixture that raced. Searching a fixed band below the ephemeral range removes the
+    /// kernel as a competitor; the pid-derived start offset keeps two concurrent test binaries
+    /// from probing the same port first.
+    fn a_port_no_one_is_listening_on() -> u16 {
+        const SEARCH_BASE: u16 = 20_000;
+        const SEARCH_SPAN: u16 = 8_000;
+        let start = (std::process::id() as u16) % SEARCH_SPAN;
+        for offset in 0..SEARCH_SPAN {
+            let port = SEARCH_BASE + (start + offset) % SEARCH_SPAN;
+            if let Ok(probe) = TcpListener::bind(("0.0.0.0", port)) {
+                drop(probe);
+                return port;
+            }
+        }
+        panic!(
+            "no free TCP port in {SEARCH_BASE}..{}",
+            SEARCH_BASE + SEARCH_SPAN
+        );
+    }
+
     #[test]
     fn verify_tcp_listen_port_free_ok_after_listener_dropped() {
-        let l = TcpListener::bind("0.0.0.0:0").expect("bind ephemeral");
-        let port = l.local_addr().expect("addr").port();
-        drop(l);
+        // Given — a listener holding a port nothing else is competing for
+        let port = a_port_no_one_is_listening_on();
+        let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind the chosen port");
+
+        // When — the listener goes away
+        drop(listener);
+
+        // Then — the port reads as free again
         verify_tcp_listen_port_free(port).expect("port free after drop");
     }
 
@@ -1438,7 +1514,23 @@ mod stack_parent_spawn_tests {
 
 #[cfg(all(test, unix))]
 mod startup_grace_period_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
+    use std::time::Duration;
+
+    /// Long enough that a loaded machine's fork/exec/exit never looks like a healthy start.
+    /// Costs a crashing child nothing: `try_wait` breaks out the moment it is gone, so this is a
+    /// ceiling on how long we would wait, not on how long we do.
+    const LONG_ENOUGH_TO_SEE_A_CRASH: StartupWatch = StartupWatch {
+        grace: Duration::from_secs(10),
+        poll: Duration::from_millis(25),
+    };
+
+    /// A watch a healthy spawn pays in full — kept short, because what is asserted is that a live
+    /// child is reported as started, not how long it was watched.
+    const A_BRIEF_WATCH: StartupWatch = StartupWatch {
+        grace: Duration::from_millis(100),
+        poll: Duration::from_millis(25),
+    };
 
     fn current_username() -> String {
         std::env::var("USER").expect("USER env var must be set to run this test")
@@ -1483,6 +1575,7 @@ mod startup_grace_period_tests {
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
             None,
+            LONG_ENOUGH_TO_SEE_A_CRASH,
         );
 
         // Then — a startup crash is reported as an error, not a fake-success SpawnResult
@@ -1522,6 +1615,7 @@ mod startup_grace_period_tests {
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
             None,
+            A_BRIEF_WATCH,
         );
 
         // Then — spawn_as_user does not wait for the child to exit; it only guards against an
@@ -1582,9 +1676,18 @@ mod resolve_tool_path_tests {
 
 #[cfg(all(test, unix))]
 mod daemon_toolchain_resolution_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
     use serial_test::serial;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    /// These tests assert what argv the child received, not how long it was watched — so the
+    /// startup watch is kept to the minimum that still proves the child did not die on its
+    /// arguments.
+    const A_BRIEF_STARTUP_WATCH: StartupWatch = StartupWatch {
+        grace: Duration::from_millis(100),
+        poll: Duration::from_millis(25),
+    };
 
     fn current_username() -> String {
         std::env::var("USER").expect("USER env var must be set to run this test")
@@ -1660,6 +1763,7 @@ mod daemon_toolchain_resolution_tests {
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
             None,
+            A_BRIEF_STARTUP_WATCH,
         );
 
         // Then — it finds and runs the daemon's own toolchain build, even though target_repo
@@ -1793,9 +1897,24 @@ mod resolve_tddy_data_dir_tests {
 
 #[cfg(all(test, unix))]
 mod daemon_data_dir_passthrough_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions};
+    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
     use serial_test::serial;
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+    use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv_value_after};
+    use tddy_testing_commons::wait::eventually_blocking;
+
+    /// These tests assert what argv the child received, not how long it was watched — so the
+    /// startup watch is kept to the minimum that still proves the child did not die on its
+    /// arguments.
+    const A_BRIEF_STARTUP_WATCH: StartupWatch = StartupWatch {
+        grace: Duration::from_millis(100),
+        poll: Duration::from_millis(25),
+    };
+
+    /// Safety net, not a prediction: a stub that has not recorded its argv within this window is
+    /// a stub that was never spawned. The wait costs nothing when the record is already there.
+    const A_STUB_RECORDS_ITS_ARGV_WITHIN: Duration = Duration::from_secs(10);
 
     fn current_username() -> String {
         std::env::var("USER").expect("USER env var must be set to run this test")
@@ -1812,32 +1931,29 @@ mod daemon_data_dir_passthrough_tests {
     }
 
     /// Writes an executable script at `<dir>/target/debug/tddy-coder` that records the argv it
-    /// was actually invoked with (one argument per line) to `argv_file`, then sleeps rather than
-    /// exiting immediately so it survives `spawn_as_user`'s startup grace-period check — these
-    /// tests are about what argv the child *received*, not about post-spawn liveness.
+    /// was actually invoked with to `argv_file`, then sleeps rather than exiting immediately so it
+    /// survives `spawn_as_user`'s startup grace-period check — these tests are about what argv the
+    /// child *received*, not about post-spawn liveness.
     fn a_fake_tddy_coder_build_that_records_its_argv(dir: &Path, argv_file: &Path) {
-        use std::os::unix::fs::PermissionsExt;
         let script_dir = dir.join("target").join("debug");
         std::fs::create_dir_all(&script_dir).unwrap();
-        let script_path = script_dir.join("tddy-coder");
-        let script = format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\nsleep 2\n",
-            argv_file.display()
-        );
-        std::fs::write(&script_path, script).unwrap();
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        a_stub_agent_script(&script_dir, "tddy-coder")
+            .recording_argv_to(argv_file)
+            .then_sleeping_secs(2)
+            .build();
     }
 
-    /// Reads back the argv recorded by [`a_fake_tddy_coder_build_that_records_its_argv`] and
-    /// returns the value immediately following `flag` (e.g. `--tddy-data-dir`), if present.
-    fn recorded_argv_value_after(argv_file: &Path, flag: &str) -> Option<String> {
-        let contents = std::fs::read_to_string(argv_file).expect("read recorded argv file");
-        let lines: Vec<&str> = contents.lines().collect();
-        lines
-            .iter()
-            .position(|l| *l == flag)
-            .and_then(|i| lines.get(i + 1))
-            .map(|s| s.to_string())
+    /// The value the child received after `flag` (e.g. `--tddy-data-dir`).
+    ///
+    /// `spawn_as_user` returns once the child has survived its startup grace period, which says
+    /// nothing about whether the child's *first* statement has run yet — under a loaded machine
+    /// the shell can still be starting up. Poll for the record rather than reading once.
+    fn recorded_argv_value_after(argv_file: &Path, flag: &str) -> String {
+        eventually_blocking(
+            &format!("the spawned child to record {flag} in its argv"),
+            A_STUB_RECORDS_ITS_ARGV_WITHIN,
+            || read_recorded_argv_value_after(argv_file, flag),
+        )
     }
 
     /// RAII guard: switches the test process's cwd for the duration of the test (simulating
@@ -1884,13 +2000,13 @@ mod daemon_data_dir_passthrough_tests {
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
             None,
+            A_BRIEF_STARTUP_WATCH,
         );
         result.expect("spawn_as_user must succeed");
 
         // Then — the child receives the daemon's own tddy_data_dir verbatim, regardless of
         // repo_path; it must never fall back to deriving session storage from its own cwd
-        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir")
-            .expect("child argv must include --tddy-data-dir");
+        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir");
         assert_eq!(received, tddy_data_dir.path().to_str().unwrap());
     }
 
@@ -1920,6 +2036,7 @@ mod daemon_data_dir_passthrough_tests {
             "info",
             super::CHILD_LOG_FORMAT_FALLBACK,
             None,
+            A_BRIEF_STARTUP_WATCH,
         );
         result.expect("spawn_as_user must succeed");
 
@@ -1929,8 +2046,7 @@ mod daemon_data_dir_passthrough_tests {
         // `std::env::current_dir()`, which returns the OS-canonicalized path (e.g. macOS
         // resolves `/tmp` to `/private/tmp`), while `daemon_toolchain_root.path()` here is the
         // raw, uncanonicalized `tempfile::TempDir` path — both name the same directory.
-        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir")
-            .expect("child argv must include --tddy-data-dir");
+        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir");
         let expected = daemon_toolchain_root
             .path()
             .canonicalize()

@@ -6,10 +6,16 @@
 //! Echoes the request's `args_json` back as the response's `result_json`, verbatim — enough to
 //! prove a tool-call payload round-trips over the stdio RPC channel without truncation, without
 //! needing a real daemon/sandbox on the other end.
+//!
+//! Before it can be usefully called, it calls back into the parent's
+//! `parent.FixtureReadyService/Ready` over the same pipe pair (the reverse-call pattern
+//! `echo_child.rs` demonstrates). That announcement is the parent's readiness signal: without it
+//! the parent would have to guess how long fork/exec, dynamic linking and tokio start-up take, and
+//! fold that guess into the budget meant to measure a single tool call.
 
 use async_trait::async_trait;
 use prost::Message;
-use tddy_rpc::{RpcMessage, RpcResult, RpcService};
+use tddy_rpc::{RpcClientTransport, RpcMessage, RpcResult, RpcService};
 use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
 
 struct FakeExecuteToolService;
@@ -37,6 +43,13 @@ impl RpcService for FakeExecuteToolService {
 // under `cargo test` (mirrors tddy-stdio's stdio-echo-fixture).
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(FakeExecuteToolService);
-    endpoint.run().await;
+    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(FakeExecuteToolService);
+    let run_handle = tokio::spawn(endpoint.run());
+
+    client
+        .call_unary("parent.FixtureReadyService", "Ready", Vec::new())
+        .await
+        .expect("announce readiness to the parent");
+
+    let _ = run_handle.await;
 }

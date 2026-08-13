@@ -191,12 +191,20 @@ no fallback to starting the session anyway.
 - **Where it runs.** `tddy-sandbox-app` (macOS in-process path) runs the gate before
   `spawn_claude_sandbox`, with visible log output, and is Ctrl-C-interruptible. The daemon runs it in
   the sandboxed **claude-cli** and **cursor-cli** start paths (after resolving defs, before spawning
-  the jail); a failure is returned as `failed_precondition`. Resume reuses the daemon start path, so it
-  is gated too.
+  the jail); a failure is returned as `failed_precondition`. **Resume does not reuse those start
+  paths** — it goes through `relaunch_sandboxed_runner`, which runs the same gate before relaunching
+  the jail, so a resumed session's subagents are as ready as a fresh one's.
 - **Implementation.** `tddy_discovery::warmup::warm_up_agents(defs, &WarmupOptions)` — the shared
   readiness primitive used by both the app and the daemon. `WarmupOptions { timeout, retry_interval,
   request_timeout }` is injectable so tests run in milliseconds. An empty def set is an immediate no-op
   (no HTTP). Step output logs at target `tddy_discovery::warmup`.
+- **Operator control (daemon).** The daemon builds its `WarmupOptions` from an `agent_warmup` section
+  in `daemon.yaml` — `timeout_secs` (120), `retry_interval_ms` (1000), `request_timeout_secs` (120),
+  whose defaults are exactly the library defaults. Each is overridable per-process by
+  `TDDY_AGENT_WARMUP_TIMEOUT_SECS`, `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS` and
+  `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS` (env beats file beats default). `tddy-sandbox-app` keeps
+  the library defaults — it has its own config schema, so the two hosts can currently disagree on the
+  budget.
 
 ## Non-goals (out of scope for v1)
 

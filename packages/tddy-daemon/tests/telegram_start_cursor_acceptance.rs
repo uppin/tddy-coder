@@ -5,9 +5,12 @@ use std::sync::{Arc, Mutex};
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_daemon::claude_cli_session::{CliSessionManager, PtyHandle};
+use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::{CursorCliConfig, DaemonConfig};
 use tddy_daemon::telegram_notifier::InMemoryTelegramSender;
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_daemon::telegram_session_control::{
     collect_outbound_messages, read_changeset_routing_snapshot, StartCursorCommand,
     TelegramSessionControlHarness, TelegramWorkflowSpawn, CURSOR_CLI_MODELS,
@@ -115,22 +118,6 @@ fn build_harness(
         None,
     );
     (harness, sender)
-}
-
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 #[tokio::test]
@@ -300,8 +287,5 @@ async fn start_cursor_model_callback_launches_cursor_cli_with_hooks() {
         .get(&session_id)
         .await
         .expect("session must be registered in CliSessionManager");
-    assert!(
-        wait_for_capture_contains(&handle, "ARGV:", 3000).await,
-        "stub binary output must appear in PTY capture"
-    );
+    a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
 }

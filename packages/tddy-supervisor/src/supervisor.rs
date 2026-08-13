@@ -1206,6 +1206,7 @@ mod tests {
     /// A supervisor that manages no declared service. What it does with the sessions it is *asked*
     /// for is the subject here, and a declaration would only add accounts to resolve and children to
     /// start.
+    #[cfg(target_os = "linux")]
     fn a_supervisor_managing_nothing() -> Arc<Supervisor> {
         let config = SupervisorConfig {
             socket: SocketConfig {
@@ -1226,6 +1227,7 @@ mod tests {
     ///
     /// A `/bin/sh` script rather than a binary from `PATH`, which is the only interpreter this
     /// crate's tests already assume.
+    #[cfg(target_os = "linux")]
     fn a_session_that_exits_immediately(directory: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
@@ -1242,6 +1244,7 @@ mod tests {
     /// `spawn_broker::tests::omits_the_privilege_drop_when_it_already_runs_as_the_target_user` — and
     /// the whole path runs unprivileged. `name` and `home` become the child's `USER` and `HOME`, which
     /// nothing here looks at.
+    #[cfg(target_os = "linux")]
     fn a_plan_running(program: PathBuf, scope_procs: Option<PathBuf>) -> SpawnPlan {
         // SAFETY: reads this process's own effective ids and nothing else.
         let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
@@ -1271,6 +1274,7 @@ mod tests {
     /// the child wrote into `cgroup.procs` is an ordinary file, so it is removed here to give the
     /// stand-in the shape the real thing has. Nothing about the supervisor is faked: it made the
     /// association itself, from the plan it was handed.
+    #[cfg(target_os = "linux")]
     fn empty_the_scope_the_way_the_kernel_does(scope: &Path) {
         std::fs::remove_file(scope.join("cgroup.procs"))
             .expect("the child should have joined the scope before exec");
@@ -1284,6 +1288,7 @@ mod tests {
     /// forks a child and reaps it: a second one would steal this one's exit and both would time out
     /// here. Everything else about a session's lifetime is asserted against [`SessionTable`] directly,
     /// and against the real binary in `tests/`, where each supervisor is its own process.
+    #[cfg(target_os = "linux")]
     async fn await_session_exit(supervisor: &Arc<Supervisor>, pid: u32) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -1297,6 +1302,11 @@ mod tests {
         panic!("session {pid} never exited");
     }
 
+    /// The one test here that forks a child all the way through its pre-exec plan, and that plan
+    /// opens with `PR_SET_PDEATHSIG` — Linux's, and refused elsewhere rather than skipped, so off
+    /// Linux the spawn fails before there is a session to reap. What the scope's lifetime does
+    /// *after* that is asserted against [`SessionTable`] on every host.
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn removes_the_scope_of_a_session_once_that_session_has_exited() {
         // Given a scope on disk and a session spawned into it, which exits straight away.

@@ -8,6 +8,10 @@
 //! The daemon already implements the receiving half — `resolve_socket_source` adopts
 //! `SD_LISTEN_FDS_START` when `LISTEN_PID` names it — so the contract asserted here is deliberately
 //! systemd's, not a new one.
+//!
+//! Every test here needs a service the supervisor actually started, so the whole file is Linux-only
+//! — see the note in `support`'s header.
+#![cfg(target_os = "linux")]
 
 mod support;
 

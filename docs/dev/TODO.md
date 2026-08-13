@@ -2,7 +2,19 @@
 
 ## Known failing tests
 
-### `cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` fails on `master` (source: session-attachment-start-materialization wrap, 2026-07-30)
+### `session_action_wait_times_out_while_running` is load-sensitive (found 2026-08-13, pre-existing — not caused by the deterministic-test-suite changeset)
+
+- `packages/tddy-tools/tests/session_action_jobs_acceptance.rs:258` — after the bounded wait times
+  out as intended, the test gives the job a fixed **1500 ms** to drain and asserts it reached
+  `Completed`/`Failed`. On a loaded machine it is still `TimedOut { still_running: true }`. Observed
+  once in a deliberately-loaded workspace run (4073 passed, this one failed).
+- Same shape as the flakes the deterministic-test-suite changeset closed — a budget standing in for a
+  readiness signal — but in a package that changeset did not touch. Fix is the same: poll for the
+  terminal disposition with `tddy_testing_commons::wait::eventually_blocking` and keep the ceiling as
+  a safety net. The test also branches on the outcome (`match` with an "allowed if…" arm), so it
+  wants a fluent-tests pass at the same time.
+
+### ~~`cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` fails on `master`~~ — resolved 2026-08-13 (source: session-attachment-start-materialization wrap, 2026-07-30)
 
 - `packages/tddy-daemon/tests/cursor_cli_session_acceptance.rs` — the test (introduced by #358)
   starts a cursor-cli session whose `stack_parent` names an orchestrator session it never creates on
@@ -15,6 +27,10 @@
   default base) — a behaviour decision, not a test fix.
 - Not a regression from any in-flight branch: reproduced with every file on the code path
   byte-identical to `master`. #367 (which last touched the test file) reported no CI checks.
+- **Resolved** by the deterministic-test-suite changeset (#385): the fixture was what was wrong.
+  `an_orchestrator_session(...)` now writes a real parent changeset, because production correctly
+  refuses an unresolvable `stack_parent` with `FailedPrecondition` rather than silently basing the
+  child off the default branch — the no-fallback behaviour is the one worth keeping.
 
 ### `cargo test --workspace` has 7 pre-existing failures on Linux, not 3 (source: session-attach-ui wrap, 2026-08-01)
 
@@ -74,6 +90,24 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Deterministic test suite — deliberate gaps (source: deterministic-test-suite changeset, 2026-08-13)
+
+- **`tddy-sandbox-app` keeps `WarmupOptions::default()`** (`src/main.rs`) while the daemon's budget
+  moved into `DaemonConfig.agent_warmup`. It has its own config schema, so a daemon-hosted and a
+  standalone session on the same host can warm up with different budgets. Give it the same three
+  keys, or have it read the daemon's.
+- **`pick_free_loopback_port` / `allocate_verified_grpc_listen_port` share a production TOCTOU
+  shape** (`sandbox_session.rs`) — bind `:0`, note the port, close, hand it to something else. The
+  test-side instance of this was fixed by probing outside the ephemeral range; production was not
+  hardened. The real fix is to pass the bound listener rather than the number.
+- **The supervisor's unread stderr pipe can deadlock under `RUST_LOG=debug`** — a child that fills
+  the pipe buffer blocks on write while nothing is reading.
+- **`spawn_startup_poll_interval_ms > spawn_startup_grace_period_ms` is unvalidated.** The `.max(1)`
+  clamp makes it harmless (one poll, then the deadline), but a config that says something impossible
+  should be refused at load like the rest of `DaemonConfig`.
+- **`packages/tddy-daemon/tests/worktree_files_rpc.rs:188` fails `cargo fmt --check`** — pre-existing
+  from `5bd24ad1` (#375), left untouched as unrelated. Anyone running `cargo fmt --all` will
+  incidentally fix it.
 ### tddy-web — a failed `ListSessions` is indistinguishable from an empty result in the new-session form (source: pr-stack-base-session changeset, 2026-08-13)
 
 `CreateSessionPane`'s mount effect fetches sessions best-effort and swallows the failure. That was

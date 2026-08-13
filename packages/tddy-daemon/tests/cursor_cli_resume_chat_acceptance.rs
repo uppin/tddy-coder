@@ -20,6 +20,12 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
+
+use tddy_testing_commons::stub_scripts::{
+    a_stub_agent_script, appended_invocation_count, read_last_appended_argv,
+};
+use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
@@ -46,8 +52,10 @@ const ORIGINAL_CHAT_ID: &str = "88147fb1-bdb6-43d9-94d8-3c9b7da4d806";
 /// The session whose resume opened a new chat instead of reattaching.
 const INCIDENT_SESSION_ID: &str = "019fa71b-8463-7b33-98a5-f07bb830c803";
 
-/// How long a spawned stub gets to record its argv before we call it a failure.
-const SPAWN_OBSERVE_TIMEOUT_MS: u64 = 3_000;
+/// How long a spawned stub gets to record its argv before we call it a failure. A safety net,
+/// not a prediction of how long a spawn takes: when the daemon spawns the stub promptly the wait
+/// costs nothing, and a machine busy enough to need seconds here is not evidence of a bug.
+const SPAWN_OBSERVE: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // Stub cursor-agent — a fake binary, not a mock: it serves `create-chat` from a
@@ -65,32 +73,26 @@ struct StubCursorAgent {
 ///
 /// Paths and the minted id are baked into the script text rather than passed through the
 /// environment, so the stub behaves identically no matter how the daemon spawns it.
+///
+/// The argv log is written one whole line per invocation (see
+/// `tddy_testing_commons::stub_scripts`): a stub that appended its argv one argument at a time
+/// would let [`StubCursorAgent::last_spawn_args`] observe a truncated command line, which reads
+/// as "the daemon forgot `--resume`" — a real bug's symptom produced by the fixture.
 fn a_stub_cursor_agent(dir: &Path) -> StubCursorAgent {
-    let binary_path = dir.join("stub_cursor_agent.sh");
     let argv_log = dir.join("argv.log");
     let create_chat_log = dir.join("create_chat.log");
-    let script = format!(
-        r#"#!/bin/sh
-if [ "$1" = "create-chat" ]; then
+    let binary_path = a_stub_agent_script(dir, "stub_cursor_agent.sh")
+        .with_prelude(&format!(
+            r#"if [ "$1" = "create-chat" ]; then
   echo "create-chat" >> "{create_chat_log}"
   echo "{MINTED_CHAT_ID}"
   exit 0
-fi
-printf '%s' "$1" >> "{argv_log}"
-shift
-for arg in "$@"; do printf '\t%s' "$arg" >> "{argv_log}"; done
-printf '\n' >> "{argv_log}"
-cat
-"#,
-        create_chat_log = create_chat_log.display(),
-        argv_log = argv_log.display(),
-    );
-    std::fs::write(&binary_path, script).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&binary_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+fi"#,
+            create_chat_log = create_chat_log.display(),
+        ))
+        .appending_argv_to(&argv_log)
+        .then_reading_stdin()
+        .build();
     StubCursorAgent {
         binary_path,
         argv_log,
@@ -99,32 +101,21 @@ cat
 }
 
 impl StubCursorAgent {
-    /// The args of the most recent agent spawn, waiting up to `SPAWN_OBSERVE_TIMEOUT_MS` for it.
+    /// The args of the most recent agent spawn, waiting up to [`SPAWN_OBSERVE`] for it.
     ///
     /// Excludes argv[0] (a shell script never sees its own path in `"$@"`).
     async fn last_spawn_args(&self) -> Vec<String> {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_millis(SPAWN_OBSERVE_TIMEOUT_MS);
-        while std::time::Instant::now() < deadline {
-            let logged = std::fs::read_to_string(&self.argv_log).unwrap_or_default();
-            if let Some(last) = logged.lines().last().filter(|l| !l.is_empty()) {
-                return last.split('\t').map(str::to_string).collect();
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!(
-            "stub cursor-agent was never spawned: {} recorded no argv within {SPAWN_OBSERVE_TIMEOUT_MS}ms",
-            self.argv_log.display()
-        );
+        eventually(
+            "the stub cursor-agent to record a spawn",
+            SPAWN_OBSERVE,
+            || read_last_appended_argv(&self.argv_log),
+        )
+        .await
     }
 
     /// How many times `cursor-agent create-chat` ran.
     fn create_chat_invocations(&self) -> usize {
-        std::fs::read_to_string(&self.create_chat_log)
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count()
+        appended_invocation_count(&self.create_chat_log)
     }
 }
 
@@ -302,15 +293,17 @@ impl CursorCliDaemon {
 
     /// Wait until the session has a live PTY, so a spawn failure fails here and not in an assertion.
     async fn assert_agent_is_running(&self, session_id: &str) {
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_millis(SPAWN_OBSERVE_TIMEOUT_MS);
-        while std::time::Instant::now() < deadline {
-            if self.manager.get(session_id).await.is_some() {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("session {session_id} never registered a PTY in CliSessionManager");
+        eventually_awaiting(
+            &format!("session {session_id} to register a PTY in CliSessionManager"),
+            SPAWN_OBSERVE,
+            || async {
+                match self.manager.get(session_id).await {
+                    Some(_) => Ok(()),
+                    None => Err("no PTY registered for this session yet".to_string()),
+                }
+            },
+        )
+        .await;
     }
 }
 

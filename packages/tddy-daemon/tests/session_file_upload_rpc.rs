@@ -31,8 +31,15 @@ const UPLOAD_ID: &str = "22222222-2222-7222-8222-222222222222";
 // ---------------------------------------------------------------------------
 
 /// The directory a drop's files land in: `{base}/sessions/{session_id}/uploads/{upload_id}`.
+///
+/// `base` is resolved first because the writer returns a path it canonicalized itself (the
+/// traversal guard resolves the target before accepting it). On macOS a `TempDir` base is spelled
+/// `/tmp/...` while `/tmp` is a symlink to `/private/tmp`, so an unresolved expectation would
+/// differ from the writer's answer by that symlink alone.
 fn expected_upload_dir(base: &std::path::Path, session_id: &str, upload_id: &str) -> PathBuf {
-    base.join("sessions")
+    std::fs::canonicalize(base)
+        .expect("canonicalize the uploads base")
+        .join("sessions")
         .join(session_id)
         .join("uploads")
         .join(upload_id)
