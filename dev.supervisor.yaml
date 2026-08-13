@@ -62,11 +62,17 @@ shutdown_grace_secs: 5
 #   # execution as the session user).
 #   allowed_env_keys: [RUST_LOG]
 
-# Uncomment to exercise the cgroup broker without /sys/fs/cgroup: base_override is used verbatim, so
-# scope create/limits/attach/destroy write under this directory instead. A documented production
-# option (pinning the base), not a test hook.
-# cgroup:
-#   base_override: REPO_ROOT/tmp/cgroup
-#   controllers: [memory, cpu, pids]
-#   memory_max_ceiling: 2147483648
-#   pids_max_ceiling: 512
+# ACTIVE, not commented out, and it has to be for a dev run to start at all. At startup the supervisor
+# moves itself into `<base>/<supervisor_leaf>` and delegates `controllers` into the base's
+# cgroup.subtree_control, and both are fatal on failure — a scope whose memory.max has no controller
+# behind it would report a ceiling as applied that the kernel does not enforce. Run unprivileged
+# against the real /sys/fs/cgroup, that relocation fails with EINVAL (cgroup v2 will not delegate from
+# a cgroup that still holds processes), so the supervisor refuses to start. `base_override` is used
+# verbatim, which points all of it at a plain directory instead. A documented production option
+# (pinning an already-prepared subtree), not a test hook — production gets a real one from the unit's
+# Delegate=yes slice.
+cgroup:
+  base_override: REPO_ROOT/tmp/cgroup
+  controllers: [memory, cpu, pids]
+  memory_max_ceiling: 2147483648
+  pids_max_ceiling: 512

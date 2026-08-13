@@ -173,7 +173,7 @@ is surrendered before any namespace exists.
 
 ### Milestone 4: Cgroup broker
 - [x] Scope create/limits/attach/destroy against an injected base
-- [ ] Supervisor owns the delegated subtree; scope cleanup on session end
+- [x] Supervisor owns the delegated subtree; scope cleanup on session end
 
 ### Milestone 5: Session and sandbox spawn brokers
 - [x] `spawn_session` — setuid/setgid/initgroups against the allowlist
@@ -528,6 +528,48 @@ is one AF_UNIX connect per spawn or clone.
   was not called out anywhere until now. The fix is routing them through `SpawnSession`, which needs the
   pty master fd to cross the socket via `SCM_RIGHTS` — the one place the "paths, not fds" decision does
   not stretch.
+
+### ✅ The supervisor now prepares the subtree it owns, and reclaims a session's scope
+
+`CgroupBroker::prepare_delegated_subtree` runs once in `run()` — before the privileged listener and
+before any service starts — creating `<base>/<supervisor_leaf>`, moving the supervisor's own TGID into
+it, then writing `+memory +cpu +pids` into `<base>/cgroup.subtree_control`. That order is forced by
+cgroup v2's no-internal-processes rule: controllers cannot be delegated out of a cgroup that still
+holds processes.
+
+**Both failures are fatal at startup, deliberately diverging from `tddy-sandbox-cgroups`**, which only
+`log::warn!`s on a failed controller enable. Without `+memory` in `subtree_control` a scope's
+`memory.max` write has no controller behind it, yet `CreateScope` still returns
+`AppliedLimits { memory_max: Some(..) }` — reporting a ceiling as applied that the kernel does not
+enforce, and invisible until an OOM that never comes. Failing once in the journal beats failing
+silently per session. No `OnceLock` and no cached failure, so a restart re-derives everything.
+
+Verified against the real binary both ways: with an injected base it logs the relocation and the
+enabled controllers and the bytes land exactly where expected; unprivileged against the real
+`/sys/fs/cgroup` it refuses to start with `EINVAL` and a message naming both remedies
+(`Delegate=yes`, or `cgroup.base_override`).
+
+**Scope reclamation is keyed to the session generation, never to a bare pid.** A pid is reissued while
+the previous session's status is still retained, so a pid-keyed reclaim would delete the *new*
+session's live scope. The association is derived from the spawn plan itself rather than a second RPC
+argument, so the scope a session joins and the scope recorded as its own cannot disagree — and a bare
+`CreateScope` with no session attached is consequently **never** swept; it stays the caller's to
+destroy. `record_exit` hands the scope back exactly once.
+
+`EBUSY` — a session's descendants outliving its leader — gets a bounded retry (100ms × 2s) on its own
+task, never on the reaper, because every other exit on the host queues behind `reap`. Deferring to
+"the next reap" was rejected: descendants are the supervisor's *grand*children, so their exits raise
+no `SIGCHLD` here and the next reap might never arrive. Still-populated after the grace is left in
+place with a `WARN` naming the directory — loud and bounded rather than a leak nobody can find.
+
+One consequence worth watching in the VM run: after preparation the supervisor sits in
+`<base>/<leaf>`, so every managed service and session is born in the leaf rather than the base. That
+is what keeps the base process-free, and it means the daemon is no longer a direct member of the
+unit's cgroup.
+
+`dev.supervisor.yaml` now ships an **active** `cgroup.base_override`, because a dev running the
+supervisor by hand unprivileged would otherwise hit that startup failure — the correct consequence of
+"fatal", absorbed in the dev template where it belongs.
 
 ### ⚠️ Two defects the jail work exposed, both fixed
 

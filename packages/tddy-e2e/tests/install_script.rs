@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_e2e::install_contract::{
-    verify_build_flag_invokes_release, verify_env_override_references, verify_headless_flag_support,
-    verify_install_overwrite_systemd_unit, verify_install_script_contracts,
-    verify_no_systemctl_support, verify_requires_systemd_flag, verify_root_check, verify_syntax,
-    verify_user_flag_support,
+    verify_build_flag_invokes_release, verify_env_override_references,
+    verify_headless_flag_support, verify_install_overwrite_systemd_unit,
+    verify_install_script_contracts, verify_no_systemctl_support, verify_requires_systemd_flag,
+    verify_root_check, verify_syntax, verify_user_flag_support,
 };
 
 fn repo_root() -> PathBuf {

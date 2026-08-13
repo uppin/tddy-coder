@@ -89,6 +89,11 @@ pub async fn run(config_path: &Path) -> anyhow::Result<()> {
         cgroup_broker::resolve_cgroup_base(&config.cgroup)?,
         config.cgroup.clone(),
     );
+    // Before any child exists, and before the first scope is asked for. The supervisor has to leave
+    // the cgroup it carves scopes out of before cgroup v2 will let it delegate controllers there, and
+    // a child forked afterwards is created in the leaf the supervisor moved into rather than in the
+    // base — which is what keeps the base free of processes for the rest of the run.
+    cgroups.prepare_delegated_subtree(std::process::id())?;
     let surface = Arc::new(server::PrivilegedSurface::new(
         Arc::clone(&config),
         Arc::clone(&supervisor),

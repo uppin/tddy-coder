@@ -7,10 +7,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::os::unix::net::UnixListener;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use crate::cgroup_broker::{self, ScopeRemoval};
 use crate::config::{ManagedService, ServiceSocket, SupervisorConfig};
 use crate::error::SupervisorError;
 use crate::reaper;
@@ -37,6 +39,17 @@ const KILL_TIMEOUT: Duration = Duration::from_secs(2);
 /// exit-diagnostic loop asks every 50ms and asks again after it has its answer — so a status that
 /// vanished on first read would answer one poll and deny the next.
 const RETAINED_EXITED_SESSIONS: usize = 256;
+
+/// How long a scope's leftover processes get to disappear before its directory is left behind.
+///
+/// `rmdir` on a cgroup fails with `EBUSY` while *any* process remains in it, and a session's own
+/// descendants routinely outlive the session leader by a moment — a shell that exits before the
+/// children it signalled do. Waiting is therefore normal and short. Waiting *forever* is not: a scope
+/// whose processes never leave is a leak, and this is how long the supervisor tries before saying so.
+const SCOPE_REMOVAL_GRACE: Duration = Duration::from_secs(2);
+
+/// How often a scope that still holds processes is retried within [`SCOPE_REMOVAL_GRACE`].
+const SCOPE_REMOVAL_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 /// One declared service: its declaration, its resolved account, and its lifecycle state.
 struct Slot {
@@ -90,6 +103,18 @@ struct SessionTable {
     exited: VecDeque<u32>,
     /// Generations handed out so far. Monotonic for the life of the process.
     spawned: u64,
+    /// The cgroup scope directory each session was spawned into, for the sessions that were spawned
+    /// into one at all.
+    ///
+    /// Keyed by generation rather than by pid, which is the same hazard [`SessionGeneration`] exists
+    /// for: a pid is reissued while the previous session's status is still retained, and a scope
+    /// reclaimed on the strength of a pid alone would be the *new* session's live scope.
+    ///
+    /// Only a session the supervisor spawned *into* a scope has an entry here. A scope a caller
+    /// created with `CreateScope` and attached no session to is not in this map and is never swept:
+    /// the association is what makes a scope garbage, and without one the supervisor cannot know
+    /// whether the caller has finished with it.
+    scopes: BTreeMap<SessionGeneration, PathBuf>,
 }
 
 impl SessionTable {
@@ -127,19 +152,38 @@ impl SessionTable {
         generation
     }
 
-    /// Record an exit, if `pid` is a session at all. A pid this table does not know is left alone:
-    /// only the sessions the supervisor was asked for are reportable.
-    fn record_exit(&mut self, pid: u32, code: Option<i32>) {
-        let Some(record) = self.records.get_mut(&pid) else {
-            return;
-        };
+    /// Record that `generation`'s session was spawned into the cgroup scope at `scope`.
+    ///
+    /// This association is the whole reason a scope can be cleaned up without a caller asking for it,
+    /// and it is deliberately made from the spawn itself rather than declared separately: the scope a
+    /// session joins *is* its plan's `cgroup.procs`, so there is nothing for the two to disagree about.
+    fn own_scope(&mut self, generation: SessionGeneration, scope: PathBuf) {
+        self.scopes.insert(generation, scope);
+    }
+
+    /// Record an exit, if `pid` is a session at all, and hand back the cgroup scope that has just
+    /// become garbage. A pid this table does not know is left alone: only the sessions the supervisor
+    /// was asked for are reportable.
+    ///
+    /// The scope and the status have different lifetimes on purpose. The directory is reclaimed now —
+    /// nothing will ever run in it again — while the *status* stays retained for a caller whose poll
+    /// has not arrived yet ([`RETAINED_EXITED_SESSIONS`]). Handing the scope back exactly once is what
+    /// keeps a repeated reap, or a pid the kernel has reissued, from removing a directory that by then
+    /// belongs to a later session.
+    fn record_exit(&mut self, pid: u32, code: Option<i32>) -> Option<PathBuf> {
+        let record = self.records.get_mut(&pid)?;
         record.outcome = SessionOutcome::Exited { code };
+        let generation = record.generation;
+
         self.exited.push_back(pid);
         while self.exited.len() > RETAINED_EXITED_SESSIONS {
             if let Some(evicted) = self.exited.pop_front() {
                 self.records.remove(&evicted);
             }
         }
+        // Taken, not read: the scope of a session that has exited is handed to the caller once, and
+        // the only other entries left are those of sessions that are still running.
+        self.scopes.remove(&generation)
     }
 
     /// The state of `pid` together with the incarnation it belongs to, read as one value.
@@ -350,10 +394,17 @@ impl Supervisor {
     /// for, and what makes `shutdown` able to account for all of them.
     pub async fn spawn_session(&self, plan: SpawnPlan) -> std::io::Result<u32> {
         let _in_flight = self.spawn_gate.lock().await;
+        // Read before the plan is handed over. A scope becomes this session's the moment the session
+        // exists, so it can be reclaimed when the session ends without a caller having to ask.
+        let scope = scope_directory_of(plan.scope_procs.as_deref()).map(Path::to_path_buf);
         // No listener: socket handover is a declared managed service's privilege, never something a
         // caller can ask for.
         let pid = self.forks.spawn(plan, None).await?;
-        self.sessions().record_spawned(pid);
+        let mut sessions = self.sessions();
+        let generation = sessions.record_spawned(pid);
+        if let Some(scope) = scope {
+            sessions.own_scope(generation, scope);
+        }
         Ok(pid)
     }
 
@@ -443,7 +494,10 @@ impl Supervisor {
                 // exit rather than forgetting the pid is what lets a caller ask afterwards: its poll
                 // cannot arrive before this point, because the status it wants is what `waitpid`
                 // just produced.
-                self.sessions().record_exit(child.pid, child.exit_code());
+                let reclaimed = self.sessions().record_exit(child.pid, child.exit_code());
+                if let Some(scope) = reclaimed {
+                    self.reclaim_scope(scope);
+                }
                 log::debug!(
                     target: "tddy_supervisor::supervisor",
                     "reaped pid {} ({})",
@@ -629,6 +683,70 @@ impl Supervisor {
         }
     }
 
+    /// Remove the cgroup scope a session was spawned into, now that the session is gone.
+    ///
+    /// The first attempt is made here, inline: the common case is a session that left nothing behind,
+    /// and one `rmdir` costs less than a task. `EBUSY` is *not* retried here. The kernel refuses to
+    /// remove a cgroup while any process remains in it, a session's own descendants can outlive the
+    /// session leader, and every other exit on the host — the daemon's restart included — is queued
+    /// behind this reap. So the waiting happens in a task with a bounded grace
+    /// ([`SCOPE_REMOVAL_GRACE`]), and a scope that never empties is reported rather than retried
+    /// forever or forgotten: an operator can then find out what is still living in it.
+    ///
+    /// Not fatal to anything. The session is over either way, the caller already has its exit status,
+    /// and `DestroyScope` remains available for a scope this could not remove. A retry still waiting
+    /// when the supervisor exits goes with the runtime, which is correct: on a real host the delegated
+    /// subtree is torn down with the unit, so there is nothing left to remove.
+    fn reclaim_scope(&self, scope: PathBuf) {
+        match cgroup_broker::remove_scope_dir(&scope) {
+            ScopeRemoval::Removed => log::debug!(
+                target: "tddy_supervisor::supervisor",
+                "removed the scope {} of a session that has exited",
+                scope.display()
+            ),
+            ScopeRemoval::Failed { message } => log::warn!(
+                target: "tddy_supervisor::supervisor",
+                "the scope of a session that has exited is left behind: {message}"
+            ),
+            ScopeRemoval::StillPopulated => {
+                tokio::spawn(async move {
+                    let deadline = Instant::now() + SCOPE_REMOVAL_GRACE;
+                    loop {
+                        tokio::time::sleep(SCOPE_REMOVAL_RETRY_INTERVAL).await;
+                        match cgroup_broker::remove_scope_dir(&scope) {
+                            ScopeRemoval::Removed => {
+                                log::debug!(
+                                    target: "tddy_supervisor::supervisor",
+                                    "removed the scope {} once the last of its processes had gone",
+                                    scope.display()
+                                );
+                                return;
+                            }
+                            ScopeRemoval::Failed { message } => {
+                                log::warn!(
+                                    target: "tddy_supervisor::supervisor",
+                                    "the scope of a session that has exited is left behind: {message}"
+                                );
+                                return;
+                            }
+                            ScopeRemoval::StillPopulated if Instant::now() >= deadline => {
+                                log::warn!(
+                                    target: "tddy_supervisor::supervisor",
+                                    "the scope {} still holds processes {SCOPE_REMOVAL_GRACE:?} after \
+                                     its session exited, so it is left behind; its `cgroup.procs` \
+                                     names what is still running in it",
+                                    scope.display()
+                                );
+                                return;
+                            }
+                            ScopeRemoval::StillPopulated => continue,
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     /// Poll until nothing the supervisor spawned is left, or `budget` runs out.
     async fn await_children_gone(self: &Arc<Self>, budget: Duration) -> bool {
         let deadline = Instant::now() + budget;
@@ -676,6 +794,16 @@ impl Supervisor {
     fn lock(&self) -> MutexGuard<'_, Vec<Slot>> {
         lock_or_recover(&self.slots, "service slots")
     }
+}
+
+/// The cgroup scope directory a spawn plan places its child in, if any.
+///
+/// A plan carries the scope as the `cgroup.procs` the child writes itself into, which is
+/// `<scope>/cgroup.procs` by construction ([`crate::cgroup_broker::CgroupBroker::scope_procs_path`]).
+/// The directory around that file is what becomes garbage when the session ends. Pure, and taking the
+/// path rather than the plan, so the derivation is assertable on its own.
+fn scope_directory_of(scope_procs: Option<&Path>) -> Option<&Path> {
+    scope_procs.and_then(Path::parent)
 }
 
 /// Take a lock, and take it back if a panic under an earlier guard poisoned it.
@@ -939,6 +1067,261 @@ mod tests {
 
         // Then — a pid is not an identity, so two sessions that shared one are still two sessions.
         assert_ne!(first, second);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Reclaiming the cgroup scope a session was spawned into
+    // -----------------------------------------------------------------------------------------
+
+    /// The scope directory a session was spawned into, as [`CgroupBroker::scope_procs_path`] names it.
+    fn a_scope_dir(name: &str) -> PathBuf {
+        PathBuf::from(format!("/sys/fs/cgroup/tddy.slice/tddy-{name}.scope"))
+    }
+
+    #[test]
+    fn takes_the_scope_a_session_joins_from_the_procs_file_it_was_handed() {
+        // Given the `cgroup.procs` a spawn plan carries for a session that joins a scope.
+        let procs = a_scope_dir("session-alpha").join("cgroup.procs");
+
+        // When
+        let scope = scope_directory_of(Some(&procs));
+
+        // Then — the plan names the file the child writes itself into; the directory around it is what
+        // becomes garbage when the session ends.
+        assert_eq!(scope, Some(a_scope_dir("session-alpha").as_path()));
+    }
+
+    #[test]
+    fn takes_no_scope_for_a_session_that_joins_none() {
+        // Given / When
+        let scope = scope_directory_of(None);
+
+        // Then
+        assert_eq!(scope, None);
+    }
+
+    #[test]
+    fn reclaims_the_scope_of_a_session_that_has_exited() {
+        // Given a session spawned into a scope of its own.
+        let mut sessions = a_session_table();
+        let generation = sessions.record_spawned(SESSION_PID);
+        sessions.own_scope(generation, a_scope_dir("session-alpha"));
+
+        // When
+        let reclaimed = sessions.record_exit(SESSION_PID, Some(0));
+
+        // Then — nobody had to ask: the scope became garbage the moment its session did.
+        assert_eq!(reclaimed, Some(a_scope_dir("session-alpha")));
+    }
+
+    #[test]
+    fn reclaims_no_scope_for_a_session_that_was_never_spawned_into_one() {
+        // Given a session with no scope, on a supervisor that may well hold scopes a caller created
+        // with `CreateScope` and attached nothing to.
+        let mut sessions = a_session_table();
+        sessions.record_spawned(SESSION_PID);
+
+        // When
+        let reclaimed = sessions.record_exit(SESSION_PID, Some(0));
+
+        // Then — only the association makes a scope garbage. A scope nothing was spawned into is the
+        // caller's to destroy, and sweeping it would remove a directory it is still filling.
+        assert_eq!(reclaimed, None);
+    }
+
+    #[test]
+    fn reclaims_no_scope_for_a_pid_that_was_never_a_session() {
+        // Given a supervisor whose only session is somebody else's pid away.
+        let mut sessions = a_session_table();
+        let generation = sessions.record_spawned(SESSION_PID);
+        sessions.own_scope(generation, a_scope_dir("session-alpha"));
+
+        // When a managed service, or anything else the supervisor forked, is reaped.
+        let reclaimed = sessions.record_exit(A_STRANGERS_PID, Some(0));
+
+        // Then
+        assert_eq!(reclaimed, None);
+    }
+
+    #[test]
+    fn keeps_the_exit_status_of_a_session_whose_scope_it_reclaimed() {
+        // Given
+        let mut sessions = a_session_table();
+        let generation = sessions.record_spawned(SESSION_PID);
+        sessions.own_scope(generation, a_scope_dir("session-alpha"));
+
+        // When
+        sessions.record_exit(SESSION_PID, Some(3));
+
+        // Then — the directory and the status have different lifetimes. A caller polling for what
+        // became of its session must still get an answer after the scope is gone.
+        assert_eq!(
+            sessions.status(SESSION_PID),
+            Some(SessionStatus {
+                pid: SESSION_PID,
+                state: SessionState::Exited,
+                exit_code: Some(3),
+            })
+        );
+    }
+
+    #[test]
+    fn reclaims_a_session_scope_once_and_not_again() {
+        // Given a session whose exit has already been recorded.
+        let mut sessions = a_session_table();
+        let generation = sessions.record_spawned(SESSION_PID);
+        sessions.own_scope(generation, a_scope_dir("session-alpha"));
+        sessions.record_exit(SESSION_PID, Some(0));
+
+        // When the same pid is reaped again — the shutdown sequence drains repeatedly.
+        let reclaimed = sessions.record_exit(SESSION_PID, Some(0));
+
+        // Then — a scope handed out twice is a directory removed twice, and by then the kernel may
+        // have given that name to a later session.
+        assert_eq!(reclaimed, None);
+    }
+
+    #[test]
+    fn reclaims_no_scope_on_behalf_of_a_later_session_that_inherited_a_pid() {
+        // Given a session that exited and had its scope reclaimed, and a new session the kernel handed
+        // the same pid to — this one spawned into no scope at all.
+        let mut sessions = a_session_table();
+        let exited = sessions.record_spawned(SESSION_PID);
+        sessions.own_scope(exited, a_scope_dir("session-alpha"));
+        sessions.record_exit(SESSION_PID, Some(0));
+        sessions.record_spawned(SESSION_PID);
+
+        // When
+        let reclaimed = sessions.record_exit(SESSION_PID, Some(0));
+
+        // Then — a scope belongs to the incarnation that was spawned into it, not to whoever holds its
+        // pid afterwards.
+        assert_eq!(reclaimed, None);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Sweeping a real session's scope on the way through the reap path
+    // -----------------------------------------------------------------------------------------
+
+    /// A supervisor that manages no declared service. What it does with the sessions it is *asked*
+    /// for is the subject here, and a declaration would only add accounts to resolve and children to
+    /// start.
+    fn a_supervisor_managing_nothing() -> Arc<Supervisor> {
+        let config = SupervisorConfig {
+            socket: SocketConfig {
+                path: PathBuf::from("/run/tddy-supervisor.sock"),
+                group: None,
+                mode: "0660".to_string(),
+            },
+            services: Vec::new(),
+            spawn_policy: SpawnPolicy::default(),
+            cgroup: crate::config::CgroupPolicy::default(),
+            shutdown_grace_secs: 1,
+        };
+        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        Supervisor::new(&config, forks).expect("build a supervisor")
+    }
+
+    /// A session that exits the instant it starts, as a script under `directory`.
+    ///
+    /// A `/bin/sh` script rather than a binary from `PATH`, which is the only interpreter this
+    /// crate's tests already assume.
+    fn a_session_that_exits_immediately(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = directory.join("session.sh");
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write the session script");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("make the session script executable");
+        path
+    }
+
+    /// A plan for a session this test process can really fork and exec.
+    ///
+    /// The target account is the one already running, so no privilege drop is planned — pinned by
+    /// `spawn_broker::tests::omits_the_privilege_drop_when_it_already_runs_as_the_target_user` — and
+    /// the whole path runs unprivileged. `name` and `home` become the child's `USER` and `HOME`, which
+    /// nothing here looks at.
+    fn a_plan_running(program: PathBuf, scope_procs: Option<PathBuf>) -> SpawnPlan {
+        // SAFETY: reads this process's own effective ids and nothing else.
+        let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+        SpawnPlan {
+            program,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            working_dir: std::env::temp_dir(),
+            target: TargetUser {
+                uid,
+                gid,
+                name: std::ffi::CString::new("tester").expect("a target user name"),
+                home: std::env::temp_dir(),
+                groups: Vec::new(),
+            },
+            scope_procs,
+            inherit_output: false,
+            environment: EnvironmentBase::Minimal,
+            sandbox: None,
+        }
+    }
+
+    /// The state the kernel leaves a cgroup directory in once the last process has left it: removable.
+    ///
+    /// A cgroup's control files are not directory entries, so an emptied cgroup is an empty directory.
+    /// Under the plain-directory base an operator's `base_override` (and every test) can name, the pid
+    /// the child wrote into `cgroup.procs` is an ordinary file, so it is removed here to give the
+    /// stand-in the shape the real thing has. Nothing about the supervisor is faked: it made the
+    /// association itself, from the plan it was handed.
+    fn empty_the_scope_the_way_the_kernel_does(scope: &Path) {
+        std::fs::remove_file(scope.join("cgroup.procs"))
+            .expect("the child should have joined the scope before exec");
+    }
+
+    /// Reap until `pid` is recorded as exited, which is the point at which everything the reap path
+    /// does about that session — its scope included — has happened.
+    ///
+    /// ⚠️ `waitpid(-1)` is process-wide, so whichever caller reaps first collects *every* exited child
+    /// of the test binary. The test below must therefore stay the only unit test in this crate that
+    /// forks a child and reaps it: a second one would steal this one's exit and both would time out
+    /// here. Everything else about a session's lifetime is asserted against [`SessionTable`] directly,
+    /// and against the real binary in `tests/`, where each supervisor is its own process.
+    async fn await_session_exit(supervisor: &Arc<Supervisor>, pid: u32) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            supervisor.reap().await;
+            if supervisor.session_status(pid).map(|status| status.state) == Ok(SessionState::Exited)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("session {pid} never exited");
+    }
+
+    #[tokio::test]
+    async fn removes_the_scope_of_a_session_once_that_session_has_exited() {
+        // Given a scope on disk and a session spawned into it, which exits straight away.
+        let workspace = tempfile::TempDir::new().expect("create a workspace");
+        let scope = workspace.path().join("tddy-session-alpha.scope");
+        std::fs::create_dir(&scope).expect("create the scope directory");
+        let supervisor = a_supervisor_managing_nothing();
+        let pid = supervisor
+            .spawn_session(a_plan_running(
+                a_session_that_exits_immediately(workspace.path()),
+                Some(scope.join("cgroup.procs")),
+            ))
+            .await
+            .expect("spawn a session into the scope");
+        empty_the_scope_the_way_the_kernel_does(&scope);
+
+        // When the session is reaped. Nobody asks for the scope to be destroyed.
+        await_session_exit(&supervisor, pid).await;
+
+        // Then
+        assert!(
+            !scope.exists(),
+            "the scope {} outlived the session it was created for",
+            scope.display()
+        );
     }
 
     // -----------------------------------------------------------------------------------------

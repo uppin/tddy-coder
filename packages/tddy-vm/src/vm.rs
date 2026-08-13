@@ -50,15 +50,31 @@ pub enum VmAccel {
 impl VmAccel {
     /// The best accelerator this host offers. An explicit constructor used to populate a
     /// manifest: the launcher itself never guesses, it emits whatever the manifest says.
+    ///
+    /// On Linux this asks whether `/dev/kvm` can actually be **opened**, not merely whether it
+    /// exists. The node is present on any host with the module loaded, but it is `root:kvm 0660`
+    /// (often with an ACL naming particular users), so an account outside that group sees the file
+    /// and cannot use it. Reporting `Kvm` there produces a manifest QEMU refuses to start, and the
+    /// failure surfaces as an opaque emulator exit rather than "you are not in group kvm" —
+    /// whereas falling back to `Tcg` boots correctly, just slowly.
     pub fn host_default() -> Self {
         if cfg!(target_os = "macos") {
             Self::Hvf
-        } else if cfg!(target_os = "linux") && std::path::Path::new("/dev/kvm").exists() {
+        } else if cfg!(target_os = "linux") && kvm_is_usable() {
             Self::Kvm
         } else {
             Self::Tcg
         }
     }
+}
+
+/// Whether this process can open `/dev/kvm` for the read/write access QEMU needs.
+fn kvm_is_usable() -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/kvm")
+        .is_ok()
 }
 
 /// The UEFI firmware pair a guest boots through: read-only code plus writable variables.
