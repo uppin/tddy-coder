@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
+import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import {
   startSessionOverridesFor,
@@ -189,6 +190,10 @@ export function CreateSessionPane({
   // The form stays mounted behind the prompt, so cancelling returns to it with its values intact.
   const [branchConflict, setBranchConflict] = useState<BranchConflict | null>(null);
 
+  // One option per logical project: aggregated `ListProjects` returns a row per (project, host), and
+  // this form's Project selector submits only a project id (the host has its own selector).
+  const projectOptions = useMemo(() => projectSelectOptions(projects), [projects]);
+
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
   const modelAgentKey =
@@ -265,9 +270,11 @@ export function CreateSessionPane({
         if (loadedTools.length > 0) {
           setToolPath(loadedTools[0]!.path);
         }
-        // Auto-select projectId when there is exactly one choice — no meaningful decision.
-        if (loadedProjects.length === 1) {
-          setProjectId(loadedProjects[0]!.projectId);
+        // Auto-select projectId when there is exactly one choice — no meaningful decision. Counted
+        // in offered options, not rows: a single project carried by two hosts is still one choice.
+        const loadedOptions = projectSelectOptions(loadedProjects);
+        if (loadedOptions.length === 1) {
+          setProjectId(loadedOptions[0]!.projectId);
         }
       })
       .catch((err) => {
@@ -632,9 +639,9 @@ export function CreateSessionPane({
             <option value="" disabled>
               {projects.length === 0 ? "No projects available" : "Select a project…"}
             </option>
-            {projects.map((p) => (
-              <option key={p.projectId} value={p.projectId}>
-                {p.name || p.projectId}
+            {projectOptions.map((option) => (
+              <option key={option.projectId} value={option.projectId}>
+                {option.label}
               </option>
             ))}
           </select>
