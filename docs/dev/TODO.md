@@ -74,6 +74,83 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### cursor-cli cannot enforce managed-codebase mode (source: remote-managed-worktree changeset, 2026-08-13)
+
+`cursor-agent` has no `--allowedTools` / `--disallowedTools` equivalent anywhere in this codebase, so a
+managed-codebase cursor session can only be *guided* — via `REMOTE_APPENDIX` and a
+`.cursor/rules/*.mdc` entry — never *prevented* from attempting native filesystem access. claude-cli
+gets hard enforcement through `build_claude_allowlist` + `--disallowedTools`.
+
+This is why split placement (`codebase_daemon_instance_id`) is restricted to `claude-cli` in v1. Adding
+cursor-cli would additionally require, all of which the non-sandboxed cursor path lacks today:
+
+- a read-only context dir as cwd (`prepare_context_dir_with_subagent` + `copy_dir_all`) instead of the
+  worktree — `cursor_cli_spawn.rs:302` discards `managed_codebase` outright (`let _ = (…)`);
+- an MCP registration (`write_cursor_mcp_config`, `packages/tddy-sandbox-recipes/src/cursor_cli.rs:213`)
+  written to the cursor `$HOME` or cwd — this path writes none;
+- `--force --trust --approve-mcps` in argv, which `write_cursor_mcp_config` deliberately does not inject;
+- tool-relay env in `session_env`, **and** on resume — `resume_cursor_cli_session` passes
+  `Vec::new()` (`cli_session_manager.rs:346-364`), so any start-time env is silently lost.
+
+Worth revisiting if cursor-agent gains a tool-allowlist or MCP-only mode.
+
+### `session_deletion` leaks the worktree for every session type except claude-cli (source: remote-managed-worktree changeset, 2026-08-13)
+
+`packages/tddy-daemon/src/session_deletion.rs:166-169` gates worktree removal on
+`session_type == "claude-cli"`:
+
+```rust
+let claude_cli_worktree = metadata
+    .as_ref()
+    .filter(|m| m.session_type.as_deref() == Some("claude-cli"))
+    .and_then(|m| m.repo_path.clone());
+```
+
+So deleting a `cursor-cli` or `workspace` session removes the session directory but leaves both the
+directory and the `git worktree` registration behind. The remote-managed-worktree changeset widens this
+to include `"workspace"` because split sessions would otherwise leak a worktree on the codebase host on
+every delete. **`cursor-cli` is deliberately left leaking** — fixing it changes behaviour for sessions
+that changeset does not touch, and deserves its own change with its own tests.
+
+Note `docs/ft/daemon/remote-codebase-mode.md` criterion 3 asserted that `DeleteSession` for a workspace
+session "removes the session directory and the worktree". It did not. That line is corrected by the same
+changeset; the rest of that document's criteria are worth re-verifying against the code rather than
+trusted, since at least one was aspirational.
+
+### `tddy-coder --remote` never completes a session bootstrap (source: remote-managed-worktree changeset, 2026-08-13)
+
+`packages/tddy-coder/src/run.rs:4000-4003` contacts the relay daemon successfully and then bails:
+
+```rust
+// TODO: implement full session bootstrap (start-session → connect-session → run_goal)
+anyhow::bail!("remote mode: successfully contacted relay at {} but full session bootstrap is not yet implemented", daemon_url)
+```
+
+`RemoteContextDir` (`packages/tddy-coder/src/remote.rs:27-59`) is referenced only from tests. So the
+CLI entry point for remote-codebase mode has never worked end to end, despite
+`docs/ft/daemon/remote-codebase-mode.md` criteria 23–28 describing it as shipped. The
+remote-managed-worktree changeset delivers the daemon/UI path instead and leaves this alone; either
+implement the bootstrap or retire the flag, but the current state advertises a capability that does not
+exist.
+
+### `docs/ft/daemon/background-tasks.md` claims TaskService unary methods peer-forward (source: remote-managed-worktree changeset, 2026-08-13)
+
+`docs/ft/daemon/background-tasks.md:153-155` states TaskService's unary methods "forward via
+`livekit_peer_discovery::forward_to_peer`". They do not — `packages/tddy-daemon/src/task_service.rs`
+contains no `forward_to_peer` call and no `classify_peer_route`, so `daemon_instance_id` on those RPCs
+is silently ignored rather than routed or rejected. Either implement the forwarding or correct the doc
+and reject a non-local id the way `WatchTask` already does (`task_service.rs:151-155`).
+
+### `TokenGenerator::generate_for` performs no authorization (source: remote-managed-worktree changeset, 2026-08-13)
+
+`packages/tddy-livekit/src/token.rs:50-65` mints a JWT for whatever `(room, identity)` pair it is
+handed, with no check that the caller may join that room or claim that identity. Any client that can
+reach a daemon's or a session coder's `token.TokenService` HTTP endpoint is therefore a room-agnostic
+minting oracle, scoped only by network reachability. Default TTL is 6 h
+(`DEFAULT_LIVEKIT_JWT_TTL_SECS`). Separately, `spawner.rs:886-902` passes the raw
+`--livekit-api-secret` on the spawned child's command line, where `/proc/<pid>/cmdline` exposes it to
+the spawning user.
+
 ### tddy-web — a failed `ListSessions` is indistinguishable from an empty result in the new-session form (source: pr-stack-base-session changeset, 2026-08-13)
 
 `CreateSessionPane`'s mount effect fetches sessions best-effort and swallows the failure. That was

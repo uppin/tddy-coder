@@ -29,6 +29,56 @@ export const createSessionPage = {
   },
 
   // ---------------------------------------------------------------------------
+  // Codebase host — which daemon holds the worktree (docs/ft/daemon/remote-managed-worktree.md)
+  // ---------------------------------------------------------------------------
+
+  /** The "Codebase host" `<select>`. Present only inside an open claude-cli Managed codebase block. */
+  codebaseHostSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect, { timeout: 5000, ...options }),
+
+  /** Choose which daemon's filesystem holds the worktree. `""` selects "same as host". */
+  selectCodebaseHost(daemonInstanceId: string) {
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect).select(daemonInstanceId);
+  },
+
+  /**
+   * The daemon-instance ids offered as codebase hosts, in option order. The leading "Same as host"
+   * option carries the empty value, so it appears here as `""`.
+   */
+  codebaseHostOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .codebaseHostSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The captions rendered for the codebase-host options, in option order. */
+  codebaseHostOptionLabels: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .codebaseHostSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
+
+  /** The selector is not offered — split placement is unavailable in the current form state. */
+  expectNoCodebaseHostSelector() {
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect).should("not.exist");
+  },
+
+  /** Open the "Managed codebase" section, which is where split placement is configured. */
+  enableManagedCodebase() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+  },
+
+  /** Close the "Managed codebase" section. */
+  disableManagedCodebase() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).uncheck();
+  },
+
+  /** Switch the form to a Cursor CLI session. */
+  switchToCursorCliSession() {
+    byTestId(TEST_IDS.createSessionTypeCursorCliBtn).click();
+  },
+
+  // ---------------------------------------------------------------------------
   // Core fields
   // ---------------------------------------------------------------------------
 

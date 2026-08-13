@@ -46,6 +46,13 @@ remote `tddy-daemon`) so that my agent can plan, read, write, and test code in a
 2. `ConnectSession` and `ResumeSession` against a workspace session return empty LiveKit credentials
    (the workspace has no terminal to connect to).
 3. `DeleteSession` for a workspace session removes the session directory and the worktree.
+   **Not true as shipped** — `session_deletion.rs` gated worktree removal on
+   `session_type == "claude-cli"`, so a workspace session kept both its worktree and its
+   `git worktree` registration. Corrected by
+   [Remote Managed Worktree](remote-managed-worktree.md), which needs it: a split session would
+   otherwise leak a checkout on the codebase host on every delete. `cursor-cli` still leaks the
+   same way (`docs/dev/TODO.md`). Treat the remaining criteria here as claims to verify against
+   the code, not as guarantees.
 
 ### Remote daemon: tool execution
 
@@ -144,9 +151,22 @@ injected by tddy — pass them explicitly when using print mode.
 
 Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
+## Extension: placing the codebase on another daemon
+
+This document assumes the worktree lives on whichever daemon the caller addressed.
+[Remote Managed Worktree](remote-managed-worktree.md) splits that: a session names a
+`codebase_daemon_instance_id` separate from the daemon running its agent, and `tddy-tools` reaches
+the remote worktree over LiveKit RPC rather than through a local relay. It also supersedes the "no
+web UI" non-goal below, for `claude-cli` sessions only.
+
+Note that the CLI entry point described in criteria 23–28 (`tddy-coder --remote`) **is not
+implemented**: `run.rs` contacts the relay and then bails with "full session bootstrap is not yet
+implemented". See `docs/dev/TODO.md`.
+
 ## Non-goals (out of scope)
 
 - Web UI support for remote sessions (no new web screens; operators use the CLI).
+  *Superseded for `claude-cli` by [Remote Managed Worktree](remote-managed-worktree.md).*
 - Full semantic code indexing with embeddings for `SemanticSearch` (v1 ships a ripgrep-backed fallback).
 - Real LSP diagnostics for `ReadLints` (v1 ships a minimal stub: empty result with a note, or
   `cargo clippy --message-format=json` if a `Cargo.toml` exists).
