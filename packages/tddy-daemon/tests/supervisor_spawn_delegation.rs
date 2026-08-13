@@ -1,7 +1,8 @@
 //! What the daemon asks `tddy-supervisor` to run, and what it does when the supervisor it was told
 //! about is not there.
 //!
-//! Changeset: `docs/dev/1-WIP/CS-2026-08-02-tddy-supervisor.md` (Milestone 6).
+//! Background: `docs/ft/supervisor/tddy-supervisor.md`; the fail-closed rule and the operator
+//! prerequisites it creates are in `packages/tddy-supervisor/docs/architecture.md`.
 //!
 //! The child's identity — program, argv, session id, LiveKit room, gRPC port — is decided once, by
 //! `spawner::plan_session_child`, and started either by the forked spawn worker or by the

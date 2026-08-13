@@ -11,7 +11,7 @@
 //!    lifecycle, spawning sessions as other OS users, and sandbox namespace/mount setup — with
 //!    every request authorized by peer credentials and validated against root-owned policy.
 //!
-//! See `docs/ft/supervisor/1-WIP/PRD-2026-08-02-tddy-supervisor.md`.
+//! Design and the reasoning behind the ordering contract: `docs/architecture.md` in this package; product-level behaviour in `docs/ft/supervisor/tddy-supervisor.md`.
 
 use std::path::Path;
 use std::sync::Arc;

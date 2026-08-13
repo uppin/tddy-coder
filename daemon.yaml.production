@@ -48,7 +48,7 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /
 # cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which
 # an unprivileged daemon cannot do). Both are recorded under "Known incomplete" in
-# docs/dev/1-WIP/CS-2026-08-02-tddy-supervisor.md.
+# docs/dev/TODO.md, under the tddy-supervisor follow-ups.
 #
 # Remove this block only for a no-supervisor deployment (no supervisor unit, daemon started directly).
 supervisor:

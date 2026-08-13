@@ -20,7 +20,7 @@
 #     socket_path: <REPO_ROOT>/tmp/tddy-supervisor.sock
 # It is parsed and validated, but no daemon code path routes spawning through the supervisor yet, so
 # with or without it the dev daemon still spawns sessions in its own forked worker as you (see "Known
-# incomplete" in docs/dev/1-WIP/CS-2026-08-02-tddy-supervisor.md). ./web-dev starts no supervisor.
+# incomplete" in docs/dev/TODO.md). ./web-dev starts no supervisor.
 
 socket:
   path: REPO_ROOT/tmp/tddy-supervisor.sock

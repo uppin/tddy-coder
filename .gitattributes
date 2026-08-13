@@ -3,6 +3,7 @@
 # See docs/dev/guides/changelog-merge-hygiene.md
 docs/dev/changesets.md merge=union
 docs/ft/coder/changelog.md merge=union
+docs/ft/supervisor/changelog.md merge=union
 docs/ft/daemon/changelog.md merge=union
 docs/ft/web/changelog.md merge=union
 packages/*/docs/changesets.md merge=union
