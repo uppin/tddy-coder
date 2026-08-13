@@ -11,11 +11,16 @@ export type CommonRoomStatus = "idle" | "connecting" | "connected" | "error";
 
 /**
  * Joins a shared LiveKit room (presence / participant list). Disconnects on unmount or when inputs change.
+ *
+ * `roomFactory` is a test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`) for
+ * substituting the `Room` object itself — the only way a test can drive the *join* through this
+ * hook's real code path, including the case where it fails. No production caller passes it.
  */
 export function useCommonRoom(
   url: string | undefined,
   roomName: string | undefined,
-  identity: string | undefined
+  identity: string | undefined,
+  roomFactory: () => Room = () => new Room(),
 ): { room: Room | null; status: CommonRoomStatus; error: string | null } {
   const [room, setRoom] = useState<Room | null>(null);
   const [status, setStatus] = useState<CommonRoomStatus>("idle");
@@ -23,6 +28,13 @@ export function useCommonRoom(
   const tokenClient = useHttpClient(TokenService);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomRef = useRef<Room | null>(null);
+
+  // Read the factory through a ref rather than depending on it: what to (re)join is decided by the
+  // room's coordinates (url/name/identity), never by the identity of the function that constructs
+  // the object. A caller passing an inline arrow — including this hook's own default — would
+  // otherwise disconnect and rejoin the room on every single render.
+  const roomFactoryRef = useRef(roomFactory);
+  roomFactoryRef.current = roomFactory;
 
   useEffect(() => {
     const u = url?.trim();
@@ -71,7 +83,7 @@ export function useCommonRoom(
         };
         scheduleRefresh(refreshInMs);
 
-        const liveRoom = new Room();
+        const liveRoom = roomFactoryRef.current();
         roomRef.current = liveRoom;
 
         // Diagnostic: log participant churn in this presenter room. Duplicate/departing

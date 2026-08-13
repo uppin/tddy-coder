@@ -28,11 +28,18 @@ export function DaemonSelector({
   selectedInstanceId,
   servingInstanceId,
   onSelect,
+  commonRoomUnreachable = false,
 }: {
   daemons: DaemonHost[];
   selectedInstanceId: string | null;
   servingInstanceId?: string;
   onSelect: (instanceId: string) => void;
+  /**
+   * The daemon list is empty because the common room could not be joined, not because no daemon is
+   * running. Both look identical from `daemons` alone, and the plain "Select daemon" placeholder
+   * reads as "pick one" — an invitation the operator cannot act on and that hides the real fault.
+   */
+  commonRoomUnreachable?: boolean;
 }) {
   return (
     <Select
@@ -44,7 +51,9 @@ export function DaemonSelector({
         data-testid="daemon-selector-trigger"
         className="h-7 gap-1 px-2 text-xs [&_svg:not([class*='size-'])]:size-3.5"
       >
-        <SelectValue placeholder="Select daemon" />
+        <SelectValue
+          placeholder={commonRoomUnreachable ? "Common room unreachable" : "Select daemon"}
+        />
       </SelectTrigger>
       <SelectContent>
         {daemons.map((daemon) => (
@@ -63,13 +72,15 @@ export function DaemonSelector({
 
 /** Connected wrapper reading the shared `SelectedDaemonProvider` context — what screens render. */
 export function DaemonSelectorConnected() {
-  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon } = useSelectedDaemon();
+  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon, roomStatus } =
+    useSelectedDaemon();
   return (
     <DaemonSelector
       daemons={daemons}
       selectedInstanceId={selectedInstanceId}
       servingInstanceId={servingInstanceId}
       onSelect={selectDaemon}
+      commonRoomUnreachable={roomStatus === "error"}
     />
   );
 }

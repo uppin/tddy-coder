@@ -25,7 +25,11 @@ import type { Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { Room } from "livekit-client";
 import { useAuth } from "../hooks/useAuth";
-import { useCommonRoom } from "../hooks/useCommonRoom";
+import {
+  useCommonRoom,
+  useObservedCommonRoomStatus,
+  type CommonRoomStatus,
+} from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { daemonHostsFromParticipants, daemonRpcIdentity, type DaemonHost } from "../lib/participantRole";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
@@ -65,6 +69,15 @@ interface SelectedDaemonContextValue {
   readonly selectedInstanceId: string | null;
   readonly servingInstanceId?: string;
   readonly selectDaemon: (instanceId: string) => void;
+  /**
+   * How the shared common-room connection is doing. `room` alone cannot answer that: it is `null`
+   * both while the join is in flight and after it failed, so a screen holding only the room cannot
+   * tell "still connecting" from "cannot connect" — the confusion that left the presence panel
+   * claiming it was connecting for as long as the tab stayed open.
+   */
+  readonly roomStatus: CommonRoomStatus;
+  /** Why the common room is unusable, when {@link roomStatus} is `"error"`; `null` otherwise. */
+  readonly roomError: string | null;
 }
 
 const SelectedDaemonContext = createContext<SelectedDaemonContextValue | null>(null);
@@ -85,20 +98,40 @@ export interface SelectedDaemonProviderProps {
    * No production caller sets this.
    */
   daemons?: DaemonHost[];
+  /**
+   * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): the `Room` object
+   * `useCommonRoom` joins with. Unlike `room`/`daemons`, which are *result* seams that skip the
+   * join entirely, this one leaves the provider on its production path — authenticate, mint a
+   * LiveKit token, `connect()` — so a test can drive a join that fails or never settles. No
+   * production caller sets this.
+   */
+  roomFactory?: () => Room;
   children: ReactNode;
 }
 
 /**
- * Resolve `{ room, daemons }` for the provider: the test-injection overrides when given, otherwise
- * the production path — join the common room as this user's presence identity, then derive the
- * daemon list from its participants.
+ * Resolve `{ room, daemons, roomStatus, roomError }` for the provider: the test-injection overrides
+ * when given, otherwise the production path — join the common room as this user's presence
+ * identity, then derive the daemon list from its participants.
+ *
+ * The published status has one rule, which covers the `room` override without special-casing it:
+ * until there is a room object, it is the outcome of the join attempt (`useCommonRoom`); once
+ * there is one, it is that room's own live connection state, so a drop after a successful join is
+ * reported too. An injected room therefore speaks for itself — a room double standing in for a
+ * joined room reports `ConnectionState.Connected` and is published as `"connected"`.
  */
 function useCommonRoomDaemons(
   livekitUrl: string | undefined,
   commonRoom: string | undefined,
   roomOverride: Room | null | undefined,
   daemonsOverride: DaemonHost[] | undefined,
-): { room: Room | null; daemons: DaemonHost[] } {
+  roomFactory: (() => Room) | undefined,
+): {
+  room: Room | null;
+  daemons: DaemonHost[];
+  roomStatus: CommonRoomStatus;
+  roomError: string | null;
+} {
   // TODO: migrate to `useAuthContext()` once every `withSelectedDaemon`-based test provides an
   // `AuthProvider` ancestor. Left on the standalone `useAuth()` hook deliberately for now: this
   // component is mounted once for the whole daemon-mode session (it wraps, and is never remounted
@@ -112,18 +145,25 @@ function useCommonRoomDaemons(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],
   );
-  const { room: producedRoom } = useCommonRoom(
-    livekitUrl,
-    commonRoom,
-    isAuthenticated ? identity : undefined,
-  );
+  const {
+    room: producedRoom,
+    status: joinStatus,
+    error: joinError,
+  } = useCommonRoom(livekitUrl, commonRoom, isAuthenticated ? identity : undefined, roomFactory);
   const room = roomOverride !== undefined ? roomOverride : producedRoom;
 
   const participants = useRoomParticipants(daemonsOverride !== undefined ? null : room);
   const derivedDaemons = useMemo(() => daemonHostsFromParticipants(participants), [participants]);
   const daemons = daemonsOverride !== undefined ? daemonsOverride : derivedDaemons;
 
-  return { room, daemons };
+  const observed = useObservedCommonRoomStatus(room);
+
+  return {
+    room,
+    daemons,
+    roomStatus: room ? observed.status : joinStatus,
+    roomError: room ? observed.error : joinError,
+  };
 }
 
 /**
@@ -204,14 +244,29 @@ export function SelectedDaemonProvider({
   servingInstanceId,
   room: roomOverride,
   daemons: daemonsOverride,
+  roomFactory,
   children,
 }: SelectedDaemonProviderProps) {
-  const { room, daemons } = useCommonRoomDaemons(livekitUrl, commonRoom, roomOverride, daemonsOverride);
+  const { room, daemons, roomStatus, roomError } = useCommonRoomDaemons(
+    livekitUrl,
+    commonRoom,
+    roomOverride,
+    daemonsOverride,
+    roomFactory,
+  );
   const { selectedInstanceId, selectDaemon } = useSelectedDaemonState(daemons, servingInstanceId);
 
   const value: SelectedDaemonContextValue = useMemo(
-    () => ({ room, daemons, selectedInstanceId, servingInstanceId, selectDaemon }),
-    [room, daemons, selectedInstanceId, servingInstanceId, selectDaemon],
+    () => ({
+      room,
+      daemons,
+      selectedInstanceId,
+      servingInstanceId,
+      selectDaemon,
+      roomStatus,
+      roomError,
+    }),
+    [room, daemons, selectedInstanceId, servingInstanceId, selectDaemon, roomStatus, roomError],
   );
 
   // Give the screen subtree a fresh lifecycle whenever the selected daemon changes: keying the
@@ -236,6 +291,8 @@ const NO_PROVIDER_DEFAULTS: SelectedDaemonContextValue = {
   selectedInstanceId: null,
   servingInstanceId: undefined,
   selectDaemon: () => {},
+  roomStatus: "idle",
+  roomError: null,
 };
 
 /**
