@@ -350,7 +350,7 @@ fn after_write_stack_plan(
             .map_err(|e| format!("write exploration.md: {e}"))?;
     }
 
-    set_changeset_state(dir, WorkflowState::new("StackPlanned"));
+    set_changeset_state(dir, WorkflowState::new(super::STATE_STACK_PLANNED));
     Ok(())
 }
 

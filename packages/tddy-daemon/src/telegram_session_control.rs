@@ -1243,6 +1243,8 @@ fn telegram_spawn_options<'a>(
         mouse: inputs.mouse,
         recipe: inputs.recipe.as_deref(),
         stack_parent: None,
+        // A Telegram spawn names no PR-stack base session: it has no orchestrator to seed.
+        stack_seed_base_session: None,
         model: None,
         // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
         // TODO(stdio-relay): telegram path.

@@ -228,7 +228,7 @@ impl WorkflowRecipe for PlanPrStackRecipe {
         match state.as_str() {
             "Init" | "AnalyzeStack" => Some(GoalId::new("analyze-stack")),
             "WriteStackPlan" => Some(GoalId::new("write-stack-plan")),
-            "Failed" | "StackPlanned" => None,
+            "Failed" | crate::pr_stack::STATE_STACK_PLANNED => None,
             _ => Some(GoalId::new("analyze-stack")),
         }
     }
@@ -236,7 +236,7 @@ impl WorkflowRecipe for PlanPrStackRecipe {
     fn status_for_state(&self, state: &WorkflowState) -> &'static str {
         match state.as_str() {
             "Failed" => "Failed",
-            "StackPlanned" => "Completed",
+            crate::pr_stack::STATE_STACK_PLANNED => "Completed",
             _ => "Active",
         }
     }

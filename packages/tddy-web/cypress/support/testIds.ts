@@ -239,6 +239,12 @@ export const TEST_IDS = {
   createSessionRecipeSelect: "create-session-recipe-select",
   /** Parent-picker <select> — lists sessions that act as orchestrators; tool sessions only. */
   createSessionStackParentSelect: "create-session-stack-parent-select",
+  /**
+   * "Base the stack on" <select> — the existing session whose branch seeds a new pr-stack
+   * orchestrator's stack as its single root node. Shown only for a tool session whose recipe is
+   * `pr-stack`; lists only sessions that own a branch.
+   */
+  createSessionPrStackBaseSessionSelect: "create-session-pr-stack-base-session-select",
   createSessionModelSelect: "create-session-model-select",
   /** Inline error shown when the model probe (ListAgentModels) fails for the selected agent. */
   createSessionModelError: "create-session-model-error",
@@ -524,6 +530,11 @@ export const TEST_IDS = {
   prStackAddPlannedPrDescriptionInput: "pr-stack-add-planned-pr-description-input",
   prStackAddPlannedPrBranchSuggestionInput: "pr-stack-add-planned-pr-branch-suggestion-input",
   prStackAddPlannedPrSubmitBtn: "pr-stack-add-planned-pr-submit-btn",
+  /**
+   * Adds the planned PR and immediately opens the Start-session dialog for it, instead of leaving
+   * the operator to find the new row and click its own CTA.
+   */
+  prStackAddPlannedPrStartBtn: "pr-stack-add-planned-pr-start-btn",
   prStackAddPlannedPrCancelBtn: "pr-stack-add-planned-pr-cancel-btn",
   prStackAddPlannedPrError: "pr-stack-add-planned-pr-error",
 

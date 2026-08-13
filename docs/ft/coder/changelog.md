@@ -9,6 +9,15 @@ Release note history for the Coder product area.
 - **The warm-up budget is operator configuration**, not a constant: `agent_warmup: { timeout_secs, retry_interval_ms, request_timeout_secs }` in `daemon.yaml`, defaulting to today's 120 s / 1 s / 120 s, overridable per process by `TDDY_AGENT_WARMUP_TIMEOUT_SECS`, `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS`, `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS`. A host whose endpoints are local and fast no longer waits out a budget sized for a GPU bringing a model up cold to learn one is down.
 - Known gap: a **standalone** (`tddy-sandbox-app`) session keeps the built-in budget — it has its own config schema — so it and a daemon-hosted session on the same host can warm up differently.
 - See [specialized-subagents.md § Start-time warm-up gate](specialized-subagents.md#start-time-warm-up-gate).
+## 2026-08-13 — A PR stack can start from a session you already have
+
+- **A new `pr-stack` orchestrator can be based on an existing session.** Naming one in the new-session form gives the orchestrator a one-node stack already bound to that session's branch, and drops it straight into its interactive operator loop instead of its planning phase. Until now a stack could only be populated by asking the agent to plan one from a feature description, by adding a *planned* node that owns no branch, or by adopting an existing pull request — so "I have a session on `feat/auth-store` and the next PR stacks on top of it" had no path at all.
+- **Every PR planned on top of it stacks for free.** A planned node parented on the seeded bottom node bases its child worktree off `origin/<base session's branch>` through the resolution that already existed; no new stacking behaviour was added.
+- The seeded node records the base session's **branch, title and session id**, and deliberately records **no PR status** — whether that branch already has a pull request is for the live-status poll to discover, not for the form to assert.
+- **A base session that cannot seed a stack is refused before anything is created**, with the reason shown in the form: one that owns no branch, one that does not resolve, one already tracked by another orchestrator's stack, the orchestrator's own session, or one working in a different repository. A refused start leaves nothing behind — no session directory and no half-written changeset that would later resume as an ordinary unseeded orchestrator.
+- **Exactly one base session**, by design: ordering several pre-existing branches would declare dependencies their git history does not have, and honouring it would mean rebasing branches somebody is already working in.
+- **"+ New planned PR" can start the node's session in the same step.** The form gained an "Add & start session" action that opens the Start-session dialog for the node it just added, pre-filled exactly as the row's own button would be.
+- See [pr-stacking.md § Seeding the stack from an existing session](pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13).
 
 ## 2026-08-01 — PR-stack rows hold still, state their base, and can take it
 

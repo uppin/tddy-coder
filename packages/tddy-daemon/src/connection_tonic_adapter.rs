@@ -137,7 +137,11 @@ fn to_tonic_status(status: tddy_rpc::Status) -> tonic::Status {
 }
 
 /// Convert a tonic `Status` (tonic 0.12) into a tddy-rpc `Status`.
-fn to_rpc_status(status: tonic::Status) -> tddy_rpc::Status {
+///
+/// Visible to the crate because handlers can produce a tonic `Status` directly — a refusal raised by
+/// a helper shared with a tonic-typed caller — and the tddy-rpc `tonic` feature (which would provide
+/// the `From` impls) is not enabled for this crate.
+pub(crate) fn to_rpc_status(status: tonic::Status) -> tddy_rpc::Status {
     let code = match status.code() {
         tonic::Code::Ok => tddy_rpc::Code::Ok,
         tonic::Code::Cancelled => tddy_rpc::Code::Cancelled,

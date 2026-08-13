@@ -72,15 +72,69 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionAgentSelect).select(agentId);
   },
 
+  /** Choose the workflow recipe (tool sessions). */
+  selectRecipe(recipe: string) {
+    byTestId(TEST_IDS.createSessionRecipeSelect).select(recipe);
+  },
+
+  /** Switch the form to a Claude CLI session. */
+  switchToClaudeCliSession() {
+    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+  },
+
   /** Switch the branch mode to "work on an existing branch", which triggers branch listing. */
   switchToWorkOnExistingBranch() {
     byTestId(TEST_IDS.createSessionBranchIntentSelect).select("work_on_selected_branch");
+  },
+
+  // ---------------------------------------------------------------------------
+  // PR-stack base session — seeds a new orchestrator's stack with one existing session
+  // ---------------------------------------------------------------------------
+
+  /** The "Base the stack on" <select>. Present only for a tool session whose recipe is pr-stack. */
+  prStackBaseSessionSelect: () => byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect),
+
+  /** The picker is offered — the gate is the recipe, not the branch mode. */
+  expectPrStackBaseSessionPickerOffered() {
+    byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect).should("be.visible");
+  },
+
+  /** The picker is absent, for the recipes and session types that cannot seed a stack. */
+  expectNoPrStackBaseSessionPicker() {
+    byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect).should("not.exist");
+  },
+
+  /** The session ids offered as stack bases, in option order. The default option's value is "". */
+  prStackBaseSessionOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .prStackBaseSessionSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /**
+   * The stack-base options' visible labels, in option order — what the operator actually reads when
+   * picking a base. Yields a plain array so a test states the whole offered list, and its order, in
+   * one assertion.
+   */
+  prStackBaseSessionOptionLabels: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .prStackBaseSessionSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => el.textContent ?? "")),
+
+  /** Choose the existing session whose branch seeds the new orchestrator's stack. */
+  selectPrStackBaseSession(sessionId: string) {
+    byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect).select(sessionId);
   },
 
   /** Name the branch to create in "new branch from base" mode. */
   typeNewBranchName(branch: string) {
     byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type(branch);
   },
+
+  /** The new-branch-name input itself — for asserting what a caller pre-filled it with. */
+  newBranchNameInput: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionNewBranchNameInput, { timeout: 5000, ...options }),
 
   /** Submit the new-session form. */
   submit() {
