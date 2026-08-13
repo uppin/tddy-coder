@@ -37,6 +37,36 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionProjectSelect).select(projectId);
   },
 
+  /** The "Project" `<select>` — which registry project the session is created in. */
+  projectSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionProjectSelect, { timeout: 5000, ...options }),
+
+  /**
+   * Wait until the asynchronously loaded project list has rendered, by which point every option the
+   * form will offer is present. Lets a test assert on the whole option list without racing the
+   * `ListProjects` round trip.
+   */
+  awaitProjectOption(projectId: string) {
+    createSessionPage.projectSelect().find(`option[value='${projectId}']`).should("exist");
+  },
+
+  /**
+   * The project ids offered as options, in option order. The leading "Select a project…" placeholder
+   * is `disabled` and excluded — these are the projects a session can actually be created in.
+   */
+  projectOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .projectSelect()
+      .find("option:not([disabled])")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The captions rendered for the selectable project options, in option order. */
+  projectOptionLabels: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .projectSelect()
+      .find("option:not([disabled])")
+      .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
+
   /** Choose the agent (tool sessions). */
   selectAgent(agentId: string) {
     byTestId(TEST_IDS.createSessionAgentSelect).select(agentId);
