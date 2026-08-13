@@ -55,6 +55,7 @@ members = [
     "packages/tddy-sandbox-recipes",
     "packages/tddy-sandbox-app",
     "packages/tddy-sandbox-qemu",
+    "packages/tddy-supervisor",
 ]
 exclude = [
     # Real cargo workspace used as a tddy-build example fixture; built by the

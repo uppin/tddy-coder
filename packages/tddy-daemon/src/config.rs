@@ -189,6 +189,11 @@ pub struct DaemonConfig {
     /// resolved at bind time).
     #[serde(default)]
     pub local: LocalConfig,
+    /// Privileged broker this daemon delegates spawning and cgroup work to (see
+    /// `SupervisorClientConfig`). Absent = no supervisor on this host: the daemon keeps its own
+    /// forked spawn worker and whatever privilege its own unit grants it.
+    #[serde(default)]
+    pub supervisor: Option<SupervisorClientConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
@@ -205,6 +210,19 @@ pub struct DaemonConfig {
     /// transport message-size limit.
     #[serde(default = "default_max_attachment_bytes")]
     pub max_attachment_bytes: u64,
+}
+
+/// Where to reach `tddy-supervisor` (`supervisor:` YAML section).
+///
+/// Presence of this section is the switch: with it, session spawning, repo cloning and sandbox
+/// jailing all go to the supervisor, and a supervisor that cannot be reached fails the operation.
+/// There is deliberately no fallback — quietly spawning a session as the daemon user instead of
+/// the requested user would turn an outage into a silent loss of isolation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupervisorClientConfig {
+    /// Absolute path of the supervisor's unix socket, e.g. `/run/tddy-supervisor.sock`.
+    pub socket_path: PathBuf,
 }
 
 /// 64 MiB — comfortably above a screenshot, a PDF spec or a log excerpt, well below anything that
@@ -241,6 +259,7 @@ impl Default for DaemonConfig {
             git: None,
             sandbox_cgroup: None,
             local: LocalConfig::default(),
+            supervisor: None,
             debug: None,
             max_attachment_bytes: default_max_attachment_bytes(),
         }

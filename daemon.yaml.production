@@ -1,9 +1,14 @@
 # Production template for tddy-daemon (installed to $INSTALL_CONFIG_DIR/daemon.yaml).
 # Placeholders replaced at install time:
-#   __INSTALL_BIN_DIR__   — binary directory (default: /usr/local/bin)
-#   __WEB_BUNDLE_PATH__   — static web root (default: /usr/local/share/tddy/web)
-#   __DAEMON_LOG_DIR__    — daemon file-log dir (default: /var/log/tddy-daemon; --user: XDG state dir)
-#   __AUTH_STORAGE_DIR__  — OAuth/token storage base (default: /var/lib/tddy; --user: XDG data dir)
+#   __INSTALL_BIN_DIR__          — binary directory (default: /usr/local/bin)
+#   __WEB_BUNDLE_PATH__          — static web root (default: /usr/local/share/tddy/web)
+#   __DAEMON_LOG_DIR__           — daemon file-log dir (default: /var/log/tddy-daemon; --user: XDG state dir)
+#   __AUTH_STORAGE_DIR__         — OAuth/token storage base (default: /var/lib/tddy; --user: XDG data dir)
+#   __SUPERVISOR_SOCKET_PATH__   — tddy-supervisor's socket (INSTALL_SUPERVISOR_SOCKET_PATH). System
+#                                  mode only: a --user install has no supervisor, and install omits
+#                                  the `supervisor:` block entirely there.
+#   __DAEMON_SOCKET_PATH__       — this daemon's own client socket (INSTALL_DAEMON_SOCKET_PATH); the
+#                                  same value goes into supervisor.yaml, so the two cannot drift
 
 log:
   loggers:
@@ -24,10 +29,44 @@ web_bundle_path: "__WEB_BUNDLE_PATH__"
 # by the daemon user or the daemon refuses to start — see the `github:` block below.
 auth_storage: "__AUTH_STORAGE_DIR__/auth"
 
-# Linux rootless cgroups sandbox delegation. Defaults derive the delegated cgroup base from
-# /proc/self/cgroup at runtime (nothing hardcoded), so no override is needed when the systemd unit
-# runs with Delegate=yes (./install sets this) and — on Ubuntu 24.04 — the AppArmor profile granting
-# unprivileged user namespaces is loaded (./install installs it). Uncomment only to override:
+# tddy-supervisor — the root process that started this daemon as an unprivileged child. This block
+# says where to reach its privileged RPC socket. It is parsed and validated at startup, and the same
+# path is written into supervisor.yaml, so the two agree.
+#
+# The presence of this block is the switch. With it, session spawning and repo cloning are delegated
+# over this socket, and the daemon does not fork a spawn worker at all. An unreachable or refusing
+# supervisor FAILS the operation — there is deliberately no fallback to in-process spawning, because
+# that would silently downgrade an isolated session to one running as the daemon user. Remove the
+# block to go back to the daemon's own forked worker.
+#
+# For a delegated spawn to be permitted, supervisor.yaml's spawn_policy must list the tool paths the
+# daemon will name — including git's absolute path for cloning — and, if any session user's
+# ~/.tddy/config.yaml sets spawn_path_extra, the PATH key under allowed_env_keys. An unlisted tool,
+# user or env key is refused rather than silently adjusted.
+#
+# STILL SPAWNED BY THE DAEMON ITSELF, and therefore still running as the daemon user on a supervised
+# host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /
+# cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which
+# an unprivileged daemon cannot do). Both are recorded under "Known incomplete" in
+# docs/dev/TODO.md, under the tddy-supervisor follow-ups.
+#
+# Remove this block only for a no-supervisor deployment (no supervisor unit, daemon started directly).
+supervisor:
+  socket_path: "__SUPERVISOR_SOCKET_PATH__"
+
+# Where this daemon serves its local ConnectionService. Named explicitly, not left to the
+# XDG_RUNTIME_DIR/run fallback: on a supervised host the supervisor binds this path as root and
+# passes the listener down, so the two files have to agree on it. It must match the `socket:` block
+# of the tddy-daemon service in supervisor.yaml.
+local:
+  socket_path: "__DAEMON_SOCKET_PATH__"
+
+# Linux rootless cgroups sandbox delegation, used for sandboxes the daemon builds itself. On a
+# supervised host the supervisor owns the delegated cgroup subtree and creates per-session scopes, so
+# this section is not needed. Without a supervisor, defaults derive the delegated cgroup base from
+# /proc/self/cgroup at runtime (nothing hardcoded), which needs a unit with Delegate=yes and — on
+# Ubuntu 24.04 — the AppArmor profile granting unprivileged user namespaces (./install installs and
+# loads it). Uncomment only to override:
 # sandbox_cgroup:
 #   mount_root: /sys/fs/cgroup     # cgroup v2 unified mount root
 #   base_path: /sys/fs/cgroup/system.slice/tddy-daemon.service  # skip /proc derivation entirely
@@ -46,8 +85,9 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 #      widened carry only `read:user`; PR status reads "PR status unavailable" until they re-login.
 #   2. `auth_storage` must exist and be WRITABLE by the daemon user. If it is set and unwritable the
 #      daemon REFUSES TO START (a failed token write fails every login, so it is caught at boot).
-#      ./install creates/chowns only the parent __AUTH_STORAGE_DIR__ — create and chown the `auth` dir
-#      itself (system default /var/lib/tddy; --user: ${XDG_DATA_HOME:-~/.local/share}/tddy).
+#      ./install creates this directory, chowns it to the daemon user and sets mode 0700, in both
+#      system and --user mode (system default /var/lib/tddy/auth; --user:
+#      ${XDG_DATA_HOME:-~/.local/share}/tddy/auth). A hand-rolled install must do the same.
 #      Leaving `auth_storage` unset is allowed: logins work, but PR status reads as unavailable.
 #
 # `stub: true` is the demo/test provider: it retains no token and its PR lookups resolve to "no PRs",

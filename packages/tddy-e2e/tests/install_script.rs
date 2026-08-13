@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tddy_e2e::install_contract::{
-    verify_build_flag_invokes_release, verify_env_override_references, verify_headless_flag_support,
-    verify_install_overwrite_systemd_unit, verify_install_script_contracts,
-    verify_no_systemctl_support, verify_requires_systemd_flag, verify_root_check, verify_syntax,
-    verify_user_flag_support,
+    verify_build_flag_invokes_release, verify_env_override_references,
+    verify_headless_flag_support, verify_install_overwrite_systemd_unit,
+    verify_install_script_contracts, verify_no_systemctl_support, verify_requires_systemd_flag,
+    verify_root_check, verify_syntax, verify_user_flag_support,
 };
 
 fn repo_root() -> PathBuf {
@@ -122,14 +122,16 @@ fn copy_install_tree(dest: &Path) {
         perms.set_mode(0o755);
         fs::set_permissions(&dst_install, perms).unwrap();
     }
-    let prod = repo_root().join("daemon.yaml.production");
-    fs::copy(&prod, dest.join("daemon.yaml.production")).unwrap_or_else(|e| {
-        panic!(
-            "copy {} -> {}/daemon.yaml.production: {e}",
-            prod.display(),
-            dest.display()
-        )
-    });
+    for template in ["daemon.yaml.production", "supervisor.yaml.production"] {
+        let prod = repo_root().join(template);
+        fs::copy(&prod, dest.join(template)).unwrap_or_else(|e| {
+            panic!(
+                "copy {} -> {}/{template}: {e}",
+                prod.display(),
+                dest.display()
+            )
+        });
+    }
     let dist = dest.join("packages").join("tddy-web").join("dist");
     fs::create_dir_all(&dist).unwrap();
     fs::write(dist.join("index.html"), "<!DOCTYPE html><html></html>\n").unwrap();
@@ -138,7 +140,7 @@ fn copy_install_tree(dest: &Path) {
 fn write_fake_release_binaries(root: &Path) {
     let rel = root.join("target").join("release");
     fs::create_dir_all(&rel).unwrap();
-    for name in ["tddy-daemon", "tddy-coder", "tddy-tools"] {
+    for name in ["tddy-supervisor", "tddy-daemon", "tddy-coder", "tddy-tools"] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();
         #[cfg(unix)]
@@ -320,12 +322,12 @@ fn install_generates_unit_with_correct_paths() {
         ],
     );
 
-    // Then
+    // Then — the supervisor is the installed unit; it starts the daemon as a managed child.
     assert!(st.success(), "install: {st:?}");
-    let unit = fs::read_to_string(sys_dir.join("tddy-daemon.service")).unwrap();
-    let cfg_file = cfg_dir.join("daemon.yaml");
+    let unit = fs::read_to_string(sys_dir.join("tddy-supervisor.service")).unwrap();
+    let cfg_file = cfg_dir.join("supervisor.yaml");
     let want_exec = format!(
-        "ExecStart={}/tddy-daemon -c {}",
+        "ExecStart={}/tddy-supervisor -c {}",
         bin_dir.display(),
         cfg_file.display()
     );
@@ -360,7 +362,7 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
 
     // Then — unit is created; add a custom marker
     assert!(st.success(), "first install: {st:?}");
-    let unit_path = sys_dir.join("tddy-daemon.service");
+    let unit_path = sys_dir.join("tddy-supervisor.service");
     let mut unit = fs::read_to_string(&unit_path).unwrap();
     assert!(
         !unit.contains("User=preserve_test"),
@@ -392,9 +394,9 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
         !final_unit.contains("User=preserve_test"),
         "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}"
     );
-    let cfg_file = cfg_dir.join("daemon.yaml");
+    let cfg_file = cfg_dir.join("supervisor.yaml");
     let want_exec = format!(
-        "ExecStart={}/tddy-daemon -c {}",
+        "ExecStart={}/tddy-supervisor -c {}",
         bin_dir.display(),
         cfg_file.display()
     );

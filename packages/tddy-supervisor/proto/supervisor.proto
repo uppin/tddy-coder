@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package supervisor;
+
+// The privileged surface of `tddy-supervisor`, served on a root-owned unix socket.
+//
+// Every request names *what* the caller wants, never *how* to get it: there is no field for a uid,
+// a cgroup path or a mount flag anywhere below. The supervisor resolves all of those against its
+// own root-owned policy, so a compromised caller cannot widen its grant by lying. Peer
+// credentials (SO_PEERCRED) gate the connection before any field here is interpreted.
+service SupervisorService {
+  // Declared-service control. A caller names a service from the root-owned config; it can never
+  // name a binary.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse);
+  rpc StartService(ServiceRef) returns (ServiceStatus);
+  rpc StopService(ServiceRef) returns (ServiceStatus);
+
+  // Spawn a tool as another OS user. Both the user and the tool path must appear in root-owned
+  // allowlists.
+  rpc SpawnSession(SpawnSessionRequest) returns (SpawnedProcess);
+
+  // Spawn a tool as another OS user, jailed. Same allowlists as SpawnSession, plus every mount
+  // source must sit under a root-owned allowed_mount_roots entry: the mount list is the one part of
+  // a sandbox request that names host paths, so it is the part a compromised caller reaches for.
+  rpc SpawnSandbox(SpawnSandboxRequest) returns (SpawnedProcess);
+
+  // What became of a session. The supervisor reaps its own children, so it is the only process that
+  // can answer this — a caller cannot `waitpid` a process it did not fork. A pid the supervisor
+  // never spawned is refused rather than reported on, so this cannot become a liveness oracle for
+  // arbitrary processes on the host.
+  //
+  // Both return types are fully qualified: inside a service body, `SessionStatus` would otherwise
+  // resolve to the method of that name declared just above rather than to the message.
+  rpc SessionStatus(SessionRef) returns (.supervisor.SessionStatus);
+  rpc StopSession(SessionRef) returns (.supervisor.SessionStatus);
+
+  // cgroup v2 scope lifecycle inside the subtree the supervisor owns.
+  rpc CreateScope(CreateScopeRequest) returns (ScopeHandle);
+  rpc AttachPid(AttachPidRequest) returns (AttachPidResponse);
+  rpc DestroyScope(ScopeRef) returns (DestroyScopeResponse);
+}
+
+message ListServicesRequest {}
+
+message ListServicesResponse {
+  // In declaration order, which is also the order the supervisor starts them in.
+  repeated ServiceStatus services = 1;
+}
+
+// Addresses one service by the name it carries in the root-owned config.
+message ServiceRef {
+  string name = 1;
+}
+
+enum ServiceState {
+  SERVICE_STATE_UNSPECIFIED = 0;
+  SERVICE_STATE_STARTING = 1;
+  SERVICE_STATE_RUNNING = 2;
+  SERVICE_STATE_BACKOFF = 3;
+  SERVICE_STATE_GAVE_UP = 4;
+  SERVICE_STATE_STOPPED = 5;
+}
+
+message ServiceStatus {
+  string name = 1;
+  // Unset while the service is in BACKOFF, GAVE_UP or STOPPED — a dead pid must not be handed
+  // out, or a caller may signal one the kernel has already recycled.
+  optional uint32 pid = 2;
+  ServiceState state = 3;
+  // Restarts since the service last stayed up past its stability threshold.
+  uint32 restarts = 4;
+}
+
+message SpawnSessionRequest {
+  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  string os_user = 1;
+  // Must appear verbatim in the policy's allowed_tool_paths.
+  string tool_path = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  optional string working_dir = 5;
+  // Name of an existing scope the child joins before it drops privilege and execs.
+  optional string scope = 6;
+}
+
+message SpawnedProcess {
+  uint32 pid = 1;
+}
+
+// Spawn a jailed session. Differs from SpawnSessionRequest in exactly two ways: the child is jailed,
+// and the jail's bind mounts are named here.
+//
+// The session's control channel is deliberately absent. The caller passes the runner a `--grpc-uds`
+// path in `args` and dials it once the child is up, following the precedent set by
+// SpawnRequest::host_session_socket: a path crosses a process boundary, a file descriptor does not.
+message SpawnSandboxRequest {
+  // Must appear in the policy's allowed_session_users; `root` never resolves.
+  string os_user = 1;
+  // Must appear verbatim in the policy's allowed_tool_paths.
+  string tool_path = 2;
+  repeated string args = 3;
+  map<string, string> env = 4;
+  optional string working_dir = 5;
+  // Name of an existing scope the child joins while it is still privileged.
+  optional string scope = 6;
+  repeated SandboxMount mounts = 7;
+  // Give the jail its own network namespace with only loopback up.
+  bool isolate_network = 8;
+}
+
+// One bind mount to establish inside the jail. `source` is a host path — the only host path a
+// sandbox request names — and is resolved against allowed_mount_roots before anything is mounted.
+// No mount flags: readonly is the whole choice a caller gets.
+message SandboxMount {
+  string source = 1;
+  string target = 2;
+  bool readonly = 3;
+}
+
+// Addresses one session by the pid the supervisor reported when it spawned it.
+message SessionRef {
+  uint32 pid = 1;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_RUNNING = 1;
+  SESSION_STATE_EXITED = 2;
+}
+
+message SessionStatus {
+  uint32 pid = 1;
+  SessionState state = 2;
+  // Set once the session has exited. Unset while it runs, and also when it was killed by a signal
+  // rather than exiting with a code.
+  optional int32 exit_code = 3;
+}
+
+// Limits a caller asks for. Each is clamped down to the matching policy ceiling; an unset field
+// still receives the ceiling, so omitting one is not a way to opt out of the limit.
+message RequestedLimits {
+  optional uint64 memory_max = 1;
+  // "<quota_us> <period_us>", matching the kernel's cpu.max format.
+  optional string cpu_max = 2;
+  optional uint64 pids_max = 3;
+}
+
+// Limits as resolved against policy — what the kernel was told, not what was asked for.
+message AppliedLimits {
+  optional uint64 memory_max = 1;
+  optional string cpu_max = 2;
+  optional uint64 pids_max = 3;
+}
+
+message CreateScopeRequest {
+  string name = 1;
+  RequestedLimits limits = 2;
+}
+
+// Addresses one scope by the name that created it.
+message ScopeRef {
+  string name = 1;
+}
+
+message ScopeHandle {
+  string name = 1;
+  // Absolute path of the scope directory on the host.
+  string path = 2;
+  AppliedLimits applied = 3;
+}
+
+message AttachPidRequest {
+  string scope = 1;
+  uint32 pid = 2;
+}
+
+message AttachPidResponse {}
+
+message DestroyScopeResponse {}

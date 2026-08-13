@@ -1,0 +1,73 @@
+# Example systemd unit for tddy-supervisor — the ONLY tddy unit on a supervised host.
+#
+# tddy-supervisor is the only root process in the stack. It starts tddy-daemon as an unprivileged
+# managed child (declared in /etc/tddy/supervisor.yaml, not in a systemd unit) and brokers the few
+# privileged operations the daemon needs: cgroup v2 scope lifecycle, spawning sessions as other OS
+# users, and sandbox namespace/mount setup. Do NOT also install tddy-daemon.service — the supervisor
+# owns the daemon's lifecycle and a second unit would start the daemon twice.
+#
+# Prefer automated install from the repo root: sudo ./install --systemd
+# (optional: ./install --systemd --build to run ./release first). ./install also creates the tddy
+# service user and the socket-access group, chowns the log/auth dirs, renders supervisor.yaml from
+# supervisor.yaml.production, and writes the companion tddy-supervisor.socket. See
+# supervisor.yaml.production and docs/ft/daemon/systemd-install.md.
+#
+# Manual install: sudo cp tddy-supervisor.service.example /etc/systemd/system/tddy-supervisor.service
+# Socket:  see the [Socket] template at the bottom of this file
+# Enable:  sudo systemctl enable tddy-supervisor.socket tddy-supervisor
+# Start:   sudo systemctl start tddy-supervisor.socket tddy-supervisor
+#
+# For a deployment WITHOUT a supervisor (single-user sessions, no privilege broker), use
+# tddy-daemon.service.example instead.
+
+[Unit]
+Description=tddy-supervisor privileged broker and mini-init
+After=network.target
+# The socket unit creates the privileged RPC socket as root (group tddy-clients, mode 0660) and passes
+# the listening fd, so nothing binds in /run at runtime. Requires= lifecycles them together.
+Requires=tddy-supervisor.socket
+After=tddy-supervisor.socket
+
+[Service]
+Type=simple
+ExecStart=/path/to/tddy-supervisor -c /etc/tddy/supervisor.yaml
+Restart=on-failure
+RestartSec=5
+
+# Root, deliberately: choosing a session's target uid and writing cgroup scopes are the two things
+# that need privilege. Both are surrendered before any namespace exists — the supervisor drops to the
+# target uid/gid in pre_exec BEFORE unshare(CLONE_NEWUSER), so a sandbox's user namespace is owned by
+# the unprivileged target user exactly as it is on an unsupervised host.
+User=root
+Group=root
+# Delegate=yes hands the supervisor a writable cgroup v2 subtree; it carves per-session scopes out of
+# that subtree on the daemon's behalf, so the daemon needs no delegation (and no AppArmor userns
+# grant) of its own.
+Delegate=yes
+# KillMode=mixed sends SIGTERM to the supervisor only, so it can forward the signal to its children
+# and honor supervisor.yaml shutdown_grace_secs; whatever is still alive at TimeoutStopSec is
+# SIGKILLed cgroup-wide, so no session process outlives the unit. Keep TimeoutStopSec above
+# shutdown_grace_secs.
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+
+# ---------------------------------------------------------------------------------------------------
+# Companion socket unit — copy to /etc/systemd/system/tddy-supervisor.socket:
+#
+# [Unit]
+# Description=tddy-supervisor privileged RPC socket
+#
+# [Socket]
+# # Root-owned with group access (the docker.sock model). Group membership only gets a client as far
+# # as connect(): every request is authorized by SO_PEERCRED against the uids of declared services.
+# # Must match supervisor.yaml socket.path/group/mode and daemon.yaml supervisor.socket_path.
+# ListenStream=/run/tddy-supervisor.sock
+# SocketUser=root
+# SocketGroup=tddy-clients
+# SocketMode=0660
+#
+# [Install]
+# WantedBy=sockets.target

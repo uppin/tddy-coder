@@ -1,0 +1,78 @@
+# Dev config for tddy-supervisor (repo-local counterpart of supervisor.yaml.production).
+#
+# Points at target/debug binaries and declares the developer's own OS user, so the privilege drop is
+# a no-op at the syscall level while every other path (fork, exec, reap, backoff, socket, authz)
+# runs for real. That is the only difference from production — there is no test/dev code branch.
+#
+# tddy-supervisor requires ABSOLUTE paths, so render this file before use:
+#
+#   mkdir -p tmp
+#   sed -e "s|CURRENT_USER|${USER}|g" -e "s|REPO_ROOT|${PWD}|g" dev.supervisor.yaml > tmp/supervisor.yaml
+#   target/debug/tddy-supervisor -c tmp/supervisor.yaml
+#
+# (`CURRENT_USER` follows the same substitution convention ./web-dev uses for dev.daemon.yaml. `|` is
+# the delimiter and `&` means "the whole match" in a sed replacement, so a checkout path containing
+# either renders a wrong path here — the supervisor then fails to start on it, loudly. ./install does
+# not use sed for this reason; see its render_template.)
+#
+# The daemon's `supervisor:` block — add to dev.daemon.yaml to point it at this socket:
+#   supervisor:
+#     socket_path: <REPO_ROOT>/tmp/tddy-supervisor.sock
+# It is parsed and validated, but no daemon code path routes spawning through the supervisor yet, so
+# with or without it the dev daemon still spawns sessions in its own forked worker as you (see "Known
+# incomplete" in docs/dev/TODO.md). ./web-dev starts no supervisor.
+
+socket:
+  path: REPO_ROOT/tmp/tddy-supervisor.sock
+  # No `group:` in dev: the socket is owned by the developer running the supervisor.
+  mode: "0660"
+
+services:
+  - name: tddy-daemon
+    exec_start: REPO_ROOT/target/debug/tddy-daemon
+    args: ["-c", "REPO_ROOT/dev.daemon.yaml"]
+    user: CURRENT_USER
+    working_dir: REPO_ROOT
+    env:
+      RUST_LOG: info
+    # In dev the daemon runs as you, so it could bind this itself — declared anyway so the dev path
+    # exercises the same handover as production rather than only the fallback.
+    socket:
+      path: REPO_ROOT/dev.tddy-daemon.sock
+      mode: "0660"
+    restart:
+      max_retries: 3
+      initial_backoff_ms: 250
+      max_backoff_ms: 5000
+      stability_threshold_ms: 10000
+
+shutdown_grace_secs: 5
+
+# Uncomment to exercise session spawning locally. Only the developer's own account is listed —
+# spawning as another user needs a real root supervisor.
+# spawn_policy:
+#   allowed_session_users: [CURRENT_USER]
+#   allowed_tool_paths:
+#     - REPO_ROOT/target/debug/tddy-coder
+#     - REPO_ROOT/target/debug/tddy-tools
+#   allowed_mount_roots: [REPO_ROOT]
+#   # A key not listed here makes the whole request fail, rather than being dropped — so if you point
+#   # a daemon at this supervisor and it sends any env, list every key it sends. LD_*/MALLOC_* and
+#   # friends can never be listed (rejected at load: LD_PRELOAD on an allowlisted tool is code
+#   # execution as the session user).
+#   allowed_env_keys: [RUST_LOG]
+
+# ACTIVE, not commented out, and it has to be for a dev run to start at all. At startup the supervisor
+# moves itself into `<base>/<supervisor_leaf>` and delegates `controllers` into the base's
+# cgroup.subtree_control, and both are fatal on failure — a scope whose memory.max has no controller
+# behind it would report a ceiling as applied that the kernel does not enforce. Run unprivileged
+# against the real /sys/fs/cgroup, that relocation fails with EINVAL (cgroup v2 will not delegate from
+# a cgroup that still holds processes), so the supervisor refuses to start. `base_override` is used
+# verbatim, which points all of it at a plain directory instead. A documented production option
+# (pinning an already-prepared subtree), not a test hook — production gets a real one from the unit's
+# Delegate=yes slice.
+cgroup:
+  base_override: REPO_ROOT/tmp/cgroup
+  controllers: [memory, cpu, pids]
+  memory_max_ceiling: 2147483648
+  pids_max_ceiling: 512

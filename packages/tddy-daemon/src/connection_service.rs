@@ -126,6 +126,38 @@ pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
     }
 }
 
+/// Await a `tddy-supervisor`-brokered operation under the same deadline the forked spawn backend
+/// gets from [`spawn_blocking_with_timeout`].
+///
+/// An unreachable or refusing supervisor fails the RPC. There is deliberately no local spawn to fall
+/// back to: doing the work here would run a session as the daemon's own user, which is the isolation
+/// the supervisor exists to provide.
+pub(crate) async fn await_supervised_with_timeout<T>(
+    timeout: Duration,
+    op_label: &'static str,
+    operation: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> Result<T, Status> {
+    match tokio::time::timeout(timeout, operation).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => {
+            log::error!("{} failed: {:#}", op_label, e);
+            Err(Status::internal(format!("{e:#}")))
+        }
+        Err(_elapsed) => {
+            log::error!(
+                "{} timed out after {}s (spawn_worker_request_timeout_secs) waiting for tddy-supervisor",
+                op_label,
+                timeout.as_secs()
+            );
+            Err(Status::deadline_exceeded(format!(
+                "{}: tddy-supervisor did not answer within {}s",
+                op_label,
+                timeout.as_secs()
+            )))
+        }
+    }
+}
+
 /// After a `new_branch_from_base` worktree is created, optionally push the freshly created branch to
 /// its remote. Reads the actual created branch from the session's changeset (it may carry a
 /// collision suffix), resolves the remote from the persisted integration base ref
@@ -2271,18 +2303,39 @@ impl ConnectionServiceImpl {
                 .await
         };
 
+        let spawn_backend = crate::supervisor_client::spawn_backend_choice(&self.config);
+        // `ensure_project_available_locally` clones synchronously while the supervisor's client is
+        // async. Handing the closure a runtime handle keeps that seam here: the closure already runs
+        // on a blocking thread, which is precisely where awaiting a future by blocking belongs.
+        let runtime = tokio::runtime::Handle::current();
+
         let handle = tokio::task::spawn_blocking(move || {
             let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-                if let Some(ref client) = spawn_client {
-                    client
-                        .clone_repo(spawn_worker::CloneRequest {
-                            os_user: os_user_owned.clone(),
-                            git_url: git_url.to_string(),
-                            destination: dest.display().to_string(),
-                        })
-                        .map_err(|e| e.to_string())
-                } else {
-                    spawner::clone_as_user(&os_user_owned, git_url, dest).map_err(|e| e.to_string())
+                match &spawn_backend {
+                    crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                        runtime
+                            .block_on(crate::supervisor_spawn::clone_repo_via_supervisor(
+                                socket_path,
+                                &os_user_owned,
+                                git_url,
+                                dest,
+                            ))
+                            .map_err(|e| format!("{e:#}"))
+                    }
+                    crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                        if let Some(ref client) = spawn_client {
+                            client
+                                .clone_repo(spawn_worker::CloneRequest {
+                                    os_user: os_user_owned.clone(),
+                                    git_url: git_url.to_string(),
+                                    destination: dest.display().to_string(),
+                                })
+                                .map_err(|e| e.to_string())
+                        } else {
+                            spawner::clone_as_user(&os_user_owned, git_url, dest)
+                                .map_err(|e| e.to_string())
+                        }
+                    }
                 }
             };
             let peer_lookup = |id: &str| {
@@ -4995,20 +5048,9 @@ impl ConnectionServiceImpl {
             .await?;
             pre_session_id = Some(tool_session_id);
         }
-        let result = spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
-            log::debug!(
-                "StartSession: spawn_blocking running, using_spawn_worker={}",
-                spawn_client.is_some()
-            );
-            let pid = Some(pid_for_spawn.as_str());
-            let agent = agent_for_spawn.as_deref();
-            let recipe = recipe_for_spawn.as_deref();
-            let stack_parent = stack_parent_for_spawn.as_deref();
-            let model = model_for_spawn.as_deref();
-            let new_session_id = pre_session_id.as_deref();
-            let host_socket = host_session_socket.as_deref();
-            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-            if let Some(ref client) = spawn_client {
+        let result = match crate::supervisor_client::spawn_backend_choice(&self.config) {
+            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
                     &tool_path,
@@ -5017,48 +5059,93 @@ impl ConnectionServiceImpl {
                     &livekit,
                     SpawnOptions {
                         resume_session_id: None,
-                        new_session_id,
-                        project_id: pid,
-                        agent,
+                        new_session_id: pre_session_id.as_deref(),
+                        project_id: Some(pid_for_spawn.as_str()),
+                        agent: agent_for_spawn.as_deref(),
                         mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                        host_session_socket: host_socket,
+                        recipe: recipe_for_spawn.as_deref(),
+                        stack_parent: stack_parent_for_spawn.as_deref(),
+                        model: model_for_spawn.as_deref(),
+                        host_session_socket: host_session_socket.as_deref(),
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
                 );
-                client.spawn(spawn_req)
-            } else {
-                let (child_log_level, child_log_format) =
-                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                spawner::spawn_as_user(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: None,
-                        new_session_id,
-                        project_id: pid,
-                        agent,
-                        mouse: spawn_mouse,
-                        recipe,
-                        stack_parent,
-                        model,
-                        host_session_socket: host_socket,
-                    },
-                    child_log_level.as_str(),
-                    child_log_format.as_str(),
-                    coder_log_yaml.as_deref(),
+                await_supervised_with_timeout(
+                    timeout,
+                    "StartSession: spawn via tddy-supervisor",
+                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
                 )
+                .await?
             }
-        })
-        .await?;
+            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
+                    log::debug!(
+                        "StartSession: spawn_blocking running, using_spawn_worker={}",
+                        spawn_client.is_some()
+                    );
+                    let pid = Some(pid_for_spawn.as_str());
+                    let agent = agent_for_spawn.as_deref();
+                    let recipe = recipe_for_spawn.as_deref();
+                    let stack_parent = stack_parent_for_spawn.as_deref();
+                    let model = model_for_spawn.as_deref();
+                    let new_session_id = pre_session_id.as_deref();
+                    let host_socket = host_session_socket.as_deref();
+                    let coder_log_yaml =
+                        spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                    if let Some(ref client) = spawn_client {
+                        let spawn_req = spawn_worker::build_spawn_request(
+                            &os_user,
+                            &tool_path,
+                            &tddy_data_dir_for_spawn,
+                            &repo_path,
+                            &livekit,
+                            SpawnOptions {
+                                resume_session_id: None,
+                                new_session_id,
+                                project_id: pid,
+                                agent,
+                                mouse: spawn_mouse,
+                                recipe,
+                                stack_parent,
+                                model,
+                                host_session_socket: host_socket,
+                            },
+                            daemon_log.as_ref(),
+                            coder_log_yaml,
+                        );
+                        client.spawn(spawn_req)
+                    } else {
+                        let (child_log_level, child_log_format) =
+                            spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                        spawner::spawn_as_user(
+                            &os_user,
+                            &tool_path,
+                            &tddy_data_dir_for_spawn,
+                            &repo_path,
+                            &livekit,
+                            SpawnOptions {
+                                resume_session_id: None,
+                                new_session_id,
+                                project_id: pid,
+                                agent,
+                                mouse: spawn_mouse,
+                                recipe,
+                                stack_parent,
+                                model,
+                                host_session_socket: host_socket,
+                            },
+                            child_log_level.as_str(),
+                            child_log_format.as_str(),
+                            coder_log_yaml.as_deref(),
+                        )
+                    }
+                })
+                .await?
+            }
+        };
         log::debug!(
-            "StartSession: spawn_blocking returned, session_id={}",
+            "StartSession: spawn returned, session_id={}",
             result.session_id
         );
         self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
@@ -5410,18 +5497,35 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
-            if let Some(ref client) = spawn_client {
-                client.clone_repo(spawn_worker::CloneRequest {
-                    os_user: os_user_owned,
-                    git_url: git_url_owned,
-                    destination: dest_path.display().to_string(),
-                })
-            } else {
-                spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+        match crate::supervisor_client::spawn_backend_choice(&self.config) {
+            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                await_supervised_with_timeout(
+                    timeout,
+                    "create_project: clone via tddy-supervisor",
+                    crate::supervisor_spawn::clone_repo_via_supervisor(
+                        &socket_path,
+                        &os_user_owned,
+                        &git_url_owned,
+                        &dest_path,
+                    ),
+                )
+                .await?
             }
-        })
-        .await?;
+            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
+                    if let Some(ref client) = spawn_client {
+                        client.clone_repo(spawn_worker::CloneRequest {
+                            os_user: os_user_owned,
+                            git_url: git_url_owned,
+                            destination: dest_path.display().to_string(),
+                        })
+                    } else {
+                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                    }
+                })
+                .await?
+            }
+        }
 
         let main_repo_path = destination
             .canonicalize()
@@ -5554,18 +5658,35 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
-            if let Some(ref client) = spawn_client {
-                client.clone_repo(spawn_worker::CloneRequest {
-                    os_user: os_user_owned,
-                    git_url: git_url_owned,
-                    destination: dest_path.display().to_string(),
-                })
-            } else {
-                spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+        match crate::supervisor_client::spawn_backend_choice(&self.config) {
+            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                await_supervised_with_timeout(
+                    timeout,
+                    "add_project_to_host: clone via tddy-supervisor",
+                    crate::supervisor_spawn::clone_repo_via_supervisor(
+                        &socket_path,
+                        &os_user_owned,
+                        &git_url_owned,
+                        &dest_path,
+                    ),
+                )
+                .await?
             }
-        })
-        .await?;
+            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
+                    if let Some(ref client) = spawn_client {
+                        client.clone_repo(spawn_worker::CloneRequest {
+                            os_user: os_user_owned,
+                            git_url: git_url_owned,
+                            destination: dest_path.display().to_string(),
+                        })
+                    } else {
+                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                    }
+                })
+                .await?
+            }
+        }
 
         let main_repo_path = destination
             .canonicalize()
@@ -5821,14 +5942,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
         let coder_config_path = self.config.coder_config_path.clone();
-        let result = spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
-            let pid = if project_id_resume.is_empty() {
-                None
-            } else {
-                Some(project_id_resume.as_str())
-            };
-            let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
-            if let Some(ref client) = spawn_client {
+        let result = match crate::supervisor_client::spawn_backend_choice(&self.config) {
+            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
                     &tool_path,
@@ -5838,7 +5954,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     SpawnOptions {
                         resume_session_id: Some(session_id.as_str()),
                         new_session_id: None,
-                        project_id: pid,
+                        project_id: Some(project_id_resume.as_str()).filter(|id| !id.is_empty()),
                         agent: resume_agent.as_deref(),
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
@@ -5850,35 +5966,75 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     daemon_log.as_ref(),
                     coder_log_yaml,
                 );
-                client.spawn(spawn_req)
-            } else {
-                let (child_log_level, child_log_format) =
-                    spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                spawner::spawn_as_user(
-                    &os_user,
-                    &tool_path,
-                    &tddy_data_dir_for_spawn,
-                    &repo_path,
-                    &livekit,
-                    SpawnOptions {
-                        resume_session_id: Some(session_id.as_str()),
-                        new_session_id: None,
-                        project_id: pid,
-                        agent: resume_agent.as_deref(),
-                        mouse: spawn_mouse,
-                        recipe: resume_recipe.as_deref(),
-                        stack_parent: None,
-                        model: None,
-                        // TODO(stdio-relay): wire the resume path's reverse channel too.
-                        host_session_socket: None,
-                    },
-                    child_log_level.as_str(),
-                    child_log_format.as_str(),
-                    coder_log_yaml.as_deref(),
+                await_supervised_with_timeout(
+                    timeout,
+                    "ResumeSession: spawn via tddy-supervisor",
+                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
                 )
+                .await?
             }
-        })
-        .await?;
+            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+                spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
+                    let pid = if project_id_resume.is_empty() {
+                        None
+                    } else {
+                        Some(project_id_resume.as_str())
+                    };
+                    let coder_log_yaml =
+                        spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                    if let Some(ref client) = spawn_client {
+                        let spawn_req = spawn_worker::build_spawn_request(
+                            &os_user,
+                            &tool_path,
+                            &tddy_data_dir_for_spawn,
+                            &repo_path,
+                            &livekit,
+                            SpawnOptions {
+                                resume_session_id: Some(session_id.as_str()),
+                                new_session_id: None,
+                                project_id: pid,
+                                agent: resume_agent.as_deref(),
+                                mouse: spawn_mouse,
+                                recipe: resume_recipe.as_deref(),
+                                stack_parent: None,
+                                model: None,
+                                // TODO(stdio-relay): wire the resume path's reverse channel too.
+                                host_session_socket: None,
+                            },
+                            daemon_log.as_ref(),
+                            coder_log_yaml,
+                        );
+                        client.spawn(spawn_req)
+                    } else {
+                        let (child_log_level, child_log_format) =
+                            spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                        spawner::spawn_as_user(
+                            &os_user,
+                            &tool_path,
+                            &tddy_data_dir_for_spawn,
+                            &repo_path,
+                            &livekit,
+                            SpawnOptions {
+                                resume_session_id: Some(session_id.as_str()),
+                                new_session_id: None,
+                                project_id: pid,
+                                agent: resume_agent.as_deref(),
+                                mouse: spawn_mouse,
+                                recipe: resume_recipe.as_deref(),
+                                stack_parent: None,
+                                model: None,
+                                // TODO(stdio-relay): wire the resume path's reverse channel too.
+                                host_session_socket: None,
+                            },
+                            child_log_level.as_str(),
+                            child_log_format.as_str(),
+                            coder_log_yaml.as_deref(),
+                        )
+                    }
+                })
+                .await?
+            }
+        };
         self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,

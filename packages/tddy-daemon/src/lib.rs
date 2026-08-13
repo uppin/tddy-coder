@@ -46,6 +46,8 @@ pub mod session_workflow_files;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod startup;
+pub mod supervisor_client;
+pub mod supervisor_spawn;
 pub mod task_service;
 pub mod tddy_user_config;
 pub mod telegram_bot;

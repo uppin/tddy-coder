@@ -10067,6 +10067,7 @@ dependencies = [
  "tddy-semantic-index",
  "tddy-service",
  "tddy-stdio",
+ "tddy-supervisor",
  "tddy-task",
  "tddy-terminal-rpc",
  "tddy-testing-commons",
@@ -10623,6 +10624,28 @@ dependencies = [
  "async-trait",
  "futures",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-supervisor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "libc",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "prost-build 0.13.5",
+ "rstest 0.24.0",
+ "serde",
+ "serde_yaml",
+ "tddy-codegen",
+ "tddy-rpc",
+ "tddy-stdio",
+ "tempfile",
  "tokio",
 ]
 
