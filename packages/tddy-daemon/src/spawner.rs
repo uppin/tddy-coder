@@ -410,6 +410,9 @@ pub struct SpawnOptions<'a> {
     pub recipe: Option<&'a str>,
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     pub stack_parent: Option<&'a str>,
+    /// Existing session whose branch seeds a new `pr-stack` orchestrator's stack as its single root
+    /// node. Passed as `--stack-seed-base-session <id>`.
+    pub stack_seed_base_session: Option<&'a str>,
     /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
     pub model: Option<&'a str>,
     /// Per-session unix socket path the daemon listens on for the reverse `HostSessionService`
@@ -417,6 +420,30 @@ pub struct SpawnOptions<'a> {
     /// `--host-session-socket <path>`. A plain string, so it crosses the `spawn_worker` JSON-IPC
     /// boundary trivially (unlike OS fds). `None` keeps the legacy wiring with no reverse channel.
     pub host_session_socket: Option<&'a str>,
+}
+
+/// The PR-stack flags a spawned `tddy-coder` is given, as a flat argument vector.
+///
+/// One function rather than two inline `cmd.arg` sequences: a flag that is silently not passed is
+/// this feature's failure mode — the orchestrator comes up looking successful and carrying an empty
+/// stack — and an argument vector can be asserted on where a `Command` cannot.
+///
+/// A blank value is treated as unset, because proto3 carries "unset" as the empty string.
+pub fn pr_stack_spawn_args(
+    stack_parent: Option<&str>,
+    stack_seed_base_session: Option<&str>,
+) -> Vec<String> {
+    [
+        ("--stack-parent", stack_parent),
+        ("--stack-seed-base-session", stack_seed_base_session),
+    ]
+    .into_iter()
+    .filter_map(|(flag, value)| {
+        let value = value.map(str::trim).filter(|v| !v.is_empty())?;
+        Some([flag.to_string(), value.to_string()])
+    })
+    .flatten()
+    .collect()
 }
 
 /// Merge the daemon process `PATH` with an optional prefix (from the target user's `~/.tddy/config.yaml`).
@@ -915,12 +942,10 @@ pub fn plan_session_child(
         }
     }
 
-    if let Some(sp) = opts.stack_parent {
-        let sp = sp.trim();
-        if !sp.is_empty() {
-            log::debug!("spawner: passing --stack-parent {}", sp);
-            push_flag(&mut args, "--stack-parent", sp);
-        }
+    let stack_args = pr_stack_spawn_args(opts.stack_parent, opts.stack_seed_base_session);
+    if !stack_args.is_empty() {
+        log::debug!("spawner: passing stack flags {:?}", stack_args);
+        args.extend(stack_args);
     }
 
     if let Some(sock) = opts.host_session_socket {

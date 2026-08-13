@@ -4728,6 +4728,39 @@ impl ConnectionServiceImpl {
             }
         }
 
+        // A base session that cannot seed a stack is refused here, before the session-type dispatch
+        // and before anything is created, so the new-session form can show the reason in its error
+        // strip rather than navigating away from a session that came up unseeded.
+        if !req.pr_stack_base_session_id.trim().is_empty() {
+            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            )
+            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+            // The requesting project's repository, which the base session's must be. Resolved here
+            // rather than reusing the tool branch's lookup further down, because the whole value of
+            // this refusal is that it happens before any of that runs. A seeded orchestrator without
+            // a project has no repository to be scoped to, so it is refused rather than exempted.
+            let project_id = req.project_id.trim();
+            if project_id.is_empty() {
+                return Err(Status::invalid_argument(
+                    "project_id is required to seed a PR stack from a base session",
+                ));
+            }
+            let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+            let project = project_storage::find_project(&projects_dir, project_id)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("project not found"))?;
+            validate_stack_seed_base_session(
+                &sessions_base,
+                &req.recipe,
+                &req.pr_stack_base_session_id,
+                Path::new(&project.main_repo_path),
+            )
+            .map_err(crate::connection_tonic_adapter::to_rpc_status)?;
+        }
+
         // A requested new branch another session already owns is refused here, before the
         // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
         // so nothing has been created yet when it fires.
@@ -4994,6 +5027,16 @@ impl ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        // Already validated above; the orchestrator's own process is what seeds the stack, because
+        // the session that owns a `changeset.yaml` is the process that writes it.
+        let stack_seed_base_session_for_spawn: Option<String> = {
+            let t = req.pr_stack_base_session_id.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
         let model_for_spawn: Option<String> = {
             let t = req.model.trim();
             if t.is_empty() {
@@ -5065,6 +5108,7 @@ impl ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: recipe_for_spawn.as_deref(),
                         stack_parent: stack_parent_for_spawn.as_deref(),
+                        stack_seed_base_session: stack_seed_base_session_for_spawn.as_deref(),
                         model: model_for_spawn.as_deref(),
                         host_session_socket: host_session_socket.as_deref(),
                     },
@@ -5088,6 +5132,7 @@ impl ConnectionServiceImpl {
                     let agent = agent_for_spawn.as_deref();
                     let recipe = recipe_for_spawn.as_deref();
                     let stack_parent = stack_parent_for_spawn.as_deref();
+                    let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
                     let model = model_for_spawn.as_deref();
                     let new_session_id = pre_session_id.as_deref();
                     let host_socket = host_session_socket.as_deref();
@@ -5108,6 +5153,7 @@ impl ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
+                                stack_seed_base_session,
                                 model,
                                 host_session_socket: host_socket,
                             },
@@ -5132,6 +5178,7 @@ impl ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
+                                stack_seed_base_session,
                                 model,
                                 host_session_socket: host_socket,
                             },
@@ -5959,6 +6006,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
+                        // Seeding a stack is a creation-time act; a resumed orchestrator already has
+                        // whatever stack it was created with.
+                        stack_seed_base_session: None,
                         model: None,
                         // TODO(stdio-relay): wire the resume path's reverse channel too.
                         host_session_socket: None,
@@ -5997,6 +6047,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
+                                // Seeding a stack is a creation-time act; a resumed orchestrator
+                                // already has whatever stack it was created with.
+                                stack_seed_base_session: None,
                                 model: None,
                                 // TODO(stdio-relay): wire the resume path's reverse channel too.
                                 host_session_socket: None,
@@ -6022,6 +6075,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
+                                // Seeding a stack is a creation-time act; a resumed orchestrator
+                                // already has whatever stack it was created with.
+                                stack_seed_base_session: None,
                                 model: None,
                                 // TODO(stdio-relay): wire the resume path's reverse channel too.
                                 host_session_socket: None,
@@ -8446,7 +8502,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             (!req.branch_suggestion.trim().is_empty()).then(|| req.branch_suggestion.clone());
         let child_recipe = (!req.child_recipe.trim().is_empty()).then(|| req.child_recipe.clone());
 
-        tddy_workflow_recipes::pr_stack::add_planned_pr_node(
+        // The appended node, so the response can *name* what this call created. The caller must not
+        // infer it by diffing the returned plan: the orchestrator agent appends nodes to the same
+        // stack, so a plan can come back holding several nodes the caller has never seen.
+        let added = tddy_workflow_recipes::pr_stack::add_planned_pr_node(
             &session_dir,
             tddy_workflow_recipes::pr_stack::AddPlannedPrInput {
                 title: req.title.clone(),
@@ -8466,11 +8525,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let stack_plan_json = session_list_enrichment::stack_plan_json_for_changeset(&changeset);
 
         log::info!(
-            "AddPlannedPr: success session_id={} title={:?}",
+            "AddPlannedPr: success session_id={} node_id={} title={:?}",
             req.session_id.trim(),
+            added.node_id,
             req.title
         );
-        Ok(Response::new(AddPlannedPrResponse { stack_plan_json }))
+        Ok(Response::new(AddPlannedPrResponse {
+            stack_plan_json,
+            node_id: added.node_id,
+        }))
     }
 
     async fn get_pr_status(
@@ -9732,6 +9795,109 @@ fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Result<(), St
         ));
     }
     Ok(())
+}
+
+/// Refuse a `StartSessionRequest.pr_stack_base_session_id` that cannot seed a stack, *before*
+/// anything spawns.
+///
+/// The pre-spawn position is the point: a refusal raised after the spawn is invisible to the
+/// new-session form, which has already navigated away, so the operator would be left with an
+/// orchestrator that looks seeded and is not. The seeding function refuses the same conditions again
+/// as its own writer contract — the CLI flag is reachable without this RPC.
+///
+/// A blank id validates nothing, because nothing was asked for: an unseeded orchestrator is the
+/// pre-existing behaviour. Otherwise the recipe must resolve to `"pr-stack"` (the legacy
+/// `plan-pr-stack` / `orchestrate-pr-stack` aliases resolve to it and are accepted — refusing them
+/// would make the recipe name a load-bearing string rather than a resolution), the named session must
+/// pass [`tddy_workflow_recipes::pr_stack::check_stack_seed_base`] — the *same* rules, in the *same*
+/// words, that the seeding writer enforces — and its repository must be the requesting project's.
+///
+/// **The repository check is this function's own**, because only the RPC knows which project was
+/// asked for. Without it an operator can seed a stack with a branch from a different repository:
+/// nothing refuses it, and the failure lands much later as a git error when the first descendant tries
+/// to base off `origin/<branch>`, by which time the orchestrator exists and looks seeded. It compares
+/// **canonicalized repository roots**, never project ids — a project id is registry-local and not
+/// stable across hosts, while the repository root is the thing a stacked branch must actually share.
+// `result_large_err`: the refusal is what the tonic gRPC surface reports to the new-session form, so
+// `tonic::Status` is the error type — the same reason the adapter's streaming handlers allow it.
+#[allow(clippy::result_large_err)]
+pub fn validate_stack_seed_base_session(
+    sessions_base: &Path,
+    recipe: &str,
+    base_session_id: &str,
+    project_repo_root: &Path,
+) -> Result<(), tonic::Status> {
+    let base_session_id = base_session_id.trim();
+    if base_session_id.is_empty() {
+        return Ok(());
+    }
+
+    let is_pr_stack =
+        tddy_workflow_recipes::recipe_resolve::resolve_workflow_recipe_from_cli_name(recipe.trim())
+            .map(|r| r.name() == "pr-stack")
+            .unwrap_or(false);
+    if !is_pr_stack {
+        return Err(tonic::Status::invalid_argument(format!(
+            "pr_stack_base_session_id is only supported for the pr-stack recipe, but this session \
+             requested recipe {recipe:?}"
+        )));
+    }
+
+    // One rule, one wording: the refusal text lives in the recipes crate beside the writer, and only
+    // the *code* it travels as is decided here — an id that names nothing is a bad argument, a session
+    // whose state cannot seed is a failed precondition.
+    let base =
+        tddy_workflow_recipes::pr_stack::check_stack_seed_base(sessions_base, base_session_id)
+            .map_err(|refusal| match refusal {
+                tddy_workflow_recipes::pr_stack::StackSeedBaseRefusal::Unresolvable(reason) => {
+                    tonic::Status::invalid_argument(reason)
+                }
+                tddy_workflow_recipes::pr_stack::StackSeedBaseRefusal::Unusable(reason) => {
+                    tonic::Status::failed_precondition(reason)
+                }
+            })?;
+
+    let base_repo = base.repo_path.as_deref().ok_or_else(|| {
+        tonic::Status::failed_precondition(format!(
+            "session '{base_session_id}' records no repository, so it cannot be confirmed to work in \
+             this project's repository"
+        ))
+    })?;
+    if !session_repo_is_in_project(Path::new(base_repo), project_repo_root).map_err(|reason| {
+        tonic::Status::failed_precondition(format!(
+            "session '{base_session_id}' could not be checked against this project's repository: \
+             {reason}"
+        ))
+    })? {
+        return Err(tonic::Status::failed_precondition(format!(
+            "session '{base_session_id}' works in repository '{base_repo}', not this project's \
+             '{}', so its branch cannot be stacked on here",
+            project_repo_root.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Whether a session's recorded repository is the project's repository, or a worktree inside it.
+///
+/// The relation is "at or under", not equality, because `Changeset.repo_path` records the project's
+/// main repo for a `tddy-coder` session but the session's **own worktree**
+/// (`<repo>/.worktrees/<name>`) for a claude-cli / cursor-cli / workspace session. Both work in the
+/// project's repository; only one of them spells its root.
+///
+/// Both sides are canonicalized: a project registered through a symlinked path and a session that
+/// recorded the resolved one name the same repository, and a string comparison would call them
+/// different. An unresolvable path is an `Err`, not a `false` — "could not tell" and "different
+/// repository" are different answers, and only one of them may be reported as a mismatch.
+fn session_repo_is_in_project(
+    session_repo: &Path,
+    project_repo_root: &Path,
+) -> Result<bool, String> {
+    let canonical = |path: &Path| -> Result<std::path::PathBuf, String> {
+        path.canonicalize()
+            .map_err(|e| format!("'{}' could not be resolved: {e}", path.display()))
+    };
+    Ok(canonical(session_repo)?.starts_with(canonical(project_repo_root)?))
 }
 
 /// Derive `owner/repo` from a repo's `origin` remote URL, for GitHub API namespacing.

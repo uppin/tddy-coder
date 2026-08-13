@@ -8,6 +8,11 @@ export interface AddPlannedPrFormSubmission {
   description: string;
   branchSuggestion: string;
   parents: string[];
+  /**
+   * Start the added node's session straight away, rather than leaving it planned for later. Set by
+   * the "Add & start session" action; the plain "Add" action leaves it false.
+   */
+  startSession: boolean;
 }
 
 export interface AddPlannedPrFormProps {
@@ -44,7 +49,7 @@ export function AddPlannedPrForm({ nodes, onSubmit, onCancel }: AddPlannedPrForm
     });
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (startSession: boolean) => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
     setSubmitting(true);
@@ -55,6 +60,7 @@ export function AddPlannedPrForm({ nodes, onSubmit, onCancel }: AddPlannedPrForm
         description,
         branchSuggestion,
         parents: ordered.filter((n) => checkedParents.has(n.nodeId)).map((n) => n.nodeId),
+        startSession,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -122,9 +128,19 @@ export function AddPlannedPrForm({ nodes, onSubmit, onCancel }: AddPlannedPrForm
           data-testid="pr-stack-add-planned-pr-submit-btn"
           size="sm"
           disabled={submitting}
-          onClick={handleSubmit}
+          onClick={() => handleSubmit(false)}
         >
           Add planned PR
+        </Button>
+        {/* Adding the node and starting its session is one intent in the common case, so it is one
+            action — the same add, followed by the Start-session dialog for the node it appended. */}
+        <Button
+          data-testid="pr-stack-add-planned-pr-start-btn"
+          size="sm"
+          disabled={submitting}
+          onClick={() => handleSubmit(true)}
+        >
+          Add &amp; start session
         </Button>
         <Button
           data-testid="pr-stack-add-planned-pr-cancel-btn"

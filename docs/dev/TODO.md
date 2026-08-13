@@ -51,7 +51,128 @@ easy to lose among these:
 - `cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` — already tracked above.
 - `cancel_task_cancels_a_bash_pty_task` (`task_service_acceptance.rs`) — PTY timing.
 
+**Re-measured 2026-08-13 (pr-stack-base-session wrap): 11 suites / 24 tests**, every one attributed by
+its own failure message, none from that branch. New entries beyond the list above:
+
+- **The ACP-stub set** (8) — the six `acp_*` in `tddy-integration-tests`
+  (`acp_backend_acceptance`, `acp_host_bridge_acceptance`) and the two `codex_acp_backend_*`: they abort
+  with `tddy-acp-stub not built. Run: cargo build -p tddy-acp-stub`. This is the **same class of gap as
+  `tddy-sandbox-runner`** — a fixture binary no test script builds — and it is the larger half of the
+  workspace's noise. Both belong in whatever `./test` does before it runs.
+- `factory_is_shared_per_room_so_two_clients_to_one_peer_never_collide` (`tddy-livekit`) — testcontainers
+  loses a UDP port race: `failed to bind host port 0.0.0.0:<port>/udp: address already in use`. Use
+  `./run-livekit-testkit-server` and `LIVEKIT_TESTKIT_WS_URL` to avoid it.
+- `sandbox_runner_streams_demo_tui_dimensions_on_session_channel` (`tddy-sandbox-darwin`) — macOS-only.
+- The sandbox set is **four** `sandboxed_cursor_cli_*`, not three (`..._connect_session_returns_empty_livekit`,
+  `..._start_persists_metadata_and_empty_livekit`, `..._start_wires_specialized_agents_env_and_metadata`,
+  `..._terminal_io_round_trips`), and on an unprivileged user the cgroups ones fail with
+  `Operation not permitted … the host may forbid unprivileged user namespaces` rather than a missing binary.
+- `verify_rejects_a_token_with_a_tampered_signature` is **genuinely flaky**, not consistently failing:
+  it failed once in five consecutive runs. It expects `InvalidSignature` and intermittently gets
+  `Malformed`, so the tampering helper sometimes produces a string that fails base64 decoding before the
+  signature is ever checked. Fix the helper to mutate within the alphabet.
+
 ## Future Enhancements
+
+### tddy-web — a failed `ListSessions` is indistinguishable from an empty result in the new-session form (source: pr-stack-base-session changeset, 2026-08-13)
+
+`CreateSessionPane`'s mount effect fetches sessions best-effort and swallows the failure. That was
+tolerable when the list only fed the optional "PR stack parent" picker; it now also decides whether the
+"Base the stack on" picker has any options, so an operator who came specifically to seed a stack sees
+only "None (agent plans the stack)" and cannot tell "no eligible sessions" from "the fetch failed" —
+the likely outcome being an unseeded orchestrator created by accident. Keep the fetch non-fatal, but
+record the failure and say so in the picker's help text.
+
+The same effect also never refetches when the in-form daemon selector changes (its dependency list
+omits the host), so the offered sessions can belong to a different host than the one that will run the
+session.
+
+### Wrapping a changeset leaves dangling `1-WIP` pointers in code comments (source: pr-stack-base-session changeset, 2026-08-13)
+
+`/wrap-context-docs` deletes the WIP PRD and changeset, but code and test comments that cite them by
+path are not part of its sweep, so every wrap silently leaves broken pointers behind. The
+pr-stack-base-session wrap had six (a proto field comment, its generated TS copy, and four acceptance
+suite headers) and they were repointed by hand at
+`pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13`.
+
+One is still outstanding from an earlier wrap: `packages/tddy-service/proto/connection.proto:449` and
+its generated copy in `packages/tddy-web/src/gen/connection_pb.ts` cite
+`docs/ft/coder/1-WIP/PRD-2026-07-25-branch-query-and-remote-branch.md`, which exists nowhere — not even
+under `1-WIP/archived/`. Left alone here because it belongs to a different changeset and repointing it
+churns a generated file.
+
+Fix the process, not just the instances: the wrap step should grep the tree for the paths it is about to
+delete and refuse to finish while any code reference survives.
+
+### pr-stack — an externally-located worktree is refused as a stack base (source: pr-stack-base-session changeset, 2026-08-13)
+
+`session_repo_is_in_project` accepts a base session whose canonical `Changeset.repo_path` is at or under
+the project's `main_repo_path`. That covers every worktree this system creates —
+`worktree::worktrees_dir` is always `<repo_root>/.worktrees` — but git allows a worktree anywhere, and
+`worktree.rs`'s resolver explicitly tolerates registered worktrees outside `.worktrees/`. Such a session
+is refused as a stack base even though its branch belongs to the right repository.
+
+Conservative in the safe direction (a false refusal, not a false accept) and consistent with treating
+"could not tell" as "not the same repository". The real fix is to compare the resolved **git common
+dir** rather than a path prefix.
+
+### tddy-daemon — `connection_service.rs` repeats a trim-to-`Option<String>` block six times (source: pr-stack-base-session changeset, 2026-08-13)
+
+`connection_service.rs` has the same eight-line "trim, empty means unset" block at five pre-existing
+sites plus the one this changeset added, and the file already contains exactly that helper nested
+inside `resume_agent_and_recipe`. Hoist it to module scope and collapse all six. The new site was left
+consistent with its five siblings rather than fixed in isolation.
+
+Related, in the same file: `validate_stack_seed_base_session` and `require_pr_stack_orchestrator` are
+pure free functions with no `&self`, and belong in a `connection_service/pr_stack.rs` whenever that
+13k-line file is finally split.
+
+### tddy-daemon — generalize `pr_stack_spawn_args` to all optional spawn flags (source: pr-stack-base-session changeset, 2026-08-13)
+
+`spawner::pr_stack_spawn_args` exists because an argument vector can be asserted on where a `Command`
+cannot. That instinct applies to the four hand-rolled trim/skip-if-empty/`cmd.arg` blocks immediately
+above it (agent, recipe, model, project id): `spawn_as_user` now has two mechanisms for one job.
+Renaming it to an `optional_flag_args(&[(&str, Option<&str>)])` and routing those four through it
+collapses their per-flag `log::debug!` lines into one and makes them testable too.
+
+### pr-stack — a managed claude-cli/cursor-cli session may record a goal id as its state (source: pr-stack-base-session changeset, 2026-08-13)
+
+Surfaced while implementing stack seeding; **not** fixed there, because fixing it changes how existing
+on-disk sessions resume and that deserves its own review.
+
+`PrStackRecipe::start_goal()` returns the goal id `"analyze-stack"`, and the claude-cli / cursor-cli
+spawn paths in `tddy-daemon`'s `connection_service.rs` seed a managed session's position with
+`update_state(&mut cs, WorkflowState::new(recipe.start_goal().as_str()))`
+(`spawn_claude_cli_session_inner`, `start_sandboxed_claude_cli_session`,
+`start_sandboxed_cursor_cli_session`). So `"analyze-stack"` can be persisted as a *state*, while
+`PrStackRecipe::next_goal_for_state` matches only the `"AnalyzeStack"` / `"WriteStackPlan"` spellings —
+the goal-id spellings fall into the `_ => orchestrate` catch-all, which would read a session that has
+done nothing yet as mid-flight and skip planning.
+
+Tool sessions are unaffected, which is why the orchestrator this changeset creates is fine: a tool
+session's `changeset.yaml` is written by its own `tddy-coder` process via `ensure_changeset_recipe`,
+leaving `Changeset::default()`'s `Init` — and `Init` is in the table.
+
+Before fixing: confirm a managed **claude-cli** session can actually carry the `pr-stack` recipe in
+practice (the web only offers the recipe select for tool sessions, but `managed_codebase` claude-cli
+spawns do send `recipe`). If it can, the fix is to accept both spellings per state — and it must be
+weighed against sessions already on disk in that state, which resume into `orchestrate` today.
+
+### pr-stack — seeding a stack from several existing sessions (source: pr-stack-base-session changeset, 2026-08-13)
+
+- **Only one base session can seed a stack.** The picker is single-select and
+  `seed_stack_with_base_session` refuses a second node. Seeding a chain over *several* pre-existing
+  branches would declare dependencies their git history does not have: making the chain real means
+  rebasing branches an operator may be actively working in, and leaving it unreal means every node
+  below the first reports itself behind its base from the moment the stack exists. Neither was worth
+  shipping to get an ordering control.
+- **With multi-select would come ordering.** The original request asked for drag-handle ordering over
+  the selected sessions, with the linear order becoming the `parents` chain. It was dropped because a
+  single base node has nothing to order. The panel's persisted `display_order` and
+  `move_planned_pr_node` are the reorder primitives to build it on; note they move *rows*, while this
+  would have to move `parents`, which is `pr_set_parents`' job.
+- **claude-cli / cursor-cli sessions cannot seed a stack.** The orchestrator is a tool session, and
+  those forms hold no agent + tool-path + model triple valid for spawning one.
 
 ### tddy-web — activities tail-first / autoscroll follow-ups (source: activities-tail-first-autoscroll changeset, 2026-08-02)
 
