@@ -33,20 +33,51 @@ pub fn encode_response(response: RpcResponse) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Build an `RpcResponse` from a result. Success: response_message + end_of_stream.
-/// Error: `RpcError` with code and message from `Status`.
-pub fn response_from_result(request_id: i32, result: Result<Vec<u8>, Status>) -> RpcResponse {
+/// Identifies the call a response answers.
+///
+/// Exists so a response cannot be built without saying which call it belongs to. `request_id` alone
+/// is not an identity: it restarts whenever a client rebuilds its id space (a browser page reload, a
+/// process restart) while the peer still serves streams opened by the previous connection and
+/// addressed to the same transport identity. Those frames would otherwise resolve whichever call now
+/// holds the id, and their payload be decoded as that call's message type — silently, because the
+/// engines hand callers raw bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallOrigin {
+    pub request_id: i32,
+    /// The originating client connection (see `RpcRequest.client_epoch`).
+    pub client_epoch: u32,
+    /// The service/method the caller invoked, echoed so the client can refuse a response that
+    /// answers a different call than the one holding the id.
+    pub call_metadata: Option<CallMetadata>,
+}
+
+impl CallOrigin {
+    /// The origin of `request` — every response to it must carry this.
+    pub fn of(request: &RpcRequest) -> Self {
+        Self {
+            request_id: request.request_id,
+            client_epoch: request.client_epoch,
+            call_metadata: request.call_metadata.clone(),
+        }
+    }
+}
+
+/// Build an `RpcResponse` from a result, attributed to the call that asked for it. Success:
+/// response_message + end_of_stream. Error: `RpcError` with code and message from `Status`.
+pub fn response_from_result(origin: &CallOrigin, result: Result<Vec<u8>, Status>) -> RpcResponse {
     match result {
         Ok(bytes) => RpcResponse {
-            request_id,
+            request_id: origin.request_id,
             response_message: bytes,
             metadata: None,
             end_of_stream: true,
             error: None,
             trailers: None,
+            client_epoch: origin.client_epoch,
+            call_metadata: origin.call_metadata.clone(),
         },
         Err(status) => RpcResponse {
-            request_id,
+            request_id: origin.request_id,
             response_message: vec![],
             metadata: None,
             end_of_stream: true,
@@ -56,6 +87,8 @@ pub fn response_from_result(request_id: i32, result: Result<Vec<u8>, Status>) ->
                 details: std::collections::HashMap::new(),
             }),
             trailers: None,
+            client_epoch: origin.client_epoch,
+            call_metadata: origin.call_metadata.clone(),
         },
     }
 }

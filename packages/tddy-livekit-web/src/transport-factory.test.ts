@@ -64,12 +64,14 @@ function makeFakeRoom() {
 }
 
 /** Build an RpcResponse whose inner `responseMessage` marks which call it belongs to. */
-function makeMarkedResponse(requestId: number, marker: number): Uint8Array {
+function makeMarkedResponse(requestId: number, marker: number, clientEpoch: number): Uint8Array {
   const innerMessage = toBinary(RpcResponseSchema, create(RpcResponseSchema, { requestId: marker }));
   const response = create(RpcResponseSchema, {
     requestId,
     responseMessage: innerMessage,
     endOfStream: true,
+    // Only a response naming the connection that made the call is delivered.
+    clientEpoch,
   });
   return toBinary(RpcResponseSchema, response);
 }
@@ -153,8 +155,8 @@ describe("LiveKitTransportFactory", () => {
     await Promise.resolve();
     const idA = publishedRequestIdForTarget(room, "daemon-a");
     const idB = publishedRequestIdForTarget(room, "daemon-b");
-    room._emit(RoomEvent.DataReceived, makeMarkedResponse(idB, 222), { identity: "daemon-b" }, "tddy-rpc");
-    room._emit(RoomEvent.DataReceived, makeMarkedResponse(idA, 111), { identity: "daemon-a" }, "tddy-rpc");
+    room._emit(RoomEvent.DataReceived, makeMarkedResponse(idB, 222, factory.clientEpoch), { identity: "daemon-b" }, "tddy-rpc");
+    room._emit(RoomEvent.DataReceived, makeMarkedResponse(idA, 111, factory.clientEpoch), { identity: "daemon-a" }, "tddy-rpc");
 
     // Then — each call resolves to its own daemon's response
     const resultA = await callA;

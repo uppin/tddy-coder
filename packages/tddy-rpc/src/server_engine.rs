@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::bridge::{BidiStreamOutput, ResponseBody, RpcBridge, RpcService};
-use crate::envelope::{RpcError, RpcRequest, RpcResponse};
+use crate::envelope::{CallMetadata, CallOrigin, RpcError, RpcRequest, RpcResponse};
 use crate::message::{RequestMetadata, RpcMessage};
 use crate::status::Status;
 
@@ -133,7 +133,7 @@ impl<S: RpcService> ServerEngine<S> {
         // frame.
         self.spawn_dispatch(
             peer.to_string(),
-            request_id,
+            CallOrigin::of(&request),
             service.to_string(),
             method.to_string(),
             vec![message],
@@ -180,10 +180,20 @@ impl<S: RpcService> ServerEngine<S> {
             .remove(session_key)
             .expect("just matched via get_mut above");
         drop(pending);
-        let (peer, request_id) = (session_key.0.clone(), request.request_id);
+        let peer = session_key.0.clone();
+        // The continuation carries no `call_metadata` — only the opening frame does — so the call
+        // is named from the accumulating entry, which recorded it when the call opened.
+        let origin = CallOrigin {
+            request_id: request.request_id,
+            client_epoch: request.client_epoch,
+            call_metadata: Some(CallMetadata {
+                service: entry.service.clone(),
+                method: entry.method.clone(),
+            }),
+        };
         self.spawn_dispatch(
             peer,
-            request_id,
+            origin,
             entry.service,
             entry.method,
             entry.messages,
@@ -201,7 +211,7 @@ impl<S: RpcService> ServerEngine<S> {
     fn spawn_dispatch(
         &self,
         peer: String,
-        request_id: i32,
+        origin: CallOrigin,
         service: String,
         method: String,
         messages: Vec<RpcMessage>,
@@ -212,11 +222,11 @@ impl<S: RpcService> ServerEngine<S> {
             let result = bridge.handle_messages(&service, &method, &messages).await;
             match result {
                 Ok(body) => {
-                    Self::forward_response_body(request_id, peer, body, outgoing).await;
+                    Self::forward_response_body(origin, peer, body, outgoing).await;
                 }
                 Err(status) => {
                     let _ = outgoing
-                        .send((peer, Self::error_response(request_id, status)))
+                        .send((peer, Self::error_response(&origin, status)))
                         .await;
                 }
             }
@@ -231,6 +241,7 @@ impl<S: RpcService> ServerEngine<S> {
     ) {
         let request_id = request.request_id;
         let session_key = (peer.to_string(), request_id);
+        let origin = CallOrigin::of(&request);
         let meta = request
             .call_metadata
             .clone()
@@ -258,20 +269,20 @@ impl<S: RpcService> ServerEngine<S> {
                 .await
             {
                 Ok(BidiStreamOutput { output }) => {
-                    Self::forward_response_body(request_id, peer_owned, output, outgoing).await;
+                    Self::forward_response_body(origin, peer_owned, output, outgoing).await;
                 }
                 Err(status) => {
                     let _ = outgoing
-                        .send((peer_owned, Self::error_response(request_id, status)))
+                        .send((peer_owned, Self::error_response(&origin, status)))
                         .await;
                 }
             }
         });
     }
 
-    fn error_response(request_id: i32, status: Status) -> RpcResponse {
+    fn error_response(origin: &CallOrigin, status: Status) -> RpcResponse {
         RpcResponse {
-            request_id,
+            request_id: origin.request_id,
             response_message: vec![],
             metadata: None,
             end_of_stream: true,
@@ -281,6 +292,8 @@ impl<S: RpcService> ServerEngine<S> {
                 details: HashMap::new(),
             }),
             trailers: None,
+            client_epoch: origin.client_epoch,
+            call_metadata: origin.call_metadata.clone(),
         }
     }
 
@@ -296,7 +309,7 @@ impl<S: RpcService> ServerEngine<S> {
     /// closure once the channel ends cleanly (see [`crate::client_engine::ClientEngine::on_response`],
     /// which recognizes and doesn't forward this frame as data).
     async fn forward_response_body(
-        request_id: i32,
+        origin: CallOrigin,
         peer: String,
         body: ResponseBody,
         outgoing: mpsc::Sender<(String, RpcResponse)>,
@@ -306,12 +319,14 @@ impl<S: RpcService> ServerEngine<S> {
                 let len = chunks.len();
                 for (i, bytes) in chunks.into_iter().enumerate() {
                     let response = RpcResponse {
-                        request_id,
+                        request_id: origin.request_id,
                         response_message: bytes,
                         metadata: None,
                         end_of_stream: i + 1 == len,
                         error: None,
                         trailers: None,
+                        client_epoch: origin.client_epoch,
+                        call_metadata: origin.call_metadata.clone(),
                     };
                     if outgoing.send((peer.clone(), response)).await.is_err() {
                         break;
@@ -323,16 +338,18 @@ impl<S: RpcService> ServerEngine<S> {
                     let (response, is_error) = match item {
                         Ok(bytes) => (
                             RpcResponse {
-                                request_id,
+                                request_id: origin.request_id,
                                 response_message: bytes,
                                 metadata: None,
                                 end_of_stream: false,
                                 error: None,
                                 trailers: None,
+                                client_epoch: origin.client_epoch,
+                                call_metadata: origin.call_metadata.clone(),
                             },
                             false,
                         ),
-                        Err(status) => (Self::error_response(request_id, status), true),
+                        Err(status) => (Self::error_response(&origin, status), true),
                     };
                     if outgoing.send((peer.clone(), response)).await.is_err() {
                         return;
@@ -344,12 +361,14 @@ impl<S: RpcService> ServerEngine<S> {
                     }
                 }
                 let closing_signal = RpcResponse {
-                    request_id,
+                    request_id: origin.request_id,
                     response_message: Vec::new(),
                     metadata: None,
                     end_of_stream: true,
                     error: None,
                     trailers: None,
+                    client_epoch: origin.client_epoch,
+                    call_metadata: origin.call_metadata.clone(),
                 };
                 let _ = outgoing.send((peer, closing_signal)).await;
             }

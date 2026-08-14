@@ -14,6 +14,10 @@ use tddy_rpc::{BidiStreamOutput, ResponseBody, RpcMessage, RpcResult, RpcService
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+/// The connection that opened these calls. Every response is attributed to it, so a frame
+/// left over from a different connection can never resolve one of them.
+const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
+
 /// Echoes the request payload back unchanged; `EchoBidi` also echoes each incoming bidi message
 /// as it arrives. A fake, not a mock — real (if trivial) behavior, per fluent-tests guidelines.
 struct EchoStub;
@@ -104,6 +108,7 @@ fn a_streaming_request(request_id: i32, payload: &[u8]) -> RpcRequest {
         end_of_stream: true,
         abort: false,
         sender_identity: None,
+        client_epoch: A_CLIENT_EPOCH,
     }
 }
 
@@ -121,6 +126,7 @@ fn a_client_stream_open_request(request_id: i32, payload: &[u8]) -> RpcRequest {
         end_of_stream: false,
         abort: false,
         sender_identity: None,
+        client_epoch: A_CLIENT_EPOCH,
     }
 }
 
@@ -136,6 +142,7 @@ fn a_unary_request(request_id: i32, payload: &[u8]) -> RpcRequest {
         end_of_stream: true,
         abort: false,
         sender_identity: None,
+        client_epoch: A_CLIENT_EPOCH,
     }
 }
 
@@ -151,6 +158,7 @@ fn a_bidi_open_request(request_id: i32, payload: &[u8]) -> RpcRequest {
         end_of_stream: false,
         abort: false,
         sender_identity: None,
+        client_epoch: A_CLIENT_EPOCH,
     }
 }
 
@@ -165,6 +173,7 @@ fn a_bidi_continuation_request(request_id: i32, payload: &[u8], end_of_stream: b
         end_of_stream,
         abort: false,
         sender_identity: None,
+        client_epoch: A_CLIENT_EPOCH,
     }
 }
 

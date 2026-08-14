@@ -45,11 +45,39 @@ const RPC_TOPIC = "tddy-rpc";
 const registryLog = createDebug("tddy:rpc:room-rpc-registry");
 const transportLog = createDebug("tddy:rpc:livekit-transport");
 
-let nextRequestId = 1;
 
-function generateRequestId(): number {
-  return nextRequestId++;
+/**
+ * Distinguishes one client connection from the next.
+ *
+ * A request id restarts at 1 whenever a page builds a fresh connection, while the LiveKit
+ * participant identity is persisted in `sessionStorage` and survives a reload — so the daemon keeps
+ * publishing frames of streams the *previous* page opened, tagged with ids the new page is about to
+ * hand out again. Without a per-connection discriminator those frames resolve whichever call now
+ * holds the id, and their bytes are decoded as that call's message type. Never 0: a zero epoch on
+ * the wire means the field was absent.
+ */
+function mintClientEpoch(): number {
+  const epoch = Math.floor(Math.random() * 0xffffffff) >>> 0;
+  return epoch === 0 ? 1 : epoch;
 }
+
+/** The call a pending entry was opened for, so an arriving response can be attributed to it. */
+export interface PendingCall {
+  service: string;
+  method: string;
+}
+
+interface PendingUnaryCall {
+  call: PendingCall;
+  resolve: (value: RpcResponse) => void;
+  reject: (err: Error) => void;
+}
+
+interface PendingStreamCall {
+  call: PendingCall;
+  queue: AsyncQueue<Uint8Array>;
+}
+
 
 /**
  * `JSON.stringify` that survives `bigint` values. Decoded protobuf messages carry `uint64`/`int64`
@@ -122,11 +150,8 @@ class InboundReassembly {
  * filter needed), and no cross-talk between clients. Mirrors the Rust `LiveKitRpcClientFactory`.
  */
 export class RoomRpcRegistry {
-  readonly pendingUnary = new Map<
-    number,
-    { resolve: (value: RpcResponse) => void; reject: (err: Error) => void }
-  >();
-  readonly pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
+  readonly pendingUnary = new Map<number, PendingUnaryCall>();
+  readonly pendingStreams = new Map<number, PendingStreamCall>();
   private nextId = 1;
   private listener:
     | ((
@@ -144,6 +169,11 @@ export class RoomRpcRegistry {
     private readonly room: Room,
     private readonly debug = false,
     private readonly onTransportError?: TransportErrorHandler,
+    /** This connection's identity, stamped on every request and required on every response. */
+    readonly clientEpoch: number = mintClientEpoch(),
+    /** Inbound byte meter. Set only by a transport that owns its registry; a registry shared across
+     *  a room's transports cannot attribute an inbound frame to one of them. */
+    private readonly meter?: { record(dir: "in" | "out", bytes: number): void },
   ) {
     this.listener = (
       payload: Uint8Array,
@@ -152,6 +182,7 @@ export class RoomRpcRegistry {
       topic?: string,
     ) => {
       if (topic !== RPC_TOPIC) return;
+      this.meter?.record("in", (payload as Uint8Array).length);
       this.route(payload as Uint8Array, participant?.identity);
     };
     this.room.on(RoomEvent.DataReceived, this.listener as any);
@@ -161,14 +192,49 @@ export class RoomRpcRegistry {
     return this.nextId++;
   }
 
+  /**
+   * Whether `response` answers the call currently registered under its request id.
+   *
+   * A matching id is not enough. The daemon keeps serving streams opened by a connection that has
+   * gone away and addresses them to the same participant identity, while ids restart from 1 — so an
+   * id match alone can mean "a dead page's stream", and delivering it hands the caller another
+   * call's bytes to decode as its own message type, with no error. That is how a terminal's output
+   * came to be rendered as a control lease's holder screen id.
+   */
+  private answersItsCall(response: RpcResponse): boolean {
+    if (response.clientEpoch !== this.clientEpoch) {
+      if (this.debug) {
+        transportLog(
+          `dropping response request_id=${response.requestId} from client_epoch=${response.clientEpoch} (this connection is ${this.clientEpoch})`,
+        );
+      }
+      return false;
+    }
+    const pending =
+      this.pendingStreams.get(response.requestId) ?? this.pendingUnary.get(response.requestId);
+    const answered = response.callMetadata;
+    if (!pending || !answered) return true;
+    if (pending.call.service === answered.service && pending.call.method === answered.method) {
+      return true;
+    }
+    if (this.debug) {
+      transportLog(
+        `dropping response request_id=${response.requestId} answering ${answered.service}/${answered.method}, but that id holds ${pending.call.service}/${pending.call.method}`,
+      );
+    }
+    return false;
+  }
+
   private route(payload: Uint8Array, sender?: string): void {
     const full = this.reassemble(payload, sender);
     if (full === null) return;
     try {
       const response = fromBinary(RpcResponseSchema, full) as RpcResponse;
+      if (!this.answersItsCall(response)) return;
       const requestId = response.requestId;
-      const streamQueue = this.pendingStreams.get(requestId);
-      if (streamQueue) {
+      const pendingStream = this.pendingStreams.get(requestId);
+      if (pendingStream) {
+        const streamQueue = pendingStream.queue;
         if (response.error) {
           streamQueue.fail(rpcErrorToConnectError(response.error));
           this.pendingStreams.delete(requestId);
@@ -272,124 +338,54 @@ export class LiveKitTransport implements Transport {
   private room: Room;
   private targetIdentity: string;
   private debug: boolean;
-  private pendingUnary = new Map<
-    number,
-    { resolve: (value: RpcResponse) => void; reject: (err: Error) => void }
-  >();
-  private pendingStreams = new Map<number, AsyncQueue<Uint8Array>>();
-  private listener: ((payload: Uint8Array, participant?: { identity: string }, topic?: string) => void) | null = null;
   private meter: { record(dir: "in" | "out", bytes: number): void } | undefined;
-  private registry: RoomRpcRegistry | undefined;
-  private onTransportError: TransportErrorHandler | undefined;
+  /**
+   * Correlation state. Always present: a transport given no registry builds its own rather than
+   * running a second, parallel routing path. One implementation of "does this response answer this
+   * call" means a new dispatch path cannot be added that forgets to ask.
+   */
+  private registry: RoomRpcRegistry;
+  /** True when this transport built {@link registry} itself and must dispose it. */
+  private ownsRegistry: boolean;
 
   constructor(options: LiveKitTransportOptions) {
     this.room = options.room;
     this.targetIdentity = options.targetIdentity;
     this.debug = options.debug ?? false;
     this.meter = options.meter;
-    this.registry = options.registry;
-    this.onTransportError = options.onTransportError;
+    this.ownsRegistry = options.registry === undefined;
+    this.registry =
+      options.registry ??
+      new RoomRpcRegistry(
+        this.room,
+        this.debug,
+        options.onTransportError,
+        undefined,
+        this.meter,
+      );
 
-    // Shared-registry mode: correlation (one listener, one request-id space, one set of pending
-    // maps) is owned by the registry and shared with every other transport on the room. Reuse its
-    // maps and install no listener of our own.
-    if (this.registry) {
-      this.pendingUnary = this.registry.pendingUnary;
-      this.pendingStreams = this.registry.pendingStreams;
-      return;
-    }
-
-    // Frames are grouped per sender even here: this listener accepts frames whose sender identity is
-    // unknown (livekit-client reports none whenever the sender is missing from
-    // `room.remoteParticipants`), and message ids collide across senders — so an unidentified
-    // sender's chunk must never complete the target peer's message.
-    const inboundReassembly = new InboundReassembly();
-    this.listener = (
-      payload: Uint8Array,
-      participant?: { identity?: string } | null,
-      _kind?: unknown,
-      topic?: string
-    ) => {
-      if (topic !== RPC_TOPIC) return;
-      if (participant != null && participant.identity != null && participant.identity !== this.targetIdentity) {
-        // A frame from a participant other than our target is silently ignored — log it, since a
-        // mismatched/churned presenter identity is an easy-to-miss cause of a stalled stream.
-        if (this.debug) {
-          transportLog(
-            `dropped frame from identity=${participant.identity} (target=${this.targetIdentity}) bytes=${payload.length}`
-          );
-        }
-        return;
-      }
-
-      this.meter?.record("in", payload.length);
-
-      const sender = participant?.identity ?? undefined;
-      let full: Uint8Array | null;
-      try {
-        full = inboundReassembly.accept(payload, sender);
-      } catch (e) {
-        if (this.debug) transportLog(`malformed chunk frame:`, e);
-        reportTransportError(this.onTransportError, `malformed chunk frame from sender=${sender}`, e);
-        return;
-      }
-      if (full === null) return;
-
-      try {
-        const response = fromBinary(RpcResponseSchema, full) as RpcResponse;
-        const requestId = response.requestId;
-
-        if (this.debug) {
-          transportLog(
-            `response request_id=${requestId} endOfStream=${response.endOfStream} error=${response.error ? response.error.message : "none"}`
-          );
-        }
-
-        const streamQueue = this.pendingStreams.get(requestId);
-        if (streamQueue) {
-          if (response.error) {
-            streamQueue.fail(rpcErrorToConnectError(response.error));
-            this.pendingStreams.delete(requestId);
-          } else {
-            if (response.responseMessage && response.responseMessage.length > 0) {
-              if (this.debug) {
-                transportLog(
-                  `stream chunk request_id=${requestId} bytes=${response.responseMessage.length} endOfStream=${response.endOfStream}`
-                );
-              }
-              streamQueue.enqueue(response.responseMessage);
-            }
-            if (response.endOfStream) {
-              if (this.debug) {
-                transportLog(`stream ended request_id=${requestId}`);
-              }
-              streamQueue.close();
-              this.pendingStreams.delete(requestId);
-            }
-          }
-        } else {
-          const pending = this.pendingUnary.get(requestId);
-          if (pending) {
-            this.pendingUnary.delete(requestId);
-            pending.resolve(response);
-          }
-        }
-      } catch (e) {
-        if (this.debug) transportLog(`decode error:`, e);
-        reportTransportError(this.onTransportError, `decode error from sender=${sender}`, e);
-      }
-    };
-
-    this.room.on(RoomEvent.DataReceived, this.listener as any);
     if (this.debug) {
       transportLog(
-        `created, listening for DataReceived topic=${RPC_TOPIC} target=${this.targetIdentity}`
+        `created, listening for DataReceived topic=${RPC_TOPIC} target=${this.targetIdentity} client_epoch=${this.registry.clientEpoch}`
       );
     }
   }
 
+  /** This connection's identity. Every response must carry it to be delivered. */
+  get clientEpoch(): number {
+    return this.registry.clientEpoch;
+  }
+
+  private get pendingUnary(): Map<number, PendingUnaryCall> {
+    return this.registry.pendingUnary;
+  }
+
+  private get pendingStreams(): Map<number, PendingStreamCall> {
+    return this.registry.pendingStreams;
+  }
+
   private allocateRequestId(): number {
-    return this.registry ? this.registry.allocateRequestId() : generateRequestId();
+    return this.registry.allocateRequestId();
   }
 
   private publishRequest(request: RpcRequest): void {
@@ -442,10 +438,11 @@ export class LiveKitTransport implements Transport {
       endOfStream: true,
       abort: false,
       senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
     });
 
     const responsePromise = new Promise<RpcResponse>((resolve, reject) => {
-      this.pendingUnary.set(requestId, { resolve, reject });
+      this.pendingUnary.set(requestId, { call: { service, method: methodName }, resolve, reject });
     });
 
     if (_signal?.aborted) {
@@ -569,6 +566,7 @@ export class LiveKitTransport implements Transport {
 
     const responsePromise = new Promise<RpcResponse>((resolve, reject) => {
       this.pendingUnary.set(requestId, {
+        call: { service, method: methodName },
         resolve: resolve as any,
         reject,
       });
@@ -588,6 +586,7 @@ export class LiveKitTransport implements Transport {
         endOfStream: false,
         abort: false,
         senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
       });
       isFirst = false;
       this.publishRequest(rpcRequest as any);
@@ -601,6 +600,7 @@ export class LiveKitTransport implements Transport {
       endOfStream: true,
       abort: false,
       senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
     });
     this.publishRequest(endRequest as any);
 
@@ -642,7 +642,7 @@ export class LiveKitTransport implements Transport {
 
     const responseQueue = new AsyncQueue<Uint8Array>();
 
-    this.pendingStreams.set(requestId, responseQueue);
+    this.pendingStreams.set(requestId, { call: { service, method: methodName }, queue: responseQueue });
 
     let inputMessage: unknown = null;
     for await (const item of input) {
@@ -663,6 +663,7 @@ export class LiveKitTransport implements Transport {
       endOfStream: true,
       abort: false,
       senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
     });
     this.publishRequest(rpcRequest as any);
 
@@ -697,7 +698,7 @@ export class LiveKitTransport implements Transport {
     }
 
     const responseQueue = new AsyncQueue<Uint8Array>();
-    this.pendingStreams.set(requestId, responseQueue);
+    this.pendingStreams.set(requestId, { call: { service, method: methodName }, queue: responseQueue });
 
     const sendPromise = (async () => {
       let isFirst = true;
@@ -714,6 +715,7 @@ export class LiveKitTransport implements Transport {
           endOfStream: false,
           abort: false,
           senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
         });
         isFirst = false;
         this.publishRequest(rpcRequest as any);
@@ -726,6 +728,7 @@ export class LiveKitTransport implements Transport {
         endOfStream: true,
         abort: false,
         senderIdentity: this.room.localParticipant.identity,
+      clientEpoch: this.registry.clientEpoch,
       });
       this.publishRequest(endRequest as any);
     })();
@@ -749,15 +752,10 @@ export class LiveKitTransport implements Transport {
   }
 
   destroy(): void {
-    if (this.listener) {
-      this.room.off(RoomEvent.DataReceived, this.listener as any);
-      this.listener = null;
-    }
-    // In shared-registry mode the listener and pending maps belong to the registry (shared with
-    // sibling transports); only a standalone transport tears them down here.
-    if (!this.registry) {
-      this.pendingUnary.clear();
-      this.pendingStreams.clear();
+    // A shared registry outlives this transport — it belongs to the room and its sibling
+    // transports. Only a registry this transport built itself is torn down here.
+    if (this.ownsRegistry) {
+      this.registry.dispose();
     }
   }
 }
@@ -802,6 +800,11 @@ export class LiveKitTransportFactory {
     const created = new LiveKitTransportFactory(room, debug, onTransportError);
     LiveKitTransportFactory.byRoom.set(room, created);
     return created;
+  }
+
+  /** This connection's identity, shared by every transport vended for the room. */
+  get clientEpoch(): number {
+    return this.registry.clientEpoch;
   }
 
   /** Vend a transport that sends to `targetIdentity` over the room's shared registry. */

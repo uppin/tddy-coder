@@ -878,6 +878,9 @@ pub(crate) fn resolve_response_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The connection these test requests were made on.
+    const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
     use crate::proto::CallMetadata;
 
     #[test]
@@ -894,6 +897,7 @@ mod tests {
             end_of_stream: true,
             abort: false,
             sender_identity: Some("client1".to_string()),
+            client_epoch: A_CLIENT_EPOCH,
         };
         let event_participant = Some("client2".to_string().into());
         let remote_identities = vec!["client1".to_string().into(), "client2".to_string().into()];
