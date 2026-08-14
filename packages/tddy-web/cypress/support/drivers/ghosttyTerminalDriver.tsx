@@ -53,9 +53,26 @@ export interface GhosttyTerminalDriverOptions extends Partial<GhosttyTerminalPro
   withHandleCapture?: boolean;
 }
 
+/** A mouse event observed reaching the terminal, reduced to the fields tap-to-click cares about. */
+interface RecordedMouseEvent {
+  type: string;
+  clientX: number;
+  clientY: number;
+}
+
+/** Viewport coordinates a synthesised touch was delivered at. */
+interface TapPoint {
+  clientX: number;
+  clientY: number;
+}
+
 export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
   const { withMobileKeyboardWrapper, withHandleCapture, ...terminalProps } = options;
   const handleRef = React.createRef<GhosttyTerminalHandle>();
+  /** Mouse events seen since `recordMouseEvents()` — mutated in place so `.should()` retries observe growth. */
+  const recordedMouseEvents: RecordedMouseEvent[] = [];
+  /** Where the last synthesised tap landed, for coordinate-fidelity assertions. */
+  let lastTapPoint: TapPoint | null = null;
   const onDataStub = terminalProps.onData ?? cy.stub().as("onData");
   const onResizeStub = terminalProps.onResize ?? undefined;
 
@@ -190,16 +207,30 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
       return this;
     },
 
-    /** Synthesise a touch tap on the terminal. */
+    /** Synthesise a touch tap at the centre of the terminal. */
     simulateTouchTap() {
+      return this.simulateTouchTapAt(0.5, 0.5);
+    },
+
+    /**
+     * Synthesise a touch tap at a fraction of the terminal's box — `(0.5, 0.5)` is the centre,
+     * `(0.25, 0.75)` is left-of-centre and low. Records the resulting viewport coordinates so
+     * `expectMouseDownAtTapPoint()` can check the click landed where the finger did.
+     */
+    simulateTouchTapAt(xRatio: number, yRatio: number) {
       terminal().then(($el) => {
         const el = $el[0];
         const rect = el.getBoundingClientRect();
+        const point: TapPoint = {
+          clientX: rect.left + rect.width * xRatio,
+          clientY: rect.top + rect.height * yRatio,
+        };
+        lastTapPoint = point;
         const touch = new Touch({
           identifier: 1,
           target: el,
-          clientX: rect.left + rect.width / 2,
-          clientY: rect.top + rect.height / 2,
+          clientX: point.clientX,
+          clientY: point.clientY,
           radiusX: 0,
           radiusY: 0,
           rotationAngle: 0,
@@ -221,6 +252,110 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
             cancelable: true,
           }),
         );
+      });
+      return this;
+    },
+
+    /**
+     * Synthesise a two-finger touch at the centre of the terminal: one finger lands, a second
+     * joins, then both lift one after the other — the shape of a pinch or a two-finger tap.
+     */
+    tapWithTwoFingers() {
+      terminal().then(($el) => {
+        const el = $el[0];
+        const rect = el.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        const fingerAt = (identifier: number, clientX: number) =>
+          new Touch({
+            identifier,
+            target: el,
+            clientX,
+            clientY: midY,
+            radiusX: 0,
+            radiusY: 0,
+            rotationAngle: 0,
+            force: 1,
+          });
+        const first = fingerAt(1, rect.left + rect.width * 0.4);
+        const second = fingerAt(2, rect.left + rect.width * 0.6);
+        const touchEvent = (type: string, touches: Touch[], changedTouches: Touch[]) =>
+          new TouchEvent(type, {
+            touches,
+            targetTouches: touches,
+            changedTouches,
+            cancelable: true,
+            bubbles: true,
+          });
+        el.dispatchEvent(touchEvent("touchstart", [first], [first]));
+        el.dispatchEvent(touchEvent("touchstart", [first, second], [second]));
+        el.dispatchEvent(touchEvent("touchend", [first], [second]));
+        el.dispatchEvent(touchEvent("touchend", [], [first]));
+      });
+      return this;
+    },
+
+    /**
+     * Start recording mouse events that reach the terminal. Listens in the capture phase on the
+     * container, so events dispatched at the inner canvas are observed whether or not they bubble.
+     * Call before the gesture under test.
+     */
+    recordMouseEvents() {
+      terminal().then(($el) => {
+        const el = $el[0];
+        const record = (event: Event) => {
+          const mouse = event as MouseEvent;
+          recordedMouseEvents.push({
+            type: mouse.type,
+            clientX: mouse.clientX,
+            clientY: mouse.clientY,
+          });
+        };
+        el.addEventListener("mousedown", record, { capture: true });
+        el.addEventListener("mouseup", record, { capture: true });
+        el.addEventListener("click", record, { capture: true });
+      });
+      return this;
+    },
+
+    /** Assert the recorded press/release events are exactly one mousedown followed by one mouseup. */
+    expectMouseDownThenMouseUp() {
+      cy.wrap(null).should(() => {
+        const pressReleases = recordedMouseEvents
+          .map((event) => event.type)
+          .filter((type) => type === "mousedown" || type === "mouseup");
+        expect(pressReleases, "a tap should reach the terminal as a mousedown/mouseup pair").to.deep.equal([
+          "mousedown",
+          "mouseup",
+        ]);
+      });
+      return this;
+    },
+
+    /** Assert exactly one `click` event reached the terminal. */
+    expectClickDispatchedOnce() {
+      cy.wrap(null).should(() => {
+        const clicks = recordedMouseEvents.filter((event) => event.type === "click");
+        expect(clicks.length, "a tap should reach the terminal as a single click event").to.equal(1);
+      });
+      return this;
+    },
+
+    /** Assert no `click` event reached the terminal — a gesture that is not a tap must not click. */
+    expectNoClickDispatched() {
+      cy.wrap(null).should(() => {
+        const clicks = recordedMouseEvents.filter((event) => event.type === "click");
+        expect(clicks.length, "a gesture that is not a tap should not reach the terminal as a click").to.equal(0);
+      });
+      return this;
+    },
+
+    /** Assert the recorded mousedown carries the coordinates the finger touched. */
+    expectMouseDownAtTapPoint() {
+      cy.wrap(null).should(() => {
+        expect(lastTapPoint, "simulate a tap before asserting where its click landed").to.not.equal(null);
+        const [mouseDown] = recordedMouseEvents.filter((event) => event.type === "mousedown");
+        expect(mouseDown, "a tap should reach the terminal as a mousedown").to.not.equal(undefined);
+        expect({ clientX: mouseDown.clientX, clientY: mouseDown.clientY }).to.deep.equal(lastTapPoint);
       });
       return this;
     },
@@ -295,6 +430,55 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
         const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
         const offset = handle?.getViewportScrollOffset?.() ?? 0;
         expect(offset, "terminal viewport should reveal earlier output after the drag").to.be.greaterThan(0);
+      });
+      return this;
+    },
+
+    /**
+     * Wait until the terminal is wired to report mouse gestures to the TUI: the DECSET
+     * mouse-tracking sequences have been processed, *and* the effect that attaches the
+     * mouse/touch listeners has committed. The terminal enables tracking while still inside its
+     * async setup — one render before that effect runs — so the two frames flush the commit
+     * (useEffect runs after paint) instead of guessing at a delay.
+     * Requires `withHandleCapture: true`.
+     */
+    expectReportingMouseToTui() {
+      cy.wrap(handleRef).should((ref) => {
+        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        expect(
+          handle?.hasMouseTracking?.() ?? false,
+          "terminal should have mouse tracking enabled by the TUI",
+        ).to.equal(true);
+      });
+      cy.wrap(null).then(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      return this;
+    },
+
+    /**
+     * Assert `@onData` carried exactly one SGR mouse press (`…M`) and exactly one release (`…m`) —
+     * a gesture must never be reported to the TUI twice.
+     */
+    expectSgrPressAndReleaseReportedOnce() {
+      cy.get("@onData").should((subject) => {
+        const stub = subject as unknown as { getCalls: () => { args: unknown[] }[] };
+        const sgr = stub
+          .getCalls()
+          .map((call) => call.args[0])
+          .filter((arg): arg is string => typeof arg === "string")
+          .filter((data) => /^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data));
+        const reports = {
+          presses: sgr.filter((data) => data.endsWith("M")).length,
+          releases: sgr.filter((data) => data.endsWith("m")).length,
+        };
+        expect(reports, "a tap should be reported as one SGR press and one release").to.deep.equal({
+          presses: 1,
+          releases: 1,
+        });
       });
       return this;
     },

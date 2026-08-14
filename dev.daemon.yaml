@@ -61,6 +61,12 @@ livekit:
   public_url: ws://127.0.0.1:7880
   common_room: tddy-lobby
 
+# Per-session rooms are on by default once `livekit:` is set; these only pace the git polling behind
+# them. Left commented so dev runs on the shipped defaults — uncomment to watch activity land sooner.
+# session_room:
+#   poll_interval_ms: 2000
+#   git_timeout_ms: 5000
+
 github:
   stub: true
   stub_codes: "test-code:testuser"

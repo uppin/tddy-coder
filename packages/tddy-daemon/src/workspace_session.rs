@@ -13,14 +13,34 @@ use tddy_service::proto::connection::StartSessionResponse;
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;
 
-/// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`,
-/// and return a `StartSessionResponse` with empty LiveKit fields.
+/// The branch a workspace session's worktree is cut on, as asked for by the request that created it.
+///
+/// A workspace session is also the codebase half of a split session
+/// (docs/ft/daemon/remote-managed-worktree.md), where the caller chose a branch in the new-session
+/// form and expects the agent to find it — so the intent travels with the forwarded request rather
+/// than being reinvented on the codebase host.
+#[derive(Debug, Default, Clone)]
+pub struct WorkspaceBranchIntent<'a> {
+    pub branch_worktree_intent: &'a str,
+    pub new_branch_name: &'a str,
+    pub selected_integration_base_ref: &'a str,
+    pub selected_branch_to_work_on: &'a str,
+}
+
+/// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`.
+///
+/// **No room is opened here.** A session room belongs to the daemon running a session's *agent*
+/// (`docs/ft/daemon/session-room.md`, Roles), and a workspace session has no
+/// agent — it is a checkout, either standalone or the codebase half of a split session whose agent
+/// lives on another daemon entirely. Hosting a room here would put it on the one participant that
+/// has nobody to serve, and would name it after a session the agent's daemon does not own.
 #[allow(clippy::too_many_arguments)]
 pub async fn start_workspace_session(
     os_user: &str,
     session_id: &str,
     sessions_base: PathBuf,
     project_id: &str,
+    branch: &WorkspaceBranchIntent<'_>,
     tddy_data_dir: &Path,
     request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
@@ -45,6 +65,22 @@ pub async fn start_workspace_session(
         ));
     }
 
+    // Resolved before anything is created: a branch intent this daemon cannot honour is a malformed
+    // request, and a request refused after a session directory exists leaves the caller — which for
+    // a split session is another daemon — to clean up something it never wanted.
+    let workflow = crate::branch_intent::resolve_branch_workflow(
+        session_id,
+        &crate::branch_intent::BranchIntentRequest {
+            branch_worktree_intent: branch.branch_worktree_intent,
+            new_branch_name: branch.new_branch_name,
+            selected_integration_base_ref: branch.selected_integration_base_ref,
+            selected_branch_to_work_on: branch.selected_branch_to_work_on,
+        },
+        crate::branch_intent::BranchIntentPolicy::workspace(),
+        project.main_branch_ref.as_deref(),
+    )?
+    .workflow;
+
     // Create session directory.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
@@ -52,14 +88,7 @@ pub async fn start_workspace_session(
 
     // Write a minimal changeset so `setup_worktree_for_session_with_optional_chain_base` can read it.
     let cs = tddy_core::Changeset {
-        workflow: Some(tddy_core::ChangesetWorkflow {
-            branch_worktree_intent: Some(tddy_core::BranchWorktreeIntent::NewBranchFromBase),
-            new_branch_name: Some(format!(
-                "workspace/{}",
-                &session_id[..8.min(session_id.len())]
-            )),
-            ..Default::default()
-        }),
+        workflow: Some(workflow),
         ..Default::default()
     };
     tddy_core::write_changeset(&session_dir, &cs)
@@ -68,13 +97,16 @@ pub async fn start_workspace_session(
     // Create the real git worktree (blocking: involves git fetch + git worktree add).
     let repo_root_clone = repo_root.clone();
     let session_dir_clone = session_dir.clone();
+    let base_ref = Some(branch.selected_integration_base_ref.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let worktree_path = tokio::time::timeout(
         request_timeout,
         tokio::task::spawn_blocking(move || {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_clone,
                 &session_dir_clone,
-                None,
+                base_ref.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         }),
@@ -107,6 +139,8 @@ pub async fn start_workspace_session(
         agent: None,
         recipe: None,
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -119,11 +153,15 @@ pub async fn start_workspace_session(
         os_user
     );
 
+    // Three empty LiveKit fields, as before this daemon hosted rooms at all: a workspace session is
+    // a checkout, and there is nothing here for a participant to join.
+    let (livekit_room, livekit_url, livekit_server_identity) =
+        (String::new(), String::new(), String::new());
     Ok(Response::new(StartSessionResponse {
         session_id: session_id.to_string(),
-        livekit_room: String::new(),
-        livekit_url: String::new(),
-        livekit_server_identity: String::new(),
+        livekit_room,
+        livekit_url,
+        livekit_server_identity,
         branch_conflict: None,
     }))
 }

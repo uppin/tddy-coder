@@ -65,6 +65,10 @@ livekit = { version = "0.7", optional = true }
 livekit-api = { version = "0.5", optional = true }
 
 [features]
+# On by default: `--mcp` dispatch for a split session (agent on one host, worktree on another)
+# reaches the remote daemon over LiveKit RPC, so a shipped tddy-tools must carry the SDK. A build
+# that only ever talks stdio (in-jail) can drop it with --no-default-features.
+default = ["livekit"]
 livekit = ["dep:tddy-livekit", "dep:livekit", "dep:livekit-api"]
 
 [target.'cfg(unix)'.dependencies]

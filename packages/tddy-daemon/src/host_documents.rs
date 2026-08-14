@@ -391,6 +391,8 @@ mod tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
             cursor_chat_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &meta).unwrap();

@@ -80,7 +80,7 @@ impl StdioRpcClient {
     /// response before sending the next (real-time streaming — the peer processes each message
     /// as it arrives, not on end_of_stream).
     pub fn start_bidi_stream(&self, service: &str, method: &str) -> BidiStreamResult<'_> {
-        let (request_id, rx) = self.engine.register_stream();
+        let (request_id, rx) = self.engine.register_stream(service, method);
         Ok((
             StdioBidiSender {
                 client: self,
@@ -125,7 +125,7 @@ impl RpcClientTransport for StdioRpcClient {
         method: &str,
         request_bytes_list: Vec<Vec<u8>>,
     ) -> Result<Vec<u8>, Status> {
-        let (request_id, rx) = self.engine.register_unary();
+        let (request_id, rx) = self.engine.register_unary(service, method);
         self.send_message_list(request_id, service, method, request_bytes_list)
             .await?;
         rx.await
@@ -138,7 +138,7 @@ impl RpcClientTransport for StdioRpcClient {
         method: &str,
         request_bytes_list: Vec<Vec<u8>>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        let (request_id, rx) = self.engine.register_stream();
+        let (request_id, rx) = self.engine.register_stream(service, method);
         self.send_message_list(request_id, service, method, request_bytes_list)
             .await?;
         Ok(rx)

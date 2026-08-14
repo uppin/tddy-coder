@@ -4,13 +4,17 @@
 //! Thin transport adapter — delegates to tddy-rpc for generic dispatch.
 
 pub mod bridge;
+pub mod broadcast;
 pub mod chunking;
 pub mod client;
 pub mod client_factory;
 pub mod envelope;
 pub mod participant;
 mod projects_registry;
+pub mod room_metadata;
+pub mod room_roster;
 pub mod rpc_log;
+pub mod server_api_url;
 #[cfg(test)]
 pub mod test_util;
 pub mod token;
@@ -22,13 +26,19 @@ pub mod proto {
 }
 
 pub use bridge::{RpcBridge, RpcResult, RpcService};
+pub use broadcast::{
+    BroadcastChannel, BroadcastError, BroadcastMessage, BroadcastPublisher,
+    MAX_BROADCAST_PAYLOAD_BYTES,
+};
 pub use client::{BidiStreamSender, RpcClient};
 pub use client_factory::LiveKitRpcClientFactory;
 pub use envelope::{decode_request, encode_request, encode_response, response_from_result};
 pub use livekit::prelude::RoomOptions;
 pub use participant::{
     merge_participant_metadata_json, owned_project_count_for_projects_dir,
-    spawn_local_participant_metadata_watcher, LiveKitParticipant, OWNED_PROJECT_COUNT_METADATA_KEY,
+    spawn_local_participant_metadata_watcher, JoinedParticipant, LiveKitParticipant,
+    OWNED_PROJECT_COUNT_METADATA_KEY,
 };
+pub use room_metadata::{livekit_http_url, RoomMetadataClient};
 pub use tddy_rpc::Status;
 pub use token::{TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};

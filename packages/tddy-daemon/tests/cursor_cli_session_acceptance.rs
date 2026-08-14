@@ -340,6 +340,8 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         agent: None,
         recipe: None,
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 

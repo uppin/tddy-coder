@@ -238,6 +238,8 @@ impl SessionMetadataBuilder {
             agent: None,
             recipe: None,
             specialized_agents: self.specialized_agents,
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         }
     }
 }

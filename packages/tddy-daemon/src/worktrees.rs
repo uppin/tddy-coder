@@ -218,15 +218,15 @@ fn build_worktree_stat_snapshots(rows: &[WorktreeListRow]) -> Vec<WorktreeStatSn
     let mut snapshots = Vec::with_capacity(rows.len());
     for row in rows {
         let disk_bytes = directory_size_bytes_best_effort(&row.path);
-        let (changed_files, lines_added, lines_removed) = git_diff_numstat_summary(&row.path);
+        let numstat = git_diff_numstat(&row.path);
         let updated_at_unix_ms = chrono::Utc::now().timestamp_millis();
         snapshots.push(WorktreeStatSnapshot {
             path: row.path.clone(),
             branch_label: row.branch_label.clone(),
             disk_bytes,
-            changed_files,
-            lines_added,
-            lines_removed,
+            changed_files: numstat.changed_files,
+            lines_added: numstat.lines_added,
+            lines_removed: numstat.lines_removed,
             updated_at_unix_ms,
             stale: false,
         });
@@ -736,40 +736,68 @@ fn directory_size_bytes_best_effort(path: &Path) -> u64 {
     total
 }
 
-/// Returns (changed_files, lines_added, lines_removed) from `git diff --numstat` in `cwd`.
-fn git_diff_numstat_summary(cwd: &Path) -> (u32, i64, i64) {
+/// One `git diff --numstat HEAD` run: the paths it named, in git's order, and the totals over them.
+///
+/// The paths are what the Worktrees screen throws away and a session room's metadata keeps, so both
+/// read the same measurement rather than each running their own diff and disagreeing about it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorktreeNumstat {
+    /// The paths exactly as git printed them. Without `-z`, git C-quotes any path that is not plain
+    /// ASCII (`"src/caf\303\251.rs"`) and writes a rename as `{old => new}`, so these are for
+    /// display and comparison between two runs — not for opening a file with.
+    pub paths: Vec<String>,
+    pub changed_files: u32,
+    pub lines_added: i64,
+    pub lines_removed: i64,
+}
+
+/// Run `git diff --numstat HEAD` in `cwd` and parse it.
+///
+/// A repository git cannot read reports as no changes: this feeds a status display and a room
+/// summary, neither of which has anywhere to put an error.
+pub fn git_diff_numstat(cwd: &Path) -> WorktreeNumstat {
     let out = match Command::new("git")
         .current_dir(cwd)
         .args(["diff", "--numstat", "HEAD"])
         .output()
     {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return (0, 0, 0),
+        _ => return WorktreeNumstat::default(),
     };
-    let mut files = 0u32;
-    let mut added = 0i64;
-    let mut removed = 0i64;
-    for line in out.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+    parse_git_diff_numstat(&out)
+}
+
+/// Parse `git diff --numstat` output. Each line is `added\tremoved\tpath`, with `-\t-` in place of
+/// the counts for a binary file — which still changed, so it counts toward `changed_files` while
+/// contributing no lines.
+///
+/// Shared with [`crate::session_room`], which runs the same command under its own deadline: the
+/// room and the Worktrees screen must never quote different totals for one checkout, and one parser
+/// is how that stays true.
+pub fn parse_git_diff_numstat(stdout: &str) -> WorktreeNumstat {
+    let mut summary = WorktreeNumstat::default();
+    for line in stdout.lines() {
+        let line = line.trim_end_matches(['\r', '\n']);
+        if line.trim().is_empty() {
             continue;
         }
-        let mut parts = line.split_whitespace();
-        let a = parts.next();
-        let b = parts.next();
+        let mut fields = line.splitn(3, '\t');
+        let (a, b, path) = (fields.next(), fields.next(), fields.next());
         if a == Some("-") && b == Some("-") {
-            files += 1;
+            summary.changed_files += 1;
+            summary.paths.extend(path.map(str::to_string));
             continue;
         }
         if let (Some(a), Some(b)) = (a, b) {
-            if let (Ok(ai), Ok(bi)) = (a.parse::<i64>(), b.parse::<i64>()) {
-                files += 1;
-                added += ai;
-                removed += bi;
+            if let (Ok(ai), Ok(bi)) = (a.trim().parse::<i64>(), b.trim().parse::<i64>()) {
+                summary.changed_files += 1;
+                summary.lines_added += ai;
+                summary.lines_removed += bi;
+                summary.paths.extend(path.map(str::to_string));
             }
         }
     }
-    (files, added, removed)
+    summary
 }
 
 fn paths_equal(a: &Path, b: &Path) -> bool {
@@ -807,13 +835,13 @@ pub fn list_worktree_diff_rows(main_repo: &Path) -> Vec<WorktreeDiffRow> {
     );
     rows.into_iter()
         .map(|row| {
-            let (changed_files, lines_added, lines_removed) = git_diff_numstat_summary(&row.path);
+            let numstat = git_diff_numstat(&row.path);
             WorktreeDiffRow {
                 path: row.path,
                 branch_label: row.branch_label,
-                changed_files,
-                lines_added,
-                lines_removed,
+                changed_files: numstat.changed_files,
+                lines_added: numstat.lines_added,
+                lines_removed: numstat.lines_removed,
             }
         })
         .collect()

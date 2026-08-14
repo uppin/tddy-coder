@@ -8,6 +8,9 @@ pub use tddy_rpc::envelope::{
 #[cfg(test)]
 mod tests {
     use crate::proto::CallMetadata;
+
+    /// The connection these test requests were made on.
+    const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
     use tddy_rpc::envelope::{decode_request, encode_request, RpcRequest};
 
     #[test]
@@ -24,6 +27,7 @@ mod tests {
             end_of_stream: false,
             abort: false,
             sender_identity: None,
+            client_epoch: A_CLIENT_EPOCH,
         };
 
         // When encoding then decoding
@@ -53,6 +57,7 @@ mod tests {
             end_of_stream: true,
             abort: false,
             sender_identity: Some("client".to_string()),
+            client_epoch: A_CLIENT_EPOCH,
         };
 
         // When encoding then decoding

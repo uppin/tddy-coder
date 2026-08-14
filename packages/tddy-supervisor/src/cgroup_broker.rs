@@ -163,12 +163,11 @@ impl CgroupBroker {
     /// different questions with it: one is a caller's request to place a session, the other is the
     /// supervisor placing *itself* while preparing the subtree.
     fn write_pid(&self, procs: &Path, pid: u32) -> std::io::Result<()> {
-        use std::io::Write;
         let mut file = fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(procs)?;
-        writeln!(file, "{pid}")
+        write_one_pid(&mut file, pid)
     }
 
     /// The leaf the supervisor moves itself into, refused unless it names one ordinary directory
@@ -218,6 +217,21 @@ impl CgroupBroker {
             message: format!("{what} under {}: {error}", self.base.display()),
         }
     }
+}
+
+/// Send `pid` to an opened `cgroup.procs` in **exactly one** `write`.
+///
+/// The syscall count is the contract, not an implementation detail. cgroupfs treats every `write` as a
+/// separate command, so `writeln!` — which on an unbuffered `File` sends the digits and the newline as
+/// two writes — makes the kernel parse a lone `"\n"` as a pid and fail the call with `EINVAL`, *after*
+/// the first write has already moved the process. That failure only appears on a real cgroupfs host: on
+/// the plain-directory base every test (and `cgroup.base_override`) uses, two appends leave exactly the
+/// bytes one write would have. `spawn_broker::join_cgroup_scope` makes the same single write in the
+/// post-fork path, for the same reason.
+///
+/// Free-standing and generic over the sink so the one-write property is assertable without a cgroupfs.
+fn write_one_pid(sink: &mut impl std::io::Write, pid: u32) -> std::io::Result<()> {
+    sink.write_all(format!("{pid}\n").as_bytes())
 }
 
 /// A subtree the supervisor cannot prepare, with what an operator can do about it.
@@ -402,6 +416,39 @@ mod tests {
         assert_eq!(
             contents_of(base.path().join("supervisor/cgroup.procs")),
             format!("{SUPERVISOR_PID}\n")
+        );
+    }
+
+    #[test]
+    fn sends_a_pid_to_cgroup_procs_in_exactly_one_write() {
+        // Given a sink that records where one write ends and the next begins — which is the boundary
+        // cgroupfs itself reads, and the one a plain-directory base cannot show.
+        #[derive(Default)]
+        struct RecordingSink {
+            writes: Vec<Vec<u8>>,
+        }
+        impl std::io::Write for RecordingSink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.writes.push(buf.to_vec());
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut sink = RecordingSink::default();
+
+        // When
+        write_one_pid(&mut sink, SUPERVISOR_PID).expect("write the pid");
+
+        // Then — one write carrying the whole line. Two writes is a real host failure and not a
+        // cosmetic one: cgroupfs reads every write as its own command, so a trailing `"\n"` of its own
+        // is a pid it cannot parse, and the supervisor dies at startup with `EINVAL` having already
+        // moved itself.
+        assert_eq!(
+            sink.writes,
+            vec![format!("{SUPERVISOR_PID}\n").into_bytes()],
+            "a pid must reach cgroup.procs as a single write"
         );
     }
 

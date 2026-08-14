@@ -6,24 +6,29 @@
 use std::sync::Arc;
 
 use tddy_rpc::client_engine::ClientEngine;
-use tddy_rpc::envelope::RpcResponse;
+use tddy_rpc::envelope::{RpcRequest, RpcResponse};
 
-fn a_response(request_id: i32, payload: &[u8], end_of_stream: bool) -> RpcResponse {
+/// A response to `request`, attributed to the call that made it: same request id, same connection
+/// epoch, same method. The engine requires all three to match before delivering anything, so a
+/// response is now built from the request it answers rather than from a bare id.
+fn a_response_to(request: &RpcRequest, payload: &[u8], end_of_stream: bool) -> RpcResponse {
     RpcResponse {
-        request_id,
+        request_id: request.request_id,
         response_message: payload.to_vec(),
         metadata: None,
         end_of_stream,
         error: None,
         trailers: None,
+        client_epoch: request.client_epoch,
+        call_metadata: request.call_metadata.clone(),
     }
 }
 
 /// The marker a real-time streaming server sends purely to signal that a stream has ended, when
 /// it can't tag the last real item directly (the item was already forwarded before the server
 /// knew it was last). Carries no data and no error — just closure.
-fn a_closing_signal(request_id: i32) -> RpcResponse {
-    a_response(request_id, b"", true)
+fn a_closing_signal(request: &RpcRequest) -> RpcResponse {
+    a_response_to(request, b"", true)
 }
 
 #[test]
@@ -48,7 +53,7 @@ async fn resolves_a_pending_unary_call_when_its_response_arrives() {
 
     // When the matching response arrives
     engine
-        .on_response(a_response(request.request_id, b"hello", true))
+        .on_response(a_response_to(&request, b"hello", true))
         .await;
 
     // Then the caller's receiver resolves with the response payload
@@ -64,10 +69,10 @@ async fn closes_a_pending_stream_after_end_of_stream() {
 
     // When two chunks arrive, the second marked end_of_stream
     engine
-        .on_response(a_response(request.request_id, b"chunk-1", false))
+        .on_response(a_response_to(&request, b"chunk-1", false))
         .await;
     engine
-        .on_response(a_response(request.request_id, b"chunk-2", true))
+        .on_response(a_response_to(&request, b"chunk-2", true))
         .await;
 
     // Then both chunks are delivered in order, and the channel closes after end_of_stream
@@ -89,15 +94,13 @@ async fn closes_a_pending_stream_without_forwarding_a_payload_free_closing_signa
     let engine = ClientEngine::new("client-1");
     let (request, mut rx) = engine.begin_stream("test.EchoService", "EchoStream", b"AB".to_vec());
     engine
-        .on_response(a_response(request.request_id, b"chunk-1", false))
+        .on_response(a_response_to(&request, b"chunk-1", false))
         .await;
 
     // When a payload-free closing signal arrives — sent because a real-time forwarder can't know
     // a data item is the last one until after it's already been sent, so closure is signaled
     // separately rather than by tagging a real item
-    engine
-        .on_response(a_closing_signal(request.request_id))
-        .await;
+    engine.on_response(a_closing_signal(&request)).await;
 
     // Then the real chunk is delivered, but the closing signal itself is not treated as data —
     // it only closes the stream
@@ -122,13 +125,12 @@ async fn delivers_every_stream_item_even_when_the_consumer_drains_after_a_large_
     const N: usize = 40; // exceeds the internal channel capacity (32)
 
     let producer_engine = engine.clone();
-    let request_id = request.request_id;
     let producer = tokio::spawn(async move {
         for i in 0..N {
             let end_of_stream = i + 1 == N;
             producer_engine
-                .on_response(a_response(
-                    request_id,
+                .on_response(a_response_to(
+                    &request,
                     format!("item-{i}").as_bytes(),
                     end_of_stream,
                 ))
@@ -156,7 +158,8 @@ async fn ignores_a_response_for_an_unknown_request_id() {
     // When a response arrives for a request_id nothing registered (e.g. a duplicate delivery
     // after the pending entry was already removed)
     // Then it is dropped silently — no panic, no pending entry to corrupt
+    let never_registered = engine.build_request(999, "test.EchoService", "Echo", vec![], true);
     engine
-        .on_response(a_response(999, b"unexpected", true))
+        .on_response(a_response_to(&never_registered, b"unexpected", true))
         .await;
 }

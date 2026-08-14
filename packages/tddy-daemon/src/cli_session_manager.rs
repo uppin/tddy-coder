@@ -396,6 +396,7 @@ impl CliSessionManager {
             false,
             None,
             Vec::new(),
+            Vec::new(),
             None,
         )
         .await
@@ -413,6 +414,10 @@ impl CliSessionManager {
     ///
     /// `env` — extra environment variables set on the spawned process (e.g. a managed session's
     /// per-session `TDDY_SOCKET` and a `PATH` that resolves `tddy-tools`).
+    ///
+    /// `extra_args` — flags appended before any positional prompt (a split session's tool allowlist
+    /// and `--mcp-config`). They go before the prompt because `--mcp-config` is variadic and would
+    /// otherwise swallow a bare positional as another config path.
     #[allow(clippy::too_many_arguments)]
     pub async fn start_with_options(
         &self,
@@ -425,6 +430,7 @@ impl CliSessionManager {
         dangerously_skip_permissions: bool,
         resume: bool,
         append_system_prompt_file: Option<&Path>,
+        extra_args: Vec<String>,
         env: Vec<(String, String)>,
         os_user: Option<&str>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
@@ -437,21 +443,28 @@ impl CliSessionManager {
             dangerously_skip_permissions,
             resume,
         );
-        if let Some(path) = append_system_prompt_file {
-            // Insert before a trailing positional prompt (if any) so the flag precedes the prompt.
-            let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
-            let insert_at = if has_positional_prompt {
+        // Insert before a trailing positional prompt (if any) so every flag precedes the prompt.
+        let has_positional_prompt = initial_prompt.is_some_and(|p| !p.trim().is_empty());
+        let insert_at = |argv: &Vec<String>| {
+            if has_positional_prompt {
                 argv.len() - 1
             } else {
                 argv.len()
-            };
+            }
+        };
+        if let Some(path) = append_system_prompt_file {
+            let at = insert_at(&argv);
             argv.splice(
-                insert_at..insert_at,
+                at..at,
                 [
                     "--append-system-prompt-file".to_string(),
                     path.to_string_lossy().into_owned(),
                 ],
             );
+        }
+        if !extra_args.is_empty() {
+            let at = insert_at(&argv);
+            argv.splice(at..at, extra_args);
         }
         self.spawn_tool(
             session_id,
@@ -669,6 +682,7 @@ impl CliSessionManager {
             binary_path,
             None,
             Vec::new(),
+            Vec::new(),
         )
         .await
     }
@@ -677,6 +691,11 @@ impl CliSessionManager {
     /// prompt (`append_system_prompt_file`) and per-session env (`TDDY_SOCKET` + `PATH`) so a resumed
     /// managed session stays workflow-aware. Never replays the initial prompt and never carries over
     /// a prior permission mode (resume uses the default "auto").
+    ///
+    /// `extra_args` re-supplies the flags a spawn injected but nothing persisted — a split session's
+    /// tool allowlist and `--mcp-config`, without which a resumed agent would come back with no way
+    /// to reach its worktree at all.
+    #[allow(clippy::too_many_arguments)]
     pub async fn resume_with_options(
         &self,
         session_id: &str,
@@ -684,6 +703,7 @@ impl CliSessionManager {
         model: &str,
         binary_path: &str,
         append_system_prompt_file: Option<&Path>,
+        extra_args: Vec<String>,
         env: Vec<(String, String)>,
     ) -> anyhow::Result<Arc<PtyHandle>> {
         self.start_with_options(
@@ -696,6 +716,7 @@ impl CliSessionManager {
             false,
             true,
             append_system_prompt_file,
+            extra_args,
             env,
             None,
         )
@@ -1409,6 +1430,7 @@ mod tests {
                 false,
                 false,
                 None,
+                Vec::new(),
                 Vec::new(),
                 Some("nyxzzz-nonexistent-user"),
             )

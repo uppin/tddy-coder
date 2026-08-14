@@ -1279,6 +1279,14 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     telegram_tracked: SharedTelegramTrackedSessionCoordinator,
     /// When `workflow_spawn` has no [`TelegramDaemonHooks`], tests may install watcher + config here for Enter replay.
     elicitation_replay_bridge: Arc<Mutex<TelegramElicitationReplayBridge>>,
+    /// The session rooms this daemon hosts, so **Delete** stops hosting the deleted session's room
+    /// before its checkout is removed — the same order `DeleteSession` uses.
+    ///
+    /// Defaults to a registry of this harness's own, which hosts nothing: a harness built without
+    /// the daemon's registry (every test fixture) has no rooms to close, and the call still happens
+    /// on one code path rather than on a branch. `main` injects the daemon's own with
+    /// [`Self::with_session_rooms`].
+    session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -1377,7 +1385,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             elicitation_replay_bridge: Arc::new(Mutex::new(
                 TelegramElicitationReplayBridge::default(),
             )),
+            session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
         }
+    }
+
+    /// Share the daemon's session-room registry (builder), so **Delete** closes the room of a
+    /// session it deletes instead of leaving it polling a checkout that is being removed.
+    pub fn with_session_rooms(
+        mut self,
+        rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    ) -> Self {
+        self.session_rooms = rooms;
+        self
     }
 
     /// Wire [`TelegramSessionWatcher`] + [`DaemonConfig`] for **Enter session** elicitation replay when
@@ -3103,6 +3122,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
@@ -3301,6 +3322,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
@@ -3711,6 +3734,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         );
         self.ensure_authorized(chat_id)?;
 
+        // Before the directory goes, as `delete_session_directory` requires: the room's poll loop
+        // measures the checkout on an interval, and this path removes the worktree with it.
+        crate::session_deletion::close_session_room(&self.session_rooms, session_id);
         crate::session_deletion::delete_session_directory(&self.sessions_base, session_id, None)
             .map_err(|s| anyhow::anyhow!("{}", s.message))?;
 

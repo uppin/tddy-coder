@@ -71,6 +71,81 @@ impl Default for AgentWarmupConfig {
     }
 }
 
+/// Today's freshness for a session room: fast enough that an agent notices a commit within a
+/// couple of seconds, slow enough that a host with many checkouts is not spending its time shelling
+/// out to git.
+fn default_session_room_poll_interval_ms() -> u64 {
+    2000
+}
+
+/// A `git rev-parse` / `status` / `diff` trio that has not answered in this long is a repository in
+/// trouble (a stale index lock, a filesystem that stopped responding), not a slow one. Read from
+/// the module that measures checkouts so the two cannot drift apart.
+fn default_session_room_git_timeout_ms() -> u64 {
+    crate::session_room::DEFAULT_GIT_TIMEOUT.as_millis() as u64
+}
+
+/// The shortest interval and git budget a session room accepts.
+///
+/// Not a clamp. Below this a room is not "fast", it is a git storm: one poll runs four `git`
+/// subprocesses against the checkout, so a mistyped `poll_interval_ms: 0` or `: 1` would ask for
+/// thousands of processes a second, per room, forever. An operator who wrote that meant something
+/// else, and being told so at startup is cheaper than finding it in a load average. The same floor
+/// covers `git_timeout_ms`, where anything shorter kills every measurement before git can answer.
+const MIN_WORKTREE_ROOM_INTERVAL_MS: u64 = 100;
+
+/// Cadence and patience of the session-room poll loop (`session_room:` YAML section).
+///
+/// Polling is how a checkout's activity is detected (`docs/ft/daemon/session-room.md`
+/// FR5), so its interval is the freshness the room offers. The defaults reproduce the shipped
+/// behaviour exactly — this section exists so an operator can say something different, not so a
+/// caller can branch on how the daemon was started.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionRoomConfig {
+    /// How often the facilitating daemon measures the checkout it hosts. At least
+    /// [`MIN_WORKTREE_ROOM_INTERVAL_MS`].
+    #[serde(default = "default_session_room_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    /// Wall-clock budget for one poll's git work; a `git` that overruns it is killed. Exceeding it
+    /// costs that worktree's freshness for a tick and nothing else — the daemon never waits on git
+    /// on a request path. At least [`MIN_WORKTREE_ROOM_INTERVAL_MS`].
+    #[serde(default = "default_session_room_git_timeout_ms")]
+    pub git_timeout_ms: u64,
+}
+
+impl SessionRoomConfig {
+    /// Refuse a section that asks for something no room should do, naming the value and the floor.
+    ///
+    /// Refused rather than clamped: a clamp turns an operator's mistake into behaviour they did not
+    /// ask for and cannot see, and this particular mistake — a sub-100 ms poll — is one that
+    /// saturates a host.
+    fn validate(&self) -> anyhow::Result<()> {
+        for (field, value) in [
+            ("poll_interval_ms", self.poll_interval_ms),
+            ("git_timeout_ms", self.git_timeout_ms),
+        ] {
+            if value < MIN_WORKTREE_ROOM_INTERVAL_MS {
+                anyhow::bail!(
+                    "session_room.{field} is {value}; it must be at least {MIN_WORKTREE_ROOM_INTERVAL_MS} \
+                     (each poll runs four git subprocesses per hosted worktree). Remove the field to \
+                     use the default."
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Default for SessionRoomConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: default_session_room_poll_interval_ms(),
+            git_timeout_ms: default_session_room_git_timeout_ms(),
+        }
+    }
+}
+
 fn default_codex_oauth_loopback_proxy_eligible() -> bool {
     true
 }
@@ -207,6 +282,9 @@ pub struct DaemonConfig {
     /// Timing budget for the specialized-subagent warm-up gate (see [`AgentWarmupConfig`]).
     #[serde(default)]
     pub agent_warmup: AgentWarmupConfig,
+    /// Cadence and patience of the session-room poll loop (see [`SessionRoomConfig`]).
+    #[serde(default)]
+    pub session_room: SessionRoomConfig,
     /// Stable id for this daemon in a shared LiveKit room (multi-host). When set, spawned tools
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     /// Overridable at startup via the `TDDY_DAEMON_INSTANCE_ID` env var (see `apply_env_overrides`
@@ -314,6 +392,7 @@ impl Default for DaemonConfig {
             spawn_startup_grace_period_ms: default_spawn_startup_grace_period_ms(),
             spawn_startup_poll_interval_ms: default_spawn_startup_poll_interval_ms(),
             agent_warmup: AgentWarmupConfig::default(),
+            session_room: SessionRoomConfig::default(),
             daemon_instance_id: None,
             daemon_instance_id_append_startup_timestamp: false,
             codex_oauth_loopback_proxy_eligible: default_codex_oauth_loopback_proxy_eligible(),
@@ -901,6 +980,10 @@ impl DaemonConfig {
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
         let config: Self = serde_yaml::from_str(&contents)
             .map_err(|e| anyhow::anyhow!("failed to parse config {}: {}", path.display(), e))?;
+        config
+            .session_room
+            .validate()
+            .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
         Ok(config)
     }
 
@@ -1000,6 +1083,19 @@ impl DaemonConfig {
         }
     }
 
+    /// How often a hosted worktree is measured.
+    ///
+    /// Not clamped: a value below [`MIN_WORKTREE_ROOM_INTERVAL_MS`] is refused when the config is
+    /// loaded, so what an operator wrote is what runs.
+    pub fn session_room_poll_interval(&self) -> Duration {
+        Duration::from_millis(self.session_room.poll_interval_ms)
+    }
+
+    /// Wall-clock budget for one poll's git work. See [`Self::session_room_poll_interval`].
+    pub fn session_room_git_timeout(&self) -> Duration {
+        Duration::from_millis(self.session_room.git_timeout_ms)
+    }
+
     /// Wall-clock budget for one common-room daemon-advertisement `set_metadata` round (the LiveKit SDK
     /// still uses **5 s per attempt**; we retry until this budget elapses or the publish succeeds).
     pub fn common_room_set_metadata_attempt_budget(&self) -> Duration {
@@ -1066,12 +1162,18 @@ impl DaemonConfig {
     /// Override the spawn-startup watch and the warm-up budget from the environment — the last
     /// layer of `defaults ← daemon.yaml ← TDDY_*`. Call after YAML load.
     ///
-    /// All five take a whole number; an unparseable value warns and keeps the file/default value:
+    /// All seven take a whole number; an unparseable value warns and keeps the file/default value:
     /// - `TDDY_SPAWN_STARTUP_GRACE_PERIOD_MS`
     /// - `TDDY_SPAWN_STARTUP_POLL_INTERVAL_MS`
     /// - `TDDY_AGENT_WARMUP_TIMEOUT_SECS`
     /// - `TDDY_AGENT_WARMUP_RETRY_INTERVAL_MS`
     /// - `TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS`
+    /// - `TDDY_SESSION_ROOM_POLL_INTERVAL_MS`
+    /// - `TDDY_SESSION_ROOM_GIT_TIMEOUT_MS`
+    ///
+    /// The two session-room values are additionally refused below
+    /// [`MIN_WORKTREE_ROOM_INTERVAL_MS`], the same floor the YAML section is loaded under — a floor
+    /// an environment variable could step under would not be one.
     pub fn apply_timing_env_overrides(&mut self) {
         merge_timing_env(self, non_empty_env);
     }
@@ -1096,6 +1198,27 @@ fn merge_timing_env(config: &mut DaemonConfig, lookup: impl Fn(&str) -> Option<S
     if let Some(secs) = env_u64(&lookup, "TDDY_AGENT_WARMUP_REQUEST_TIMEOUT_SECS") {
         config.agent_warmup.request_timeout_secs = secs;
     }
+    if let Some(ms) = env_session_room_ms(&lookup, "TDDY_SESSION_ROOM_POLL_INTERVAL_MS") {
+        config.session_room.poll_interval_ms = ms;
+    }
+    if let Some(ms) = env_session_room_ms(&lookup, "TDDY_SESSION_ROOM_GIT_TIMEOUT_MS") {
+        config.session_room.git_timeout_ms = ms;
+    }
+}
+
+/// A session-room millisecond override, or `None` (with a warning) when it is not a whole number
+/// at or above [`MIN_WORKTREE_ROOM_INTERVAL_MS`]. Keeping the file/default value on a bad input is
+/// how every other override in [`merge_timing_env`] behaves.
+fn env_session_room_ms(lookup: &impl Fn(&str) -> Option<String>, name: &str) -> Option<u64> {
+    let ms = env_u64(lookup, name)?;
+    if ms < MIN_WORKTREE_ROOM_INTERVAL_MS {
+        log::warn!(
+            target: "tddy_daemon::config",
+            "{name}: {ms} is below the {MIN_WORKTREE_ROOM_INTERVAL_MS}ms floor (each poll runs four git subprocesses per hosted worktree), ignoring"
+        );
+        return None;
+    }
+    Some(ms)
 }
 
 /// A whole-number environment override, or `None` (with a warning) when it is not one.
@@ -1552,6 +1675,127 @@ mod startup_and_warmup_timing_tests {
         assert_eq!(
             config.spawn_startup_grace_period(),
             Duration::from_millis(2500)
+        );
+    }
+
+    /// Writes `yaml` to a file and loads it the way the daemon does, so the load-time checks run.
+    fn a_daemon_loaded_from(yaml: &str) -> anyhow::Result<DaemonConfig> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("daemon.yaml");
+        std::fs::write(&path, yaml).expect("write daemon.yaml");
+        DaemonConfig::load(&path)
+    }
+
+    #[test]
+    fn a_default_configuration_measures_a_hosted_worktree_every_two_seconds() {
+        // Given a daemon configured with nothing at all
+        let config = DaemonConfig::default();
+
+        // Then a session room keeps the cadence and patience it shipped with — the section is a
+        // way to say something else, not a change of production behaviour
+        assert_eq!(
+            config.session_room_poll_interval(),
+            Duration::from_millis(2000)
+        );
+        assert_eq!(
+            config.session_room_git_timeout(),
+            Duration::from_millis(5000)
+        );
+    }
+
+    #[test]
+    fn a_yaml_session_room_section_overrides_the_defaults() {
+        // Given a daemon YAML naming its own cadence and patience
+        let config = a_daemon_loaded_from(
+            "session_room:\n  poll_interval_ms: 500\n  git_timeout_ms: 1500\n",
+        )
+        .expect("a configuration above the floor must load");
+
+        // Then both values come from the file
+        assert_eq!(
+            config.session_room_poll_interval(),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            config.session_room_git_timeout(),
+            Duration::from_millis(1500)
+        );
+    }
+
+    #[test]
+    fn a_session_room_poll_faster_than_the_floor_is_refused_by_name() {
+        // Given a daemon YAML asking for a poll interval of zero — the typo that would otherwise
+        // become a one-millisecond loop shelling out to git
+        let refused = a_daemon_loaded_from("session_room:\n  poll_interval_ms: 0\n")
+            .expect_err("a sub-floor poll interval must not load");
+
+        // Then the daemon refuses to start and says which field and which floor, rather than
+        // silently running something the operator did not ask for
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("session_room.poll_interval_ms") && message.contains("100"),
+            "the refusal must name the field and the floor; got {message}"
+        );
+    }
+
+    #[test]
+    fn a_session_room_git_timeout_below_the_floor_is_refused_too() {
+        // Given a daemon YAML whose git budget is too short for git to ever answer in
+        let refused =
+            a_daemon_loaded_from("session_room:\n  poll_interval_ms: 2000\n  git_timeout_ms: 5\n")
+                .expect_err("a sub-floor git timeout must not load");
+
+        // Then it is refused by name, for the same reason
+        assert!(
+            format!("{refused:#}").contains("session_room.git_timeout_ms"),
+            "the refusal must name the offending field"
+        );
+    }
+
+    #[test]
+    fn a_session_room_environment_override_wins_over_the_yaml_it_was_loaded_with() {
+        // Given a daemon configured by YAML, and an environment naming other values
+        let mut config = a_daemon_configured_by(
+            "session_room:\n  poll_interval_ms: 2000\n  git_timeout_ms: 5000\n",
+        );
+
+        // When the environment layer is applied
+        merge_timing_env(
+            &mut config,
+            an_environment_with(&[
+                ("TDDY_SESSION_ROOM_POLL_INTERVAL_MS", "750"),
+                ("TDDY_SESSION_ROOM_GIT_TIMEOUT_MS", "3000"),
+            ]),
+        );
+
+        // Then the environment values are the ones in effect — the same defaults ← YAML ← TDDY_*
+        // layering every other timing knob has
+        assert_eq!(
+            config.session_room_poll_interval(),
+            Duration::from_millis(750)
+        );
+        assert_eq!(
+            config.session_room_git_timeout(),
+            Duration::from_millis(3000)
+        );
+    }
+
+    #[test]
+    fn a_session_room_environment_override_below_the_floor_keeps_the_yaml_value() {
+        // Given a daemon configured by YAML, and an environment asking for a one-millisecond poll
+        let mut config = a_daemon_configured_by("session_room:\n  poll_interval_ms: 2000\n");
+
+        // When the environment layer is applied
+        merge_timing_env(
+            &mut config,
+            an_environment_with(&[("TDDY_SESSION_ROOM_POLL_INTERVAL_MS", "1")]),
+        );
+
+        // Then the file's value survives: a floor an environment variable could step under would
+        // not be a floor
+        assert_eq!(
+            config.session_room_poll_interval(),
+            Duration::from_millis(2000)
         );
     }
 

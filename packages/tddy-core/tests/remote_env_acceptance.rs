@@ -18,6 +18,7 @@ fn remote_tool_env_struct_has_required_fields() {
         livekit_url: Some("ws://lk.example.com".to_string()),
         livekit_room: Some("common-room".to_string()),
         server_identity: Some("relay-local-sess-abc123".to_string()),
+        livekit_token: None,
     };
 
     // Then
@@ -39,6 +40,7 @@ fn invoke_request_has_remote_field() {
         livekit_url: None,
         livekit_room: None,
         server_identity: None,
+        livekit_token: None,
     };
 
     // When
@@ -90,6 +92,7 @@ fn remote_tool_env_env_pairs_covers_all_required_vars() {
         livekit_url: Some("ws://lk.example.com".to_string()),
         livekit_room: Some("common-room".to_string()),
         server_identity: Some("relay-local-sess-789".to_string()),
+        livekit_token: None,
     };
 
     // When

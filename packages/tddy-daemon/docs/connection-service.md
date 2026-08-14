@@ -249,6 +249,8 @@ metadata dir — powers the web [Code pane](../../../docs/ft/web/session-code-pa
 - **Process termination**: When **`metadata.pid`** is set and the process is still running on Unix, the daemon terminates it (**SIGTERM**, then **SIGKILL** if needed) before **`remove_dir_all`**. Zombies on Linux are detected so delete can finish even when the parent has not reaped the child.
 - **Metadata gaps**: If **`.session.yaml`** is missing or unreadable, the directory is still removed when present (no PID termination step).
 - **Errors**: Invalid id → `INVALID_ARGUMENT`; missing directory on this daemon → `FAILED_PRECONDITION` (routing); process still running after signals → `FAILED_PRECONDITION`; filesystem removal failure → `INTERNAL` with a generic client message; details are logged server-side.
+- **Worktree removal** applies to `claude-cli` **and `workspace`** sessions (`worktree_removal_applies_to`). It previously covered only `claude-cli`, so a `workspace` session kept both its directory and its `git worktree` registration. `cursor-cli` still leaks the same way — tracked in `docs/dev/TODO.md`.
+- **Split sessions delete their paired workspace session first** on the codebase host; see § Split placement for why "the peer does not have it" is success and everything else refuses.
 
 ## Paths (per mapped OS user)
 
@@ -283,6 +285,48 @@ A "host" is a daemon instance; the selectable set is the connected `tddy-daemon`
 The helper takes injected `cloner` + `peer_lookup` closures for testability; the RPC wires the real cloner (`SpawnClient::clone_repo` when a spawn worker is configured, else `spawner::clone_as_user`, mirroring `AddProjectToHost`) and runs the blocking clone via `spawn_blocking` + `timeout`. Clone failures surface as errors (no masking); `NotFound` is preserved (not flattened to `internal`).
 
 See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md).
+
+## Split placement — the codebase on a different daemon than the agent
+
+`StartSessionRequest.codebase_daemon_instance_id` is a **second, independent host axis**:
+`daemon_instance_id` says where the agent process runs, this says whose filesystem holds the git
+worktree. Empty or self-matching keeps the pre-existing co-located behaviour; naming a different
+eligible daemon makes the session **split**. Feature doc:
+[remote-managed-worktree.md](../../../docs/ft/daemon/remote-managed-worktree.md).
+
+- **`classify_codebase_placement`** (pure, mirroring `classify_peer_route`) returns `CoLocated` or
+  `Split { codebase_instance_id }`, or names the failed precondition. A split requires
+  `managed_codebase` (an agent that kept its native filesystem tools has nothing to proxy) and
+  `session_type == "claude-cli"` (the only agent that can be *prevented* from touching a local
+  filesystem, via `--allowedTools`/`--disallowedTools`). `recipe`, `semantic_index` and `sandbox`
+  are **refused by name** for a split: each resolves a worktree on the daemon running the agent.
+- **The B-side session id is caller-chosen.** A split start generates the workspace session's id and
+  sends it as `requested_session_id` (honoured only for `session_type: "workspace"`, refused with
+  `already_exists` if taken). Without it a forward that times out leaves this daemon unable to name
+  what to tear down. The split forward's deadline is `spawn_worker_request_timeout +
+  PEER_FORWARD_TIMEOUT`, because the peer's own worktree budget (300 s default) exceeds
+  `PEER_FORWARD_TIMEOUT` (30 s) — a plain forward would give up while the peer was still building.
+- **`TDDY_REMOTE_SESSION_ID` carries the B-side id**, not the agent's own: the codebase daemon
+  resolves the worktree from *its* sessions base keyed by that id. The agent also receives a scoped
+  LiveKit join token minted per session — never `livekit.api_secret`.
+- **Teardown is paired.** `DeleteSession` deletes the workspace session on the codebase host first.
+  "The peer does not have it" (`failed_precondition` / `not_found`) is idempotent success; only
+  *unreachable or failed* refuses. The common room is checked to be **connected** before forwarding,
+  because a local "no room" fault returns the same code the peer uses for a missing session.
+- `split-agent-` is a **reserved identity prefix**: discovery refuses to treat such a participant as
+  an eligible daemon, so an agent cannot advertise itself as a host.
+
+### `StreamExecuteTool`
+
+A server-streaming sibling of `ExecuteTool`, carrying `result_json` as ordered `ExecuteToolChunk`
+frames with a `last` marker. It exists because the unary call returns one string, and over LiveKit
+anything above `MAX_CHUNK_FRAME_BYTES` is chunk-framed by the transport, where reassembly is
+best-effort and index-keyed — a lost frame wedges the call with **no error**. `EXEC_TOOL_FRAME_BYTES`
+is `HOST_DOCUMENT_FRAME_BYTES` with one shared envelope headroom and one compile-time assert. A
+stream ending without its `last` frame is an **error** and the partial result is discarded: returning
+it would hand an agent a truncated file that reads as a whole one. Cross-host it rides
+`forward_server_stream_to_peer`. The unary `ExecuteTool` is unchanged and still serves the stdio and
+HTTP paths.
 
 ## Claude Code CLI sessions
 
@@ -517,6 +561,56 @@ sample reads ~0. Disk resolution enumerates mounts and picks the filesystem whos
 longest **path-component** prefix of the project directory (`select_mount_for_path`), falling back to
 the largest mount by capacity if none is a prefix. The default project directory resolves to
 `$HOME/<repos_base_path_or_default>` (`DaemonConfig` has no explicit project-dir override today).
+
+## LiveKit rooms (Rooms panel)
+
+One server-streaming RPC feeds the web's **LiveKit rooms panel** (see
+[docs/ft/web/livekit-rooms-panel.md](../../../../docs/ft/web/livekit-rooms-panel.md)) with every room
+on the LiveKit server and the participants joined to each:
+
+- `StreamLiveKitRooms(session_token)` → `stream LiveKitRoomsEvent`. Authenticated like every other
+  endpoint, and addressed to the daemon participant directly (no `daemon_instance_id` payload — the
+  LiveKit transport already targets `daemon-{instanceId}`).
+
+**Snapshot then changes.** The first message always carries `LiveKitRoomsSnapshot` (every room, with
+its participants); every message after it carries exactly one `LiveKitRoomsChange` —
+`room_added` (the full row, so a consumer never infers a room from a partial event), `room_removed`,
+`participant_joined`, `participant_left`, `participant_metadata_changed`, `participant_state_changed`.
+Metadata and state are diffed independently, so a participant that republishes both on one tick
+produces two events; the feed's contract is one event per delta throughout. A client folds changes
+onto the snapshot and never re-requests the list.
+
+**The daemon owns the cadence.** LiveKit's server API has no change feed, so `pump_rooms`
+(`livekit_rooms_stream.rs`) polls it every 3 s and calls `diff_rosters` against the roster it last
+sent **on that stream**. Per-subscriber baselines are what stop two watchers desynchronizing each
+other — a shared baseline would let watcher B's tick consume a delta watcher A had not been sent. A
+tick with no delta emits nothing, so an idle server yields an idle stream. Ticks are
+`MissedTickBehavior::Skip`: a read slower than the cadence must not queue up the ticks it outlasted,
+since bursting them fires another `1 + rooms` calls exactly when the server API is already slow.
+
+**The loop lives and dies with its subscriber.** `pump_rooms` selects on `tx.closed()` alongside the
+tick. That is load-bearing rather than defensive: an idle stream sends nothing, so a loop that
+learned about departure only from a failed send would never learn at all, and every subscription
+would leave a permanent 3 s poll of the LiveKit server behind it. It works only because the generated
+server-streaming pump propagates the teardown — see
+[tddy-codegen § Server-streaming teardown](../../tddy-codegen/docs/server-streaming.md).
+
+**Errors are never an empty list.** A roster read that fails — or a daemon with no LiveKit
+credentials — terminates the stream with the reason. Reporting zero rooms would read to the panel as
+"the server has no rooms", which is a different fact. A configuration gap is `FAILED_PRECONDITION`; a
+read failure is `INTERNAL`.
+
+Backed by the `RoomRoster` trait (`livekit_rooms_stream.rs`), injected via
+`ConnectionServiceImpl::with_room_roster` so tests drive a scripted roster sequence without a LiveKit
+server, and built for production from `DaemonConfig.livekit` inside `ConnectionServiceImpl::new` —
+not at the `main.rs` call site, so no second construction site can forget it. The implementation is
+[`tddy_livekit::room_roster`](../../tddy-livekit/docs/room-roster.md).
+
+**Cost.** Each subscription runs its own poller, so load is `1 + room count` calls every 3 s **per
+open subscription**, not per daemon. It is bounded by panels actually open (the loop ends with its
+subscriber). One shared poller broadcasting full rosters, with each subscriber diffing locally, would
+preserve the same per-subscriber guarantee at one poller per daemon — the escape hatch if this panel
+becomes commonly-open.
 
 ## Spawn worker
 

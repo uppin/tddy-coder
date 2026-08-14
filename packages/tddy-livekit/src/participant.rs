@@ -158,10 +158,15 @@ impl SharedPublisher {
         self.notify.notify_waiters();
     }
 
-    /// Publish data, retrying with the latest LocalParticipant during reconnection gaps.
-    async fn publish_data(
+    /// Publish data on `topic`, retrying with the latest LocalParticipant during reconnection gaps.
+    ///
+    /// `topic` is a parameter because the same indirection carries RPC responses ([`RPC_TOPIC`],
+    /// addressed) and room-wide broadcasts ([`crate::BroadcastPublisher`], unaddressed): both need
+    /// the current participant rather than the one that existed when they were wired up.
+    pub(crate) async fn publish_data(
         &self,
         payload: Vec<u8>,
+        topic: &str,
         destination_identities: &[ParticipantIdentity],
     ) -> Result<(), String> {
         for attempt in 0..30 {
@@ -169,7 +174,7 @@ impl SharedPublisher {
             if let Some(lp) = local {
                 let packet = DataPacket {
                     payload: payload.clone(),
-                    topic: Some(RPC_TOPIC.to_string()),
+                    topic: Some(topic.to_string()),
                     reliable: true,
                     destination_identities: destination_identities.to_vec(),
                 };
@@ -260,7 +265,8 @@ fn spawn_response_drain_reconnectable(
                     let dest = [ParticipantIdentity::from(peer)];
                     let mut publish_error = None;
                     for frame in chunking::frame_for_transport(message_id, &encoded) {
-                        if let Err(e) = shared_publisher.publish_data(frame, &dest).await {
+                        if let Err(e) = shared_publisher.publish_data(frame, RPC_TOPIC, &dest).await
+                        {
                             publish_error = Some(e);
                             break;
                         }
@@ -450,72 +456,73 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         codex_oauth_watch: Option<PathBuf>,
         projects_registry_dir: Option<PathBuf>,
     ) {
-        let server = Arc::new(ServerEngine::new(service));
-        let shared_publisher = SharedPublisher::new();
-        let (outgoing_tx, outgoing_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
-        // Long-lived: survives every reconnect below, since `shared_publisher` (not a
-        // `LocalParticipant` snapshot) retries against whatever room is current.
-        spawn_response_drain_reconnectable(outgoing_rx, shared_publisher.clone());
-
-        let token = match token_generator.generate() {
-            Ok(t) => t,
-            Err(e) => {
-                log::error!("Token generation failed: {}", e);
-                return;
-            }
-        };
-        let participant = match Self::connect_for_reconnect(
+        match Self::join(
             url,
-            &token,
-            server.clone(),
-            room_options.clone(),
-            outgoing_tx.clone(),
-            shared_publisher.clone(),
-            codex_oauth_watch.clone(),
-            projects_registry_dir.clone(),
+            token_generator,
+            service,
+            room_options,
+            metadata_watch,
+            codex_oauth_watch,
+            projects_registry_dir,
         )
         .await
         {
-            Ok(p) => {
-                log::info!("READY");
-                p
-            }
-            Err(e) => {
-                log::error!("LiveKit connect failed: {}", e);
-                return;
-            }
-        };
+            Ok(joined) => joined.serve(shutdown).await,
+            Err(e) => log::error!("LiveKit connect failed: {e:#}"),
+        }
+    }
 
-        let metadata_task = if let Some(rx) = metadata_watch {
-            let local = participant.room().local_participant().clone();
-            let lock = participant.metadata_publish_lock.clone();
-            Some(spawn_local_participant_metadata_watcher(rx, local, lock))
-        } else {
-            None
-        };
+    /// Join the room now and hand back a connection that is **already a participant**, ready to be
+    /// served with [`JoinedParticipant::serve`].
+    ///
+    /// [`Self::run_with_reconnect`] joins inside the task its caller spawns, which is right for a
+    /// daemon advertising itself in a lobby and wrong for one that has to be provably in a room
+    /// before it tells anyone the room exists — a session room's "the facilitating daemon is the
+    /// first participant" property is a consequence of *awaiting* this
+    /// (`docs/ft/daemon/session-room.md` FR2), not a race it hopes to win.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn join(
+        url: &str,
+        token_generator: &TokenGenerator,
+        service: S,
+        room_options: RoomOptions,
+        metadata_watch: Option<watch::Receiver<String>>,
+        codex_oauth_watch: Option<PathBuf>,
+        projects_registry_dir: Option<PathBuf>,
+    ) -> anyhow::Result<JoinedParticipant<S>> {
+        let server = Arc::new(ServerEngine::new(service));
+        let shared_publisher = SharedPublisher::new();
+        let (outgoing_tx, outgoing_rx) = mpsc::channel(OUTGOING_QUEUE_CAPACITY);
+        // Long-lived: survives every reconnect, since `shared_publisher` (not a
+        // `LocalParticipant` snapshot) retries against whatever room is current.
+        spawn_response_drain_reconnectable(outgoing_rx, shared_publisher.clone());
 
+        let token = token_generator
+            .generate()
+            .map_err(|e| anyhow::anyhow!("token generation failed: {e}"))?;
+        let participant = Self::connect_for_reconnect(
+            url,
+            &token,
+            server,
+            room_options,
+            outgoing_tx,
+            shared_publisher.clone(),
+            codex_oauth_watch,
+            projects_registry_dir,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("joining {url}: {e}"))?;
+        log::info!("READY");
         log::info!(
             "[livekit] participant running (jwt_ttl={:?}, no timer-driven reconnect)",
             token_generator.ttl()
         );
 
-        let shutdown_clone = shutdown.clone();
-        tokio::select! {
-            _ = participant.run() => {
-                log::info!("[livekit] participant.run() returned (disconnected)");
-            }
-            _ = async {
-                while !shutdown_clone.load(Ordering::Relaxed) {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            } => {
-                log::info!("[livekit] shutdown requested");
-            }
-        }
-
-        if let Some(t) = metadata_task {
-            t.abort();
-        }
+        Ok(JoinedParticipant {
+            participant,
+            shared_publisher,
+            metadata_watch,
+        })
     }
 
     /// Run the participant event loop. Processes DataReceived events for topic "tddy-rpc"
@@ -705,7 +712,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     }
                 }
                 RoomEvent::ParticipantDisconnected(remote) => {
-                    log::info!("[LiveKit] ParticipantDisconnected {:?}", remote.identity());
+                    let identity = remote.identity();
+                    log::info!("[LiveKit] ParticipantDisconnected {:?}", identity);
+                    // Responses are addressed by participant identity (see `handle_incoming`), so
+                    // that identity is also the key under which the engine holds this peer's live
+                    // bidi sessions, half-sent calls and in-flight streaming forwards. Without this
+                    // a departed peer's forwards keep pumping frames nobody will ever read.
+                    self.server.on_peer_disconnected(identity.as_str()).await;
                 }
                 _ => {}
             }
@@ -854,6 +867,70 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
     }
 }
 
+/// A connection that has joined its room but is not serving yet — the gap
+/// [`LiveKitParticipant::join`] hands to its caller.
+///
+/// Two things need that gap: proving membership before announcing the room, and taking a
+/// [`BroadcastPublisher`] on the connection *before* [`LiveKitParticipant::run`] consumes it.
+pub struct JoinedParticipant<S: crate::bridge::RpcService> {
+    participant: LiveKitParticipant<S>,
+    shared_publisher: SharedPublisher,
+    metadata_watch: Option<watch::Receiver<String>>,
+}
+
+impl<S: crate::bridge::RpcService> JoinedParticipant<S> {
+    /// The identity this connection joined under.
+    pub fn identity(&self) -> String {
+        self.participant
+            .room()
+            .local_participant()
+            .identity()
+            .to_string()
+    }
+
+    /// A publisher for room-wide broadcasts on `topic`, over this connection.
+    ///
+    /// Follows the connection across reconnects rather than pinning the participant it has right
+    /// now, so a publisher held for the life of a room keeps reaching the room (see
+    /// [`crate::BroadcastPublisher`]).
+    pub fn broadcast_on(&self, topic: impl Into<String>) -> crate::broadcast::BroadcastPublisher {
+        crate::broadcast::BroadcastPublisher::for_connection(self.shared_publisher.clone(), topic)
+    }
+
+    /// Serve RPC in the room until the connection ends or `shutdown` is set.
+    ///
+    /// Returning means this participant is **no longer in the room**: the caller owns saying so.
+    /// Nothing here reconnects on its own — the SDK handles connection health and server-driven
+    /// token refresh on the signalling channel, and a stream that ended anyway is a fact the caller
+    /// has to act on rather than one to paper over.
+    pub async fn serve(self, shutdown: Arc<AtomicBool>) {
+        let metadata_task = if let Some(rx) = self.metadata_watch {
+            let local = self.participant.room().local_participant().clone();
+            let lock = self.participant.metadata_publish_lock.clone();
+            Some(spawn_local_participant_metadata_watcher(rx, local, lock))
+        } else {
+            None
+        };
+
+        tokio::select! {
+            _ = self.participant.run() => {
+                log::info!("[livekit] participant.run() returned (disconnected)");
+            }
+            _ = async {
+                while !shutdown.load(Ordering::Relaxed) {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            } => {
+                log::info!("[livekit] shutdown requested");
+            }
+        }
+
+        if let Some(t) = metadata_task {
+            t.abort();
+        }
+    }
+}
+
 /// Resolve which participant identity to send responses to.
 /// Prefers sender_identity from the request when present and non-empty; otherwise falls back to event participant or sole remote.
 pub(crate) fn resolve_response_identity(
@@ -878,6 +955,9 @@ pub(crate) fn resolve_response_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The connection these test requests were made on.
+    const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
     use crate::proto::CallMetadata;
 
     #[test]
@@ -894,6 +974,7 @@ mod tests {
             end_of_stream: true,
             abort: false,
             sender_identity: Some("client1".to_string()),
+            client_epoch: A_CLIENT_EPOCH,
         };
         let event_participant = Some("client2".to_string().into());
         let remote_identities = vec!["client1".to_string().into(), "client2".to_string().into()];

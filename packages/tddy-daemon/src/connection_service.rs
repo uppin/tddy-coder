@@ -10,7 +10,7 @@ use prost::Message as _;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_core::{BranchWorktreeIntent, Changeset, ChangesetWorkflow};
+use tddy_core::{BranchWorktreeIntent, Changeset};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource,
@@ -57,12 +57,16 @@ use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
 
 use crate::agent_list_mapping::agent_allowlist_rows;
+use crate::branch_intent::{
+    resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
+};
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
 };
+use crate::livekit_rooms_stream::{pump_rooms, room_roster_from_config, RoomRoster};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_attachments::validate_attachment_basename;
@@ -83,17 +87,18 @@ use crate::worktrees::{
     WorktreeSizeStatus, WorktreeStatsCache,
 };
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState,
+    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolChunk,
     ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
     GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
     GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
-    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, PullBaseIntoBranchRequest,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats,
+    HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, LiveKitRoomsEvent, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
+    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
     ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
@@ -699,6 +704,30 @@ const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
 /// Default cadence for refreshing project-dir disk figures on the host-stats sampling loop.
 const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Cadence at which a `StreamLiveKitRooms` subscription re-reads the LiveKit roster. Presence is
+/// the volatile fact on that panel, hence far shorter than the host-stats disk tick.
+const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+/// Stream adapter backed by an mpsc channel for [`LiveKitRoomsEvent`] server-streaming.
+///
+/// Carries results rather than events: a roster read that fails ends the stream with that error,
+/// since an empty room list would read to the panel as "the server has no rooms".
+#[derive(Debug)]
+pub struct MpscLiveKitRoomsStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<LiveKitRoomsEvent, Status>>,
+}
+
+impl Stream for MpscLiveKitRoomsStream {
+    type Item = Result<LiveKitRoomsEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
 /// Stream adapter backed by an mpsc channel for [`HostStatsEvent`] server-streaming.
 #[derive(Debug)]
 pub struct MpscHostStatsStream {
@@ -944,6 +973,11 @@ pub struct ConnectionServiceImpl {
     host_cpu_interval: Duration,
     /// Cadence for refreshing disk on the `StreamHostStats` sampling loop (overridable for tests).
     host_disk_interval: Duration,
+    /// Reader for the LiveKit server's rooms and their participants, behind `StreamLiveKitRooms`.
+    room_roster: Arc<dyn RoomRoster>,
+    /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the roster (overridable for
+    /// tests).
+    room_poll_interval: Duration,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
@@ -963,6 +997,11 @@ pub struct ConnectionServiceImpl {
     /// cleared by the host restart rather than living in the data dir forever. Defaults to
     /// [`crate::session_attachment_staging::default_staging_base_dir`].
     staging_base_dir: PathBuf,
+    /// The per-worktree LiveKit rooms this daemon hosts, keyed by the session owning each checkout
+    /// (`docs/ft/daemon/session-room.md`). Holding the joined participant
+    /// here is what keeps a room open past the `StartSession` that created it; `DeleteSession`
+    /// closes it again.
+    session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -1020,6 +1059,7 @@ impl ConnectionServiceImpl {
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
+        let room_roster = room_roster_from_config(config.livekit.as_ref());
         Self {
             config,
             sessions_base_for_user,
@@ -1038,11 +1078,40 @@ impl ConnectionServiceImpl {
             host_stats,
             host_cpu_interval: HOST_CPU_INTERVAL,
             host_disk_interval: HOST_DISK_INTERVAL,
+            room_roster,
+            room_poll_interval: LIVEKIT_ROOMS_POLL_INTERVAL,
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
+            session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
+        }
+    }
+
+    /// Share the daemon's session-room registry (builder) with everything else that opens or
+    /// closes rooms — Telegram's Delete path holds the same `Arc`. Without it this service keeps
+    /// the private registry it was constructed with, which is right for a test fixture and wrong
+    /// for a daemon, where a room opened here has to be closable from there.
+    pub fn with_session_rooms(
+        mut self,
+        rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    ) -> Self {
+        self.session_rooms = rooms;
+        self
+    }
+
+    /// This daemon as the host of the rooms of the sessions it runs agents for.
+    ///
+    /// Handed to the agent-start path so the room is open *before* the agent process exists, which
+    /// is what makes "the facilitating daemon is the first participant" a consequence of ordering
+    /// rather than a race (PRD FR2).
+    fn session_room_host(&self) -> DaemonSessionRoomHost {
+        DaemonSessionRoomHost {
+            config: self.config.clone(),
+            instance_id: local_instance_id_for_config(&self.config),
+            rooms: Arc::clone(&self.session_rooms),
+            service: self.clone(),
         }
     }
 
@@ -1110,6 +1179,20 @@ impl ConnectionServiceImpl {
     pub fn with_host_stats_intervals(mut self, cpu: Duration, disk: Duration) -> Self {
         self.host_cpu_interval = cpu;
         self.host_disk_interval = disk;
+        self
+    }
+
+    /// Substitute the LiveKit rooms reader (builder pattern) — lets tests drive a scripted roster
+    /// sequence in place of a live LiveKit server.
+    pub fn with_room_roster(mut self, room_roster: Arc<dyn RoomRoster>) -> Self {
+        self.room_roster = room_roster;
+        self
+    }
+
+    /// Override the `StreamLiveKitRooms` poll cadence (builder pattern) — lets tests observe a
+    /// change event without waiting the production three seconds for it.
+    pub fn with_room_poll_interval(mut self, interval: Duration) -> Self {
+        self.room_poll_interval = interval;
         self
     }
 
@@ -1511,6 +1594,7 @@ impl ConnectionServiceImpl {
             {
                 let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
                 Some(Arc::new(StackChildSpawnHandler {
+                    room_host: Arc::new(self.session_room_host()),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),
                     claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1558,6 +1642,7 @@ impl ConnectionServiceImpl {
             semantic_index,
             create_remote_branch,
             &self.task_registry,
+            &self.session_room_host(),
         )
         .await
     }
@@ -1579,6 +1664,7 @@ impl ConnectionServiceImpl {
             return None;
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
+            room_host: Arc::new(self.session_room_host()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1625,6 +1711,7 @@ impl ConnectionServiceImpl {
         let sessions_base = self.tddy_data_dir.clone();
         let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         let handler = Arc::new(GrillMeConversationSpawnHandler {
+            room_host: Arc::new(self.session_room_host()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1660,6 +1747,55 @@ impl ConnectionServiceImpl {
         log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");
         Some(path.to_string_lossy().into_owned())
     }
+}
+
+/// Write `.claude/settings.local.json` into `cwd` — the directory `claude` will run in — so Claude
+/// Code wires this session's lifecycle hooks on startup.
+///
+/// Warn-and-continue: a session without hooks reports no status, which is worse than a session that
+/// never started only if the operator cannot see it at all, and it still can.
+fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandParams<'_>) {
+    let settings = tddy_core::build_claude_hooks_settings(params);
+    let claude_dir = cwd.join(".claude");
+    if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
+        serde_json::to_string_pretty(&settings)
+            .map_err(|e| std::io::Error::other(e.to_string()))
+            .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
+    }) {
+        log::warn!(
+            "session {}: failed to write .claude/settings.local.json — hooks will not fire: {e}",
+            params.session_id
+        );
+    }
+}
+
+/// The web port a hook URL assumes when `listen.web_port` is unset. `startup` refuses to serve
+/// without that setting, so this only covers a config the daemon would not have started from — but
+/// building the URL is not the place to discover it.
+const DEFAULT_WEB_PORT: u16 = 8899;
+
+/// Where a hook command reaches this daemon when nothing is configured: its own web listener on
+/// loopback.
+///
+/// The port default is here and nowhere else — a hook posting to the wrong port fails silently from
+/// the operator's side, and three copies of `8899` is three chances for one of them to fall behind a
+/// changed default.
+pub fn local_daemon_hook_url(config: &DaemonConfig) -> String {
+    format!(
+        "http://127.0.0.1:{}",
+        config.listen.web_port.unwrap_or(DEFAULT_WEB_PORT)
+    )
+}
+
+/// Base URL a claude-cli session's hook commands call `ReportSessionStatus` on: the configured
+/// `claude_cli.daemon_url`, else this daemon's own web port.
+pub fn claude_hook_daemon_url(config: &DaemonConfig) -> String {
+    config
+        .claude_cli
+        .as_ref()
+        .and_then(|c| c.daemon_url.as_deref())
+        .map(str::to_string)
+        .unwrap_or_else(|| local_daemon_hook_url(config))
 }
 
 /// Resolve the `claude` binary for the interactive (non-sandboxed) StartSession path.
@@ -1791,6 +1927,76 @@ pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
     crate::config::resolve_claude_binary_path(config)
 }
 
+/// The daemon's own [`crate::session_room::SessionRoomHost`].
+///
+/// Holds a clone of the service it will serve inside the room — the same `ConnectionService` it
+/// answers on in the common room, so a participant reaches every file-access method without a
+/// second connection anywhere (PRD FR3). That makes a reference cycle with the registry, which is
+/// deliberate and broken by `close`: see `SessionRoomRegistry`.
+struct DaemonSessionRoomHost {
+    config: DaemonConfig,
+    instance_id: String,
+    rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    service: ConnectionServiceImpl,
+}
+
+/// The daemon measuring a checkout that lives on one of its peers.
+///
+/// Routed through its own `GetWorktreeSnapshot` handler rather than a bespoke client, so a remote
+/// measurement takes exactly the path a caller's would — including the peer routing and the
+/// blocking-pool budget.
+#[async_trait::async_trait]
+impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
+    async fn snapshot(
+        &self,
+        session_token: &str,
+        codebase_session_id: &str,
+        codebase_instance_id: &str,
+    ) -> Result<crate::session_room::WorktreeSnapshot, Status> {
+        let answered = ConnectionServiceTrait::get_worktree_snapshot(
+            self,
+            Request::new(GetWorktreeSnapshotRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session_id.to_string(),
+                daemon_instance_id: codebase_instance_id.to_string(),
+            }),
+        )
+        .await?
+        .into_inner();
+        Ok(crate::session_room::WorktreeSnapshot {
+            head_commit: answered.head_commit,
+            branch: answered.branch,
+            changed_paths: answered.changed_paths,
+            changed_files: answered.changed_files,
+            lines_added: answered.lines_added,
+            lines_removed: answered.lines_removed,
+            untracked_files: answered.untracked_files,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::session_room::SessionRoomHost for DaemonSessionRoomHost {
+    async fn open_for(
+        &self,
+        session_id: &str,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> Result<Option<crate::session_room::OpenedSessionRoom>, Status> {
+        self.rooms
+            .open(
+                &crate::session_room::DaemonRoomHosting {
+                    config: &self.config,
+                    instance_id: &self.instance_id,
+                    rooms: &self.rooms,
+                }
+                .for_worktree(session_id, worktree_root, session_dir),
+                tddy_service::ConnectionServiceServer::new(self.service.clone()),
+            )
+            .await
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -1819,6 +2025,7 @@ async fn spawn_claude_cli_session_inner(
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
     task_registry: &TaskRegistry,
+    room_host: &dyn crate::session_room::SessionRoomHost,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -1850,63 +2057,24 @@ async fn spawn_claude_cli_session_inner(
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-    // Build branch intent and write a minimal changeset so the worktree setup fn can read it.
-    let short_id = &session_id[..8.min(session_id.len())];
-    let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
-        .trim()
-    {
-        "new_branch_from_base" => {
-            if new_branch_name.trim().is_empty() {
-                return Err(Status::invalid_argument(
-                            "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
-                        ));
-            }
-            (
-                BranchWorktreeIntent::NewBranchFromBase,
-                Some(new_branch_name.trim().to_string()),
-                None,
-            )
-        }
-        "work_on_selected_branch" => {
-            if selected_branch_to_work_on.trim().is_empty() {
-                return Err(Status::invalid_argument(
-                            "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                        ));
-            }
-            (
-                BranchWorktreeIntent::WorkOnSelectedBranch,
-                None,
-                Some(selected_branch_to_work_on.trim().to_string()),
-            )
-        }
-        _ => {
-            // Default: create a new branch from the integration base with a generated name.
-            (
-                BranchWorktreeIntent::NewBranchFromBase,
-                Some(format!("claude-cli/{}", short_id)),
-                None,
-            )
-        }
-    };
-
-    // Resolve the integration base ref: an explicit client override wins; otherwise, for a
-    // new-branch-from-base worktree, use the project's stored default branch when set. A legacy
-    // project (no stored default) leaves this `None` so worktree setup resolves the default live
-    // (`origin/master` → `origin/main` → `origin/HEAD`) — the same order the project resolver uses.
-    let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
-        Some(selected_integration_base_ref.trim().to_string())
-    } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
-        project.main_branch_ref.clone()
-    } else {
-        None
-    };
-    let cs_workflow = ChangesetWorkflow {
-        branch_worktree_intent: Some(intent),
-        new_branch_name: resolved_new_branch,
-        selected_integration_base_ref: resolved_integration_base_ref,
-        selected_branch_to_work_on: resolved_selected_branch,
-        ..ChangesetWorkflow::default()
-    };
+    // Build branch intent and write a minimal changeset so the worktree setup fn can read it. A
+    // legacy project (no stored default branch) leaves the base `None` so worktree setup resolves
+    // the default live (`origin/master` → `origin/main` → `origin/HEAD`) — the same order the
+    // project resolver uses.
+    let ResolvedBranchWorkflow {
+        intent,
+        workflow: cs_workflow,
+    } = resolve_branch_workflow(
+        session_id,
+        &BranchIntentRequest {
+            branch_worktree_intent,
+            new_branch_name,
+            selected_integration_base_ref,
+            selected_branch_to_work_on,
+        },
+        BranchIntentPolicy::claude_cli(),
+        project.main_branch_ref.as_deref(),
+    )?;
     let mut cs = Changeset {
         workflow: Some(cs_workflow),
         orchestrator_session_id: stack_parent.map(str::to_string),
@@ -1986,38 +2154,22 @@ async fn spawn_claude_cli_session_inner(
             .and_then(|c| c.tddy_tools_path.as_deref()),
     );
 
-    // Resolve daemon URL: config → http://127.0.0.1:{web_port}.
-    let daemon_url = config
-        .claude_cli
-        .as_ref()
-        .and_then(|c| c.daemon_url.as_deref())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            let port = config.listen.web_port.unwrap_or(8899);
-            format!("http://127.0.0.1:{port}")
-        });
+    let daemon_url = claude_hook_daemon_url(config);
 
     // Generate a per-session hook token and write .claude/settings.local.json into the
     // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
     // Write failure is warn-and-continue so it never blocks the session from starting.
     let hook_token = Uuid::new_v4().to_string();
-    let hooks_settings = tddy_core::build_claude_hooks_settings(&tddy_core::HookCommandParams {
-        tddy_tools_path: &tddy_tools_path,
-        daemon_url: &daemon_url,
-        session_id,
-        os_user,
-        hook_token: &hook_token,
-    });
-    let claude_dir = worktree_path.join(".claude");
-    if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
-        serde_json::to_string_pretty(&hooks_settings)
-            .map_err(|e| std::io::Error::other(e.to_string()))
-            .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
-    }) {
-        log::warn!(
-                "session {session_id}: failed to write .claude/settings.local.json — hooks will not fire: {e}"
-            );
-    }
+    write_claude_hooks_settings(
+        &worktree_path,
+        &tddy_core::HookCommandParams {
+            tddy_tools_path: &tddy_tools_path,
+            daemon_url: &daemon_url,
+            session_id,
+            os_user,
+            hook_token: &hook_token,
+        },
+    );
 
     // Spawn the claude CLI process in a PTY inside the real worktree. Resolve `claude` through the
     // shared host resolver — the same one the sandboxed path uses — so an explicit config path is
@@ -2093,6 +2245,29 @@ async fn spawn_claude_cli_session_inner(
         env_extra.push((key, value));
     }
 
+    // Before the agent exists, not after: this daemon is the session's facilitating daemon, and the
+    // room's first-participant property is a consequence of this `await` completing while the only
+    // thing that could join is still unspawned (PRD FR2). A failure here fails the start — the
+    // agent's tool transport is minted for this room, so a session started without it is a session
+    // whose agent has nowhere to ask for its files.
+    // Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
+    // session's *terminal* room, which the browser attaches to, and the two are different rooms
+    // with different participants. A caller that wants this one derives it from the session id
+    // through `session_room_name`, which is how the agent's own wiring gets it too.
+    match room_host
+        .open_for(session_id, &worktree_path, &session_dir)
+        .await?
+    {
+        Some(room) => log::info!(
+            "claude-cli session {session_id} facilitated in {} as {}",
+            room.room,
+            room.server_identity
+        ),
+        None => log::debug!(
+            "claude-cli session {session_id} runs without a session room (LiveKit not configured)"
+        ),
+    }
+
     let handle = manager
         .start_with_options(
             &session_id_owned,
@@ -2104,6 +2279,7 @@ async fn spawn_claude_cli_session_inner(
             dangerously_skip_permissions,
             false,
             append_system_prompt_file.as_deref(),
+            Vec::new(),
             env_extra,
             Some(os_user),
         )
@@ -2139,6 +2315,8 @@ async fn spawn_claude_cli_session_inner(
         agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -2491,40 +2669,6 @@ impl ConnectionServiceImpl {
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-        let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
-            .trim()
-        {
-            "new_branch_from_base" => {
-                if new_branch_name.trim().is_empty() {
-                    return Err(Status::invalid_argument(
-                        "new_branch_name is required when branch_worktree_intent is new_branch_from_base",
-                    ));
-                }
-                (
-                    BranchWorktreeIntent::NewBranchFromBase,
-                    Some(new_branch_name.trim().to_string()),
-                    None,
-                )
-            }
-            "work_on_selected_branch" => {
-                if selected_branch_to_work_on.trim().is_empty() {
-                    return Err(Status::invalid_argument(
-                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                    ));
-                }
-                (
-                    BranchWorktreeIntent::WorkOnSelectedBranch,
-                    None,
-                    Some(selected_branch_to_work_on.trim().to_string()),
-                )
-            }
-            _ => (
-                BranchWorktreeIntent::NewBranchFromBase,
-                Some(format!("claude-cli/{short_id}")),
-                None,
-            ),
-        };
         // A client-supplied `repo_path` runs against that checkout directly (no registered
         // project), so a stored default branch only applies when resolving from `project_id`.
         let project_default_branch_ref: Option<String> =
@@ -2540,23 +2684,20 @@ impl ConnectionServiceImpl {
                 None
             };
 
-        // An explicit client override wins; otherwise a new-branch-from-base worktree uses the
-        // project's stored default branch when set. A legacy project (no stored default) leaves
-        // this `None` so worktree setup resolves the default live.
-        let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
-            Some(selected_integration_base_ref.trim().to_string())
-        } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
-            project_default_branch_ref.clone()
-        } else {
-            None
-        };
-        let cs_workflow = ChangesetWorkflow {
-            branch_worktree_intent: Some(intent),
-            new_branch_name: resolved_new_branch,
-            selected_integration_base_ref: resolved_integration_base_ref,
-            selected_branch_to_work_on: resolved_selected_branch,
-            ..ChangesetWorkflow::default()
-        };
+        let ResolvedBranchWorkflow {
+            intent,
+            workflow: cs_workflow,
+        } = resolve_branch_workflow(
+            session_id,
+            &BranchIntentRequest {
+                branch_worktree_intent,
+                new_branch_name,
+                selected_integration_base_ref,
+                selected_branch_to_work_on,
+            },
+            BranchIntentPolicy::claude_cli(),
+            project_default_branch_ref.as_deref(),
+        )?;
         let mut cs = Changeset {
             workflow: Some(cs_workflow),
             orchestrator_session_id: stack_parent.map(str::to_string),
@@ -2971,6 +3112,8 @@ impl ConnectionServiceImpl {
             agent: None,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             specialized_agents: specialized_agents.to_vec(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -3054,55 +3197,20 @@ impl ConnectionServiceImpl {
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-        let short_id = &session_id[..8.min(session_id.len())];
-        let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
-            .trim()
-        {
-            "new_branch_from_base" => {
-                let branch = if new_branch_name.trim().is_empty() {
-                    format!("cursor-cli/{short_id}")
-                } else {
-                    new_branch_name.trim().to_string()
-                };
-                (BranchWorktreeIntent::NewBranchFromBase, Some(branch), None)
-            }
-            "work_on_selected_branch" => {
-                if selected_branch_to_work_on.trim().is_empty() {
-                    return Err(Status::invalid_argument(
-                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                    ));
-                }
-                (
-                    BranchWorktreeIntent::WorkOnSelectedBranch,
-                    None,
-                    Some(selected_branch_to_work_on.trim().to_string()),
-                )
-            }
-            _ => (
-                BranchWorktreeIntent::NewBranchFromBase,
-                Some(format!("cursor-cli/{short_id}")),
-                None,
-            ),
-        };
-        let project_default_branch_ref = project.main_branch_ref.clone();
-
-        // An explicit client override wins; otherwise a new-branch-from-base worktree uses the
-        // project's stored default branch when set. A legacy project (no stored default) leaves
-        // this `None` so worktree setup resolves the default live.
-        let resolved_integration_base_ref = if !selected_integration_base_ref.trim().is_empty() {
-            Some(selected_integration_base_ref.trim().to_string())
-        } else if matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
-            project_default_branch_ref.clone()
-        } else {
-            None
-        };
-        let cs_workflow = ChangesetWorkflow {
-            branch_worktree_intent: Some(intent),
-            new_branch_name: resolved_new_branch,
-            selected_integration_base_ref: resolved_integration_base_ref,
-            selected_branch_to_work_on: resolved_selected_branch,
-            ..ChangesetWorkflow::default()
-        };
+        let ResolvedBranchWorkflow {
+            intent,
+            workflow: cs_workflow,
+        } = resolve_branch_workflow(
+            session_id,
+            &BranchIntentRequest {
+                branch_worktree_intent,
+                new_branch_name,
+                selected_integration_base_ref,
+                selected_branch_to_work_on,
+            },
+            BranchIntentPolicy::cursor_cli(),
+            project.main_branch_ref.as_deref(),
+        )?;
         let mut cs = Changeset {
             workflow: Some(cs_workflow),
             orchestrator_session_id: stack_parent.map(str::to_string),
@@ -3412,6 +3520,8 @@ impl ConnectionServiceImpl {
             agent: None,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             specialized_agents: specialized_agents.to_vec(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -3438,6 +3548,9 @@ impl ConnectionServiceImpl {
         session_id: &str,
         session_dir: PathBuf,
         meta: tddy_core::SessionMetadata,
+        // The caller's token, re-exported to a split session's agent as TDDY_REMOTE_SESSION_TOKEN:
+        // the codebase daemon verifies it on every tool call, so the resumed agent needs a live one.
+        session_token: &str,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         if meta.sandbox == Some(true) {
             return self
@@ -3445,11 +3558,21 @@ impl ConnectionServiceImpl {
                 .await;
         }
         let model = meta.model.clone().unwrap_or_default();
-        let worktree_path = meta
-            .repo_path
+
+        // A split session has no `repo_path` here and its `TDDY_REMOTE_*` wiring was injected at
+        // spawn time, so both are re-derived from the persisted pairing — including a **fresh** join
+        // token, since the original is scoped to a lifetime that may well have elapsed while the
+        // session was stopped.
+        let split = self.resume_split_wiring(&meta, &session_dir, session_id, session_token)?;
+        let worktree_path = split
             .as_ref()
-            .map(PathBuf::from)
+            .map(|w| w.context_dir.clone())
+            .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
+        let (split_args, split_env) = match split {
+            Some(w) => (w.extra_args, w.env),
+            None => (Vec::new(), Vec::new()),
+        };
 
         let manager = Arc::clone(&self.claude_cli_manager);
         let session_id_owned = session_id.to_string();
@@ -3460,7 +3583,7 @@ impl ConnectionServiceImpl {
         // changeset.yaml so the workflow continues from where it left off, not from the start goal.
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut env_extra: Vec<(String, String)> = Vec::new();
+        let mut env_extra: Vec<(String, String)> = split_env;
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
@@ -3482,7 +3605,7 @@ impl ConnectionServiceImpl {
                 None,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
-            env_extra = launch.env;
+            env_extra.extend(launch.env);
             managed = Some(launch.workflow);
         }
 
@@ -3493,6 +3616,7 @@ impl ConnectionServiceImpl {
                 &model,
                 &binary_owned,
                 append_system_prompt_file.as_deref(),
+                split_args,
                 env_extra,
             )
             .await
@@ -3527,6 +3651,40 @@ impl ConnectionServiceImpl {
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
         }))
+    }
+
+    /// Rebuild the remote-tool wiring for a split session being resumed, or `None` for a co-located
+    /// one.
+    ///
+    /// Nothing about a split session's tool transport survives a stop: the env was injected into a
+    /// process that has exited, and the join token it carried is scoped to a TTL that may have
+    /// elapsed. Both are minted afresh here from the persisted pairing, which is the only part that
+    /// is durable.
+    fn resume_split_wiring(
+        &self,
+        meta: &tddy_core::SessionMetadata,
+        session_dir: &Path,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<Option<crate::split_session::SplitAgentWiring>, Status> {
+        let Some((codebase_daemon, codebase_session)) = crate::split_session::split_pairing(meta)
+        else {
+            return Ok(None);
+        };
+
+        let wiring = crate::split_session::prepare_split_agent_wiring(
+            &self.config,
+            session_dir,
+            &self.resolve_tddy_tools_path().to_string_lossy(),
+            session_id,
+            codebase_daemon,
+            codebase_session,
+            session_token,
+        )?;
+        log::info!(
+            "ResumeSession: re-wired split session {session_id} to workspace session {codebase_session} on daemon {codebase_daemon}"
+        );
+        Ok(Some(wiring))
     }
 
     /// Re-spawn and re-dial a sandboxed claude-cli session.
@@ -3951,6 +4109,9 @@ fn prepare_managed_workflow_inner(
 /// [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses. Bound only to a `pr-stack`
 /// orchestrator's toolcall listener, so it can only spawn children for that orchestrator's stack.
 struct StackChildSpawnHandler {
+    /// Opens the session room of each child agent this handler spawns — the children are
+    /// agent sessions of this same daemon, so it facilitates their rooms too.
+    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -4024,6 +4185,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // never push a remote branch here.
             false,
             &self.claude_cli_manager.task_registry(),
+            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -4071,6 +4233,9 @@ fn conversation_branch_slug(prompt: &str) -> String {
 /// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
 /// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
 struct GrillMeConversationSpawnHandler {
+    /// Opens the session room of each child agent this handler spawns — the children are
+    /// agent sessions of this same daemon, so it facilitates their rooms too.
+    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -4143,6 +4308,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             &self.claude_cli_manager.task_registry(),
+            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -4276,6 +4442,136 @@ impl AttachmentMaterialization<'_> {
     }
 }
 
+/// Where a session's git worktree lives relative to the daemon running its agent.
+///
+/// The second placement axis added by `docs/ft/daemon/remote-managed-worktree.md`:
+/// `daemon_instance_id` still decides where the agent process runs, and this decides whose
+/// filesystem holds the worktree it works in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodebasePlacement {
+    /// Agent and worktree on the same daemon — every session created before split placement existed.
+    CoLocated,
+    /// Agent here, worktree on `codebase_instance_id`.
+    Split { codebase_instance_id: String },
+}
+
+/// Classify a start request's codebase placement, refusing a split that cannot be honoured.
+///
+/// Mirrors [`crate::livekit_peer_discovery::classify_peer_route`]: a pure decision with every
+/// precondition named in its error, so an operator learns *which* one failed rather than that the
+/// request was bad. An empty or self-matching id is co-located — the pre-existing behaviour, which
+/// this must never change.
+///
+/// A split needs `managed_codebase` (an agent that kept its native filesystem tools has nothing to
+/// proxy through) and `session_type == "claude-cli"` (only Claude's `--allowedTools` /
+/// `--disallowedTools` make the restriction enforceable rather than advisory — see the PRD
+/// § Why claude-cli only), and the named daemon must be in the current eligible list.
+pub fn classify_codebase_placement(
+    local_instance_id: &str,
+    requested_codebase_id: &str,
+    eligible_ids: &[String],
+    managed_codebase: bool,
+    session_type: &str,
+) -> Result<CodebasePlacement, String> {
+    let requested = requested_codebase_id.trim();
+    if requested.is_empty() || requested == local_instance_id.trim() {
+        return Ok(CodebasePlacement::CoLocated);
+    }
+    if !managed_codebase {
+        return Err(format!(
+            "codebase_daemon_instance_id {requested:?} requires managed_codebase = true: an agent holding native filesystem tools has no reason to reach a worktree on another daemon"
+        ));
+    }
+    let session_type = session_type.trim();
+    if session_type != "claude-cli" {
+        return Err(format!(
+            "codebase_daemon_instance_id {requested:?} is only supported for session_type \"claude-cli\", not {session_type:?}: no other agent can be prevented from using its native filesystem tools"
+        ));
+    }
+    if !eligible_ids.iter().any(|id| id.trim() == requested) {
+        return Err(format!(
+            "unknown or not connected codebase_daemon_instance_id {requested:?}: peer is not in the current eligible daemon list (configure livekit.common_room and ensure the peer is in the same LiveKit room)"
+        ));
+    }
+    log::info!("classify_codebase_placement: codebase placed on peer instance_id={requested}");
+    Ok(CodebasePlacement::Split {
+        codebase_instance_id: requested.to_string(),
+    })
+}
+
+/// Whether a peer's `DeleteSession` failure says the session is not there, as opposed to saying
+/// nothing usable about it.
+///
+/// `session_deletion::delete_session_directory` answers `failed_precondition` for a session id it
+/// holds no directory for — it reads as wrong-daemon routing there — and `not_found` is the same
+/// answer from any layer that phrases it that way. Both mean the worktree is provably gone with the
+/// session that owned it. Every other code, and every transport failure, leaves that unknown, which
+/// is a different thing and must not be treated as success.
+/// What a split start failed with, as far as the teardown that unwinds it is concerned.
+///
+/// The distinction is not cosmetic: it decides whether the codebase daemon answering "I have no
+/// such session" proves the session was never created, or only that it did not exist yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitStartFailure {
+    /// A verdict was reached within the deadline — the peer refused, answered something
+    /// unusable, or the agent spawn on this host failed. Whatever the peer holds now is final.
+    PeerAnswered,
+    /// The forwarded start ran out of time. The peer is still free to finish the work it was
+    /// doing, so nothing about its current state is final.
+    ForwardDeadline,
+}
+
+impl SplitStartFailure {
+    /// Classify the error a forwarded start came back with. Only [`Code::DeadlineExceeded`] leaves
+    /// the peer still working — every other status means it answered.
+    fn from_forward_error(status: &Status) -> Self {
+        if status.code == tddy_rpc::Code::DeadlineExceeded {
+            Self::ForwardDeadline
+        } else {
+            Self::PeerAnswered
+        }
+    }
+}
+
+fn peer_has_no_such_session(status: &Status) -> bool {
+    matches!(
+        status.code,
+        tddy_rpc::Code::FailedPrecondition | tddy_rpc::Code::NotFound
+    )
+}
+
+/// Validate `StartSessionRequest.requested_session_id`: the id a caller asks the session to be
+/// created under instead of one this daemon generates.
+///
+/// Only `workspace` sessions accept one, and only because of atomicity: the daemon placing a split
+/// session's worktree here has to know the id *before* it forwards the start, so that a forward
+/// which errors or times out can still name the session to tear down (see
+/// `docs/ft/daemon/remote-managed-worktree.md` § Failure is atomic). Every other session type
+/// refuses it rather than ignoring it — a caller that believed it had pinned the id would go on to
+/// address a session that does not exist.
+///
+/// The id becomes a directory name under the sessions base, so it is validated exactly as the id
+/// `DeleteSession` is handed.
+pub fn resolve_caller_chosen_session_id(
+    requested_session_id: &str,
+    session_type: &str,
+) -> Result<Option<String>, Status> {
+    let requested = requested_session_id.trim();
+    if requested.is_empty() {
+        return Ok(None);
+    }
+    let session_type = session_type.trim();
+    if session_type != "workspace" {
+        return Err(Status::invalid_argument(format!(
+            "requested_session_id is only supported for session_type \"workspace\", not {session_type:?}"
+        )));
+    }
+    validate_session_id_segment(requested).map_err(|e| {
+        Status::invalid_argument(format!("invalid requested_session_id: {}", e.message()))
+    })?;
+    Ok(Some(requested.to_string()))
+}
+
 impl ConnectionServiceImpl {
     fn resolve_os_user(&self, session_token: &str) -> Result<String, Status> {
         let github_user = (self.user_resolver)(session_token)
@@ -4305,6 +4601,137 @@ impl ConnectionServiceImpl {
             log::info!("daemon routing rejected: {msg}");
             Status::failed_precondition(msg)
         })
+    }
+
+    /// Route an exec-tool RPC by its requested `daemon_instance_id`, before any session lookup — a
+    /// relay holds no sessions of its own and must still be able to forward.
+    ///
+    /// Unlike [`Self::classify_daemon_route`], an unroutable id is `InvalidArgument`: the caller
+    /// named a daemon that cannot serve the call, which is a bad request rather than a deployment
+    /// that is not ready. Shared by the unary and streaming handlers so they cannot diverge.
+    fn classify_exec_tool_route(
+        &self,
+        rpc_name: &str,
+        requested_daemon: &str,
+    ) -> Result<PeerRoute, Status> {
+        let requested_daemon = requested_daemon.trim();
+        if requested_daemon.is_empty() {
+            return Ok(PeerRoute::Local);
+        }
+        let route = crate::livekit_peer_discovery::classify_peer_route(
+            &local_instance_id_for_config(&self.config),
+            requested_daemon,
+            &self.eligible_instance_ids(),
+        )
+        .map_err(|msg| {
+            log::info!("{rpc_name}: rejected daemon routing: {msg}");
+            Status::invalid_argument(msg)
+        })?;
+        if let PeerRoute::Forward { peer_instance_id } = &route {
+            log::info!(
+                "{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}"
+            );
+        }
+        Ok(route)
+    }
+
+    /// Authenticate an exec-tool caller and resolve, on this daemon, the sessions base and the
+    /// worktree its tools run in.
+    ///
+    /// Both refusals name **this** daemon. For a split session the tools are served on the codebase
+    /// host while the error is rendered in the agent's transcript on the agent host, where an
+    /// unattributed "invalid or expired session" reads as the agent host's own answer — and the two
+    /// likeliest split misconfigurations land here: daemons not sharing `livekit.api_secret` (a
+    /// session token is a stateless HMAC, verifiable only by daemons holding the same secret), and a
+    /// GitHub user mapped on the agent host but not on the codebase host. Each is also logged here,
+    /// because the operator debugging it is reading *this* daemon's log.
+    fn resolve_exec_tool_worktree(
+        &self,
+        req: &ExecuteToolRequest,
+    ) -> Result<(PathBuf, PathBuf), Status> {
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let Some(github_user) = (self.user_resolver)(&req.session_token) else {
+            log::warn!(
+                "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token minted by its agent daemon, so both daemons must share livekit.api_secret)",
+                tool = req.tool_name,
+                session = req.session_id
+            );
+            return Err(Status::unauthenticated(format!(
+                "daemon {local_instance_id} could not verify the session token (invalid or expired there); a split session's tools run on the daemon holding the codebase, which verifies the token with its own livekit.api_secret"
+            )));
+        };
+        let Some(os_user) = self.config.os_user_for_github(&github_user) else {
+            log::warn!(
+                "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: GitHub user {github_user} has no users[] entry here",
+                tool = req.tool_name,
+                session = req.session_id
+            );
+            return Err(Status::permission_denied(format!(
+                "daemon {local_instance_id} has no OS user mapped for GitHub user {github_user}; add a users[] entry there — a split session's tools run as that user on the daemon holding the codebase"
+            )));
+        };
+
+        validate_session_id_segment(&req.session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let worktree_root =
+            workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
+        Ok((sessions_base, worktree_root))
+    }
+
+    /// Run one tool call in `worktree_root` and durably record it.
+    ///
+    /// A tool failure is carried in the returned response, never raised as an RPC error: only
+    /// routing and auth failures are RPC errors, so an agent can tell "the tool said no" from "the
+    /// call never reached the tool".
+    async fn run_exec_tool_locally(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+    ) -> ExecuteToolResponse {
+        let outcome = tool_engine::execute_tool(
+            worktree_root,
+            &req.tool_name,
+            &req.args_json,
+            &self.task_registry,
+            &req.session_id,
+        )
+        .await;
+
+        // Durably record the tool call (non-fatal on failure).
+        let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
+        let record = crate::tool_call_log::ToolCallRecord {
+            task_id: outcome.job_id.clone(),
+            tool_name: req.tool_name.clone(),
+            args_json: req.args_json.clone(),
+            result_json: outcome.result_json.clone(),
+            is_error: outcome.is_error,
+            error_message: outcome.error_message.clone(),
+            job_running: outcome.job_running,
+            created_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        };
+        if let Err(e) = crate::tool_call_log::append_tool_call(&session_dir, &record) {
+            log::warn!(
+                "tool_call_log: failed to persist tool call for session {}: {}",
+                req.session_id,
+                e
+            );
+        }
+
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
     }
 
     fn common_room_slot(
@@ -4632,6 +5059,460 @@ impl ConnectionServiceImpl {
         Ok(())
     }
 
+    /// Start a **split** session: the agent runs here, its worktree lives on `codebase_instance_id`.
+    ///
+    /// The codebase daemon creates a `workspace` session holding the worktree; this daemon spawns the
+    /// agent with no repository on disk and wires it to that worktree through `mcp__tddy-tools__*`
+    /// over LiveKit (`docs/ft/daemon/remote-managed-worktree.md`).
+    ///
+    /// Atomic by construction: everything that can be resolved locally is resolved *before* the peer
+    /// is asked to create anything, and any failure after it has done so tears its session back down.
+    /// A half-built split session would strand a worktree on a host with no session left to reclaim
+    /// it.
+    async fn start_split_claude_cli_session(
+        &self,
+        os_user: &str,
+        codebase_instance_id: &str,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        // These three ask for work that only exists where the repository is. Refused rather than
+        // silently dropped, because a session that came up without its recipe (or its index) looks
+        // like the session that was asked for.
+        if !req.recipe.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "a workflow recipe needs a repository on the daemon running the agent; it cannot be combined with codebase_daemon_instance_id",
+            ));
+        }
+        if req.semantic_index {
+            return Err(Status::invalid_argument(
+                "semantic_index indexes a worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
+            ));
+        }
+        if req.sandbox {
+            return Err(Status::invalid_argument(
+                "sandbox sessions resolve their worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
+            ));
+        }
+
+        let slot = self.common_room_slot("StartSession")?.clone();
+
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let session_id = Uuid::now_v7().to_string();
+
+        // The workspace session's id is chosen *here*, before the peer is asked for anything, and
+        // travels in the request. Letting the peer name it would make the answer the only way to
+        // learn the id — so a forward that errors or times out while the peer goes on building
+        // would leave a worktree on that host with nothing pointing at it and no way to name it in
+        // a teardown. This is what makes the failure atomic rather than merely usually atomic.
+        let codebase_session_id = Uuid::now_v7().to_string();
+
+        // Resolved before the peer is contacted: a room this daemon cannot mint a token for means
+        // the agent could never reach its checkout, so nothing should be created for it. The room is
+        // *this* session's and is hosted here — this daemon runs the agent, so it is the session's
+        // facilitating daemon whether or not the repo turns out to live somewhere else.
+        let livekit = crate::split_session::SplitLiveKitRoom::from_config(
+            &self.config,
+            crate::session_room::session_room_name(&session_id),
+        )?;
+
+        // The peer runs this locally and holds the codebase for it, so it must not route the request
+        // onward: `daemon_instance_id` named *this* host, and a codebase host of its own would make
+        // it split the session again.
+        // Attachments belong beside the agent, which is here: they are read by the agent and by the
+        // browser's Docs listing, both of which act against *this* session on *this* daemon. Sending
+        // them on would put a second copy on a host with no reader for it, and pay the transfer
+        // inside the forward's deadline to do so.
+        let workspace_req = StartSessionRequest {
+            session_type: "workspace".to_string(),
+            daemon_instance_id: String::new(),
+            codebase_daemon_instance_id: String::new(),
+            requested_session_id: codebase_session_id.clone(),
+            attachments: Vec::new(),
+            ..req.clone()
+        };
+        let forwarded = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
+            &slot,
+            codebase_instance_id,
+            &workspace_req,
+            self.split_forward_deadline(),
+        )
+        .await;
+        let workspace = match forwarded {
+            Ok(workspace) => workspace,
+            Err(status) => {
+                // The peer may have created the session and its worktree, may have failed part-way
+                // through, or may never have started — none of which this side can distinguish. The
+                // teardown covers all three, because the id was ours to begin with.
+                self.tear_down_codebase_session(
+                    &slot,
+                    codebase_instance_id,
+                    &codebase_session_id,
+                    &req.session_token,
+                    SplitStartFailure::from_forward_error(&status),
+                )
+                .await;
+                return Err(status);
+            }
+        };
+        // A branch another session owns is reported, not created: the peer built nothing, so the
+        // conflict travels back to the caller as it would for a co-located start.
+        if workspace.branch_conflict.is_some() {
+            return Ok(Response::new(workspace));
+        }
+        let created_session_id = workspace.session_id.trim();
+        if created_session_id.is_empty() {
+            return Err(Status::internal(format!(
+                "daemon {codebase_instance_id} answered StartSession with no session id; the worktree's placement cannot be recorded"
+            )));
+        }
+        if created_session_id != codebase_session_id {
+            // A peer that ignored `requested_session_id` cannot give the guarantee above: the next
+            // forward it serves slowly would orphan its worktree. Refused rather than accepted with
+            // a warning, and the session it did create is torn down under the id it reported.
+            self.tear_down_codebase_session(
+                &slot,
+                codebase_instance_id,
+                created_session_id,
+                &req.session_token,
+                SplitStartFailure::PeerAnswered,
+            )
+            .await;
+            return Err(Status::internal(format!(
+                "daemon {codebase_instance_id} created workspace session {created_session_id:?} instead of the requested {codebase_session_id:?}; it does not honour requested_session_id, so a split session's worktree could not be reclaimed after a failed start"
+            )));
+        }
+        // Nothing about the peer's LiveKit fields is checked here any more: a codebase daemon hosts
+        // no room. It holds a checkout and answers `GetWorktreeSnapshot` and tool calls about it,
+        // both of which this daemon reaches over the peer routing it already uses.
+        let started = self
+            .spawn_split_agent(
+                os_user,
+                &session_id,
+                &sessions_base,
+                codebase_instance_id,
+                &codebase_session_id,
+                &livekit,
+                req,
+                progress,
+            )
+            .await;
+
+        match started {
+            Ok(response) => Ok(response),
+            Err(status) => {
+                // The agent spawn is this daemon's own work: the peer already answered, and
+                // whatever it built is there to be reclaimed.
+                self.tear_down_codebase_session(
+                    &slot,
+                    codebase_instance_id,
+                    &codebase_session_id,
+                    &req.session_token,
+                    SplitStartFailure::PeerAnswered,
+                )
+                .await;
+                Err(status)
+            }
+        }
+    }
+
+    /// Spawn the agent half of a split session and record the pairing.
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_split_agent(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        sessions_base: &Path,
+        codebase_instance_id: &str,
+        codebase_session_id: &str,
+        livekit: &crate::split_session::SplitLiveKitRoom,
+        req: &StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+        std::fs::create_dir_all(&session_dir)
+            .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+        self.prepare_session_attachments(&AttachmentMaterialization {
+            session_token: &req.session_token,
+            os_user,
+            sessions_base,
+            session_id,
+            attachments: &req.attachments,
+            progress,
+        })
+        .await?;
+
+        let tddy_tools_path = self.resolve_tddy_tools_path();
+        let remote = crate::split_session::split_remote_tool_env(
+            livekit,
+            session_id,
+            codebase_instance_id,
+            codebase_session_id,
+            &req.session_token,
+        )?;
+        // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
+        // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
+        // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
+        // this host does not have (FR5). The agent's token was minted for exactly this room.
+        let remote_source = Arc::new(crate::session_room::RemoteCheckout::new(
+            Arc::new(self.clone()),
+            codebase_session_id.to_string(),
+            codebase_instance_id.to_string(),
+            req.session_token.clone(),
+            session_dir.clone(),
+        ));
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        match self
+            .session_rooms
+            .open_measured_by(
+                &crate::session_room::DaemonRoomHosting {
+                    config: &self.config,
+                    instance_id: &local_instance_id,
+                    rooms: &self.session_rooms,
+                }
+                .for_remote_worktree(session_id, &session_dir),
+                tddy_service::ConnectionServiceServer::new(self.clone()),
+                remote_source,
+            )
+            .await?
+        {
+            Some(room) => log::info!(
+                "split session {session_id} facilitated in {} as {}, measuring session {codebase_session_id} on daemon {codebase_instance_id}",
+                room.room,
+                room.server_identity
+            ),
+            None => log::debug!(
+                "split session {session_id} runs without a session room (LiveKit not configured)"
+            ),
+        }
+
+        let context_dir = crate::split_session::build_split_context_dir(&session_dir)?;
+        let extra_args = crate::split_session::split_claude_extra_args(
+            &session_dir,
+            &tddy_tools_path.to_string_lossy(),
+        )?;
+
+        // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
+        // split session is the context dir rather than a worktree. Best-effort, as elsewhere: a
+        // missing hook file costs status reporting, not the session.
+        let hook_token = Uuid::new_v4().to_string();
+        write_claude_hooks_settings(
+            &context_dir,
+            &tddy_core::HookCommandParams {
+                tddy_tools_path: &tddy_tools_path.to_string_lossy(),
+                daemon_url: &claude_hook_daemon_url(&self.config),
+                session_id,
+                os_user,
+                hook_token: &hook_token,
+            },
+        );
+
+        let handle = self
+            .claude_cli_manager
+            .start_with_options(
+                session_id,
+                context_dir,
+                req.model.trim(),
+                &resolve_start_session_claude_binary(&self.config),
+                Some(req.initial_prompt.trim()).filter(|p| !p.is_empty()),
+                Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
+                req.dangerously_skip_permissions,
+                false,
+                None,
+                extra_args,
+                remote.env_pairs(),
+                Some(os_user),
+            )
+            .await
+            .map_err(|e| Status::internal(format!("failed to spawn claude-cli: {e}")))?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let meta = tddy_core::SessionMetadata {
+            session_id: session_id.to_string(),
+            project_id: req.project_id.trim().to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            status: "active".to_string(),
+            // No repository on this host — the pairing below is how the worktree is found.
+            repo_path: None,
+            pid: Some(handle.pid),
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("claude-cli".to_string()),
+            model: Some(req.model.trim().to_string()),
+            cursor_chat_id: None,
+            activity_status: None,
+            hook_token: Some(hook_token),
+            sandbox: None,
+            agent: None,
+            recipe: None,
+            specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
+            codebase_session_id: Some(codebase_session_id.to_string()),
+        };
+        tddy_core::write_session_metadata(&session_dir, &meta)
+            .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+
+        log::info!(
+            target: "tddy_daemon::connection_service",
+            "started split claude-cli session {session_id} pid={} codebase_daemon={codebase_instance_id} codebase_session={codebase_session_id}",
+            handle.pid
+        );
+
+        Ok(Response::new(StartSessionResponse {
+            session_id: session_id.to_string(),
+            livekit_room: String::new(),
+            livekit_url: String::new(),
+            livekit_server_identity: String::new(),
+            branch_conflict: None,
+        }))
+    }
+
+    /// How long to wait for the codebase daemon's answer to a split session's forwarded start.
+    ///
+    /// Not the ordinary [`PEER_FORWARD_TIMEOUT`]: the peer serves this call by resolving the project
+    /// — cloning it if it does not have it yet — and cutting a worktree, work it bounds by its own
+    /// `spawn_worker_request_timeout` (5 minutes by default). Giving up after 30 s would mean
+    /// erroring while the peer is still building, which is the state that used to strand a worktree.
+    /// This daemon can only assume the peer's budget matches its own, so it waits that budget out
+    /// plus one ordinary forward deadline of round-trip headroom. A peer configured with a *larger*
+    /// budget still times out here — the teardown at the call site is what keeps that from becoming
+    /// an orphan.
+    ///
+    /// The cost is that a peer whose RPC participant is gone surfaces after this wait rather than
+    /// after 30 s. Accepted: the placement check already required the peer to be visible in the
+    /// common room moments earlier, so that is the rarer failure, and the alternative trades a rare
+    /// slow error for a routine orphaned worktree.
+    pub fn split_forward_deadline(&self) -> Duration {
+        self.config.spawn_worker_request_timeout()
+            + crate::livekit_peer_discovery::PEER_FORWARD_TIMEOUT
+    }
+
+    /// Delete the `workspace` session holding a split session's worktree on `codebase_instance_id`.
+    ///
+    /// Used only to unwind a failed start, where the caller already has an error to return: the
+    /// failure that got us here is the more useful one, so a teardown failure is logged with the
+    /// orphaned session named rather than replacing it.
+    ///
+    /// `unwinding` is what the start failed with, which is the only thing that decides how much the
+    /// peer's answer proves — see the `peer_has_no_such_session` arm below.
+    async fn tear_down_codebase_session(
+        &self,
+        slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+        codebase_instance_id: &str,
+        codebase_session_id: &str,
+        session_token: &str,
+        unwinding: SplitStartFailure,
+    ) {
+        let request = DeleteSessionRequest {
+            session_token: session_token.to_string(),
+            session_id: codebase_session_id.to_string(),
+        };
+        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+            slot,
+            codebase_instance_id,
+            &request,
+        )
+        .await
+        {
+            Ok(_) => log::info!(
+                "StartSession: tore down workspace session {codebase_session_id} on daemon {codebase_instance_id} after a failed split start"
+            ),
+            // A start that failed before the peer created anything is the ordinary case here — the
+            // teardown is issued blind, because a forward that never answered leaves this side
+            // unable to tell what the peer got as far as building.
+            //
+            // "Not there" is a statement about *now*, not about the whole start. After a forward
+            // deadline the peer may still be cutting the worktree, so it can answer this honestly
+            // and create the session moments later — the one case that still orphans a checkout,
+            // and the reason that case is a warning an operator can grep for rather than an info
+            // line saying nothing was created.
+            Err(e) if peer_has_no_such_session(&e) => match unwinding {
+                SplitStartFailure::PeerAnswered => log::info!(
+                    "StartSession: daemon {codebase_instance_id} did not have workspace session {codebase_session_id} at teardown time, after a failed split start"
+                ),
+                SplitStartFailure::ForwardDeadline => log::warn!(
+                    "StartSession: daemon {codebase_instance_id} did not have workspace session {codebase_session_id} at teardown time, but the forwarded start had already timed out: if that daemon was still building the worktree it may create the session after this teardown, leaving an orphaned checkout there"
+                ),
+            },
+            Err(e) => log::error!(
+                "StartSession: could not delete workspace session {codebase_session_id} on daemon {codebase_instance_id} after a failed split start ({e}); its worktree is now orphaned there"
+            ),
+        }
+    }
+
+    /// Delete the `workspace` session paired with a split session, on the daemon that holds its
+    /// worktree. A no-op for a co-located session, which records no pairing.
+    ///
+    /// Unlike the failed-start teardown, a failure here is returned: `DeleteSession` succeeding
+    /// while the worktree survives on another host is exactly the silent leak this pairing exists to
+    /// prevent, so the message names the session left behind and where.
+    async fn delete_paired_codebase_session(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let Ok(meta) = read_session_metadata(&session_dir) else {
+            return Ok(());
+        };
+        let Some((codebase_daemon, codebase_session)) = crate::split_session::split_pairing(&meta)
+        else {
+            return Ok(());
+        };
+
+        let slot = self.common_room_slot("DeleteSession")?;
+        // `common_room_slot` only proves this daemon is *configured* for a common room, not that it
+        // is currently joined to one — the discovery loop empties this slot on every disconnect.
+        // The distinction is load-bearing here: a forward attempted with no room fails locally with
+        // `failed_precondition`, which is the same code the peer returns for "I do not have that
+        // session". Without this check the two are indistinguishable, and a momentary disconnect
+        // would be read as "already torn down", completing the local delete and stranding the
+        // worktree on the codebase host — the exact leak the paired teardown exists to prevent.
+        if slot.read().await.is_none() {
+            return Err(Status::failed_precondition(format!(
+                "cannot reach the common room to delete the paired workspace session \
+                 {codebase_session} on daemon {codebase_daemon}, so its worktree's fate is unknown; \
+                 this session was left in place — retry once the daemons can see each other, or \
+                 delete that session on {codebase_daemon} directly and retry"
+            )));
+        }
+        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+            slot,
+            codebase_daemon,
+            &DeleteSessionRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(_) => log::info!(
+                "DeleteSession: deleted paired workspace session {codebase_session} on daemon {codebase_daemon}"
+            ),
+            // The peer answering "I do not have that session" is the state this call exists to
+            // reach, not a failure to reach it: an operator may have deleted it there directly, or
+            // an earlier attempt may have succeeded on the peer and then failed locally. Continuing
+            // is idempotency — the worktree is provably gone with the session that owned it. It is
+            // deliberately *not* the treatment for any other outcome: an unreachable or failing peer
+            // leaves the worktree's fate unknown, and unknown is refused below.
+            Err(e) if peer_has_no_such_session(&e) => log::info!(
+                "DeleteSession: daemon {codebase_daemon} no longer has the paired workspace session {codebase_session} ({e}); it was already torn down, so this session's deletion continues"
+            ),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "could not delete the workspace session {codebase_session} holding this session's worktree on daemon {codebase_daemon} ({e}); its worktree would be orphaned, so the deletion was refused"
+                )))
+            }
+        }
+        Ok(())
+    }
+
     /// The one implementation behind both `StartSession` and `StreamStartSession`.
     ///
     /// `progress` is where attachment materialization reports to: the stream's sender for the
@@ -4706,6 +5587,28 @@ impl ConnectionServiceImpl {
             crate::livekit_peer_discovery::StartSessionPeerRoute::Local => {}
         }
 
+        // The agent runs here; where its worktree goes is the second, independent placement. A
+        // refused split is a malformed request, so it is classified before anything is created and
+        // before the project is provisioned — a session whose codebase host is wrong should not
+        // leave a clone behind on the way to being rejected.
+        let placement = classify_codebase_placement(
+            &local_id,
+            &req.codebase_daemon_instance_id,
+            &eligible_ids,
+            req.managed_codebase,
+            req.session_type.trim(),
+        )
+        .map_err(|msg| {
+            log::info!("StartSession: rejected codebase placement: {msg}");
+            Status::invalid_argument(msg)
+        })?;
+
+        // Checked here, alongside the other request-shape decisions, so a session type that does not
+        // honour a caller-chosen id refuses it before anything is created rather than generating one
+        // and leaving the caller pointing at a session that does not exist.
+        let caller_chosen_session_id =
+            resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
+
         // Validate cheap, session-type-specific inputs before the (potentially expensive) project
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
         // — a bad request should fail fast with INVALID_ARGUMENT, not a project NotFound. The
@@ -4719,6 +5622,18 @@ impl ConnectionServiceImpl {
             return Err(Status::invalid_argument(
                 "model is required for cursor-cli sessions",
             ));
+        }
+
+        // A split session has no repository here, so it skips the project auto-provision below and
+        // the whole worktree-bearing dispatch: the codebase host resolves the project against its
+        // own filesystem.
+        if let CodebasePlacement::Split {
+            codebase_instance_id,
+        } = &placement
+        {
+            return self
+                .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
+                .await;
         }
 
         // Auto-provision the project's working copy on this host before dispatching to any session
@@ -4799,7 +5714,23 @@ impl ConnectionServiceImpl {
                 Some(&self.tddy_data_dir),
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            let session_id = Uuid::now_v7().to_string();
+            let session_id = match caller_chosen_session_id {
+                // Creating a session over an existing one would overwrite its `.session.yaml` and
+                // leave that session's worktree with nothing pointing at it, so a taken id is
+                // refused rather than reused.
+                Some(chosen) => {
+                    if unified_session_dir_path(&sessions_base, &chosen).exists() {
+                        return Err(Status {
+                            code: tddy_rpc::Code::AlreadyExists,
+                            message: format!(
+                                "requested_session_id {chosen:?} already names a session on this daemon"
+                            ),
+                        });
+                    }
+                    chosen
+                }
+                None => Uuid::now_v7().to_string(),
+            };
             self.prepare_session_attachments(&AttachmentMaterialization {
                 session_token: &req.session_token,
                 os_user,
@@ -4810,11 +5741,20 @@ impl ConnectionServiceImpl {
             })
             .await?;
             let timeout = self.config.spawn_worker_request_timeout();
+            // The room serves this very service: a participant of a session room reaches the same
+            // `ExecuteTool` / `ReadHostDocument` surface a caller reaches over the common room or
+            // HTTP, on the same daemon, rooted at the checkout it just made.
             return workspace_session::start_workspace_session(
                 os_user,
                 &session_id,
                 sessions_base,
                 req.project_id.trim(),
+                &workspace_session::WorkspaceBranchIntent {
+                    branch_worktree_intent: req.branch_worktree_intent.trim(),
+                    new_branch_name: req.new_branch_name.trim(),
+                    selected_integration_base_ref: req.selected_integration_base_ref.trim(),
+                    selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
+                },
                 &self.tddy_data_dir,
                 timeout,
             )
@@ -5452,6 +6392,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         // Changeset.branch; left empty here so the enrichment is the single source
                         // of truth.
                         branch: String::new(),
+                        // A split session's pairing, straight from `.session.yaml`. Empty for a
+                        // co-located session, which is every session that does not name another
+                        // daemon as its codebase host.
+                        codebase_daemon_instance_id: s.codebase_daemon_instance_id,
+                        codebase_session_id: s.codebase_session_id,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -5962,7 +6907,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // --- claude-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("claude-cli") {
             return self
-                .resume_claude_cli_session(os_user, &req.session_id, session_dir, metadata)
+                .resume_claude_cli_session(
+                    os_user,
+                    &req.session_id,
+                    session_dir,
+                    metadata,
+                    &req.session_token,
+                )
                 .await;
         }
 
@@ -6231,10 +7182,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             os_user
         );
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
+        // A split session's worktree lives on another daemon, which must lose it first: deleting
+        // this side alone would leave a checkout on a host with no session left to reclaim it. A
+        // failure to reach that daemon fails the delete rather than silently dropping its half.
+        self.delete_paired_codebase_session(&sessions_base, session_id, &req.session_token)
+            .await?;
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }
         let _ = self.sandbox_manager.remove(session_id).await;
+        session_deletion::close_session_room(&self.session_rooms, session_id);
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
@@ -7071,6 +8028,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let worktree_path = PathBuf::from(worktree_path_raw);
 
+        // Before the checkout goes, not after: a session room measures its directory on an
+        // interval, so one still hosted for this path would shell out to git in a directory that no
+        // longer exists — warning at the poll rate for the life of the daemon. This RPC removes a
+        // checkout by path and never learns a session id, so the registry is asked by path.
+        self.session_rooms.close_for_worktree(&worktree_path);
+
         let repo_blocking = main_repo.clone();
         let wt_blocking = worktree_path.clone();
         let timeout = self.config.spawn_worker_request_timeout();
@@ -7315,133 +8278,79 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
 
         // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        let requested_daemon = req.daemon_instance_id.trim();
-        if !requested_daemon.is_empty() {
-            let local_id = local_instance_id_for_config(&self.config);
-            let eligible_rows = self.eligible_daemon_source.list_eligible_daemons();
-            let eligible_ids: Vec<String> = eligible_rows
-                .iter()
-                .map(|e| e.instance_id.0.clone())
-                .collect();
-            match crate::livekit_peer_discovery::classify_peer_route(
-                &local_id,
-                requested_daemon,
-                &eligible_ids,
-            ) {
-                Err(msg) => {
-                    log::info!("ExecuteTool: rejected daemon routing: {}", msg);
-                    return Err(Status::invalid_argument(msg));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Forward { peer_instance_id }) => {
-                    log::info!(
-                        "ExecuteTool: forwarding RPC to remote daemon_instance_id={}",
-                        peer_instance_id
-                    );
-                    let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
-                        Status::failed_precondition(
-                            "cannot forward ExecuteTool: this process has no LiveKit common-room connection",
-                        )
-                    })?;
-                    let body = req.encode_to_vec();
-                    let out = crate::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "connection.ConnectionService",
-                        "ExecuteTool",
-                        body,
-                    )
-                    .await?;
-                    let inner = ExecuteToolResponse::decode(out.as_slice()).map_err(|e| {
-                        Status::internal(format!("decode ExecuteToolResponse: {e}"))
-                    })?;
-                    return Ok(Response::new(inner));
-                }
-                Ok(crate::livekit_peer_discovery::PeerRoute::Local) => {
-                    // Fall through to local execution below.
-                }
-            }
-        }
-
-        // Authenticate caller.
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // Validate session ID.
-        validate_session_id_segment(&req.session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        // Resolve the sessions base and the session's worktree root.
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-
-        let worktree_root =
-            workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
-
-        // For path-bearing tools, perform an upfront path traversal check.
-        if matches!(
-            req.tool_name.as_str(),
-            "Read" | "Write" | "StrReplace" | "Delete"
-        ) {
-            let args_val: serde_json::Value =
-                serde_json::from_str(&req.args_json).unwrap_or(serde_json::Value::Null);
-            if let Some(path_str) = args_val.get("path").and_then(|v| v.as_str()) {
-                // Reject obvious traversal before any I/O.
-                let p = std::path::Path::new(path_str);
-                if p.components().any(|c| c == std::path::Component::ParentDir) {
-                    return Err(Status::permission_denied(
-                        "path contains '..' components (traversal rejected)",
-                    ));
-                }
-            }
-        }
-
-        // Dispatch.
-        let outcome = tool_engine::execute_tool(
-            &worktree_root,
-            &req.tool_name,
-            &req.args_json,
-            &self.task_registry,
-            &req.session_id,
-        )
-        .await;
-
-        // Durably record the tool call (non-fatal on failure).
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_exec_tool_route("ExecuteTool", &req.daemon_instance_id)?
         {
-            let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
-            let record = crate::tool_call_log::ToolCallRecord {
-                task_id: outcome.job_id.clone(),
-                tool_name: req.tool_name.clone(),
-                args_json: req.args_json.clone(),
-                result_json: outcome.result_json.clone(),
-                is_error: outcome.is_error,
-                error_message: outcome.error_message.clone(),
-                job_running: outcome.job_running,
-                created_unix_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-            };
-            if let Err(e) = crate::tool_call_log::append_tool_call(&session_dir, &record) {
-                log::warn!(
-                    "tool_call_log: failed to persist tool call for session {}: {}",
-                    req.session_id,
-                    e
-                );
-            }
+            let slot = self.common_room_slot("ExecuteTool")?;
+            let out = crate::livekit_peer_discovery::forward_to_peer(
+                slot,
+                &peer_instance_id,
+                "connection.ConnectionService",
+                "ExecuteTool",
+                req.encode_to_vec(),
+            )
+            .await?;
+            let inner = ExecuteToolResponse::decode(out.as_slice())
+                .map_err(|e| Status::internal(format!("decode ExecuteToolResponse: {e}")))?;
+            return Ok(Response::new(inner));
         }
 
-        Ok(Response::new(ExecuteToolResponse {
-            result_json: outcome.result_json,
-            is_error: outcome.is_error,
-            error_message: outcome.error_message,
-            job_id: outcome.job_id,
-            job_running: outcome.job_running,
-        }))
+        let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req)?;
+        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+        let response = self
+            .run_exec_tool_locally(&req, &sessions_base, &worktree_root)
+            .await;
+        Ok(Response::new(response))
+    }
+
+    /// Associated output stream type for [`stream_execute_tool`].
+    type StreamExecuteToolStream = MpscResultStream<ExecuteToolChunk>;
+
+    /// Server-streaming sibling of [`Self::execute_tool`], carrying the same result in bounded
+    /// frames.
+    ///
+    /// The unary call returns `result_json` as one string; over LiveKit anything past
+    /// `MAX_CHUNK_FRAME_BYTES` is chunk-framed, and one lost chunk frame wedges the call with no
+    /// error at all (`docs/ft/coder/rpc-multi-transport.md`). A `Read` of a large file crosses that
+    /// on day one of a split session, so the split path streams instead — routing, auth and worktree
+    /// resolution are shared with the unary handler so the two cannot drift.
+    async fn stream_execute_tool(
+        &self,
+        request: Request<ExecuteToolRequest>,
+    ) -> Result<Response<Self::StreamExecuteToolStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let PeerRoute::Forward { peer_instance_id } =
+            self.classify_exec_tool_route("StreamExecuteTool", &req.daemon_instance_id)?
+        {
+            let slot = self.common_room_slot("StreamExecuteTool")?;
+            // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
+            // can never reach the caller looking complete.
+            let rx = crate::livekit_peer_discovery::forward_stream_execute_tool_via_livekit(
+                slot,
+                &peer_instance_id,
+                &req,
+            )
+            .await?;
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req)?;
+        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+        let response = self
+            .run_exec_tool_locally(&req, &sessions_base, &worktree_root)
+            .await;
+
+        // The result is already complete in memory, so every frame can be queued now: the stream
+        // exists to bound each frame's size, not to interleave with the tool's execution.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<ExecuteToolChunk, Status>>();
+        for frame in exec_tool_result_frames(response) {
+            if tx.send(Ok(frame)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
     }
 
     async fn list_exec_tools(
@@ -8592,6 +9501,73 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }))
     }
 
+    async fn get_worktree_snapshot(
+        &self,
+        request: Request<GetWorktreeSnapshotRequest>,
+    ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
+        let req = request.into_inner();
+
+        // Routed exactly like ExecuteTool, and for the same reason: the caller names the daemon it
+        // believes holds the checkout, and a session room on the agent's daemon polls a remote
+        // checkout by addressing the codebase daemon. Reusing that classifier keeps one answer to
+        // "which daemon owns this session's files".
+        match self.classify_exec_tool_route("GetWorktreeSnapshot", &req.daemon_instance_id)? {
+            PeerRoute::Local => {}
+            PeerRoute::Forward { peer_instance_id } => {
+                let slot = self.common_room_slot("GetWorktreeSnapshot")?;
+                let out = crate::livekit_peer_discovery::forward_to_peer(
+                    slot,
+                    &peer_instance_id,
+                    "connection.ConnectionService",
+                    "GetWorktreeSnapshot",
+                    req.encode_to_vec(),
+                )
+                .await?;
+                let inner = GetWorktreeSnapshotResponse::decode(out.as_slice())
+                    .map_err(|e| Status::internal(format!("decoding peer snapshot: {e}")))?;
+                return Ok(Response::new(inner));
+            }
+        }
+
+        // The measurement is assembled here, where the files are, and shells out to git — so it
+        // runs on the blocking pool under the same budget a local poll uses. A caller that gave up
+        // waiting is a caller whose next tick will ask again.
+        let (sessions_base, worktree_root) =
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: req.session_token.clone(),
+                session_id: req.session_id.clone(),
+                tool_name: "GetWorktreeSnapshot".to_string(),
+                args_json: String::new(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+            })?;
+
+        let budget = self.config.session_room_git_timeout();
+        let measured_root = worktree_root.clone();
+        let snapshot = tokio::task::spawn_blocking(move || {
+            crate::session_room::snapshot_worktree_within(&measured_root, budget)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("measuring {worktree_root:?} panicked: {e}")))?;
+
+        let session_dir =
+            tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &req.session_id);
+        let attachments = crate::session_attachments::list_session_attachments(&session_dir)
+            .into_iter()
+            .map(|a| a.basename)
+            .collect();
+
+        Ok(Response::new(GetWorktreeSnapshotResponse {
+            head_commit: snapshot.head_commit,
+            branch: snapshot.branch,
+            changed_paths: snapshot.changed_paths,
+            changed_files: snapshot.changed_files,
+            lines_added: snapshot.lines_added,
+            lines_removed: snapshot.lines_removed,
+            untracked_files: snapshot.untracked_files,
+            attachments,
+        }))
+    }
+
     async fn query_branch(
         &self,
         request: Request<QueryBranchRequest>,
@@ -9052,6 +10028,36 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Err(Status::unauthenticated(
             "local token minting is only available over the local socket",
         ))
+    }
+
+    type StreamLiveKitRoomsStream = MpscLiveKitRoomsStream;
+
+    /// Stream the LiveKit server's rooms and their participants: one full snapshot, then one change
+    /// event per delta found by polling the room service.
+    ///
+    /// Authenticates `session_token`, then spawns [`pump_rooms`], which emits the snapshot
+    /// immediately and re-reads the roster on the poll cadence, diffing each read against the state
+    /// **this** stream was last sent — a per-subscriber baseline, so two watchers cannot consume
+    /// each other's deltas. A tick with no delta emits nothing, so an idle server yields an idle
+    /// stream. The task ends when the receiver is dropped (client unsubscribe), and a roster read
+    /// that fails ends the stream with that error rather than reporting an empty server.
+    async fn stream_live_kit_rooms(
+        &self,
+        request: Request<StreamLiveKitRoomsRequest>,
+    ) -> Result<Response<Self::StreamLiveKitRoomsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<LiveKitRoomsEvent, Status>>();
+        tokio::spawn(pump_rooms(
+            Arc::clone(&self.room_roster),
+            self.room_poll_interval,
+            tx,
+        ));
+
+        Ok(Response::new(MpscLiveKitRoomsStream { rx }))
     }
 
     type StreamHostStatsStream = MpscHostStatsStream;
@@ -9704,25 +10710,85 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     }
 }
 
+/// Reject an obvious path traversal in a path-bearing exec tool's arguments, before any I/O.
+///
+/// The worktree root is the boundary an exec tool call is confined to; a `..` component asks to
+/// leave it, which is refused rather than normalized away.
+fn reject_exec_tool_path_traversal(tool_name: &str, args_json: &str) -> Result<(), Status> {
+    if !matches!(tool_name, "Read" | "Write" | "StrReplace" | "Delete") {
+        return Ok(());
+    }
+    let args: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
+    let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+        return Ok(());
+    };
+    if Path::new(path)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        return Err(Status::permission_denied(
+            "path contains '..' components (traversal rejected)",
+        ));
+    }
+    Ok(())
+}
+
+/// Bytes of tool result carried per `StreamExecuteTool` frame.
+///
+/// Defined *as* [`HOST_DOCUMENT_FRAME_BYTES`] rather than as the same number, because the budget is
+/// a property of the transport rather than of what rides on it: both are what every transport in the
+/// stack carries per message without applying its own chunk framing. Two constants free to drift
+/// would be two answers to one question, and only one of them could be right.
+pub const EXEC_TOOL_FRAME_BYTES: usize = HOST_DOCUMENT_FRAME_BYTES;
+
+/// Split a completed tool result into ordered [`EXEC_TOOL_FRAME_BYTES`] frames.
+///
+/// The outcome rides the **final** frame — a tool error is a result, not an RPC failure, matching
+/// unary `ExecuteTool`'s contract. An empty result still yields exactly one frame, so a consumer
+/// never has to tell "empty result" from "stream produced nothing", and a stream ending without a
+/// `last` frame is unambiguously a truncation.
+fn exec_tool_result_frames(response: ExecuteToolResponse) -> Vec<ExecuteToolChunk> {
+    let bytes = response.result_json.into_bytes();
+    let mut frames: Vec<ExecuteToolChunk> = bytes
+        .chunks(EXEC_TOOL_FRAME_BYTES)
+        .map(|chunk| ExecuteToolChunk {
+            result_chunk: chunk.to_vec(),
+            ..Default::default()
+        })
+        .collect();
+    if frames.is_empty() {
+        frames.push(ExecuteToolChunk::default());
+    }
+    let last = frames.last_mut().expect("at least one frame");
+    last.is_error = response.is_error;
+    last.error_message = response.error_message;
+    last.job_id = response.job_id;
+    last.job_running = response.job_running;
+    last.last = true;
+    frames
+}
+
 /// Bytes per `StreamReadHostDocument` frame. Mirrors the 48 KiB the upload path chunks with, which
 /// every transport in the stack (ConnectRPC-HTTP, LiveKit data channels) already carries per
 /// message without its own chunk framing.
 pub const HOST_DOCUMENT_FRAME_BYTES: usize = 48 * 1024;
 
-/// Bytes to leave free in a LiveKit data packet for everything in a `HostDocumentChunk` frame that
-/// is not document data: the RPC envelope (request id, service/method metadata, sender identity) and
-/// the chunk's own `total_byte_size`. Mirrors the web's `UPLOAD_REQUEST_ENVELOPE_HEADROOM`, which
-/// sizes the same budget from the other end of the same transport.
-const HOST_DOCUMENT_FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
+/// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
+/// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
+/// `total_byte_size` for a document chunk, `error_message` / `job_id` / the flags for a tool-result
+/// chunk. Mirrors the web's `UPLOAD_REQUEST_ENVELOPE_HEADROOM`, which sizes the same budget from the
+/// other end of the same transport.
+const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
 
 /// A frame plus its envelope must fit in one LiveKit data packet. Past that budget the transport
 /// splits each frame into chunk frames, and one lost chunk frame leaves the peer's reassembler
 /// permanently incomplete — the call is then never answered and never fails
 /// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
 /// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
-/// that false.
+/// that false. One assert covers [`EXEC_TOOL_FRAME_BYTES`] too, which is this same constant.
 const _: () = assert!(
-    HOST_DOCUMENT_FRAME_BYTES + HOST_DOCUMENT_FRAME_ENVELOPE_HEADROOM
+    HOST_DOCUMENT_FRAME_BYTES + FRAME_ENVELOPE_HEADROOM
         <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
     "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
 );
@@ -10211,6 +11277,8 @@ mod signal_session_unit_tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -10636,6 +11704,8 @@ mod list_sessions_unit_tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -10731,6 +11801,8 @@ mod report_session_status_unit_tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -10831,6 +11903,8 @@ mod report_session_status_unit_tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -10951,6 +12025,8 @@ mod agent_activity_unit_tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }

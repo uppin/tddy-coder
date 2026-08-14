@@ -119,6 +119,8 @@ fn write_minimal_running_session(sessions_base: &std::path::Path, session_id: &s
         agent: None,
         recipe: None,
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 }

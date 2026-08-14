@@ -188,7 +188,10 @@ async fn list_worktree_directory_lists_the_projects_primary_worktree() {
     // Then — the repo's checked-in file is offered, with its real size
     let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, vec!["README.md"]);
-    assert_eq!(entries[0].size_bytes, "# Hello Worktree\n\n- alpha\n".len() as u64);
+    assert_eq!(
+        entries[0].size_bytes,
+        "# Hello Worktree\n\n- alpha\n".len() as u64
+    );
     assert!(!entries[0].is_dir);
 }
 

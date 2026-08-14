@@ -8,6 +8,8 @@
  * constant is a prefix or a helper function — see the examples below.
  */
 
+import { safeTestIdPart } from "../../src/lib/testId";
+
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
@@ -92,6 +94,12 @@ export const TEST_IDS = {
   participantListEmpty: "participant-list-empty",
   participantListError: "participant-list-error",
   connectedParticipantsPanel: "connected-participants-panel",
+
+  // LiveKit rooms panel
+  livekitRoomsPanel: "livekit-rooms-panel",
+  livekitRoomsPanelLoading: "livekit-rooms-panel-loading",
+  livekitRoomsPanelEmpty: "livekit-rooms-panel-empty",
+  livekitRoomsPanelError: "livekit-rooms-panel-error",
 
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",
@@ -262,6 +270,10 @@ export const TEST_IDS = {
   /** "Semantic index" checkbox inside the Managed codebase section — when on, the daemon indexes the
    * worktree before launch and exposes the SemanticSearch tool. See docs/ft/coder/semantic-index.md. */
   createSessionSemanticIndexToggle: "create-session-semantic-index-toggle",
+  /** "Codebase host" <select> inside the Managed codebase section — which daemon's filesystem holds
+   * the session's git worktree. Empty value means "same as host" (co-located). claude-cli only.
+   * See docs/ft/daemon/remote-managed-worktree.md. */
+  createSessionCodebaseHostSelect: "create-session-codebase-host-select",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
@@ -639,6 +651,61 @@ export const participantOwnedProjectCount = (identity: string) =>
 export const sessionMoreActions = (sessionId: string) => `session-more-actions-${sessionId}`;
 
 // ---------------------------------------------------------------------------
+// LiveKit rooms panel dynamic helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Room names and participant identities carry characters that do not belong in a test id
+ * (`livekit.common_room`, `daemon-x/y`), so the helpers below collapse them with `safeTestIdPart`.
+ * `LiveKitRoomsPanel.tsx` and `ParticipantList.tsx` import that same function from
+ * `src/lib/testId.ts`, so these selectors cannot drift from the ids they select.
+ */
+
+/** `[data-testid="livekit-room-entry-<room>"]` */
+export const livekitRoomEntry = (room: string) => `livekit-room-entry-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-toggle-<room>"]` */
+export const livekitRoomToggle = (room: string) => `livekit-room-toggle-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-name-<room>"]` */
+export const livekitRoomName = (room: string) => `livekit-room-name-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-label-<room>"]` */
+export const livekitRoomLabel = (room: string) => `livekit-room-label-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-participant-count-<room>"]` */
+export const livekitRoomParticipantCount = (room: string) =>
+  `livekit-room-participant-count-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-created-at-<room>"]` */
+export const livekitRoomCreatedAt = (room: string) =>
+  `livekit-room-created-at-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-no-participants-<room>"]` */
+export const livekitRoomNoParticipants = (room: string) =>
+  `livekit-room-no-participants-${safeTestIdPart(room)}`;
+
+/** `[data-testid="livekit-room-participant-entry-<room>-<identity>"]` */
+export const livekitRoomParticipantEntry = (room: string, identity: string) =>
+  `livekit-room-participant-entry-${safeTestIdPart(room)}-${safeTestIdPart(identity)}`;
+
+/** `[data-testid="livekit-room-participant-role-<room>-<identity>"]` */
+export const livekitRoomParticipantRole = (room: string, identity: string) =>
+  `livekit-room-participant-role-${safeTestIdPart(room)}-${safeTestIdPart(identity)}`;
+
+/** `[data-testid="livekit-room-participant-joined-<room>-<identity>"]` */
+export const livekitRoomParticipantJoined = (room: string, identity: string) =>
+  `livekit-room-participant-joined-${safeTestIdPart(room)}-${safeTestIdPart(identity)}`;
+
+/** `[data-testid="livekit-room-participant-state-<room>-<identity>"]` */
+export const livekitRoomParticipantState = (room: string, identity: string) =>
+  `livekit-room-participant-state-${safeTestIdPart(room)}-${safeTestIdPart(identity)}`;
+
+/** `[data-testid="livekit-room-participant-metadata-<room>-<identity>"]` */
+export const livekitRoomParticipantMetadata = (room: string, identity: string) =>
+  `livekit-room-participant-metadata-${safeTestIdPart(room)}-${safeTestIdPart(identity)}`;
+
+// ---------------------------------------------------------------------------
 // Sessions drawer screen dynamic helpers
 // ---------------------------------------------------------------------------
 
@@ -664,6 +731,14 @@ export const sessionsDrawerItemTooltip = (sessionId: string) =>
 /** `[data-testid="sessions-drawer-item-host-<sessionId>"]` — owning-host badge on cross-host rows */
 export const sessionsDrawerItemHost = (sessionId: string) =>
   `sessions-drawer-item-host-${sessionId}`;
+
+/**
+ * `[data-testid="sessions-drawer-item-codebase-host-<sessionId>"]` — codebase-host badge on a split
+ * session, whose worktree lives on a different daemon than the one running its agent. Absent for
+ * co-located sessions. See docs/ft/daemon/remote-managed-worktree.md.
+ */
+export const sessionsDrawerItemCodebaseHost = (sessionId: string) =>
+  `sessions-drawer-item-codebase-host-${sessionId}`;
 
 /** `[data-testid="sessions-detail-resume-<sessionId>"]` — Resume button in detail pane */
 export const sessionsDetailResumeBtn = (sessionId: string) =>

@@ -13,6 +13,12 @@ interface SessionDrawerItemProps {
   depth?: number;
   /** Owning-host label for a cross-host row; `null`/omitted for rows on the selected host. */
   hostLabel?: string | null;
+  /**
+   * Label of the daemon holding this session's worktree, when that is not the daemon running the
+   * agent (docs/ft/daemon/remote-managed-worktree.md). `null`/omitted for co-located sessions —
+   * badging every row would claim a split placement that most sessions do not have.
+   */
+  codebaseHostLabel?: string | null;
   /** Parsed `session` participant-metadata block for this row (presence-driven, req 4). */
   sessionMetadata?: SessionMetadata | null;
   /** Whether this row is ticked for bulk delete. */
@@ -27,7 +33,7 @@ const STATUS_COLOR: Record<string, string> = {
   "needs-input": "bg-yellow-500",
 };
 
-export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, codebaseHostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const status = connectionStatusForSession(session);
 
@@ -78,6 +84,17 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
               className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
             >
               {hostLabel}
+            </span>
+          )}
+          {/* Codebase-host badge — outlined rather than filled so "the agent runs here" and "the
+              code lives there" stay tellable apart when a split row shows both. */}
+          {codebaseHostLabel && (
+            <span
+              data-testid={`sessions-drawer-item-codebase-host-${session.sessionId}`}
+              title={`Codebase on ${codebaseHostLabel}`}
+              className="flex-shrink-0 text-[10px] leading-none px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary"
+            >
+              {codebaseHostLabel}
             </span>
           )}
           </button>
