@@ -492,6 +492,8 @@ async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSessi
         }
     }
 
+    spawn_worktree_activity_log(Arc::clone(&connected_room));
+
     // Through the factory rather than building an RpcClient directly: it owns one ClientEngine and
     // one response loop per room, so vended clients share a request-id space instead of each
     // starting at 1 and leaking its own `room.subscribe()` loop. Harmless while every call had its
@@ -506,6 +508,56 @@ async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSessi
                 .contains_key(&presence_target)
         }),
     )))
+}
+
+/// Log the worktree's activity for as long as this process holds the room.
+///
+/// The room the tools are dispatched in is the room of the checkout they operate on, and the daemon
+/// that owns that checkout broadcasts what happens to it on
+/// [`WORKTREE_ACTIVITY_TOPIC`](tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC).
+/// Subscribing costs one task and yields one `DEBUG` line per event: nothing here derives state
+/// from an event or acts on one, which
+/// is deliberate — the log is what a `tddy-tools=debug` session leaves behind for someone asking
+/// whether the agent's picture of the worktree was current, and the first consumer that needs more
+/// than that will have this stream to read.
+#[cfg(feature = "livekit")]
+fn spawn_worktree_activity_log(room: std::sync::Arc<livekit::Room>) {
+    let mut activity = tddy_livekit::BroadcastChannel::new(
+        room,
+        tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC,
+    )
+    .subscribe();
+    tokio::spawn(async move {
+        while let Some(message) = activity.recv().await {
+            match worktree_activity_line(&message.payload) {
+                Ok(line) => log::debug!(target: "tddy_tools::session_tool_client", "{line}"),
+                Err(e) => log::warn!(
+                    target: "tddy_tools::session_tool_client",
+                    "worktree activity payload from {:?} did not decode: {e}",
+                    message.from
+                ),
+            }
+        }
+    });
+}
+
+/// Decode one `worktree.activity` payload and render the `DEBUG` line it produces.
+///
+/// Split out of [`spawn_worktree_activity_log`] because it is the whole of what that task decides:
+/// the loop around it only chooses which log level to emit at, and a payload that does not decode —
+/// an event from a newer publisher whose schema this build cannot read — must surface as a warning
+/// rather than as one more silent drop on a fire-and-forget topic.
+///
+/// Compiled whenever its caller is, and additionally under `cfg(test)`: a `--no-default-features`
+/// build has no LiveKit and so no `spawn_worktree_activity_log` to call this, but the decoding rule
+/// it holds is the same one either way.
+#[cfg(any(feature = "livekit", test))]
+fn worktree_activity_line(payload: &[u8]) -> Result<String, prost::DecodeError> {
+    use prost::Message as _;
+    use tddy_service::proto::worktree_activity::WorktreeActivityEvent;
+
+    let event = WorktreeActivityEvent::decode(payload)?;
+    Ok(tddy_service::worktree_activity::format_worktree_activity_for_log(&event))
 }
 
 /// Forward a tool call to a remote daemon over LiveKit, addressed at its RPC-server participant.
@@ -898,6 +950,49 @@ pub async fn dispatch_via_streaming_rpc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broadcast_worktree_event_renders_as_the_line_the_agents_log_carries() {
+        // Given the bytes of a commit event as the facilitating daemon broadcast them
+        let payload = {
+            use prost::Message as _;
+            tddy_service::proto::worktree_activity::WorktreeActivityEvent {
+                kind: tddy_service::proto::worktree_activity::WorktreeActivityKind::Commit as i32,
+                seq: 4,
+                at_unix_ms: 1_760_000_000_000,
+                head_commit: "abcdef1234567890abcdef1234567890abcdef12".to_string(),
+                changed_files: 0,
+                lines_added: 0,
+                lines_removed: 0,
+            }
+            .encode_to_vec()
+        };
+
+        // When the receiver turns the payload into its log line
+        let line = worktree_activity_line(&payload);
+
+        // Then a split agent's process leaves behind the same sentence every other receiver does —
+        // which is the whole of what subscribing to the topic does for it today
+        assert_eq!(
+            line.expect("a well-formed event must decode"),
+            "worktree activity: commit seq=4 head=abcdef1"
+        );
+    }
+
+    #[test]
+    fn a_payload_that_is_not_an_activity_event_is_reported_rather_than_logged_as_one() {
+        // Given bytes that are not a `WorktreeActivityEvent` — what a newer publisher, or a topic
+        // collision, would put on the wire
+        let payload = b"\xff\xff not protobuf at all";
+
+        // When the receiver tries to turn them into a log line
+        let line = worktree_activity_line(payload);
+
+        // Then it says so, so the receiver can warn. A fire-and-forget topic has no reply to fail,
+        // so a payload silently dropped here would be indistinguishable from a publisher that went
+        // quiet.
+        line.expect_err("an undecodable payload must not produce a line");
+    }
 
     #[test]
     fn format_tool_dispatch_result_returns_result_json_on_success() {

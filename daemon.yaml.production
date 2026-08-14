@@ -107,6 +107,25 @@ local:
 #   public_url: ws://your-host:7880
 #   common_room: tddy-lobby
 
+# Per-session LiveKit rooms (session-<session_id>). The daemon running a session's agent hosts one,
+# joins it before the agent is spawned, serves its file-access RPCs there, broadcasts git activity on
+# the `worktree.activity` topic, and keeps the room's metadata as the current working-tree summary.
+# Additional agents (fastcontext, discovery) join the same room. See docs/ft/daemon/session-room.md.
+#
+# When the session's repo lives on another daemon, the room still belongs to the daemon running the
+# agent: it measures the checkout and serves files by forwarding to that codebase daemon, so
+# participants never learn which case they are in.
+#
+# Requires the `livekit:` block above — without credentials no room is created and sessions start
+# exactly as before. These knobs only pace the polling that feeds it.
+# session_room:
+#   # How often the checkout is measured (git rev-parse / status / diff --numstat). Lower means
+#   # fresher activity and heavier git load: every tick spawns git subprocesses per hosted room.
+#   poll_interval_ms: 2000
+#   # Ceiling for one measurement. A repo that exceeds it (a stale index.lock, a network filesystem
+#   # stalling) has that tick abandoned, so the room's freshness degrades and nothing else does.
+#   git_timeout_ms: 5000
+
 users: []
 # - github_user: "octocat"
 #   os_user: "dev1"

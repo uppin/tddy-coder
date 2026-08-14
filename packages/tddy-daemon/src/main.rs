@@ -199,6 +199,11 @@ fn main() -> anyhow::Result<()> {
     let shared_claude_cli_manager =
         Arc::new(tddy_daemon::cli_session_manager::CliSessionManager::new());
 
+    // One registry of hosted session rooms for the whole daemon: `StartSession` opens rooms in it
+    // and both deletion paths — the `DeleteSession` RPC and Telegram's Delete button — close them
+    // there. Two registries would mean a room only one of them could ever stop hosting.
+    let shared_session_rooms = Arc::new(tddy_daemon::session_room::SessionRoomRegistry::new());
+
     let mut telegram_inbound: Option<(
         Bot,
         Arc<
@@ -281,7 +286,8 @@ fn main() -> anyhow::Result<()> {
                             workflow_spawn,
                             Some(active_elicitation),
                             Some(telegram_tracked),
-                        ),
+                        )
+                        .with_session_rooms(Arc::clone(&shared_session_rooms)),
                     ));
                     telegram_inbound = Some((bot.clone(), harness));
                 } else {
@@ -445,7 +451,8 @@ fn main() -> anyhow::Result<()> {
                 livekit_discovery,
                 telegram_hooks.clone(),
                 Arc::clone(&shared_claude_cli_manager),
-            );
+            )
+            .with_session_rooms(Arc::clone(&shared_session_rooms));
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
             }

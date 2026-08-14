@@ -140,6 +140,13 @@ service ConnectionService {
   // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
   // See docs/ft/coder/pr-stack-live-status.md.
   rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
+  // One measurement of a session's checkout, for the daemon hosting that session's room.
+  //
+  // A session room lives on the daemon running the session's agent; when the repo is remote that
+  // daemon has no checkout to measure, so it asks the codebase daemon for the same snapshot the
+  // codebase daemon would take of itself. One round trip per poll rather than three, because the
+  // measurement is assembled where the files are.
+  rpc GetWorktreeSnapshot(GetWorktreeSnapshotRequest) returns (GetWorktreeSnapshotResponse);
   // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
   // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
   // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
@@ -1733,4 +1740,29 @@ message AttachmentMaterializationProgress {
   // Bytes of this attachment materialized so far, and its full size.
   uint64 bytes_done = 4;
   uint64 bytes_total = 5;
+}
+
+// Asks the daemon holding a checkout to measure it. `session_id` names the session on the
+// ANSWERING daemon whose `repo_path` is the checkout — for a split session that is the paired
+// `workspace` session, not the agent's own id.
+message GetWorktreeSnapshotRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+}
+
+// The same fields `snapshot_worktree` produces locally, so a remote measurement and a local one are
+// the same value and neither the poll loop nor the room metadata can tell them apart.
+message GetWorktreeSnapshotResponse {
+  string head_commit = 1;
+  string branch = 2;
+  repeated string changed_paths = 3;
+  uint32 changed_files = 4;
+  int64 lines_added = 5;
+  int64 lines_removed = 6;
+  uint32 untracked_files = 7;
+  // Basenames under the session's `artifacts/attachments/`, so the room's metadata lists what the
+  // answering daemon actually holds rather than what the asking one guesses.
+  repeated string attachments = 8;
 }

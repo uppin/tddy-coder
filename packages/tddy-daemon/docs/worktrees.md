@@ -15,6 +15,8 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`projects_stats_cache_root`** | Root directory; honors **`TDDY_PROJECTS_STATS_ROOT`**. |
 | **`validate_worktree_path_within_repo_root`** | Lexical **`..`** / absolute resolution; no filesystem canonicalize. |
 | **`WorktreeStatsCache`** | **`new`**, **`refresh_stats_for_project`**, **`list_cached_stats`**, **`invalidate_project`**. Test-only atomic **`test_git_diff_invocations`** counts refresh-side diff/stat work; list path does not re-run diff. |
+| **`WorktreeNumstat`** | Parsed `git diff --numstat HEAD`: **`paths`**, **`changed_files`**, **`lines_added`**, **`lines_removed`**. |
+| **`git_diff_numstat`** | Runs and parses that diff. Shared with `session_room`, so a session room and the Worktrees screen can never quote different totals for one checkout. Paths arrive as git presents them — C-quoted for non-ASCII, `{old => new}` for renames — so they are display-only. |
 | **`RemoveWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotRemovePrimary`**, **`Io`**. |
 | **`remove_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git worktree remove`**. |
 | **`CleanWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotCleanPrimary`**, **`Io`**. |
