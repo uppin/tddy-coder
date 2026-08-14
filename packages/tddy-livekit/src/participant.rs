@@ -705,7 +705,13 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
                     }
                 }
                 RoomEvent::ParticipantDisconnected(remote) => {
-                    log::info!("[LiveKit] ParticipantDisconnected {:?}", remote.identity());
+                    let identity = remote.identity();
+                    log::info!("[LiveKit] ParticipantDisconnected {:?}", identity);
+                    // Responses are addressed by participant identity (see `handle_incoming`), so
+                    // that identity is also the key under which the engine holds this peer's live
+                    // bidi sessions, half-sent calls and in-flight streaming forwards. Without this
+                    // a departed peer's forwards keep pumping frames nobody will ever read.
+                    self.server.on_peer_disconnected(identity.as_str()).await;
                 }
                 _ => {}
             }
