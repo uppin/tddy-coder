@@ -41,6 +41,7 @@ pub mod session_deletion;
 pub mod session_file_upload;
 pub mod session_list_enrichment;
 pub mod session_reader;
+pub mod session_room;
 pub mod session_toolcall;
 pub mod session_uploads;
 pub mod session_workflow_files;

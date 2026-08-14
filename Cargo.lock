@@ -10271,6 +10271,7 @@ dependencies = [
  "tddy-livekit-testkit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
  "tokio",

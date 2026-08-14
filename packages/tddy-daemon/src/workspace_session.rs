@@ -27,8 +27,13 @@ pub struct WorkspaceBranchIntent<'a> {
     pub selected_branch_to_work_on: &'a str,
 }
 
-/// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`,
-/// and return a `StartSessionResponse` with empty LiveKit fields.
+/// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`.
+///
+/// **No room is opened here.** A session room belongs to the daemon running a session's *agent*
+/// (`docs/ft/daemon/session-room.md`, Roles), and a workspace session has no
+/// agent — it is a checkout, either standalone or the codebase half of a split session whose agent
+/// lives on another daemon entirely. Hosting a room here would put it on the one participant that
+/// has nobody to serve, and would name it after a session the agent's daemon does not own.
 #[allow(clippy::too_many_arguments)]
 pub async fn start_workspace_session(
     os_user: &str,
@@ -148,11 +153,15 @@ pub async fn start_workspace_session(
         os_user
     );
 
+    // Three empty LiveKit fields, as before this daemon hosted rooms at all: a workspace session is
+    // a checkout, and there is nothing here for a participant to join.
+    let (livekit_room, livekit_url, livekit_server_identity) =
+        (String::new(), String::new(), String::new());
     Ok(Response::new(StartSessionResponse {
         session_id: session_id.to_string(),
-        livekit_room: String::new(),
-        livekit_url: String::new(),
-        livekit_server_identity: String::new(),
+        livekit_room,
+        livekit_url,
+        livekit_server_identity,
         branch_conflict: None,
     }))
 }

@@ -90,14 +90,14 @@ use tddy_service::proto::connection::{
     ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
     GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
     GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
-    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo,
+    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats,
+    HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+    RepointPlannedPrRequest, RepointPlannedPrResponse, ReportAgentActivityRequest,
+    ReportAgentActivityResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest,
+    StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest, StreamMode,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -966,6 +966,11 @@ pub struct ConnectionServiceImpl {
     /// cleared by the host restart rather than living in the data dir forever. Defaults to
     /// [`crate::session_attachment_staging::default_staging_base_dir`].
     staging_base_dir: PathBuf,
+    /// The per-worktree LiveKit rooms this daemon hosts, keyed by the session owning each checkout
+    /// (`docs/ft/daemon/session-room.md`). Holding the joined participant
+    /// here is what keeps a room open past the `StartSession` that created it; `DeleteSession`
+    /// closes it again.
+    session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -1046,6 +1051,33 @@ impl ConnectionServiceImpl {
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
+            session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
+        }
+    }
+
+    /// Share the daemon's session-room registry (builder) with everything else that opens or
+    /// closes rooms — Telegram's Delete path holds the same `Arc`. Without it this service keeps
+    /// the private registry it was constructed with, which is right for a test fixture and wrong
+    /// for a daemon, where a room opened here has to be closable from there.
+    pub fn with_session_rooms(
+        mut self,
+        rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    ) -> Self {
+        self.session_rooms = rooms;
+        self
+    }
+
+    /// This daemon as the host of the rooms of the sessions it runs agents for.
+    ///
+    /// Handed to the agent-start path so the room is open *before* the agent process exists, which
+    /// is what makes "the facilitating daemon is the first participant" a consequence of ordering
+    /// rather than a race (PRD FR2).
+    fn session_room_host(&self) -> DaemonSessionRoomHost {
+        DaemonSessionRoomHost {
+            config: self.config.clone(),
+            instance_id: local_instance_id_for_config(&self.config),
+            rooms: Arc::clone(&self.session_rooms),
+            service: self.clone(),
         }
     }
 
@@ -1514,6 +1546,7 @@ impl ConnectionServiceImpl {
             {
                 let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
                 Some(Arc::new(StackChildSpawnHandler {
+                    room_host: Arc::new(self.session_room_host()),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),
                     claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1561,6 +1594,7 @@ impl ConnectionServiceImpl {
             semantic_index,
             create_remote_branch,
             &self.task_registry,
+            &self.session_room_host(),
         )
         .await
     }
@@ -1582,6 +1616,7 @@ impl ConnectionServiceImpl {
             return None;
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
+            room_host: Arc::new(self.session_room_host()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1628,6 +1663,7 @@ impl ConnectionServiceImpl {
         let sessions_base = self.tddy_data_dir.clone();
         let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         let handler = Arc::new(GrillMeConversationSpawnHandler {
+            room_host: Arc::new(self.session_room_host()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -1843,6 +1879,76 @@ pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
     crate::config::resolve_claude_binary_path(config)
 }
 
+/// The daemon's own [`crate::session_room::SessionRoomHost`].
+///
+/// Holds a clone of the service it will serve inside the room — the same `ConnectionService` it
+/// answers on in the common room, so a participant reaches every file-access method without a
+/// second connection anywhere (PRD FR3). That makes a reference cycle with the registry, which is
+/// deliberate and broken by `close`: see `SessionRoomRegistry`.
+struct DaemonSessionRoomHost {
+    config: DaemonConfig,
+    instance_id: String,
+    rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    service: ConnectionServiceImpl,
+}
+
+/// The daemon measuring a checkout that lives on one of its peers.
+///
+/// Routed through its own `GetWorktreeSnapshot` handler rather than a bespoke client, so a remote
+/// measurement takes exactly the path a caller's would — including the peer routing and the
+/// blocking-pool budget.
+#[async_trait::async_trait]
+impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
+    async fn snapshot(
+        &self,
+        session_token: &str,
+        codebase_session_id: &str,
+        codebase_instance_id: &str,
+    ) -> Result<crate::session_room::WorktreeSnapshot, Status> {
+        let answered = ConnectionServiceTrait::get_worktree_snapshot(
+            self,
+            Request::new(GetWorktreeSnapshotRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session_id.to_string(),
+                daemon_instance_id: codebase_instance_id.to_string(),
+            }),
+        )
+        .await?
+        .into_inner();
+        Ok(crate::session_room::WorktreeSnapshot {
+            head_commit: answered.head_commit,
+            branch: answered.branch,
+            changed_paths: answered.changed_paths,
+            changed_files: answered.changed_files,
+            lines_added: answered.lines_added,
+            lines_removed: answered.lines_removed,
+            untracked_files: answered.untracked_files,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::session_room::SessionRoomHost for DaemonSessionRoomHost {
+    async fn open_for(
+        &self,
+        session_id: &str,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> Result<Option<crate::session_room::OpenedSessionRoom>, Status> {
+        self.rooms
+            .open(
+                &crate::session_room::DaemonRoomHosting {
+                    config: &self.config,
+                    instance_id: &self.instance_id,
+                    rooms: &self.rooms,
+                }
+                .for_worktree(session_id, worktree_root, session_dir),
+                tddy_service::ConnectionServiceServer::new(self.service.clone()),
+            )
+            .await
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -1871,6 +1977,7 @@ async fn spawn_claude_cli_session_inner(
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
     task_registry: &TaskRegistry,
+    room_host: &dyn crate::session_room::SessionRoomHost,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -2088,6 +2195,29 @@ async fn spawn_claude_cli_session_inner(
         .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
         let (key, value) = crate::semantic_index::semantic_index_env(&session_dir);
         env_extra.push((key, value));
+    }
+
+    // Before the agent exists, not after: this daemon is the session's facilitating daemon, and the
+    // room's first-participant property is a consequence of this `await` completing while the only
+    // thing that could join is still unspawned (PRD FR2). A failure here fails the start — the
+    // agent's tool transport is minted for this room, so a session started without it is a session
+    // whose agent has nowhere to ask for its files.
+    // Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
+    // session's *terminal* room, which the browser attaches to, and the two are different rooms
+    // with different participants. A caller that wants this one derives it from the session id
+    // through `session_room_name`, which is how the agent's own wiring gets it too.
+    match room_host
+        .open_for(session_id, &worktree_path, &session_dir)
+        .await?
+    {
+        Some(room) => log::info!(
+            "claude-cli session {session_id} facilitated in {} as {}",
+            room.room,
+            room.server_identity
+        ),
+        None => log::debug!(
+            "claude-cli session {session_id} runs without a session room (LiveKit not configured)"
+        ),
     }
 
     let handle = manager
@@ -3931,6 +4061,9 @@ fn prepare_managed_workflow_inner(
 /// [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses. Bound only to a `pr-stack`
 /// orchestrator's toolcall listener, so it can only spawn children for that orchestrator's stack.
 struct StackChildSpawnHandler {
+    /// Opens the session room of each child agent this handler spawns — the children are
+    /// agent sessions of this same daemon, so it facilitates their rooms too.
+    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -4004,6 +4137,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // never push a remote branch here.
             false,
             &self.claude_cli_manager.task_registry(),
+            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -4051,6 +4185,9 @@ fn conversation_branch_slug(prompt: &str) -> String {
 /// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
 /// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
 struct GrillMeConversationSpawnHandler {
+    /// Opens the session room of each child agent this handler spawns — the children are
+    /// agent sessions of this same daemon, so it facilitates their rooms too.
+    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -4123,6 +4260,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             &self.claude_cli_manager.task_registry(),
+            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -4910,9 +5048,6 @@ impl ConnectionServiceImpl {
         }
 
         let slot = self.common_room_slot("StartSession")?.clone();
-        // Resolved before the peer is contacted: a room this daemon cannot mint a token for means
-        // the agent could never reach the worktree, so nothing should be created for it.
-        let livekit = crate::split_session::SplitLiveKitRoom::from_config(&self.config)?;
 
         let sessions_base =
             crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
@@ -4926,15 +5061,27 @@ impl ConnectionServiceImpl {
         // a teardown. This is what makes the failure atomic rather than merely usually atomic.
         let codebase_session_id = Uuid::now_v7().to_string();
 
+        // Resolved before the peer is contacted: a room this daemon cannot mint a token for means
+        // the agent could never reach its checkout, so nothing should be created for it. The room is
+        // *this* session's and is hosted here — this daemon runs the agent, so it is the session's
+        // facilitating daemon whether or not the repo turns out to live somewhere else.
+        let livekit = crate::split_session::SplitLiveKitRoom::from_config(
+            &self.config,
+            crate::session_room::session_room_name(&session_id),
+        )?;
+
         // The peer runs this locally and holds the codebase for it, so it must not route the request
         // onward: `daemon_instance_id` named *this* host, and a codebase host of its own would make
         // it split the session again.
+        // Attachments belong beside the agent, which is here: they are read by the agent and by the
+        // browser's Docs listing, both of which act against *this* session on *this* daemon. Sending
+        // them on would put a second copy on a host with no reader for it, and pay the transfer
+        // inside the forward's deadline to do so.
         let workspace_req = StartSessionRequest {
             session_type: "workspace".to_string(),
             daemon_instance_id: String::new(),
             codebase_daemon_instance_id: String::new(),
             requested_session_id: codebase_session_id.clone(),
-            // Attachments belong beside the agent, which is here.
             attachments: Vec::new(),
             ..req.clone()
         };
@@ -4989,7 +5136,9 @@ impl ConnectionServiceImpl {
                 "daemon {codebase_instance_id} created workspace session {created_session_id:?} instead of the requested {codebase_session_id:?}; it does not honour requested_session_id, so a split session's worktree could not be reclaimed after a failed start"
             )));
         }
-
+        // Nothing about the peer's LiveKit fields is checked here any more: a codebase daemon hosts
+        // no room. It holds a checkout and answers `GetWorktreeSnapshot` and tool calls about it,
+        // both of which this daemon reaches over the peer routing it already uses.
         let started = self
             .spawn_split_agent(
                 os_user,
@@ -5055,6 +5204,42 @@ impl ConnectionServiceImpl {
             codebase_session_id,
             &req.session_token,
         )?;
+        // This daemon runs the agent, so it is this session's facilitating daemon and hosts its room —
+        // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
+        // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
+        // this host does not have (FR5). The agent's token was minted for exactly this room.
+        let remote_source = Arc::new(crate::session_room::RemoteCheckout::new(
+            Arc::new(self.clone()),
+            codebase_session_id.to_string(),
+            codebase_instance_id.to_string(),
+            req.session_token.clone(),
+            session_dir.clone(),
+        ));
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        match self
+            .session_rooms
+            .open_measured_by(
+                &crate::session_room::DaemonRoomHosting {
+                    config: &self.config,
+                    instance_id: &local_instance_id,
+                    rooms: &self.session_rooms,
+                }
+                .for_remote_worktree(session_id, &session_dir),
+                tddy_service::ConnectionServiceServer::new(self.clone()),
+                remote_source,
+            )
+            .await?
+        {
+            Some(room) => log::info!(
+                "split session {session_id} facilitated in {} as {}, measuring session {codebase_session_id} on daemon {codebase_instance_id}",
+                room.room,
+                room.server_identity
+            ),
+            None => log::debug!(
+                "split session {session_id} runs without a session room (LiveKit not configured)"
+            ),
+        }
+
         let context_dir = crate::split_session::build_split_context_dir(&session_dir)?;
         let extra_args = crate::split_session::split_claude_extra_args(
             &session_dir,
@@ -5508,6 +5693,9 @@ impl ConnectionServiceImpl {
             })
             .await?;
             let timeout = self.config.spawn_worker_request_timeout();
+            // The room serves this very service: a participant of a session room reaches the same
+            // `ExecuteTool` / `ReadHostDocument` surface a caller reaches over the common room or
+            // HTTP, on the same daemon, rooted at the checkout it just made.
             return workspace_session::start_workspace_session(
                 os_user,
                 &session_id,
@@ -6955,6 +7143,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             sandbox.stop();
         }
         let _ = self.sandbox_manager.remove(session_id).await;
+        session_deletion::close_session_room(&self.session_rooms, session_id);
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
@@ -7790,6 +7979,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }
 
         let worktree_path = PathBuf::from(worktree_path_raw);
+
+        // Before the checkout goes, not after: a session room measures its directory on an
+        // interval, so one still hosted for this path would shell out to git in a directory that no
+        // longer exists — warning at the poll rate for the life of the daemon. This RPC removes a
+        // checkout by path and never learns a session id, so the registry is asked by path.
+        self.session_rooms.close_for_worktree(&worktree_path);
 
         let repo_blocking = main_repo.clone();
         let wt_blocking = worktree_path.clone();
@@ -9255,6 +9450,73 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .await;
         Ok(Response::new(GetPrStatusResponse {
             status: Some(status),
+        }))
+    }
+
+    async fn get_worktree_snapshot(
+        &self,
+        request: Request<GetWorktreeSnapshotRequest>,
+    ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
+        let req = request.into_inner();
+
+        // Routed exactly like ExecuteTool, and for the same reason: the caller names the daemon it
+        // believes holds the checkout, and a session room on the agent's daemon polls a remote
+        // checkout by addressing the codebase daemon. Reusing that classifier keeps one answer to
+        // "which daemon owns this session's files".
+        match self.classify_exec_tool_route("GetWorktreeSnapshot", &req.daemon_instance_id)? {
+            PeerRoute::Local => {}
+            PeerRoute::Forward { peer_instance_id } => {
+                let slot = self.common_room_slot("GetWorktreeSnapshot")?;
+                let out = crate::livekit_peer_discovery::forward_to_peer(
+                    slot,
+                    &peer_instance_id,
+                    "connection.ConnectionService",
+                    "GetWorktreeSnapshot",
+                    req.encode_to_vec(),
+                )
+                .await?;
+                let inner = GetWorktreeSnapshotResponse::decode(out.as_slice())
+                    .map_err(|e| Status::internal(format!("decoding peer snapshot: {e}")))?;
+                return Ok(Response::new(inner));
+            }
+        }
+
+        // The measurement is assembled here, where the files are, and shells out to git — so it
+        // runs on the blocking pool under the same budget a local poll uses. A caller that gave up
+        // waiting is a caller whose next tick will ask again.
+        let (sessions_base, worktree_root) =
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: req.session_token.clone(),
+                session_id: req.session_id.clone(),
+                tool_name: "GetWorktreeSnapshot".to_string(),
+                args_json: String::new(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+            })?;
+
+        let budget = self.config.session_room_git_timeout();
+        let measured_root = worktree_root.clone();
+        let snapshot = tokio::task::spawn_blocking(move || {
+            crate::session_room::snapshot_worktree_within(&measured_root, budget)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("measuring {worktree_root:?} panicked: {e}")))?;
+
+        let session_dir =
+            tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &req.session_id);
+        let attachments = crate::session_attachments::list_session_attachments(&session_dir)
+            .into_iter()
+            .map(|a| a.basename)
+            .collect();
+
+        Ok(Response::new(GetWorktreeSnapshotResponse {
+            head_commit: snapshot.head_commit,
+            branch: snapshot.branch,
+            changed_paths: snapshot.changed_paths,
+            changed_files: snapshot.changed_files,
+            lines_added: snapshot.lines_added,
+            lines_removed: snapshot.lines_removed,
+            untracked_files: snapshot.untracked_files,
+            attachments,
         }))
     }
 

@@ -300,8 +300,9 @@ async fn a_resumed_split_agent_is_re_wired_to_the_codebase_daemon_it_was_paired_
     );
     assert_eq!(
         resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_ROOM"),
-        COMMON_ROOM,
-        "the tool transport rides the configured common room"
+        tddy_daemon::session_room::session_room_name(AGENT_SESSION_ID),
+        "a resumed agent rejoins its own session's room — the one this daemon hosts as the session's \
+         facilitating daemon, not one named after the codebase session on the other host"
     );
     assert_eq!(
         resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_URL"),
