@@ -156,6 +156,76 @@ tddy-vm-build --spec <path-to-.config> --output <path> --format qcow2|raw
   defaults to `native`. Requires Docker to be installed and running — already a repo
   dependency via `tddy-build-docker`.
 
+## VM testkit — build-in-a-VM and test-in-a-VM (`tddy-vm-testkit`) (Added: 2026-08-14)
+
+**Product area:** VM / Sandbox / Supervisor
+**Status:** Implemented; production tests written but not yet run end to end
+**Changeset:** [docs/dev/1-WIP/vm-cgroups-testkit.md](../../dev/1-WIP/vm-cgroups-testkit.md)
+
+A testkit that makes the workspace's Linux-only code testable from a macOS host, by
+building it in one guest and asserting against it in another.
+
+**The image chain**, cached under the repo's `tmp/.tddy` (the same dev data dir `./web-dev`
+uses), all derived from one cloud image supplied on disk. (Updated: 2026-08-14 — reworked
+from flattened copies to a true backing chain.)
+
+```
+images/01-base/<supplied>.qcow2   the ONLY full image — sealed copy of the pristine
+                                  download, no backing file, 0444
+  ↑ absolute backing
+images/02-prepared-base/          ← one flat dir; links within it are bare basenames
+  tddy-nix-base.qcow2             delta: Nix + flakes, tddy + alice accounts
+    ↑ relative basename backing
+  tddy-builder.qcow2              delta: + 9p kernel, + warmed dev shell
+  tddy-test-host.qcow2            delta: + tddy-clients group, stock kernel
+```
+
+**Chaining discipline.** The imported pristine image is the **only full image in the
+system**. Every layer above it — the cloud-init one included — is a true delta created with
+`qemu-img create -f qcow2 -F qcow2 -b <parent> <child> <size>`, and **each provisioned
+overlay becomes the backing file of the next layer**: never flattened, never committed down.
+A `qemu-img convert` runs only to normalise a non-qcow2 supplied image, once, at import.
+
+Path style follows one rule: *same-directory link ⇒ bare basename (with `cwd` set to that
+directory); cross-directory link ⇒ absolute path to the durable location.* Only the
+`02-prepared-base/` → `01-base/` link is cross-directory.
+
+This mirrors `~/Code/makers-lt`'s `@wix/maker-vm` (`maker-build/maker-vm`), the same
+reference the VM & Image Library's own chaining was modelled on.
+
+Because every layer is a delta, the shared Nix parent saves both bake time *and* disk.
+
+> `cloud_init::build_cloud_init_image` implements this for every layer alike: it chains a
+> delta directly onto whatever image it is given, whether that is the pristine import or an
+> already-provisioned layer. The backing reference is computed by `relative_backing_path`,
+> and the overlay is created at its final path — a relative reference resolves against the
+> directory holding the image, so a created-then-moved overlay would point at nothing.
+
+**The builder guest** is on the critical path, not an optimisation: `tddy-supervisor`,
+`tddy-daemon` and `tddy-sandbox-runner` must be Linux/aarch64 ELF binaries, and an
+Apple-Silicon host cannot emit those. It mounts the working copy read-only over 9p and
+`tmp/.tddy/dist` **writable** (the first writable 9p share in the workspace), runs
+`./release`, and hands the binaries back to the host. Its overlay is long-lived so
+`/opt/tddy/target` survives and rebuilds are incremental.
+
+**The test host** gets a fresh, disposable overlay per run — cgroup state must never be
+inherited — receives the binaries by `scp`, and installs them with the real
+`./install --systemd --headless`. It keeps Debian's stock `-cloud` kernel: giving it the
+generic flavour for 9p would diverge the kernel under test from the one a real host runs,
+and the thing under test *is* kernel behaviour. That is why binaries arrive by scp, and why
+`tddy-vm` grew `scp_opts`/`scp_to_guest` (note `scp` spells the port `-P`, not `-p`).
+
+**What it unlocks.** Before this, every function touching `/sys/fs/cgroup` was either never
+executed by a test or exercised against a `tempfile::tempdir()` — which accepts any bytes,
+enforces no limit, and returns `ENOTEMPTY` forever where the kernel returns `EBUSY`, so
+scope removal's retry path and success path had never run. The production tests in
+`packages/tddy-e2e/tests/vm_cgroups_acceptance.rs` assert delegation the kernel actually
+honoured, `EBUSY` on a populated scope, `pids.max` refusing a fork, and a root supervisor
+with an already-dropped daemon.
+
+**Running it.** `#[ignore]` + env-gated, so `./test` is unaffected. `./run-vm-testkit`
+warms the cache; `./run-vm-testkit --status` reports what is cached.
+
 ## QEMU sandbox backend (`tddy-sandbox-qemu`) (Added: 2026-07-01)
 
 **Product area:** VM / Sandbox
@@ -233,13 +303,15 @@ this feature at a base image — there is no bundled or auto-downloaded default,
 machine-specific path is baked into the CLI. Reuses this repo's existing QEMU
 primitives instead of duplicating them:
 
-- **Immutable base + chained delta overlay.** The base cloud image is **copied** from
-  the caller-provided source (never downloaded by this feature, never re-fetched, never
-  mutated) into `<output-dir>/<name>-base.qcow2` via `qemu-img convert -f qcow2 -O
-  qcow2`. A delta overlay `<output-dir>/<name>.qcow2` is created with `qemu-img create -f
-  qcow2 -F qcow2 -b <name>-base.qcow2 <overlay> <disk-size>` — a **relative** backing
-  reference, so the base and overlay must stay co-located in the same directory (the
-  "image" produced by this feature is the pair, not a single file). Mirrors the existing
+- **Chained delta overlay.** (Updated: 2026-08-14 — the base is no longer copied or
+  converted.) The caller-provided base image is used **in place** as the backing file: it
+  is never downloaded, never re-fetched and never mutated. A delta overlay is created
+  directly at its final path with `qemu-img create -f qcow2 -F qcow2 -b <relative-parent>
+  <overlay> <disk-size>`, the backing reference computed by `relative_backing_path` so the
+  whole library relocates as a unit. The product of a bake is **one file**, not a pair.
+  Because a relative reference resolves against the directory holding the referencing
+  image, the overlay is created where it will live and is never moved afterwards. Mirrors
+  the existing
   ephemeral-overlay primitive in `tddy-sandbox-qemu`'s `overlay_create_argv`
   (`packages/tddy-sandbox-qemu/src/argv.rs`), adapted for disk sizing and relative
   basenames.
@@ -248,9 +320,20 @@ primitives instead of duplicating them:
   `xorriso -as mkisofs` (mkisofs-emulation mode — no new Rust ISO dependency). The
   `{{SSH_PUBLIC_KEY}}` placeholder in `ssh_authorized_keys` is replaced with either a
   caller-supplied key (`--ssh-public-key`) or a freshly generated keypair
-  (`ssh-keygen`). A `cloud-init clean --logs --seed` `bootcmd` is injected so a
-  pre-baked cloud image's prior cloud-init state doesn't suppress re-provisioning on the
-  copy.
+  (`ssh-keygen`). The rendered `users:` list is led by the bare string `default`, keeping
+  the distro's own account — a `users:` key *replaces* it, and `cc_ssh_authkey_fingerprints`
+  still resolves it by name, failing `cloud-final` with
+  `KeyError: getpwnam(): name not found: 'debian'` when it is missing (Added: 2026-08-14).
+
+  **Nothing is injected into `bootcmd`** (Updated: 2026-08-14). What stops a pre-baked cloud
+  image's prior cloud-init state from suppressing re-provisioning is the seed's own
+  `instance-id`, which names the layer being built and is therefore one cloud-init has never
+  processed. A `cloud-init clean --logs --seed` `bootcmd` used to be injected for that and
+  was actively destructive: `clean` deletes `/var/lib/cloud/instance/`, where the config
+  stage writes the `runcmd` script the final stage is about to run, so the boot it ran on
+  provisioned nothing and the host sealed an empty image and reported success. A step that
+  must reboot mid-bake resets the instance state itself, on its way out
+  (`cloud_init::reset_cloud_init_and_reboot`).
 - **Bake-in by booting.** The overlay is booted with the seed ISO attached
   (`-cdrom`), reusing `QemuVmArgs`' argv shape (`packages/tddy-vm/src/qemu.rs`) with the one
   difference needed to observe completion: `-serial stdio` (not `file:`).
@@ -267,15 +350,25 @@ primitives instead of duplicating them:
 
   A deterministic completion token
   (`CLOUDINIT_COMPLETE_<name>_<sha256(provisioning-input)[:12]>`) is embedded in
-  user-data as a per-boot script that prints the token then calls `shutdown -h now` (or
-  `<token>_FAILED` on error); the host watches the serial stream line-by-line (reusing
+  user-data as the **last `runcmd` step**, which dumps the guest's cloud-init logs to the
+  console, prints the token and calls `shutdown -h now`; an EXIT trap armed by the **first**
+  `runcmd` step prints `<token>_FAILED` (and halts) if any earlier step exits non-zero.
+  The host watches the serial stream line-by-line (reusing
   the `BufReader`/`tokio::select!` draining pattern from `build.rs::run_parallel_build`)
   and returns once the token is observed, with `send_monitor_command`
   (`packages/tddy-vm/src/qemu.rs`) as a graceful-shutdown fallback on timeout. The
   overlay this produces is fully provisioned — no first-boot cloud-init step needed by
   the consumer.
+
+  **The token used to be a `scripts-per-boot` script, and that was a real bug** (Fixed:
+  2026-08-14). `cloud_final_modules` runs `scripts-per-boot` *before* `scripts-user`, so
+  the guest halted — and the host sealed the overlay and reported success — before `runcmd`
+  had run at all: a bake of a recipe installing six apt packages and Nix produced a 21M
+  delta in 0.46s of "provisioning", its boot log showing no `scripts-user`, no `runcmd`,
+  and `set_hostname` as the only module that ran. Nothing but `runcmd` runs after `runcmd`,
+  which is why the signal now lives there.
 - **New module `tddy_vm::cloud_init`** — all argv/document-rendering logic is exposed
-  as pure, unit-testable builder functions (`base_convert_argv`, `overlay_create_argv`,
+  as pure, unit-testable builder functions (`relative_backing_path`, `overlay_create_argv`,
   `render_user_data`, `render_meta_data`, `completion_token`, `seed_iso_argv`,
   `iso_tool_command`, `cloud_init_boot_argv`, `classify_serial_line`), composed by an
   async orchestrator `build_cloud_init_image`.
@@ -341,9 +434,11 @@ rooted at the existing tddy data dir (the same root `tddy-daemon` already resolv
 ```
 
 Design mirrors `~/Code/makers-lt`'s `maker-vm` package: image chaining is pure qcow2
-backing files (pristine download → flattened immutable base → cloud-init overlay → per-VM
-mutable overlay), reusing this crate's existing `cloud_init` argv builders
-(`base_convert_argv`, `overlay_create_argv`) rather than reinventing them.
+backing files (pristine import → cloud-init overlay → further overlays → per-VM mutable
+overlay), reusing this crate's existing `cloud_init` argv builders
+(`relative_backing_path`, `overlay_create_argv`) rather than reinventing them. (Updated:
+2026-08-14 — the pristine import is the only full image; there is no flattened
+intermediate.)
 
 - **`VmLibrary`** (`packages/tddy-vm/src/library.rs`) — path accessors for the layout
   above; `init()` creates the tree; `import_base_image` copies a base into `01-base` and
@@ -365,9 +460,11 @@ mutable overlay), reusing this crate's existing `cloud_init` argv builders
   in-memory/RPC DTO — the existing `VmService` RPC surface and web UI are unaffected;
   `VmManager` maps between `VmSpec` and `VmManifest` internally.
 - **Cloud-init wiring** — `cloud_init_library_paths` (in `tddy_vm::cloud_init`) resolves a
-  cloud-init build's outputs into the library: the downloaded input base into `01-base/`,
-  and the flattened base + provisioned overlay pair into `02-prepared-base/` (co-located,
-  preserving the relative-backing-file invariant the pair depends on). `tddy-vm-build
+  cloud-init build's outputs into the library: the supplied input base into `01-base/`,
+  and the single provisioned overlay into `02-prepared-base/`, chained onto it by a
+  relative backing reference. (Updated: 2026-08-14 — there is no second, flattened half;
+  the overlay is created at this final path and never moved, because a relative reference
+  resolves against the directory holding the image.) `tddy-vm-build
   cloud-init` points the existing `build_cloud_init_image` pipeline at a per-image scratch
   subdirectory, `02-prepared-base/<name>/`, so every artifact it produces (seed ISO,
   `seed/nocloud/` sources, generated SSH keypair, boot log) lands there; once baking
@@ -572,8 +669,9 @@ TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-<arch>.qcow2 \
 where a stalled `apt`, a failed Nix install, or a wedged `./release` becomes visible. The
 guest's full transcript is also written to `<output-dir>/<name>-boot.log`.
 
-On success the prepared-base pair lands in `<tddy-data-dir>/images/02-prepared-base/`
-(`debian-12-tddy-base.qcow2` + `debian-12-tddy.qcow2`, both sealed `0444`). The scratch
+On success the prepared base lands in `<tddy-data-dir>/images/02-prepared-base/` as a
+single sealed-`0444` delta (`debian-12-tddy.qcow2`) chained onto the image in `01-base/`.
+(Updated: 2026-08-14 — formerly a `-base.qcow2` + overlay pair.) The scratch
 directory is removed on both the success and failure paths, so a failed run leaves no
 plaintext seed behind — but it also leaves nothing to inspect, so capture the console output.
 
@@ -584,10 +682,18 @@ TDDY_TDDY_HOST_PREPARED_BASE=<tddy-data-dir>/images/02-prepared-base/debian-12-t
   ./dev cargo test -p tddy-vm --test tddy_host_vm_acceptance -- --ignored --test-threads=1
 ```
 
-**When the bake is first run, check two things the static analysis could not settle:** that
-the LiveKit `api_secret` does not appear in `<name>-boot.log` or the streamed RPC progress,
-and that the completion token is not emitted before `runcmd` has finished (see the
-cloud-init ordering question in `docs/dev/TODO.md`).
+**When the bake is first run, check that** the LiveKit `api_secret` does not appear in
+`<name>-boot.log` or the streamed RPC progress. (The other open question — whether the
+completion token could be emitted before `runcmd` had finished — was settled by a real
+bake: it could, and it was. See the `scripts-per-boot` note above.)
+
+`<name>-boot.log` is written with terminal escapes stripped, and carries the guest's own
+cloud-init logs, framed for extraction:
+
+```bash
+sed -n '/TDDY_GUEST_LOG_BEGIN \/var\/log\/cloud-init.log/,/TDDY_GUEST_LOG_END \/var\/log\/cloud-init.log/p' \
+  <name>-boot.log
+```
 
 ### Out of scope for this sub-feature
 
@@ -624,7 +730,9 @@ the cloud packages is what makes the generic kernel the only thing left to boot.
 
 The step is guarded on `uname -r | grep -- '-cloud'`, so it is a no-op once a generic kernel
 is running. That bounds it to exactly one reboot: cloud-init re-runs `runcmd` on the next
-boot (the seed's `cloud-init clean` bootcmd ensures that), and the second pass falls straight
+boot (the step reboots through `cloud_init::reset_cloud_init_and_reboot`, which discards this
+instance's cloud-init state first — without that, the next boot recognises an instance it has
+already provisioned and skips `runcmd` entirely), and the second pass falls straight
 through to the real provisioning work. **That "next boot" only exists because the bake's boot
 argv omits `-no-reboot`** (see "Bake-in by booting" above) — with it, the guest's reset would
 end QEMU instead of restarting the guest, and the bake would fail on every `genericcloud`

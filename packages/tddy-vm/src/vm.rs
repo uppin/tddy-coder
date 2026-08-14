@@ -146,11 +146,26 @@ pub struct ForwardHandle {
 }
 
 /// Result of running the verify command inside the guest.
+///
+/// The two streams are kept apart, not concatenated. A caller asserting on what a command
+/// *answered* — the stdout of a CLI it just ran in the guest — cannot do so against a string
+/// that also carries sshd's host-key banner, a `sudo` warning, or the command's own
+/// diagnostics. Anything that genuinely wants both can ask for
+/// [`combined_output`][Self::combined_output].
 #[derive(Debug)]
 pub struct VerifyResult {
     pub success: bool,
-    pub output: String,
+    pub stdout: String,
+    pub stderr: String,
     pub exit_code: i32,
+}
+
+impl VerifyResult {
+    /// Both streams, stdout first — for a diagnostic message, where dropping either half
+    /// would drop the half that explained the failure.
+    pub fn combined_output(&self) -> String {
+        format!("{}{}", self.stdout, self.stderr)
+    }
 }
 
 /// Errors from VM operations.

@@ -1,12 +1,17 @@
 //! Cloud-init based VM image building with image-chaining.
 //!
-//! Copies an immutable base cloud image, chains a qcow2 delta overlay onto it
-//! (`qemu-img create -b`), generates a NoCloud cloud-init seed ISO, then boots QEMU to
-//! actually bake the provisioning into the overlay (watching the serial console for a
-//! completion token; the guest self-shuts-down when done). The output is the chained
-//! pair — `<name>-base.qcow2` (immutable) + `<name>.qcow2` (provisioned delta overlay)
-//! — co-located, since the overlay uses a **relative** backing-file reference and is
-//! not self-contained without its base.
+//! Chains a qcow2 delta overlay onto its parent image (`qemu-img create -b`), generates a
+//! NoCloud cloud-init seed ISO, then boots QEMU to actually bake the provisioning into the
+//! overlay (watching the serial console for a completion token; the guest self-shuts-down
+//! when done). The output is a single image — `<name>.qcow2` — holding **only its own
+//! delta** and keeping a live reference to the parent it was baked from. Nothing is copied
+//! and nothing is flattened: the parent is read, never rewritten.
+//!
+//! The backing reference is **relative** ([`relative_backing_path`]), so a whole library of
+//! layers relocates as a unit. A qcow2 resolves such a reference against the directory
+//! holding the *referencing* image, which is why [`build_cloud_init_image`] creates the
+//! overlay at its final `overlay_output` path and never moves it afterwards; `output_dir`
+//! is scratch space for everything else the bake produces.
 //!
 //! All argv/document-rendering logic is exposed as pure, unit-testable builder
 //! functions; [`build_cloud_init_image`] composes them into the full pipeline.
@@ -22,40 +27,69 @@ use crate::vm::{UefiFirmware, VmAccel, VmArch, VmError};
 
 // ── Pure argv builders ───────────────────────────────────────────────────────────
 
-/// Build `qemu-img convert -f qcow2 -O qcow2 <base_input> <base_output>` — a plain
-/// qcow2-to-qcow2 convert that flattens any prior backing chain on the source into a
-/// standalone, immutable base image. Distinct from `build.rs::convert_to_qcow2`
-/// (raw-to-qcow2, used by the Buildroot pipeline).
-pub fn base_convert_argv(base_input: &Path, base_output: &Path) -> Vec<String> {
-    vec![
-        "convert".to_string(),
-        "-f".to_string(),
-        "qcow2".to_string(),
-        "-O".to_string(),
-        "qcow2".to_string(),
-        base_input.display().to_string(),
-        base_output.display().to_string(),
-    ]
+/// Name `parent` as seen from `from_dir`, the directory holding the image that will carry
+/// the reference — a bare filename for a sibling (`"tddy-nix-base.qcow2"`), a walk out and
+/// back down across a tier boundary (`"../01-base/debian-12.qcow2"`).
+///
+/// Pure path arithmetic: no filesystem access, no normalisation of `.`/`..` already present
+/// in either argument. A trailing separator on `from_dir` makes no difference, so a caller
+/// that built it by `join` gets the same answer as one that wrote it out.
+///
+/// **Both paths must share an origin** — either both absolute, or both relative to the same
+/// directory. A mix of the two is rejected rather than answered: the walk out of an absolute
+/// `from_dir` counts components that a relative `parent` never had, so the result would name
+/// a location neither argument refers to, and qcow2 would record it without complaint.
+///
+/// A relative reference is what keeps a layered library relocatable: qcow2 resolves it
+/// against the directory of the image holding it, so moving the whole tree — as moving a
+/// checkout moves its repo-relative `tmp/.tddy` — leaves every link in the chain intact.
+/// The same property is why an overlay must be created where it will live: created
+/// elsewhere and moved, its reference would point at nothing.
+pub fn relative_backing_path(from_dir: &Path, parent: &Path) -> Result<String, VmError> {
+    if from_dir.is_absolute() != parent.is_absolute() {
+        return Err(VmError::BuildFailed(format!(
+            "cannot name {} relative to {}: one is absolute and the other is relative",
+            parent.display(),
+            from_dir.display()
+        )));
+    }
+
+    let from: Vec<_> = from_dir.components().collect();
+    let to: Vec<_> = parent.components().collect();
+    let shared = from
+        .iter()
+        .zip(to.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let mut parts = vec!["..".to_string(); from.len() - shared];
+    parts.extend(
+        to[shared..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned()),
+    );
+    Ok(parts.join("/"))
 }
 
-/// Build `qemu-img create -f qcow2 -F qcow2 -b <base_basename> <overlay> <disk_size>`.
+/// Build `qemu-img create -f qcow2 -F qcow2 -b <backing> <overlay> <disk_size>`.
 ///
-/// `base_basename` must be a bare relative filename (e.g. `"demo-base.qcow2"`), not an
-/// absolute path — the overlay and base can then be relocated together without
-/// breaking the backing-file reference. This is intentionally different in flag order
-/// and semantics from `tddy_sandbox_qemu::argv::overlay_create_argv`, which builds an
-/// ephemeral, absolute-path-backed overlay with no size argument.
-pub fn overlay_create_argv(base_basename: &str, overlay: &Path, disk_size: &str) -> Vec<String> {
-    qcow2_overlay_create_argv(base_basename, overlay, disk_size)
+/// `backing` must be a path relative to the overlay's own directory, as
+/// [`relative_backing_path`] produces — never an absolute one, so the layer and its
+/// ancestors can be relocated together without breaking the chain. This is intentionally
+/// different in flag order and semantics from `tddy_sandbox_qemu::argv::overlay_create_argv`,
+/// which builds an ephemeral, absolute-path-backed overlay with no size argument.
+pub fn overlay_create_argv(backing: &str, overlay: &Path, disk_size: &str) -> Vec<String> {
+    qcow2_overlay_create_argv(backing, overlay, disk_size)
 }
 
 /// The one `qemu-img create` argv shape shared by [`overlay_create_argv`] and
 /// [`crate::library::vm_overlay_create_argv`].
 ///
-/// The two public functions differ only in what they pass as `backing_file` — a relative
-/// basename for cloud-init's co-located pair, an absolute path for a per-VM overlay — and
-/// their doc comments explain why. Routing both through this helper is what keeps the flag
-/// order itself a single definition rather than two that must be kept in lockstep by hand.
+/// The two public functions differ only in what they pass as `backing_file` — a path
+/// relative to the overlay's own directory for a library layer, an absolute path for a
+/// per-VM overlay — and their doc comments explain why. Routing both through this helper is
+/// what keeps the flag order itself a single definition rather than two that must be kept
+/// in lockstep by hand.
 pub(crate) fn qcow2_overlay_create_argv(
     backing_file: &str,
     overlay: &Path,
@@ -161,6 +195,20 @@ struct RenderedUser<'a> {
     lock_passwd: Option<bool>,
 }
 
+/// One entry of a rendered `users:` list: cloud-init accepts the bare string `default`
+/// alongside the maps describing individual accounts, and `untagged` is what renders each
+/// variant as itself rather than as a tagged wrapper.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum RenderedUserEntry<'a> {
+    DistroDefault(&'static str),
+    Defined(RenderedUser<'a>),
+}
+
+/// cloud-init's keyword for "the account this distro's images create by default" — `debian`
+/// on a Debian cloud image, `ubuntu` on an Ubuntu one.
+const DISTRO_DEFAULT_USER: &str = "default";
+
 #[derive(Debug, Clone, Serialize)]
 struct RenderedWriteFile<'a> {
     path: &'a str,
@@ -178,13 +226,14 @@ struct RenderedUserDataDoc<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     hostname: Option<&'a str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    users: Vec<RenderedUser<'a>>,
+    users: Vec<RenderedUserEntry<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     packages: Vec<&'a str>,
     write_files: Vec<RenderedWriteFile<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     bootcmd: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    runcmd: Vec<&'a str>,
+    runcmd: Vec<String>,
 }
 
 /// A basic netplan v2 DHCP config for the primary NIC (matches both `en*` and `eth*`
@@ -194,11 +243,28 @@ struct RenderedUserDataDoc<'a> {
 const NETPLAN_DHCP_CONTENT: &str = "network:\n  version: 2\n  ethernets:\n    all-en:\n      match:\n        name: \"en*\"\n      dhcp4: true\n    all-eth:\n      match:\n        name: \"eth*\"\n      dhcp4: true\n";
 
 /// Map `users`, substituting the `{{SSH_PUBLIC_KEY}}` placeholder in each user's
-/// `ssh_authorized_keys` with `ssh_public_key`.
-fn render_users<'a>(users: &'a [CloudInitUser], ssh_public_key: &str) -> Vec<RenderedUser<'a>> {
-    users
-        .iter()
-        .map(|u| RenderedUser {
+/// `ssh_authorized_keys` with `ssh_public_key`, behind the distro's own default account.
+///
+/// **`default` leads the list because a `users:` key replaces the distro default rather than
+/// adding to it**, and `cc_ssh_authkey_fingerprints` — which runs in `cloud_final_modules`
+/// after `scripts-user` — still resolves that account by name. On a guest where it was never
+/// created the module raises `KeyError: "getpwnam(): name not found: 'debian'"` and fails
+/// `cloud-final.service` with exit 1 no matter how well provisioning itself went. Naming
+/// `default` is cloud-init's own answer to that, and it costs one ordinary unprivileged
+/// account in the image.
+///
+/// A spec that defines no accounts of its own renders no `users` key at all, which says the
+/// same thing in fewer words: cloud-init's built-in default already *is* the distro account.
+fn render_users<'a>(
+    users: &'a [CloudInitUser],
+    ssh_public_key: &str,
+) -> Vec<RenderedUserEntry<'a>> {
+    if users.is_empty() {
+        return vec![];
+    }
+    let mut entries = vec![RenderedUserEntry::DistroDefault(DISTRO_DEFAULT_USER)];
+    entries.extend(users.iter().map(|u| {
+        RenderedUserEntry::Defined(RenderedUser {
             name: u.name.as_str(),
             shell: u.shell.as_deref(),
             sudo: u.sudo.as_deref(),
@@ -210,51 +276,166 @@ fn render_users<'a>(users: &'a [CloudInitUser], ssh_public_key: &str) -> Vec<Ren
             plain_text_passwd: u.plain_text_passwd.as_deref(),
             lock_passwd: u.lock_passwd,
         })
-        .collect()
+    }));
+    entries
 }
 
-/// The `scripts-per-boot` completion script content: waits for cloud-init to finish,
-/// then echoes `completion_token` (or `<completion_token>_FAILED`) to the serial
-/// console and shuts the guest down.
+/// The shell a `runcmd` step reboots the guest with when the rest of its provisioning has to
+/// happen on the next boot — the kernel swap in
+/// [`crate::tddy_host::ninep_capable_kernel_command`] is the workspace's one such step.
 ///
-/// Decides success/failure from cloud-init's aggregated error list rather than a
-/// blanket "status: error" check: some Debian genericcloud images reliably log a
-/// benign `set_hostname` module failure under QEMU (systemd-hostnamed isn't ready
-/// that early in boot) that flips overall status to "error" even though every
-/// directive we actually care about (users, packages, write_files, runcmd) applied
-/// cleanly. Filtering that one out avoids misclassifying a successful bake as failed.
-/// `python3` is guaranteed present — cloud-init itself depends on it.
-fn completion_script_content(completion_token: &str) -> String {
-    format!(
-        "#!/bin/bash\n\
-         cloud-init status --wait >/dev/null 2>&1\n\
-         ERRORS=\"$(cloud-init status --format json 2>/dev/null | python3 -c '\n\
-         import json, sys\n\
-         d = json.load(sys.stdin)\n\
-         errs = [e for e in d.get(\"errors\", []) if \"set_hostname\" not in e]\n\
-         print(\"\\n\".join(errs))\n\
-         ' 2>/dev/null)\"\n\
-         if [ -n \"$ERRORS\" ]; then\n\
-         \x20 echo \"{completion_token}_FAILED\"\n\
-         else\n\
-         \x20 echo \"{completion_token}\"\n\
-         fi\n\
-         shutdown -h now\n"
-    )
+/// **The reset belongs here and nowhere else.** cloud-init will not re-run `runcmd` for an
+/// instance it has already processed, so a reboot without one comes back up to a guest that
+/// silently skips every remaining step. Resetting from `bootcmd` instead — which is where
+/// this used to live — resets on *every* boot, including the first: `cloud-init clean`
+/// deletes `/var/lib/cloud/instance/`, which is where the config stage writes the `runcmd`
+/// script the final stage is about to run, so the boot that ran it provisioned nothing at
+/// all and the bake sealed an empty image.
+///
+/// `--seed` drops `/var/lib/cloud/seed`; the NoCloud seed ISO stays attached as `-cdrom`, so
+/// the next boot reads the same seed again. A reset that fails aborts the provisioning
+/// script rather than rebooting into a guest that can never finish — the bake would
+/// otherwise sit there until it timed out, which is indistinguishable from a slow one.
+pub fn reset_cloud_init_and_reboot() -> String {
+    "cloud-init clean --logs --seed || exit 1; sync; systemctl reboot".to_string()
+}
+
+// ── Bake completion ──────────────────────────────────────────────────────────────
+
+/// Opens a guest log dumped onto the serial console, followed by the path of the log it
+/// frames: `TDDY_GUEST_LOG_BEGIN /var/log/cloud-init.log`.
+///
+/// Together with [`GUEST_LOG_END_MARKER`] this is what makes the durable boot log a
+/// *diagnosable* artifact rather than a timeline to guess from: everything between the two
+/// markers is the guest's own `cloud-init.log`, byte for byte, and `sed -n '/BEGIN
+/// <path>/,/END <path>/p' <name>-boot.log` cuts it back out.
+pub const GUEST_LOG_BEGIN_MARKER: &str = "TDDY_GUEST_LOG_BEGIN";
+
+/// Closes a guest log dumped onto the serial console — see [`GUEST_LOG_BEGIN_MARKER`].
+pub const GUEST_LOG_END_MARKER: &str = "TDDY_GUEST_LOG_END";
+
+/// The final `runcmd` step of a bake: dump the guest's logs, emit the completion token,
+/// halt. Being *last* is the whole point — see [`completion_runcmd_preamble`].
+const COMPLETION_RUNCMD_STEP: &str = "__tddy_complete_bake";
+
+/// The shell the bake's completion is made of, with `@TOKEN@`, `@GUEST_LOG_BEGIN@`,
+/// `@GUEST_LOG_END@` and `@COMPLETE@` substituted by [`completion_runcmd_preamble`].
+///
+/// Runs as part of `runcmd` — cloud-init joins every entry into one `/bin/sh` script — so
+/// nothing here may assume `bash`.
+const COMPLETION_RUNCMD_PREAMBLE: &str = r#"# Bake completion, rendered by tddy_vm::cloud_init.
+__tddy_dump_guest_log() {
+  __tddy_log="$1"
+  __tddy_snapshot="/tmp/tddy-guest-log-snapshot"
+  # Snapshotted first: this dump's own output is appended to cloud-init-output.log while it
+  # runs, and a file that grows as fast as it is read is never read to the end.
+  cp "$__tddy_log" "$__tddy_snapshot" 2>/dev/null || : >"$__tddy_snapshot"
+  echo "@GUEST_LOG_BEGIN@ $__tddy_log"
+  # The token is rewritten wherever the guest's own logs happen to carry it: the host
+  # classifies the console line by line, so a log line quoting the token would end the
+  # watch here — reporting success on a bake that may have just failed.
+  sed "s/@TOKEN@/CLOUDINIT_TOKEN_ELIDED/g" "$__tddy_snapshot" 2>/dev/null
+  echo "@GUEST_LOG_END@ $__tddy_log"
+  rm -f "$__tddy_snapshot"
+}
+__tddy_signal_and_halt() {
+  # The signal has to survive whatever state the failing step left the shell in.
+  set +e
+  __tddy_dump_guest_log /var/log/cloud-init.log
+  __tddy_dump_guest_log /var/log/cloud-init-output.log
+  echo "$1"
+  shutdown -h now
+}
+__tddy_on_runcmd_exit() {
+  __tddy_status=$?
+  if [ "$__tddy_status" -ne 0 ]; then
+    __tddy_signal_and_halt "@TOKEN@_FAILED"
+  fi
+}
+@COMPLETE@() {
+  set +e
+  __tddy_errors="$(cloud-init status --format json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+errs = [e for e in d.get("errors", []) if "set_hostname" not in e]
+print("\n".join(errs))
+' 2>/dev/null)"
+  if [ -n "$__tddy_errors" ]; then
+    __tddy_signal_and_halt "@TOKEN@_FAILED"
+  else
+    __tddy_signal_and_halt "@TOKEN@"
+  fi
+}
+trap __tddy_on_runcmd_exit EXIT"#;
+
+/// The first `runcmd` step of a bake: define the completion shell and arm the EXIT trap
+/// that carries a failed provision back to the host.
+///
+/// **The completion signal lives in `runcmd` because nothing else in cloud-init runs after
+/// `runcmd` does.** It used to be a `scripts-per-boot` script, and `cloud_final_modules`
+/// runs `scripts-per-boot` *before* `scripts-user` — so the guest halted, and the host
+/// sealed the overlay and reported success, before a single provisioning command had run.
+///
+/// Three rules follow from where the signal now sits, and they are what the shell above
+/// implements:
+///
+/// - **Success is announced by the last step.** [`COMPLETION_RUNCMD_STEP`] is appended
+///   after the caller's own entries, so the token cannot precede the work it reports on.
+/// - **Failure is announced by the trap**, armed here before any caller step exists to
+///   fail. A step failing under `set -e` ends the script, and a host left waiting on a
+///   token that will never come can only time out — which is indistinguishable from a slow
+///   bake. The trap fires *only* on a non-zero status: a step that deliberately exits 0
+///   early (the kernel-swap step reboots the guest and does exactly that) must be left to
+///   cloud-init's re-run on the next boot, not mistaken for a finished bake.
+/// - **The guest's own logs come first**, framed by [`GUEST_LOG_BEGIN_MARKER`] /
+///   [`GUEST_LOG_END_MARKER`], because the host stops reading the console at the token.
+///
+/// Success is additionally withheld when cloud-init recorded an error in an earlier stage —
+/// a failed `packages:` install would otherwise seal an image missing what it was asked to
+/// install. `set_hostname` is filtered out of that check: Debian genericcloud images
+/// reliably log a benign failure of it under QEMU (systemd-hostnamed isn't up that early),
+/// which would otherwise fail every bake. `python3` is guaranteed present — cloud-init
+/// itself depends on it.
+fn completion_runcmd_preamble(completion_token: &str) -> String {
+    COMPLETION_RUNCMD_PREAMBLE
+        .replace("@GUEST_LOG_BEGIN@", GUEST_LOG_BEGIN_MARKER)
+        .replace("@GUEST_LOG_END@", GUEST_LOG_END_MARKER)
+        .replace("@COMPLETE@", COMPLETION_RUNCMD_STEP)
+        .replace("@TOKEN@", completion_token)
+}
+
+/// The `runcmd` list of a rendered document: the caller's entries, wrapped in the bake's
+/// completion steps when one is being baked ([`completion_runcmd_preamble`]) and left
+/// exactly as given when one is not.
+fn render_runcmd(runcmd: &[String], completion_token: Option<&str>) -> Vec<String> {
+    let Some(token) = completion_token else {
+        return runcmd.to_vec();
+    };
+    let mut steps = Vec::with_capacity(runcmd.len() + 2);
+    steps.push(completion_runcmd_preamble(token));
+    steps.extend(runcmd.iter().cloned());
+    steps.push(COMPLETION_RUNCMD_STEP.to_string());
+    steps
 }
 
 /// Render the NoCloud `user-data` document for a **bake**: a `#cloud-config` header
 /// followed by the caller's users/packages/runcmd/write_files/bootcmd, plus:
 /// - SSH public key substitution for the `{{SSH_PUBLIC_KEY}}` placeholder.
-/// - A `cloud-init clean --logs --seed` `bootcmd` entry (forces cloud-init to re-run
-///   against the fresh seed on a copied base image that already ran cloud-init once).
+/// - The distro's own default account ahead of the caller's `users` — see [`render_users`].
 /// - A basic DHCP netplan config for the primary NIC.
-/// - A `scripts-per-boot` completion script (see [`completion_script_content`]).
+/// - The completion steps that wrap the caller's `runcmd` — see
+///   [`completion_runcmd_preamble`] for why they live there and nowhere else.
 ///
-/// **The completion script halts the guest** once provisioning finishes — that is the
-/// bake contract: signal the token, then power down so the host can seal the overlay. A
-/// guest that is meant to keep running after provisioning must therefore be seeded with
-/// [`render_user_data_without_completion`] instead.
+/// **Nothing is injected into `bootcmd`.** What re-provisions a base image that already ran
+/// cloud-init once is the seed's own `instance-id` — a bake names its instance after the
+/// layer it is building, so cloud-init sees an instance it has never processed and applies
+/// every per-instance module. A step that has to reboot mid-bake resets the instance state
+/// itself, on its way out ([`reset_cloud_init_and_reboot`]).
+///
+/// **The completion steps halt the guest** once provisioning finishes — that is the bake
+/// contract: dump the guest's cloud-init logs, signal the token, then power down so the
+/// host can seal the overlay. A guest that is meant to keep running after provisioning
+/// must therefore be seeded with [`render_user_data_without_completion`] instead.
 pub fn render_user_data(
     user_data: &CloudInitUserData,
     ssh_public_key: &str,
@@ -264,8 +445,9 @@ pub fn render_user_data(
 }
 
 /// Render the NoCloud `user-data` document for a **long-lived guest**: identical to
-/// [`render_user_data`] except that no completion script is injected, so the guest stays
-/// up after cloud-init finishes instead of halting itself.
+/// [`render_user_data`] except that no completion step is injected — `runcmd` is exactly
+/// what the caller gave — so the guest stays up after cloud-init finishes instead of
+/// halting itself.
 ///
 /// Used for guests the caller intends to keep working with — over SSH or the serial
 /// console — rather than bake into an image.
@@ -277,7 +459,8 @@ pub fn render_user_data_without_completion(
 }
 
 /// Shared body of [`render_user_data`] and [`render_user_data_without_completion`].
-/// `completion_token` of `None` omits the halt-on-completion script entirely.
+/// `completion_token` of `None` omits the halt-on-completion steps entirely, leaving
+/// `runcmd` exactly as the caller wrote it.
 fn render_user_data_doc(
     user_data: &CloudInitUserData,
     ssh_public_key: &str,
@@ -303,27 +486,14 @@ fn render_user_data_doc(
         owner: None,
         defer: None,
     });
-    let completion_script = completion_token.map(completion_script_content);
-    if let Some(completion_script) = &completion_script {
-        write_files.push(RenderedWriteFile {
-            path: "/var/lib/cloud/scripts/per-boot/99-tddy-cloud-init-complete.sh",
-            content: completion_script,
-            permissions: Some("0755"),
-            owner: None,
-            defer: None,
-        });
-    }
-
-    let mut bootcmd = vec!["cloud-init clean --logs --seed".to_string()];
-    bootcmd.extend(user_data.bootcmd.iter().cloned());
 
     let doc = RenderedUserDataDoc {
         hostname: user_data.hostname.as_deref(),
         users,
         packages: user_data.packages.iter().map(|p| p.as_str()).collect(),
         write_files,
-        bootcmd,
-        runcmd: user_data.runcmd.iter().map(|r| r.as_str()).collect(),
+        bootcmd: user_data.bootcmd.clone(),
+        runcmd: render_runcmd(&user_data.runcmd, completion_token),
     };
 
     let body = serde_yml::to_string(&doc)
@@ -498,6 +668,21 @@ pub enum CloudInitOutcome {
     Failed,
 }
 
+/// The form a serial console `raw` line takes in the durable boot log: the escape
+/// sequences a terminal would have consumed removed, the CRLF framing trimmed, the text
+/// itself untouched.
+///
+/// The log exists to be read after the fact — including the guest's own cloud-init logs,
+/// which the bake dumps into it between [`GUEST_LOG_BEGIN_MARKER`] and
+/// [`GUEST_LOG_END_MARKER`] — and a transcript still carrying colour codes and cursor
+/// moves is one only a terminal can replay, not one `grep` and `sed` can cut apart.
+///
+/// Deliberately the *same* cleanup [`crate::serial_shell`] applies to the lines it reads
+/// from a live console, rather than a second definition of what console noise is.
+pub fn boot_log_line(raw: &str) -> String {
+    crate::serial_shell::clean_line(raw)
+}
+
 /// Classify a serial console `line` against `completion_token`.
 ///
 /// Checks for the `<completion_token>_FAILED` variant **first**: it contains the bare
@@ -522,12 +707,11 @@ pub fn classify_serial_line(line: &str, completion_token: &str) -> CloudInitOutc
 pub struct CloudInitLibraryPaths {
     /// The downloaded/cached input base image, imported into `images/01-base/`.
     pub base_image_in_01_base: PathBuf,
-    /// The flattened, immutable base produced by [`base_convert_argv`], in
-    /// `images/02-prepared-base/` — co-located with `prepared_overlay_output` so the
-    /// overlay's relative backing-file reference stays valid.
-    pub prepared_base_output: PathBuf,
     /// The provisioned delta overlay produced by [`overlay_create_argv`] +
     /// [`build_cloud_init_image`], in `images/02-prepared-base/`.
+    ///
+    /// The only image the build produces: it chains onto whatever it was baked from and
+    /// holds nothing of it, so there is no second, flattened half to name.
     pub prepared_overlay_output: PathBuf,
 }
 
@@ -546,58 +730,8 @@ pub fn cloud_init_library_paths(
         base_image_in_01_base: library
             .base_images_dir()
             .join(format!("{base_image_name}.qcow2")),
-        prepared_base_output: library
-            .prepared_base_dir()
-            .join(format!("{name}-base.qcow2")),
         prepared_overlay_output: library.prepared_base_dir().join(format!("{name}.qcow2")),
     }
-}
-
-/// Promote the finished qcow2 pair out of a per-image scratch directory to the flat
-/// `images/02-prepared-base/` locations [`cloud_init_library_paths`] resolves, then lock
-/// both read-only.
-///
-/// [`build_cloud_init_image`] writes every artifact it produces (the pair, the seed ISO, the
-/// generated keypair, the boot log) into one `output_dir`; running it against a scratch
-/// subdirectory and moving only the two images up keeps `02-prepared-base/` free of
-/// non-image files. Both files move together, so the overlay's *relative* backing-file
-/// reference to its base stays valid.
-pub async fn promote_prepared_base_pair(
-    scratch_dir: &Path,
-    name: &str,
-    paths: &CloudInitLibraryPaths,
-) -> Result<(), VmError> {
-    move_scratch_output(
-        scratch_dir,
-        &format!("{name}-base.qcow2"),
-        &paths.prepared_base_output,
-    )
-    .await?;
-    move_scratch_output(
-        scratch_dir,
-        &format!("{name}.qcow2"),
-        &paths.prepared_overlay_output,
-    )
-    .await?;
-
-    crate::library::set_readonly_file(&paths.prepared_base_output)?;
-    crate::library::set_readonly_file(&paths.prepared_overlay_output)
-}
-
-/// Move `scratch_dir.join(filename)` to `dest`.
-async fn move_scratch_output(
-    scratch_dir: &Path,
-    filename: &str,
-    dest: &Path,
-) -> Result<(), VmError> {
-    let src = scratch_dir.join(filename);
-    tokio::fs::rename(&src, dest).await.map_err(|e| {
-        VmError::BuildFailed(format!(
-            "failed to move {} to {}: {e}",
-            src.display(),
-            dest.display()
-        ))
-    })
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────────
@@ -606,7 +740,15 @@ async fn move_scratch_output(
 #[derive(Debug, Clone)]
 pub struct CloudInitBuildOptions {
     pub name: String,
+    /// The image this build chains onto. Read, never written, never copied — it stays the
+    /// parent of the finished overlay for as long as that overlay exists.
     pub base_image_src: PathBuf,
+    /// Where the finished overlay is created, and where it stays: its backing reference is
+    /// relative to this file's own directory, so moving it afterwards would break the chain.
+    pub overlay_output: PathBuf,
+    /// Scratch space for everything the bake produces *other* than the overlay — the
+    /// NoCloud seed and its ISO, a generated keypair, the boot log. Keeping it separate is
+    /// what leaves `images/02-prepared-base/` holding images only.
     pub output_dir: PathBuf,
     pub user_data: CloudInitUserData,
     pub disk_size: String,
@@ -639,9 +781,24 @@ struct TokenDataInput<'a> {
 /// Run `qemu-img` with `args`, surfacing stderr on a non-zero exit — mirrors the
 /// error-handling shape of `build.rs::convert_to_qcow2`. `pub(crate)` so
 /// [`crate::library::VmLibrary::create_vm`] can reuse it for its own `qemu-img create`.
-pub(crate) async fn run_qemu_img(args: &[String]) -> Result<(), String> {
-    let out = tokio::process::Command::new("qemu-img")
-        .args(args)
+///
+/// `cwd` matters for exactly one argv: `create -b <relative>` validates the backing file at
+/// creation time against the *process* working directory, even though the reference it then
+/// records is resolved against the new image's own directory. Running from the overlay's
+/// directory makes the two agree. `None` inherits the caller's, which is all an argv naming
+/// every path absolutely needs.
+///
+/// Every argv is checked by [`crate::image_import::refuse_chain_flattening`] first: this is the
+/// crate's async chokepoint for `qemu-img`, so a chain-flattening argv is refused here rather
+/// than being something later readers have to notice for themselves.
+pub(crate) async fn run_qemu_img(cwd: Option<&Path>, args: &[String]) -> Result<(), String> {
+    crate::image_import::refuse_chain_flattening(args)?;
+    let mut command = tokio::process::Command::new("qemu-img");
+    command.args(args);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let out = command
         .output()
         .await
         .map_err(|e| format!("qemu-img launch failed: {e}"))?;
@@ -684,7 +841,8 @@ async fn generate_ssh_keypair(output_dir: &Path, name: &str) -> Result<String, V
 }
 
 /// Handle one line read from the qemu serial console during [`boot_and_bake`]'s watch
-/// loop: forward it to `progress`, append it to `boot_log`, and classify it.
+/// loop: forward it to `progress`, append it to `boot_log` in its greppable form
+/// ([`boot_log_line`]), and classify it.
 ///
 /// Returns `Some(outcome)` once the loop should stop (success or failure observed),
 /// or `None` to keep waiting for more lines. On `Failed`, also kills `child` so the
@@ -700,7 +858,7 @@ async fn handle_boot_line(
     use tokio::io::AsyncWriteExt;
 
     progress(line);
-    let _ = boot_log.write_all(line.as_bytes()).await;
+    let _ = boot_log.write_all(boot_log_line(line).as_bytes()).await;
     let _ = boot_log.write_all(b"\n").await;
 
     match classify_serial_line(line, token) {
@@ -723,7 +881,7 @@ const POWERDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// How long the QEMU process is given to exit after the completion token is observed.
 ///
-/// The completion script powers the guest off immediately after printing the token, so
+/// The completion step powers the guest off immediately after printing the token, so
 /// this is normally a few seconds of orderly shutdown. It is bounded rather than an
 /// unqualified `wait()` because the boot argv carries no `-no-reboot`: a guest that resets
 /// instead of halting would otherwise keep the bake blocked forever.
@@ -758,9 +916,13 @@ async fn handle_boot_timeout(
 /// console for the completion token, per the orchestration flow documented on
 /// [`build_cloud_init_image`].
 ///
-/// Every serial console line is both forwarded to `progress` (ephemeral) and
-/// appended to `boot_log_path` (durable), so a failed or timed-out bake can be
-/// investigated after the fact — the full boot log outlives the process that ran it.
+/// Every serial console line is both forwarded to `progress` (ephemeral) and appended to
+/// `boot_log_path` (durable), so a failed or timed-out bake can be investigated after the
+/// fact — the full boot log outlives the process that ran it. The durable copy is written
+/// in its greppable form ([`boot_log_line`]), and the guest's own `/var/log/cloud-init.log`
+/// and `/var/log/cloud-init-output.log` end up in it too: the completion step dumps both
+/// onto the console between [`GUEST_LOG_BEGIN_MARKER`] and [`GUEST_LOG_END_MARKER`] before
+/// signalling, on the success and the failure path alike.
 async fn boot_and_bake(
     opts: &CloudInitBuildOptions,
     overlay_path: &Path,
@@ -857,43 +1019,6 @@ async fn boot_and_bake(
     outcome
 }
 
-/// Copy `opts.base_image_src` into a scratch file and convert it into the immutable
-/// base `<output_dir>/<name>-base.qcow2` (steps 1-2 of [`build_cloud_init_image`]).
-/// The scratch copy is removed afterward; the original source is never touched.
-async fn copy_and_convert_base(
-    opts: &CloudInitBuildOptions,
-    progress: &(dyn Fn(&str) + Sync),
-) -> Result<PathBuf, VmError> {
-    progress(&format!(
-        "Copying base image from {}…",
-        opts.base_image_src.display()
-    ));
-    let copied_src = opts
-        .output_dir
-        .join(format!("{}-copied-src.qcow2", opts.name));
-    tokio::fs::copy(&opts.base_image_src, &copied_src)
-        .await
-        .map_err(|e| {
-            VmError::BuildFailed(format!(
-                "failed to copy base image {} to {}: {e}",
-                opts.base_image_src.display(),
-                copied_src.display()
-            ))
-        })?;
-
-    progress("Converting base image into an immutable qcow2…");
-    let base_path = opts.output_dir.join(format!("{}-base.qcow2", opts.name));
-    run_qemu_img(&base_convert_argv(&copied_src, &base_path))
-        .await
-        .map_err(|e| {
-            progress(&e);
-            VmError::BuildFailed(e)
-        })?;
-    let _ = tokio::fs::remove_file(&copied_src).await;
-
-    Ok(base_path)
-}
-
 /// Resolve the SSH public key for the seed: read `opts.ssh_public_key` if given,
 /// otherwise generate a fresh ed25519 keypair in `opts.output_dir` (step 3).
 async fn resolve_ssh_public_key(opts: &CloudInitBuildOptions) -> Result<String, VmError> {
@@ -988,44 +1113,144 @@ async fn build_seed_iso(
     Ok(iso_path)
 }
 
-/// Create the delta overlay `<output_dir>/<name>.qcow2`, chained onto the immutable
-/// base via a relative backing-file reference (step 7). Returns the overlay path.
+/// Create the delta overlay at `overlay_output`, chained onto `base_image_src` through a
+/// reference relative to the overlay's own directory. Returns the overlay's absolute path.
+///
+/// Created **in place**, from that same directory: the overlay is the one artifact of a bake
+/// that cannot be produced somewhere convenient and moved, because moving it is precisely
+/// what a relative backing reference does not survive.
+///
+/// Both paths are resolved to absolute before `qemu-img` sees them. They arrive relative
+/// whenever the library root is — `tddy-vm-build cloud-init` defaults to
+/// `default_tddy_data_dir()`, the repo-relative `tmp/.tddy`, in a debug build — and a
+/// relative path handed to a process whose working directory has been set to the overlay's
+/// own directory names something else entirely.
+///
+/// **Overwrites an existing overlay at that path**, unlocking it first: a finished layer is
+/// sealed `0444`, and `qemu-img create` opens its output `O_WRONLY|O_CREAT|O_TRUNC`, which
+/// such a file refuses. Re-baking a layer replaces it, so anything already chained onto the
+/// old one is orphaned — the same contract [`crate::library::VmLibrary::import_base_image`]
+/// has for `images/01-base/`.
+pub async fn create_chained_overlay(
+    overlay_output: &Path,
+    base_image_src: &Path,
+    disk_size: &str,
+) -> Result<PathBuf, VmError> {
+    let overlay_dir = match overlay_output.parent() {
+        // A bare filename names the working directory, which `create_dir_all("")` cannot.
+        Some(dir) if dir.as_os_str().is_empty() => Path::new("."),
+        Some(dir) => dir,
+        None => {
+            return Err(VmError::BuildFailed(format!(
+                "overlay output {} has no parent directory to chain from",
+                overlay_output.display()
+            )))
+        }
+    };
+    let file_name = overlay_output.file_name().ok_or_else(|| {
+        VmError::BuildFailed(format!(
+            "overlay output {} does not name a file",
+            overlay_output.display()
+        ))
+    })?;
+    tokio::fs::create_dir_all(overlay_dir).await.map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to create overlay dir {}: {e}",
+            overlay_dir.display()
+        ))
+    })?;
+
+    // The directory now exists and the parent image must already; the overlay itself does
+    // not yet, so it is named from its canonical directory rather than canonicalized.
+    let overlay_dir = canonical(overlay_dir).await?;
+    let base_image_src = canonical(base_image_src).await?;
+    let overlay_path = overlay_dir.join(file_name);
+
+    unseal_existing_overlay(&overlay_path).await?;
+
+    let backing = relative_backing_path(&overlay_dir, &base_image_src)?;
+    run_qemu_img(
+        Some(&overlay_dir),
+        &overlay_create_argv(&backing, &overlay_path, disk_size),
+    )
+    .await
+    .map_err(VmError::BuildFailed)?;
+    Ok(overlay_path)
+}
+
+/// Resolve `path` — which must already exist — to an absolute, symlink-free path.
+async fn canonical(path: &Path) -> Result<PathBuf, VmError> {
+    tokio::fs::canonicalize(path)
+        .await
+        .map_err(|e| VmError::BuildFailed(format!("failed to resolve {}: {e}", path.display())))
+}
+
+/// Clear a file already occupying the overlay's path, so `qemu-img create` can write there.
+///
+/// Removed rather than chmod'ed back: the bytes of the previous layer are not the bytes of
+/// the new one, and a truncate-in-place would leave a file that is neither until the create
+/// finishes.
+async fn unseal_existing_overlay(overlay_path: &Path) -> Result<(), VmError> {
+    match tokio::fs::remove_file(overlay_path).await {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(VmError::BuildFailed(format!(
+            "failed to remove the existing overlay {}: {e}",
+            overlay_path.display()
+        ))),
+    }
+}
+
+/// [`create_chained_overlay`] for a bake, reporting a failure through `progress` on the way
+/// out — the bake's only channel to whoever is watching it.
 async fn create_overlay(
     opts: &CloudInitBuildOptions,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<PathBuf, VmError> {
-    let overlay_path = opts.output_dir.join(format!("{}.qcow2", opts.name));
-    let base_basename = format!("{}-base.qcow2", opts.name);
-    run_qemu_img(&overlay_create_argv(
-        &base_basename,
-        &overlay_path,
-        &opts.disk_size,
-    ))
-    .await
-    .map_err(|e| {
-        progress(&e);
-        VmError::BuildFailed(e)
-    })?;
-    Ok(overlay_path)
+    create_chained_overlay(&opts.overlay_output, &opts.base_image_src, &opts.disk_size)
+        .await
+        .inspect_err(|e| progress(&e.to_string()))
 }
 
-/// Build a cloud-init-provisioned VM image with image-chaining.
+/// Remove the overlay a failed bake left behind, reporting through `progress` if it cannot
+/// be removed.
 ///
-/// 1. Copies `opts.base_image_src` into `<output_dir>/<name>-copied-src.qcow2`.
-/// 2. Converts it into the immutable base `<output_dir>/<name>-base.qcow2`.
-/// 3. Resolves the SSH public key (reads `opts.ssh_public_key`, or generates a fresh
-///    ed25519 keypair).
-/// 4. Derives a deterministic completion token from `(opts.name, opts.user_data)`.
-/// 5. Renders and writes the NoCloud `user-data`/`meta-data` seed.
-/// 6. Packs the seed into a `cidata` ISO via `opts.iso_tool`.
-/// 7. Creates the delta overlay `<output_dir>/<name>.qcow2`, chained onto the base via
-///    a relative backing-file reference.
-/// 8. Boots the overlay with the seed ISO attached and watches the serial console for
+/// The overlay is created at its final, published path — a relative backing reference gives
+/// it nowhere else to be — so a bake that dies mid-provisioning leaves a file that looks
+/// exactly like a finished layer to the next run's existence check. Callers cache on
+/// "the output is there", and only a finished layer may answer to that.
+async fn discard_unbaked_overlay(overlay_path: &Path, progress: &(dyn Fn(&str) + Sync)) {
+    if let Err(e) = tokio::fs::remove_file(overlay_path).await {
+        progress(&format!(
+            "failed to remove the unfinished overlay {}: {e} — remove it before retrying, \
+             or the next build will mistake it for a finished image",
+            overlay_path.display()
+        ));
+    }
+}
+
+/// Build a cloud-init-provisioned VM image as a delta chained onto `opts.base_image_src`.
+///
+/// 1. Resolves the SSH public key (reads `opts.ssh_public_key`, or generates a fresh
+///    ed25519 keypair into `<output_dir>/`).
+/// 2. Derives a deterministic completion token from `(opts.name, opts.user_data)`.
+/// 3. Renders and writes the NoCloud `user-data`/`meta-data` seed.
+/// 4. Packs the seed into a `cidata` ISO via `opts.iso_tool`.
+/// 5. Creates the delta overlay at `opts.overlay_output`, chained onto
+///    `opts.base_image_src` through a relative backing-file reference.
+/// 6. Boots the overlay with the seed ISO attached and watches the serial console for
 ///    the completion token, baking the provisioning into the overlay. The full serial
-///    console transcript is durably logged to `<output_dir>/<name>-boot.log` (in
-///    addition to being streamed through `progress`), so a failed or timed-out bake
-///    can be investigated after the process has exited. Returns the overlay path on
-///    success.
+///    console transcript — the guest's own cloud-init logs included — is durably logged
+///    to `<output_dir>/<name>-boot.log` with its terminal escapes stripped (in addition
+///    to being streamed through `progress`), so a failed or timed-out bake can be
+///    investigated, and grepped, after the process has exited.
+/// 7. Seals the finished overlay `0444`. Every layer chained onto it from then on depends
+///    on its bytes staying exactly as baked: qcow2 has no way to detect a parent that
+///    changed under its children, so the format's own answer is never to let it happen.
+///
+/// Returns the overlay path on success. `opts.base_image_src` is only ever read. A bake that
+/// fails leaves no overlay behind (see [`discard_unbaked_overlay`]), so the presence of the
+/// output file remains a reliable answer to "is this layer built?".
 pub async fn build_cloud_init_image(
     opts: &CloudInitBuildOptions,
     progress: &(dyn Fn(&str) + Sync),
@@ -1039,8 +1264,6 @@ pub async fn build_cloud_init_image(
             ))
         })?;
 
-    copy_and_convert_base(opts, progress).await?;
-
     progress("Resolving SSH public key…");
     let ssh_public_key = resolve_ssh_public_key(opts).await?;
     let token = derive_completion_token(opts)?;
@@ -1051,12 +1274,15 @@ pub async fn build_cloud_init_image(
     progress("Building cloud-init seed ISO…");
     let iso_path = build_seed_iso(opts, &nocloud_dir, progress).await?;
 
-    progress("Creating chained delta overlay…");
+    progress(&format!(
+        "Creating a delta overlay chained onto {}…",
+        opts.base_image_src.display()
+    ));
     let overlay_path = create_overlay(opts, progress).await?;
 
     progress("Booting QEMU to bake cloud-init provisioning into the overlay…");
     let boot_log_path = opts.output_dir.join(format!("{}-boot.log", opts.name));
-    boot_and_bake(
+    let baked = boot_and_bake(
         opts,
         &overlay_path,
         &iso_path,
@@ -1064,8 +1290,88 @@ pub async fn build_cloud_init_image(
         &boot_log_path,
         progress,
     )
-    .await?;
+    .await;
+    if let Err(e) = baked {
+        discard_unbaked_overlay(&overlay_path, progress).await;
+        return Err(e);
+    }
+
+    crate::library::set_readonly_file(&overlay_path)?;
 
     progress("Cloud-init image build complete");
     Ok(overlay_path)
+}
+
+// ── Per-VM login seed ─────────────────────────────────────────────────────────────
+
+/// The provisioning document a *VM's own* NoCloud seed carries: authorize the key the
+/// document is rendered against for `username`, and nothing else.
+///
+/// A prepared base only ever authorized the key its own bake was seeded with — the layers
+/// chained below it re-render nothing — so a VM built off it and handed a fresh keypair has
+/// no account its private key opens. This document is how that key reaches the guest, and
+/// cloud-init's `users_groups` module applies `ssh_authorized_keys` to an account that
+/// already exists just as it does to one it creates.
+pub fn vm_login_user_data(username: &str) -> CloudInitUserData {
+    CloudInitUserData {
+        users: vec![CloudInitUser {
+            name: username.to_string(),
+            shell: None,
+            sudo: None,
+            ssh_authorized_keys: vec!["{{SSH_PUBLIC_KEY}}".to_string()],
+            plain_text_passwd: None,
+            // Explicitly *not* locked. This seed exists to add one SSH key to an account
+            // the image already created; omitting the field lets cloud-init apply its own
+            // default of `lock_passwd: true`, which locks the password the prepared base
+            // set — and the serial console is the only way into a guest whose network or
+            // sshd has not come up, so losing it costs the diagnostic of last resort.
+            lock_passwd: Some(false),
+        }],
+        ..Default::default()
+    }
+}
+
+/// The NoCloud instance id a VM boots under.
+///
+/// Distinct from the `cloud-init-<layer>` id every bake uses, and distinct per VM, so
+/// cloud-init sees a new instance on an overlay whose parent has already run once and
+/// applies its per-instance modules — the ssh one included — instead of skipping them.
+pub fn vm_instance_id(vm_name: &str) -> String {
+    format!("tddy-vm-{vm_name}")
+}
+
+/// Write the NoCloud seed authorizing `ssh_public_key` for `username` into `seed_dir`, and
+/// pack it into a `cidata` ISO at `iso_output`.
+///
+/// Rendered with [`render_user_data_without_completion`]: the bake renderer's completion
+/// script halts the guest the moment cloud-init finishes, which for a VM meant to be worked
+/// with is a power-off seconds after boot.
+pub async fn write_vm_login_seed_iso(
+    seed_dir: &Path,
+    iso_output: &Path,
+    vm_name: &str,
+    username: &str,
+    ssh_public_key: &str,
+) -> Result<PathBuf, VmError> {
+    tokio::fs::create_dir_all(seed_dir).await.map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to create seed dir {}: {e}",
+            seed_dir.display()
+        ))
+    })?;
+
+    let user_data =
+        render_user_data_without_completion(&vm_login_user_data(username), ssh_public_key.trim());
+    write_owner_only(&seed_dir.join("user-data"), &user_data).await?;
+
+    let meta_data = render_meta_data(&vm_instance_id(vm_name), vm_name);
+    tokio::fs::write(seed_dir.join("meta-data"), meta_data)
+        .await
+        .map_err(|e| VmError::BuildFailed(format!("failed to write meta-data: {e}")))?;
+
+    let (program, args) = iso_tool_command(IsoTool::Xorriso, iso_output, seed_dir);
+    run_iso_tool(&program, &args)
+        .await
+        .map_err(VmError::BuildFailed)?;
+    Ok(iso_output.to_path_buf())
 }

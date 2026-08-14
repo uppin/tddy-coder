@@ -6,15 +6,97 @@
 //! spawning `qemu-img`, an ISO tool, or QEMU itself.
 
 use pretty_assertions::assert_eq;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tddy_vm::cloud_init::{
-    base_convert_argv, classify_serial_line, cloud_init_boot_argv, cloud_init_library_paths,
-    completion_token, iso_tool_command, overlay_create_argv, promote_prepared_base_pair,
-    render_meta_data, render_user_data, render_user_data_without_completion, seed_iso_argv,
-    CloudInitBootConfig, CloudInitOutcome, CloudInitUser, CloudInitUserData, IsoTool, NinePShare,
+    boot_log_line, classify_serial_line, cloud_init_boot_argv, completion_token, iso_tool_command,
+    overlay_create_argv, render_meta_data, render_user_data, render_user_data_without_completion,
+    reset_cloud_init_and_reboot, seed_iso_argv, CloudInitBootConfig, CloudInitOutcome,
+    CloudInitUser, CloudInitUserData, IsoTool, NinePShare,
 };
-use tddy_vm::library::VmLibrary;
 use tddy_vm::{UefiFirmware, VmAccel, VmArch};
+
+/// The `runcmd` entries of a rendered document, in the order cloud-init will run them.
+fn rendered_runcmd(rendered: &str) -> Vec<String> {
+    let doc: serde_yml::Value =
+        serde_yml::from_str(rendered).expect("the rendered user-data must be YAML");
+    doc["runcmd"]
+        .as_sequence()
+        .expect("the rendered user-data must carry a runcmd list")
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .expect("every runcmd entry must be a string")
+                .to_string()
+        })
+        .collect()
+}
+
+/// The first `runcmd` step of a rendered document — for a bake, the shell everything else
+/// about completion is defined in.
+fn first_runcmd_step(rendered: &str) -> String {
+    rendered_runcmd(rendered)
+        .first()
+        .expect("the rendered user-data must carry at least one runcmd step")
+        .clone()
+}
+
+/// The `bootcmd` entries of a rendered document, or an empty list when it carries no
+/// `bootcmd` key at all.
+fn rendered_bootcmd(rendered: &str) -> Vec<String> {
+    let doc: serde_yml::Value =
+        serde_yml::from_str(rendered).expect("the rendered user-data must be YAML");
+    doc["bootcmd"]
+        .as_sequence()
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| {
+                    entry
+                        .as_str()
+                        .expect("every bootcmd entry must be a string")
+                        .to_string()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The names in a rendered document's `users` list. cloud-init accepts a mixed list — the
+/// bare string `default` standing for the distro's own account, maps for the rest — so a
+/// string entry names itself.
+fn rendered_user_names(rendered: &str) -> Vec<String> {
+    let doc: serde_yml::Value =
+        serde_yml::from_str(rendered).expect("the rendered user-data must be YAML");
+    doc["users"]
+        .as_sequence()
+        .expect("the rendered user-data must carry a users list")
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| entry["name"].as_str().unwrap_or_default().to_string())
+        })
+        .collect()
+}
+
+/// The `path` of every `write_files` entry of a rendered document.
+fn rendered_write_file_paths(rendered: &str) -> Vec<String> {
+    let doc: serde_yml::Value =
+        serde_yml::from_str(rendered).expect("the rendered user-data must be YAML");
+    doc["write_files"]
+        .as_sequence()
+        .expect("the rendered user-data must carry a write_files list")
+        .iter()
+        .map(|entry| {
+            entry["path"]
+                .as_str()
+                .expect("every write_files entry must have a path")
+                .to_string()
+        })
+        .collect()
+}
 
 fn a_cloud_init_user_data() -> CloudInitUserData {
     CloudInitUserData {
@@ -48,47 +130,18 @@ fn a_boot_config() -> CloudInitBootConfig {
     }
 }
 
-// ── base_convert_argv ────────────────────────────────────────────────────────
-
-/// The immutable base is produced by a plain qcow2-to-qcow2 convert (flattening any
-/// prior backing chain on the source), distinct from `build.rs::convert_to_qcow2`
-/// (raw-to-qcow2, used by the Buildroot pipeline).
-#[test]
-fn base_convert_argv_builds_qemu_img_convert_into_an_immutable_qcow2() {
-    // Given a downloaded/copied base image and the immutable base output path
-    let base_input = PathBuf::from("/cache/debian-12-genericcloud-amd64.qcow2");
-    let base_output = PathBuf::from("/images/demo-base.qcow2");
-
-    // When building the qemu-img convert argv
-    let args = base_convert_argv(&base_input, &base_output);
-
-    // Then it matches `qemu-img convert -f qcow2 -O qcow2 <in> <out>` exactly
-    assert_eq!(
-        args,
-        vec![
-            "convert".to_string(),
-            "-f".to_string(),
-            "qcow2".to_string(),
-            "-O".to_string(),
-            "qcow2".to_string(),
-            "/cache/debian-12-genericcloud-amd64.qcow2".to_string(),
-            "/images/demo-base.qcow2".to_string(),
-        ]
-    );
-}
-
 // ── overlay_create_argv ──────────────────────────────────────────────────────
 
 #[test]
-fn overlay_create_argv_uses_the_base_filename_as_a_relative_backing_file() {
-    // Given a bare base filename (not an absolute path) and an overlay destination
+fn overlay_create_argv_uses_the_parent_filename_as_a_relative_backing_file() {
+    // Given a parent named relative to the overlay's own directory, not absolutely
     let overlay = PathBuf::from("/images/demo.qcow2");
 
     // When building the overlay-create argv
     let args = overlay_create_argv("demo-base.qcow2", &overlay, "20G");
 
-    // Then the -b value is the relative basename, not an absolute path, so the overlay
-    // and base can be relocated together without breaking the backing reference
+    // Then the -b value is that relative reference, so the layer and its ancestors can be
+    // relocated together without breaking the chain
     let b_index = args.iter().position(|a| a == "-b").unwrap();
     assert_eq!(args[b_index + 1], "demo-base.qcow2");
 }
@@ -175,7 +228,7 @@ fn rendered_user_data_replaces_the_ssh_public_key_placeholder_with_the_provided_
 }
 
 #[test]
-fn rendered_user_data_embeds_a_per_boot_completion_script_that_prints_the_token_then_shuts_down() {
+fn rendered_user_data_prints_the_completion_token_and_shuts_the_guest_down() {
     // Given a completion token identifying this build
     let user_data = a_cloud_init_user_data();
     let token = "CLOUDINIT_COMPLETE_demo_abc123456789";
@@ -183,7 +236,8 @@ fn rendered_user_data_embeds_a_per_boot_completion_script_that_prints_the_token_
     // When rendering user-data
     let rendered = render_user_data(&user_data, "ssh-ed25519 AAAA...", token);
 
-    // Then the per-boot script prints the token and shuts the guest down
+    // Then the guest is told to print the token and halt, which is what lets the host seal
+    // the overlay
     assert!(
         rendered.contains(token),
         "rendered user-data must embed the completion token, got: {rendered}"
@@ -194,32 +248,235 @@ fn rendered_user_data_embeds_a_per_boot_completion_script_that_prints_the_token_
     );
 }
 
-#[test]
-fn rendered_user_data_injects_a_cloud_init_clean_bootcmd_so_the_copied_base_re_runs_provisioning() {
-    // Given a minimal provisioning spec (the base image already ran cloud-init once)
-    let user_data = a_cloud_init_user_data();
+// ── completion ordering ──────────────────────────────────────────────────────
 
-    // When rendering user-data
+#[test]
+fn the_completion_signal_is_the_last_runcmd_step_so_it_runs_after_every_caller_step() {
+    // Given a bake whose provisioning is two runcmd steps
+    let user_data = CloudInitUserData {
+        runcmd: vec!["set -e".to_string(), "./release".to_string()],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data for a bake
     let rendered = render_user_data(
         &user_data,
         "ssh-ed25519 AAAA...",
         "CLOUDINIT_COMPLETE_demo_abc123456789",
     );
 
-    // Then a `cloud-init clean --logs --seed` bootcmd forces re-provisioning on the copy
+    // Then the caller's steps keep their order and the completion call closes the list —
+    // a token emitted anywhere earlier would report on provisioning that had not run
+    let runcmd = rendered_runcmd(&rendered);
+    assert_eq!(
+        runcmd[runcmd.len() - 3..],
+        ["set -e", "./release", "__tddy_complete_bake"]
+    );
+}
+
+#[test]
+fn the_completion_signal_is_not_written_as_a_per_boot_script() {
+    // Given a bake spec that writes no files of its own
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the netplan config is the only file written. cloud-init's final stage runs
+    // `scripts-per-boot` *before* `scripts-user`, so a completion script under
+    // /var/lib/cloud/scripts/per-boot/ halts the guest before `runcmd` ever runs and seals
+    // an image that applied none of its provisioning.
+    assert_eq!(
+        rendered_write_file_paths(&rendered),
+        ["/etc/netplan/50-tddy-cloud-init-dhcp.yaml"]
+    );
+}
+
+#[test]
+fn a_caller_step_that_fails_signals_failure_instead_of_leaving_the_host_to_time_out() {
+    // Given a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the first runcmd step arms an EXIT trap, before any caller step can fail under
+    // `set -e`, and that trap emits the failed variant — a timeout is indistinguishable
+    // from a slow bake, so a failure must say so
+    let completion_shell = first_runcmd_step(&rendered);
     assert!(
-        rendered.contains("cloud-init clean --logs --seed"),
-        "rendered user-data must force cloud-init to re-run against the fresh seed, got: {rendered}"
+        completion_shell.contains("trap __tddy_on_runcmd_exit EXIT"),
+        "the failure trap must be armed by the first runcmd step, got: {completion_shell}"
+    );
+    assert!(
+        completion_shell
+            .contains("__tddy_signal_and_halt \"CLOUDINIT_COMPLETE_demo_abc123456789_FAILED\""),
+        "the trap must emit the failed token variant, got: {completion_shell}"
+    );
+}
+
+// ── guest cloud-init logs on the serial console ──────────────────────────────
+
+#[test]
+fn both_guest_cloud_init_logs_are_dumped_before_the_completion_token_reaches_the_host() {
+    // Given a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the guest dumps both logs and only then echoes the token — the host stops
+    // reading the console the moment it sees the token
+    let completion_shell = first_runcmd_step(&rendered);
+    assert!(
+        completion_shell.contains(
+            "  __tddy_dump_guest_log /var/log/cloud-init.log\n  \
+             __tddy_dump_guest_log /var/log/cloud-init-output.log\n  echo \"$1\"\n"
+        ),
+        "both guest logs must be dumped ahead of the token, got: {completion_shell}"
+    );
+}
+
+#[test]
+fn each_dumped_guest_log_is_framed_by_markers_the_host_can_grep_for() {
+    // Given a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then each dump is bracketed by a begin/end marker naming the log it frames, so one
+    // log can be cut out of the boot log by `grep`/`sed`
+    let completion_shell = first_runcmd_step(&rendered);
+    assert!(
+        completion_shell.contains("echo \"TDDY_GUEST_LOG_BEGIN $__tddy_log\""),
+        "each dumped guest log must open with a greppable marker, got: {completion_shell}"
+    );
+    assert!(
+        completion_shell.contains("echo \"TDDY_GUEST_LOG_END $__tddy_log\""),
+        "each dumped guest log must close with a greppable marker, got: {completion_shell}"
+    );
+}
+
+#[test]
+fn a_dumped_guest_log_cannot_impersonate_the_completion_token() {
+    // Given a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the dump rewrites the token wherever the guest's own logs happen to carry it:
+    // the host classifies the console line by line, so a log line quoting the token would
+    // otherwise end the watch — reporting success on a bake that had just failed
+    let completion_shell = first_runcmd_step(&rendered);
+    assert!(
+        completion_shell.contains(
+            "sed \"s/CLOUDINIT_COMPLETE_demo_abc123456789/CLOUDINIT_TOKEN_ELIDED/g\" \
+             \"$__tddy_snapshot\""
+        ),
+        "the guest log dump must elide the completion token, got: {completion_shell}"
+    );
+}
+
+// ── boot_log_line ────────────────────────────────────────────────────────────
+
+#[test]
+fn a_serial_line_reaches_the_durable_boot_log_with_its_terminal_escapes_stripped() {
+    // Given a serial console line wrapped in colour escapes and CRLF framing
+    let raw = "\u{1b}[0;32m[  OK  ] Started cloud-final.service.\u{1b}[0m\r";
+
+    // When deriving what the durable boot log records for it
+    let logged = boot_log_line(raw);
+
+    // Then only the text a human would have seen survives, so the log is greppable
+    assert_eq!(logged, "[  OK  ] Started cloud-final.service.");
+}
+
+#[test]
+fn a_guest_log_marker_reaches_the_durable_boot_log_verbatim() {
+    // Given the begin marker as the guest's console emits it, escape-prefixed and CR-framed
+    let raw = "\u{1b}[0mTDDY_GUEST_LOG_BEGIN /var/log/cloud-init.log\r";
+
+    // When deriving what the durable boot log records for it
+    let logged = boot_log_line(raw);
+
+    // Then the marker line is exactly what a caller greps for — stripping escapes must not
+    // cost content
+    assert_eq!(logged, "TDDY_GUEST_LOG_BEGIN /var/log/cloud-init.log");
+}
+
+// ── resetting cloud-init ─────────────────────────────────────────────────────
+
+/// `cloud-init clean` deletes `/var/lib/cloud/instance/`, which is where cloud-init writes
+/// the `runcmd` script it is about to run. From `bootcmd` — the init stage, before the
+/// config stage renders that script — it therefore destroys the provisioning of the very
+/// boot it belongs to. Observed in a live guest after a bake: `/var/lib/cloud/instance/` was
+/// gone, every script module finished in under a millisecond because there was nothing left
+/// to run, and the host sealed an image with none of its `packages:` or `runcmd:` applied.
+#[test]
+fn a_bake_never_resets_cloud_init_at_boot_which_would_delete_the_runcmd_it_is_about_to_run() {
+    // Given a bake spec carrying a bootcmd of its own
+    let user_data = CloudInitUserData {
+        bootcmd: vec!["modprobe 9pnet_virtio".to_string()],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the caller's own entry is the whole of bootcmd
+    assert_eq!(rendered_bootcmd(&rendered), ["modprobe 9pnet_virtio"]);
+}
+
+#[test]
+fn a_mid_bake_reboot_discards_the_instance_state_first_so_the_next_boot_re_runs_provisioning() {
+    // Given a provisioning step that has to reboot the guest to continue
+
+    // When building the shell it reboots with
+    let command = reset_cloud_init_and_reboot();
+
+    // Then cloud-init's record of this instance goes first — a boot that finds an instance
+    // it has already provisioned skips `runcmd` entirely, so the steps after the reboot
+    // would never run — and a reset that fails aborts the bake instead of rebooting into a
+    // guest that will never finish
+    assert_eq!(
+        command,
+        "cloud-init clean --logs --seed || exit 1; sync; systemctl reboot"
     );
 }
 
 // ── render_user_data_without_completion ──────────────────────────────────────
 
 /// A guest seeded for real work — over SSH or the serial console — must not power itself
-/// off the moment cloud-init finishes. Re-introducing the completion script here would kill
+/// off the moment cloud-init finishes. Re-introducing the completion steps here would kill
 /// every real-boot test the moment provisioning completed.
 #[test]
-fn user_data_without_completion_omits_the_halt_on_completion_script() {
+fn user_data_without_completion_omits_the_halt_on_completion_steps() {
     // Given a provisioning spec for a guest that must stay up
     let user_data = a_cloud_init_user_data();
 
@@ -232,13 +489,28 @@ fn user_data_without_completion_omits_the_halt_on_completion_script() {
         "a long-lived guest must not be told to halt, got: {rendered}"
     );
     assert!(
-        !rendered.contains("99-tddy-cloud-init-complete.sh"),
-        "the completion script must not be written at all, got: {rendered}"
+        !rendered.contains("__tddy_"),
+        "none of the completion machinery belongs here, got: {rendered}"
     );
     assert!(
         !rendered.contains("CLOUDINIT_COMPLETE"),
         "no completion token belongs in a long-lived guest's seed, got: {rendered}"
     );
+}
+
+#[test]
+fn user_data_without_completion_runs_exactly_the_runcmd_steps_it_was_given() {
+    // Given a provisioning spec for a guest that must stay up
+    let user_data = CloudInitUserData {
+        runcmd: vec!["set -e".to_string(), "./release".to_string()],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data without a completion token
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then the caller's steps are the whole of runcmd — no completion step is appended
+    assert_eq!(rendered_runcmd(&rendered), ["set -e", "./release"]);
 }
 
 #[test]
@@ -253,15 +525,15 @@ fn user_data_with_a_completion_token_still_halts_the_guest() {
         "CLOUDINIT_COMPLETE_demo_abc123456789",
     );
 
-    // Then the halt-on-completion script is present — the two renderers differ in exactly
+    // Then the halt-on-completion steps are present — the two renderers differ in exactly
     // this, and nothing else
     assert!(
         rendered.contains("shutdown -h now"),
         "a bake must halt so the host can seal the overlay, got: {rendered}"
     );
-    assert!(
-        rendered.contains("99-tddy-cloud-init-complete.sh"),
-        "the completion script must be written for a bake, got: {rendered}"
+    assert_eq!(
+        rendered_runcmd(&rendered).last().map(String::as_str),
+        Some("__tddy_complete_bake")
     );
 }
 
@@ -296,23 +568,67 @@ fn user_data_without_completion_renders_the_users_packages_and_runcmd_it_was_giv
 }
 
 #[test]
-fn user_data_without_completion_keeps_the_netplan_and_cloud_init_clean_bootcmd() {
+fn user_data_without_completion_still_configures_the_guest_network() {
     // Given a provisioning spec for a guest that must stay up
     let user_data = a_cloud_init_user_data();
 
     // When rendering user-data without a completion token
     let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
 
-    // Then it still gets networking and still re-provisions on a copied base image — the
-    // only thing dropped relative to render_user_data is the halt
+    // Then it still gets networking — the only thing dropped relative to render_user_data
+    // is the halt
     assert!(
         rendered.contains("/etc/netplan/50-tddy-cloud-init-dhcp.yaml"),
         "got: {rendered}"
     );
-    assert!(
-        rendered.contains("cloud-init clean --logs --seed"),
-        "got: {rendered}"
-    );
+}
+
+#[test]
+fn user_data_without_completion_leaves_the_bootcmd_empty_when_the_caller_asked_for_none() {
+    // Given a provisioning spec for a guest that must stay up
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data without a completion token
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then nothing runs at boot ahead of the caller's own provisioning
+    assert_eq!(rendered_bootcmd(&rendered), Vec::<String>::new());
+}
+
+// ── users: the distro default ────────────────────────────────────────────────
+
+/// A `users:` list *replaces* the distro's default account rather than adding to it, but
+/// `cc_ssh_authkey_fingerprints` still looks that account up by name — and dies on a guest
+/// where it was never created: `KeyError: "getpwnam(): name not found: 'debian'"`, which
+/// fails `cloud-final.service` with exit 1 even when every provisioning step succeeded.
+/// cloud-init's own answer is the bare string `default` among the user maps.
+#[test]
+fn the_rendered_users_list_keeps_the_distro_default_account_ahead_of_the_ones_it_defines() {
+    // Given a spec defining one account of its own
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then the distro's own account leads the list, and the spec's account follows it
+    assert_eq!(rendered_user_names(&rendered), ["default", "tddy"]);
+}
+
+#[test]
+fn a_spec_defining_no_accounts_of_its_own_renders_no_users_key_at_all() {
+    // Given a spec that defines no accounts — every account it needs came from the image it
+    // chains onto
+    let user_data = CloudInitUserData {
+        users: vec![],
+        ..a_cloud_init_user_data()
+    };
+
+    // When rendering user-data
+    let rendered = render_user_data_without_completion(&user_data, "ssh-ed25519 AAAA...");
+
+    // Then the key is absent, which is what leaves cloud-init's own default in force —
+    // rendering a lone `default` would say the same thing in more words
+    assert!(!rendered.contains("users:"), "got: {rendered}");
 }
 
 // ── users: plain_text_passwd / lock_passwd ───────────────────────────────────
@@ -644,107 +960,6 @@ fn serial_watcher_reports_failure_when_the_failed_token_variant_appears() {
     // Then it reports failure, not success (the failed variant must be checked before
     // the bare token, since it contains the bare token as a substring)
     assert_eq!(outcome, CloudInitOutcome::Failed);
-}
-
-// ── promote_prepared_base_pair ────────────────────────────────────────────────
-
-/// Two dummy files standing in for a finished bake's chained pair, in the scratch directory
-/// `build_cloud_init_image` writes every artifact to.
-fn a_baked_pair_in(scratch_dir: &Path, name: &str) {
-    std::fs::create_dir_all(scratch_dir).unwrap();
-    std::fs::write(
-        scratch_dir.join(format!("{name}-base.qcow2")),
-        b"immutable base",
-    )
-    .unwrap();
-    std::fs::write(scratch_dir.join(format!("{name}.qcow2")), b"delta overlay").unwrap();
-    std::fs::write(scratch_dir.join(format!("{name}-seed.iso")), b"seed").unwrap();
-}
-
-#[tokio::test]
-async fn promoting_moves_both_halves_of_the_pair_out_of_the_scratch_directory() {
-    // Given a finished bake's scratch directory holding the pair plus its seed ISO
-    let dir = tempfile::tempdir().unwrap();
-    let library = VmLibrary::new(dir.path());
-    library.init().unwrap();
-    let scratch_dir = library.prepared_base_dir().join("demo");
-    a_baked_pair_in(&scratch_dir, "demo");
-    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
-
-    // When the pair is promoted
-    promote_prepared_base_pair(&scratch_dir, "demo", &paths)
-        .await
-        .unwrap();
-
-    // Then both halves land flat in images/02-prepared-base/, co-located so the overlay's
-    // relative backing reference still resolves, and only they moved
-    assert_eq!(
-        std::fs::read(&paths.prepared_base_output).unwrap(),
-        b"immutable base"
-    );
-    assert_eq!(
-        std::fs::read(&paths.prepared_overlay_output).unwrap(),
-        b"delta overlay"
-    );
-    assert!(
-        scratch_dir.join("demo-seed.iso").exists(),
-        "promotion moves the images only — the seed ISO stays for its owner to clean up"
-    );
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn promoting_locks_both_halves_of_the_pair_read_only() {
-    use std::os::unix::fs::PermissionsExt;
-
-    // Given a finished bake's scratch directory
-    let dir = tempfile::tempdir().unwrap();
-    let library = VmLibrary::new(dir.path());
-    library.init().unwrap();
-    let scratch_dir = library.prepared_base_dir().join("demo");
-    a_baked_pair_in(&scratch_dir, "demo");
-    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
-
-    // When the pair is promoted
-    promote_prepared_base_pair(&scratch_dir, "demo", &paths)
-        .await
-        .unwrap();
-
-    // Then both are sealed 0444 — a prepared base is shared by every VM cloned from it and
-    // must not be mutated in place
-    let base_mode = std::fs::metadata(&paths.prepared_base_output)
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    let overlay_mode = std::fs::metadata(&paths.prepared_overlay_output)
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(base_mode, 0o444);
-    assert_eq!(overlay_mode, 0o444);
-}
-
-#[tokio::test]
-async fn promoting_fails_when_the_bake_left_no_pair_behind() {
-    // Given an empty scratch directory — a bake that produced nothing
-    let dir = tempfile::tempdir().unwrap();
-    let library = VmLibrary::new(dir.path());
-    library.init().unwrap();
-    let scratch_dir = library.prepared_base_dir().join("demo");
-    std::fs::create_dir_all(&scratch_dir).unwrap();
-    let paths = cloud_init_library_paths(&library, "debian-12", "demo");
-
-    // When the pair is promoted
-    let result = promote_prepared_base_pair(&scratch_dir, "demo", &paths).await;
-
-    // Then it reports the missing file rather than silently publishing nothing
-    let message = result.unwrap_err().to_string();
-    assert!(
-        message.contains("demo-base.qcow2"),
-        "error must name the missing image, got: {message}"
-    );
 }
 
 #[test]

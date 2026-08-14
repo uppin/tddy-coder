@@ -104,8 +104,10 @@ impl DemoOrchestrator {
             .verify(&vm, recipe.verify_command.as_deref().unwrap_or_default())
             .await?;
         if !verify_result.success {
+            // Both streams: a verify command that failed usually says why on stderr, and
+            // the half that explains the failure is the half worth reporting.
             return Err(OrchestratorError::Vm(VmError::VerifyFailed(
-                verify_result.output,
+                verify_result.combined_output(),
             )));
         }
 
@@ -116,7 +118,7 @@ impl DemoOrchestrator {
         Ok(DemoResult {
             share_url: handle.share_url,
             steps_completed: recipe.deploy_steps.len() as u32,
-            verification: verify_result.output,
+            verification: verify_result.combined_output(),
         })
     }
 

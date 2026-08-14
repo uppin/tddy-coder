@@ -5,11 +5,14 @@
 //! serial). These pin what the launcher must emit so it can boot a real cloud image and log
 //! into it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;
 use tddy_vm::cloud_init::NinePShare;
-use tddy_vm::qemu::{ensure_uefi_vars_file, qemu_binary, ssh_destination, ssh_opts, QemuVmArgs};
+use tddy_vm::qemu::{
+    ensure_uefi_vars_file, qemu_binary, scp_opts, scp_to_guest_argv, ssh_destination, ssh_opts,
+    QemuVmArgs,
+};
 use tddy_vm::vm::{PortForward, RunningVm, UefiFirmware, VmAccel, VmArch, VmConfig, VmLogin};
 
 fn an_aarch64_config() -> VmConfig {
@@ -412,6 +415,61 @@ fn offers_no_identity_when_the_login_policy_carries_no_key() {
          -o BatchMode=yes \
          -o ConnectTimeout=10 \
          -o LogLevel=ERROR"
+    );
+}
+
+#[test]
+fn names_the_port_with_scps_own_flag_rather_than_sshs() {
+    // Given a guest reached on a forwarded port with a per-VM key
+    let vm = a_running_vm();
+
+    // When the scp options are built
+    let opts = scp_opts(&vm);
+
+    // Then the port is spelled `-P`, not the `-p` ssh uses — scp reads `-p` as "preserve
+    // modification times" and would take the port number as a source path
+    assert_eq!(
+        opts.join(" "),
+        "-P 2222 \
+         -o StrictHostKeyChecking=no \
+         -o UserKnownHostsFile=/dev/null \
+         -o BatchMode=yes \
+         -o ConnectTimeout=10 \
+         -o LogLevel=ERROR \
+         -i /vms/guest/id_guest \
+         -o IdentitiesOnly=yes"
+    );
+}
+
+#[test]
+fn copies_every_named_binary_in_one_invocation_to_the_guest_destination() {
+    // Given a guest and the three binaries a supervised host needs
+    let vm = a_running_vm();
+    let binaries = [
+        PathBuf::from("/dist/tddy-supervisor"),
+        PathBuf::from("/dist/tddy-daemon"),
+        PathBuf::from("/dist/tddy-sandbox-runner"),
+    ];
+
+    // When the copy is described
+    let argv = scp_to_guest_argv(&vm, &binaries, "/tmp/stage");
+
+    // Then all three sources precede the single `<user>@<host>:<dest>` target, so one scp
+    // carries the whole set instead of paying the connection cost three times
+    assert_eq!(
+        argv.join(" "),
+        "-P 2222 \
+         -o StrictHostKeyChecking=no \
+         -o UserKnownHostsFile=/dev/null \
+         -o BatchMode=yes \
+         -o ConnectTimeout=10 \
+         -o LogLevel=ERROR \
+         -i /vms/guest/id_guest \
+         -o IdentitiesOnly=yes \
+         /dist/tddy-supervisor \
+         /dist/tddy-daemon \
+         /dist/tddy-sandbox-runner \
+         tddy@127.0.0.1:/tmp/stage"
     );
 }
 

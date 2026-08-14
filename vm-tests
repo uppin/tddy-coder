@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#
+# Run the VM-backed production tests — the ones that boot a real QEMU guest.
+#
+# These are deliberately NOT part of `./test`: every one is `#[ignore]`d, so a default
+# `cargo test` run reports them as ignored and never boots anything. They take minutes to
+# hours, need an on-disk base image, and need hardware acceleration to be bearable — none
+# of which belongs in the suite a developer runs on every change.
+#
+# Usage:
+#   ./vm-tests                     # every VM-backed test
+#   ./vm-tests <substring>         # only tests whose name contains <substring>
+#   ./vm-tests --list              # show the test binaries this would run
+#
+# Requires TDDY_CLOUDINIT_BASE_IMAGE pointing at a cloud image already on disk — exported,
+# or in the repo-root .env. Nothing is ever downloaded. Warm the image cache first with
+# ./run-vm-testkit if you want the bakes to be a one-time cost.
+#
+# Prerequisite: /dev/kvm must be *openable* (Linux) or HVF available (macOS). Under TCG
+# these run for hours rather than minutes.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# Load .env if present (does not override already-set env vars), matching ./web-dev and
+# the testkit's own reader.
+if [ -f .env ]; then
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    value="${value%\"}" ; value="${value#\"}"
+    value="${value%\'}" ; value="${value#\'}"
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
+  done < .env
+fi
+
+# Each entry is "<package> <test-binary>". Keep this list in step with the `#[ignore]`d
+# suites: a VM test that is not listed here is a VM test nobody runs.
+VM_TESTS=(
+  "tddy-vm bake_provisioning_acceptance"
+  "tddy-vm cloud_init_acceptance"
+  "tddy-vm vm_boot_control_acceptance"
+  "tddy-vm vm_library_acceptance"
+  "tddy-vm tddy_host_vm_acceptance"
+  "tddy-vm-build cloud_init_cli_acceptance"
+  "tddy-vm-build build_image_cli_acceptance"
+  "tddy-e2e vm_cgroups_acceptance"
+)
+
+if [[ "${1:-}" == "--list" ]]; then
+  printf '%s\n' "${VM_TESTS[@]}"
+  exit 0
+fi
+
+FILTER="${1:-}"
+
+if [ -z "${TDDY_CLOUDINIT_BASE_IMAGE:-}" ]; then
+  echo "vm-tests: TDDY_CLOUDINIT_BASE_IMAGE is not set." >&2
+  echo "vm-tests: point it at a cloud image already on disk — nothing is downloaded." >&2
+  echo "vm-tests: export it, or add it to the repo-root .env:" >&2
+  echo "vm-tests:   TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-arm64.qcow2" >&2
+  exit 1
+fi
+
+if [ ! -f "$TDDY_CLOUDINIT_BASE_IMAGE" ]; then
+  echo "vm-tests: no such image: ${TDDY_CLOUDINIT_BASE_IMAGE}" >&2
+  exit 1
+fi
+
+echo "vm-tests: base image ${TDDY_CLOUDINIT_BASE_IMAGE}" >&2
+[ -n "$FILTER" ] && echo "vm-tests: filtering to tests matching '${FILTER}'" >&2
+echo >&2
+
+failed=()
+for entry in "${VM_TESTS[@]}"; do
+  read -r pkg bin <<<"$entry"
+  echo "=== ${pkg} :: ${bin} ===" >&2
+  # --test-threads=1 is not optional: these bind fixed host ports and QEMU derives its
+  # monitor socket path from the port alone, so two concurrent guests collide on both.
+  if ! ./dev cargo test -p "$pkg" --test "$bin" -- --ignored --nocapture --test-threads=1 ${FILTER:+"$FILTER"}; then
+    failed+=("${pkg}::${bin}")
+  fi
+  echo >&2
+done
+
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "vm-tests: FAILED — ${#failed[@]} suite(s):" >&2
+  printf '  %s\n' "${failed[@]}" >&2
+  exit 1
+fi
+
+echo "vm-tests: all VM-backed suites passed." >&2

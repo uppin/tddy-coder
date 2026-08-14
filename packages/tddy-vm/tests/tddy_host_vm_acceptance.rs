@@ -35,6 +35,8 @@ use tddy_vm::library::VmLibrary;
 use tddy_vm::tddy_host::{
     build_tddy_host_image, LiveKitCommonRoom, TddyHostBuildOptions, TddyHostSpec,
 };
+use tddy_vm::vm_manifest::VmManifest;
+use tddy_vm_testkit::BootedGuest;
 use tempfile::tempdir;
 
 /// The RPC's own ceiling, imported rather than restated so the test cannot drift from the
@@ -49,6 +51,22 @@ const BAKE_TIMEOUT: Duration = tddy_vm::service::TDDY_HOST_BAKE_TIMEOUT;
 /// over the observed figure, deliberately, because a guest that is merely slow to start a
 /// service should not fail the suite — but a guest that never starts one still does.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Boot a VM that already exists in `library` — overlay, per-VM seed ISO and manifest all
+/// written by [`VmLibrary::create_vm`] — and wait for it to reach a login prompt.
+///
+/// No 9p shares: a VM created from a prepared base carries everything it needs on its own
+/// disk.
+async fn a_booted_library_vm(library: &VmLibrary, manifest: &VmManifest) -> BootedGuest {
+    let mut guest = BootedGuest::boot(library, manifest, vec![])
+        .await
+        .expect("a VM created from the prepared base must boot");
+    guest
+        .wait_for_login_prompt(BOOT_TIMEOUT)
+        .await
+        .expect("the VM must reach a login prompt");
+    guest
+}
 
 fn a_livekit_common_room() -> LiveKitCommonRoom {
     LiveKitCommonRoom {
@@ -107,17 +125,15 @@ async fn bakes_a_prepared_base_whose_guest_runs_the_tddy_daemon_under_systemd() 
     .await
     .expect("tddy host image must bake");
 
-    // Then the prepared base pair landed in the library and progress was streamed
+    // Then the prepared base landed in the library as a delta chained onto the imported
+    // cloud image, and progress was streamed
     assert_eq!(
         prepared_base,
         library.prepared_base_dir().join("debian-12-tddy.qcow2")
     );
-    assert!(
-        library
-            .prepared_base_dir()
-            .join("debian-12-tddy-base.qcow2")
-            .exists(),
-        "the flattened base half of the chained pair must be co-located with the overlay"
+    assert_eq!(
+        backing_file_of(&prepared_base),
+        "../01-base/debian-12.qcow2"
     );
     assert!(
         !progress_lines.lock().unwrap().is_empty(),
@@ -136,25 +152,31 @@ async fn runs_the_tddy_daemon_under_systemd_in_a_vm_created_from_the_prepared_ba
     };
 
     // Given a VM created from an already-baked tddy host prepared base
-    let dir = tempdir().unwrap();
-    let library = a_library_seeded_with(&prepared_base, dir.path(), "debian-12-tddy");
+    let library = the_library_holding(&prepared_base);
     let manifest = a_tddy_host_manifest("tddy-host-1", "debian-12-tddy", 2242);
+    let _ = library.remove_vm(&manifest.name);
     library
         .create_vm(&manifest)
         .await
         .expect("VM must be creatable from the prepared base");
 
-    let guest = common::boot_library_vm(&library, &manifest, BOOT_TIMEOUT).await;
+    let guest = a_booted_library_vm(&library, &manifest).await;
 
     // When the guest is asked whether the daemon service is up, over SSH as the manifest's
-    // login-policy user
-    let active = guest.run_over_ssh("systemctl is-active tddy-daemon").await;
+    // login-policy user. The daemon starts asynchronously under systemd, so this is one of
+    // the few commands whose purpose really is to poll a condition into existence
+    let active = guest
+        .run_over_ssh_until_success("systemctl is-active tddy-daemon", BOOT_TIMEOUT)
+        .await
+        .expect("the guest must answer over SSH");
 
     // Then systemd reports it active
-    assert_eq!(active.exit_code, 0);
-    assert_eq!(active.output.trim(), "active");
+    active.assert_succeeded().assert_stdout_line("active");
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("the guest must shut down");
+    library
+        .remove_vm(&manifest.name)
+        .expect("the disposable VM must be removable from the developer's own library");
 }
 
 #[tokio::test]
@@ -168,15 +190,15 @@ async fn serves_the_guest_daemon_connect_port_over_the_forwarded_host_port() {
     };
 
     // Given a booted VM created from the tddy host prepared base
-    let dir = tempdir().unwrap();
-    let library = a_library_seeded_with(&prepared_base, dir.path(), "debian-12-tddy");
+    let library = the_library_holding(&prepared_base);
     let manifest = a_tddy_host_manifest("tddy-host-2", "debian-12-tddy", 2243);
+    let _ = library.remove_vm(&manifest.name);
     library
         .create_vm(&manifest)
         .await
         .expect("VM must be creatable from the prepared base");
 
-    let guest = common::boot_library_vm(&library, &manifest, BOOT_TIMEOUT).await;
+    let guest = a_booted_library_vm(&library, &manifest).await;
     let forwarded_port = manifest.run.port_forwards[0].host_port;
 
     // When the host speaks HTTP to the forwarded Connect port.
@@ -193,7 +215,10 @@ async fn serves_the_guest_daemon_connect_port_over_the_forwarded_host_port() {
         "guest daemon must serve HTTP on forwarded host port {forwarded_port}, got: {response:?}"
     );
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("the guest must shut down");
+    library
+        .remove_vm(&manifest.name)
+        .expect("the disposable VM must be removable from the developer's own library");
 }
 
 /// Send a minimal HTTP request to `port` and return the first line of the response,
@@ -237,28 +262,38 @@ async fn read_http_status_line(port: u16) -> Result<String, String> {
         .ok_or_else(|| "the connection closed without sending anything".to_string())
 }
 
-/// Place an already-baked prepared-base pair into a fresh library rooted at `root`.
-fn a_library_seeded_with(
-    prepared_base: &std::path::Path,
-    root: &std::path::Path,
-    name: &str,
-) -> VmLibrary {
-    let library = VmLibrary::new(root);
-    library.init().expect("library must initialise");
+/// The library the already-baked prepared base lives in, resolved from the image's own
+/// location: `<root>/images/02-prepared-base/<name>.qcow2`.
+///
+/// A prepared base is a delta that names its parent by a path relative to its own directory,
+/// so it cannot be lifted out on its own into a scratch library — the VM under test is
+/// created in the library that holds the whole chain instead.
+fn the_library_holding(prepared_base: &std::path::Path) -> VmLibrary {
+    let root = prepared_base
+        .ancestors()
+        .nth(3)
+        .expect("a prepared base must sit at <root>/images/02-prepared-base/<name>.qcow2");
+    VmLibrary::new(root)
+}
 
-    let base_half = prepared_base.with_file_name(format!("{name}-base.qcow2"));
-    std::fs::copy(
-        &base_half,
-        library
-            .prepared_base_dir()
-            .join(format!("{name}-base.qcow2")),
-    )
-    .expect("the prepared base's flattened half must be copyable alongside its overlay");
-    std::fs::copy(
-        prepared_base,
-        library.prepared_base_dir().join(format!("{name}.qcow2")),
-    )
-    .expect("the prepared base overlay must be copyable");
-
-    library
+/// The backing reference `qemu-img info` reports as recorded in `image` — without the
+/// ` (actual path: …)` annotation qemu-img adds for a relative one, which describes where
+/// the file sits today rather than what the image records.
+fn backing_file_of(image: &std::path::Path) -> String {
+    let output = std::process::Command::new("qemu-img")
+        .arg("info")
+        .arg(image)
+        .output()
+        .expect("qemu-img info must run");
+    let info = String::from_utf8_lossy(&output.stdout);
+    let reported = info
+        .lines()
+        .find_map(|line| line.strip_prefix("backing file: "))
+        .unwrap_or_else(|| panic!("qemu-img info reported no backing file:\n{info}"));
+    reported
+        .split(" (actual path:")
+        .next()
+        .unwrap_or(reported)
+        .trim()
+        .to_string()
 }

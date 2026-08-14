@@ -94,6 +94,77 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### VM image chaining and testkit — deliberate gaps (source: vm-cgroups-testkit changeset, 2026-08-14)
+
+- **BLOCKER: binaries built in the builder guest cannot execute on the test host.** They are
+  compiled inside the Nix dev shell, so their ELF interpreter is an exact store path —
+  `/nix/store/nmq81hidzwij3c7vyiazwg2l74vnxkar-glibc-2.42-51/lib/ld-linux-aarch64.so.1`. The test
+  host inherits `/nix` from `tddy-nix-base` but not *that* glibc closure, which was only ever
+  realized in the builder's dev shell, so `execve` fails `ENOENT` on the interpreter and systemd
+  reports `203/EXEC`. Observed as `./install --systemd` succeeding completely and then
+  `tddy-supervisor is 'activating', not active`. Four ways out, none free: build against **musl**
+  statically (cleanest "deployable" story, but a real change to how the workspace builds and
+  `libwebrtc` is the risk); **`nix copy`** the runtime closure to the test host (faithful to how a
+  Nix artifact really deploys, but the test host stops resembling a plain production host); build
+  with **Debian's own toolchain** in the guest (links against system glibc, but the builder stops
+  exercising the real `./release` path); or **warm the dev shell on the test host** (smallest
+  change, deliberately reintroduces a toolchain into the guest the tests treat as production-like).
+  This blocks all five cgroups e2e tests.
+- **`builds_deployable_linux_binaries_on_a_host_that_cannot_compile_them` asserts too little.** It
+  checks the ELF header's `e_machine` and stops, so it passed while producing binaries that cannot
+  actually run on the guest they are built for — "deployable" is exactly the property it does not
+  test. It should assert the binary *executes* in the test host (e.g. `--version`), which is the
+  only check the interpreter problem could not have survived.
+- **AppArmor profile does not load on Debian 12** (non-fatal): `apparmor_parser` fails with
+  `Could not open 'abi/4.0'` — the profile targets a newer abi than bookworm ships. `./install`
+  warns and continues, but on a host with `kernel.apparmor_restrict_unprivileged_userns=1` the
+  daemon's own sandbox jails would fail to create a user namespace.
+
+- **`tddy-vm-build cloud-init` can only build the *first* layer of a chain** (found by running it,
+  2026-08-14). `run_cloud_init_build` unconditionally calls `import_base_image`, which now rejects a
+  qcow2 that names a backing file — correctly, since importing a delta into `01-base/` would strand
+  it. So passing an already-prepared layer as `--base-image` fails with *"is a qcow2 delta with a
+  backing file; import the whole image it ultimately derives from instead"*. Multi-level chaining
+  works only through `tddy-vm-testkit`'s `bake.rs`, which hands the parent straight to
+  `build_cloud_init_image` without importing. Closing it means letting the CLI distinguish "import
+  this pristine image, then chain onto it" from "chain onto this existing layer" — probably a
+  `--parent-layer` flag alongside `--base-image`, mutually exclusive.
+
+- **`VmManager::start` still boots with `seed_iso: None`** (`packages/tddy-vm/src/registry.rs:286`).
+  `create_vm` now writes a per-VM NoCloud seed authorizing the keypair it generates, and both the
+  testkit and `packages/tddy-vm/tests/common/mod.rs` attach it — but a library VM started **through
+  the daemon** does not, so SSH into it cannot authenticate (`BatchMode=yes` + `IdentitiesOnly=yes`
+  leave no fallback). Closing it means distinguishing library-created VMs, which have a seed, from
+  spec-only VMs pointed at an arbitrary `image_path`, which have none and would fail to boot on a
+  missing `-cdrom`. That is an RPC-surface decision, not a one-liner.
+- **No layer records its parent's identity.** `import_base_image` unconditionally removes and
+  re-copies `images/01-base/<name>.qcow2` on every bake, and qcow2 stores no parent hash — so a
+  re-imported base silently changes the bytes under every existing child and nothing detects it.
+  This is the makers-lt gap the changeset set out to close by recording each layer's parent in the
+  manifest; it is not implemented and no test covers it.
+- **The five VM production tests have never been run end to end.** Their gating is verified (all
+  report `ignored` in a default run) but the bake chain itself is unexercised — the first real run
+  should expect corrections around the guest-side `./install` invocation and the `tddy.slice` path
+  the delegation assertions read.
+- **A non-qcow2 supplied base image is not normalised.** `import_base_image` rejects a *chained*
+  qcow2 but copies a raw/VMDK source verbatim, which then fails later at `qemu-img create -F qcow2`
+  with a confusing error. If normalisation is added, its argv cannot live in `library.rs`: the
+  `no_disk_flattening_acceptance` guard matches per-file on `"convert"` + `"-f"` + `"qcow2"`, and
+  `library.rs` already contains `"-f"` from `ssh-keygen`.
+- **The anti-flattening guard matches source text**, so it passes for a renamed reintroduction of
+  the same behaviour and can false-positive on an unrelated `"convert"` literal. A tripwire, not a
+  proof.
+- **`dist/linux-aarch64` is hardcoded** (`packages/tddy-vm-testkit/src/layout.rs`) while
+  `VmArch::host()` can be x86_64, and `vm_cgroups_acceptance.rs` asserts `EM_AARCH64`
+  unconditionally. No arch guard.
+- **~150 lines duplicated** between `packages/tddy-vm-testkit/src/guest.rs` and
+  `packages/tddy-vm/tests/common/mod.rs` (`force_kill` and `wait_for_port_release` are byte-identical;
+  `boot_library_vm` is `BootedGuest::boot` with no shares), already drifting in their env-var
+  constants. `tddy-vm` could take `tddy-vm-testkit` as a dev-dependency and keep only
+  `TestGuestBuilder`, which has no testkit equivalent.
+- **`tddy-vm-testkit` is a plain workspace lib**, so nothing structurally stops production code
+  depending on it and picking up `SESSION_TOKEN_SECRET` / `GUEST_PASSWORD`. Consider
+  `publish = false` plus a crate-level test-only marker.
 ### Session rooms are not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
 
 `SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`, and a room is only opened by
@@ -430,15 +501,16 @@ weighed against sessions already on disk in that state, which resume into `orche
   `dmesg -n 1` after login to make exact-output assertions deterministic, but any production
   consumer driving a guest over UART faces the same interleaving — a `quiesce_kernel_console`
   on the driver is the natural home.
-- **A possible ordering bug in the cloud-init completion script (found statically, unverified).**
-  Upstream `cloud.cfg.tmpl` runs `scripts_per_boot` *before* `scripts_user`, so the completion
-  script — which lives in `/var/lib/cloud/scripts/per-boot/` — appears to run before `runcmd`;
-  and `cloud-init status --wait` loops while `status.json` exists without `result.json`, which
-  is the state during the final stage. Statically that reads as either a deadlock or a token
-  emitted before provisioning ran, which would let the host seal a half-baked image. This
-  contradicts the existing claim of multiple verified real boots, so it may be a misreading of
-  the upstream ordering — it needs a real bake to settle either way. Predates this changeset
-  (the completion mechanism came with the 2026-07-02 cloud-init work).
+- ~~**A possible ordering bug in the cloud-init completion script (found statically,
+  unverified).**~~ **Confirmed by a real bake and fixed (2026-08-14).** `scripts_per_boot` does
+  run before `scripts_user`, so the completion script halted the guest before `runcmd` ever ran
+  and the host sealed a half-baked image as a success; `cloud-init status --wait` did not block
+  because the seed's `cloud-init clean --logs --seed` `bootcmd` had wiped the status it waits on.
+  The completion signal now lives in `runcmd` itself — a preamble step arming an EXIT trap that
+  emits `<token>_FAILED`, and a final step that emits the success token — and both paths dump
+  the guest's `/var/log/cloud-init.log` and `/var/log/cloud-init-output.log` to the console,
+  framed by `TDDY_GUEST_LOG_BEGIN`/`TDDY_GUEST_LOG_END`, into a boot log now written with its
+  terminal escapes stripped.
 - **Guest console log-level control.** The bake streams every serial line as RPC progress —
   ~713 lines in the first 17 seconds, almost all kernel and systemd chatter. `cloud_init_boot_argv`
   and `QemuVmArgs::build` emit no kernel cmdline at all, so there is no `loglevel=`/`quiet` knob.
@@ -551,6 +623,17 @@ Verified pre-existing by inspection: the whole `tddy-daemon` diff on this branch
 
 ### tddy-supervisor — VM-backed acceptance test (deferred to its own PR, 2026-08-03)
 
+> **Implemented 2026-08-14** by the `tddy-vm-testkit` changeset — see
+> [docs/dev/1-WIP/vm-cgroups-testkit.md](1-WIP/vm-cgroups-testkit.md) and
+> [plans/vm-cgroups-testkit.md](../../plans/vm-cgroups-testkit.md). Steps 1-6 below are all
+> in place, with two deliberate departures: step 1's **download** was dropped (the base
+> image is supplied on disk via `TDDY_CLOUDINIT_BASE_IMAGE`, nothing is ever fetched), and
+> the single bake of step 2 became a **three-image chain** sharing one Nix-prepared parent,
+> so the builder and the guest under test derive from the same base without paying for Nix
+> twice. Step 6's gRPC assertions are the remaining gap: the cross-user session and
+> `PR_SET_PDEATHSIG` properties still need a tonic client over `ssh -L`. Keep this section
+> until that lands.
+
 The supervisor's 33 acceptance tests run the real binary but declare the *invoking* user as the service
 user, so `privilege_to_drop` returns `None` and no drop happens; the cgroup base is a temp directory.
 Three properties therefore have no automated coverage anywhere, and they are the feature's headline
@@ -570,8 +653,9 @@ Design settled during reconnaissance, so this is implementation rather than open
    `VmLibrary::import_base_image` into `images/01-base/`. The download step is genuinely absent from
    `tddy-vm` by explicit design decision (`docs/ft/vm/tddy-vm.md` lists it as out of scope) — it is the
    first thing to write.
-2. **Bake once.** cloud-init it into `images/02-prepared-base/` as the existing flattened-base +
-   overlay pair, sealed `0444` by `promote_prepared_base_pair`. Bake **OS packages and the account
+2. **Bake once.** cloud-init it into `images/02-prepared-base/` as a single delta chained onto
+   `01-base/`, sealed `0444`. (Updated: 2026-08-14 — was a flattened-base + overlay pair promoted
+   by `promote_prepared_base_pair`; both are gone.) Bake **OS packages and the account
    only** — do *not* reuse `build_tddy_host_image`, whose recipe mounts the repo over 9p and runs a
    cold `./release` including `libwebrtc` inside the guest (`TDDY_HOST_BAKE_TIMEOUT` is 6 hours, and
    its comment says hours is expected). Baking without 9p also avoids the ~3 min / ~100 MB kernel swap

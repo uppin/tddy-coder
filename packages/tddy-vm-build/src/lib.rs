@@ -6,10 +6,10 @@
 //! images/02-prepared-base) instead of a bare caller-chosen output directory.
 
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tddy_vm::cloud_init::{
-    build_cloud_init_image, cloud_init_library_paths, promote_prepared_base_pair,
-    CloudInitBuildOptions, CloudInitUserData, IsoTool,
+    build_cloud_init_image, cloud_init_library_paths, CloudInitBuildOptions, CloudInitUserData,
+    IsoTool,
 };
 use tddy_vm::qemu::uefi_firmware_for;
 use tddy_vm::{ImageFormat, VmAccel, VmArch, VmLibrary};
@@ -91,18 +91,43 @@ pub async fn run_build_image(args: BuildImageArgs) -> anyhow::Result<PathBuf> {
 /// Arguments for the `cloud-init` subcommand: build a cloud-init-provisioned VM image
 /// with image-chaining (immutable base + delta overlay), placed into the VM & Image
 /// Library.
+///
+/// The new layer's parent is named exactly one of two ways, and the choice is what makes a
+/// chain deeper than one layer possible: `--base-image` starts a fresh chain from a
+/// pristine cloud image, `--parent-layer` continues an existing one.
 #[derive(Parser, Debug, Clone)]
+#[command(group(
+    // `required` alone, with `multiple` left on, so this group states only "name a parent".
+    // Which parents may be named *together* is `base_image`'s own `conflicts_with`.
+    clap::ArgGroup::new("layer_parent").required(true).multiple(true)
+        .args(["base_image", "parent_layer"])
+))]
 pub struct CloudInitBuildArgs {
-    /// Name for the produced image pair (`<name>-base.qcow2` + `<name>.qcow2` in
-    /// `images/02-prepared-base/`) and for the imported base image in
-    /// `images/01-base/`.
+    /// Name for the produced layer (`<name>.qcow2` in `images/02-prepared-base/`) and, when
+    /// `--base-image` starts a new chain, for the image imported into `images/01-base/`.
     #[arg(long)]
     pub name: String,
 
-    /// Path to the cached base cloud image to copy (never mutated, never downloaded
-    /// by this command).
-    #[arg(long, env = "TDDY_CLOUDINIT_BASE_IMAGE")]
-    pub base_image: PathBuf,
+    /// Path to the pristine base cloud image to import and chain the new layer onto (never
+    /// mutated, never downloaded by this command). Mutually exclusive with
+    /// `--parent-layer`.
+    ///
+    /// Deliberately *not* wired to `TDDY_CLOUDINIT_BASE_IMAGE`: clap counts an
+    /// env-supplied value as an explicit one, so an exported variable — which is how the
+    /// VM testkit is configured — would conflict with every `--parent-layer` invocation
+    /// and leave the second layer of a chain unbuildable.
+    #[arg(long, group = "layer_parent", conflicts_with = "parent_layer")]
+    pub base_image: Option<PathBuf>,
+
+    /// Name of an already-baked layer in `images/02-prepared-base/` to chain the new layer
+    /// onto. Mutually exclusive with `--base-image`.
+    ///
+    /// The parent is used where it lies rather than imported: it is a qcow2 delta that
+    /// resolves *its* own parent through a path relative to its directory, so copying it
+    /// into `images/01-base/` would strand it — which `VmLibrary::import_base_image`
+    /// refuses outright.
+    #[arg(long, group = "layer_parent")]
+    pub parent_layer: Option<String>,
 
     /// Root of the VM & Image Library (`images/01-base`, `images/02-prepared-base`,
     /// `vm/`). Defaults to the profile-default tddy data dir, or `$HOME/.tddy`.
@@ -141,21 +166,66 @@ pub struct CloudInitBuildArgs {
     pub timeout_secs: u64,
 }
 
+/// Resolve the image a new cloud-init layer chains onto.
+///
+/// Exactly one parent must be named, and the two are resolved differently:
+///
+/// - `base_image` is a **whole** cloud image from outside the library. It is imported into
+///   `images/01-base/<name>.qcow2` and the new layer chains onto *that* copy rather than
+///   the caller's path, so the finished layer's parent lives in the library and the two
+///   relocate together.
+/// - `parent_layer` names a layer already baked into `images/02-prepared-base/`. It is used
+///   exactly where it lies: it is a delta that resolves its own parent through a path
+///   relative to its directory, so importing it into `images/01-base/` would strand it —
+///   which [`VmLibrary::import_base_image`] refuses outright, and which is why a chain used
+///   to stop at one layer.
+///
+/// The CLI enforces the "exactly one" rule through an argument group, but this is a library
+/// entry point too, so it states the rule itself rather than assuming a caller obeyed it.
+pub fn resolve_layer_parent(
+    library: &VmLibrary,
+    name: &str,
+    base_image: Option<&Path>,
+    parent_layer: Option<&str>,
+) -> anyhow::Result<PathBuf> {
+    match (base_image, parent_layer) {
+        (Some(base_image), None) => library
+            .import_base_image(base_image, name)
+            .map_err(|e| anyhow::anyhow!("failed to import base image into images/01-base: {e}")),
+        (None, Some(parent_layer)) => {
+            let path = library
+                .prepared_base_dir()
+                .join(format!("{parent_layer}.qcow2"));
+            if !path.exists() {
+                return Err(anyhow::anyhow!(
+                    "no prepared layer named `{parent_layer}` in {} — bake it first, or pass \
+                     --base-image to start a new chain from a pristine cloud image",
+                    library.prepared_base_dir().display()
+                ));
+            }
+            Ok(path)
+        }
+        _ => Err(anyhow::anyhow!(
+            "exactly one of --base-image or --parent-layer must be given"
+        )),
+    }
+}
+
 /// Parse the `--user-data` YAML file and build a cloud-init-provisioned, chained VM
 /// image into the VM & Image Library, printing progress to stderr.
 ///
 /// 1. Resolves the library root (`--library-root`, or the profile/`$HOME` default).
-/// 2. Imports `--base-image` into `images/01-base/<name>.qcow2` (catalogs the raw
-///    source; the actual chaining pipeline below still reads from the original path).
-/// 3. Runs the existing `build_cloud_init_image` pipeline with `output_dir` set to a
-///    per-image scratch directory, `images/02-prepared-base/<name>/` — every artifact
-///    the pipeline produces (the qcow2 pair, the NoCloud seed ISO, the generated SSH
-///    keypair, the boot log) lands there.
-/// 4. Moves the finished qcow2 pair up to the flat `images/02-prepared-base/`
-///    location [`cloud_init_library_paths`] resolves (both files together, preserving
-///    the overlay's relative backing-file reference to the base), then locks both
-///    read-only. The scratch artifacts stay behind in the per-image subdirectory
-///    instead of cluttering `02-prepared-base/` with non-image files.
+/// 2. Resolves the new layer's parent with [`resolve_layer_parent`] — an imported
+///    `--base-image` for the first layer of a chain, an existing `--parent-layer` for every
+///    layer below it.
+/// 3. Runs the `build_cloud_init_image` pipeline, which creates the provisioned delta
+///    straight into `images/02-prepared-base/<name>.qcow2` — its backing reference is
+///    relative to that directory, so it cannot be built elsewhere and moved — and seals it
+///    read-only once baked.
+/// 4. Everything else the pipeline produces (the NoCloud seed ISO, the generated SSH
+///    keypair, the boot log) lands in the per-image scratch directory
+///    `images/02-prepared-base/<name>/`, instead of cluttering `02-prepared-base/` with
+///    non-image files.
 pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<PathBuf> {
     let user_data_yaml = tokio::fs::read_to_string(&args.user_data)
         .await
@@ -183,9 +253,12 @@ pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<Pa
         .init()
         .map_err(|e| anyhow::anyhow!("failed to initialize the VM & Image Library: {e}"))?;
 
-    library
-        .import_base_image(&args.base_image, &args.name)
-        .map_err(|e| anyhow::anyhow!("failed to import base image into images/01-base: {e}"))?;
+    let parent_image = resolve_layer_parent(
+        &library,
+        &args.name,
+        args.base_image.as_deref(),
+        args.parent_layer.as_deref(),
+    )?;
 
     let name = args.name;
     let paths = cloud_init_library_paths(&library, &name, &name);
@@ -194,7 +267,8 @@ pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<Pa
     let arch = VmArch::host();
     let opts = CloudInitBuildOptions {
         name: name.clone(),
-        base_image_src: args.base_image,
+        base_image_src: parent_image,
+        overlay_output: paths.prepared_overlay_output.clone(),
         output_dir: scratch_dir.clone(),
         user_data,
         disk_size: args.disk_size,
@@ -212,10 +286,6 @@ pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<Pa
     };
 
     build_cloud_init_image(&opts, &|line| eprintln!("{line}"))
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    promote_prepared_base_pair(&scratch_dir, &name, &paths)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
