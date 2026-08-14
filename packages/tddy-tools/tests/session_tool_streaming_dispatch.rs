@@ -201,7 +201,8 @@ async fn a_background_job_handle_survives_the_final_frame() {
     let result = dispatch_against(frames).await;
 
     // Then — long-running tools are driven through this handle rather than one long blocking call,
-    // which is what keeps them inside the forwarded-stream deadline
+    // which is what keeps them inside the remote block budget on a transport that carries no
+    // deadline of its own
     let parsed: serde_json::Value = serde_json::from_str(&result).expect("result must be JSON");
     assert_eq!(parsed["job_id"], "job-7");
 }

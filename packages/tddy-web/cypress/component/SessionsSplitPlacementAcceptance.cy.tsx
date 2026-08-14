@@ -7,15 +7,20 @@
  * explicitly on `SessionEntry` as `daemonInstanceId` (the agent) and `codebaseDaemonInstanceId`
  * (the worktree).
  *
+ * Mounted through `SessionDrawer` rather than `SessionDrawerItem` so the component derives its own
+ * badge labels from the entries. Passing the labels in as props and then asserting on them would
+ * compare the fixture against itself and leave `badgeCodebaseHostLabel` — where the behaviour
+ * actually lives — untested.
+ *
  * PRD: docs/ft/daemon/remote-managed-worktree.md.
  */
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema } from "../../src/gen/connection_pb";
-import { SessionDrawerItem } from "../../src/components/sessions/SessionDrawerItem";
+import { SessionDrawer } from "../../src/components/sessions/SessionDrawer";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import { byTestId, sessionsDrawerItemCodebaseHost, sessionsDrawerItemHost } from "../support/testIds";
+import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -23,6 +28,12 @@ import { byTestId, sessionsDrawerItemCodebaseHost, sessionsDrawerItemHost } from
 
 const AGENT_HOST = "laptop-a";
 const CODEBASE_HOST = "workstation-b";
+
+/** Human labels the drawer resolves instance ids through, as the real screen supplies them. */
+const HOST_LABELS: Record<string, string> = {
+  [AGENT_HOST]: "laptop-a (this daemon)",
+  [CODEBASE_HOST]: "workstation-b",
+};
 
 const SPLIT_SESSION_ID = "aaaaaaaa-0000-4000-8000-00000000000a";
 const COLOCATED_SESSION_ID = "bbbbbbbb-0000-4000-8000-00000000000b";
@@ -66,21 +77,22 @@ function aCoLocatedSession() {
   });
 }
 
-function aRow(session: ReturnType<typeof aSplitSession>) {
-  return (
-    <SessionDrawerItem
-      key={session.sessionId}
-      session={session}
-      isSelected={false}
-      onClick={cy.stub()}
-      hostLabel={AGENT_HOST}
-      codebaseHostLabel={session.codebaseDaemonInstanceId || null}
-    />
+/** The drawer, with `laptop-a` selected — so the agent host is the *unremarkable* one. */
+function mountDrawerWith(sessions: ReturnType<typeof aSplitSession>[]) {
+  cy.mount(
+    <TooltipProvider delayDuration={0}>
+      <SessionDrawer
+        sessions={sessions as Parameters<typeof SessionDrawer>[0]["sessions"]}
+        selectedSessionId={null}
+        onSelectSession={cy.stub()}
+        isOpen
+        onClose={cy.stub()}
+        onOpen={cy.stub()}
+        selectedInstanceId={AGENT_HOST}
+        hostLabelForInstance={(instanceId: string) => HOST_LABELS[instanceId] ?? instanceId}
+      />
+    </TooltipProvider>,
   );
-}
-
-function mountRows(sessions: ReturnType<typeof aSplitSession>[]) {
-  cy.mount(<TooltipProvider>{sessions.map(aRow)}</TooltipProvider>);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,25 +107,38 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-it("shows both the agent host and the codebase host for a split session", () => {
-  // Given a session running on the laptop against a worktree on the workstation
-  mountRows([aSplitSession()]);
+it("badges the codebase host of a split session with its resolved label", () => {
+  // Given a session running on the selected host against a worktree on another
+  mountDrawerWith([aSplitSession()]);
 
-  // Then both placements are named — one badge per host, each carrying its own instance id
-  byTestId(sessionsDrawerItemHost(SPLIT_SESSION_ID)).should("have.text", AGENT_HOST);
-  byTestId(sessionsDrawerItemCodebaseHost(SPLIT_SESSION_ID)).should("have.text", CODEBASE_HOST);
+  // Then the drawer resolves the codebase instance id through the same label mapping the agent
+  // host uses — an operator reads a host name here, not a raw instance id
+  sessionsDrawerPage
+    .codebaseHostBadge(SPLIT_SESSION_ID)
+    .should("have.text", HOST_LABELS[CODEBASE_HOST]);
 });
 
 it("badges the codebase host only on the session that actually has one", () => {
   // Given a split session and an ordinary co-located one side by side
-  mountRows([aSplitSession(), aCoLocatedSession()]);
+  mountDrawerWith([aSplitSession(), aCoLocatedSession()]);
 
-  // Then only the split row carries the second badge. An unconditional badge would label every
-  // pre-existing session as if its codebase were somewhere else.
-  byTestId(sessionsDrawerItemCodebaseHost(SPLIT_SESSION_ID)).should("have.text", CODEBASE_HOST);
-  byTestId(sessionsDrawerItemCodebaseHost(COLOCATED_SESSION_ID)).should("not.exist");
+  // Then only the split row carries the badge. An unconditional one would label every pre-existing
+  // session as if its codebase were somewhere else.
+  sessionsDrawerPage
+    .codebaseHostBadge(SPLIT_SESSION_ID)
+    .should("have.text", HOST_LABELS[CODEBASE_HOST]);
+  sessionsDrawerPage.expectNoCodebaseHostBadge(COLOCATED_SESSION_ID);
+});
 
-  // And both rows still name the daemon running their agent
-  byTestId(sessionsDrawerItemHost(SPLIT_SESSION_ID)).should("have.text", AGENT_HOST);
-  byTestId(sessionsDrawerItemHost(COLOCATED_SESSION_ID)).should("have.text", AGENT_HOST);
+it("badges the codebase host even when the session's agent runs on the selected host", () => {
+  // Given a split session whose agent is on the selected host, so its *agent* host is unremarkable
+  // and carries no owning-host badge
+  mountDrawerWith([aSplitSession()]);
+
+  // Then the codebase badge still renders: unlike the agent's host, where the worktree lives cannot
+  // be inferred from the row appearing in this drawer at all
+  sessionsDrawerPage.expectNoOwningHostBadge(SPLIT_SESSION_ID);
+  sessionsDrawerPage
+    .codebaseHostBadge(SPLIT_SESSION_ID)
+    .should("have.text", HOST_LABELS[CODEBASE_HOST]);
 });

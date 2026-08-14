@@ -9,14 +9,17 @@
 - [x] Create changeset
 - [x] Write acceptance tests
 - [x] Write unit tests
-- [ ] Implement proto + generated types
-- [ ] Implement `SessionToolTransport::LiveKit` in tddy-tools
-- [ ] Implement `StreamExecuteTool` + frame budget
-- [ ] Implement split placement in `StartSession`
-- [ ] Implement paired teardown + workspace worktree removal
-- [ ] Implement resume for split sessions
-- [ ] Implement the web codebase-host selector
-- [ ] Record out-of-scope findings in `docs/dev/TODO.md`
+- [x] Implement proto + generated types
+- [x] Implement `SessionToolTransport::LiveKit` in tddy-tools
+- [x] Implement `StreamExecuteTool` + frame budget
+- [x] Implement split placement in `StartSession`
+- [x] Implement paired teardown + workspace worktree removal
+- [x] Implement resume for split sessions
+- [x] Implement the web codebase-host selector
+- [x] Record out-of-scope findings in `docs/dev/TODO.md`
+- [x] Switch `tddy-tools` to `StreamExecuteTool` (the client half)
+- [x] Hold one LiveKit connection per session rather than one per tool call
+- [x] Pre-PR validation: risk review, test-quality review — 13 + 9 findings, all resolved
 
 ## State A (current behaviour)
 
@@ -141,10 +144,17 @@ that cannot produce a first frame in time are driven through `block_until_ms: 0`
 
 Stated as prose this is only a convention, and a convention nothing checks is a latent bug: an agent
 asking `Await` to block for five minutes would surface as a *transport* failure, which is the
-hardest kind of error to attribute. So the client clamps it —
-`clamp_await_block_ms(requested) -> u64`, bounded by `MAX_REMOTE_AWAIT_BLOCK_MS`, which a test pins
-below the forwarded-stream deadline with headroom for the round trip. Clamping is a ceiling only:
-`0` stays non-blocking, and a short poll is left alone.
+hardest kind of error to attribute. So the client clamps it, bounded by
+`MAX_REMOTE_AWAIT_BLOCK_MS`.
+
+**Clamping a value that is present is not enough**, and the first implementation did only that. The
+remote engine defaults a missing `timeout_ms` (`Await`) or `block_until_ms` (`Shell`) to 30 000 ms —
+so `Await {job_id}` and `Shell {command}`, the two shapes an agent actually emits, blocked for
+exactly the duration the ceiling exists to stay under, and a JSON float slipped past `as_i64` into
+the same default. `clamp_remote_blocking_args` therefore *inserts* the ceiling when no usable key is
+present, covers `Shell` as well as `Await`, and writes only the key the engine will actually read,
+so a `0` (background job) is never overridden. `REMOTE_ENGINE_DEFAULT_BLOCK_MS` mirrors the engine's
+default with a compile-time assert that the ceiling stays below it.
 
 ### Failure is atomic
 
@@ -250,6 +260,115 @@ than what the rename would have overwritten.
   `git init` repo fails there before any behaviour under test is reached. Every repo fixture adds
   itself as `origin`.
 
+## Validation results (pre-PR)
+
+A risk review of the whole branch diff (58 files vs `origin/master`) found **2 critical** and **11
+warning** issues. All are fixed; each behavioural fix was pinned by a test written failing first,
+and the two criticals were additionally verified by reverting the fix and confirming the test
+reproduces the reviewed symptom.
+
+| Finding | Where | Resolution |
+|---|---|---|
+| **Slow codebase daemon orphans the worktree** | `connection_service.rs` split start | `requested_session_id` + a forward deadline exceeding B's own budget — see PRD § Session start |
+| **Split session becomes permanently undeletable** | `delete_paired_codebase_session` | "peer has no such session" is idempotent success; unreachable still refuses |
+| Split agent could advertise itself as a daemon | `livekit_peer_discovery` | `split-agent-` is a reserved identity prefix discovery rejects |
+| Silent branch-intent degradation | `workspace_session.rs` | Mirrors the claude-cli refusals; blank intent keeps the generated name |
+| Project default branch ignored when split | `workspace_session.rs` | `project.main_branch_ref` resolved as the co-located path does |
+| Tool restriction bypassable via user MCP servers | `split_session.rs` | `--strict-mcp-config` |
+| Sandbox + semantic index still offered for a split | `CreateSessionPane.tsx` | Withdrawn and forced false, as `recipe` already was |
+| Own host as codebase host read as a split | `CreateSessionPane.tsx` | Predicate compares against the session's host, matching the daemon |
+| `Await`/`Shell` clamp missed the default case | `session_tool_client.rs` | Ceiling is *inserted* when no key is present, extended to `Shell`, floats read |
+| Half-configured LiveKit env degrades to HTTP | `session_tool_client.rs` | `IncompleteLiveKit` names the missing variables instead of falling through |
+| Comments cite a deadline not on this path | `session_tool_client.rs` | Corrected; `TODO(livekit-rpc-deadline)` added at the unbounded `recv()` |
+
+### Carried into follow-up rather than fixed here
+
+Production-readiness and clean-code reviews raised these. None blocks the feature; each is recorded
+so it is a decision rather than an oversight.
+
+- **A split session's tool path is invisible to an operator.** Every `dispatch_via_livekit` failure
+  — room connect, peer absent, truncated stream — is returned to the model as a JSON error and
+  logged nowhere at a level `tddy-tools`' default filter shows. Unlike the sandbox path, the split
+  MCP config sets no `TDDY_TOOLS_LOG_FILE`, so those logs land in captured stderr and are lost. A
+  split session whose dispatch is failing produces no evidence on either daemon. Worth fixing
+  before anyone has to debug one.
+- **The exec-tool auth refusals do not name which daemon refused.** `unauthenticated` /
+  `permission_denied` surface in the agent's transcript on the agent host, reading as if *that*
+  host rejected the call. For split placement the two likeliest misconfigurations — daemons not
+  sharing `livekit.api_secret`, or the GitHub user unmapped on the codebase host — both land here.
+- **`NATIVE_FILESYSTEM_TOOLS` is a hand-maintained copy** of Claude Code's tool inventory and is
+  the sole enforcement of the feature's central restriction, while `tddy-sandbox-recipes` already
+  owns that knowledge (`native_aliases`). A tool added upstream silently widens the hole. A test
+  asserting the split list is a superset of the sandbox aliases would catch divergence.
+- **Duplication that will drift**: `workspace_branch_workflow` is a third copy of the branch-intent
+  match (co-located claude-cli, cursor-cli, workspace) — and the split/co-located pair resolve the
+  *same request fields* for the two halves of this feature; `daemon_hook_url` is a third copy of
+  the hook-URL fallback; `PERMISSION_PROMPT_TOOL` and the MCP-arg assembly are re-declared from
+  `tddy-sandbox-recipes`; `prepare_split_agent_wiring` is used only by resume while start builds
+  the same three pieces inline.
+- **Stale public names in `tddy-tools`**: `MAX_REMOTE_AWAIT_BLOCK_MS` / `clamp_await_block_ms` now
+  bound `Shell` as well as `Await`.
+- **The failed-start teardown log overstates.** It says "nothing was created there" on a peer
+  `not_found`, but in the one case `split_forward_deadline` exists for, the peer can honestly
+  answer that and *then* create the worktree. Should read "did not have it at teardown time".
+
+### Closed in the follow-up pass (daemon)
+
+Everything above that lives in `packages/tddy-daemon` has since been closed. What changed, and what
+each is pinned by:
+
+- **Exec-tool auth refusals name the serving daemon.** `resolve_exec_tool_worktree` puts this
+  daemon's instance id in both the `unauthenticated` and the `permission_denied` message — the
+  first naming the shared `livekit.api_secret` a split session's token is verified with, the second
+  naming the unmapped GitHub user — and logs each at `warn` with the session id and tool, on the
+  daemon that refused. Pinned by two tests in `remote_managed_worktree_acceptance.rs`.
+- **`NATIVE_FILESYSTEM_TOOLS` drift is now a test failure, not a silent hole.** Deriving the list
+  from `tddy-sandbox-recipes` was rejected: the sandbox's disallowlist is derived from the *exec
+  tool* inventory, so shrinking that inventory would silently *remove* a native tool from the split
+  session's disallowlist, which is the opposite of what this list is for. Two unit tests in
+  `split_session.rs` instead assert the split list covers every native alias the sandbox recipes
+  know, and that every exec tool sharing its name with a Claude built-in is hard-disabled — the
+  latter forcing a decision when a new exec tool appears rather than defaulting to leaving it out.
+- **The split session's MCP server logs to disk.** `split_claude_extra_args` sets
+  `TDDY_TOOLS_LOG_FILE` to `<session dir>/tddy-tools.mcp.log` and `RUST_LOG` to
+  `info,tddy_tools=debug`, matching the sandbox runner's convention (minus its
+  `tddy_discovery=debug`, which exists for specialized subagents a split session has none of).
+  Without this, the dispatch failures `tddy-tools` now reports would land in Claude Code's captured
+  MCP stderr and be lost.
+- **The failed-start teardown log no longer overstates.** It reads "did not have it at teardown
+  time", and `SplitStartFailure` splits the two cases: a peer that answered is logged at `info`, a
+  teardown following a forward *deadline* at `warn`, naming the possibility that the peer creates
+  the worktree after the teardown. Not covered by a test — the level of a log line following a
+  deadline is not observable from the acceptance harness without a log capture and a genuinely slow
+  peer, and simulating either would test the simulation.
+- **One branch-intent resolver.** `branch_intent.rs` now holds the match all five spawn paths
+  copied (co-located and sandboxed claude-cli, co-located and sandboxed cursor-cli, workspace).
+  What legitimately differed is a `BranchIntentPolicy`: the generated-name prefix, whether a blank
+  `new_branch_name` is refused or generated, and whether an unrecognised intent is refused. The
+  claude-cli paths keep defaulting an unrecognised intent — refusing there would change behaviour
+  for sessions this changeset does not touch — so `workspace_session.rs`' claim that it "makes the
+  same refusals as the co-located claude-cli path" was dropped rather than made true; the
+  divergence is now stated where the policy is declared.
+- **One hook-URL fallback.** `local_daemon_hook_url` / `claude_hook_daemon_url` replace three
+  copies, and the literal `8899` exists once.
+- **`exec_tool_common_room_slot` deleted** in favour of `common_room_slot`, whose message names the
+  config keys to set.
+- **`EXEC_TOOL_FRAME_BYTES` is defined as `HOST_DOCUMENT_FRAME_BYTES`**, with one headroom constant
+  and one compile-time assert covering both.
+- **`split_session::split_pairing`** replaces the pairing destructure that appeared character-for-
+  character in `resume_split_wiring` and `delete_paired_codebase_session`.
+
+Still open from the bullets above: `PERMISSION_PROMPT_TOOL` and the MCP-arg assembly are still
+re-declared from `tddy-sandbox-recipes`, and `prepare_split_agent_wiring` is still used only by
+resume while the start path builds the same three pieces inline.
+
+### One unexplained test failure, not reproduced
+
+A combined run aborted with one failing test in `remote_managed_worktree_cross_host_acceptance`
+(28 passed, 1 failed). It has not recurred in five subsequent runs — three of that suite alone, two
+of the full set. Cause unidentified, so it is recorded rather than declared fixed. The suite is
+`#[serial]` against a shared LiveKit container; if it resurfaces, start there.
+
 ## Acceptance tests
 
 ### Web — codebase-host selector
@@ -301,6 +420,29 @@ Uses `MockEligibleDaemonSource` and a `None` room slot, per `relay_peer_forwardi
     and creates **no** workspace session; `.session.yaml` has a `repo_path` and no pairing fields.
 14. **`start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_precondition`** —
     `FailedPrecondition`, the known-peer/no-room split this harness is built around.
+14a. **`the_split_forward_waits_out_the_worktree_budget_plus_one_ordinary_forward`** — with
+    `spawn_worker_request_timeout_secs: 600`, the deadline is `600s + PEER_FORWARD_TIMEOUT`. Pins
+    that it is *derived from the configured budget*, not a constant.
+14b. **`the_split_forward_outlives_the_worktree_budget_the_codebase_daemon_gives_itself`** — the
+    invariant behind the "slow codebase daemon orphans the worktree" critical. A slow peer is not
+    reproducible locally and simulating it with sleeps would test the sleep; both tests fail if the
+    deadline reverts to a plain `PEER_FORWARD_TIMEOUT`.
+
+### Daemon — split resume
+
+`packages/tddy-daemon/tests/split_session_resume_acceptance.rs`
+One daemon, no LiveKit container: a resume contacts no peer, and minting a join token only reads
+config. The PTY spawn is real, and a stub `claude` records its environment, so the assertions read
+what the relaunched process actually received.
+
+14c. **`a_resumed_split_agent_is_pointed_at_the_codebase_hosts_session_not_its_own`** —
+    `TDDY_REMOTE_SESSION_ID` is the persisted `codebase_session_id`. The one thing a co-located
+    resume would get right by accident.
+14d. **`a_resumed_split_agent_is_re_wired_to_the_codebase_daemon_it_was_paired_with`** — server
+    identity, daemon instance id, room and url are re-derived from `.session.yaml`. A resume that
+    dropped them would leave the agent with no tool transport at all.
+14e. **`a_resumed_split_agent_receives_a_join_token_minted_at_the_resume`** — the token's `exp` is a
+    full TTL ahead of the resume, not whatever was left of the original.
 
 ### Daemon — cross-host (two real daemons)
 

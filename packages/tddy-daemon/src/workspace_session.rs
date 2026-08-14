@@ -60,6 +60,22 @@ pub async fn start_workspace_session(
         ));
     }
 
+    // Resolved before anything is created: a branch intent this daemon cannot honour is a malformed
+    // request, and a request refused after a session directory exists leaves the caller — which for
+    // a split session is another daemon — to clean up something it never wanted.
+    let workflow = crate::branch_intent::resolve_branch_workflow(
+        session_id,
+        &crate::branch_intent::BranchIntentRequest {
+            branch_worktree_intent: branch.branch_worktree_intent,
+            new_branch_name: branch.new_branch_name,
+            selected_integration_base_ref: branch.selected_integration_base_ref,
+            selected_branch_to_work_on: branch.selected_branch_to_work_on,
+        },
+        crate::branch_intent::BranchIntentPolicy::workspace(),
+        project.main_branch_ref.as_deref(),
+    )?
+    .workflow;
+
     // Create session directory.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
@@ -67,7 +83,7 @@ pub async fn start_workspace_session(
 
     // Write a minimal changeset so `setup_worktree_for_session_with_optional_chain_base` can read it.
     let cs = tddy_core::Changeset {
-        workflow: Some(workspace_branch_workflow(session_id, branch)?),
+        workflow: Some(workflow),
         ..Default::default()
     };
     tddy_core::write_changeset(&session_dir, &cs)
@@ -139,58 +155,6 @@ pub async fn start_workspace_session(
         livekit_server_identity: String::new(),
         branch_conflict: None,
     }))
-}
-
-/// Resolve the requested branch intent into the changeset the worktree setup reads.
-///
-/// A request that names no intent gets a fresh `workspace/<short id>` branch off the project's
-/// default base — the pre-existing behaviour, and the only sensible one for a session created purely
-/// to hold a checkout. An intent that names a branch must actually name it: creating a differently
-/// named branch would hand the caller a worktree that is not the one they asked for.
-fn workspace_branch_workflow(
-    session_id: &str,
-    branch: &WorkspaceBranchIntent<'_>,
-) -> Result<tddy_core::ChangesetWorkflow, Status> {
-    let (intent, new_branch_name, selected_branch_to_work_on) = match branch
-        .branch_worktree_intent
-        .trim()
-    {
-        "work_on_selected_branch" => {
-            let selected = branch.selected_branch_to_work_on.trim();
-            if selected.is_empty() {
-                return Err(Status::invalid_argument(
-                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                    ));
-            }
-            (
-                tddy_core::BranchWorktreeIntent::WorkOnSelectedBranch,
-                None,
-                Some(selected.to_string()),
-            )
-        }
-        "new_branch_from_base" if !branch.new_branch_name.trim().is_empty() => (
-            tddy_core::BranchWorktreeIntent::NewBranchFromBase,
-            Some(branch.new_branch_name.trim().to_string()),
-            None,
-        ),
-        _ => (
-            tddy_core::BranchWorktreeIntent::NewBranchFromBase,
-            Some(format!(
-                "workspace/{}",
-                &session_id[..8.min(session_id.len())]
-            )),
-            None,
-        ),
-    };
-    Ok(tddy_core::ChangesetWorkflow {
-        branch_worktree_intent: Some(intent),
-        new_branch_name,
-        selected_integration_base_ref: Some(branch.selected_integration_base_ref.trim())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string),
-        selected_branch_to_work_on,
-        ..Default::default()
-    })
 }
 
 /// Resolve the worktree root for a session by reading `.session.yaml`.

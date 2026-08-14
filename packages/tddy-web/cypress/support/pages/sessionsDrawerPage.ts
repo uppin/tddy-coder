@@ -12,6 +12,7 @@ import {
   sessionsDrawerItemStatus,
   sessionsDrawerItemTooltip,
   sessionsDrawerItemHost,
+  sessionsDrawerItemCodebaseHost,
   sessionsDetailResumeBtn,
   sessionsDetailDeleteBtn,
   sessionsInspectorResumeBtn,
@@ -130,6 +131,23 @@ export const sessionsDrawerPage = {
   /** The owning-host badge inside a drawer item (only present on cross-host rows). */
   drawerItemHost: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemHost(sessionId), { timeout: 5000, ...options }),
+
+  /** The row carries no owning-host badge — its agent runs on the selected host. */
+  expectNoOwningHostBadge(sessionId: string) {
+    byTestId(sessionsDrawerItemHost(sessionId)).should("not.exist");
+  },
+
+  /**
+   * The codebase-host badge — present only on a split session, whose worktree lives on a different
+   * daemon than its agent. See docs/ft/daemon/remote-managed-worktree.md.
+   */
+  codebaseHostBadge: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsDrawerItemCodebaseHost(sessionId), { timeout: 5000, ...options }),
+
+  /** The row's codebase is on the same daemon as its agent, so no second badge is rendered. */
+  expectNoCodebaseHostBadge(sessionId: string) {
+    byTestId(sessionsDrawerItemCodebaseHost(sessionId)).should("not.exist");
+  },
 
   // ---------------------------------------------------------------------------
   // Detail pane (right area)

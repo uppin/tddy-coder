@@ -307,6 +307,106 @@ it("sends no workflow recipe for a split session", () => {
   });
 });
 
+it("stops offering sandbox and semantic index once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session, which offers both while the codebase is co-located
+  mountCreatePane(aCreateSessionBackend());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.sandboxToggle().should("exist");
+  createSessionPage.semanticIndexToggle().should("exist");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then — both resolve a worktree on the daemon running the agent, which a split session does not
+  // have, so the daemon refuses them. Offering them would be the same trap the recipe had.
+  createSessionPage.sandboxToggle().should("not.exist");
+  createSessionPage.semanticIndexToggle().should("not.exist");
+});
+
+it("sends neither sandbox nor semantic index for a split session", () => {
+  // Given both switched on while the codebase was still co-located
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.sandboxToggle().check();
+  createSessionPage.semanticIndexToggle().check();
+
+  // When the codebase is placed elsewhere and the session created
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.submit();
+
+  // Then — a value chosen before the placement must not survive into a request the daemon rejects
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.sandbox).to.equal(false);
+    expect(request.semanticIndex).to.equal(false);
+  });
+});
+
+it("stops offering to skip permissions once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session, which offers the toggle while the codebase is co-located
+  mountCreatePane(aCreateSessionBackend());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.dangerouslySkipPermissionsToggle().should("exist");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then it is withdrawn. A split session runs unjailed on this host and its entire "no route to
+  // the local filesystem" guarantee rests on the agent's deny list; whether that list survives
+  // --dangerously-skip-permissions is not something this repo pins, so the combination is not
+  // offered rather than assumed safe.
+  createSessionPage.dangerouslySkipPermissionsToggle().should("not.exist");
+});
+
+it("sends no permission bypass for a split session", () => {
+  // Given the bypass switched on while the codebase was still co-located
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.dangerouslySkipPermissionsToggle().check();
+
+  // When the codebase is placed elsewhere and the session created
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.submit();
+
+  // Then the stale choice does not ride along into the one session type that has no jail behind it
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.dangerouslySkipPermissions).to.equal(false);
+  });
+});
+
+it("treats naming the session's own host as co-located, keeping the recipe", () => {
+  // Given a managed claude-cli session on the agent host
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+
+  // When the operator names that same host as the codebase host — the explicit spelling of
+  // "co-located", which the daemon classifies exactly that way
+  createSessionPage.selectCodebaseHost(AGENT_HOST);
+
+  // Then the form must agree with the daemon rather than treating it as a split: withdrawing the
+  // recipe here would launch a co-located session without the workflow it was created for
+  createSessionPage.recipeSelect().should("be.visible");
+  createSessionPage.submit();
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.recipe).to.equal("tdd");
+  });
+});
+
 it("restores the workflow recipe when the codebase comes back to the session host", () => {
   // Given a split placement, with the recipe withdrawn
   const backend = aCreateSessionBackend();

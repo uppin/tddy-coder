@@ -136,6 +136,21 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
   },
 
+  /** The "--dangerously-skip-permissions" checkbox — bypasses the agent's permission prompts. */
+  dangerouslySkipPermissionsToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionDangerouslySkipPermissionsToggle, {
+      timeout: 5000,
+      ...options,
+    }),
+
+  /** The "Sandbox" checkbox — jails the agent; resolves a worktree on the session's own daemon. */
+  sandboxToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSandboxToggle, { timeout: 5000, ...options }),
+
+  /** The "Semantic index" checkbox — indexes a worktree on the session's own daemon before launch. */
+  semanticIndexToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle, { timeout: 5000, ...options }),
+
   /** Switch the form to a Claude CLI session. */
   switchToClaudeCliSession() {
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();

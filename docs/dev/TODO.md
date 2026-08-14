@@ -94,6 +94,48 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### `tddy-rust-typescript-tests/gen/` is badly stale and nothing detects it (source: remote-managed-worktree changeset, 2026-08-14)
+
+Running `bun run generate` in that package produces **12 files that were never checked in**
+(`actions_pb`, `bsp_pb`, `tasks_pb`, `vm_pb`, `vnc_pb`, `sandbox_pb`, the `grpc/reflection` and
+`tddy/acp` trees, …) and rewrites three that were, including a 5182-line diff to `connection_pb.ts`.
+So the committed set is a curated subset frozen at some past point, and the checked-in files have
+drifted behind the proto they are generated from — `auth_pb.ts` is missing `RefreshSession`, added
+some time ago.
+
+Nothing catches this: no CI step regenerates and diffs, and the package's own `bun test` needs a
+built web bundle, so it does not run in an ordinary check either. A proto change can therefore land
+with this package silently describing a different wire contract than the daemon serves — which is
+precisely what an interop test package exists to prevent.
+
+Left untouched by the remote-managed-worktree changeset deliberately: regenerating it there would
+have added ~5 000 lines of unrelated churn to a feature PR. Worth either regenerating and committing
+the whole set in a change of its own, adding a CI drift check, or deleting the directory if the
+package is no longer exercised.
+
+### A split agent's join token carries `can_update_own_metadata` it never uses (source: remote-managed-worktree changeset, 2026-08-14)
+
+`tddy_livekit::TokenGenerator` (`packages/tddy-livekit/src/token.rs:50-65`) grants the same set to every
+participant it mints for, including `can_update_own_metadata: true`. That grant is what a daemon needs
+to publish its advertisement; a split session's agent process never calls `set_metadata` and has no use
+for it.
+
+It matters because participant metadata is exactly how peer eligibility is decided
+(`eligible_daemon_from_participant_fields`), so the grant is the mechanism by which an agent could
+advertise itself as a daemon. That path is now closed by reserving the `split-agent-` identity prefix
+in discovery — the robust half — but narrowing the grant would remove the capability rather than filter
+its one known use.
+
+Not done here because `TokenGenerator` is shared by every LiveKit participant in the repo and a
+narrowed variant belongs in `tddy-livekit`, not in a daemon-side feature. Cheap and worth doing: add a
+grants parameter (or a `TokenGenerator::for_agent`) and mint the split token without it.
+
+Related, and larger: the same session-token export means the agent process holds the *user's* full
+session token in `TDDY_REMOTE_SESSION_TOKEN`, which authenticates every `ConnectionService` RPC on both
+daemons — not just `ExecuteTool` on its own worktree. A session-scoped tool token (audience = this
+session, exec-tool methods only) would bound that. Recorded in the PRD's trust model as a known
+property rather than an oversight.
+
 ### No LiveKit RPC call has a client-side deadline (source: remote-managed-worktree changeset, 2026-08-14)
 
 Neither `tddy_livekit::RpcClient` nor `tddy_rpc`'s `ClientEngine` bounds how long a call may wait for

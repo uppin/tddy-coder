@@ -18,18 +18,20 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::{
     classify_codebase_placement, CodebasePlacement, ConnectionServiceImpl,
 };
-use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_TIMEOUT};
 use tddy_daemon::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
+    StartSessionRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -72,6 +74,23 @@ daemon_instance_id: "{LOCAL_INSTANCE_ID}"
     serde_yaml::from_str(&yaml).expect("config must parse")
 }
 
+/// A daemon that gives a spawn — its own, and by assumption a peer's — `secs` to finish.
+///
+/// Deliberately not the 300 s default: a deadline that merely *happened* to exceed the budget on
+/// the default configuration would look right while ignoring the setting entirely.
+fn config_allowing_a_worktree_to_take_secs(secs: u64) -> DaemonConfig {
+    let yaml = format!(
+        r#"
+users:
+  - github_user: "testuser"
+    os_user: "testuser"
+daemon_instance_id: "{LOCAL_INSTANCE_ID}"
+spawn_worker_request_timeout_secs: {secs}
+"#
+    );
+    serde_yaml::from_str(&yaml).expect("config must parse")
+}
+
 fn user_resolver_valid() -> UserResolver {
     Arc::new(|token| {
         if token == TEST_TOKEN {
@@ -85,6 +104,13 @@ fn user_resolver_valid() -> UserResolver {
 /// A service that knows `workstation-b` as an eligible peer but holds no LiveKit room, so a valid
 /// split request gets as far as routing and then fails there.
 fn service_with_known_codebase_peer(sessions_base: PathBuf) -> ConnectionServiceImpl {
+    service_with_known_codebase_peer_and_config(sessions_base, test_config())
+}
+
+fn service_with_known_codebase_peer_and_config(
+    sessions_base: PathBuf,
+    config: DaemonConfig,
+) -> ConnectionServiceImpl {
     let resolver: SessionsBaseResolver = {
         let base = sessions_base.clone();
         Arc::new(move |_| Some(base.clone()))
@@ -96,7 +122,7 @@ fn service_with_known_codebase_peer(sessions_base: PathBuf) -> ConnectionService
         common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
     };
     ConnectionServiceImpl::new(
-        test_config(),
+        config,
         resolver,
         sessions_base,
         user_resolver_valid(),
@@ -105,6 +131,36 @@ fn service_with_known_codebase_peer(sessions_base: PathBuf) -> ConnectionService
         None,
         Arc::new(ClaudeCliSessionManager::new()),
     )
+}
+
+/// The same service, but every token resolves to a GitHub user this daemon has no OS mapping for —
+/// the shape a split session takes when the codebase host was never told about the caller.
+fn service_with_a_user_this_daemon_does_not_map(sessions_base: PathBuf) -> ConnectionServiceImpl {
+    let resolver: SessionsBaseResolver = {
+        let base = sessions_base.clone();
+        Arc::new(move |_| Some(base.clone()))
+    };
+    let unmapped_user: UserResolver = Arc::new(|_| Some("someone-else".to_string()));
+    ConnectionServiceImpl::new(
+        test_config(),
+        resolver,
+        sessions_base,
+        unmapped_user,
+        None,
+        None,
+        None,
+        Arc::new(ClaudeCliSessionManager::new()),
+    )
+}
+
+fn an_exec_tool_request(session_token: &str) -> ExecuteToolRequest {
+    ExecuteToolRequest {
+        session_token: session_token.to_string(),
+        session_id: "019d105b-ac0f-78d3-9a89-40973114cc03".to_string(),
+        tool_name: "Read".to_string(),
+        args_json: r#"{"path":"README.md"}"#.to_string(),
+        ..Default::default()
+    }
 }
 
 /// A managed claude-cli start request placing the codebase on `codebase_daemon_instance_id`.
@@ -367,4 +423,186 @@ async fn start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_pr
         status.code(),
         status.message()
     );
+}
+
+// ---------------------------------------------------------------------------
+// The split forward's deadline
+// ---------------------------------------------------------------------------
+//
+// A split start is served by the codebase daemon resolving the project — cloning it first if it does
+// not have it — and cutting a worktree, work that daemon bounds by its own
+// `spawn_worker_request_timeout` (300 s by default). The ordinary `PEER_FORWARD_TIMEOUT` is 30 s, so
+// a plain forward would give up while the peer was still building and leave the checkout behind on a
+// host the operator may not be watching. That is one of the two criticals this changeset fixes; the
+// other half — naming the B-side session before asking for it — is pinned by
+// `a_worktree_failure_on_the_codebase_daemon_leaves_no_session_behind` in the cross-host suite.
+//
+// A real slow peer is not reproducible here, and simulating one with sleeps would test the sleep.
+// What is worth pinning is the property: the deadline is derived from the configured budget and
+// strictly exceeds it.
+
+#[tokio::test]
+async fn the_split_forward_waits_out_the_worktree_budget_plus_one_ordinary_forward() {
+    // Given a daemon configured to allow ten minutes for a worktree
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer_and_config(
+        sessions_tmp.path().to_path_buf(),
+        config_allowing_a_worktree_to_take_secs(600),
+    );
+
+    // When
+    let deadline = service.split_forward_deadline();
+
+    // Then — the peer's whole budget, plus one ordinary forward deadline of round-trip headroom.
+    // This daemon can only assume the peer's budget matches its own, which is why the configured
+    // value is what it waits out rather than a constant.
+    assert_eq!(
+        deadline,
+        Duration::from_secs(600) + PEER_FORWARD_TIMEOUT,
+        "the split forward must be derived from spawn_worker_request_timeout_secs; got {deadline:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_split_forward_outlives_the_worktree_budget_the_codebase_daemon_gives_itself() {
+    // Given a daemon on the default configuration
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let peers_worktree_budget = DaemonConfig::default().spawn_worker_request_timeout();
+
+    // When
+    let deadline = service.split_forward_deadline();
+
+    // Then — erroring while the peer is still building is the state that stranded a worktree, so
+    // this must never be the shorter of the two. The cost is a vanished peer surfacing after this
+    // wait rather than after 30 s, which the PRD accepts as the cheaper failure.
+    assert!(
+        deadline > peers_worktree_budget,
+        "the split forward deadline ({deadline:?}) must outlast the worktree budget the codebase daemon gives itself ({peers_worktree_budget:?})"
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_split_session_refuses_while_this_daemon_cannot_reach_the_common_room() {
+    // Given a split session on disk, and a daemon with no live common-room connection
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let session_id = "019d105b-ac0f-78d3-9a89-40973114aa01";
+    write_split_session_metadata(sessions_tmp.path(), session_id);
+
+    // When the session is deleted
+    let status = service
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+        }))
+        .await
+        .expect_err("a delete that cannot reach the codebase daemon must refuse");
+
+    // Then it refuses rather than continuing. Being unable to *ask* is not the same answer as the
+    // peer saying it no longer has the session: the first leaves the worktree's fate unknown, and
+    // treating unknown as "already torn down" strands a checkout on a host nobody is watching —
+    // which is the very leak the paired teardown exists to prevent.
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::FailedPrecondition,
+        "expected FailedPrecondition; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        sessions_tmp
+            .path()
+            .join("sessions")
+            .join(session_id)
+            .exists(),
+        "the local session must survive a refused delete, so a retry can still reach its worktree"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Exec-tool refusals — which daemon said no
+// ---------------------------------------------------------------------------
+//
+// A split session's tool calls are served on the *codebase* daemon, but every failure they return
+// is rendered in the agent's transcript on the *agent* daemon, where a bare "invalid or expired
+// session" reads as if the host the operator is looking at refused. The two likeliest split
+// misconfigurations both land in exactly these two refusals — daemons not sharing
+// `livekit.api_secret` (a session token is a stateless HMAC only its co-signers can verify), and a
+// GitHub user mapped on the agent host but not on the codebase host — so each names the daemon that
+// refused.
+
+#[tokio::test]
+async fn an_exec_tool_refused_over_an_unverifiable_token_names_the_daemon_that_refused_it() {
+    // Given a daemon that cannot verify the caller's token
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+
+    // When
+    let status = service
+        .execute_tool(Request::new(an_exec_tool_request("minted-elsewhere")))
+        .await
+        .expect_err("an unverifiable session token must be refused");
+
+    // Then
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::Unauthenticated,
+        "expected Unauthenticated; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains(LOCAL_INSTANCE_ID),
+        "the refusal must name the daemon that refused, or a split session's operator reads it as the agent host's answer; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn an_exec_tool_refused_for_an_unmapped_user_names_the_daemon_that_refused_it() {
+    // Given a daemon that verifies the token but has no OS user for the GitHub user behind it
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_a_user_this_daemon_does_not_map(sessions_tmp.path().to_path_buf());
+
+    // When
+    let status = service
+        .execute_tool(Request::new(an_exec_tool_request(TEST_TOKEN)))
+        .await
+        .expect_err("a user with no OS mapping must be refused");
+
+    // Then
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::PermissionDenied,
+        "expected PermissionDenied; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains(LOCAL_INSTANCE_ID),
+        "the refusal must name the daemon whose users[] mapping is missing; got '{}'",
+        status.message()
+    );
+    assert!(
+        status.message().contains("someone-else"),
+        "the refusal must name the unmapped user so the operator knows what to add; got '{}'",
+        status.message()
+    );
+}
+
+/// A stopped split session: paired to a codebase daemon, with no repository of its own.
+fn write_split_session_metadata(sessions_base: &std::path::Path, session_id: &str) {
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
+    std::fs::create_dir_all(&session_dir).expect("session dir");
+    let mut metadata = tddy_testing_commons::builders::a_session_metadata()
+        .with_session_id(session_id)
+        .with_status("exited")
+        .build();
+    metadata.session_type = Some("claude-cli".to_string());
+    metadata.repo_path = None;
+    metadata.codebase_daemon_instance_id = Some(CODEBASE_PEER_ID.to_string());
+    metadata.codebase_session_id = Some("019d105b-ac0f-78d3-9a89-40973114bb02".to_string());
+    tddy_core::write_session_metadata(&session_dir, &metadata).expect("write metadata");
 }

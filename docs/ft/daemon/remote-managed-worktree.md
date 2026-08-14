@@ -112,6 +112,17 @@ substantial work for a materially weaker guarantee, so it is deferred and tracke
 string codebase_daemon_instance_id = 32;
 ```
 
+```proto
+// Session id the caller wants the new session created under, instead of a freshly minted one.
+// Honoured only for session_type "workspace"; any other type is a request error rather than a
+// silently ignored field. Refused with already_exists if it names a session that already exists.
+string requested_session_id = 33;
+```
+
+This exists so a split start can name the B-side session **before** contacting B. Without it, a
+forward that times out leaves A knowing a session may have been created but not what it is called,
+and the teardown cannot run — see § Teardown.
+
 ### `SessionEntry` (connection.proto)
 
 ```proto
@@ -249,12 +260,36 @@ message ExecuteToolChunk {
 If step 2 or 3 fails, the whole start fails and any worktree already created on B is removed — no
 half-built split session is left behind.
 
+**Two things are required to actually deliver that**, and the obvious implementation has neither:
+
+1. **A knows the B-side session id before it asks.** `PEER_FORWARD_TIMEOUT` is 30 s, but B's own
+   worktree creation is bounded by `spawn_worker_request_timeout` (300 s by default) and B may
+   `git clone` the project first. A forward that times out therefore tells A nothing about whether
+   B went on to build the worktree — and without a name for it, teardown is impossible. A generates
+   the id and sends it as `requested_session_id`, so a failed forward can still issue the delete.
+   If B answers with a *different* id (an older peer that ignores the field), A tears down the id B
+   reported and refuses the start: a peer that cannot honour the request cannot give the guarantee.
+2. **The forward outlives B's own budget.** With only the caller-chosen id, A would tear down at
+   30 s and B would carry on building the worktree afterwards. The split forward therefore uses
+   `spawn_worker_request_timeout + PEER_FORWARD_TIMEOUT`.
+
+The cost of (2) is worth stating: a codebase daemon whose RPC participant has vanished now surfaces
+after roughly 330 s rather than 30 s. That is the price of never orphaning a checkout on a host the
+operator may not be watching.
+
 ### Agent working directory
 
-There is no repository on A, so the agent's cwd is the read-only context directory that
-managed-codebase mode already builds (`RemoteContextDir`): synced `CLAUDE.md` / `AGENTS.md` /
-skills plus the `REMOTE_APPENDIX` notice telling the agent the real codebase is elsewhere and
-reachable only through `mcp__tddy-tools__*`.
+There is no repository on A, so the agent's cwd is a context directory holding the
+`REMOTE_APPENDIX` notice — telling the agent the real codebase is elsewhere and reachable only
+through `mcp__tddy-tools__*`.
+
+**It does not yet carry the codebase host's own `CLAUDE.md` / `AGENTS.md` / skills.** The
+co-located managed path copies those from the worktree it sits beside; a split session's worktree
+is on another daemon, so fetching them means bounded reads over the peer link plus a decision about
+what a failed fetch means — which is a fallback decision, so it is deferred and marked in
+`split_session.rs`. A split agent therefore sees the notice but not the project's own guidance.
+Note also that the directory is deliberately **writable**, unlike `RemoteContextDir`: the agent has
+no other scratch space on A.
 
 ### Tool dispatch
 
@@ -287,6 +322,14 @@ transport entirely and fail on the missing worktree.
 directory. A failure to reach B fails the delete with a message naming the orphaned worktree — it
 does not silently drop the B-side.
 
+**"B says it has no such session" is not a failure.** B's workspace session is an ordinary, listable
+session an operator can delete directly, and a delete that succeeded on B can still fail locally
+afterwards. Treating B's `failed_precondition` as an error would make the A-side session
+undeletable through the API from then on, with an error naming a worktree that no longer exists. So
+"peer does not have it" is treated as already torn down and the deletion continues; only
+*unreachable or failed* refuses. That is idempotency, not a swallowed leak — the distinction is
+which of the two answers B gave.
+
 **This requires fixing an existing gap.** `session_deletion.rs` gates worktree removal on
 `session_type == "claude-cli"` only:
 
@@ -315,6 +358,29 @@ secret, the latter because peer routing and the tool RPC both ride that room. Th
 GitHub user must map to an OS user on **both** daemons; B runs the tools as its own mapped user.
 
 ### Trust model
+
+**The agent process holds the caller's session token.** `TDDY_REMOTE_SESSION_TOKEN` is the user's own
+session token, because that is what B authenticates against to resolve the worktree as the right OS
+user. It is not scoped to `ExecuteTool` or to this session: it authenticates every
+`ConnectionService` RPC on **both** daemons — `DeleteSession` against any of the user's sessions,
+`StartSession`, project mutations. No co-located path hands an agent this credential today (the
+sandbox uses `SandboxIpc` with an empty token).
+
+This is a deliberate v1 property, not an oversight: the alternative is a session-scoped tool token
+(audience = this session id, exec-tool methods only), which is recorded in `docs/dev/TODO.md`. Weigh
+it before enabling split placement for users whose agents you would not trust with their own account.
+
+**The agent is a room participant, and room participants are how daemons are discovered.** Peer
+eligibility is decided from self-declared participant metadata, filtered only by identity prefix
+(`web-`, `browser-`, `server`, `daemon-`). The split agent joins as `split-agent-<session_id>`,
+which passed that filter — so an agent running model-authored code could publish a daemon
+advertisement and insert an arbitrary host into every daemon's eligible list and the web's host
+picker. `split-agent-` is now a reserved prefix that discovery rejects.
+
+The join token still carries `can_update_own_metadata` because `TokenGenerator` is shared by every
+LiveKit participant in the repo and narrowing it belongs in `tddy-livekit`, not here. The split
+agent never calls `set_metadata`, so a narrowed variant should be free — recorded in
+`docs/dev/TODO.md`. The identity filter is the robust half and is in place.
 
 Unchanged from the existing multi-host model: any participant able to join the common room is an
 eligible daemon. A split session lets an agent on A run arbitrary `Shell` in a worktree on B as B's

@@ -16,7 +16,6 @@ use std::path::Path;
 use futures_util::StreamExt;
 use tddy_daemon::connection_service::EXEC_TOOL_FRAME_BYTES;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
-use tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, StartSessionRequest,
@@ -128,14 +127,26 @@ fn a_read_request(session_id: &str, path: &str) -> ExecuteToolRequest {
     }
 }
 
-/// Drain a `StreamExecuteTool` response into the reassembled `result_json` plus the terminal frame's
-/// error state.
+/// What a drained `StreamExecuteTool` response actually carried.
+///
+/// `frame_sizes` is kept because reassembling correctly is only half the contract: a handler that
+/// returned the whole result in one oversized frame would reassemble byte-for-byte and still
+/// reintroduce the silent chunk-wedge this RPC exists to remove. A test that only concatenates
+/// cannot tell those apart.
+struct DrainedResult {
+    result_json: String,
+    is_error: bool,
+    error_message: String,
+    frame_sizes: Vec<usize>,
+}
+
 async fn drain_result(
     mut stream: impl futures_util::Stream<
             Item = Result<tddy_service::proto::connection::ExecuteToolChunk, tddy_rpc::Status>,
         > + Unpin,
-) -> (String, bool, String) {
+) -> DrainedResult {
     let mut bytes: Vec<u8> = Vec::new();
+    let mut frame_sizes: Vec<usize> = Vec::new();
     let mut is_error = false;
     let mut error_message = String::new();
     let mut saw_last = false;
@@ -145,6 +156,7 @@ async fn drain_result(
             !saw_last,
             "no frame may follow the one marked `last` — a consumer stops reading there"
         );
+        frame_sizes.push(frame.result_chunk.len());
         bytes.extend_from_slice(&frame.result_chunk);
         if frame.last {
             saw_last = true;
@@ -157,32 +169,22 @@ async fn drain_result(
         "the stream must end with a frame marked `last`; a stream that just stops is \
          indistinguishable from a truncated one"
     );
-    (
-        String::from_utf8(bytes).expect("result_json must be valid UTF-8"),
+    DrainedResult {
+        result_json: String::from_utf8(bytes).expect("result_json must be valid UTF-8"),
         is_error,
         error_message,
-    )
+        frame_sizes,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn the_exec_tool_frame_budget_leaves_headroom_under_the_livekit_chunk_limit() {
-    /// The RPC envelope and protobuf framing ride along with every frame, so "under the limit" is
-    /// not enough on its own — a frame sized right up to the boundary still gets chunk-framed once
-    /// its envelope is added, which is the silent wedge this RPC exists to avoid.
-    const REQUIRED_ENVELOPE_HEADROOM: usize = 4_096;
-
-    // Then — both operands are compile-time known, so a budget raised past what the transport can
-    // carry fails the build rather than waiting for someone to run this file
-    const _: () = assert!(
-        EXEC_TOOL_FRAME_BYTES + REQUIRED_ENVELOPE_HEADROOM <= MAX_CHUNK_FRAME_BYTES,
-        "the exec-tool frame budget must leave room for the RPC envelope under the transport's \
-         per-chunk limit"
-    );
-}
+/// The budget's relationship to the transport limit is already pinned at compile time in production
+/// (`connection_service.rs`, with stricter headroom), so restating it here would prove nothing a
+/// build does not already prove. What no compile-time assert can check is whether the handler
+/// *honours* the budget when it splits a real result — which is the next test.
 
 #[tokio::test]
 async fn a_result_larger_than_one_frame_reassembles_byte_for_byte() {
@@ -201,19 +203,41 @@ async fn a_result_larger_than_one_frame_reassembles_byte_for_byte() {
         .await
         .expect("StreamExecuteTool must be accepted")
         .into_inner();
-    let (result_json, is_error, error_message) = drain_result(Box::pin(stream)).await;
+    let drained = drain_result(Box::pin(stream)).await;
 
-    // Then — every byte arrived, in order. This is the whole reason the RPC exists.
+    // Then — every byte arrived, in order
     assert!(
-        !is_error,
-        "the read must succeed; error was '{error_message}'"
+        !drained.is_error,
+        "the read must succeed; error was '{}'",
+        drained.error_message
     );
     let parsed: serde_json::Value =
-        serde_json::from_str(&result_json).expect("reassembled result must be valid JSON");
+        serde_json::from_str(&drained.result_json).expect("reassembled result must be valid JSON");
     assert_eq!(
         parsed["content"].as_str().expect("content field"),
         content,
         "the reassembled file content must match what was written"
+    );
+
+    // And it arrived as *bounded* frames. Reassembly alone is not the contract: a handler that
+    // returned this result in one oversized frame would satisfy every assertion above and put the
+    // payload straight back into the transport's chunk-framing, where a lost frame wedges the call
+    // with no error. That is the failure this RPC was added to remove.
+    assert!(
+        drained.frame_sizes.len() >= 4,
+        "a result of {} bytes must span several frames at a {EXEC_TOOL_FRAME_BYTES}-byte budget; \
+         got {} frame(s): {:?}",
+        content.len(),
+        drained.frame_sizes.len(),
+        drained.frame_sizes
+    );
+    assert!(
+        drained
+            .frame_sizes
+            .iter()
+            .all(|size| *size <= EXEC_TOOL_FRAME_BYTES),
+        "no frame may exceed the budget of {EXEC_TOOL_FRAME_BYTES} bytes; got {:?}",
+        drained.frame_sizes
     );
 }
 
@@ -246,12 +270,32 @@ async fn a_streamed_tool_result_equals_the_unary_result_for_the_same_call() {
         .await
         .expect("StreamExecuteTool")
         .into_inner();
-    let (streamed_json, _, _) = drain_result(Box::pin(stream)).await;
+    let drained = drain_result(Box::pin(stream)).await;
 
-    // Then — the streaming variant is a transport change, not a semantic one
+    // Then — the streaming variant is a transport change, not a semantic one.
+    // Both outcomes are asserted before comparing them: two calls that failed the same way would
+    // both carry an empty `result_json`, and an equality check alone would certify "streaming
+    // matches unary" for a pair where neither actually read the file.
+    assert!(
+        !drained.is_error,
+        "the streamed read must succeed; error was '{}'",
+        drained.error_message
+    );
+    assert!(
+        !unary.is_error,
+        "the unary read must succeed; error was '{}'",
+        unary.error_message
+    );
     assert_eq!(
-        streamed_json, unary.result_json,
+        drained.result_json, unary.result_json,
         "the streamed result must be identical to the unary one for the same tool call"
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&drained.result_json).expect("result must be valid JSON");
+    assert_eq!(
+        parsed["content"].as_str().expect("content field"),
+        "just a little content\n",
+        "both calls must have returned the seeded file, not a shared empty result"
     );
 }
 
@@ -270,13 +314,17 @@ async fn a_tool_error_is_reported_on_the_final_frame_rather_than_as_a_stream_err
         .await
         .expect("an unknown tool name must open the stream, not refuse it")
         .into_inner();
-    let (_, is_error, error_message) = drain_result(Box::pin(stream)).await;
+    let drained = drain_result(Box::pin(stream)).await;
 
     // Then — matching unary `ExecuteTool`'s contract: a tool failure is a *result*, and only routing
     // or auth failures are RPC errors. An agent must be able to tell those apart.
-    assert!(is_error, "an unknown tool must be reported as a tool error");
     assert!(
-        error_message.contains("NoSuchTool"),
-        "the error must name the tool that was not found; got '{error_message}'"
+        drained.is_error,
+        "an unknown tool must be reported as a tool error"
+    );
+    assert!(
+        drained.error_message.contains("NoSuchTool"),
+        "the error must name the tool that was not found; got '{}'",
+        drained.error_message
     );
 }

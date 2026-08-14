@@ -482,7 +482,10 @@ async fn tool_shell(
     let block_until_ms = args
         .get("block_until_ms")
         .and_then(|v| v.as_i64())
-        .unwrap_or(30_000); // default: block 30s
+        // default: block 30s. Mirrored by `tddy_tools::session_tool_client::
+        // REMOTE_ENGINE_DEFAULT_BLOCK_MS`, whose remote ceiling is pinned *below* it by a
+        // compile-time assert — lowering this without lowering that ceiling breaks the build there.
+        .unwrap_or(30_000);
 
     let root_owned = root.to_path_buf();
 
@@ -560,6 +563,9 @@ async fn tool_await(args: &serde_json::Value, registry: &TaskRegistry) -> ToolOu
         .get("timeout_ms")
         .or_else(|| args.get("block_until_ms"))
         .and_then(|v| v.as_i64())
+        // Mirrored by `tddy_tools::session_tool_client::REMOTE_ENGINE_DEFAULT_BLOCK_MS` (the crates
+        // cannot import each other), whose remote ceiling is pinned *below* it by a compile-time
+        // assert — lowering this without lowering that ceiling breaks the build there.
         .unwrap_or(30_000);
 
     let handle = match registry.get_by_str(job_id).await {

@@ -190,14 +190,35 @@ export function CreateSessionPane({
   // placement every session had before docs/ft/daemon/remote-managed-worktree.md.
   const [codebaseDaemonInstanceId, setCodebaseDaemonInstanceId] = useState("");
   /**
-   * The session's worktree lives on a daemon other than the one running its agent. Only meaningful
-   * alongside managed codebase, which is what removes the agent's native filesystem tools — see
+   * Whether placing the codebase on another daemon is even on offer.
+   *
+   * claude-cli only: it is the one agent that can be *prevented* from touching a local filesystem
+   * (`--allowedTools`/`--disallowedTools`), so it is the only type the daemon accepts a split for.
+   * Never in peer mode — that flow joins an orchestrator's existing worktree, so the placement is
+   * settled by the session being joined. And never without a common room to name a host in.
+   *
+   * This is what the selector renders on. `isSplitCodebase` below builds on it rather than
+   * restating it, so the control's visibility and everything a split withdraws cannot drift apart.
+   */
+  const canChooseCodebaseHost =
+    sessionType === "claude-cli" && managedCodebase && !peerMode && daemons.length > 0;
+
+  /**
+   * The session's worktree lives on a daemon other than the one running its agent — see
    * docs/ft/daemon/remote-managed-worktree.md.
    *
-   * Never in peer mode: that flow joins an orchestrator's existing worktree, so its placement is
-   * already settled by the session being joined rather than chosen here.
+   * Governs everything a split cannot also ask for: the workflow recipe, the sandbox, the semantic
+   * index and the permission bypass all resolve a worktree on the daemon running the agent, which a
+   * split session does not have, and the daemon refuses each by name.
    */
-  const isSplitCodebase = managedCodebase && !peerMode && codebaseDaemonInstanceId !== "";
+  const isSplitCodebase =
+    canChooseCodebaseHost &&
+    codebaseDaemonInstanceId !== "" &&
+    // Naming the session's own host is the explicit spelling of "co-located", and the daemon
+    // classifies it exactly that way. Treating it as a split here would withdraw the recipe from a
+    // session that is going to run with one. `daemonInstanceId` rather than its peer-mode-aware
+    // form: `canChooseCodebaseHost` already means the two are the same value.
+    codebaseDaemonInstanceId !== daemonInstanceId;
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
   // a stack can be seeded from — and one fetch feeds both.
@@ -489,22 +510,23 @@ export function CreateSessionPane({
       ...commonParams,
       toolPath: "",
       agent: "",
-      // A split session has no repository on this host for a recipe's tooling to run against, and
-      // the daemon refuses the pair outright. The form defaults `recipe` to a non-empty value, so
-      // without this every split session would be created as a request that cannot succeed.
+      // A recipe, a sandbox and a semantic index all resolve a worktree on the daemon running the
+      // agent, which a split session does not have — the daemon refuses each by name. The form
+      // defaults `recipe` to a non-empty value and either toggle may already be on, so without this
+      // a split session would be created as a request that cannot succeed.
       recipe: managedCodebase && !isSplitCodebase ? recipe : "",
       stackParent,
       sessionType: "claude-cli",
       model,
       permissionMode,
-      dangerouslySkipPermissions,
+      dangerouslySkipPermissions: isSplitCodebase ? false : dangerouslySkipPermissions,
       initialPrompt,
-      sandbox,
+      sandbox: isSplitCodebase ? false : sandbox,
       managedCodebase,
       // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
       // so a selection made before unchecking the toggle must not leak into the request.
       specializedAgents: managedCodebase ? selectedSubagents : [],
-      semanticIndex: managedCodebase ? semanticIndex : false,
+      semanticIndex: managedCodebase && !isSplitCodebase ? semanticIndex : false,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
       // combination the daemon refuses. `isSplitCodebase` also covers peer mode, where the worktree
@@ -871,6 +893,8 @@ export function CreateSessionPane({
                     ))
                   )}
                 </div>
+                {/* No split guard here, unlike the claude-cli copy below: `isSplitCodebase` requires
+                    claude-cli, so inside this cursor-cli branch it is always false. */}
                 <div>
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <input
@@ -914,31 +938,42 @@ export function CreateSessionPane({
             </select>
           </div>
 
-          <div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-dangerously-skip-permissions-toggle"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
-                checked={dangerouslySkipPermissions}
-                onChange={(e) => setDangerouslySkipPermissions(e.target.checked)}
-              />
-              Dangerously skip permissions
-            </label>
-          </div>
+          {/* A split session runs unjailed on this host, and its entire "no route to the local
+              filesystem" guarantee rests on the agent's deny list. Whether that list survives
+              --dangerously-skip-permissions is not something this repo pins, so the combination is
+              withdrawn rather than assumed safe. */}
+          {!isSplitCodebase && (
+            <div>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  data-testid="create-session-dangerously-skip-permissions-toggle"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-input"
+                  checked={dangerouslySkipPermissions}
+                  onChange={(e) => setDangerouslySkipPermissions(e.target.checked)}
+                />
+                Dangerously skip permissions
+              </label>
+            </div>
+          )}
 
-          <div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                data-testid="create-session-sandbox-toggle"
-                type="checkbox"
-                className="h-4 w-4 rounded border-input"
-                checked={sandbox}
-                onChange={(e) => setSandbox(e.target.checked)}
-              />
-              Sandbox
-            </label>
-          </div>
+          {/* A sandboxed spawn resolves its worktree on this daemon, which a split session has no
+              worktree on — the daemon refuses the pair, so the choice is withdrawn rather than
+              offered and then rejected. */}
+          {!isSplitCodebase && (
+            <div>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  data-testid="create-session-sandbox-toggle"
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-input"
+                  checked={sandbox}
+                  onChange={(e) => setSandbox(e.target.checked)}
+                />
+                Sandbox
+              </label>
+            </div>
+          )}
 
           <div>
             <label className={labelClass} htmlFor="create-session-initial-prompt">
@@ -1003,7 +1038,7 @@ export function CreateSessionPane({
                     local filesystem (--allowedTools/--disallowedTools), so it is the only session
                     type the daemon accepts a split placement for.
                     See docs/ft/daemon/remote-managed-worktree.md. */}
-                {daemons.length > 0 && !peerMode && (
+                {canChooseCodebaseHost && (
                   <div>
                     <label className={labelClass} htmlFor="create-session-codebase-host">
                       Codebase host
@@ -1050,18 +1085,22 @@ export function CreateSessionPane({
                     ))
                   )}
                 </div>
-                <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      data-testid="create-session-semantic-index-toggle"
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-input"
-                      checked={semanticIndex}
-                      onChange={(e) => setSemanticIndex(e.target.checked)}
-                    />
-                    Semantic index
-                  </label>
-                </div>
+                {/* Indexing runs against a worktree on this daemon before launch, which a split
+                    session does not have — refused by the daemon, so not offered here. */}
+                {!isSplitCodebase && (
+                  <div>
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <input
+                        data-testid="create-session-semantic-index-toggle"
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={semanticIndex}
+                        onChange={(e) => setSemanticIndex(e.target.checked)}
+                      />
+                      Semantic index
+                    </label>
+                  </div>
+                )}
               </div>
             )}
           </div>

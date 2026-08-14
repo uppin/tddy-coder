@@ -58,13 +58,39 @@ pub struct SplitAgentWiring {
     pub env: Vec<(String, String)>,
 }
 
+/// Identity prefix reserved for split sessions' agent participants.
+///
+/// Reserved, not merely conventional: peer eligibility is decided from self-declared participant
+/// metadata, so this prefix is what
+/// `livekit_peer_discovery::eligible_daemon_from_participant_fields` matches on to refuse an agent
+/// advertising itself as a daemon. A daemon whose `daemon_instance_id` began with it would not be
+/// discoverable — which is the intended trade, since the agent holds a token it can publish
+/// metadata with and the daemon's instance id is an operator's free choice.
+pub const SPLIT_AGENT_IDENTITY_PREFIX: &str = "split-agent-";
+
 /// The LiveKit participant identity a split session's agent joins the common room under.
 ///
 /// Session-scoped and distinct from both daemon identities (`daemon-…`) and the bare instance ids
 /// the discovery participants use, so the token grants exactly one agent's presence and an operator
 /// reading the room roster can tell whose it is.
 pub fn split_agent_participant_identity(session_id: &str) -> String {
-    format!("split-agent-{session_id}")
+    format!("{SPLIT_AGENT_IDENTITY_PREFIX}{session_id}")
+}
+
+/// The codebase daemon and the workspace session on it that a session is paired with, or `None`
+/// when the session is co-located.
+///
+/// The pairing is the *pair* — a recorded daemon with no session id names a host but nothing on it
+/// to resume, re-wire or delete, so half a pairing is read as none rather than acted on. Every
+/// caller needs both, so the check lives here instead of at each of them.
+pub fn split_pairing(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> {
+    fn non_blank(field: &Option<String>) -> Option<&str> {
+        field.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+    Some((
+        non_blank(&meta.codebase_daemon_instance_id)?,
+        non_blank(&meta.codebase_session_id)?,
+    ))
 }
 
 /// Where a split session's context directory lives: inside the session directory, so it is removed
@@ -95,6 +121,25 @@ pub fn build_split_context_dir(session_dir: &Path) -> Result<PathBuf, Status> {
     Ok(context_dir)
 }
 
+/// Filename of the MCP server's log, under the session directory.
+///
+/// Same basename the sandbox runner writes into its egress dir (`tddy-sandbox-runner`): a split
+/// session's session dir is its equivalent — the per-session place the host can read afterwards.
+const MCP_LOG_BASENAME: &str = "tddy-tools.mcp.log";
+
+/// `RUST_LOG` for the agent's `tddy-tools --mcp` child.
+///
+/// Mirrors the sandbox runner's default, minus its `tddy_discovery=debug` — that one exists for
+/// specialized subagents' HTTP activity, which a split session has none of. `tddy_tools=debug` is
+/// the part that matters here: it is where a failed LiveKit dispatch to the codebase daemon (room
+/// connect refused, peer absent, truncated stream) is reported.
+const MCP_RUST_LOG: &str = "info,tddy_tools=debug";
+
+/// Where a split session's MCP server writes its log.
+pub fn split_mcp_log_path(session_dir: &Path) -> PathBuf {
+    session_dir.join(MCP_LOG_BASENAME)
+}
+
 /// Build the `claude` flags that leave the agent no route to this host's filesystem and point its
 /// MCP server at `tddy-tools`.
 ///
@@ -104,10 +149,24 @@ pub fn split_claude_extra_args(
     session_dir: &Path,
     tddy_tools_path: &str,
 ) -> Result<Vec<String>, Status> {
+    // Every tool call a split session makes crosses LiveKit to the codebase daemon, and every way
+    // that can fail is reported by `tddy-tools` itself. Claude Code captures an MCP server's stderr,
+    // so without a log file those reports exist only inside a process nobody can attach to: a split
+    // session whose dispatch is failing would leave no evidence on either daemon. The sandbox path
+    // solves this the same way, pointing the same variable at its egress dir.
+    let mcp_env = BTreeMap::from([
+        (
+            "TDDY_TOOLS_LOG_FILE".to_string(),
+            split_mcp_log_path(session_dir)
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ("RUST_LOG".to_string(), MCP_RUST_LOG.to_string()),
+    ]);
     let mcp_config = tddy_sandbox_recipes::write_claude_mcp_config(
         session_dir,
         Path::new(tddy_tools_path),
-        &BTreeMap::new(),
+        &mcp_env,
     )
     .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
 
@@ -126,6 +185,12 @@ pub fn split_claude_extra_args(
     args.push(PERMISSION_PROMPT_TOOL.to_string());
     args.push("--mcp-config".to_string());
     args.push(mcp_config.to_string_lossy().into_owned());
+    // `--mcp-config` alone *adds* to the user-scoped MCP configuration, so any filesystem or shell
+    // MCP server the operator has configured would load beside `tddy-tools` — reachable under an
+    // `mcp__*` name the disallowlist above does not cover, on this host rather than the codebase
+    // host. The restriction the split placement rests on has to be impossible to route around, not
+    // merely the default, so this config is the only one loaded.
+    args.push("--strict-mcp-config".to_string());
     Ok(args)
 }
 
@@ -323,6 +388,132 @@ mod tests {
         assert!(
             allowed.contains(&"mcp__tddy-tools__Read"),
             "the proxied Read must remain allowed; got {allowed:?}"
+        );
+    }
+
+    #[test]
+    fn no_mcp_server_but_tddy_tools_is_loaded_for_the_agent() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let args = split_claude_extra_args(tmp.path(), "/usr/bin/tddy-tools").expect("extra args");
+
+        // Then — without this, Claude Code merges the user-scoped MCP configuration on top of ours,
+        // and a filesystem or shell server configured there would run beside tddy-tools, outside
+        // the disallowlist above: the restriction the split placement rests on would be advice
+        assert!(
+            args.iter().any(|a| a == "--strict-mcp-config"),
+            "the MCP config must be the only one loaded; got {args:?}"
+        );
+    }
+
+    /// Exec tools whose name is *not* also a Claude Code built-in, so [`NATIVE_FILESYSTEM_TOOLS`]
+    /// has nothing to disallow for them: they are reachable only in their `mcp__tddy-tools__` form,
+    /// which is the form a split session wants.
+    ///
+    /// Listed rather than inferred so that a **new** exec tool fails the test below until someone
+    /// decides which side of the line it falls on. That decision is the whole point: an exec tool
+    /// that shares a name with a Claude built-in (as `Read` and `Grep` do) needs the built-in hard
+    /// disabled, or the agent gets this host's filesystem instead of the codebase host's.
+    const EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN: &[&str] = &[
+        "StrReplace",
+        "Delete",
+        "Shell",
+        "Await",
+        "ReadLints",
+        "SemanticSearch",
+    ];
+
+    /// The native Claude built-ins `tddy-sandbox-recipes` knows an exec tool by, other than the
+    /// exec tool's own name: `Bash`/`BashOutput`/`KillShell` for `Shell`, `Edit`/`MultiEdit`/
+    /// `NotebookEdit` for `Write`. Read out of the public disallowlist builder, which is where that
+    /// knowledge lives, so this test tracks it rather than restating it.
+    fn native_aliases_the_sandbox_recipes_know() -> Vec<String> {
+        let exec_tools = tddy_sandbox::workspace_exec_tool_names();
+        tddy_sandbox_recipes::build_claude_disallowlist(exec_tools)
+            .into_iter()
+            // The `mcp__tddy-tools__` forms are the proxied tools themselves — the split session's
+            // only route to the codebase, and the one thing it must *not* disallow.
+            .filter(|tool| !tool.starts_with("mcp__"))
+            .filter(|tool| !exec_tools.contains(&tool.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn the_split_disallowlist_covers_every_native_alias_the_sandbox_recipes_know() {
+        // Given the aliases the sandbox path hard-disables when it replaces a tool
+        let aliases = native_aliases_the_sandbox_recipes_know();
+        assert!(
+            !aliases.is_empty(),
+            "the sandbox recipes must still expose native aliases, or this test proves nothing"
+        );
+
+        // Then — the two lists answer the same question about Claude's own tool inventory, from two
+        // crates. A built-in added upstream to one and not the other would silently leave a split
+        // agent a native route to *this* host's filesystem, which is the one thing the placement
+        // forbids and the only thing enforcing it.
+        for alias in &aliases {
+            assert!(
+                NATIVE_FILESYSTEM_TOOLS.contains(&alias.as_str()),
+                "native {alias} is hard-disabled by the sandbox recipes but not by a split session; add it to NATIVE_FILESYSTEM_TOOLS"
+            );
+        }
+    }
+
+    #[test]
+    fn every_exec_tool_sharing_its_name_with_a_claude_built_in_is_hard_disabled() {
+        for tool in tddy_sandbox::workspace_exec_tool_names() {
+            if EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN.contains(tool) {
+                continue;
+            }
+            // Then — the proxied `mcp__tddy-tools__Read` stays allowed, but Claude's own `Read`
+            // would open a file on the agent host, where the repository does not exist
+            assert!(
+                NATIVE_FILESYSTEM_TOOLS.contains(tool),
+                "exec tool {tool} names a Claude built-in that a split session leaves reachable; \
+                 add it to NATIVE_FILESYSTEM_TOOLS, or to EXEC_TOOLS_WITH_NO_CLAUDE_BUILT_IN if \
+                 Claude has no tool by that name"
+            );
+        }
+    }
+
+    #[test]
+    fn the_agents_tool_server_logs_to_a_file_under_the_session_dir() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let args = split_claude_extra_args(tmp.path(), "/usr/bin/tddy-tools").expect("extra args");
+
+        // Then — every remote tool call's failures (room connect, peer absent, truncated stream)
+        // are reported by tddy-tools, and Claude Code captures an MCP server's stderr: without a
+        // log file a split session whose dispatch is failing leaves no evidence on either daemon
+        let config_path = args
+            .windows(2)
+            .find(|w| w[0] == "--mcp-config")
+            .map(|w| w[1].clone())
+            .expect("an --mcp-config path");
+        let config: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(config_path).expect("read MCP config"))
+                .expect("MCP config must be JSON");
+        let env = &config["mcpServers"]["tddy-tools"]["env"];
+        assert_eq!(
+            env["TDDY_TOOLS_LOG_FILE"].as_str(),
+            Some(
+                split_mcp_log_path(tmp.path())
+                    .to_string_lossy()
+                    .as_ref()
+                    .to_owned()
+            )
+            .as_deref(),
+            "the MCP server's log must land in the session dir; got {env}"
+        );
+        assert!(
+            env["RUST_LOG"]
+                .as_str()
+                .is_some_and(|level| level.contains("tddy_tools=debug")),
+            "the dispatch failures worth reading are logged by tddy_tools; got {env}"
         );
     }
 

@@ -45,7 +45,11 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 const ROOM: &str = "split-placement-room";
 /// Daemon A — runs the agent.
-const AGENT_INSTANCE_ID: &str = "split-agent-host";
+///
+/// Deliberately not `split-agent-…`: that prefix is reserved for a split session's *agent*
+/// participant and is refused as a daemon advertisement, so a daemon named that way would never be
+/// discovered (`livekit_peer_discovery::eligible_daemon_from_participant_fields`).
+const AGENT_INSTANCE_ID: &str = "split-placement-agent-host";
 /// Daemon B — holds the codebase.
 const CODEBASE_INSTANCE_ID: &str = "split-codebase-host";
 const LK_API_KEY: &str = "devkey";
@@ -354,6 +358,24 @@ fn session_metadata_on(sessions_base: &Path, session_id: &str) -> tddy_core::Ses
         .unwrap_or_else(|e| panic!("session metadata for {session_id} must be readable: {e}"))
 }
 
+/// Every session directory physically present under a daemon's sessions base.
+///
+/// Deliberately not `ListSessions`: a start that failed part-way leaves a directory with no
+/// readable `.session.yaml`, which the listing skips — and that leftover is exactly what an orphan
+/// looks like from the outside.
+fn session_directories_on(sessions_base: &Path) -> Vec<String> {
+    let dir = sessions_base.join("sessions");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
 async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
     service
         .list_sessions(Request::new(ListSessionsRequest {
@@ -574,6 +596,81 @@ async fn deleting_a_split_session_deletes_the_paired_workspace_session_and_its_w
     assert!(
         !worktree.exists(),
         "the worktree must be removed from the codebase host; {worktree:?} still exists"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_has_its_workspace_session(
+) {
+    // Given a split session whose paired workspace session has already been deleted on the codebase
+    // host — what an operator deleting it directly there leaves behind, and equally the state after
+    // a DeleteSession that succeeded on the peer and then failed locally
+    let hosts = split_hosts().await;
+    let started = hosts
+        .agent
+        .start_session(Request::new(a_split_session_request()))
+        .await
+        .expect("a split session must start")
+        .into_inner();
+    let codebase_session_id = session_metadata_on(&hosts.agent_sessions_base, &started.session_id)
+        .codebase_session_id
+        .expect("codebase session id");
+    hosts
+        .codebase
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: codebase_session_id.clone(),
+        }))
+        .await
+        .expect("deleting the workspace session directly on the codebase host must succeed");
+
+    // When the agent-host session is deleted
+    hosts
+        .agent
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: started.session_id.clone(),
+        }))
+        .await
+        .expect("a split session whose codebase half is already gone must still be deletable");
+
+    // Then the session is actually gone from the agent host — a peer answering "I do not have it"
+    // is the state the deletion wanted, so treating it as a failure would make the session
+    // permanently undeletable through the API
+    assert!(
+        !unified_session_dir_path(&hosts.agent_sessions_base, &started.session_id).exists(),
+        "the agent-host session directory must be removed"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_worktree_failure_on_the_codebase_daemon_leaves_no_session_behind() {
+    // Given a split request naming a branch that does not exist on the codebase host, so the peer
+    // creates the session directory and then fails cutting the worktree — the shape of every
+    // forwarded start that errors *after* the peer has begun building
+    let hosts = split_hosts().await;
+    let before = session_directories_on(&hosts.codebase_sessions_base);
+
+    // When
+    hosts
+        .agent
+        .start_session(Request::new(StartSessionRequest {
+            branch_worktree_intent: "work_on_selected_branch".to_string(),
+            selected_branch_to_work_on: "no-such-branch-anywhere".to_string(),
+            ..a_split_session_request()
+        }))
+        .await
+        .expect_err("a split start whose worktree cannot be cut must fail");
+
+    // Then the codebase host is left exactly as it was. The agent host never saw a session id in the
+    // answer, so it can only tear down a session it named itself — which is why it chooses that id
+    // before forwarding.
+    let after = session_directories_on(&hosts.codebase_sessions_base);
+    assert_eq!(
+        after, before,
+        "a failed forward must leave no session directory on the codebase host"
     );
 }
 

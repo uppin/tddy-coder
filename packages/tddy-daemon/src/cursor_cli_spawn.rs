@@ -5,13 +5,16 @@ use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{
-    build_cursor_hooks_settings, write_session_metadata, BranchWorktreeIntent, Changeset,
-    ChangesetWorkflow, HookCommandParams, SessionMetadata,
+    build_cursor_hooks_settings, write_session_metadata, Changeset, HookCommandParams,
+    SessionMetadata,
 };
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::connection::{ResumeSessionResponse, StartSessionResponse};
 use uuid::Uuid;
 
+use crate::branch_intent::{
+    resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
+};
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::{
@@ -33,10 +36,10 @@ pub fn install_cursor_hooks_in_worktree(
         crate::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
     );
 
-    let daemon_url = crate::config::resolve_cursor_cli_daemon_url(config).unwrap_or_else(|| {
-        let port = config.listen.web_port.unwrap_or(8899);
-        format!("http://127.0.0.1:{port}")
-    });
+    // `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener —
+    // the same last resort every hook URL falls back to.
+    let daemon_url = crate::config::resolve_cursor_cli_daemon_url(config)
+        .unwrap_or_else(|| crate::connection_service::local_daemon_hook_url(config));
 
     let hook_token = Uuid::new_v4().to_string();
     let hooks_settings = build_cursor_hooks_settings(&HookCommandParams {
@@ -146,48 +149,22 @@ pub async fn spawn_cursor_cli_session_inner(
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
-    let short_id = &session_id[..8.min(session_id.len())];
-    let (intent, resolved_new_branch, resolved_selected_branch) = match branch_worktree_intent
-        .trim()
-    {
-        "new_branch_from_base" => {
-            let branch = if new_branch_name.trim().is_empty() {
-                format!("cursor-cli/{short_id}")
-            } else {
-                new_branch_name.trim().to_string()
-            };
-            (BranchWorktreeIntent::NewBranchFromBase, Some(branch), None)
-        }
-        "work_on_selected_branch" => {
-            if selected_branch_to_work_on.trim().is_empty() {
-                return Err(Status::invalid_argument(
-                    "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
-                ));
-            }
-            (
-                BranchWorktreeIntent::WorkOnSelectedBranch,
-                None,
-                Some(selected_branch_to_work_on.trim().to_string()),
-            )
-        }
-        _ => (
-            BranchWorktreeIntent::NewBranchFromBase,
-            Some(format!("cursor-cli/{short_id}")),
-            None,
-        ),
-    };
-
-    let cs_workflow = ChangesetWorkflow {
-        branch_worktree_intent: Some(intent),
-        new_branch_name: resolved_new_branch,
-        selected_integration_base_ref: if selected_integration_base_ref.trim().is_empty() {
-            None
-        } else {
-            Some(selected_integration_base_ref.trim().to_string())
+    // No project default branch is consulted here: this path may run against a client-supplied
+    // `repo_path` with no registered project at all, and it never read one before the extraction.
+    let ResolvedBranchWorkflow {
+        intent,
+        workflow: cs_workflow,
+    } = resolve_branch_workflow(
+        session_id,
+        &BranchIntentRequest {
+            branch_worktree_intent,
+            new_branch_name,
+            selected_integration_base_ref,
+            selected_branch_to_work_on,
         },
-        selected_branch_to_work_on: resolved_selected_branch,
-        ..ChangesetWorkflow::default()
-    };
+        BranchIntentPolicy::cursor_cli(),
+        None,
+    )?;
     let mut cs = Changeset {
         workflow: Some(cs_workflow),
         orchestrator_session_id: stack_parent.map(str::to_string),
