@@ -1440,24 +1440,27 @@ mod grpc_listen_port_tests {
 
     use super::verify_tcp_listen_port_free;
 
-    /// A port outside the range the kernel hands out on its own.
+    /// A **held** listener on a port outside the range the kernel hands out on its own.
     ///
-    /// Binding `:0` draws from the ephemeral range (49152+ on macOS, 32768+ on Linux) — the very
-    /// range the kernel re-issues to any other test binding `:0` at the same moment. A port
-    /// sourced that way can therefore be taken between this test dropping its listener and
-    /// asserting the port is free, which reads as "the production check is broken" when it is
-    /// only the fixture that raced. Searching a fixed band below the ephemeral range removes the
-    /// kernel as a competitor; the pid-derived start offset keeps two concurrent test binaries
-    /// from probing the same port first.
-    fn a_port_no_one_is_listening_on() -> u16 {
+    /// Two things make a port fixture race, and this returns the listener rather than the number to
+    /// close the second one:
+    ///
+    /// - Binding `:0` draws from the ephemeral range (49152+ on macOS, 32768+ on Linux) — the very
+    ///   range the kernel re-issues to any other test binding `:0` at the same moment. Searching a
+    ///   fixed band below that range removes the kernel as a competitor; the pid-derived start
+    ///   offset keeps two concurrent test binaries from probing the same port first.
+    /// - Probing a port, releasing it, and handing back the *number* leaves a window in which
+    ///   anything at all can take it before the caller binds — which is how this fixture failed once
+    ///   in three loaded workspace runs, reported as `AddrInUse` on the caller's own bind. Ownership
+    ///   is never released here, so the caller binds exactly once: it inherits the listener.
+    fn a_listener_on_a_port_no_one_else_is_using() -> TcpListener {
         const SEARCH_BASE: u16 = 20_000;
         const SEARCH_SPAN: u16 = 8_000;
         let start = (std::process::id() as u16) % SEARCH_SPAN;
         for offset in 0..SEARCH_SPAN {
             let port = SEARCH_BASE + (start + offset) % SEARCH_SPAN;
-            if let Ok(probe) = TcpListener::bind(("0.0.0.0", port)) {
-                drop(probe);
-                return port;
+            if let Ok(listener) = TcpListener::bind(("0.0.0.0", port)) {
+                return listener;
             }
         }
         panic!(
@@ -1469,8 +1472,8 @@ mod grpc_listen_port_tests {
     #[test]
     fn verify_tcp_listen_port_free_ok_after_listener_dropped() {
         // Given — a listener holding a port nothing else is competing for
-        let port = a_port_no_one_is_listening_on();
-        let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind the chosen port");
+        let listener = a_listener_on_a_port_no_one_else_is_using();
+        let port = listener.local_addr().expect("the bound address").port();
 
         // When — the listener goes away
         drop(listener);
