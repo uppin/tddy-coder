@@ -193,8 +193,11 @@ export function CreateSessionPane({
    * The session's worktree lives on a daemon other than the one running its agent. Only meaningful
    * alongside managed codebase, which is what removes the agent's native filesystem tools — see
    * docs/ft/daemon/remote-managed-worktree.md.
+   *
+   * Never in peer mode: that flow joins an orchestrator's existing worktree, so its placement is
+   * already settled by the session being joined rather than chosen here.
    */
-  const isSplitCodebase = managedCodebase && codebaseDaemonInstanceId !== "";
+  const isSplitCodebase = managedCodebase && !peerMode && codebaseDaemonInstanceId !== "";
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
   // a stack can be seeded from — and one fetch feeds both.
@@ -504,8 +507,9 @@ export function CreateSessionPane({
       semanticIndex: managedCodebase ? semanticIndex : false,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
-      // combination the daemon refuses.
-      codebaseDaemonInstanceId: managedCodebase ? codebaseDaemonInstanceId : "",
+      // combination the daemon refuses. `isSplitCodebase` also covers peer mode, where the worktree
+      // being joined already decides where the codebase lives.
+      codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
     };
   };
 
@@ -999,7 +1003,7 @@ export function CreateSessionPane({
                     local filesystem (--allowedTools/--disallowedTools), so it is the only session
                     type the daemon accepts a split placement for.
                     See docs/ft/daemon/remote-managed-worktree.md. */}
-                {daemons.length > 0 && (
+                {daemons.length > 0 && !peerMode && (
                   <div>
                     <label className={labelClass} htmlFor="create-session-codebase-host">
                       Codebase host

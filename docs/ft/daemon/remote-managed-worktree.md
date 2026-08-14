@@ -337,12 +337,18 @@ block, sourced from the same shared common-room daemon list as the existing Host
   matching the existing convention where `specializedAgents` and `semanticIndex` are sent empty
   unless the block is open.
 
+- Not offered in **peer mode** either. That flow joins an orchestrator's existing worktree and is
+  given it as `repoPath`, so the codebase's location is already settled by the session being
+  joined — the pane hides its Host and Project pickers for the same reason.
+
 Note for implementation: the managed-codebase block exists **twice** in `CreateSessionPane` — once
 in the cursor-cli branch and once in the claude-cli branch — sharing the same state and the same
 `data-testid`s, so only one is mounted at a time. The new selector goes in the **claude-cli copy
 only**. Because both copies share state, the claude-cli branch must also send an empty
 `codebaseDaemonInstanceId` when the session type is cursor-cli, so a value chosen before switching
-type cannot leak into a request that would be refused.
+type cannot leak into a request that would be refused. One predicate (`isSplitCodebase`) governs
+the selector's visibility, the recipe withdrawal, and what the request carries, so the three cannot
+drift apart.
 
 The sessions list renders a split session's placement as agent host and codebase host, sourced from
 the new `SessionEntry` fields rather than inferred from which daemon answered.

@@ -78,6 +78,32 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
   );
 }
 
+/**
+ * The peer-spawn flow: a second agent joining an orchestrator's existing worktree. The pane is
+ * given that worktree as `repoPath` and hides its host and project pickers, because the placement
+ * is already decided by the session being joined.
+ */
+function mountPeerCreatePane(backend: InMemoryRpcBackend) {
+  const client = createClient(ConnectionService, backend.transport());
+  cy.mount(
+    <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
+      <CreateSessionPane
+        client={client}
+        sessionToken="fake-token"
+        onCancel={cy.stub()}
+        onCreated={cy.stub()}
+        peerMode
+        initialValues={{
+          sessionType: "claude-cli",
+          projectId: "proj-1",
+          daemonInstanceId: AGENT_HOST,
+          repoPath: "/home/dev/repo/.worktrees/orchestrator",
+        }}
+      />
+    </SelectedDaemonProvider>,
+  );
+}
+
 /** The single StartSession the form sent. */
 function theStartSessionRequest(backend: InMemoryRpcBackend) {
   const calls = backend.callsTo(ConnectionService.method.startSession);
@@ -224,6 +250,18 @@ it("drops a chosen codebase host when the session type changes to cursor-cli", (
     expect(request.sessionType).to.equal("cursor-cli");
     expect(request.codebaseDaemonInstanceId).to.equal("");
   });
+});
+
+it("does not offer a codebase host when joining an existing worktree as a peer", () => {
+  // Given the peer-spawn flow, where the worktree is the orchestrator's and already exists on a
+  // host the operator does not choose
+  mountPeerCreatePane(aCreateSessionBackend());
+  createSessionPage.enableManagedCodebase();
+
+  // Then — placing the codebase elsewhere would contradict the worktree being joined, and the
+  // daemon would refuse it. The pane already hides its Host and Project pickers for the same
+  // reason; this is the third control that is not the operator's to choose here.
+  createSessionPage.expectNoCodebaseHostSelector();
 });
 
 // ---------------------------------------------------------------------------

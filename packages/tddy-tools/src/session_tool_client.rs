@@ -1,7 +1,10 @@
 //! Generic session tool dispatch — forwards MCP tool calls to `tddy-daemon` via sandbox IPC,
 //! direct HTTP, or LiveKit RPC to a remote daemon, depending on environment.
 
+use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub use tddy_sandbox::session_id_from_env;
 
@@ -222,50 +225,129 @@ pub async fn dispatch_session_tool(tool_name: &str, args: serde_json::Value) -> 
     }
 }
 
+/// Which remote daemon a cached LiveKit connection reaches.
+///
+/// Reuse is keyed by destination, `server_identity` included: handing back a client aimed at a
+/// different daemon would execute the tool against the wrong host's filesystem. The token is part of
+/// the key because it is what the room was joined with — a re-minted token is a different
+/// connection, not the same one under a new name.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LiveKitRoomKey {
+    pub url: String,
+    pub room: String,
+    pub token: String,
+    pub server_identity: String,
+}
+
+/// One LiveKit connection per destination, held for the life of the process.
+///
+/// `dispatch_via_livekit` used to connect a room, issue one call and drop it — per tool call, so an
+/// agent doing fifty `Read`s paid fifty connects. `tddy-tools --mcp` runs for the whole session, so
+/// it can hold the connection instead.
+///
+/// The per-key [`tokio::sync::OnceCell`] is what makes that safe under concurrency: an MCP server
+/// issues tool calls in parallel, and a cache that checked the map, released it and only then
+/// connected would open a room per racing call. Initialisation happens *inside* the cell, so the
+/// first caller connects and the rest await that same connect. A failed connect leaves the cell
+/// empty, so one unlucky first call cannot poison the session.
+#[derive(Default)]
+pub struct LiveKitRoomCache {
+    cells: Mutex<HashMap<LiveKitRoomKey, RoomClientCell>>,
+}
+
+/// One destination's connection slot: empty until a caller finishes connecting it, and still empty
+/// if that connect failed.
+type RoomClientCell = Arc<tokio::sync::OnceCell<Arc<LiveKitSession>>>;
+
+/// A held connection to one remote daemon, plus the means to ask whether that daemon is still in
+/// the room.
+///
+/// The presence check exists because holding the connection moves the participant wait from *every
+/// call* to *first connect*. If the codebase daemon restarts mid-session, a call issued against the
+/// cached client would publish to an identity nobody is listening on — and neither
+/// `tddy_livekit::RpcClient` nor `tddy_rpc`'s engine carries a request deadline, so it would hang
+/// rather than error. Hanging is strictly worse than the clear timeout the connect-per-call
+/// behaviour produced, so the caller checks first.
+pub struct LiveKitSession {
+    transport: Arc<dyn tddy_rpc::RpcClientTransport>,
+    peer_present: Box<dyn Fn() -> bool + Send + Sync>,
+}
+
+impl LiveKitSession {
+    pub fn new(
+        transport: Arc<dyn tddy_rpc::RpcClientTransport>,
+        peer_present: Box<dyn Fn() -> bool + Send + Sync>,
+    ) -> Self {
+        Self {
+            transport,
+            peer_present,
+        }
+    }
+
+    /// The RPC transport addressed at the remote daemon.
+    pub fn transport(&self) -> &Arc<dyn tddy_rpc::RpcClientTransport> {
+        &self.transport
+    }
+
+    /// Whether the remote daemon's RPC-server participant is still in the room.
+    pub fn peer_present(&self) -> bool {
+        (self.peer_present)()
+    }
+}
+
+impl LiveKitRoomCache {
+    /// Return the session for `key`, running `connect` only if this destination has no live one.
+    pub async fn client_via<F, Fut>(
+        &self,
+        key: &LiveKitRoomKey,
+        connect: F,
+    ) -> Result<Arc<LiveKitSession>, String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Arc<LiveKitSession>, String>>,
+    {
+        // The map lock only hands out the cell; every await happens on the cell, so the lock is
+        // never held across one.
+        let cell = {
+            let mut cells = self.cells.lock().expect("livekit room cache");
+            Arc::clone(cells.entry(key.clone()).or_default())
+        };
+        cell.get_or_try_init(connect).await.cloned()
+    }
+}
+
 /// How long to wait for the remote daemon's RPC-server participant to appear in the room. It is
 /// normally already joined; this only covers the window right after a daemon restart.
 #[cfg(feature = "livekit")]
 const SERVER_PARTICIPANT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Forward a tool call to a remote daemon over LiveKit, addressed at its RPC-server participant.
-///
-/// The join token is scoped to `room` by the daemon that minted it, so the room is not re-derived
-/// here — it is carried for diagnostics, where "which room did we join" is the first question.
-///
-/// TODO: connect the room once per process and reuse it across tool calls; today every call pays a
-/// full room connect.
+/// The process-wide connection cache behind [`dispatch_via_livekit`].
 #[cfg(feature = "livekit")]
-#[allow(clippy::too_many_arguments)]
-pub async fn dispatch_via_livekit(
-    url: &str,
-    room: &str,
-    token: &str,
-    server_identity: &str,
-    envelope: &SessionToolEnvelope,
-    tool_name: &str,
-    args: &serde_json::Value,
-) -> String {
-    use livekit::prelude::*;
-    use std::sync::Arc;
+fn livekit_room_cache() -> &'static LiveKitRoomCache {
+    static CACHE: std::sync::OnceLock<LiveKitRoomCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(LiveKitRoomCache::default)
+}
 
-    log::info!(
-        target: "tddy_tools::session_tool_client",
-        "dispatching {tool_name} to \"{server_identity}\" in room \"{room}\" at {url}"
-    );
-    let (connected_room, mut room_events) =
-        match Room::connect(url, token, RoomOptions::default()).await {
-            Ok(pair) => pair,
-            Err(e) => {
-                return serde_json::json!({
-                    "error": format!("livekit room connect: {e}"),
-                    "is_error": true
-                })
-                .to_string();
-            }
-        };
+/// Join `room` and return a client addressed at the remote daemon's RPC-server participant.
+///
+/// The returned client owns the `Arc<Room>`, so the connection lives exactly as long as the cache
+/// keeps the client.
+#[cfg(feature = "livekit")]
+async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSession>, String> {
+    use livekit::prelude::*;
+
+    let LiveKitRoomKey {
+        url,
+        room,
+        token,
+        server_identity,
+    } = key;
+    let (connected_room, mut room_events) = Room::connect(url, token, RoomOptions::default())
+        .await
+        .map_err(|e| format!("livekit room connect: {e}"))?;
     let connected_room = Arc::new(connected_room);
 
-    let target: ParticipantIdentity = server_identity.to_string().into();
+    let target: ParticipantIdentity = server_identity.clone().into();
     if !connected_room.remote_participants().contains_key(&target) {
         let appeared = tokio::time::timeout(SERVER_PARTICIPANT_WAIT, async {
             while let Some(event) = room_events.recv().await {
@@ -278,23 +360,77 @@ pub async fn dispatch_via_livekit(
         })
         .await;
         if appeared.is_err() {
-            return serde_json::json!({
-                "error": format!(
-                    "timed out waiting for remote daemon participant \"{server_identity}\" in room \"{room}\""
-                ),
-                "is_error": true
-            })
-            .to_string();
+            return Err(format!(
+                "timed out waiting for remote daemon participant \"{server_identity}\" in room \"{room}\""
+            ));
         }
     }
 
-    let rpc_events = connected_room.subscribe();
-    let client: Arc<dyn tddy_rpc::RpcClientTransport> = Arc::new(
-        tddy_livekit::RpcClient::new_shared(connected_room, target, rpc_events),
+    // Through the factory rather than building an RpcClient directly: it owns one ClientEngine and
+    // one response loop per room, so vended clients share a request-id space instead of each
+    // starting at 1 and leaking its own `room.subscribe()` loop. Harmless while every call had its
+    // own short-lived room; caching the room is what would make it bite.
+    let presence_room = Arc::clone(&connected_room);
+    let presence_target = target.clone();
+    Ok(Arc::new(LiveKitSession::new(
+        Arc::new(tddy_livekit::LiveKitRpcClientFactory::for_room(connected_room).client(target)),
+        Box::new(move || {
+            presence_room
+                .remote_participants()
+                .contains_key(&presence_target)
+        }),
+    )))
+}
+
+/// Forward a tool call to a remote daemon over LiveKit, addressed at its RPC-server participant.
+///
+/// The join token is scoped to `room` by the daemon that minted it, so the room is not re-derived
+/// here — it is carried for diagnostics, where "which room did we join" is the first question.
+#[cfg(feature = "livekit")]
+#[allow(clippy::too_many_arguments)]
+pub async fn dispatch_via_livekit(
+    url: &str,
+    room: &str,
+    token: &str,
+    server_identity: &str,
+    envelope: &SessionToolEnvelope,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> String {
+    log::info!(
+        target: "tddy_tools::session_tool_client",
+        "dispatching {tool_name} to \"{server_identity}\" in room \"{room}\" at {url}"
     );
+    let key = LiveKitRoomKey {
+        url: url.to_string(),
+        room: room.to_string(),
+        token: token.to_string(),
+        server_identity: server_identity.to_string(),
+    };
+    let session = match livekit_room_cache()
+        .client_via(&key, || connect_livekit_client(&key))
+        .await
+    {
+        Ok(session) => session,
+        Err(e) => {
+            return serde_json::json!({"error": e, "is_error": true}).to_string();
+        }
+    };
+    // Holding the connection moves the participant wait to first connect, so a daemon that
+    // restarted since then would receive nothing — and with no request deadline anywhere below
+    // this, the call would hang instead of failing. Checked per call for that reason.
+    if !session.peer_present() {
+        return serde_json::json!({
+            "error": format!(
+                "remote daemon participant \"{server_identity}\" is no longer in room \"{room}\""
+            ),
+            "is_error": true
+        })
+        .to_string();
+    }
     // Streaming, not unary: this is the one transport whose messages are chunk-framed past
     // MAX_CHUNK_FRAME_BYTES, where a lost chunk frame wedges the call with no error at all.
-    dispatch_via_streaming_rpc(&client, envelope, tool_name, args).await
+    dispatch_via_streaming_rpc(session.transport(), envelope, tool_name, args).await
 }
 
 /// Without the `livekit` feature the SDK is not linked, so a split session cannot reach its

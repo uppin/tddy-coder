@@ -178,15 +178,31 @@ for a LiveKit container twice.
   as a whole one. Same for a mid-stream error status. The output shape is byte-identical to the
   unary path, so an agent cannot tell the transports apart. `SandboxIpc` and `DaemonHttp` keep the
   unary call: neither crosses LiveKit chunk framing.
-- **Every remote tool call currently pays a full LiveKit room connect.** `dispatch_via_livekit`
-  connects a room, waits for the codebase daemon's participant, issues one `ExecuteTool`, and drops
-  the room — per call. An agent doing fifty `Read`s pays fifty connects, likely hundreds of
-  milliseconds each. This is the single biggest threat to the feature being usable rather than
-  merely correct, and it is **not** covered by any test: the suite drives the transport-agnostic
-  dispatch through an in-process peer, so the connect cost is invisible to it.
-  Fixing it means caching one room per process, which needs reconnect-on-drop semantics — a
-  fallback decision, so it was deliberately left alone (`session_tool_client.rs`, marked TODO).
-  Measure it against a real daemon before calling this feature done.
+- ~~**Every remote tool call pays a full LiveKit room connect.**~~ **Closed.** The connection is now
+  held per destination in a process-wide `LiveKitRoomCache`, keyed by url/room/token/server
+  identity so a client aimed at one daemon can never be handed to a call bound for another. The
+  per-key `OnceCell` is what makes it safe under concurrency: an MCP server issues tool calls in
+  parallel, and a check-then-connect cache would open a room per racing call. A failed connect is
+  not cached, so one unlucky first call cannot poison the session.
+  Clients come from `LiveKitRpcClientFactory::for_room`, not `RpcClient::new_shared` — the factory
+  owns one `ClientEngine` and one response loop per room. Building clients directly leaked a
+  `room.subscribe()` loop per call and collided request-id spaces; harmless while every call had
+  its own short-lived room, which is exactly what caching the room would have changed.
+  **No reconnect-on-drop was added.** If the connection dies permanently, every subsequent call
+  returns an explicit error; the session does not self-heal. That is the intended shape.
+
+- **A remote tool call has no deadline below `tddy-tools`.** Holding the connection moved the
+  10 s participant wait from every call to first connect, so a codebase daemon that restarts
+  mid-session would leave a cached client publishing to an identity nobody is listening on — and
+  neither `tddy_livekit::RpcClient` nor `tddy_rpc`'s `ClientEngine` carries a request deadline, so
+  that call would **hang rather than error**. Strictly worse than the clear timeout it replaced.
+  Mitigated by re-checking participant presence per call (`LiveKitSession::peer_present`), which
+  restores the old failure mode — a named error — without adding a reconnect policy.
+  The residual hazard is real though: presence can lapse *between* the check and the publish, and
+  nothing bounds a call that has already gone out. The honest fix is a client-side RPC deadline in
+  `tddy-livekit`, which would also cover the "oversized payload wedges silently" hazard the
+  chunking docs record. Out of scope here — it is a policy decision affecting every LiveKit RPC in
+  the repo, not just this feature.
 - **`tddy-tools` binary size / feature gating — resolved, with a cost.** `livekit` is now a
   **default** feature, because nothing in the repo builds `tddy-tools` with `--features livekit`
   (`./release` and `./test` both use default features), so leaving it opt-in would ship a binary
