@@ -242,6 +242,28 @@ fn generate_server_struct(service: &Service, buf: &mut String, rpc: &str) {
     generate_rpc_service_impl(service, buf, rpc);
 }
 
+/// Emit the body of a response pump's `while let Some(item) = stream.next().await` loop, indented
+/// by `indent` spaces.
+///
+/// The send is *not* ignored: the receiving end belongs to the transport, which drops it as soon as
+/// the peer that made the call is gone. Ignoring the error would leave this loop pulling items into
+/// a void forever, and — because it holds the handler's stream alive — the handler's own
+/// "my subscriber left" check could never fire either, so a polling handler would go on polling for
+/// the life of the process. Breaking here propagates the teardown one hop further back.
+///
+/// (The emitted code carries no comment of its own: the generated file is formatted by a
+/// token-level pretty-printer, which drops comments.)
+fn write_stream_pump_send(buf: &mut String, indent: usize) {
+    let pad = " ".repeat(indent);
+    writeln!(
+        buf,
+        "{pad}if tx.send(item.map(|r| r.encode_to_vec())).await.is_err() {{"
+    )
+    .unwrap();
+    writeln!(buf, "{pad}    break;").unwrap();
+    writeln!(buf, "{pad}}}").unwrap();
+}
+
 fn generate_per_method_struct(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
     let svc_name = format!("{}Svc", to_pascal_case(&method.name));
     let method_snake = to_snake_case(&method.name);
@@ -344,11 +366,7 @@ fn generate_per_method_struct(service: &Service, method: &Method, buf: &mut Stri
                 "                    while let Some(item) = stream.next().await {{",
             )
             .unwrap();
-            writeln!(
-                buf,
-                "                        let _ = tx.send(item.map(|r| r.encode_to_vec())).await;",
-            )
-            .unwrap();
+            write_stream_pump_send(buf, 24);
             writeln!(buf, "                    }}",).unwrap();
             writeln!(buf, "                }});",).unwrap();
             writeln!(
@@ -484,11 +502,7 @@ fn generate_per_method_struct(service: &Service, method: &Method, buf: &mut Stri
                 "                    while let Some(item) = stream.next().await {{",
             )
             .unwrap();
-            writeln!(
-                buf,
-                "                        let _ = tx.send(item.map(|r| r.encode_to_vec())).await;",
-            )
-            .unwrap();
+            write_stream_pump_send(buf, 24);
             writeln!(buf, "                    }}",).unwrap();
             writeln!(buf, "                }});",).unwrap();
             writeln!(
@@ -763,10 +777,7 @@ fn generate_start_bidi_stream(service: &Service, buf: &mut String, rpc: &str) {
             "                            while let Some(item) = stream.next().await {{"
         )
         .unwrap();
-        writeln!(
-            buf,
-            "                                let _ = tx.send(item.map(|r| r.encode_to_vec())).await;"
-        ).unwrap();
+        write_stream_pump_send(buf, 32);
         writeln!(buf, "                            }}").unwrap();
         writeln!(buf, "                        }});").unwrap();
         writeln!(

@@ -12,7 +12,9 @@ pub mod envelope;
 pub mod participant;
 mod projects_registry;
 pub mod room_metadata;
+pub mod room_roster;
 pub mod rpc_log;
+pub mod server_api_url;
 #[cfg(test)]
 pub mod test_util;
 pub mod token;

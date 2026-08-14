@@ -562,6 +562,56 @@ longest **path-component** prefix of the project directory (`select_mount_for_pa
 the largest mount by capacity if none is a prefix. The default project directory resolves to
 `$HOME/<repos_base_path_or_default>` (`DaemonConfig` has no explicit project-dir override today).
 
+## LiveKit rooms (Rooms panel)
+
+One server-streaming RPC feeds the web's **LiveKit rooms panel** (see
+[docs/ft/web/livekit-rooms-panel.md](../../../../docs/ft/web/livekit-rooms-panel.md)) with every room
+on the LiveKit server and the participants joined to each:
+
+- `StreamLiveKitRooms(session_token)` → `stream LiveKitRoomsEvent`. Authenticated like every other
+  endpoint, and addressed to the daemon participant directly (no `daemon_instance_id` payload — the
+  LiveKit transport already targets `daemon-{instanceId}`).
+
+**Snapshot then changes.** The first message always carries `LiveKitRoomsSnapshot` (every room, with
+its participants); every message after it carries exactly one `LiveKitRoomsChange` —
+`room_added` (the full row, so a consumer never infers a room from a partial event), `room_removed`,
+`participant_joined`, `participant_left`, `participant_metadata_changed`, `participant_state_changed`.
+Metadata and state are diffed independently, so a participant that republishes both on one tick
+produces two events; the feed's contract is one event per delta throughout. A client folds changes
+onto the snapshot and never re-requests the list.
+
+**The daemon owns the cadence.** LiveKit's server API has no change feed, so `pump_rooms`
+(`livekit_rooms_stream.rs`) polls it every 3 s and calls `diff_rosters` against the roster it last
+sent **on that stream**. Per-subscriber baselines are what stop two watchers desynchronizing each
+other — a shared baseline would let watcher B's tick consume a delta watcher A had not been sent. A
+tick with no delta emits nothing, so an idle server yields an idle stream. Ticks are
+`MissedTickBehavior::Skip`: a read slower than the cadence must not queue up the ticks it outlasted,
+since bursting them fires another `1 + rooms` calls exactly when the server API is already slow.
+
+**The loop lives and dies with its subscriber.** `pump_rooms` selects on `tx.closed()` alongside the
+tick. That is load-bearing rather than defensive: an idle stream sends nothing, so a loop that
+learned about departure only from a failed send would never learn at all, and every subscription
+would leave a permanent 3 s poll of the LiveKit server behind it. It works only because the generated
+server-streaming pump propagates the teardown — see
+[tddy-codegen § Server-streaming teardown](../../tddy-codegen/docs/server-streaming.md).
+
+**Errors are never an empty list.** A roster read that fails — or a daemon with no LiveKit
+credentials — terminates the stream with the reason. Reporting zero rooms would read to the panel as
+"the server has no rooms", which is a different fact. A configuration gap is `FAILED_PRECONDITION`; a
+read failure is `INTERNAL`.
+
+Backed by the `RoomRoster` trait (`livekit_rooms_stream.rs`), injected via
+`ConnectionServiceImpl::with_room_roster` so tests drive a scripted roster sequence without a LiveKit
+server, and built for production from `DaemonConfig.livekit` inside `ConnectionServiceImpl::new` —
+not at the `main.rs` call site, so no second construction site can forget it. The implementation is
+[`tddy_livekit::room_roster`](../../tddy-livekit/docs/room-roster.md).
+
+**Cost.** Each subscription runs its own poller, so load is `1 + room count` calls every 3 s **per
+open subscription**, not per daemon. It is bounded by panels actually open (the loop ends with its
+subscriber). One shared poller broadcasting full rosters, with each subscriber diffing locally, would
+preserve the same per-subscriber guarantee at one poller per daemon — the escape hatch if this panel
+becomes commonly-open.
+
 ## Spawn worker
 
 Spawn and **git clone** requests run through a forked single-threaded worker (`spawn_worker`) so fork+setuid from a Tokio process avoids deadlocks. JSON protocol: `WorkerRequest` (`spawn` | `clone`) and `WorkerResponse` (`spawn_ok` | `clone_ok` | `error`).
