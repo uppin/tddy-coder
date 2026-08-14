@@ -198,7 +198,7 @@ fn refuse_a_source_the_kernel_will_not_resolve_beneath(
             spawn_broker::open_resolved(
                 root.as_raw_fd(),
                 &beneath,
-                libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS,
+                spawn_broker::RESOLVE_BENEATH | spawn_broker::RESOLVE_NO_SYMLINKS,
             )
         }),
     )
@@ -547,6 +547,12 @@ mod tests {
     // Mount sources
     // -----------------------------------------------------------------------------------------
 
+    /// Every test that reaches [`refuse_a_source_the_kernel_will_not_resolve_beneath`] — the six
+    /// below — asserts what `openat2(2)` answers, and that syscall is Linux 5.6's. Off Linux
+    /// `spawn_broker::open_resolved` refuses instead, so a mount source is denied for want of a
+    /// kernel rather than on its merits: an accepting test would fail and a denying one would pass
+    /// without having tested anything. The path-based rules around it are asserted on every host.
+    #[cfg(target_os = "linux")]
     #[test]
     fn accepts_a_mount_source_under_an_allowed_root() {
         // Given
@@ -561,6 +567,7 @@ mod tests {
         assert_eq!(resolved, Ok(PathBuf::from("/srv/tddy/repos/alice/project")));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn accepts_an_allowed_root_itself_as_a_mount_source() {
         // Given
@@ -607,16 +614,19 @@ mod tests {
     ///
     /// The escape tests need a directory a session user could write into, and there is no way to
     /// assert a symlink is refused without a symlink on disk to refuse.
+    #[cfg(target_os = "linux")]
     fn a_real_mount_root() -> tempfile::TempDir {
         tempfile::tempdir().expect("a mount root on disk")
     }
 
+    #[cfg(target_os = "linux")]
     fn policy_allowing(root: &Path) -> SpawnPolicy {
         a_spawn_policy()
             .allowing_mount_root(root.to_str().expect("a utf-8 mount root"))
             .build()
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn accepts_a_mount_source_the_kernel_resolves_inside_its_allowed_root() {
         // Given
@@ -631,6 +641,7 @@ mod tests {
         assert_eq!(resolved, Ok(project));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn denies_a_mount_source_that_leaves_its_allowed_root_through_a_symlink() {
         // Given the escape a session user can plant for herself: the mount roots are trees she
@@ -647,6 +658,7 @@ mod tests {
         assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn denies_a_mount_source_whose_parent_directory_is_a_symlink_out_of_the_root() {
         // Given
@@ -663,6 +675,7 @@ mod tests {
         assert_eq!(resolved, Err(SupervisorError::Denied));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn accepts_a_mount_source_that_does_not_exist_yet_and_leaves_the_bind_to_refuse_it() {
         // Given

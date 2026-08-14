@@ -1146,6 +1146,7 @@ impl TelegramWorkflowSpawn {
                 opts,
                 self.config.log.as_ref(),
                 coder_log_yaml,
+                spawner::StartupWatch::from_config(&self.config),
             );
             client.spawn(req)
         } else {
@@ -1161,6 +1162,7 @@ impl TelegramWorkflowSpawn {
                 child_log_level.as_str(),
                 child_log_format.as_str(),
                 coder_log_yaml.as_deref(),
+                spawner::StartupWatch::from_config(&self.config),
             )
         }
     }
@@ -1189,6 +1191,7 @@ impl TelegramWorkflowSpawn {
                     telegram_spawn_options(&inputs, project_id, new_session_id),
                     self.config.log.as_ref(),
                     spawner::coder_log_config_yaml(self.config.coder_config_path.as_deref()),
+                    spawner::StartupWatch::from_config(&self.config),
                 );
                 match tokio::time::timeout(
                     timeout,

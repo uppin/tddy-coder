@@ -6,12 +6,18 @@
 
 mod support;
 
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
-use support::{
-    a_service, a_supervisor, a_tool_that_records_its_parent, current_username, ScopeAssertions,
-};
-use tddy_supervisor::{AppliedLimits, CreateScopeRequest, RequestedLimits, SpawnSessionRequest};
+use support::{a_service, a_supervisor, ScopeAssertions};
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
+use support::{a_tool_that_records_its_parent, current_username};
+use tddy_supervisor::{AppliedLimits, CreateScopeRequest, RequestedLimits};
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
+use tddy_supervisor::SpawnSessionRequest;
 
 const MIB: u64 = 1024 * 1024;
 
@@ -30,6 +36,8 @@ fn limits(memory_max: u64, cpu_max: &str, pids_max: u64) -> RequestedLimits {
     }
 }
 
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 fn a_session_spawn(os_user: &str, tool_path: &Path, scope: &str) -> SpawnSessionRequest {
     SpawnSessionRequest {
         os_user: os_user.to_string(),
@@ -112,6 +120,9 @@ async fn clamps_requested_limits_down_to_the_policy_ceiling() {
         .assert_wrote("pids.max", "64");
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn places_a_spawned_session_into_the_scope_it_asked_for() {
     // Given

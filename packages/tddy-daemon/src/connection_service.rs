@@ -2495,10 +2495,10 @@ impl ConnectionServiceImpl {
         // Readiness gate: wake every specialized agent's endpoint and wait until each answers
         // before spawning the jail, so a cold/unreachable model fails session start here rather
         // than stalling the main agent's first subagent call. No fallback — the jail is never
-        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        // spawned if warm-up fails. Resume gates separately, in `relaunch_sandboxed_runner`.
         tddy_discovery::warmup::warm_up_agents(
             &specialized_defs,
-            &tddy_discovery::warmup::WarmupOptions::default(),
+            &self.config.agent_warmup_options(),
         )
         .await
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
@@ -3048,10 +3048,10 @@ impl ConnectionServiceImpl {
         // Readiness gate: wake every specialized agent's endpoint and wait until each answers
         // before spawning the jail, so a cold/unreachable model fails session start here rather
         // than stalling the main agent's first subagent call. No fallback — the jail is never
-        // spawned if warm-up fails (this covers resume, which reuses this start path).
+        // spawned if warm-up fails. Resume gates separately, in `relaunch_sandboxed_runner`.
         tddy_discovery::warmup::warm_up_agents(
             &specialized_defs,
-            &tddy_discovery::warmup::WarmupOptions::default(),
+            &self.config.agent_warmup_options(),
         )
         .await
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
@@ -3687,6 +3687,18 @@ impl ConnectionServiceImpl {
         resume: bool,
     ) -> Result<u32, Status> {
         let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+
+        // The same readiness gate the start paths apply: a resumed session's subagents are only as
+        // usable as a fresh one's if their endpoints are awake before the jail comes back up.
+        // Without this, resume would hand the agent a subagent whose first call stalls on a cold
+        // model. No fallback — the runner is not relaunched if warm-up fails.
+        tddy_discovery::warmup::warm_up_agents(
+            &specialized_defs,
+            &self.config.agent_warmup_options(),
+        )
+        .await
+        .map_err(|e| Status::failed_precondition(e.to_string()))?;
+
         let sandbox_root = session_dir.join("sandbox");
         let egress_dir = session_dir.join("egress");
         std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
@@ -5652,6 +5664,7 @@ impl ConnectionServiceImpl {
         };
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
+        let startup_watch = spawner::StartupWatch::from_config(&self.config);
         let coder_config_path = self.config.coder_config_path.clone();
         // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
         // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
@@ -5719,6 +5732,7 @@ impl ConnectionServiceImpl {
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
+                    startup_watch,
                 );
                 await_supervised_with_timeout(
                     timeout,
@@ -5764,6 +5778,7 @@ impl ConnectionServiceImpl {
                             },
                             daemon_log.as_ref(),
                             coder_log_yaml,
+                            startup_watch,
                         );
                         client.spawn(spawn_req)
                     } else {
@@ -5790,6 +5805,7 @@ impl ConnectionServiceImpl {
                             child_log_level.as_str(),
                             child_log_format.as_str(),
                             coder_log_yaml.as_deref(),
+                            startup_watch,
                         )
                     }
                 })
@@ -6604,6 +6620,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
+        let startup_watch = spawner::StartupWatch::from_config(&self.config);
         let coder_config_path = self.config.coder_config_path.clone();
         let result = match crate::supervisor_client::spawn_backend_choice(&self.config) {
             crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
@@ -6631,6 +6648,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     },
                     daemon_log.as_ref(),
                     coder_log_yaml,
+                    startup_watch,
                 );
                 await_supervised_with_timeout(
                     timeout,
@@ -6672,6 +6690,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                             },
                             daemon_log.as_ref(),
                             coder_log_yaml,
+                            startup_watch,
                         );
                         client.spawn(spawn_req)
                     } else {
@@ -6701,6 +6720,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                             child_log_level.as_str(),
                             child_log_format.as_str(),
                             coder_log_yaml.as_deref(),
+                            startup_watch,
                         )
                     }
                 })

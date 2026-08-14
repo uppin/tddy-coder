@@ -95,6 +95,12 @@ is last, means a future step cannot silently invalidate it.
 `/proc/self/uid_map`. A `PR_SET_DUMPABLE` re-arm is mandatory — the unprivileged reference
 implementation in `tddy-sandbox-cgroups` never needed it because it was never privileged.
 
+**The supplementary group list is truncated to `getgrouplist`'s `ngroups`, never to its return
+value.** glibc returns the number of groups it found; Darwin's libc returns `0` for "they fit". Both
+write the number into `ngroups`. Reading the return value therefore hands the child an *empty* group
+list on one of the two platforms — the same silent privilege downgrade the `bail` beside it exists to
+refuse, arrived at by another route. (Found by making the crate compile off Linux, not by a test.)
+
 **A bind mount's source is resolved in the child, not pre-fork.** A descriptor opened before
 `unshare(CLONE_NEWNS)` belongs to the old mount namespace and `mount(2)` rejects it. The
 authoritative `openat2(RESOLVE_NO_SYMLINKS)` therefore happens immediately before the bind, so check
@@ -243,6 +249,21 @@ Acceptance tests run the **real binary** as the invoking user, with a config dec
 The privilege drop is then a no-op at the syscall level while fork, exec, reap, backoff, socket bind,
 `SO_PEERCRED` and the RPC round trip all execute for real. No test-only branch exists in production
 code; only the injected base and target user differ.
+
+**Off Linux the crate compiles and refuses.** The supervisor is a Linux program — systemd starts it,
+it joins cgroup scopes, it builds a jail from namespaces and bind mounts — and none of that exists on
+Darwin. What both platforms share is everything decided *before* the fork: step ordering, the
+credentials refused, the environment built. So each `pre_exec` step that needs a Linux facility
+returns `ErrorKind::Unsupported` ("the supervisor will not spawn a session it cannot confine") rather
+than being skipped, and the six `policy` tests that assert what `openat2(2)` answers are
+`#[cfg(target_os = "linux")]` — off Linux a source would be denied for want of a kernel rather than on
+its merits, so an accepting test would fail and a denying one would pass without testing anything.
+A macOS developer runs the pre-fork decisions; nobody gets a reduced jail.
+
+Test fixtures wait on `await_ready`, which polls `SupervisorClient::connect` **and** `try_wait` for
+the whole window. Waiting for the socket *inode* was the earlier mistake: dropping a `UnixListener`
+does not unlink it, so a supervisor that died any time after binding left the file behind and every
+later connect reported `ECONNREFUSED` with no mention of the exit that caused it.
 
 **What that cannot prove**, and is therefore operator smoke rather than CI: a session actually running
 as a *different* user, the `PR_SET_PDEATHSIG` re-arm surviving a real drop (both need root and a second

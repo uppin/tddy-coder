@@ -14,6 +14,9 @@ pub mod fakes;
 pub mod fs;
 pub mod sandbox_fixtures;
 pub mod sandbox_session_channel;
+pub mod stub_http;
+pub mod stub_scripts;
+pub mod wait;
 
 // Root-level re-exports for ergonomic imports in test files.
 pub use builders::{
@@ -29,6 +32,12 @@ pub use sandbox_fixtures::{
     CONNECT_PROBE_TUNNEL_OK, EGRESS_PROBE_DIRECT_DENIED, EGRESS_PROBE_SESSION_CHANNEL_OK,
 };
 pub use sandbox_session_channel::SandboxSessionChannelHost;
+pub use stub_http::{a_stub_http_endpoint_answering_ok, StubHttpEndpoint};
+pub use stub_scripts::{
+    a_stub_agent_script, appended_invocation_count, read_last_appended_argv, read_recorded_argv,
+    read_recorded_argv_value_after, StubAgentScript,
+};
+pub use wait::{eventually, eventually_awaiting, eventually_blocking};
 
 /// Convenience re-export so converted tests have one path for pretty diffs.
 pub use pretty_assertions::assert_eq;

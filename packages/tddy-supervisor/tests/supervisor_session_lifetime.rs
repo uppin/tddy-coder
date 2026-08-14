@@ -13,12 +13,19 @@
 
 mod support;
 
+use support::{a_service, a_supervisor, DenialAssertions};
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 use support::{
-    a_service, a_supervisor, a_tool_that_exits_with, a_tool_that_records_its_parent,
-    current_username, process_group_of, process_is_alive, DenialAssertions,
+    a_tool_that_exits_with, a_tool_that_records_its_parent, current_username, process_group_of,
+    process_is_alive,
 };
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 use tddy_supervisor::{SessionState, SpawnSessionRequest};
 
+// Used only by the spawning tests below, which are Linux-only.
+#[cfg(target_os = "linux")]
 fn a_session_spawn(os_user: &str, tool_path: &std::path::Path) -> SpawnSessionRequest {
     SpawnSessionRequest {
         os_user: os_user.to_string(),
@@ -30,6 +37,9 @@ fn a_session_spawn(os_user: &str, tool_path: &std::path::Path) -> SpawnSessionRe
     }
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn makes_each_spawned_session_the_leader_of_its_own_process_group() {
     // Given
@@ -57,6 +67,9 @@ async fn makes_each_spawned_session_the_leader_of_its_own_process_group() {
     );
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn keeps_a_spawned_session_out_of_the_supervisors_process_group() {
     // Given
@@ -88,6 +101,9 @@ async fn keeps_a_spawned_session_out_of_the_supervisors_process_group() {
     );
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn reports_the_pid_that_the_session_itself_observes() {
     // Given
@@ -112,6 +128,9 @@ async fn reports_the_pid_that_the_session_itself_observes() {
     assert_eq!(tool.await_recorded_pid().await, spawned.pid);
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn reports_a_session_as_running_while_it_is_alive() {
     // Given
@@ -140,6 +159,9 @@ async fn reports_a_session_as_running_while_it_is_alive() {
     assert_eq!(status.exit_code, None);
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn reports_the_exit_code_of_a_session_that_has_exited() {
     // Given a tool that exits with a distinctive status
@@ -165,6 +187,9 @@ async fn reports_the_exit_code_of_a_session_that_has_exited() {
     assert_eq!(status.exit_code, Some(42));
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn keeps_a_sessions_exit_code_available_for_a_caller_that_asks_after_the_reap() {
     // Given a session that has already exited and been reaped
@@ -214,6 +239,9 @@ async fn denies_a_status_query_for_a_pid_it_never_spawned() {
     result.assert_denied_without_disclosure();
 }
 
+/// Makes the supervisor spawn for real, so it is Linux-only — see the note in `support`'s
+/// header.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn stops_a_session_on_request_and_reports_that_it_exited() {
     // Given a session that would otherwise run for ten minutes

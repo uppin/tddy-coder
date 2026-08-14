@@ -39,6 +39,13 @@ const SECOND_OWNER_SESSION: &str = "019d6392-3cff-0001-aaaa-000000000002";
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/// A worktree path spelled the way the daemon records it on the changeset: it resolves a worktree
+/// before writing it, so on macOS its answer is under `/private/tmp` where the fixture's `TempDir`
+/// says `/tmp` — the same directory reached through a symlink the daemon has already followed.
+fn as_the_daemon_records_it(worktree: &Path) -> PathBuf {
+    std::fs::canonicalize(worktree).expect("the worktree must exist before it can be resolved")
+}
+
 /// The OS user the test process runs as — the config must map a real user because a *successful*
 /// start_session spawns the CLI as that user.
 fn current_os_user() -> String {
@@ -523,7 +530,11 @@ async fn start_session_work_on_selected_branch_shares_the_owning_sessions_worktr
     let cs = read_changeset(&session_dir).expect("changeset must be written");
     assert_eq!(
         cs.worktree.as_deref(),
-        Some(owner_worktree.to_string_lossy().as_ref()),
+        Some(
+            as_the_daemon_records_it(&owner_worktree)
+                .to_string_lossy()
+                .as_ref()
+        ),
         "the second agent must share the owning session's worktree"
     );
 }

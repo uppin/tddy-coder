@@ -13,10 +13,13 @@ use std::sync::Arc;
 
 use tddy_core::changeset::read_changeset;
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
-use tddy_daemon::claude_cli_session::{ClaudeCliSessionManager, PtyHandle};
+use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_rpc::{Code, Request};
+
+mod common;
+use common::{a_capture_showing, PTY_STUB_OUTPUT};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ResumeSessionRequest, StartSessionRequest,
 };
@@ -27,7 +30,6 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-opus-4-8";
 const TEST_PROJECT_ID: &str = "test-project";
-const STUB_OUTPUT_TIMEOUT_MS: u64 = 10_000;
 /// The start goal of the `tdd` recipe (`TddRecipe::start_goal()`), used to assert seeding.
 const TDD_START_GOAL: &str = "interview";
 
@@ -163,23 +165,6 @@ fn make_executable(path: &std::path::Path) {
     }
 }
 
-/// Poll `handle.capture` until its UTF-8 contents contain `needle` or the timeout elapses.
-async fn wait_for_capture_contains(handle: &Arc<PtyHandle>, needle: &str, timeout_ms: u64) -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-    loop {
-        {
-            let cap = handle.capture.lock().unwrap();
-            if String::from_utf8_lossy(cap.buffered_bytes()).contains(needle) {
-                return true;
-            }
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-}
-
 /// A managed claude-cli StartSession request template (non-sandboxed).
 fn managed_request(recipe: &str) -> StartSessionRequest {
     StartSessionRequest {
@@ -289,12 +274,7 @@ async fn managed_claude_cli_session_launches_claude_with_orchestration_prompt_fi
         .get(&session_id)
         .await
         .expect("session must be registered in the manager");
-    assert!(
-        wait_for_capture_contains(&handle, "ARGV:", STUB_OUTPUT_TIMEOUT_MS).await,
-        "stub claude must echo its ARGV"
-    );
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
+    let output = a_capture_showing(&handle, "ARGV:", PTY_STUB_OUTPUT).await;
     assert!(
         output.contains("--append-system-prompt-file"),
         "managed session must launch claude with --append-system-prompt-file; got: {output:?}"
@@ -332,12 +312,7 @@ async fn managed_claude_cli_session_launches_claude_with_tddy_socket_in_env() {
         .get(&session_id)
         .await
         .expect("session must be registered in the manager");
-    assert!(
-        wait_for_capture_contains(&handle, "ENVDUMP TDDY_SOCKET=[", STUB_OUTPUT_TIMEOUT_MS).await,
-        "stub claude must echo its TDDY_SOCKET env"
-    );
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
+    let output = a_capture_showing(&handle, "ENVDUMP TDDY_SOCKET=[", PTY_STUB_OUTPUT).await;
     assert!(
         !output.contains("ENVDUMP TDDY_SOCKET=[]"),
         "managed session must inject a non-empty per-session TDDY_SOCKET; got: {output:?}"
@@ -405,12 +380,7 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         .get(session_id)
         .await
         .expect("resumed session must be registered in the manager");
-    assert!(
-        wait_for_capture_contains(&handle, "ENVDUMP", STUB_OUTPUT_TIMEOUT_MS).await,
-        "resumed stub claude must echo its argv + env"
-    );
-    let cap = handle.capture.lock().unwrap();
-    let output = String::from_utf8_lossy(cap.buffered_bytes());
+    let output = a_capture_showing(&handle, "ENVDUMP", PTY_STUB_OUTPUT).await;
     assert!(
         output.contains("--append-system-prompt-file"),
         "resumed managed session must re-inject the orchestration prompt; got: {output:?}"

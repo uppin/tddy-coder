@@ -66,6 +66,10 @@ extern "C" {
 
 /// What a child exits with when it discovers, between `fork` and `exec`, that the supervisor that
 /// forked it is already gone.
+///
+/// Follows [`set_parent_death_signal`] onto Linux: it is the exit the race check there takes, and
+/// there is no such check where the kernel cannot arm the signal in the first place.
+#[cfg(target_os = "linux")]
 const ORPHANED_EXIT_STATUS: libc::c_int = 125;
 
 /// A target OS user, fully resolved before the fork so the child never has to consult NSS.
@@ -142,6 +146,14 @@ pub fn resolve_target_user(name: &str) -> anyhow::Result<TargetUser> {
     })
 }
 
+/// A group id as `getgrouplist(3)` takes it: `gid_t` in glibc's header, `c_int` in Darwin's. Both
+/// are 32 bits wide, so this is the two platforms spelling one argument differently rather than
+/// passing different things.
+#[cfg(target_os = "linux")]
+type GroupListId = libc::gid_t;
+#[cfg(not(target_os = "linux"))]
+type GroupListId = libc::c_int;
+
 /// The group list `initgroups(3)` would install for an account: its primary group plus every group
 /// that lists it as a member.
 ///
@@ -154,11 +166,23 @@ fn resolve_supplementary_groups(name: &CStr, gid: u32) -> anyhow::Result<Vec<lib
         let mut count = groups.len() as libc::c_int;
         // SAFETY: `name` is a live C string, and `count` describes `groups` exactly. On overflow
         // `getgrouplist` returns -1 and writes the required length into `count` without writing past
-        // the buffer it was given.
-        let found =
-            unsafe { libc::getgrouplist(name.as_ptr(), gid, groups.as_mut_ptr(), &mut count) };
+        // the buffer it was given. The cast is between the two spellings of a 32-bit group id — see
+        // [`GroupListId`] — so the buffer it writes into is the size it was told.
+        let found = unsafe {
+            libc::getgrouplist(
+                name.as_ptr(),
+                gid as GroupListId,
+                groups.as_mut_ptr().cast::<GroupListId>(),
+                &mut count,
+            )
+        };
         if found >= 0 {
-            groups.truncate(found as usize);
+            // Truncated to `count`, not to the return value: glibc returns the number of groups it
+            // found, Darwin's libc returns 0 for "they fit", and both write that number into
+            // `ngroups`. Reading the return value would hand the child an empty group list on one of
+            // the two — the quiet downgrade the bail below exists to refuse, arrived at by another
+            // route.
+            groups.truncate(count as usize);
             return Ok(groups);
         }
         if count as usize <= groups.len() {
@@ -713,6 +737,28 @@ impl CompiledStep {
     }
 }
 
+/// The answer every step below gives on a host whose kernel does not have the facility it needs.
+///
+/// The supervisor is a Linux program: systemd starts it, it joins cgroup scopes, and it builds a
+/// jail out of namespaces and bind mounts. None of that exists on Darwin, and the sandboxing that
+/// does — Seatbelt, in `tddy-sandbox-darwin` — is a different mechanism reached a different way. What
+/// the two platforms share is everything this file decides *before* the fork: the step ordering, the
+/// credentials it refuses, the environment it builds. Compiling there keeps those under test on a
+/// developer's machine.
+///
+/// So a step that cannot be performed says so and the spawn fails. It is not a reduced jail: a
+/// session the supervisor cannot confine is one it does not start.
+#[cfg(not(target_os = "linux"))]
+fn only_on_linux(facility: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "{facility} is a Linux facility, and this host is not Linux; the supervisor will not \
+             spawn a session it cannot confine"
+        ),
+    )
+}
+
 /// Ask the kernel to signal us when the supervisor dies, and check it has not died already.
 ///
 /// Called once per [`PreExecStep::SetParentDeathSignal`], which a plan contains once per operation
@@ -723,6 +769,7 @@ impl CompiledStep {
 ///
 /// Runs after `fork`, so it may only use async-signal-safe syscalls. `prctl` and `getppid` read and
 /// write nothing but this process's own state.
+#[cfg(target_os = "linux")]
 unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
     // A supervisor that is killed rather than asked to stop should not leave its daemon and
     // sessions behind: without this they would be reparented to init and run on unsupervised.
@@ -735,6 +782,15 @@ unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Resul
         libc::_exit(ORPHANED_EXIT_STATUS);
     }
     Ok(())
+}
+
+/// `PR_SET_PDEATHSIG` has no counterpart outside Linux — see [`only_on_linux`]. Refused rather than
+/// skipped: it is the first step of every plan precisely because a child that cannot be tied to its
+/// supervisor's lifetime is one that can outlive it.
+#[cfg(not(target_os = "linux"))]
+unsafe fn set_parent_death_signal(supervisor_pid: libc::pid_t) -> std::io::Result<()> {
+    let _ = supervisor_pid;
+    Err(only_on_linux("the parent-death signal"))
 }
 
 /// Become the leader of a new session, and so of a process group of our own.
@@ -753,6 +809,14 @@ unsafe fn lead_own_process_group() -> std::io::Result<()> {
     Ok(())
 }
 
+/// How many groups `setgroups(2)` is being handed: `size_t` in glibc's header, `c_int` in Darwin's.
+/// The count is the length of a group list resolved from the passwd database, so neither type can be
+/// narrowed by the cast.
+#[cfg(target_os = "linux")]
+type GroupCount = libc::size_t;
+#[cfg(not(target_os = "linux"))]
+type GroupCount = libc::c_int;
+
 /// `setgroups` → `setgid` → `setuid`. Root is surrendered here and never comes back.
 ///
 /// `setgroups(2)` rather than `initgroups(3)`: the list was enumerated before the fork precisely so
@@ -769,7 +833,7 @@ unsafe fn drop_privilege(
     gid: libc::gid_t,
     groups: &[libc::gid_t],
 ) -> std::io::Result<()> {
-    if libc::setgroups(groups.len(), groups.as_ptr()) != 0 {
+    if libc::setgroups(groups.len() as GroupCount, groups.as_ptr()) != 0 {
         return Err(std::io::Error::last_os_error());
     }
     if libc::setgid(gid) != 0 {
@@ -865,9 +929,21 @@ fn unresolvable_mount_source(source: &Path, error: &std::io::Error) -> std::io::
     )
 }
 
+/// `openat2(2)`'s resolution flags, named here rather than reached for at each call site because
+/// they are the one thing in this file the two platforms cannot both spell: off Linux there is no
+/// `openat2` to pass them to, and [`open_resolved`] refuses before it would read them.
+#[cfg(target_os = "linux")]
+pub(crate) const RESOLVE_NO_SYMLINKS: u64 = libc::RESOLVE_NO_SYMLINKS;
+#[cfg(not(target_os = "linux"))]
+pub(crate) const RESOLVE_NO_SYMLINKS: u64 = 0;
+#[cfg(target_os = "linux")]
+pub(crate) const RESOLVE_BENEATH: u64 = libc::RESOLVE_BENEATH;
+#[cfg(not(target_os = "linux"))]
+pub(crate) const RESOLVE_BENEATH: u64 = 0;
+
 /// Open an absolute path as a bare reference, refusing to traverse a single symlink on the way.
 fn open_without_following_symlinks(path: &CStr) -> std::io::Result<OwnedFd> {
-    open_resolved(libc::AT_FDCWD, path, libc::RESOLVE_NO_SYMLINKS)
+    open_resolved(libc::AT_FDCWD, path, RESOLVE_NO_SYMLINKS)
 }
 
 /// Open a directory to resolve other paths against.
@@ -876,6 +952,7 @@ fn open_without_following_symlinks(path: &CStr) -> std::io::Result<OwnedFd> {
 /// root-owned policy file, which is root describing its own filesystem — the same trust
 /// `policy::resolve_tool_path` places in an allowlisted tool path. What must not be followed is
 /// anything below it, and that is [`open_resolved`]'s job.
+#[cfg(target_os = "linux")]
 pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> {
     // SAFETY: `path` is a live C string; the call returns a descriptor nothing else owns.
     let fd = unsafe {
@@ -891,6 +968,15 @@ pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> 
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// `O_PATH` is Linux's, and the descriptor exists only to be [`open_resolved`]'s starting point,
+/// which off Linux there is no syscall to perform — see [`only_on_linux`]. Opening the directory
+/// some other way would hand back a reference the resolution below can do nothing with.
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> {
+    let _ = path;
+    Err(only_on_linux("an O_PATH directory reference"))
+}
+
 /// `openat2(2)` under the given `RESOLVE_*` flags, as an `O_PATH` reference.
 ///
 /// A raw `syscall` because `libc` carries `open_how` and `SYS_openat2` but no wrapper, and because a
@@ -902,6 +988,7 @@ pub(crate) fn open_directory_reference(path: &CStr) -> std::io::Result<OwnedFd> 
 /// read permission on the object, does not block on a fifo, and does not open a device.
 ///
 /// Safe to call after a `fork`: one syscall over a stack-allocated struct, no allocation and no lock.
+#[cfg(target_os = "linux")]
 pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io::Result<OwnedFd> {
     // SAFETY: `open_how` is plain data; zeroing initialises every field the kernel may read.
     let mut how: libc::open_how = unsafe { std::mem::zeroed() };
@@ -925,11 +1012,25 @@ pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io:
     Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
 }
 
+/// `openat2(2)` is Linux 5.6's and has no counterpart elsewhere — see [`only_on_linux`]. Every
+/// caller reads this the way it reads a kernel too old to have the syscall, which is the same answer
+/// for the same reason: the path-based check that would stand in for it *is* the symlink race the
+/// resolution exists to remove, so a source that cannot be shown to be contained is not granted.
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn open_resolved(dirfd: RawFd, path: &CStr, resolve: u64) -> std::io::Result<OwnedFd> {
+    let _ = (dirfd, path, resolve);
+    Err(only_on_linux("openat2(2) path resolution"))
+}
+
 /// The files a fresh user namespace is configured through, and the switch that has to be thrown
 /// between them.
+#[cfg(target_os = "linux")]
 const UID_MAP_PATH: &CStr = c"/proc/self/uid_map";
+#[cfg(target_os = "linux")]
 const SETGROUPS_PATH: &CStr = c"/proc/self/setgroups";
+#[cfg(target_os = "linux")]
 const GID_MAP_PATH: &CStr = c"/proc/self/gid_map";
+#[cfg(target_os = "linux")]
 const SETGROUPS_DENY: &[u8] = b"deny";
 
 /// Enter a user namespace owned by the account the child has already become.
@@ -954,6 +1055,7 @@ const SETGROUPS_DENY: &[u8] = b"deny";
 ///
 /// Runs after `fork`, so only async-signal-safe syscalls: `unshare`, `prctl` and small `/proc`
 /// writes. `uid_map` and `gid_map` must remain valid for the call.
+#[cfg(target_os = "linux")]
 unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Result<()> {
     if libc::unshare(libc::CLONE_NEWUSER) != 0 {
         return Err(std::io::Error::last_os_error());
@@ -967,6 +1069,14 @@ unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Resul
     Ok(())
 }
 
+/// User namespaces, and the `/proc/self` map files that configure them, are Linux's — see
+/// [`only_on_linux`].
+#[cfg(not(target_os = "linux"))]
+unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Result<()> {
+    let _ = (uid_map, gid_map);
+    Err(only_on_linux("a user namespace"))
+}
+
 /// Write a buffer to a file in one call, allocation-free.
 ///
 /// # Safety
@@ -974,6 +1084,9 @@ unsafe fn enter_user_namespace(uid_map: &[u8], gid_map: &[u8]) -> std::io::Resul
 /// Runs after `fork`. `path` and `bytes` must remain valid for the call; `open`, `write` and `close`
 /// are async-signal-safe, and `std::io::Error` for an errno holds the code inline rather than
 /// allocating.
+///
+/// Only [`enter_user_namespace`] writes these, so it follows that step onto Linux.
+#[cfg(target_os = "linux")]
 unsafe fn write_small_file(path: &CStr, bytes: &[u8]) -> std::io::Result<()> {
     let fd = libc::open(path.as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC);
     if fd < 0 {
@@ -1001,11 +1114,18 @@ unsafe fn write_small_file(path: &CStr, bytes: &[u8]) -> std::io::Result<()> {
 /// Runs after `fork`, and after [`enter_user_namespace`] — `CLONE_NEWNS` needs `CAP_SYS_ADMIN`, which
 /// the child has only inside the user namespace it just created. `unshare` changes nothing outside
 /// this process.
+#[cfg(target_os = "linux")]
 unsafe fn enter_mount_namespace() -> std::io::Result<()> {
     if libc::unshare(libc::CLONE_NEWNS) != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Mount namespaces are Linux's — see [`only_on_linux`].
+#[cfg(not(target_os = "linux"))]
+unsafe fn enter_mount_namespace() -> std::io::Result<()> {
+    Err(only_on_linux("a mount namespace"))
 }
 
 /// Take an empty network of our own.
@@ -1019,11 +1139,18 @@ unsafe fn enter_mount_namespace() -> std::io::Result<()> {
 /// Runs after `fork`, and after [`enter_user_namespace`] — `CLONE_NEWNET` needs `CAP_SYS_ADMIN`, which
 /// the child has only inside the user namespace it just created. `unshare` changes nothing outside
 /// this process.
+#[cfg(target_os = "linux")]
 unsafe fn enter_network_namespace() -> std::io::Result<()> {
     if libc::unshare(libc::CLONE_NEWNET) != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Network namespaces are Linux's — see [`only_on_linux`].
+#[cfg(not(target_os = "linux"))]
+unsafe fn enter_network_namespace() -> std::io::Result<()> {
+    Err(only_on_linux("a network namespace"))
 }
 
 /// Stop this mount namespace from propagating anything back to the host.
@@ -1035,6 +1162,7 @@ unsafe fn enter_network_namespace() -> std::io::Result<()> {
 ///
 /// Runs after `fork`, inside the mount namespace [`enter_mount_namespace`] created. The
 /// path is a literal C string.
+#[cfg(target_os = "linux")]
 unsafe fn make_root_mount_private() -> std::io::Result<()> {
     if libc::mount(
         std::ptr::null(),
@@ -1049,9 +1177,21 @@ unsafe fn make_root_mount_private() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Mount propagation is a property of a Linux mount namespace — see [`only_on_linux`].
+#[cfg(not(target_os = "linux"))]
+unsafe fn make_root_mount_private() -> std::io::Result<()> {
+    Err(only_on_linux("a private root mount"))
+}
+
 /// `/proc/self/fd/`, plus room for every digit of a descriptor and the nul.
+///
+/// Follows [`bind_mount`], its only caller, onto Linux — `/proc` is where this name resolves and a
+/// bind mount is what reads it.
+#[cfg(target_os = "linux")]
 const DESCRIPTOR_PATH_PREFIX: &[u8] = b"/proc/self/fd/";
+#[cfg(target_os = "linux")]
 const DESCRIPTOR_DIGITS: usize = 10;
+#[cfg(target_os = "linux")]
 const DESCRIPTOR_PATH_LEN: usize = DESCRIPTOR_PATH_PREFIX.len() + DESCRIPTOR_DIGITS + 1;
 
 /// Name a descriptor as a path, in a buffer the caller already owns.
@@ -1059,6 +1199,7 @@ const DESCRIPTOR_PATH_LEN: usize = DESCRIPTOR_PATH_PREFIX.len() + DESCRIPTOR_DIG
 /// `mount(2)` takes its source as a path, and this is the path of the descriptor itself. Formatted by
 /// hand rather than with `format!` because the only caller runs after `fork`, where there is no
 /// allocator — the bargain [`join_cgroup_scope`] and [`write_listen_pid`] make with the same problem.
+#[cfg(target_os = "linux")]
 fn write_descriptor_path(fd: RawFd, buffer: &mut [u8; DESCRIPTOR_PATH_LEN]) {
     buffer[..DESCRIPTOR_PATH_PREFIX.len()].copy_from_slice(DESCRIPTOR_PATH_PREFIX);
     let mut digits = [0u8; DESCRIPTOR_DIGITS];
@@ -1106,6 +1247,7 @@ fn write_descriptor_path(fd: RawFd, buffer: &mut [u8; DESCRIPTOR_PATH_LEN]) {
 /// strings must remain valid for the call. `openat2` allocates nothing and takes no lock, and the
 /// descriptor it returns is closed on the way out of this function — before the `exec`, which is the
 /// only thing that would otherwise close it.
+#[cfg(target_os = "linux")]
 unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::Result<()> {
     let source_fd = open_without_following_symlinks(source)?;
     let mut source_link = [0u8; DESCRIPTOR_PATH_LEN];
@@ -1137,6 +1279,15 @@ unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::R
     Ok(())
 }
 
+/// A bind mount is a Linux `mount(2)` flag — see [`only_on_linux`]. `compile_bind_mount` has already
+/// refused the same plan before the fork, because [`open_resolved`] cannot resolve the source there
+/// either; this is the second half of the same refusal.
+#[cfg(not(target_os = "linux"))]
+unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::Result<()> {
+    let _ = (source, target, readonly);
+    Err(only_on_linux("a bind mount"))
+}
+
 /// Bring `lo` up inside the jail's own network namespace, so a loopback-only session can still talk
 /// to itself.
 ///
@@ -1149,6 +1300,7 @@ unsafe fn bind_mount(source: &CStr, target: &CStr, readonly: bool) -> std::io::R
 /// Runs after `fork`, inside the network namespace [`enter_network_namespace`] created.
 /// `socket`, `ioctl` and `close` touch nothing outside this process, and the request struct is a
 /// zeroed local.
+#[cfg(target_os = "linux")]
 unsafe fn bring_loopback_up() -> std::io::Result<()> {
     /// `struct ifreq` as `SIOCGIFFLAGS`/`SIOCSIFFLAGS` read it: a name, then flags in a union whose
     /// remaining bytes the kernel ignores.
@@ -1183,6 +1335,15 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
     };
     libc::close(socket);
     result
+}
+
+/// The interface this configures exists only inside the network namespace
+/// [`enter_network_namespace`] would have created, and off Linux there is none — see
+/// [`only_on_linux`]. The step is also reached only from a plan that took that namespace, so this is
+/// unreachable in practice; it refuses rather than succeeds so that stays true if it ever is not.
+#[cfg(not(target_os = "linux"))]
+unsafe fn bring_loopback_up() -> std::io::Result<()> {
+    Err(only_on_linux("a network namespace's loopback"))
 }
 
 /// Put a listener the supervisor created where an activated service looks for it.
@@ -1865,6 +2026,10 @@ mod tests {
             .unwrap_or_else(|error| panic!("compile a jail step: {error}"))
     }
 
+    /// Compiling a bind mount resolves its source with `openat2(2)`, so this asserts what a Linux
+    /// kernel answers — see [`open_resolved`]. Everywhere else the step is refused before it is
+    /// compiled, which is the platform's answer and not this test's subject.
+    #[cfg(target_os = "linux")]
     #[test]
     fn compiles_every_step_a_jailed_plan_asks_for() {
         // Given a jail with a bind mount whose source is really on disk
@@ -1932,6 +2097,9 @@ mod tests {
         assert_eq!(gid_map.as_ref(), b"0 4002 1\n");
     }
 
+    /// The name it builds is a `/proc/self/fd` path, which is the thing only a Linux bind mount
+    /// reads — see [`write_descriptor_path`].
+    #[cfg(target_os = "linux")]
     #[test]
     fn names_the_descriptor_it_binds_without_reaching_for_the_allocator() {
         // Given the buffer the child brings to the mount
@@ -1948,6 +2116,8 @@ mod tests {
         );
     }
 
+    /// Compiles a real source with `openat2(2)` — Linux, for the reason above.
+    #[cfg(target_os = "linux")]
     #[test]
     fn compiles_a_readonly_bind_mount_as_one_the_child_remounts_readonly() {
         // Given
@@ -1972,6 +2142,8 @@ mod tests {
         assert!(readonly, "a readonly mount compiled as writable");
     }
 
+    /// Asserts the errno `RESOLVE_NO_SYMLINKS` produces, so it needs the kernel that has it.
+    #[cfg(target_os = "linux")]
     #[test]
     fn refuses_a_bind_mount_source_that_is_reached_through_a_symlink() {
         // Given a session user's own escape, planted under a directory policy permits
@@ -2003,6 +2175,8 @@ mod tests {
         );
     }
 
+    /// Asserts the errno the kernel's own resolution returns for an absent source.
+    #[cfg(target_os = "linux")]
     #[test]
     fn refuses_a_bind_mount_source_that_does_not_exist_rather_than_skipping_it() {
         // Given

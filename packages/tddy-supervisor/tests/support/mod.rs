@@ -8,6 +8,13 @@
 //! Privilege drop is a no-op in these tests because the config declares the user that is
 //! already running them — everything else (fork, exec, reap, backoff, socket bind, peer
 //! credential authorization, RPC) is real.
+//!
+//! ⚠️ Which is why every test that makes the supervisor *spawn* something carries
+//! `#[cfg(target_os = "linux")]`. The first step of every pre-exec plan is `PR_SET_PDEATHSIG`, and
+//! off Linux `spawn_broker` refuses it rather than skipping it — a child it cannot tie to the
+//! supervisor's lifetime is one it will not start — so the spawn fails by design. The gates mark
+//! the tests whose subject is a live child; everything the supervisor decides without forking
+//! (peer authorization, policy denials, scope bookkeeping, config) is asserted on every host.
 
 #![allow(dead_code)]
 
@@ -272,7 +279,7 @@ impl SupervisorFixture {
             cgroup_base,
             config_yaml,
         };
-        running.await_socket().await;
+        running.await_ready().await;
         running
     }
 
@@ -458,12 +465,21 @@ impl RunningSupervisor {
         panic!("supervisor did not exit within {SETTLE_TIMEOUT:?} of SIGTERM");
     }
 
-    async fn await_socket(&mut self) {
+    /// Block until the supervisor actually answers on its socket.
+    ///
+    /// Waiting for the socket *file* is not the same as waiting for a live supervisor: dropping a
+    /// `UnixListener` does not unlink its inode, so a supervisor that dies at any point after it
+    /// binds — while starting its declared services, say — leaves the path behind. A fixture that
+    /// stops watching the child the moment that file appears therefore calls the start a success,
+    /// and the death resurfaces later as an unexplained `Connection refused` from whichever RPC
+    /// the test happens to make first. So poll both the connect and the child's exit status for
+    /// the whole window, and report an exit as an exit.
+    async fn await_ready(&mut self) {
         let deadline = Instant::now() + READY_TIMEOUT;
-        while Instant::now() < deadline {
-            if self.socket_path.exists() {
-                return;
-            }
+        // Assigned by the failed connect below. The deadline check that reports it is only
+        // reachable after an attempt has been made, so there is no "never attempted" state to name.
+        let mut last_error;
+        loop {
             if let Some(status) = self
                 .process
                 .as_mut()
@@ -471,21 +487,32 @@ impl RunningSupervisor {
                 .try_wait()
                 .expect("poll supervisor")
             {
+                // Safe to read stderr to EOF only here: the child is confirmed dead, so its end
+                // of the pipe is closed and the read cannot block.
                 panic!(
-                    "supervisor exited with {status} before creating its socket\n\
+                    "supervisor exited with {status} before answering on its socket\n\
                      --- stderr ---\n{}\n--- config ---\n{}",
                     self.drain_stderr(),
                     self.config_yaml
                 );
             }
+            match SupervisorClient::connect(&self.socket_path).await {
+                Ok(_) => return,
+                Err(e) => last_error = e.to_string(),
+            }
+            if Instant::now() >= deadline {
+                panic!(
+                    "supervisor never answered on {} within {READY_TIMEOUT:?}; last connect \
+                     error: {last_error}",
+                    self.socket_path.display()
+                );
+            }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
-        panic!(
-            "supervisor never created its socket at {} within {READY_TIMEOUT:?}",
-            self.socket_path.display()
-        );
     }
 
+    /// Reads the supervisor's stderr to EOF. **Only call this once the process is confirmed
+    /// exited** — against a live child the read blocks until it closes the pipe.
     fn drain_stderr(&mut self) -> String {
         use std::io::Read;
         let mut buffer = String::new();

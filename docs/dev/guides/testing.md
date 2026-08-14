@@ -270,6 +270,56 @@ cargo test -- --ignored
 cargo test && cargo test -- --ignored
 ```
 
+## Determinism under load
+
+A suite that passes on an idle laptop and fails on a busy one is not reporting whether the code
+works. Two back-to-back `cargo test --workspace` runs once produced 12 and 15 failures with only 6 in
+common; every one of them was a fixture defect, not a bug.
+
+**`--test-threads=1` does not make a run serial.** It is *per test binary* — cargo still runs many
+binaries at once, so a dozen tests can fork shell stubs simultaneously no matter what `./test` and
+`./verify` pass.
+
+Rules that follow from that:
+
+- **Never sleep, and never read a file the subject is still writing.** Poll with
+  `tddy_testing_commons::wait::{eventually, eventually_awaiting, eventually_blocking}` (25 ms
+  cadence). The probe returns `Result<T, String>`, so the panic names the condition, the ceiling, the
+  poll count and the **last observed state** — the difference between a flake and a diagnosis.
+- **A timeout is a safety net, not a prediction.** Size it for the worst machine that will ever run
+  it and let the polling decide when to stop. A budget tuned to an idle host reports load as breakage.
+- **Assert on what happened, not on how long it took.** "Warm-up failed fast" is one probe received
+  (`wiremock`'s `received_requests()`), not sub-second elapsed time — under load a single correct
+  round trip can outlast any short budget.
+- **Stubs must write records atomically.** `tddy_testing_commons::stub_scripts::a_stub_agent_script`
+  writes to `"$f.tmp.$$"` then `mv -f`, and appends a pre-built line through a single `printf`, so a
+  reader can never observe a half-written argv record. (Measured under injected preemption: 526,770
+  torn observations for a naive stub, 0 for this one.) A longer timeout does not fix a torn read.
+- **Wait for the thing, not for a proxy for the thing.** A Unix socket inode outlives the process that
+  bound it, so "the socket file exists" is not "the server is up"; poll a real `connect` *and* the
+  child's exit status. A spawned fixture with no readiness signal silently charges process start-up,
+  dynamic linking and tokio boot to whatever budget the test thought it was measuring — give it a
+  handshake, then split the budget (start-up vs. the call).
+- **Never bind `:0` to find a "free" port for a later test.** The kernel hands ephemeral ports back
+  out immediately. Probe *outside* the ephemeral range (49152+ on macOS, 32768+ on Linux).
+- **Nothing outside the repo may need to be running.** Two tests required a local inference server and
+  burned 242 s of an 863 s suite waiting out a readiness timeout before failing. They now point an
+  agent def at `tddy_testing_commons::stub_http::a_stub_http_endpoint_answering_ok` — a loopback
+  listener that drains the request headers **and** the declared `Content-Length` body before replying,
+  because a stub that answers while the client is still writing gets that write reset.
+- **Paths: compare like with like.** macOS `/tmp` is a symlink to `/private/tmp`; production
+  canonicalizes, so a raw `TempDir` path is a different string for the same directory.
+
+**When a test needs different behaviour from production, production grows a config knob whose default
+*is* today's value, and the test supplies its own through that same knob** (`defaults ← daemon.yaml ←
+`TDDY_*`). A test-only branch in production code is forbidden — see CLAUDE.md. The specialized-agent
+warm-up budget and the spawn-startup grace period are both this pattern.
+
+**Measure flakiness, don't assume it.** Run the full suite 3× back to back with the machine
+deliberately loaded and compare the failure *sets*. `cargo test` fails fast by default and abandons
+the remaining binaries after the first failing one, so the measurement needs `--no-fail-fast` or it
+stops at the first flake and reports nothing.
+
 ## Rust workspace: `./verify` vs plain `cargo test`
 
 From the repository root, prefer **`./dev ./verify`** (or **`./test`**, which follows the same pattern) when you need results that match CI and agent workflows: the dev shell provides `cargo` on `PATH`, and **`./verify`** builds prerequisite binaries such as **`tddy-acp-stub`** before running the full workspace test suite (output is also written to **`.verify-result.txt`**). Running **`cargo test`** or **`cargo test -q`** **without** that prerequisite build can fail integration tests that expect the stub. For a quick compile-only check, use **`./dev cargo check`**.

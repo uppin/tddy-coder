@@ -7,7 +7,7 @@
 //! drive it against a real `wiremock` server (deterministic, millisecond-fast via injected
 //! `WarmupOptions`). One behavior per test, exact assertions, no branching.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::warmup::{warm_up_agents, AgentWarmupError, WarmupOptions};
@@ -78,6 +78,20 @@ async fn mount_chat_completions(server: &MockServer, template: ResponseTemplate)
         .respond_with(template)
         .mount(server)
         .await;
+}
+
+/// How many probes the endpoint actually received.
+///
+/// Counting them is what distinguishes "gave up after one look" from "retried until the budget
+/// elapsed". Wall-clock elapsed time cannot: on a loaded machine a single correct probe — server
+/// start-up, connect, request, response — can outlast a sub-second budget, so a timing assertion
+/// reports a busy machine as a broken fail-fast rule.
+async fn probes_received(server: &MockServer) -> usize {
+    server
+        .received_requests()
+        .await
+        .expect("wiremock records received requests")
+        .len()
 }
 
 // ─── AC1 ─────────────────────────────────────────────────────────────────────
@@ -245,26 +259,24 @@ async fn warms_up_nothing_for_an_empty_agent_set() {
 
 // ─── AC7 ─────────────────────────────────────────────────────────────────────
 
-/// A definitive `404` (model not found) fails fast — well within the budget — instead of retrying to
-/// the deadline.
+/// A definitive `404` (model not found) fails fast — one probe, then give up — instead of retrying
+/// to the deadline.
 #[tokio::test]
 async fn fails_fast_when_the_model_is_not_found() {
     // Given
     let server = MockServer::start().await;
     mount_chat_completions(&server, ResponseTemplate::new(404)).await;
     let agent = a_warmup_agent("fastcontext", &server.uri());
-    let opts = fast_warmup_options();
 
     // When
-    let started = Instant::now();
-    let result = warm_up_agents(std::slice::from_ref(&agent), &opts).await;
-    let elapsed = started.elapsed();
+    let result = warm_up_agents(std::slice::from_ref(&agent), &fast_warmup_options()).await;
 
     // Then
     assert_warmup_failed(result).assert_for_agent("fastcontext");
-    assert!(
-        elapsed < opts.timeout,
-        "a 404 must fail fast (elapsed {elapsed:?}) rather than exhaust the {:?} budget",
-        opts.timeout
+    assert_eq!(
+        probes_received(&server).await,
+        1,
+        "a 404 is definitive, so warm-up must probe once and stop rather than retry the endpoint \
+         every 20ms until the budget elapses"
     );
 }
