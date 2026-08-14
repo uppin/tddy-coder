@@ -74,6 +74,17 @@ function badgeHostLabel(session: SessionEntry, info: OwningHostInfo): string | n
   return info.hostLabelForInstance(owner);
 }
 
+/**
+ * Resolve the codebase-host badge label for a row. `codebaseDaemonInstanceId` is set only on a split
+ * session (docs/ft/daemon/remote-managed-worktree.md), so it is badged regardless of which host is
+ * selected: unlike the agent's host it cannot be inferred from the row's position in the list.
+ */
+function badgeCodebaseHostLabel(session: SessionEntry, info: OwningHostInfo): string | null {
+  const codebaseHost = session.codebaseDaemonInstanceId.trim();
+  if (!codebaseHost) return null;
+  return info.hostLabelForInstance(codebaseHost);
+}
+
 function SessionStackGroup({
   group,
   selectedSessionId,
@@ -100,6 +111,7 @@ function SessionStackGroup({
         isSelected={group.parent.sessionId === selectedSessionId}
         onClick={onSelectSession}
         hostLabel={badgeHostLabel(group.parent, owningHost)}
+        codebaseHostLabel={badgeCodebaseHostLabel(group.parent, owningHost)}
         sessionMetadata={sessionMetadataBySessionId.get(group.parent.sessionId)}
         selected={selectedForDelete?.has(group.parent.sessionId)}
         onToggleSelect={onToggleSelect}
@@ -123,6 +135,7 @@ function SessionStackGroup({
             onClick={onSelectSession}
             depth={1}
             hostLabel={badgeHostLabel(child, owningHost)}
+            codebaseHostLabel={badgeCodebaseHostLabel(child, owningHost)}
             sessionMetadata={sessionMetadataBySessionId.get(child.sessionId)}
             selected={selectedForDelete?.has(child.sessionId)}
             onToggleSelect={onToggleSelect}
@@ -172,6 +185,7 @@ function SessionPartitionBody({
           isSelected={session.sessionId === selectedSessionId}
           onClick={onSelectSession}
           hostLabel={badgeHostLabel(session, owningHost)}
+          codebaseHostLabel={badgeCodebaseHostLabel(session, owningHost)}
           sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
           selected={selectedForDelete?.has(session.sessionId)}
           onToggleSelect={onToggleSelect}

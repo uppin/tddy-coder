@@ -52,8 +52,8 @@ impl RpcService for EnvelopeEchoingExecuteTool {
 
         assert_eq!(service, "connection.ConnectionService");
         assert_eq!(method, "ExecuteTool");
-        let request =
-            ExecuteToolRequest::decode(message.payload.as_ref()).expect("decode ExecuteToolRequest");
+        let request = ExecuteToolRequest::decode(message.payload.as_ref())
+            .expect("decode ExecuteToolRequest");
         let echoed = serde_json::json!({
             "session_id": request.session_id,
             "session_token": request.session_token,
@@ -241,18 +241,17 @@ fn the_remote_await_block_budget_stays_under_the_forwarded_stream_deadline() {
     // `tddy_daemon::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`. tddy-tools does not
     // depend on tddy-daemon, so the constant is duplicated here rather than imported.
     const FORWARD_STREAM_IDLE_TIMEOUT_MS: u64 = 30_000;
+    /// The round trip itself has to fit between the last frame and the reaper, so "under the
+    /// deadline" is not enough — the budget needs slack, not just inequality.
+    const REQUIRED_HEADROOM_MS: u64 = 5_000;
 
-    // Then — with real headroom, not merely "less than": a block that lands exactly on the deadline
-    // races the reaper
-    assert!(
-        MAX_REMOTE_AWAIT_BLOCK_MS < FORWARD_STREAM_IDLE_TIMEOUT_MS,
-        "the Await block budget ({MAX_REMOTE_AWAIT_BLOCK_MS}ms) must stay under the forwarded-stream \
-         idle deadline ({FORWARD_STREAM_IDLE_TIMEOUT_MS}ms)"
-    );
-    let headroom = FORWARD_STREAM_IDLE_TIMEOUT_MS - MAX_REMOTE_AWAIT_BLOCK_MS;
-    assert!(
-        headroom >= 5_000,
-        "at least 5s must remain for the round trip itself; only {headroom}ms spare"
+    // Then — both consts are compile-time known, so this is checked when the test is built rather
+    // than when it runs: a budget raised past the transport's reach should fail to compile, not
+    // wait for someone to run this file.
+    const _: () = assert!(
+        MAX_REMOTE_AWAIT_BLOCK_MS + REQUIRED_HEADROOM_MS <= FORWARD_STREAM_IDLE_TIMEOUT_MS,
+        "the Await block budget must stay under the forwarded-stream idle deadline, with room for \
+         the round trip"
     );
 }
 

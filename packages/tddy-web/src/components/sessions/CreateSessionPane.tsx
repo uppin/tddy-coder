@@ -186,6 +186,15 @@ export function CreateSessionPane({
   const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
   const [managedCodebase, setManagedCodebase] = useState(false);
   const [semanticIndex, setSemanticIndex] = useState(false);
+  // Which daemon's filesystem holds the worktree. Empty means "same as host" — the co-located
+  // placement every session had before docs/ft/daemon/remote-managed-worktree.md.
+  const [codebaseDaemonInstanceId, setCodebaseDaemonInstanceId] = useState("");
+  /**
+   * The session's worktree lives on a daemon other than the one running its agent. Only meaningful
+   * alongside managed codebase, which is what removes the agent's native filesystem tools — see
+   * docs/ft/daemon/remote-managed-worktree.md.
+   */
+  const isSplitCodebase = managedCodebase && codebaseDaemonInstanceId !== "";
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
   // a stack can be seeded from — and one fetch feeds both.
@@ -467,13 +476,20 @@ export function CreateSessionPane({
         managedCodebase,
         specializedAgents: managedCodebase ? selectedSubagents : [],
         semanticIndex: managedCodebase ? semanticIndex : false,
+        // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
+        // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
+        // state, so a host picked while the form was claude-cli must not survive the switch here.
+        codebaseDaemonInstanceId: "",
       };
     }
     return {
       ...commonParams,
       toolPath: "",
       agent: "",
-      recipe: managedCodebase ? recipe : "",
+      // A split session has no repository on this host for a recipe's tooling to run against, and
+      // the daemon refuses the pair outright. The form defaults `recipe` to a non-empty value, so
+      // without this every split session would be created as a request that cannot succeed.
+      recipe: managedCodebase && !isSplitCodebase ? recipe : "",
       stackParent,
       sessionType: "claude-cli",
       model,
@@ -486,6 +502,10 @@ export function CreateSessionPane({
       // so a selection made before unchecking the toggle must not leak into the request.
       specializedAgents: managedCodebase ? selectedSubagents : [],
       semanticIndex: managedCodebase ? semanticIndex : false,
+      // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
+      // codebase installs, so a placement chosen before the toggle was switched off would name a
+      // combination the daemon refuses.
+      codebaseDaemonInstanceId: managedCodebase ? codebaseDaemonInstanceId : "",
     };
   };
 
@@ -950,24 +970,56 @@ export function CreateSessionPane({
             </label>
             {managedCodebase && (
               <div className="mt-2 space-y-3 pl-4">
-                <div>
-                  <label className={labelClass} htmlFor="create-session-recipe">
-                    Recipe
-                  </label>
-                  <select
-                    id="create-session-recipe"
-                    data-testid="create-session-recipe-select"
-                    className={inputClass}
-                    value={recipe}
-                    onChange={(e) => setRecipe(e.target.value)}
-                  >
-                    {WORKFLOW_RECIPES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* A recipe's tooling runs against a repository on the daemon hosting the agent, and
+                    a split session has none — the daemon refuses the combination. Withdrawing the
+                    control is honest about that; leaving it visible would offer a choice whose only
+                    effect is to turn a valid placement into a refusal. */}
+                {!isSplitCodebase && (
+                  <div>
+                    <label className={labelClass} htmlFor="create-session-recipe">
+                      Recipe
+                    </label>
+                    <select
+                      id="create-session-recipe"
+                      data-testid="create-session-recipe-select"
+                      className={inputClass}
+                      value={recipe}
+                      onChange={(e) => setRecipe(e.target.value)}
+                    >
+                      {WORKFLOW_RECIPES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {/* Codebase host — which daemon's filesystem holds the worktree. Offered only in the
+                    claude-cli copy of this block: only claude-cli can be *prevented* from touching a
+                    local filesystem (--allowedTools/--disallowedTools), so it is the only session
+                    type the daemon accepts a split placement for.
+                    See docs/ft/daemon/remote-managed-worktree.md. */}
+                {daemons.length > 0 && (
+                  <div>
+                    <label className={labelClass} htmlFor="create-session-codebase-host">
+                      Codebase host
+                    </label>
+                    <select
+                      id="create-session-codebase-host"
+                      data-testid="create-session-codebase-host-select"
+                      className={inputClass}
+                      value={codebaseDaemonInstanceId}
+                      onChange={(e) => setCodebaseDaemonInstanceId(e.target.value)}
+                    >
+                      <option value="">Same as host</option>
+                      {daemons.map((d) => (
+                        <option key={d.instanceId} value={d.instanceId}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div
                   data-testid="create-session-managed-codebase-section"
                   className="space-y-1"

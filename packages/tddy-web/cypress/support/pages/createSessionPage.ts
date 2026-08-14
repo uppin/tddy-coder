@@ -127,6 +127,15 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionRecipeSelect).select(recipe);
   },
 
+  /** The workflow-recipe `<select>` — for asserting it is offered at all. */
+  recipeSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionRecipeSelect, { timeout: 5000, ...options }),
+
+  /** The recipe control is not offered — a recipe needs a repository the session does not have. */
+  expectNoRecipeSelector() {
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
+  },
+
   /** Switch the form to a Claude CLI session. */
   switchToClaudeCliSession() {
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();

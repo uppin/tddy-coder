@@ -334,7 +334,6 @@ async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
     service
         .list_sessions(Request::new(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
-            ..Default::default()
         }))
         .await
         .expect("ListSessions")
@@ -439,7 +438,7 @@ async fn a_split_session_addresses_tools_at_the_codebase_session_not_its_own() {
             session_token: TEST_TOKEN.to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
-            args_json: serde_json::json!({ "path": "split.txt", "content": "from host a" })
+            args_json: serde_json::json!({ "path": "split.txt", "contents": "from host a" })
                 .to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
         }))
@@ -484,7 +483,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
             session_token: TEST_TOKEN.to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
-            args_json: serde_json::json!({ "path": "round-trip.txt", "content": "hello b" })
+            args_json: serde_json::json!({ "path": "round-trip.txt", "contents": "hello b" })
                 .to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
         }))
@@ -537,7 +536,6 @@ async fn deleting_a_split_session_deletes_the_paired_workspace_session_and_its_w
         .delete_session(Request::new(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: started.session_id.clone(),
-            ..Default::default()
         }))
         .await
         .expect("deleting a split session must succeed");

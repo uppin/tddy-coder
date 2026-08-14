@@ -508,6 +508,8 @@ state:
             last_data_received_at: String::new(),
             context_docs: Vec::new(),
             branch: String::new(),
+            codebase_daemon_instance_id: String::new(),
+            codebase_session_id: String::new(),
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -600,6 +602,8 @@ state:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -658,6 +662,8 @@ state:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -701,6 +707,8 @@ state:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -744,6 +752,8 @@ state:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -807,6 +817,8 @@ sessions:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -839,6 +851,8 @@ sessions:
             last_data_received_at: String::new(),
             context_docs: Vec::new(),
             branch: String::new(),
+            codebase_daemon_instance_id: String::new(),
+            codebase_session_id: String::new(),
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(
@@ -876,6 +890,8 @@ sessions:
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

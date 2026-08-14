@@ -117,7 +117,6 @@ async fn deleting_a_workspace_session_removes_its_git_worktree() {
         .delete_session(Request::new(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: started.session_id.clone(),
-            ..Default::default()
         }))
         .await
         .expect("deleting a workspace session must succeed");
@@ -156,7 +155,6 @@ async fn deleting_a_workspace_session_deregisters_the_worktree_from_git() {
         .delete_session(Request::new(DeleteSessionRequest {
             session_token: TEST_TOKEN.to_string(),
             session_id: started.session_id.clone(),
-            ..Default::default()
         }))
         .await
         .expect("deleting a workspace session must succeed");

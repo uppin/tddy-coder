@@ -168,18 +168,17 @@ async fn drain_result(
 
 #[test]
 fn the_exec_tool_frame_budget_leaves_headroom_under_the_livekit_chunk_limit() {
-    // Then — a frame plus its RPC envelope must fit in one chunk, or the streaming variant
-    // reintroduces exactly the silent wedge it exists to avoid
-    assert!(
-        EXEC_TOOL_FRAME_BYTES < MAX_CHUNK_FRAME_BYTES,
-        "the exec-tool frame budget ({EXEC_TOOL_FRAME_BYTES}) must be under the transport's \
-         per-chunk limit ({MAX_CHUNK_FRAME_BYTES})"
-    );
-    let envelope_headroom = MAX_CHUNK_FRAME_BYTES - EXEC_TOOL_FRAME_BYTES;
-    assert!(
-        envelope_headroom >= 4_096,
-        "at least 4 KiB must remain for the RPC envelope and protobuf framing; only \
-         {envelope_headroom} bytes spare"
+    /// The RPC envelope and protobuf framing ride along with every frame, so "under the limit" is
+    /// not enough on its own — a frame sized right up to the boundary still gets chunk-framed once
+    /// its envelope is added, which is the silent wedge this RPC exists to avoid.
+    const REQUIRED_ENVELOPE_HEADROOM: usize = 4_096;
+
+    // Then — both operands are compile-time known, so a budget raised past what the transport can
+    // carry fails the build rather than waiting for someone to run this file
+    const _: () = assert!(
+        EXEC_TOOL_FRAME_BYTES + REQUIRED_ENVELOPE_HEADROOM <= MAX_CHUNK_FRAME_BYTES,
+        "the exec-tool frame budget must leave room for the RPC envelope under the transport's \
+         per-chunk limit"
     );
 }
 

@@ -79,8 +79,9 @@ use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
-    AddProjectToHostRequest, AddProjectToHostResponse, DeleteStagedAttachmentRequest,
-    DeleteStagedAttachmentResponse, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
+    AddProjectToHostRequest, AddProjectToHostResponse, DeleteSessionRequest, DeleteSessionResponse,
+    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, ExecuteToolChunk,
+    ExecuteToolRequest, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
     ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
     ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
@@ -594,8 +595,13 @@ pub fn spawn_common_room_discovery_task(
     });
 }
 
-/// Validates `livekit` + `common_room` URL/key/secret strings for discovery.
-fn livekit_common_room_connect_strings(
+/// Validates `livekit` + `common_room` URL/key/secret strings for discovery, returning
+/// `(room_name, url, api_key, api_secret)`.
+///
+/// Also the source of truth for minting a **scoped** join token for a process this daemon spawns
+/// into the same room (a split session's agent), so the room it is granted is exactly the room this
+/// daemon's peer routing rides.
+pub(crate) fn livekit_common_room_connect_strings(
     config: &DaemonConfig,
 ) -> anyhow::Result<(String, String, String, String)> {
     let livekit = config
@@ -1273,6 +1279,57 @@ pub async fn forward_stream_start_session_via_livekit(
         |bytes| {
             StartSessionEvent::decode(bytes.as_slice()).map_err(|e| {
                 tddy_rpc::Status::internal(format!("decode StartSessionEvent from peer: {e}"))
+            })
+        },
+    )
+    .await
+}
+
+/// Forward **DeleteSession** to another daemon in the common room via LiveKit data-channel RPC.
+///
+/// `DeleteSessionRequest` carries no `daemon_instance_id`, so the peer is addressed explicitly. Used
+/// to delete the paired `workspace` session that holds a split session's worktree — including the
+/// teardown of a split start that failed after the peer had already created it.
+pub async fn forward_delete_session_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &DeleteSessionRequest,
+) -> Result<DeleteSessionResponse, tddy_rpc::Status> {
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "DeleteSession",
+        request.encode_to_vec(),
+    )
+    .await?;
+    DeleteSessionResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode DeleteSessionResponse: {e}")))
+}
+
+/// Forward **StreamExecuteTool** to another daemon in the common room, yielding the peer's result
+/// frames.
+///
+/// Thin decode wrapper around [`forward_server_stream_to_peer`]: a frame that fails to decode — or a
+/// stream that stops without its `last` frame — terminates the relay with a status, so a caller
+/// reassembling a tool result never mistakes a truncated one for the whole answer.
+pub async fn forward_stream_execute_tool_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &ExecuteToolRequest,
+) -> Result<
+    tokio::sync::mpsc::UnboundedReceiver<Result<ExecuteToolChunk, tddy_rpc::Status>>,
+    tddy_rpc::Status,
+> {
+    forward_server_stream_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "StreamExecuteTool",
+        request.encode_to_vec(),
+        |bytes| {
+            ExecuteToolChunk::decode(bytes.as_slice()).map_err(|e| {
+                tddy_rpc::Status::internal(format!("decode ExecuteToolChunk from peer: {e}"))
             })
         },
     )

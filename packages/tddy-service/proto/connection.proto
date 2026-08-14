@@ -71,6 +71,12 @@ service ConnectionService {
   rpc SetProjectDefaultBranch(SetProjectDefaultBranchRequest) returns (SetProjectDefaultBranchResponse);
   // Remote-codebase mode: execute a tool in a session worktree, or list available tools.
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+  // Streaming twin of ExecuteTool, for a result past the transport's message-size budget. A `Read`
+  // of a large file or a broad `Grep` crosses it on day one, and over LiveKit an oversized response
+  // is chunk-framed with best-effort reassembly — one lost frame wedges the call with no error. The
+  // frames here are bounded below that budget instead. Used by the split-placement tool path
+  // (docs/ft/daemon/remote-managed-worktree.md); the unary call still serves stdio and HTTP.
+  rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
   rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
   rpc ListSessionToolCalls(ListSessionToolCallsRequest) returns (ListSessionToolCallsResponse);
   // Per-worktree hooks (claude-cli sessions only) report granular activity status.
@@ -321,6 +327,14 @@ message SessionEntry {
   // Lets the PR-Stack view resolve the in-progress child session for a planned node by branch
   // (docs/ft/coder/pr-stack-live-status.md).
   string branch = 28;
+  // Daemon instance holding this session's worktree, when it is not the daemon running the agent.
+  // Empty for co-located sessions. Read from .session.yaml rather than stamped at read time like
+  // `daemon_instance_id`: a split session has two hosts, and each would claim its own half. Lets
+  // the web render "agent on A / codebase on B" (docs/ft/daemon/remote-managed-worktree.md).
+  string codebase_daemon_instance_id = 29;
+  // The paired `workspace` session on that daemon whose worktree this session works in.
+  // Empty for co-located sessions.
+  string codebase_session_id = 30;
 }
 
 message ProjectEntry {
@@ -467,6 +481,15 @@ message StartSessionRequest {
   // node. Refused unless `recipe` resolves to "pr-stack". Empty leaves the stack unseeded, which is
   // the pre-existing behaviour (the agent plans it).
   string pr_stack_base_session_id = 31;
+  // Daemon instance whose filesystem holds this session's git worktree. Empty or matching
+  // `daemon_instance_id` = co-located (the pre-existing behaviour). When it names a different
+  // eligible daemon, that daemon creates a `workspace` session holding the worktree and the agent
+  // reaches it only via mcp__tddy-tools__* over LiveKit.
+  // Requires managed_codebase = true and session_type = "claude-cli" — an agent that still has
+  // native filesystem tools has nothing to proxy through, and cursor-cli cannot be prevented from
+  // using them. A request breaking either rule is refused, not silently co-located. See
+  // docs/ft/daemon/remote-managed-worktree.md.
+  string codebase_daemon_instance_id = 32;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -946,6 +969,22 @@ message ExecuteToolResponse {
   string error_message  = 3;
   string job_id         = 4;
   bool   job_running    = 5;
+}
+
+// One frame of a StreamExecuteTool response. The result is the concatenation of every frame's
+// `result_chunk`, in arrival order, decoded as the UTF-8 of the unary call's `result_json`.
+message ExecuteToolChunk {
+  // Next slice of the result. An empty result still yields exactly one frame, so a consumer never
+  // has to distinguish "empty result" from "nothing arrived".
+  bytes  result_chunk   = 1;
+  // Outcome of the call, carried on the final frame only — a tool error is a result, not an RPC
+  // failure, exactly as in unary ExecuteTool. Only routing failures terminate the stream.
+  bool   is_error       = 2;
+  string error_message  = 3;
+  string job_id         = 4;
+  bool   job_running    = 5;
+  // Final-frame marker. A stream that ends without it was truncated, not completed.
+  bool   last           = 6;
 }
 
 message ListExecToolsRequest {

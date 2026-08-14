@@ -13,6 +13,20 @@ use tddy_service::proto::connection::StartSessionResponse;
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;
 
+/// The branch a workspace session's worktree is cut on, as asked for by the request that created it.
+///
+/// A workspace session is also the codebase half of a split session
+/// (docs/ft/daemon/remote-managed-worktree.md), where the caller chose a branch in the new-session
+/// form and expects the agent to find it — so the intent travels with the forwarded request rather
+/// than being reinvented on the codebase host.
+#[derive(Debug, Default, Clone)]
+pub struct WorkspaceBranchIntent<'a> {
+    pub branch_worktree_intent: &'a str,
+    pub new_branch_name: &'a str,
+    pub selected_integration_base_ref: &'a str,
+    pub selected_branch_to_work_on: &'a str,
+}
+
 /// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`,
 /// and return a `StartSessionResponse` with empty LiveKit fields.
 #[allow(clippy::too_many_arguments)]
@@ -21,6 +35,7 @@ pub async fn start_workspace_session(
     session_id: &str,
     sessions_base: PathBuf,
     project_id: &str,
+    branch: &WorkspaceBranchIntent<'_>,
     tddy_data_dir: &Path,
     request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
@@ -52,14 +67,7 @@ pub async fn start_workspace_session(
 
     // Write a minimal changeset so `setup_worktree_for_session_with_optional_chain_base` can read it.
     let cs = tddy_core::Changeset {
-        workflow: Some(tddy_core::ChangesetWorkflow {
-            branch_worktree_intent: Some(tddy_core::BranchWorktreeIntent::NewBranchFromBase),
-            new_branch_name: Some(format!(
-                "workspace/{}",
-                &session_id[..8.min(session_id.len())]
-            )),
-            ..Default::default()
-        }),
+        workflow: Some(workspace_branch_workflow(session_id, branch)?),
         ..Default::default()
     };
     tddy_core::write_changeset(&session_dir, &cs)
@@ -68,13 +76,16 @@ pub async fn start_workspace_session(
     // Create the real git worktree (blocking: involves git fetch + git worktree add).
     let repo_root_clone = repo_root.clone();
     let session_dir_clone = session_dir.clone();
+    let base_ref = Some(branch.selected_integration_base_ref.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let worktree_path = tokio::time::timeout(
         request_timeout,
         tokio::task::spawn_blocking(move || {
             tddy_core::setup_worktree_for_session_with_optional_chain_base(
                 &repo_root_clone,
                 &session_dir_clone,
-                None,
+                base_ref.as_deref(),
             )
             .map_err(|e| anyhow::anyhow!("worktree setup failed: {}", e))
         }),
@@ -107,6 +118,8 @@ pub async fn start_workspace_session(
         agent: None,
         recipe: None,
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -126,6 +139,58 @@ pub async fn start_workspace_session(
         livekit_server_identity: String::new(),
         branch_conflict: None,
     }))
+}
+
+/// Resolve the requested branch intent into the changeset the worktree setup reads.
+///
+/// A request that names no intent gets a fresh `workspace/<short id>` branch off the project's
+/// default base — the pre-existing behaviour, and the only sensible one for a session created purely
+/// to hold a checkout. An intent that names a branch must actually name it: creating a differently
+/// named branch would hand the caller a worktree that is not the one they asked for.
+fn workspace_branch_workflow(
+    session_id: &str,
+    branch: &WorkspaceBranchIntent<'_>,
+) -> Result<tddy_core::ChangesetWorkflow, Status> {
+    let (intent, new_branch_name, selected_branch_to_work_on) = match branch
+        .branch_worktree_intent
+        .trim()
+    {
+        "work_on_selected_branch" => {
+            let selected = branch.selected_branch_to_work_on.trim();
+            if selected.is_empty() {
+                return Err(Status::invalid_argument(
+                        "selected_branch_to_work_on is required when branch_worktree_intent is work_on_selected_branch",
+                    ));
+            }
+            (
+                tddy_core::BranchWorktreeIntent::WorkOnSelectedBranch,
+                None,
+                Some(selected.to_string()),
+            )
+        }
+        "new_branch_from_base" if !branch.new_branch_name.trim().is_empty() => (
+            tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            Some(branch.new_branch_name.trim().to_string()),
+            None,
+        ),
+        _ => (
+            tddy_core::BranchWorktreeIntent::NewBranchFromBase,
+            Some(format!(
+                "workspace/{}",
+                &session_id[..8.min(session_id.len())]
+            )),
+            None,
+        ),
+    };
+    Ok(tddy_core::ChangesetWorkflow {
+        branch_worktree_intent: Some(intent),
+        new_branch_name,
+        selected_integration_base_ref: Some(branch.selected_integration_base_ref.trim())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        selected_branch_to_work_on,
+        ..Default::default()
+    })
 }
 
 /// Resolve the worktree root for a session by reading `.session.yaml`.

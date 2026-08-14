@@ -3100,6 +3100,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
@@ -3298,6 +3300,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;

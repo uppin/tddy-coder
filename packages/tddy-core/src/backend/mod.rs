@@ -361,6 +361,10 @@ pub struct RemoteToolEnv {
     pub livekit_url: Option<String>,
     pub livekit_room: Option<String>,
     pub server_identity: Option<String>,
+    /// Scoped LiveKit join token minted by the spawning daemon, for a split session whose worktree
+    /// lives on another daemon (docs/ft/daemon/remote-managed-worktree.md). Never the daemon's
+    /// `livekit.api_secret`, which would let the agent join any room as any identity.
+    pub livekit_token: Option<String>,
 }
 
 impl RemoteToolEnv {
@@ -391,6 +395,9 @@ impl RemoteToolEnv {
         }
         if let Some(v) = &self.server_identity {
             pairs.push(("TDDY_REMOTE_SERVER_IDENTITY".to_string(), v.clone()));
+        }
+        if let Some(v) = &self.livekit_token {
+            pairs.push(("TDDY_REMOTE_LIVEKIT_TOKEN".to_string(), v.clone()));
         }
         pairs
     }

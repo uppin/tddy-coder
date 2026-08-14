@@ -58,6 +58,28 @@ choose that placement from the new-session form rather than a CLI flag.
 that still has native filesystem tools has nothing to proxy through. A split placement without
 `managed_codebase` is a request error, not a silently co-located session.
 
+### What a split session cannot also ask for
+
+Three otherwise-valid options need a repository on the daemon running the agent, which a split
+session does not have. Each is **refused** with `invalid_argument` naming the field, rather than
+silently dropped — a session that came up without its recipe looks exactly like the session that
+was asked for.
+
+| Field | Why it needs a local repository |
+|---|---|
+| `recipe` | A workflow recipe's tooling resolves `TDDY_REPO_DIR` on the agent's host |
+| `semantic_index` | Indexes a worktree on this daemon before launch |
+| `sandbox` | The sandboxed spawn resolves its worktree on this daemon |
+
+This mirrors the v1 restriction the original remote-codebase mode already carries (recipes other
+than `free-prompting` were out of scope there too).
+
+**The UI must not offer them.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends it
+whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
+selector could produce is a request the daemon rejects. The form therefore withdraws the Recipe
+control once a codebase host is chosen, and sends an empty `recipe`. Putting the codebase back on
+the session's own host restores it: the withdrawal is a property of the split, not a one-way door.
+
 ### Why claude-cli only
 
 v1 restricts split placement to `session_type: "claude-cli"`. A `cursor-cli` request carrying

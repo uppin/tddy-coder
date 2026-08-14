@@ -171,9 +171,33 @@ for a LiveKit container twice.
   `room_join`/`can_publish`/`can_subscribe`/`can_update_own_metadata` but not `can_publish_data`,
   unlike production `TokenGenerator`. Existing cross-host tests pass, so the data channel evidently
   works — but if a new LiveKit dispatch test fails to publish, this is the first thing to check.
-- **`tddy-tools` binary size / feature gating.** The `livekit` feature is currently optional. Making
-  the MCP path depend on it pulls the LiveKit SDK into every `tddy-tools` build, including in-jail
-  ones that only need stdio. Measure before defaulting it on.
+- **`StreamExecuteTool` is implemented but nothing calls it.** The daemon serves it and
+  peer-forwards it, and its frame budget is pinned by a compile-time assert — but `tddy-tools`
+  still issues the **unary** `ExecuteTool` over LiveKit (`session_tool_client.rs`,
+  `dispatch_via_rpc_transport`). Until the client switches, a split session's large `Read` or broad
+  `Grep` still rides the chunk-framed unary path, where a lost frame wedges the call with no error.
+  That is precisely the failure the streaming RPC was added to remove, so the protection exists but
+  is not yet in the path. Switching the client needs its own red phase: the current tests drive a
+  transport-agnostic unary dispatch through an in-process peer, and a streaming client needs
+  reassembly and a truncation-detection test of its own.
+- **Every remote tool call currently pays a full LiveKit room connect.** `dispatch_via_livekit`
+  connects a room, waits for the codebase daemon's participant, issues one `ExecuteTool`, and drops
+  the room — per call. An agent doing fifty `Read`s pays fifty connects, likely hundreds of
+  milliseconds each. This is the single biggest threat to the feature being usable rather than
+  merely correct, and it is **not** covered by any test: the suite drives the transport-agnostic
+  dispatch through an in-process peer, so the connect cost is invisible to it.
+  Fixing it means caching one room per process, which needs reconnect-on-drop semantics — a
+  fallback decision, so it was deliberately left alone (`session_tool_client.rs`, marked TODO).
+  Measure it against a real daemon before calling this feature done.
+- **`tddy-tools` binary size / feature gating — resolved, with a cost.** `livekit` is now a
+  **default** feature, because nothing in the repo builds `tddy-tools` with `--features livekit`
+  (`./release` and `./test` both use default features), so leaving it opt-in would ship a binary
+  whose split-session dispatch always returned "requires the 'livekit' cargo feature".
+  Measured: debug binary **185.8 MB** with default features vs **123.4 MB** with
+  `--no-default-features` — **+62.4 MB** of statically linked libwebrtc and debuginfo. Release
+  /stripped was not measured. An in-jail build that only needs stdio can drop it entirely with
+  `--no-default-features`, which compiles and lints clean; the LiveKit arm then returns an explicit
+  feature error rather than silently falling back to a transport pointed at the wrong host.
 - **The cross-host suite has never been executed.** It is verified red at compile time only; running
   it needs the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`). Expect to debug the
   harness itself on first green run.

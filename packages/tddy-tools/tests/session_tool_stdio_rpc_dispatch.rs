@@ -1,8 +1,9 @@
 //! Unit tests for the sandbox tool-IPC migration (`dispatch_via_sandbox_ipc` — an unframed
 //! single-`read()`/`write_all()` JSON-over-Unix-socket protocol) onto `tddy-rpc`/`tddy-stdio`.
 //!
-//! Production API under test: `tddy_tools::session_tool_client::dispatch_via_stdio_rpc(client,
-//! tool_name, args) -> String`, taking an already-connected `Arc<dyn tddy_rpc::RpcClientTransport>`
+//! Production API under test: `tddy_tools::session_tool_client::dispatch_via_rpc_transport(client,
+//! envelope, tool_name, args) -> String`, taking an already-connected
+//! `Arc<dyn tddy_rpc::RpcClientTransport>`
 //! (dependency-injected, unlike `dispatch_via_sandbox_ipc`'s socket path — this is what makes it
 //! testable against an in-process fixture instead of a real Unix socket / sandbox). It calls
 //! `connection.ConnectionService/ExecuteTool` with the same `ExecuteToolRequest`/
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
 use tddy_stdio::spawn_child_endpoint;
+use tddy_tools::session_tool_client::SessionToolEnvelope;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
@@ -58,10 +60,15 @@ async fn dispatches_a_tool_call_over_stdio_rpc_and_returns_the_result_json() {
     let args = serde_json::json!({"path": "README.md"});
     let result = timeout(
         CALL_TIMEOUT,
-        tddy_tools::session_tool_client::dispatch_via_stdio_rpc(&client, "Read", &args),
+        tddy_tools::session_tool_client::dispatch_via_rpc_transport(
+            &client,
+            &SessionToolEnvelope::default(),
+            "Read",
+            &args,
+        ),
     )
     .await
-    .expect("dispatch_via_stdio_rpc timed out");
+    .expect("dispatch_via_rpc_transport timed out");
 
     // Then the result is exactly the echoed args_json the fake service returned
     assert_eq!(result, args.to_string());
@@ -82,10 +89,15 @@ async fn round_trips_a_payload_larger_than_a_single_socket_read_without_truncati
     // When dispatching a tool call through the new stdio-RPC path
     let result = timeout(
         CALL_TIMEOUT,
-        tddy_tools::session_tool_client::dispatch_via_stdio_rpc(&client, "Write", &args),
+        tddy_tools::session_tool_client::dispatch_via_rpc_transport(
+            &client,
+            &SessionToolEnvelope::default(),
+            "Write",
+            &args,
+        ),
     )
     .await
-    .expect("dispatch_via_stdio_rpc timed out");
+    .expect("dispatch_via_rpc_transport timed out");
 
     // Then the full 256KB payload round-trips byte-for-byte — proving tddy-rpc's length-prefixed
     // framing (not a single read()/write_all()) carries the whole message

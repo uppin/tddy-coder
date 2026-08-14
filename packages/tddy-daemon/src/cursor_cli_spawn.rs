@@ -370,6 +370,8 @@ pub async fn spawn_cursor_cli_session_inner(
         agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         specialized_agents: specialized_agents.to_vec(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

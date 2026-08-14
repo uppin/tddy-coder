@@ -226,6 +226,72 @@ it("drops a chosen codebase host when the session type changes to cursor-cli", (
   });
 });
 
+// ---------------------------------------------------------------------------
+// Tests — a split session cannot carry a workflow recipe
+// ---------------------------------------------------------------------------
+//
+// A recipe's tooling runs against a repository on the daemon hosting the agent, and a split
+// session has none — the daemon refuses the combination outright. The form defaults `recipe` to
+// "tdd" and sends it whenever managed codebase is on, so without this the *only* thing the codebase
+// host selector could produce is a request the daemon rejects.
+
+it("stops offering a workflow recipe once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session, which offers a recipe while the codebase is co-located
+  mountCreatePane(aCreateSessionBackend());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.recipeSelect().should("be.visible");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then the recipe is no longer offered, rather than offered and then silently refused
+  createSessionPage.expectNoRecipeSelector();
+});
+
+it("sends no workflow recipe for a split session", () => {
+  // Given
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+
+  // When
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.submit();
+
+  // Then — the form's default recipe must not ride along and turn a valid placement into a refusal
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.recipe).to.equal("");
+  });
+});
+
+it("restores the workflow recipe when the codebase comes back to the session host", () => {
+  // Given a split placement, with the recipe withdrawn
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.expectNoRecipeSelector();
+
+  // When the operator puts the codebase back on the session's own host
+  createSessionPage.selectCodebaseHost(SAME_AS_HOST);
+  createSessionPage.submit();
+
+  // Then the recipe returns — withdrawing it is a property of the split, not a one-way door
+  createSessionPage.recipeSelect().should("be.visible");
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal("");
+    expect(request.recipe).to.equal("tdd");
+  });
+});
+
 it("drops a chosen codebase host when managed codebase is switched back off", () => {
   // Given a codebase host chosen inside an open managed-codebase section
   const backend = aCreateSessionBackend();

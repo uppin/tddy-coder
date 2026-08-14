@@ -64,6 +64,17 @@ pub struct SessionMetadata {
     /// non-subagent sessions, legacy-single-subagent sessions, and legacy files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub specialized_agents: Vec<String>,
+    /// Daemon instance holding this session's worktree, when the agent runs on another daemon
+    /// (docs/ft/daemon/remote-managed-worktree.md). Absent for co-located sessions and legacy
+    /// files. Persisted, unlike `SessionEntry.daemon_instance_id`, which is stamped at read time —
+    /// a split session cannot be attributed by "who answered ListSessions", because two daemons
+    /// each legitimately hold one half.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codebase_daemon_instance_id: Option<String>,
+    /// The paired `workspace` session on that daemon whose worktree this session works in. Absent
+    /// for co-located sessions and legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codebase_session_id: Option<String>,
 }
 
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
@@ -135,6 +146,10 @@ pub fn write_initial_tool_session_metadata(
         agent: opts.agent,
         recipe: opts.recipe,
         specialized_agents: Vec::new(),
+        // Split placement is claude-cli only, and those sessions write their metadata directly —
+        // a session created here always works in a worktree on this host.
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     write_session_metadata(session_dir, &metadata)
 }
@@ -573,6 +588,8 @@ previous_session_id: {prev}
             agent: None,
             recipe: None,
             specialized_agents: vec!["fastcontext".to_string(), "my-linter".to_string()],
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
