@@ -43,6 +43,9 @@ import { AsyncQueue } from "./async-queue.js";
 
 const RPC_TOPIC = "tddy-rpc";
 
+/** The daemon this connection's calls are addressed to, and whose frames the room delivers. */
+const THE_DAEMON = "daemon-udoo";
+
 /** The epoch of the page that is open now. */
 const THIS_CONNECTION = 0x5f3a91c2;
 /** The epoch of the page that was open before the reload, whose streams the daemon still serves. */
@@ -97,7 +100,7 @@ function aRoom() {
     /** Deliver one already-framed `RpcResponse` payload on the RPC topic. */
     deliver(payload: Uint8Array) {
       for (const handler of listeners) {
-        handler(payload, { identity: "daemon-udoo" }, undefined, RPC_TOPIC);
+        handler(payload, { identity: THE_DAEMON }, undefined, RPC_TOPIC);
       }
     },
   };
@@ -120,6 +123,7 @@ function aBrowserConnection(clientEpoch: number) {
           service: "connection.ConnectionService",
           method: "WatchTerminalControl",
         },
+        target: THE_DAEMON,
         queue,
       });
       return queue;
