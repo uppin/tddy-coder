@@ -4,7 +4,6 @@
  * All raw selectors live here; test bodies call named methods.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import {

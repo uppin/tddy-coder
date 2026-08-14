@@ -9,7 +9,6 @@
  * would read to the client as the daemon dropping the feed, which is a different fact.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import { create } from "@bufbuild/protobuf";

@@ -9,7 +9,6 @@
  * `lib/liveKitRoomsState` so the arithmetic is unit-testable.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import { useEffect, useState } from "react";

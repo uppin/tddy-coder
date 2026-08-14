@@ -7,7 +7,6 @@
  * every room. Rooms render expanded, because "who is in there" is the whole point of the screen.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import { useEffect, useState } from "react";

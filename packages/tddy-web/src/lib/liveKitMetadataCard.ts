@@ -5,7 +5,6 @@
  * component, so each of its branches is a unit test instead of a hover-and-read acceptance case.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 /**

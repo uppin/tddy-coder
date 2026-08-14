@@ -8,7 +8,6 @@
  * focus; the harness drives the focus path (see `liveKitRoomsPanelPage.revealMetadata`).
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import React from "react";

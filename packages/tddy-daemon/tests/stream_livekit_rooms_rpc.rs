@@ -7,7 +7,7 @@
 //! silence, or an error, and it stops reading LiveKit once its subscriber is gone.
 //!
 //! Feature: `docs/ft/web/livekit-rooms-panel.md`
-//! Changeset: `docs/dev/1-WIP/livekit-rooms-panel.md`
+//! Reference: `packages/tddy-daemon/docs/connection-service.md` § LiveKit rooms
 
 use async_trait::async_trait;
 use futures_util::StreamExt;

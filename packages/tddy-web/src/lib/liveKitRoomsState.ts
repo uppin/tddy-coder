@@ -7,7 +7,6 @@
  * of a mounted-component test.
  *
  * PRD: `docs/ft/web/livekit-rooms-panel.md`
- * Changeset: `livekit-rooms-panel`
  */
 
 import type {
