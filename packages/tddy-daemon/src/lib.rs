@@ -23,6 +23,7 @@ pub mod host_documents;
 pub mod host_session_service;
 pub mod host_stats;
 pub mod livekit_peer_discovery;
+pub mod livekit_rooms_stream;
 pub mod local_socket_server;
 pub mod multi_host;
 mod oauth_loopback_tunnel;

@@ -10259,6 +10259,7 @@ dependencies = [
  "futures-util",
  "livekit",
  "livekit-api",
+ "livekit-protocol",
  "log",
  "pretty_assertions",
  "prost 0.13.5",

@@ -191,6 +191,16 @@ service ConnectionService {
   // never emits a result; the partial attachments are rolled back first. Unary StartSession stays
   // the entry point for every non-interactive caller.
   rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
+  // LiveKit Rooms panel (see docs/ft/web/livekit-rooms-panel.md) — every room on the LiveKit server
+  // and the participants joined to each, read from LiveKit's server API with the same credentials
+  // the daemon mints join tokens with. Addressed to the daemon directly over the common-room LiveKit
+  // connection (no daemon_instance_id payload needed) and validates `session_token`.
+  //
+  // The first message is always a full LiveKitRoomsSnapshot; every subsequent message is a single
+  // LiveKitRoomsChange. The server owns the cadence: it polls the room service every 3 s, diffs the
+  // result against the state it last sent on THIS stream, and emits one change per delta — a tick
+  // that produced no delta emits nothing, so an idle server yields an idle stream.
+  rpc StreamLiveKitRooms(StreamLiveKitRoomsRequest) returns (stream LiveKitRoomsEvent);
 }
 
 message ListToolsRequest {}
@@ -1733,4 +1743,104 @@ message AttachmentMaterializationProgress {
   // Bytes of this attachment materialized so far, and its full size.
   uint64 bytes_done = 4;
   uint64 bytes_total = 5;
+}
+
+// --- LiveKit Rooms panel: rooms on the LiveKit server and who is joined to them ---
+
+message StreamLiveKitRoomsRequest {
+  string session_token = 1;
+}
+
+// One message on the rooms feed. The first message on a stream always carries `snapshot`; every
+// message after it always carries `change`. A consumer applies the snapshot as its whole state and
+// folds each change into it — it never re-requests the list.
+message LiveKitRoomsEvent {
+  oneof event {
+    LiveKitRoomsSnapshot snapshot = 1;
+    LiveKitRoomsChange change = 2;
+  }
+}
+
+// The complete set of rooms on the server at subscribe time.
+message LiveKitRoomsSnapshot {
+  repeated LiveKitRoomInfo rooms = 1;
+}
+
+message LiveKitRoomInfo {
+  // LiveKit room name, e.g. "livekit.common_room" or a session's terminal room.
+  string name = 1;
+  // Room creation time, as reported by the server, in Unix milliseconds.
+  int64 created_at_ms = 2;
+  // Everyone currently joined. The participant count is this list's length — it is not carried
+  // separately, so the two can never disagree.
+  repeated LiveKitParticipantInfo participants = 3;
+  // The room's own metadata, relayed verbatim from LiveKit's server API. A JSON document carrying a
+  // `label` string names the room for a human ("PR-stack presenter", "common room") where the raw
+  // name cannot. Nothing publishes room metadata today, so this is usually empty — the panel renders
+  // a label only when one is present and never depends on it being there.
+  string metadata = 4;
+}
+
+message LiveKitParticipantInfo {
+  string identity = 1;
+  // LiveKit participant name, which may be empty; `identity` is the stable key.
+  string name = 2;
+  // Metadata exactly as published — a JSON document shallow-merged across independent publishers
+  // (daemon advertisement, owned_project_count, codex_oauth, session). Relayed verbatim: the daemon
+  // does not parse or validate it, and an empty string means nothing was published.
+  string metadata = 3;
+  // When this participant joined, in Unix milliseconds. `0` means the server has recorded no join
+  // time for it yet — a participant still `JOINING` — and is a "not known" sentinel, not a time:
+  // render it as unknown rather than as the epoch. The daemon never substitutes a time of its own.
+  int64 joined_at_ms = 4;
+  // The server's participant state: "JOINED", "ACTIVE", or "DISCONNECTED".
+  string state = 5;
+}
+
+// Exactly one delta against the state the server last sent on this stream.
+message LiveKitRoomsChange {
+  oneof change {
+    LiveKitRoomAdded room_added = 1;
+    LiveKitRoomRemoved room_removed = 2;
+    LiveKitParticipantJoined participant_joined = 3;
+    LiveKitParticipantLeft participant_left = 4;
+    LiveKitParticipantMetadataChanged participant_metadata_changed = 5;
+    LiveKitParticipantStateChanged participant_state_changed = 6;
+  }
+}
+
+// A room appeared. Carries the full row — participants included, since a room can first be seen
+// already occupied — so a consumer never has to infer a room from a partial event.
+message LiveKitRoomAdded {
+  LiveKitRoomInfo room = 1;
+}
+
+message LiveKitRoomRemoved {
+  string room = 1;
+}
+
+message LiveKitParticipantJoined {
+  string room = 1;
+  LiveKitParticipantInfo participant = 2;
+}
+
+message LiveKitParticipantLeft {
+  string room = 1;
+  string identity = 2;
+}
+
+message LiveKitParticipantMetadataChanged {
+  string room = 1;
+  string identity = 2;
+  // The new metadata, verbatim.
+  string metadata = 3;
+}
+
+// A participant already known to this stream is now in a different server state — typically the
+// "JOINED" → "ACTIVE" settle moments after a join, which no other event carries.
+message LiveKitParticipantStateChanged {
+  string room = 1;
+  string identity = 2;
+  // The new state, verbatim: "JOINED", "ACTIVE", or "DISCONNECTED".
+  string state = 3;
 }

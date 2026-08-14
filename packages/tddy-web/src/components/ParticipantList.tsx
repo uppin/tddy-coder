@@ -6,6 +6,7 @@ import {
   parseOwnedProjectCount,
   type RoomParticipant,
 } from "../hooks/useRoomParticipants";
+import { safeTestIdPart } from "../lib/testId";
 import { ParticipantVideoPreviewDialog } from "./ParticipantVideoPreviewDialog";
 import { Button } from "./ui/button";
 
@@ -45,10 +46,6 @@ export function parseCodexOAuthPending(metadata: string): { authorizeUrl: string
     return null;
   }
   return null;
-}
-
-function safeTestIdPart(s: string): string {
-  return s.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function formatJoinedAt(ms: number | null): string {

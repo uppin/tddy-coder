@@ -66,6 +66,7 @@ use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
 };
+use crate::livekit_rooms_stream::{pump_rooms, room_roster_from_config, RoomRoster};
 use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_attachments::validate_attachment_basename;
@@ -91,13 +92,13 @@ use tddy_service::proto::connection::{
     GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
     GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
     HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, LiveKitRoomsEvent,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -702,6 +703,30 @@ const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
 /// Default cadence for refreshing project-dir disk figures on the host-stats sampling loop.
 const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Cadence at which a `StreamLiveKitRooms` subscription re-reads the LiveKit roster. Presence is
+/// the volatile fact on that panel, hence far shorter than the host-stats disk tick.
+const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+/// Stream adapter backed by an mpsc channel for [`LiveKitRoomsEvent`] server-streaming.
+///
+/// Carries results rather than events: a roster read that fails ends the stream with that error,
+/// since an empty room list would read to the panel as "the server has no rooms".
+#[derive(Debug)]
+pub struct MpscLiveKitRoomsStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<LiveKitRoomsEvent, Status>>,
+}
+
+impl Stream for MpscLiveKitRoomsStream {
+    type Item = Result<LiveKitRoomsEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
 /// Stream adapter backed by an mpsc channel for [`HostStatsEvent`] server-streaming.
 #[derive(Debug)]
 pub struct MpscHostStatsStream {
@@ -947,6 +972,11 @@ pub struct ConnectionServiceImpl {
     host_cpu_interval: Duration,
     /// Cadence for refreshing disk on the `StreamHostStats` sampling loop (overridable for tests).
     host_disk_interval: Duration,
+    /// Reader for the LiveKit server's rooms and their participants, behind `StreamLiveKitRooms`.
+    room_roster: Arc<dyn RoomRoster>,
+    /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the roster (overridable for
+    /// tests).
+    room_poll_interval: Duration,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
@@ -1023,6 +1053,7 @@ impl ConnectionServiceImpl {
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
+        let room_roster = room_roster_from_config(config.livekit.as_ref());
         Self {
             config,
             sessions_base_for_user,
@@ -1041,6 +1072,8 @@ impl ConnectionServiceImpl {
             host_stats,
             host_cpu_interval: HOST_CPU_INTERVAL,
             host_disk_interval: HOST_DISK_INTERVAL,
+            room_roster,
+            room_poll_interval: LIVEKIT_ROOMS_POLL_INTERVAL,
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
@@ -1113,6 +1146,20 @@ impl ConnectionServiceImpl {
     pub fn with_host_stats_intervals(mut self, cpu: Duration, disk: Duration) -> Self {
         self.host_cpu_interval = cpu;
         self.host_disk_interval = disk;
+        self
+    }
+
+    /// Substitute the LiveKit rooms reader (builder pattern) — lets tests drive a scripted roster
+    /// sequence in place of a live LiveKit server.
+    pub fn with_room_roster(mut self, room_roster: Arc<dyn RoomRoster>) -> Self {
+        self.room_roster = room_roster;
+        self
+    }
+
+    /// Override the `StreamLiveKitRooms` poll cadence (builder pattern) — lets tests observe a
+    /// change event without waiting the production three seconds for it.
+    pub fn with_room_poll_interval(mut self, interval: Duration) -> Self {
+        self.room_poll_interval = interval;
         self
     }
 
@@ -9718,6 +9765,36 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Err(Status::unauthenticated(
             "local token minting is only available over the local socket",
         ))
+    }
+
+    type StreamLiveKitRoomsStream = MpscLiveKitRoomsStream;
+
+    /// Stream the LiveKit server's rooms and their participants: one full snapshot, then one change
+    /// event per delta found by polling the room service.
+    ///
+    /// Authenticates `session_token`, then spawns [`pump_rooms`], which emits the snapshot
+    /// immediately and re-reads the roster on the poll cadence, diffing each read against the state
+    /// **this** stream was last sent — a per-subscriber baseline, so two watchers cannot consume
+    /// each other's deltas. A tick with no delta emits nothing, so an idle server yields an idle
+    /// stream. The task ends when the receiver is dropped (client unsubscribe), and a roster read
+    /// that fails ends the stream with that error rather than reporting an empty server.
+    async fn stream_live_kit_rooms(
+        &self,
+        request: Request<StreamLiveKitRoomsRequest>,
+    ) -> Result<Response<Self::StreamLiveKitRoomsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<LiveKitRoomsEvent, Status>>();
+        tokio::spawn(pump_rooms(
+            Arc::clone(&self.room_roster),
+            self.room_poll_interval,
+            tx,
+        ));
+
+        Ok(Response::new(MpscLiveKitRoomsStream { rx }))
     }
 
     type StreamHostStatsStream = MpscHostStatsStream;
