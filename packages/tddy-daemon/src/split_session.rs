@@ -239,7 +239,7 @@ pub fn split_remote_tool_env(
     })
 }
 
-/// The common room a split session's agent joins, and the credentials to mint its token.
+/// The room a split session's agent joins, and the credentials to mint its token.
 pub struct SplitLiveKitRoom {
     pub room: String,
     pub url: String,
@@ -248,12 +248,22 @@ pub struct SplitLiveKitRoom {
 }
 
 impl SplitLiveKitRoom {
-    /// Resolve from daemon config, refusing a split placement the agent could not be wired for.
+    /// Resolve from daemon config for a named room, refusing a split placement the agent could not
+    /// be wired for.
+    ///
+    /// The room is a parameter because it is no longer the lobby: the agent belongs in the room of
+    /// the worktree it was given, so its token admits it there and nowhere else — not to the room
+    /// every daemon and browser in the project shares. The credentials still come from the common
+    /// room's resolution, since a daemon with no common room cannot forward `StartSession` to a
+    /// peer in the first place, so a split placement is impossible before this is reached.
     ///
     /// Called before the codebase daemon is asked to create anything: a wiring failure discovered
     /// afterwards would strand a worktree on a host the operator may never look at.
-    pub fn from_config(config: &crate::config::DaemonConfig) -> Result<Self, Status> {
-        let (room, url, api_key, api_secret) =
+    pub fn from_config(
+        config: &crate::config::DaemonConfig,
+        room: impl Into<String>,
+    ) -> Result<Self, Status> {
+        let (_common_room, url, api_key, api_secret) =
             crate::livekit_peer_discovery::livekit_common_room_connect_strings(config).map_err(
                 |e| {
                     Status::failed_precondition(format!(
@@ -262,7 +272,7 @@ impl SplitLiveKitRoom {
                 },
             )?;
         Ok(Self {
-            room,
+            room: room.into(),
             url,
             api_key,
             api_secret,
@@ -280,7 +290,12 @@ pub fn prepare_split_agent_wiring(
     codebase_session_id: &str,
     session_token: &str,
 ) -> Result<SplitAgentWiring, Status> {
-    let livekit = SplitLiveKitRoom::from_config(config)?;
+    // This session's own room, hosted by this daemon — the one running the agent, and therefore the
+    // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
+    // codebase daemon hosts no room, so a room named after its session would be one nobody is in.
+    // Start and resume derive it the same way, so a resumed agent rejoins the room it left.
+    let livekit =
+        SplitLiveKitRoom::from_config(config, crate::session_room::session_room_name(session_id))?;
     let remote = split_remote_tool_env(
         &livekit,
         session_id,

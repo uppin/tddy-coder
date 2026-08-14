@@ -94,6 +94,35 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Session rooms are not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
+
+`SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`, and a room is only opened by
+`start_workspace_session`. A daemon restart therefore leaves every surviving workspace session's
+checkout without its host: the room may still exist on the LiveKit server, but no `daemon-{instance_id}`
+is in it, so a split agent resumed against that session finds nothing to address and its
+`connect_livekit_client` wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`).
+
+The fix is a startup sweep that re-opens a room for each session whose `.session.yaml` has a
+`repo_path` and a live worktree — the same shape as the existing startup reconciliation in
+`packages/tddy-daemon/src/startup.rs`. Marked in code at
+`packages/tddy-daemon/src/session_room.rs:259`.
+
+### A claude-cli split agent has no route to its own attachments (source: session-room changeset, 2026-08-14)
+
+The session-room changeset puts a copy of a session's attachments on the facilitating daemon and serves
+them to session-room participants over `ReadHostDocument` / `StreamReadHostDocument`
+(`scope = SESSION_ARTIFACT`, `relative_path = "attachments/{basename}"`). A browser or a second agent
+that speaks the RPC surface can fetch them.
+
+A **claude-cli** split agent still cannot. It runs with every native filesystem tool disallowed and
+`--strict-mcp-config` (`packages/tddy-daemon/src/split_session.rs:180-193`), so its only route out is
+`mcp__tddy-tools__*` → `ExecuteTool`, whose tools are rooted at the worktree with traversal rejected
+(`connection_service.rs:4462`, `:8056`). Attachments live under the *session* dir, outside that root.
+
+Closing it means a new exec tool that deliberately reads outside the worktree, which widens the boundary
+the split placement rests on — it needs its own changeset and its own review, not a quiet addition to
+the dispatch table at `packages/tddy-tool-engine/src/lib.rs:217`.
+
 ### `tddy-rust-typescript-tests/gen/` is badly stale and nothing detects it (source: remote-managed-worktree changeset, 2026-08-14)
 
 Running `bun run generate` in that package produces **12 files that were never checked in**

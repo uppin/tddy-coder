@@ -39,8 +39,8 @@ export interface LiveKitRoom {
 
 /**
  * A `label` string from a room's metadata JSON, or `null` when the metadata is absent, unparseable,
- * carries no `label`, or carries a blank one. Nothing publishes room metadata today, so `null` is
- * the normal answer.
+ * carries no `label`, or carries a blank one. `null` is the normal answer: a session room's metadata
+ * is a worktree snapshot (`head_commit`, `branch`, …), which carries no `label`.
  */
 export function roomLabelFromMetadata(metadata: string): string | null {
   const trimmed = metadata.trim();

@@ -17,9 +17,10 @@ roster.list_rooms().await                                     // -> Result<Vec<L
 ```
 
 `list_rooms` issues `ListRooms`, then `ListParticipants` per room, and maps the results into the
-`connection.proto` types the RPC carries. This is the **first production use** of
-`livekit_api::services::room::RoomClient` — before it, only `tddy-livekit-testkit` called the room
-service, to wait for a container to come up.
+`connection.proto` types the RPC carries. It reads the same server API that `RoomMetadataClient`
+(this crate, [broadcast-and-room-metadata.md](broadcast-and-room-metadata.md)) writes a session
+room's worktree snapshot through — the two are the read and write halves of the same surface, and
+neither shares state with the other.
 
 ### Mapping rules
 
@@ -68,3 +69,16 @@ appear to work until it silently didn't. A missing scheme or an empty authority 
 
 Callers must use **`livekit.url`**, the daemon's own address for the server, not `public_url`, which
 is the browser-facing one.
+
+### Two converters, on purpose for now
+
+`room_metadata.rs` carries a second one, `livekit_http_url(&str) -> String`, for the write half. The
+contracts differ rather than duplicate by accident: that one is **lenient** — anything that is not a
+WebSocket URL passes through untouched, so a caller already holding an `http(s)` base can hand it
+straight in — while this one is **strict**, refusing a non-WebSocket scheme so a misconfigured
+`livekit.url` fails loudly instead of appearing to work.
+
+They should converge on the strict conversion with an explicit lenient wrapper where
+`RoomMetadataClient` needs one. That was left out of the change that introduced this module because
+it would alter which inputs `RoomMetadataClient` accepts, which is a behaviour change to the write
+path and belongs in its own commit.

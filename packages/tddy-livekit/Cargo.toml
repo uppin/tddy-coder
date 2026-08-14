@@ -31,6 +31,9 @@ tddy-service = { path = "../tddy-service" }
 tddy-core = { path = "../tddy-core" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-rpc = { path = "../tddy-rpc" }
+# The workspace's polling waits: `docs/dev/guides/testing.md` mandates them over hand-rolled
+# sleep-poll loops, so a timeout reports what it last observed instead of only that it gave up.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tokio-stream = "0.1"
 futures-util = "0.3"

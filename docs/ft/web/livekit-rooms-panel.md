@@ -45,11 +45,18 @@ One row per room, sorted by room name, each carrying:
 **On room labels.** Raw room names are opaque (`daemon-pr-stack-presenter-room-0001` does not say
 "PR-stack presenter"), so `LiveKitRoomInfo` relays the room's own `metadata` — a field LiveKit's
 server API already returns for every room — and the panel renders a `label` string out of it when
-one is there. This is the channel by which room kinds can be distinguished; **nothing publishes room
-metadata today**, so the label is normally absent. The panel therefore treats it as decoration: no
-behaviour keys off it, and a room with no label renders exactly as it would have without the field.
+one is there. This is the channel by which room kinds can be distinguished.
+
+**No publisher writes a `label` today**, so the label is normally absent. Room metadata itself is no
+longer empty: a session room carries a worktree snapshot (`head_commit`, `branch`, `changed_paths`,
+`changed_files`, `lines_added`, `lines_removed`, `untracked_files`, `attachments`,
+`updated_at_unix_ms` — see [session-room.md](../daemon/session-room.md)), which has no `label` key.
+The panel therefore treats the label as decoration: no behaviour keys off it, and a room whose
+metadata carries none renders exactly as it would have without the field. Surfacing the worktree
+snapshot itself in this panel is a separate, obvious next step, and deliberately not in scope here.
+
 Room metadata is read at snapshot and on `room_added`; changes to it are not tracked as their own
-change event.
+change event, so a room's label and snapshot are as of when the panel first learned about the room.
 
 Rooms render **expanded**, showing their participants; a row can be **collapsed** to hide them.
 Expanded is the default because the panel exists to answer "who is in there" — starting collapsed
@@ -151,11 +158,17 @@ cadence is faster than the host-stats disk tick.
 
 Each subscription keeps its **own** last-sent state, so two watchers cannot desynchronize each
 other — and its own poller. The poll cost is therefore **`1 + room count` calls every 3 seconds per
-open subscription**, not per daemon: five operators watching a twenty-room server is 105 calls per
-tick. That is the price of the per-subscriber baseline, and it is bounded by the number of panels
-actually open, because the poll loop ends with its subscriber (below). Coalescing onto one shared
-poller that broadcasts full rosters, with each subscriber diffing locally, would preserve the same
-guarantee at one poller per daemon — the escape hatch if this panel becomes commonly-open.
+open subscription**, not per daemon.
+
+Room count is no longer small. Every agent session now gets a LiveKit room of its own (see
+[session-room.md](../daemon/session-room.md)), so a daemon with thirty live sessions serves ~31 calls
+per tick **per open panel** — two operators watching is ~62 calls every 3 seconds. That is the price
+of the per-subscriber baseline. It is bounded by the number of panels actually open, because the poll
+loop ends with its subscriber (below), and it is correct at any scale — but coalescing onto one
+shared poller that broadcasts full rosters, with each subscriber diffing locally, would preserve the
+same guarantee at one poller per daemon. Given the room count now scales with session count rather
+than with a handful of fixed rooms, that is less "an escape hatch if this becomes commonly-open" than
+the expected next change.
 
 A read of the roster is bounded by a **5-second deadline**. A server API that accepts the read and
 never answers would otherwise stall the stream with no error frame, leaving the panel on a stale
@@ -173,10 +186,10 @@ unauthenticated error, like every other `ConnectionService` method.
 
 The daemon already holds the LiveKit **API key, secret, and URL** (`DaemonConfig.livekit` —
 `api_key`, `api_secret`, `url`) — it mints join tokens with them via `TokenService`. The same
-credentials drive a LiveKit **server-API** room client. This is the first *production* use of that
-API surface (previously only `tddy-livekit-testkit` called `list_rooms`), but it introduces **no new
-dependency**: `livekit-api` is already a normal dependency of `tddy-livekit`, which uses its
-`access_token` module to mint tokens.
+credentials drive a LiveKit **server-API** room client — the same API surface `RoomMetadataClient`
+uses to publish a session room's worktree snapshot, reached here for reading rather than writing.
+It introduces **no new dependency**: `livekit-api` is already a normal dependency of `tddy-livekit`,
+which uses its `access_token` module to mint tokens.
 
 Two details the implementation must get right:
 

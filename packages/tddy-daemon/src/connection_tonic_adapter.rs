@@ -39,8 +39,9 @@ use tddy_service::proto::connection::{
     ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest,
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
     GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetTerminalHistoryRequest, HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    GetTerminalHistoryRequest, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
+    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
     ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
@@ -857,6 +858,19 @@ where
         request: tonic::Request<QueryBranchRequest>,
     ) -> Result<tonic::Response<QueryBranchResponse>, tonic::Status> {
         let resp = RpcConnectionService::query_branch(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn get_worktree_snapshot(
+        &self,
+        request: tonic::Request<GetWorktreeSnapshotRequest>,
+    ) -> Result<tonic::Response<GetWorktreeSnapshotResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_worktree_snapshot(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

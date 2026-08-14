@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package worktree_activity;
+
+// The wire contract of the `worktree.activity` data-channel topic in a worktree room
+// (`wt-{codebase_session_id}`). Messages only, no service: this is a broadcast payload published
+// once with no destination identities, not a request/response surface, so nothing here needs a
+// generated client or server.
+
+enum WorktreeActivityKind {
+  WORKTREE_ACTIVITY_KIND_UNSPECIFIED = 0;
+  COMMIT = 1;
+  FILES_CHANGED = 2;
+}
+
+// Broadcast on the `worktree.activity` topic. Deliberately carries no file paths and no contents:
+// it says *that* the checkout moved. Reading it is what the file-access RPCs in the same room are
+// for, and the current file list lives in room metadata.
+message WorktreeActivityEvent {
+  WorktreeActivityKind kind = 1;
+  // Monotonic per room, assigned by the one daemon that owns the checkout. A gap means an event
+  // was lost in transit, not that the daemon chose to skip it — an idle poll publishes nothing at
+  // all rather than a same-seq repeat.
+  uint64 seq = 2;
+  uint64 at_unix_ms = 3;
+  string head_commit = 4;
+  uint32 changed_files = 5;
+  int64 lines_added = 6;
+  int64 lines_removed = 7;
+}

@@ -140,6 +140,13 @@ service ConnectionService {
   // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
   // See docs/ft/coder/pr-stack-live-status.md.
   rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
+  // One measurement of a session's checkout, for the daemon hosting that session's room.
+  //
+  // A session room lives on the daemon running the session's agent; when the repo is remote that
+  // daemon has no checkout to measure, so it asks the codebase daemon for the same snapshot the
+  // codebase daemon would take of itself. One round trip per poll rather than three, because the
+  // measurement is assembled where the files are.
+  rpc GetWorktreeSnapshot(GetWorktreeSnapshotRequest) returns (GetWorktreeSnapshotResponse);
   // Local peer-trust: mint a session token for the caller identified by its SO_PEERCRED peer uid
   // over the daemon's Unix-domain socket. Available only on the local UDS transport (the peer
   // credential is not present on ConnectRPC-HTTP or LiveKit), and only for a peer uid mapped to a
@@ -1776,8 +1783,9 @@ message LiveKitRoomInfo {
   repeated LiveKitParticipantInfo participants = 3;
   // The room's own metadata, relayed verbatim from LiveKit's server API. A JSON document carrying a
   // `label` string names the room for a human ("PR-stack presenter", "common room") where the raw
-  // name cannot. Nothing publishes room metadata today, so this is usually empty — the panel renders
-  // a label only when one is present and never depends on it being there.
+  // name cannot. A session room carries a worktree snapshot instead (head_commit, branch,
+  // changed_paths, … — see `session_room.rs`), which has no `label`, so most rooms render no label:
+  // the panel renders one only when it is there and never depends on it being there.
   string metadata = 4;
 }
 
@@ -1793,7 +1801,9 @@ message LiveKitParticipantInfo {
   // time for it yet — a participant still `JOINING` — and is a "not known" sentinel, not a time:
   // render it as unknown rather than as the epoch. The daemon never substitutes a time of its own.
   int64 joined_at_ms = 4;
-  // The server's participant state: "JOINED", "ACTIVE", or "DISCONNECTED".
+  // The server's participant state, relayed verbatim: "JOINING", "JOINED", "ACTIVE" or
+  // "DISCONNECTED". Not validated against a list, so a state LiveKit adds later flows through
+  // rather than being dropped.
   string state = 5;
 }
 
@@ -1841,6 +1851,31 @@ message LiveKitParticipantMetadataChanged {
 message LiveKitParticipantStateChanged {
   string room = 1;
   string identity = 2;
-  // The new state, verbatim: "JOINED", "ACTIVE", or "DISCONNECTED".
+  // The new state, verbatim: "JOINING", "JOINED", "ACTIVE" or "DISCONNECTED".
   string state = 3;
+}
+
+// Asks the daemon holding a checkout to measure it. `session_id` names the session on the
+// ANSWERING daemon whose `repo_path` is the checkout — for a split session that is the paired
+// `workspace` session, not the agent's own id.
+message GetWorktreeSnapshotRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+}
+
+// The same fields `snapshot_worktree` produces locally, so a remote measurement and a local one are
+// the same value and neither the poll loop nor the room metadata can tell them apart.
+message GetWorktreeSnapshotResponse {
+  string head_commit = 1;
+  string branch = 2;
+  repeated string changed_paths = 3;
+  uint32 changed_files = 4;
+  int64 lines_added = 5;
+  int64 lines_removed = 6;
+  uint32 untracked_files = 7;
+  // Basenames under the session's `artifacts/attachments/`, so the room's metadata lists what the
+  // answering daemon actually holds rather than what the asking one guesses.
+  repeated string attachments = 8;
 }

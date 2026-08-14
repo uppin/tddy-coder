@@ -137,6 +137,21 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
     }
 }
 
+/// Stop hosting the LiveKit room a session opened for its worktree, if it opened one.
+///
+/// Call this **before** [`delete_session_directory`]: it stops the room's poll loop from starting
+/// another measurement, so the checkout is not being polled every couple of seconds while it is
+/// removed. It does not promise the directory is untouched the instant this returns — a `git` the
+/// loop had already started keeps running until it exits or its own budget kills it
+/// ([`crate::session_room`]). What it does guarantee is that the loop stops, rather than warning
+/// about a missing directory at the poll rate for the life of the daemon.
+///
+/// A session that never hosted a room (any type but `workspace`, or a daemon with no LiveKit
+/// credentials) has nothing registered under its id and this does nothing.
+pub fn close_session_room(rooms: &crate::session_room::SessionRoomRegistry, session_id: &str) {
+    rooms.close(session_id.trim());
+}
+
 /// Deletes a session directory. On Unix, terminates a live recorded PID first.
 ///
 /// `projects_dir` is optional but recommended for sessions that own a worktree

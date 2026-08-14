@@ -66,8 +66,9 @@ export interface RoomOverrides {
 
 /**
  * A room on the LiveKit server. Defaults to an empty, unlabelled room created at
- * {@link DEFAULT_CREATED_AT_MS} — unlabelled because nothing publishes room metadata today, so an
- * empty string is the realistic default rather than a degenerate one.
+ * {@link DEFAULT_CREATED_AT_MS} — unlabelled because no publisher writes a `label` key today (a
+ * session room's metadata is a worktree snapshot), so an unlabelled room is the realistic default
+ * rather than a degenerate one.
  */
 export function aRoom(overrides: RoomOverrides): LiveKitRoomInfo {
   return create(LiveKitRoomInfoSchema, {
