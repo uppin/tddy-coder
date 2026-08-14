@@ -249,6 +249,8 @@ metadata dir — powers the web [Code pane](../../../docs/ft/web/session-code-pa
 - **Process termination**: When **`metadata.pid`** is set and the process is still running on Unix, the daemon terminates it (**SIGTERM**, then **SIGKILL** if needed) before **`remove_dir_all`**. Zombies on Linux are detected so delete can finish even when the parent has not reaped the child.
 - **Metadata gaps**: If **`.session.yaml`** is missing or unreadable, the directory is still removed when present (no PID termination step).
 - **Errors**: Invalid id → `INVALID_ARGUMENT`; missing directory on this daemon → `FAILED_PRECONDITION` (routing); process still running after signals → `FAILED_PRECONDITION`; filesystem removal failure → `INTERNAL` with a generic client message; details are logged server-side.
+- **Worktree removal** applies to `claude-cli` **and `workspace`** sessions (`worktree_removal_applies_to`). It previously covered only `claude-cli`, so a `workspace` session kept both its directory and its `git worktree` registration. `cursor-cli` still leaks the same way — tracked in `docs/dev/TODO.md`.
+- **Split sessions delete their paired workspace session first** on the codebase host; see § Split placement for why "the peer does not have it" is success and everything else refuses.
 
 ## Paths (per mapped OS user)
 
@@ -283,6 +285,48 @@ A "host" is a daemon instance; the selectable set is the connected `tddy-daemon`
 The helper takes injected `cloner` + `peer_lookup` closures for testability; the RPC wires the real cloner (`SpawnClient::clone_repo` when a spawn worker is configured, else `spawner::clone_as_user`, mirroring `AddProjectToHost`) and runs the blocking clone via `spawn_blocking` + `timeout`. Clone failures surface as errors (no masking); `NotFound` is preserved (not flattened to `internal`).
 
 See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md).
+
+## Split placement — the codebase on a different daemon than the agent
+
+`StartSessionRequest.codebase_daemon_instance_id` is a **second, independent host axis**:
+`daemon_instance_id` says where the agent process runs, this says whose filesystem holds the git
+worktree. Empty or self-matching keeps the pre-existing co-located behaviour; naming a different
+eligible daemon makes the session **split**. Feature doc:
+[remote-managed-worktree.md](../../../docs/ft/daemon/remote-managed-worktree.md).
+
+- **`classify_codebase_placement`** (pure, mirroring `classify_peer_route`) returns `CoLocated` or
+  `Split { codebase_instance_id }`, or names the failed precondition. A split requires
+  `managed_codebase` (an agent that kept its native filesystem tools has nothing to proxy) and
+  `session_type == "claude-cli"` (the only agent that can be *prevented* from touching a local
+  filesystem, via `--allowedTools`/`--disallowedTools`). `recipe`, `semantic_index` and `sandbox`
+  are **refused by name** for a split: each resolves a worktree on the daemon running the agent.
+- **The B-side session id is caller-chosen.** A split start generates the workspace session's id and
+  sends it as `requested_session_id` (honoured only for `session_type: "workspace"`, refused with
+  `already_exists` if taken). Without it a forward that times out leaves this daemon unable to name
+  what to tear down. The split forward's deadline is `spawn_worker_request_timeout +
+  PEER_FORWARD_TIMEOUT`, because the peer's own worktree budget (300 s default) exceeds
+  `PEER_FORWARD_TIMEOUT` (30 s) — a plain forward would give up while the peer was still building.
+- **`TDDY_REMOTE_SESSION_ID` carries the B-side id**, not the agent's own: the codebase daemon
+  resolves the worktree from *its* sessions base keyed by that id. The agent also receives a scoped
+  LiveKit join token minted per session — never `livekit.api_secret`.
+- **Teardown is paired.** `DeleteSession` deletes the workspace session on the codebase host first.
+  "The peer does not have it" (`failed_precondition` / `not_found`) is idempotent success; only
+  *unreachable or failed* refuses. The common room is checked to be **connected** before forwarding,
+  because a local "no room" fault returns the same code the peer uses for a missing session.
+- `split-agent-` is a **reserved identity prefix**: discovery refuses to treat such a participant as
+  an eligible daemon, so an agent cannot advertise itself as a host.
+
+### `StreamExecuteTool`
+
+A server-streaming sibling of `ExecuteTool`, carrying `result_json` as ordered `ExecuteToolChunk`
+frames with a `last` marker. It exists because the unary call returns one string, and over LiveKit
+anything above `MAX_CHUNK_FRAME_BYTES` is chunk-framed by the transport, where reassembly is
+best-effort and index-keyed — a lost frame wedges the call with **no error**. `EXEC_TOOL_FRAME_BYTES`
+is `HOST_DOCUMENT_FRAME_BYTES` with one shared envelope headroom and one compile-time assert. A
+stream ending without its `last` frame is an **error** and the partial result is discarded: returning
+it would hand an agent a truncated file that reads as a whole one. Cross-host it rides
+`forward_server_stream_to_peer`. The unary `ExecuteTool` is unchanged and still serves the stdio and
+HTTP paths.
 
 ## Claude Code CLI sessions
 

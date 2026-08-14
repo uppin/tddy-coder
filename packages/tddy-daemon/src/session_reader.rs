@@ -20,6 +20,13 @@ pub struct SessionEntry {
     pub updated_at: String,
     pub livekit_room: String,
     pub previous_session_id: String,
+    /// Daemon holding this session's worktree when it is not this one — a split session
+    /// (docs/ft/daemon/remote-managed-worktree.md). Empty for co-located sessions. Persisted rather
+    /// than stamped at read time, because a split session has two hosts and neither can be recovered
+    /// from which daemon answered the listing.
+    pub codebase_daemon_instance_id: String,
+    /// The paired `workspace` session on that daemon. Empty for co-located sessions.
+    pub codebase_session_id: String,
 }
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
@@ -78,6 +85,8 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
             updated_at: metadata.updated_at,
             livekit_room: metadata.livekit_room.unwrap_or_default(),
             previous_session_id: metadata.previous_session_id.unwrap_or_default(),
+            codebase_daemon_instance_id: metadata.codebase_daemon_instance_id.unwrap_or_default(),
+            codebase_session_id: metadata.codebase_session_id.unwrap_or_default(),
         });
     }
 
@@ -119,6 +128,8 @@ mod tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

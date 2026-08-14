@@ -27,6 +27,22 @@ pub fn is_daemon_managed_worktree(worktree: &Path) -> bool {
         .any(|c| c.as_os_str() == std::ffi::OsStr::new(".worktrees"))
 }
 
+/// Whether a session of this type owns the worktree its `.session.yaml` records, and therefore
+/// whether `DeleteSession` should remove it.
+///
+/// `claude-cli` and `workspace` sessions each get a worktree cut for them alone — a workspace
+/// session *is* its worktree and nothing else, so leaving it behind leaks the only thing the session
+/// was for (see `docs/ft/daemon/remote-managed-worktree.md` § Teardown). A `tool` (tddy-coder)
+/// session records the project's shared checkout instead, and an empty type is a legacy file
+/// predating `session_type`; removing either would delete a tree other sessions depend on.
+///
+/// `cursor-cli` leaks its worktree the same way `workspace` did. Including it here would change
+/// behaviour for sessions split placement never touches, so it is tracked in `docs/dev/TODO.md`
+/// rather than fixed in passing.
+pub fn worktree_removal_applies_to(session_type: &str) -> bool {
+    matches!(session_type, "claude-cli" | "workspace")
+}
+
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]
 fn pid_is_zombie(pid: u32) -> bool {
@@ -123,9 +139,10 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
 
 /// Deletes a session directory. On Unix, terminates a live recorded PID first.
 ///
-/// `projects_dir` is optional but recommended for claude-cli sessions: when provided, the
-/// linked git worktree is removed via `git worktree remove` (git-aware). When absent, the
-/// directory is removed with `std::fs::remove_dir_all` (leaving a dangling git worktree registration).
+/// `projects_dir` is optional but recommended for sessions that own a worktree
+/// ([`worktree_removal_applies_to`]): when provided, the linked git worktree is removed via
+/// `git worktree remove` (git-aware). When absent, the directory is removed with
+/// `std::fs::remove_dir_all` (leaving a dangling git worktree registration).
 pub fn delete_session_directory(
     sessions_base: &Path,
     session_id: &str,
@@ -162,10 +179,10 @@ pub fn delete_session_directory(
         }
     };
 
-    // Extract the claude-cli worktree path before the cfg blocks consume or shadow `metadata`.
-    let claude_cli_worktree = metadata
+    // Extract the session-owned worktree path before the cfg blocks consume or shadow `metadata`.
+    let session_worktree = metadata
         .as_ref()
-        .filter(|m| m.session_type.as_deref() == Some("claude-cli"))
+        .filter(|m| worktree_removal_applies_to(m.session_type.as_deref().unwrap_or_default()))
         .and_then(|m| m.repo_path.clone());
 
     #[cfg(unix)]
@@ -184,8 +201,8 @@ pub fn delete_session_directory(
     #[cfg(not(unix))]
     let _ = metadata;
 
-    // For claude-cli sessions, remove the linked git worktree.
-    if let Some(ref worktree_str) = claude_cli_worktree {
+    // For session types that own their worktree, remove the linked git worktree.
+    if let Some(ref worktree_str) = session_worktree {
         let worktree = PathBuf::from(worktree_str);
         // Attempt git-aware removal when we have a projects_dir and a project_id.
         let removed_git_aware = if let (Some(pd), Some(ref project_id)) = (
@@ -243,7 +260,7 @@ pub fn delete_session_directory(
             if is_daemon_managed_worktree(&worktree) {
                 let _ = std::fs::remove_dir_all(&worktree);
                 log::info!(
-                    "delete_session_directory: removed claude-cli worktree {:?} for {} (remove_dir_all fallback)",
+                    "delete_session_directory: removed session worktree {:?} for {} (remove_dir_all fallback)",
                     worktree,
                     session_id
                 );
@@ -300,6 +317,8 @@ mod tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -430,6 +449,8 @@ mod tests {
             agent: None,
             recipe: None,
             specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 

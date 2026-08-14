@@ -29,6 +29,56 @@ export const createSessionPage = {
   },
 
   // ---------------------------------------------------------------------------
+  // Codebase host — which daemon holds the worktree (docs/ft/daemon/remote-managed-worktree.md)
+  // ---------------------------------------------------------------------------
+
+  /** The "Codebase host" `<select>`. Present only inside an open claude-cli Managed codebase block. */
+  codebaseHostSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect, { timeout: 5000, ...options }),
+
+  /** Choose which daemon's filesystem holds the worktree. `""` selects "same as host". */
+  selectCodebaseHost(daemonInstanceId: string) {
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect).select(daemonInstanceId);
+  },
+
+  /**
+   * The daemon-instance ids offered as codebase hosts, in option order. The leading "Same as host"
+   * option carries the empty value, so it appears here as `""`.
+   */
+  codebaseHostOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .codebaseHostSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The captions rendered for the codebase-host options, in option order. */
+  codebaseHostOptionLabels: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .codebaseHostSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
+
+  /** The selector is not offered — split placement is unavailable in the current form state. */
+  expectNoCodebaseHostSelector() {
+    byTestId(TEST_IDS.createSessionCodebaseHostSelect).should("not.exist");
+  },
+
+  /** Open the "Managed codebase" section, which is where split placement is configured. */
+  enableManagedCodebase() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
+  },
+
+  /** Close the "Managed codebase" section. */
+  disableManagedCodebase() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseToggle).uncheck();
+  },
+
+  /** Switch the form to a Cursor CLI session. */
+  switchToCursorCliSession() {
+    byTestId(TEST_IDS.createSessionTypeCursorCliBtn).click();
+  },
+
+  // ---------------------------------------------------------------------------
   // Core fields
   // ---------------------------------------------------------------------------
 
@@ -76,6 +126,30 @@ export const createSessionPage = {
   selectRecipe(recipe: string) {
     byTestId(TEST_IDS.createSessionRecipeSelect).select(recipe);
   },
+
+  /** The workflow-recipe `<select>` — for asserting it is offered at all. */
+  recipeSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionRecipeSelect, { timeout: 5000, ...options }),
+
+  /** The recipe control is not offered — a recipe needs a repository the session does not have. */
+  expectNoRecipeSelector() {
+    byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
+  },
+
+  /** The "--dangerously-skip-permissions" checkbox — bypasses the agent's permission prompts. */
+  dangerouslySkipPermissionsToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionDangerouslySkipPermissionsToggle, {
+      timeout: 5000,
+      ...options,
+    }),
+
+  /** The "Sandbox" checkbox — jails the agent; resolves a worktree on the session's own daemon. */
+  sandboxToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSandboxToggle, { timeout: 5000, ...options }),
+
+  /** The "Semantic index" checkbox — indexes a worktree on the session's own daemon before launch. */
+  semanticIndexToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionSemanticIndexToggle, { timeout: 5000, ...options }),
 
   /** Switch the form to a Claude CLI session. */
   switchToClaudeCliSession() {

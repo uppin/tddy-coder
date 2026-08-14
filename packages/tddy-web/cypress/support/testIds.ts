@@ -262,6 +262,10 @@ export const TEST_IDS = {
   /** "Semantic index" checkbox inside the Managed codebase section — when on, the daemon indexes the
    * worktree before launch and exposes the SemanticSearch tool. See docs/ft/coder/semantic-index.md. */
   createSessionSemanticIndexToggle: "create-session-semantic-index-toggle",
+  /** "Codebase host" <select> inside the Managed codebase section — which daemon's filesystem holds
+   * the session's git worktree. Empty value means "same as host" (co-located). claude-cli only.
+   * See docs/ft/daemon/remote-managed-worktree.md. */
+  createSessionCodebaseHostSelect: "create-session-codebase-host-select",
   createSessionInitialPromptInput: "create-session-initial-prompt-input",
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
@@ -664,6 +668,14 @@ export const sessionsDrawerItemTooltip = (sessionId: string) =>
 /** `[data-testid="sessions-drawer-item-host-<sessionId>"]` — owning-host badge on cross-host rows */
 export const sessionsDrawerItemHost = (sessionId: string) =>
   `sessions-drawer-item-host-${sessionId}`;
+
+/**
+ * `[data-testid="sessions-drawer-item-codebase-host-<sessionId>"]` — codebase-host badge on a split
+ * session, whose worktree lives on a different daemon than the one running its agent. Absent for
+ * co-located sessions. See docs/ft/daemon/remote-managed-worktree.md.
+ */
+export const sessionsDrawerItemCodebaseHost = (sessionId: string) =>
+  `sessions-drawer-item-codebase-host-${sessionId}`;
 
 /** `[data-testid="sessions-detail-resume-<sessionId>"]` — Resume button in detail pane */
 export const sessionsDetailResumeBtn = (sessionId: string) =>

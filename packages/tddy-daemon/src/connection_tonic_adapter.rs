@@ -36,11 +36,11 @@ use tddy_service::proto::connection::{
     CalculateWorktreeSizeResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
-    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
-    HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest,
+    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
+    GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetTerminalHistoryRequest, HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse,
+    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
     ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
     ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
@@ -613,6 +613,26 @@ where
         .await
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    /// Server streaming: a tool result past the unary message-size ceiling.
+    type StreamExecuteToolStream =
+        Pin<Box<dyn Stream<Item = Result<ExecuteToolChunk, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_execute_tool(
+        &self,
+        request: tonic::Request<ExecuteToolRequest>,
+    ) -> Result<tonic::Response<Self::StreamExecuteToolStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_execute_tool(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 
     async fn list_exec_tools(

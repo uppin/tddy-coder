@@ -232,6 +232,7 @@ impl Task for BackendInvokeTask {
                         "remote_livekit_url",
                         "remote_livekit_room",
                         "remote_server_identity",
+                        "remote_livekit_token",
                     ];
                     let mut remote_map: HashMap<String, String> = HashMap::new();
                     for key in REMOTE_CTX_KEYS {

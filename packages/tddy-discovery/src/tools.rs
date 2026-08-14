@@ -229,6 +229,7 @@ mod tests {
             livekit_url: None,
             livekit_room: None,
             server_identity: None,
+            livekit_token: None,
         }
     }
 

@@ -79,8 +79,9 @@ use livekit::DisconnectReason;
 use prost::Message;
 use serde::Deserialize;
 use tddy_service::proto::connection::{
-    AddProjectToHostRequest, AddProjectToHostResponse, DeleteStagedAttachmentRequest,
-    DeleteStagedAttachmentResponse, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
+    AddProjectToHostRequest, AddProjectToHostResponse, DeleteSessionRequest, DeleteSessionResponse,
+    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, ExecuteToolChunk,
+    ExecuteToolRequest, HostDocumentChunk, ListProjectsRequest, ListProjectsResponse,
     ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, ProjectEntry as ProtoProjectEntry,
     ReadHostDocumentRequest, ReadHostDocumentResponse, SetProjectDefaultBranchRequest,
     SetProjectDefaultBranchResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
@@ -333,6 +334,14 @@ fn eligible_daemon_from_participant_fields(
     // A coder/session participant joins with a `server…` or `daemon-<uuid>` identity; it is never a
     // host daemon even if its metadata happens to look like an advertisement.
     if id_trim == "server" || id_trim.starts_with("server") || id_trim.starts_with("daemon-") {
+        return None;
+    }
+    // A split session's agent holds a join token granting `can_update_own_metadata`, and this
+    // function's only evidence is self-declared metadata — so an agent running model-authored code
+    // could otherwise publish a daemon advertisement and insert a host of its choosing into every
+    // daemon's eligible list and the web's host picker. Its identity prefix is reserved for exactly
+    // this refusal (`split_session::SPLIT_AGENT_IDENTITY_PREFIX`).
+    if id_trim.starts_with(crate::split_session::SPLIT_AGENT_IDENTITY_PREFIX) {
         return None;
     }
     let adv = parse_daemon_advertisement_json(metadata.trim()).ok()?;
@@ -594,8 +603,13 @@ pub fn spawn_common_room_discovery_task(
     });
 }
 
-/// Validates `livekit` + `common_room` URL/key/secret strings for discovery.
-fn livekit_common_room_connect_strings(
+/// Validates `livekit` + `common_room` URL/key/secret strings for discovery, returning
+/// `(room_name, url, api_key, api_secret)`.
+///
+/// Also the source of truth for minting a **scoped** join token for a process this daemon spawns
+/// into the same room (a split session's agent), so the room it is granted is exactly the room this
+/// daemon's peer routing rides.
+pub(crate) fn livekit_common_room_connect_strings(
     config: &DaemonConfig,
 ) -> anyhow::Result<(String, String, String, String)> {
     let livekit = config
@@ -1151,13 +1165,36 @@ pub async fn forward_to_peer(
     method: &str,
     body: Vec<u8>,
 ) -> Result<Vec<u8>, tddy_rpc::Status> {
-    let client = peer_client(room_slot, peer_id, service, method, "an RPC").await?;
-    tokio::time::timeout(
+    forward_to_peer_within(
+        room_slot,
+        peer_id,
+        service,
+        method,
+        body,
         PEER_FORWARD_TIMEOUT,
-        client.call_unary(service, method, body),
     )
     .await
-    .map_err(|_| peer_forward_deadline_status(service, method, peer_id, PEER_FORWARD_TIMEOUT))?
+}
+
+/// [`forward_to_peer`] with an explicit deadline, for the few calls whose peer-side work is bounded
+/// by something other than a round trip.
+///
+/// [`PEER_FORWARD_TIMEOUT`] is sized for a peer that answers promptly or not at all. A call the peer
+/// spends minutes serving — cloning a repository, cutting a worktree — needs a deadline drawn from
+/// *that* budget instead, or the caller gives up while the peer is still building and both sides end
+/// up believing something different about what exists.
+pub async fn forward_to_peer_within(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_id: &str,
+    service: &str,
+    method: &str,
+    body: Vec<u8>,
+    deadline: Duration,
+) -> Result<Vec<u8>, tddy_rpc::Status> {
+    let client = peer_client(room_slot, peer_id, service, method, "an RPC").await?;
+    tokio::time::timeout(deadline, client.call_unary(service, method, body))
+        .await
+        .map_err(|_| peer_forward_deadline_status(service, method, peer_id, deadline))?
 }
 
 /// Forward a **server-streaming** RPC to a peer daemon, relaying each frame decoded by
@@ -1238,13 +1275,33 @@ pub async fn forward_start_session_via_livekit(
     peer_instance_id: &str,
     request: &StartSessionRequest,
 ) -> Result<StartSessionResponse, tddy_rpc::Status> {
+    forward_start_session_via_livekit_within(
+        room_slot,
+        peer_instance_id,
+        request,
+        PEER_FORWARD_TIMEOUT,
+    )
+    .await
+}
+
+/// [`forward_start_session_via_livekit`] with an explicit deadline.
+///
+/// A start the peer serves by cloning a project and cutting a worktree outlasts the ordinary forward
+/// deadline; see [`forward_to_peer_within`].
+pub async fn forward_start_session_via_livekit_within(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &StartSessionRequest,
+    deadline: Duration,
+) -> Result<StartSessionResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
+    let out = forward_to_peer_within(
         room_slot,
         peer_instance_id,
         "connection.ConnectionService",
         "StartSession",
         body,
+        deadline,
     )
     .await?;
     StartSessionResponse::decode(out.as_slice())
@@ -1273,6 +1330,57 @@ pub async fn forward_stream_start_session_via_livekit(
         |bytes| {
             StartSessionEvent::decode(bytes.as_slice()).map_err(|e| {
                 tddy_rpc::Status::internal(format!("decode StartSessionEvent from peer: {e}"))
+            })
+        },
+    )
+    .await
+}
+
+/// Forward **DeleteSession** to another daemon in the common room via LiveKit data-channel RPC.
+///
+/// `DeleteSessionRequest` carries no `daemon_instance_id`, so the peer is addressed explicitly. Used
+/// to delete the paired `workspace` session that holds a split session's worktree — including the
+/// teardown of a split start that failed after the peer had already created it.
+pub async fn forward_delete_session_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &DeleteSessionRequest,
+) -> Result<DeleteSessionResponse, tddy_rpc::Status> {
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "DeleteSession",
+        request.encode_to_vec(),
+    )
+    .await?;
+    DeleteSessionResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode DeleteSessionResponse: {e}")))
+}
+
+/// Forward **StreamExecuteTool** to another daemon in the common room, yielding the peer's result
+/// frames.
+///
+/// Thin decode wrapper around [`forward_server_stream_to_peer`]: a frame that fails to decode — or a
+/// stream that stops without its `last` frame — terminates the relay with a status, so a caller
+/// reassembling a tool result never mistakes a truncated one for the whole answer.
+pub async fn forward_stream_execute_tool_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &ExecuteToolRequest,
+) -> Result<
+    tokio::sync::mpsc::UnboundedReceiver<Result<ExecuteToolChunk, tddy_rpc::Status>>,
+    tddy_rpc::Status,
+> {
+    forward_server_stream_to_peer(
+        room_slot,
+        peer_instance_id,
+        "connection.ConnectionService",
+        "StreamExecuteTool",
+        request.encode_to_vec(),
+        |bytes| {
+            ExecuteToolChunk::decode(bytes.as_slice()).map_err(|e| {
+                tddy_rpc::Status::internal(format!("decode ExecuteToolChunk from peer: {e}"))
             })
         },
     )
@@ -1506,6 +1614,27 @@ mod tests {
         assert!(
             got.is_none(),
             "a coder-role participant is not an eligible daemon"
+        );
+    }
+
+    #[test]
+    fn eligible_daemon_rejects_a_split_session_agent_participant() {
+        // Given a split session's agent, whose scoped join token lets it publish its own metadata:
+        // an agent running model-authored code could otherwise advertise itself as a daemon and put
+        // an arbitrary host into every peer's eligible list and the web's host picker
+        let meta = r#"{"instance_id":"attacker-host","label":"Build server"}"#;
+
+        // When
+        let got = eligible_daemon_from_participant_fields(
+            "split-agent-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
+            meta,
+            "local-host",
+        );
+
+        // Then
+        assert!(
+            got.is_none(),
+            "a split session's agent is not an eligible daemon, whatever metadata it publishes"
         );
     }
 

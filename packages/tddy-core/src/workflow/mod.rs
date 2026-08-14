@@ -13,7 +13,7 @@ use std::collections::HashMap;
 /// (including the partial-config case).
 ///
 /// Optional keys (`remote_daemon_instance_id`, `remote_livekit_url`, `remote_livekit_room`,
-/// `remote_server_identity`) are captured when present.
+/// `remote_server_identity`, `remote_livekit_token`) are captured when present.
 pub fn extract_remote_env_from_ctx(ctx: &HashMap<String, String>) -> Option<RemoteToolEnv> {
     let daemon_url = ctx.get("remote_daemon_url")?.clone();
     let session_id = ctx.get("remote_session_id")?.clone();
@@ -26,6 +26,7 @@ pub fn extract_remote_env_from_ctx(ctx: &HashMap<String, String>) -> Option<Remo
         livekit_url: ctx.get("remote_livekit_url").cloned(),
         livekit_room: ctx.get("remote_livekit_room").cloned(),
         server_identity: ctx.get("remote_server_identity").cloned(),
+        livekit_token: ctx.get("remote_livekit_token").cloned(),
     })
 }
 

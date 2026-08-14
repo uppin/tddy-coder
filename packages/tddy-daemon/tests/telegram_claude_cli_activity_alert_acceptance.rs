@@ -70,6 +70,8 @@ fn write_claude_cli_session(
         agent: None,
         recipe: None,
         specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
     };
     write_session_metadata(session_dir, &meta).unwrap();
 }
