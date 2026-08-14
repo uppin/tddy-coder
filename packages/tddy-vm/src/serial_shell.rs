@@ -333,7 +333,11 @@ fn next_exit_marker() -> String {
 
 /// Strip the escape sequences a terminal would have consumed, and the trailing carriage
 /// return of a CRLF line ending, leaving the text a human would have seen.
-fn clean_line(raw: &str) -> String {
+///
+/// `pub(crate)` for [`crate::cloud_init::boot_log_line`], which owes a bake's durable boot
+/// log the same treatment for the same reason: text a tool can grep, not a terminal
+/// recording only a terminal can replay.
+pub(crate) fn clean_line(raw: &str) -> String {
     // A serial console carries carriage returns as framing, not content: a guest terminal
     // emits `\r\r\n` line endings and prefixes a redrawn line with a bare `\r`. Splitting on
     // `\n` therefore leaves CRs on either end of the text, none of which belong to it.

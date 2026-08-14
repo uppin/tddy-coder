@@ -65,17 +65,37 @@ fn run_cloud_init_cli(
 ) -> (tempfile::TempDir, PathBuf, PathBuf) {
     let dir = tempdir().unwrap();
     let library_root = dir.path().join("library");
-    let user_data_path = dir.path().join("user-data.yaml");
+    run_cloud_init_cli_in(
+        &library_root,
+        name,
+        &["--base-image", &base_image.display().to_string()],
+        ssh_host_port,
+    );
+
+    let prepared_base_dir = library_root.join("images").join("02-prepared-base");
+    (dir, library_root, prepared_base_dir)
+}
+
+/// One `cloud-init` invocation against an explicit library root, with `layer_parent` naming
+/// the new layer's parent — `["--base-image", <path>]` to start a chain from a pristine
+/// cloud image, `["--parent-layer", <name>]` to continue an existing one.
+fn run_cloud_init_cli_in(
+    library_root: &std::path::Path,
+    name: &str,
+    layer_parent: &[&str; 2],
+    ssh_host_port: &str,
+) {
+    let user_data_path = library_root.with_file_name(format!("{name}-user-data.yaml"));
+    std::fs::create_dir_all(user_data_path.parent().unwrap()).unwrap();
     std::fs::write(&user_data_path, a_minimal_user_data_yaml()).unwrap();
 
     let mut cmd = tddy_vm_build_bin();
     cmd.arg("cloud-init")
         .arg("--name")
         .arg(name)
-        .arg("--base-image")
-        .arg(base_image)
+        .args(layer_parent)
         .arg("--library-root")
-        .arg(&library_root)
+        .arg(library_root)
         .arg("--user-data")
         .arg(&user_data_path)
         .arg("--disk-size")
@@ -89,9 +109,28 @@ fn run_cloud_init_cli(
         .arg("--timeout-secs")
         .arg("180");
     cmd.assert().success();
+}
 
-    let prepared_base_dir = library_root.join("images").join("02-prepared-base");
-    (dir, library_root, prepared_base_dir)
+/// The backing reference `qemu-img info` reports as recorded in `image` — without the
+/// ` (actual path: …)` annotation qemu-img adds for a relative one, which describes where the
+/// file sits today rather than what the image records.
+fn backing_file_of(image: &std::path::Path) -> String {
+    let output = std::process::Command::new("qemu-img")
+        .arg("info")
+        .arg(image)
+        .output()
+        .expect("qemu-img info must run");
+    let info = String::from_utf8_lossy(&output.stdout);
+    let reported = info
+        .lines()
+        .find_map(|line| line.strip_prefix("backing file: "))
+        .unwrap_or_else(|| panic!("qemu-img info reported no backing file:\n{info}"));
+    reported
+        .split(" (actual path:")
+        .next()
+        .unwrap_or(reported)
+        .trim()
+        .to_string()
 }
 
 #[test]
@@ -126,6 +165,46 @@ fn the_cloud_init_subcommand_produces_a_valid_chained_qcow2_pair_in_the_prepared
     );
     let magic = std::fs::read(&overlay_path).expect("overlay must be readable");
     assert_eq!(&magic[..4], b"QFI\xfb", "overlay must be a qcow2 image");
+}
+
+#[test]
+#[ignore = "production test: boots two real QEMU VMs to bake two chained layers, ~2-6 min; \
+            requires TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
+#[serial(cloud_init_qemu_vm)]
+fn the_cloud_init_subcommand_chains_a_second_layer_onto_an_already_prepared_one() {
+    let Some(base_image) = configured_base_image() else {
+        eprintln!(
+            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
+        );
+        return;
+    };
+
+    // Given a first layer already baked from the configured base image
+    let dir = tempdir().unwrap();
+    let library_root = dir.path().join("library");
+    run_cloud_init_cli_in(
+        &library_root,
+        "cli-chain-parent",
+        &["--base-image", &base_image.display().to_string()],
+        "2301",
+    );
+
+    // When a second layer is baked naming that layer as its parent
+    run_cloud_init_cli_in(
+        &library_root,
+        "cli-chain-child",
+        &["--parent-layer", "cli-chain-parent"],
+        "2302",
+    );
+
+    // Then the child is a delta over the parent layer, referenced as the sibling it is —
+    // the case that used to be rejected outright, because importing a delta into
+    // images/01-base/ would strand the relative reference it resolves its own parent through
+    let child = library_root
+        .join("images")
+        .join("02-prepared-base")
+        .join("cli-chain-child.qcow2");
+    assert_eq!(backing_file_of(&child), "cli-chain-parent.qcow2");
 }
 
 #[test]

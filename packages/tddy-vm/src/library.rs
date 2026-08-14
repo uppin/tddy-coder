@@ -16,13 +16,17 @@
 //! ```
 //!
 //! Image chaining reuses the qcow2 backing-file approach already implemented in
-//! [`crate::cloud_init`] (`base_convert_argv`, `overlay_create_argv`), but per-VM
+//! [`crate::cloud_init`] (`relative_backing_path`, `overlay_create_argv`), but per-VM
 //! overlays use an **absolute** backing path ([`vm_overlay_create_argv`]) since they
 //! live in `vm/<name>/`, separate from the read-only `images/02-prepared-base/` — unlike
-//! cloud-init's co-located pair, which uses a relative basename so it can be relocated
-//! as a unit.
+//! the layers under `images/`, which reference their parents relatively so the whole
+//! library relocates as a unit. A per-VM overlay is disposable and never relocated, so it
+//! gains nothing from that discipline.
 
 use crate::cloud_init::run_qemu_img;
+use crate::image_import::{
+    files_have_identical_content, normalise_to_qcow2, supplied_image_format, SuppliedImageFormat,
+};
 use crate::vm::VmError;
 use crate::vm_manifest::VmManifest;
 use std::path::{Path, PathBuf};
@@ -81,6 +85,18 @@ impl VmLibrary {
         self.vms_dir().join(name)
     }
 
+    /// `<root>/vm/<name>/seed/nocloud` — the `user-data`/`meta-data` pair packed into
+    /// [`Self::vm_seed_iso_path`], laid out as a bake's scratch seed is.
+    pub fn vm_seed_dir(&self, name: &str) -> PathBuf {
+        self.vm_dir(name).join("seed").join("nocloud")
+    }
+
+    /// `<root>/vm/<name>/<name>-seed.iso` — the NoCloud seed a boot of this VM attaches as
+    /// a cdrom, carrying the VM's own public key into the guest.
+    pub fn vm_seed_iso_path(&self, name: &str) -> PathBuf {
+        self.vm_dir(name).join(format!("{name}-seed.iso"))
+    }
+
     /// Create the full library tree (`images/01-base`, `images/02-prepared-base`,
     /// `vm/`), if not already present.
     pub fn init(&self) -> Result<(), VmError> {
@@ -96,28 +112,60 @@ impl VmLibrary {
         Ok(())
     }
 
-    /// Copy `src` into `images/01-base/<name>.qcow2` and lock it read-only (chmod
-    /// `0o444` via [`set_readonly_file`]). Removes any existing file at the destination
-    /// first (unlock-before-overwrite), so re-importing the same name replaces it.
+    /// Place `src` into `images/01-base/<name>.qcow2` and lock it read-only (chmod `0o444`
+    /// via [`set_readonly_file`]).
+    ///
+    /// Idempotent, and never destructive. An absent destination is written; a destination that
+    /// already holds exactly this image is left alone; a destination that holds a *different*
+    /// image is an **error** naming both files. qcow2 records no identity of its parent — only
+    /// a path — so replacing a base changes what every layer already chained onto it sits on,
+    /// and neither `qemu-img` nor a boot would report anything wrong. Re-importing has to be
+    /// safe to repeat (every bake starts with one) without ever being a silent swap.
+    ///
+    /// A non-qcow2 source is normalised on the way in
+    /// ([`crate::image_import::normalise_to_qcow2`]): every layer above `01-base` is created
+    /// with `-F qcow2`, so a raw or VMDK base would otherwise fail at the next layer with a
+    /// diagnostic about a file this import already accepted.
+    ///
+    /// `src` must be a whole image. A qcow2 that names a backing file is **rejected**, not
+    /// copied: copying moves the referencing image away from the parent its relative
+    /// reference resolves against, which strands the copy — a file that looks imported,
+    /// passes an `exists()` check, and cannot be opened. `01-base` holds the one image in
+    /// the library that has no parent, and this is where that is enforced.
     pub fn import_base_image(&self, src: &Path, name: &str) -> Result<PathBuf, VmError> {
-        let dest = self.base_images_dir().join(format!("{name}.qcow2"));
-        if dest.exists() {
-            std::fs::remove_file(&dest).map_err(|e| {
-                VmError::BuildFailed(format!(
-                    "failed to remove existing base image {}: {e}",
-                    dest.display()
-                ))
-            })?;
+        if names_a_backing_file(&read_image_header(src)?) {
+            return Err(VmError::BuildFailed(format!(
+                "{} is a qcow2 delta with a backing file; import the whole image it \
+                 ultimately derives from instead",
+                src.display()
+            )));
         }
-        std::fs::copy(src, &dest).map_err(|e| {
-            VmError::BuildFailed(format!(
-                "failed to copy base image {} to {}: {e}",
-                src.display(),
-                dest.display()
-            ))
-        })?;
-        set_readonly_file(&dest)?;
-        Ok(dest)
+
+        let dest = self.base_images_dir().join(format!("{name}.qcow2"));
+        let staged = self.stage_base_image(src, &dest)?;
+        let placed = place_base_image(&staged, src, &dest);
+        if staged != src {
+            let _ = std::fs::remove_file(&staged);
+        }
+        placed.map(|()| dest)
+    }
+
+    /// The qcow2 this import would publish: `src` itself when it already is one, or a
+    /// normalised temporary copy of it beside `dest` when it is not.
+    ///
+    /// Staging the conversion means the comparison in [`place_base_image`] is always against
+    /// the bytes that would actually land in `01-base`, so a re-import of an unchanged raw
+    /// source is the no-op it should be rather than a reported change.
+    fn stage_base_image(&self, src: &Path, dest: &Path) -> Result<PathBuf, VmError> {
+        match supplied_image_format(src)? {
+            SuppliedImageFormat::Qcow2 => Ok(src.to_path_buf()),
+            SuppliedImageFormat::Other(format) => {
+                let staged = dest.with_extension("qcow2.importing");
+                let _ = std::fs::remove_file(&staged);
+                normalise_to_qcow2(src, &format, &staged)?;
+                Ok(staged)
+            }
+        }
     }
 
     /// Write `manifest` to `vm/<name>/manifest.yaml`, creating the directory if needed.
@@ -196,6 +244,11 @@ impl VmLibrary {
     /// ambient agent happens to hold. Any key paths on the caller's `manifest` are
     /// superseded by the generated pair.
     ///
+    /// That key only opens the guest because a NoCloud seed carrying it is written
+    /// alongside ([`crate::cloud_init::write_vm_login_seed_iso`]) for the boot to attach:
+    /// the prepared base authorized the key its *own* bake was seeded with, and nothing
+    /// between that bake and this VM re-renders `{{SSH_PUBLIC_KEY}}` into the chain.
+    ///
     /// Requires `manifest.prepared_base` to be `Some` — this is the prepared-base-driven
     /// creation path; manifests that instead set `image_path` reference an
     /// already-existing, library-unmanaged image and are persisted via
@@ -216,9 +269,26 @@ impl VmLibrary {
 
         let args =
             vm_overlay_create_argv(&prepared_base_path, &overlay_path, &manifest.run.disk_size);
-        run_qemu_img(&args).await.map_err(VmError::BuildFailed)?;
+        run_qemu_img(None, &args)
+            .await
+            .map_err(VmError::BuildFailed)?;
 
         let keys = generate_vm_ssh_keypair(&vm_dir, &manifest.name)?;
+        let public_key = std::fs::read_to_string(&keys.public_key_path).map_err(|e| {
+            VmError::BuildFailed(format!(
+                "failed to read the generated public key {}: {e}",
+                keys.public_key_path.display()
+            ))
+        })?;
+        crate::cloud_init::write_vm_login_seed_iso(
+            &self.vm_seed_dir(&manifest.name),
+            &self.vm_seed_iso_path(&manifest.name),
+            &manifest.name,
+            &manifest.login.username,
+            &public_key,
+        )
+        .await?;
+
         let mut manifest = manifest.clone();
         manifest.login.ssh_private_key = Some(keys.private_key_path.display().to_string());
         manifest.login.ssh_public_key = Some(keys.public_key_path.display().to_string());
@@ -226,6 +296,75 @@ impl VmLibrary {
         self.write_manifest(&manifest)?;
         Ok(overlay_path)
     }
+}
+
+/// Publish `staged` as the base image at `dest`, or explain why it must not be.
+///
+/// `source` is the file the caller actually asked to import — the same as `staged` unless it
+/// needed normalising — and is what the refusal names, since that is the path the caller knows.
+fn place_base_image(staged: &Path, source: &Path, dest: &Path) -> Result<(), VmError> {
+    if dest.exists() {
+        if files_have_identical_content(staged, dest)? {
+            return Ok(());
+        }
+        return Err(VmError::BuildFailed(format!(
+            "{} already holds a different image than {}; importing over it would invalidate \
+             every layer chained onto it, because qcow2 records no identity of its parent and \
+             nothing would detect the change. Import under a different name, or remove that \
+             base and rebuild the layers above it.",
+            dest.display(),
+            source.display()
+        )));
+    }
+
+    std::fs::copy(staged, dest).map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to copy base image {} to {}: {e}",
+            source.display(),
+            dest.display()
+        ))
+    })?;
+    set_readonly_file(dest)
+}
+
+/// The qcow2 header prefix [`names_a_backing_file`] reads: magic (4 bytes), version (4),
+/// `backing_file_offset` (8).
+const QCOW2_HEADER_PREFIX_LEN: u64 = 16;
+
+/// The first four bytes of every qcow2 image.
+const QCOW2_MAGIC: &[u8] = b"QFI\xfb";
+
+/// Read the first [`QCOW2_HEADER_PREFIX_LEN`] bytes of `src`, or fewer if that is all there
+/// is — a file too short to hold a qcow2 header is simply not one.
+fn read_image_header(src: &Path) -> Result<Vec<u8>, VmError> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(src)
+        .map_err(|e| VmError::BuildFailed(format!("failed to open {}: {e}", src.display())))?;
+    let mut header = Vec::new();
+    file.take(QCOW2_HEADER_PREFIX_LEN)
+        .read_to_end(&mut header)
+        .map_err(|e| VmError::BuildFailed(format!("failed to read {}: {e}", src.display())))?;
+    Ok(header)
+}
+
+/// Whether `header` is a qcow2 that names a backing file — the head of a chain rather than a
+/// whole image.
+///
+/// Reads the format's own fields (magic at 0, big-endian `backing_file_offset` at 8) instead
+/// of shelling out to `qemu-img info`: the question is what the bytes say, and the answer
+/// must not depend on an external process being able to open the file.
+fn names_a_backing_file(header: &[u8]) -> bool {
+    let Some(prefix) = header.get(..QCOW2_HEADER_PREFIX_LEN as usize) else {
+        return false;
+    };
+    if &prefix[..QCOW2_MAGIC.len()] != QCOW2_MAGIC {
+        return false;
+    }
+    prefix[8..]
+        .iter()
+        .fold(0u64, |acc, b| (acc << 8) | u64::from(*b))
+        != 0
 }
 
 /// The per-VM SSH keypair written alongside a VM's manifest and overlay.
@@ -308,14 +447,37 @@ pub fn set_readonly_file(_path: &Path) -> Result<(), VmError> {
     Ok(())
 }
 
+/// Whether `path` is a **finished** library layer: present, and locked read-only by
+/// [`set_readonly_file`].
+///
+/// The distinction matters because an overlay exists from the first seconds of a bake that
+/// then runs for hours, and only an in-process failure removes it again — a Ctrl-C, a panic
+/// or the OOM killer leaves a half-provisioned file at the layer's published path. The seal
+/// is applied once the guest has signalled completion, so it is the only mark on disk that
+/// says the bake finished.
+#[cfg(unix)]
+pub fn is_sealed_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o222 == 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+pub fn is_sealed_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().readonly())
+        .unwrap_or(false)
+}
+
 /// Build `qemu-img create -f qcow2 -F qcow2 -b <prepared_base_abs> <overlay> <disk_size>`
 /// using an **absolute** backing-file path.
 ///
-/// Contrast [`crate::cloud_init::overlay_create_argv`], which uses a **relative**
-/// basename so its base+overlay pair can be relocated together — that invariant only
-/// holds because cloud-init co-locates the pair in the same directory. Per-VM overlays
-/// instead live in `vm/<name>/`, separate from the read-only `images/02-prepared-base/`
-/// directory their prepared base lives in, so the backing reference must be absolute.
+/// Contrast [`crate::cloud_init::overlay_create_argv`], which uses a path **relative** to
+/// the overlay's own directory ([`crate::cloud_init::relative_backing_path`]) so a library
+/// of layers relocates as a unit. Per-VM overlays are disposable and never relocated — they
+/// are rebuilt from their prepared base whenever a VM is created — so they pay none of that
+/// discipline's cost and name their parent absolutely.
 pub fn vm_overlay_create_argv(
     prepared_base_abs: &Path,
     overlay: &Path,

@@ -543,8 +543,23 @@ pub struct BootedWithConsole {
 /// When the VM has a per-VM private key, it is offered with `-i` and `IdentitiesOnly=yes`
 /// so the ambient agent's keys cannot be tried instead and exhaust `MaxAuthTries`.
 pub fn ssh_opts(vm: &RunningVm) -> Vec<String> {
+    client_opts(vm, "-p")
+}
+
+/// Build the `scp` argument list for copying into a guest.
+///
+/// Identical to [`ssh_opts`] except for the port flag: `scp` spells it `-P`, and reads a
+/// lowercase `-p` as "preserve modification times" — which would leave the port number
+/// sitting in the argv as another source path. That one-letter difference is the whole
+/// reason this is a separate function rather than a reuse of [`ssh_opts`].
+pub fn scp_opts(vm: &RunningVm) -> Vec<String> {
+    client_opts(vm, "-P")
+}
+
+/// The options `ssh` and `scp` share, with the port introduced by the caller's flag.
+fn client_opts(vm: &RunningVm, port_flag: &str) -> Vec<String> {
     let mut opts = vec![
-        "-p".to_string(),
+        port_flag.to_string(),
         vm.ssh_host_port.to_string(),
         "-o".to_string(),
         "StrictHostKeyChecking=no".to_string(),
@@ -571,6 +586,49 @@ pub fn ssh_opts(vm: &RunningVm) -> Vec<String> {
 /// The `<user>@127.0.0.1` destination SSH connects to, as the VM's login policy names it.
 pub fn ssh_destination(vm: &RunningVm) -> String {
     format!("{}@127.0.0.1", vm.login.username)
+}
+
+/// Build the full `scp` argv copying every path in `local_paths` to `remote_dest` in the
+/// guest.
+///
+/// All sources share one invocation: scp pays a full SSH connection and key exchange per
+/// call, and a supervised host needs several binaries staged at once.
+pub fn scp_to_guest_argv(
+    vm: &RunningVm,
+    local_paths: &[PathBuf],
+    remote_dest: &str,
+) -> Vec<String> {
+    let mut argv = scp_opts(vm);
+    argv.extend(local_paths.iter().map(|p| p.display().to_string()));
+    argv.push(format!("{}:{remote_dest}", ssh_destination(vm)));
+    argv
+}
+
+/// Copy `local_paths` into `remote_dest` in the guest over the forwarded SSH port.
+///
+/// Used instead of a 9p share because the guest under test runs Debian's stock `-cloud`
+/// kernel, which ships no 9p modules at all — and swapping it for the generic flavour
+/// would diverge the kernel under test from the one a real host runs.
+pub async fn scp_to_guest(
+    vm: &RunningVm,
+    local_paths: &[PathBuf],
+    remote_dest: &str,
+) -> Result<(), VmError> {
+    let argv = scp_to_guest_argv(vm, local_paths, remote_dest);
+    let output = tokio::process::Command::new("scp")
+        .args(&argv)
+        .output()
+        .await
+        .map_err(|e| VmError::DeployFailed(format!("scp spawn error: {e}")))?;
+
+    if !output.status.success() {
+        return Err(VmError::DeployFailed(format!(
+            "scp to {remote_dest} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -620,9 +678,10 @@ impl Vm for QemuVm {
 
     /// Run `command` inside the guest via SSH and return its output and exit code.
     ///
-    /// Both stdout and stderr are captured and concatenated into `VerifyResult::output`.
-    /// A non-zero exit code sets `success = false` but does **not** return `Err` — the
-    /// caller decides whether to treat verification failure as fatal.
+    /// Stdout and stderr are captured **separately**, so a caller can assert on what the
+    /// command answered without sshd's own chatter in the same string. A non-zero exit code
+    /// sets `success = false` but does **not** return `Err` — the caller decides whether to
+    /// treat verification failure as fatal.
     async fn verify(&self, vm: &RunningVm, command: &str) -> Result<VerifyResult, VmError> {
         let output = tokio::process::Command::new("ssh")
             .args(ssh_opts(vm))
@@ -632,14 +691,10 @@ impl Vm for QemuVm {
             .await
             .map_err(|e| VmError::VerifyFailed(format!("ssh spawn error: {e}")))?;
 
-        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !output.stderr.is_empty() {
-            text.push_str(&String::from_utf8_lossy(&output.stderr));
-        }
-
         Ok(VerifyResult {
             success: output.status.success(),
-            output: text,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             exit_code: output.status.code().unwrap_or(-1),
         })
     }

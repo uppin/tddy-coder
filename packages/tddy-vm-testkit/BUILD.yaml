@@ -1,0 +1,12 @@
+schema_version: 1
+targets:
+  - id: "tddy-vm-testkit:lib"
+    name: "tddy-vm-testkit"
+    config:
+      type: rust_library
+      package: tddy-vm-testkit
+      deps:
+        - "tddy-vm:lib"
+      srcs:
+        - "packages/tddy-vm-testkit/src/**/*.rs"
+        - "packages/tddy-vm-testkit/Cargo.toml"

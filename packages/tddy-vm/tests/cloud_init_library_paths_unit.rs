@@ -1,6 +1,6 @@
 //! Unit tests for the cloud-init → library path-mapping helper
-//! (`tddy_vm::cloud_init::cloud_init_library_paths`) — routes cloud-init build outputs
-//! (downloaded input base, flattened base, provisioned overlay) into the correct
+//! (`tddy_vm::cloud_init::cloud_init_library_paths`) — routes a cloud-init build's input
+//! (the imported base) and its one output (the provisioned delta overlay) into the correct
 //! library directories instead of a bare caller-chosen `--output-dir`.
 //! Fails until `cloud_init_library_paths` is implemented.
 
@@ -26,18 +26,15 @@ fn routes_the_downloaded_input_base_into_01_base_under_the_base_image_name() {
 }
 
 #[test]
-fn routes_the_flattened_base_and_provisioned_overlay_co_located_into_02_prepared_base() {
+fn routes_the_provisioned_overlay_into_02_prepared_base_under_the_derived_build_name() {
     // Given the same library and names as above
     let library = VmLibrary::new(PathBuf::from("/data/.tddy"));
+
+    // When resolving the cloud-init library paths
     let paths = cloud_init_library_paths(&library, "debian-12", "debian-12-nodejs");
 
-    // Then both halves of the chained pair land in the same 02-prepared-base
-    // directory, preserving the relative-backing-file co-location invariant that
-    // `overlay_create_argv` depends on
-    assert_eq!(
-        paths.prepared_base_output,
-        PathBuf::from("/data/.tddy/images/02-prepared-base/debian-12-nodejs-base.qcow2")
-    );
+    // Then the delta lands in 02-prepared-base named after the derived build — one image,
+    // chained onto the 01-base import above rather than carrying a copy of it
     assert_eq!(
         paths.prepared_overlay_output,
         PathBuf::from("/data/.tddy/images/02-prepared-base/debian-12-nodejs.qcow2")

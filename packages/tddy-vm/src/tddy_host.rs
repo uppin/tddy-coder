@@ -17,9 +17,9 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::cloud_init::{
-    build_cloud_init_image, cloud_init_library_paths, promote_prepared_base_pair,
-    CloudInitBuildOptions, CloudInitLibraryPaths, CloudInitUser, CloudInitUserData,
-    CloudInitWriteFile, IsoTool, NinePShare,
+    build_cloud_init_image, cloud_init_library_paths, reset_cloud_init_and_reboot,
+    CloudInitBuildOptions, CloudInitUser, CloudInitUserData, CloudInitWriteFile, IsoTool,
+    NinePShare,
 };
 use crate::library::VmLibrary;
 use crate::qemu::uefi_firmware_for;
@@ -181,11 +181,11 @@ pub fn tddy_host_user_data(spec: &TddyHostSpec) -> CloudInitUserData {
 /// remains to boot.
 ///
 /// This runs as the first provisioning step and is a no-op once a non-cloud kernel is
-/// running, which is what makes the reboot safe: cloud-init re-runs `runcmd` on the next
-/// boot (the seed's `cloud-init clean` bootcmd sees to that), and the second pass skips
-/// straight past this step to the real work. The `uname` guard is what bounds it to exactly
-/// one reboot rather than a loop. The bake's boot argv deliberately omits `-no-reboot` so
-/// that reset restarts the guest instead of ending the emulator; see
+/// running, which is what makes the reboot safe: it reboots through
+/// [`reset_cloud_init_and_reboot`], so cloud-init re-runs `runcmd` on the next boot and the
+/// second pass skips straight past this step to the real work. The `uname` guard is what
+/// bounds it to exactly one reboot rather than a loop. The bake's boot argv deliberately
+/// omits `-no-reboot` so that reset restarts the guest instead of ending the emulator; see
 /// [`crate::cloud_init::cloud_init_boot_argv`].
 ///
 /// cloud-init joins every `runcmd` entry into **one** shell script and runs it without
@@ -208,10 +208,10 @@ pub fn ninep_capable_kernel_command() -> String {
          touch {NINEP_KERNEL_STAMP}; \
          kernel_status=$?; \
          if [ \"$kernel_status\" -ne 0 ]; then exit \"$kernel_status\"; fi; \
-         sync; \
-         systemctl reboot; \
+         {}; \
          exit \"$kernel_status\"; \
-         fi"
+         fi",
+        reset_cloud_init_and_reboot()
     )
 }
 
@@ -239,17 +239,32 @@ fn provisioning_runcmd() -> Vec<String> {
         // a /nix/store that does not exist here (and would wedge `nix develop`), while
         // `target` and `node_modules` are large and may hold another platform's binaries.
         // The `cd` at the end is the working directory for every step below.
+        // `.git` is excluded for a reason beyond size: in a git **worktree** it is a
+        // pointer *file* naming `<host path>/.git/worktrees/<name>`, which does not exist
+        // in the guest — so `nix develop` resolves the flake as `git+file://<checkout>`,
+        // follows that path and dies with `failed to resolve path`. Without it the flake
+        // is a plain path, which is what a bake wants: the guest builds the tree it was
+        // handed, not a revision it could check out.
         format!(
-            "rsync -a --exclude=/.nix-profile --exclude=/target --exclude=/node_modules \
-             {GUEST_SOURCE_MOUNT}/ {GUEST_CHECKOUT_DIR}/ && cd {GUEST_CHECKOUT_DIR}"
+            "rsync -a --exclude=/.git --exclude=/.nix-profile --exclude=/target \
+             --exclude=/node_modules {GUEST_SOURCE_MOUNT}/ {GUEST_CHECKOUT_DIR}/ && cd \
+             {GUEST_CHECKOUT_DIR}"
         ),
+        // `HOME` is exported explicitly for every Nix-touching step: cloud-init runs
+        // `runcmd` with a minimal environment that has none, and the installer refuses
+        // outright with `install: $HOME is not set` — *after* downloading its tarball, so
+        // the failure arrives a minute in and reads like a network problem. `nix develop`
+        // needs it too, for the profile and the store-path GC root it writes there.
         format!(
-            "curl -fsSL {NIX_INSTALLER_URL} -o {NIX_INSTALLER_PATH} && sh {NIX_INSTALLER_PATH} \
-             --daemon --yes --nix-extra-conf-file {GUEST_NIX_EXTRA_CONF_PATH}"
+            "export HOME=/root && curl -fsSL {NIX_INSTALLER_URL} -o {NIX_INSTALLER_PATH} && sh \
+             {NIX_INSTALLER_PATH} --daemon --yes --nix-extra-conf-file \
+             {GUEST_NIX_EXTRA_CONF_PATH}"
         ),
-        format!("{SOURCE_NIX_PROFILE} && ./release"),
-        format!("{SOURCE_NIX_PROFILE} && ./dev bun install && ./dev bun run build"),
-        format!("{SOURCE_NIX_PROFILE} && ./install --systemd"),
+        format!("export HOME=/root && {SOURCE_NIX_PROFILE} && ./release"),
+        format!(
+            "export HOME=/root && {SOURCE_NIX_PROFILE} && ./dev bun install && ./dev bun run build"
+        ),
+        format!("export HOME=/root && {SOURCE_NIX_PROFILE} && ./install --systemd"),
     ]
 }
 
@@ -384,11 +399,12 @@ pub struct TddyHostBuildOptions {
 /// architecture for a build that installs Nix and compiles the whole workspace is not
 /// viable, so the caller's image must be a host-architecture one.
 ///
-/// Everything the bake produces other than the promoted pair — the NoCloud seed and its ISO
+/// Everything the bake produces other than the overlay itself — the NoCloud seed and its ISO
 /// (both of which carry the guest's `daemon.yaml`, LiveKit `api_secret` included), the
-/// generated SSH keypair, the boot log, and on a failed bake a full copy of the base image
-/// plus the overlay — lives in a `0700` scratch directory that is removed on **both** the
-/// success and the failure path.
+/// generated SSH keypair and the boot log — lives in a `0700` scratch directory that is
+/// removed on **both** the success and the failure path. The overlay is created straight
+/// into `images/02-prepared-base/`, because a layer that names its parent relatively cannot
+/// be built somewhere else and moved.
 pub async fn build_tddy_host_image(
     options: &TddyHostBuildOptions,
     progress: &(dyn Fn(&str) + Sync),
@@ -409,6 +425,7 @@ pub async fn build_tddy_host_image(
     let opts = CloudInitBuildOptions {
         name: options.name.clone(),
         base_image_src: imported_base,
+        overlay_output: paths.prepared_overlay_output.clone(),
         output_dir: scratch_dir.clone(),
         user_data: tddy_host_user_data(&options.spec),
         disk_size: options.disk_size.clone(),
@@ -429,24 +446,10 @@ pub async fn build_tddy_host_image(
     };
 
     progress(BAKING_PROGRESS_LINE);
-    let baked = bake_and_promote(&opts, &options.name, &paths, progress).await;
+    let baked = build_cloud_init_image(&opts, progress).await;
     remove_scratch_dir(&scratch_dir, progress).await;
     baked?;
     Ok(paths.prepared_overlay_output)
-}
-
-/// Run the bake and move the finished pair out of the scratch directory.
-///
-/// Split out of [`build_tddy_host_image`] so its caller has exactly one place to clean the
-/// scratch directory up from, whichever of these two steps failed.
-async fn bake_and_promote(
-    opts: &CloudInitBuildOptions,
-    name: &str,
-    paths: &CloudInitLibraryPaths,
-    progress: &(dyn Fn(&str) + Sync),
-) -> Result<(), VmError> {
-    build_cloud_init_image(opts, progress).await?;
-    promote_prepared_base_pair(&opts.output_dir, name, paths).await
 }
 
 /// Create the bake's scratch directory restricted to its owner (`0700`).

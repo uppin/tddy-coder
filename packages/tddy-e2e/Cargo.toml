@@ -48,3 +48,9 @@ tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The VM-backed cgroups production tests. `tddy-vm-testkit` depends on neither the daemon
+# nor the supervisor, so this creates no cycle — which is exactly why these tests live here
+# and not in `packages/tddy-supervisor/tests/`, where the client side would need
+# `tddy-daemon` and the cycle would be real.
+tddy-vm-testkit = { path = "../tddy-vm-testkit" }
+serial_test = "3"

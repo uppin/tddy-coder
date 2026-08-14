@@ -1,0 +1,22 @@
+[package]
+name = "tddy-vm-testkit"
+version = "0.1.0"
+edition = "2021"
+description = "Reusable VM fixtures for production tests: a builder guest that compiles the workspace for Linux, and a disposable guest the binaries are deployed into"
+# Test support only. It hands out fixed guest credentials on purpose (recipes::GUEST_PASSWORD,
+# test_host_vm::SESSION_TOKEN_SECRET), so it must never be reachable from a shipped binary —
+# belonging in a [dev-dependencies] entry and nowhere else.
+publish = false
+
+[dependencies]
+tddy-vm = { path = "../tddy-vm" }
+anyhow = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net", "process", "fs", "time"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = "3"
+# `test-util` only, and only for tests: the retry-policy tests pause the clock so they assert
+# on attempt counts instead of waiting out a real cadence.
+tokio = { version = "1", features = ["test-util"] }

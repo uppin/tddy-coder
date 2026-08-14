@@ -10168,6 +10168,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tui",
  "tddy-tui-testkit",
+ "tddy-vm-testkit",
  "tddy-workflow-recipes",
  "tempfile",
  "termwright",
@@ -10830,6 +10831,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-task",
+ "tddy-vm-testkit",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -10852,6 +10854,18 @@ dependencies = [
  "serde_yml",
  "serial_test",
  "tddy-core",
+ "tddy-vm",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-vm-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pretty_assertions",
+ "rstest 0.24.0",
  "tddy-vm",
  "tempfile",
  "tokio",

@@ -113,13 +113,15 @@ impl Vm for MockVm {
         if self.verify_fails {
             return Ok(VerifyResult {
                 success: false,
-                output: "mock verify: forced failure".to_string(),
+                stdout: String::new(),
+                stderr: "mock verify: forced failure".to_string(),
                 exit_code: 1,
             });
         }
         Ok(VerifyResult {
             success: true,
-            output: "mock verify: ok".to_string(),
+            stdout: "mock verify: ok".to_string(),
+            stderr: String::new(),
             exit_code: 0,
         })
     }

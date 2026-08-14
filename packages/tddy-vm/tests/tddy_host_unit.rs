@@ -5,6 +5,7 @@
 //! `tddy_host_vm_acceptance.rs`.
 
 use pretty_assertions::assert_eq;
+use tddy_vm::cloud_init::reset_cloud_init_and_reboot;
 use tddy_vm::tddy_host::{
     daemon_config_yaml, ninep_capable_kernel_command, tddy_host_user_data, LiveKitCommonRoom,
     TddyHostSpec, GUEST_CHECKOUT_DIR, GUEST_SOURCE_MOUNT, TDDY_SOURCE_MOUNT_TAG,
@@ -140,6 +141,22 @@ fn purges_the_cloud_kernel_so_grub_boots_the_nine_p_capable_one() {
     assert!(
         command.contains("update-grub"),
         "must refresh the boot menu after changing kernels: {command}"
+    );
+}
+
+/// The kernel step is the workspace's one provisioning step that reboots mid-bake, and
+/// cloud-init will not re-run `runcmd` for an instance it has already processed. Without the
+/// reset the guest comes back up on the 9p-capable kernel having done none of the work that
+/// was supposed to follow — and the bake sits there until it times out.
+#[test]
+fn resets_cloud_init_before_rebooting_so_the_remaining_steps_run_on_the_next_boot() {
+    // Given the kernel-preparation step
+    let command = ninep_capable_kernel_command();
+
+    // Then the reboot it requests is the one the bake renderer defines, reset included
+    assert!(
+        command.contains(&reset_cloud_init_and_reboot()),
+        "the kernel step must reboot through the bake's own reset-and-reboot shell: {command}"
     );
 }
 

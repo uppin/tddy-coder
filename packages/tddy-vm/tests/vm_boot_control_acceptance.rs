@@ -100,7 +100,7 @@ async fn boots_an_aarch64_guest_and_reaches_a_login_prompt_over_the_serial_conso
     // Then the console state machine has advanced out of the boot prelude
     assert_eq!(guest.console.state(), SerialShellState::AtLogin);
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 }
 
 #[tokio::test]
@@ -119,7 +119,10 @@ async fn logs_in_over_the_serial_console_and_runs_a_command_returning_its_exit_c
         .with_ssh_host_port(2232)
         .boot()
         .await;
-    guest.login_on_console().await;
+    guest
+        .login_on_console(GUEST_USERNAME)
+        .await
+        .expect("the serial console must accept the acceptance-test credentials");
 
     // When a command is executed over that console
     let result = guest
@@ -132,7 +135,7 @@ async fn logs_in_over_the_serial_console_and_runs_a_command_returning_its_exit_c
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.stdout_lines, vec![GUEST_USERNAME.to_string()]);
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 }
 
 #[tokio::test]
@@ -151,7 +154,10 @@ async fn reports_the_failing_exit_code_of_a_command_run_over_the_serial_console(
         .with_ssh_host_port(2233)
         .boot()
         .await;
-    guest.login_on_console().await;
+    guest
+        .login_on_console(GUEST_USERNAME)
+        .await
+        .expect("the serial console must accept the acceptance-test credentials");
 
     // When a command that fails is executed — in a subshell, since a bare `exit` would end
     // the login shell itself before it could report anything
@@ -164,7 +170,7 @@ async fn reports_the_failing_exit_code_of_a_command_run_over_the_serial_console(
     // Then the real exit code is reported, not a success placeholder
     assert_eq!(result.exit_code, 42);
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 }
 
 #[tokio::test]
@@ -188,7 +194,10 @@ async fn mounts_the_read_only_nine_p_share_and_reads_a_host_file_in_the_guest() 
         .with_read_only_nine_p_share(&share, "tddy-src")
         .boot()
         .await;
-    guest.login_on_console().await;
+    guest
+        .login_on_console(GUEST_USERNAME)
+        .await
+        .expect("the serial console must accept the acceptance-test credentials");
 
     // …and given the guest has been put on a 9p-capable kernel, exactly as the tddy-host
     // recipe does it. A stock Debian genericcloud image runs the cloud kernel flavour, which
@@ -215,7 +224,10 @@ async fn mounts_the_read_only_nine_p_share_and_reads_a_host_file_in_the_guest() 
         .wait_for_login_prompt(BOOT_TIMEOUT)
         .await
         .expect("guest must come back up on the 9p-capable kernel");
-    guest.login_on_console().await;
+    guest
+        .login_on_console(GUEST_USERNAME)
+        .await
+        .expect("the serial console must accept the acceptance-test credentials");
 
     // When the guest mounts the share and reads the host file
     let mount = guest
@@ -238,7 +250,7 @@ async fn mounts_the_read_only_nine_p_share_and_reads_a_host_file_in_the_guest() 
     assert_eq!(read.exit_code, 0, "read failed: {:?}", read.stdout_lines);
     assert_eq!(read.stdout_lines, vec!["hello-from-host-9p".to_string()]);
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 }
 
 #[tokio::test]
@@ -266,15 +278,23 @@ async fn accepts_ssh_as_the_policy_user_with_the_generated_per_vm_key() {
         .with_ssh_key_login(&keys.private_key_path, &keys.public_key_path)
         .boot()
         .await;
+    // Slirp accepts the forwarded connection from the moment QEMU starts, so waiting for
+    // sshd to answer is a separate step from asking it anything.
+    guest
+        .wait_for_ssh_ready(BOOT_TIMEOUT)
+        .await
+        .expect("sshd must start answering in the guest");
 
     // When a command is run over SSH as the policy user with that private key
-    let verified = guest.run_over_ssh_within("id -un", BOOT_TIMEOUT).await;
+    let verified = guest
+        .run_over_ssh("id -un")
+        .await
+        .expect("ssh must authenticate and run the command");
 
     // Then SSH authenticated as the policy user, not as root with an ambient key
-    assert_eq!(verified.exit_code, 0, "ssh failed: {:?}", verified.output);
-    assert_eq!(verified.output.trim(), GUEST_USERNAME);
+    verified.assert_stdout_line(GUEST_USERNAME);
 
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 }
 
 #[tokio::test]
@@ -294,14 +314,13 @@ async fn shuts_a_running_vm_down_gracefully_via_the_qemu_monitor() {
         .boot()
         .await;
     guest
-        .console
         .wait_for_login_prompt(BOOT_TIMEOUT)
         .await
         .expect("guest must reach a login prompt");
-    let ssh_host_port = guest.ssh_host_port;
+    let ssh_host_port = guest.ssh_host_port();
 
     // When it is shut down through the QEMU monitor
-    guest.shutdown().await;
+    guest.shutdown().await.expect("guest must shut down");
 
     // Then the forwarded SSH port stops accepting connections. `system_powerdown` is an
     // ACPI request the guest services asynchronously, so this polls for the port to go away

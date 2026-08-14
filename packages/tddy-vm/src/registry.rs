@@ -236,6 +236,30 @@ impl VmManager {
         }
     }
 
+    /// The NoCloud seed ISO a boot of `name` attaches as a cdrom, or `None` for a VM that
+    /// has none.
+    ///
+    /// `manifest.prepared_base` is the discriminator, and it is exact: a manifest naming a
+    /// prepared base is one [`VmLibrary::create_vm`] built, which generated the VM's keypair
+    /// and wrote the seed authorizing it at [`VmLibrary::vm_seed_iso_path`]. Nothing between
+    /// the prepared base's own bake and this VM re-renders that base's authorized key, so
+    /// without the seed the host holds no key the guest accepts — and `qemu.rs` offers only
+    /// the manifest's key (`IdentitiesOnly=yes`, `BatchMode=yes`), so there is nothing else
+    /// to fall back to. A manifest naming an `image_path` instead references an image this
+    /// library did not provision; it has no seed, and naming one would fail the boot.
+    ///
+    /// Deliberately does not check that the seed is on disk: a prepared-base VM whose seed is
+    /// missing is a broken VM, and QEMU refusing to open the cdrom says so, where skipping it
+    /// would instead produce an unexplainable SSH failure minutes later.
+    fn login_seed_iso_for(&self, name: &str, manifest: &VmManifest) -> Option<String> {
+        match (&self.storage, &manifest.prepared_base) {
+            (Storage::Library(library), Some(_)) => {
+                Some(library.vm_seed_iso_path(name).display().to_string())
+            }
+            _ => None,
+        }
+    }
+
     pub async fn start(&self, name: &str) -> Result<(), VmError> {
         // Extract what we need and update state to Booting, then release lock
         let config = {
@@ -267,6 +291,7 @@ impl VmManager {
             // Resolved before the state moves to Booting: an unresolvable firmware image is
             // a failed start, and the VM must be left as it was rather than stuck Booting.
             let firmware = uefi_firmware_for(manifest.run.arch, &self.vm_state_dir(name), name)?;
+            let seed_iso = self.login_seed_iso_for(name, &manifest);
 
             handle.state = VmState::Booting;
 
@@ -283,7 +308,7 @@ impl VmManager {
                     username: manifest.login.username.clone(),
                     private_key_path: manifest.login.ssh_private_key.clone(),
                 },
-                seed_iso: None,
+                seed_iso,
                 nine_p_shares: vec![],
             }
         };

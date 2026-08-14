@@ -28,3 +28,8 @@ tddy-task = { path = "../tddy-task" }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 serial_test = "3"
 pretty_assertions = { workspace = true }
+# The booted-guest fixture these tests share with the VM-backed production tests elsewhere.
+# Cargo permits this cycle because it is a dev-dependency: `tddy-vm-testkit` depends on
+# `tddy-vm`'s library, and only `tddy-vm`'s *tests* depend back on the testkit, so nothing
+# shipped links against it.
+tddy-vm-testkit = { path = "../tddy-vm-testkit" }

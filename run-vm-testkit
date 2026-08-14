@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#
+# Warm the VM testkit's image cache, so the first real test run does not pay for it.
+#
+# The testkit bakes a chain of three images under tmp/.tddy:
+#
+#   images/01-base/<supplied>          the cloud image you point it at
+#     └── 02-prepared-base/tddy-nix-base    Nix + flakes, the tddy and alice accounts
+#           ├── tddy-builder                + 9p kernel, + warmed workspace dev shell
+#           └── tddy-test-host              + tddy-clients group, stock -cloud kernel
+#
+# Baking all three takes hours the first time and nothing at all afterwards. A layer counts
+# as finished only once it is sealed 0444, which happens after its bake succeeds — so a
+# half-written layer left behind by a Ctrl-C or a crash is re-baked rather than trusted.
+#
+# Nothing is ever downloaded. Point TDDY_CLOUDINIT_BASE_IMAGE at a cloud image already on
+# your disk, either exported or in the repo-root .env:
+#
+#   TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-arm64.qcow2
+#
+# Usage:
+#   ./run-vm-testkit                 # warm the cache (bake if needed, then build once)
+#   ./run-vm-testkit --status        # report what is already cached, bake nothing
+#
+# Prerequisite: /dev/kvm (Linux) or HVF (macOS) must be usable. Under TCG even the warm
+# path is measured in hours.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+# Load .env if present (does not override already-set env vars) — the same semantics the
+# testkit itself applies, and the same ones ./web-dev uses.
+if [ -f .env ]; then
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    value="${value%\"}" ; value="${value#\"}"
+    value="${value%\'}" ; value="${value#\'}"
+    if [ -z "${!key+x}" ]; then
+      export "$key=$value"
+    fi
+  done < .env
+fi
+
+LIBRARY_ROOT="$(pwd)/tmp/.tddy"
+PREPARED_BASE_DIR="${LIBRARY_ROOT}/images/02-prepared-base"
+DIST_DIR="${LIBRARY_ROOT}/dist/linux-aarch64"
+
+report_status() {
+  echo "VM testkit cache under ${LIBRARY_ROOT}:" >&2
+  # A layer counts as cached only when it is sealed read-only, which happens after its
+  # bake succeeds — the same test the code's cache uses. Checking mere existence would
+  # report a layer that is only part-way through its bake, or one a crash left behind,
+  # as finished.
+  for image in tddy-nix-base tddy-builder tddy-test-host; do
+    img="${PREPARED_BASE_DIR}/${image}.qcow2"
+    if [ ! -f "$img" ]; then
+      echo "  [missing] ${image}" >&2
+    elif [ -w "$img" ]; then
+      echo "  [unsealed] ${image} — baking now, or left behind by an interrupted bake" >&2
+    else
+      echo "  [cached]  ${image}" >&2
+    fi
+  done
+  if [ -d "$DIST_DIR" ] && [ -n "$(ls -A "$DIST_DIR" 2>/dev/null)" ]; then
+    echo "  [built]   $(ls "$DIST_DIR" | tr '\n' ' ')" >&2
+  else
+    echo "  [built]   nothing yet" >&2
+  fi
+}
+
+if [[ "${1:-}" == "--status" ]]; then
+  report_status
+  exit 0
+fi
+
+if [ -z "${TDDY_CLOUDINIT_BASE_IMAGE:-}" ]; then
+  echo "run-vm-testkit: TDDY_CLOUDINIT_BASE_IMAGE is not set." >&2
+  echo "run-vm-testkit: point it at a cloud image already on disk — nothing is downloaded." >&2
+  echo "run-vm-testkit: export it, or add it to the repo-root .env:" >&2
+  echo "run-vm-testkit:   TDDY_CLOUDINIT_BASE_IMAGE=/path/to/debian-12-genericcloud-arm64.qcow2" >&2
+  exit 1
+fi
+
+if [ ! -f "$TDDY_CLOUDINIT_BASE_IMAGE" ]; then
+  echo "run-vm-testkit: no such image: ${TDDY_CLOUDINIT_BASE_IMAGE}" >&2
+  exit 1
+fi
+
+report_status
+echo >&2
+echo "run-vm-testkit: warming the cache from ${TDDY_CLOUDINIT_BASE_IMAGE}" >&2
+echo "run-vm-testkit: the first run bakes three images and takes hours; later runs are quick." >&2
+echo >&2
+
+# Driving this through the build test rather than a bespoke binary keeps one code path:
+# whatever the tests do to prepare their images is exactly what gets warmed here.
+./dev cargo test -p tddy-e2e --test vm_cgroups_acceptance \
+  builds_deployable_linux_binaries_on_a_host_that_cannot_compile_them \
+  -- --ignored --nocapture --test-threads=1 >&2
+
+echo >&2
+report_status
+echo >&2
+echo "run-vm-testkit: cache warm. Run the full suite with:" >&2
+echo "  ./dev cargo test -p tddy-e2e --test vm_cgroups_acceptance -- --ignored --test-threads=1" >&2
+echo >&2
+
+# The only line on stdout, so `eval $(./run-vm-testkit | grep '^export ')` works the way it
+# does for run-livekit-testkit-server. Unlike LIVEKIT_TESTKIT_WS_URL this is a convenience
+# for the caller, not an input the testkit reads: the testkit derives the same directory
+# from its own compile-time manifest path, so a shell can cd there without guessing.
+echo "export TDDY_VM_TESTKIT_DIST_DIR=${DIST_DIR}"
