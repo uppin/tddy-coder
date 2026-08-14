@@ -13,6 +13,12 @@ use tddy_core::session_action_jobs::{
     SessionActionJobsError, SessionActionStopOutcome, SessionActionWaitOutcome,
 };
 
+/// Safety net for a wait that returns the moment the job drains — not a prediction of how long
+/// that takes. The stub sleeps 0.25s, so the wait normally returns in about that; the ceiling only
+/// decides when to give up. The previous 1500ms read as a budget and failed on a loaded machine,
+/// reporting a scheduling delay as a job that never reached a terminal state.
+const A_JOB_HAS_TIME_TO_DRAIN_MS: u64 = 30_000;
+
 fn write_sample_action(session: &Path, body: &str) {
     let dir = session.join("actions");
     fs::create_dir_all(&dir).expect("mkdir actions");
@@ -256,7 +262,8 @@ fn session_action_wait_times_out_while_running() {
 
     // Second wait until completion or stop observes allowed transitions.
     let subsequent =
-        wait_session_action_job(&session_dir, &job_id, Some(1500)).expect("subsequent wait");
+        wait_session_action_job(&session_dir, &job_id, Some(A_JOB_HAS_TIME_TO_DRAIN_MS))
+            .expect("subsequent wait");
     assert!(
         matches!(
             subsequent,

@@ -2,17 +2,21 @@
 
 ## Known failing tests
 
-### `session_action_wait_times_out_while_running` is load-sensitive (found 2026-08-13, pre-existing — not caused by the deterministic-test-suite changeset)
+### ~~`session_action_wait_times_out_while_running` is load-sensitive~~ — resolved 2026-08-14 (found 2026-08-13, pre-existing — not caused by the deterministic-test-suite changeset)
 
-- `packages/tddy-tools/tests/session_action_jobs_acceptance.rs:258` — after the bounded wait times
-  out as intended, the test gives the job a fixed **1500 ms** to drain and asserts it reached
-  `Completed`/`Failed`. On a loaded machine it is still `TimedOut { still_running: true }`. Observed
-  once in a deliberately-loaded workspace run (4073 passed, this one failed).
-- Same shape as the flakes the deterministic-test-suite changeset closed — a budget standing in for a
-  readiness signal — but in a package that changeset did not touch. Fix is the same: poll for the
-  terminal disposition with `tddy_testing_commons::wait::eventually_blocking` and keep the ceiling as
-  a safety net. The test also branches on the outcome (`match` with an "allowed if…" arm), so it
-  wants a fluent-tests pass at the same time.
+- `packages/tddy-tools/tests/session_action_jobs_acceptance.rs` — after the bounded wait timed out as
+  intended, the test gave the job a fixed **1500 ms** to drain and asserted it reached
+  `Completed`/`Failed`. On a loaded machine it was still `TimedOut { still_running: true }` — observed
+  in two of three deliberately-loaded workspace runs.
+- Same shape as the flakes the deterministic-test-suite changeset closed: a budget standing in for a
+  readiness signal, in a package that changeset did not touch. `wait_session_action_job` already
+  returns the instant the job reaches a terminal state, so no polling helper was needed — the ceiling
+  was raised to a named `A_JOB_HAS_TIME_TO_DRAIN_MS` (30 s) safety net and the test still finishes in
+  about 0.3 s.
+- ⚠️ **Residual, not fixed:** the test still branches on the outcome (`matches!(Completed | Failed)`,
+  and a `match` arm reading "allowed if PRD maps non-zero exits to Failed") — a fluent-tests
+  violation. Removing it means deciding which disposition a non-zero exit *must* produce, which is a
+  behaviour decision about the PRD, not a test cleanup.
 
 ### ~~`cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` fails on `master`~~ — resolved 2026-08-13 (source: session-attachment-start-materialization wrap, 2026-07-30)
 
@@ -97,9 +101,26 @@ its own failure message, none from that branch. New entries beyond the list abov
   standalone session on the same host can warm up with different budgets. Give it the same three
   keys, or have it read the daemon's.
 - **`pick_free_loopback_port` / `allocate_verified_grpc_listen_port` share a production TOCTOU
-  shape** (`sandbox_session.rs`) — bind `:0`, note the port, close, hand it to something else. The
-  test-side instance of this was fixed by probing outside the ephemeral range; production was not
-  hardened. The real fix is to pass the bound listener rather than the number.
+  shape** (`sandbox_session.rs`) — bind, note the port, close, hand the *number* to something else,
+  which binds it again. **Observed, not theoretical:** the test-side instance of this failed with
+  `AddrInUse` on the third of three loaded workspace runs, on the caller's own re-bind, even after
+  the search had been moved below the ephemeral range (`spawner.rs`, run 3 of the
+  deterministic-suite measurement). Moving the band only removes the *kernel* as a competitor; the
+  window between close and re-bind stays open to anything on the host. The test fixture was then
+  fixed by never releasing ownership — it returns the held listener. `pick_free_loopback_port` is
+  the worse of the two production cases: it binds `127.0.0.1:0`, i.e. draws from the range the
+  kernel actively re-issues, then hands the number to a child.
+  Two ways out, in order of preference:
+  1. **Pass the bound listener across the fork** rather than the number — `FD_CLOEXEC` cleared,
+     `LISTEN_PID`/`LISTEN_FDS`/`SD_LISTEN_FDS_START` set. There is in-tree precedent: the
+     `handover` field in `packages/tddy-supervisor/src/spawn_broker.rs` already hands the daemon
+     its listening socket this way. This closes the window rather than narrowing it.
+  2. **Retry on `AddrInUse`** — currently a *fallback* in the CLAUDE.md sense, and not yet
+     permissible: the child at `packages/tddy-coder/src/run.rs` does `TcpListener::bind(addr).await?`
+     and then `.expect("gRPC server failed")`, so it panics, and the daemon's startup watch cannot
+     tell `AddrInUse` from a bad argument, a missing binary, or a real crash. Retrying on that
+     signal would mask genuine breakage. It becomes an option only once the child exits with a
+     distinguishable status for "the port was taken".
 - **The supervisor's unread stderr pipe can deadlock under `RUST_LOG=debug`** — a child that fills
   the pipe buffer blocks on write while nothing is reading.
 - **`spawn_startup_poll_interval_ms > spawn_startup_grace_period_ms` is unvalidated.** The `.max(1)`
