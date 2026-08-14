@@ -37,6 +37,8 @@ use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
     ListEligibleDaemonsRequest, ListSessionsRequest, StartSessionRequest,
 };
+use tddy_testing_commons::stub_scripts::a_stub_agent_script;
+use tddy_testing_commons::wait::eventually_awaiting;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -70,9 +72,16 @@ fn true_bin() -> String {
 
 /// A long-lived process standing in for the `claude` CLI: the agent side of a split session is a
 /// real PTY spawn, so without a stub every start would fail reaching for `claude` on PATH — for
-/// reasons that have nothing to do with placement. `/bin/cat` blocks on stdin, which is exactly the
-/// shape a PTY session needs. Mirrors `claude_cli_session_acceptance.rs`.
-const CLAUDE_STUB: &str = "/bin/cat";
+/// reasons that have nothing to do with placement.
+///
+/// It reads stdin forever, which is the shape a PTY session needs. Deliberately not `/bin/cat`:
+/// `cat` treats a positional argument as a filename and exits, so the moment a fixture grew an
+/// `initial_prompt` the stub would die and the failure would look like a spawn bug.
+fn a_claude_stub(dir: &Path) -> PathBuf {
+    a_stub_agent_script(dir, "stub-claude.sh")
+        .then_reading_stdin()
+        .build()
+}
 
 fn write_livekit_daemon_yaml(
     ws_url: &str,
@@ -209,25 +218,33 @@ async fn serve_rpc_participant(
 
 /// 45s: both daemons publish their advertisement on the common room's own metadata cadence, and a
 /// cold LiveKit container has to accept every participant first.
+///
+/// `eventually_awaiting` rather than a hand-rolled poll: when the peer never shows up it panics
+/// with the list that *was* returned, which is the difference between "timed out" and "these three
+/// daemons were visible and yours was not".
 async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
-    tokio::time::timeout(Duration::from_secs(45), async {
-        loop {
+    eventually_awaiting(
+        &format!("daemon {peer_instance_id} to be discovered in the common room"),
+        Duration::from_secs(45),
+        || async {
             let daemons = service
                 .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
                     session_token: TEST_TOKEN.to_string(),
                 }))
                 .await
-                .expect("ListEligibleDaemons")
+                .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
                 .into_inner()
                 .daemons;
             if daemons.iter().any(|d| d.instance_id == peer_instance_id) {
-                break;
+                return Ok(());
             }
-            tokio::time::sleep(Duration::from_millis(400)).await;
-        }
-    })
-    .await
-    .unwrap_or_else(|_| panic!("timeout waiting for daemon {peer_instance_id} to be discovered"));
+            Err(format!(
+                "eligible daemons so far: {:?}",
+                daemons.iter().map(|d| &d.instance_id).collect::<Vec<_>>()
+            ))
+        },
+    )
+    .await;
 }
 
 /// Daemon A (agent) and daemon B (codebase), each serving on its production RPC identity and each
@@ -241,18 +258,20 @@ struct SplitHosts {
     _codebase_rpc_run: tokio::task::JoinHandle<()>,
     _livekit: LiveKitTestkit,
     _repo: tempfile::TempDir,
+    _stubs: tempfile::TempDir,
     _agent: Daemon,
     _codebase: Daemon,
 }
 
+/// Both hosts get a working `claude` stub — the ordinary case, where a split session comes up.
 async fn split_hosts() -> SplitHosts {
-    split_hosts_with_agent_claude_binary(CLAUDE_STUB).await
+    split_hosts_with_agent_claude_binary(None).await
 }
 
-/// `agent_claude_binary` belongs to daemon A only. Pointing it at something unspawnable is the one
-/// way to fail *after* the codebase host has already created its workspace session, which is the
-/// only window in which teardown is observable.
-async fn split_hosts_with_agent_claude_binary(agent_claude_binary: &str) -> SplitHosts {
+/// `agent_claude_binary` overrides daemon A's stub only. Pointing it at something unspawnable is
+/// the one way to fail *after* the codebase host has already created its workspace session, which
+/// is the only window in which teardown is observable. `None` gives A the working stub.
+async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>) -> SplitHosts {
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -261,6 +280,10 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: &str) -> Spli
 
     let repo_dir = tempfile::tempdir().unwrap();
     create_test_repo_with_origin(repo_dir.path());
+
+    let stub_dir = tempfile::tempdir().unwrap();
+    let claude_stub = a_claude_stub(stub_dir.path());
+    let claude_stub = claude_stub.to_str().expect("stub path is valid UTF-8");
 
     let user_resolver: UserResolver =
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
@@ -271,7 +294,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: &str) -> Spli
         &os_user,
         repo_dir.path(),
         user_resolver.clone(),
-        CLAUDE_STUB,
+        claude_stub,
     )
     .await;
     let agent = a_daemon(
@@ -280,7 +303,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: &str) -> Spli
         &os_user,
         repo_dir.path(),
         user_resolver,
-        agent_claude_binary,
+        agent_claude_binary.unwrap_or(claude_stub),
     )
     .await;
 
@@ -306,6 +329,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: &str) -> Spli
         _codebase_rpc_run: codebase_rpc_run,
         _livekit: livekit,
         _repo: repo_dir,
+        _stubs: stub_dir,
         _agent: agent,
         _codebase: codebase,
     }
@@ -559,7 +583,8 @@ async fn a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_d
     // Given an agent host whose claude binary does not exist, so the request is well-formed and
     // only fails once the spawn is attempted — after the codebase host has done its work
     let hosts =
-        split_hosts_with_agent_claude_binary("/nonexistent/claude-that-cannot-be-spawned").await;
+        split_hosts_with_agent_claude_binary(Some("/nonexistent/claude-that-cannot-be-spawned"))
+            .await;
     let before = sessions_on(&hosts.codebase).await;
 
     // When

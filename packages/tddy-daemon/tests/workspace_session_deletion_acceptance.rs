@@ -34,7 +34,10 @@ fn a_git_repo_with_one_commit() -> tempfile::TempDir {
     let repo = tempfile::tempdir().expect("repo tempdir");
     let path = repo.path();
     run_git(path, &["init", "-q", "-b", "main"]);
-    run_git(path, &["config", "user.email", "acceptance@example.invalid"]);
+    run_git(
+        path,
+        &["config", "user.email", "acceptance@example.invalid"],
+    );
     run_git(path, &["config", "user.name", "Acceptance"]);
     std::fs::write(path.join("README.md"), "acceptance\n").expect("seed file");
     run_git(path, &["add", "README.md"]);

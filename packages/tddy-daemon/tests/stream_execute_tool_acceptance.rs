@@ -98,8 +98,10 @@ async fn a_workspace_session() -> Workspace {
         .expect("workspace session must start")
         .into_inner();
 
-    let session_dir =
-        tddy_core::session_lifecycle::unified_session_dir_path(sessions.path(), &started.session_id);
+    let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+        sessions.path(),
+        &started.session_id,
+    );
     let worktree = std::path::PathBuf::from(
         tddy_core::read_session_metadata(&session_dir)
             .expect("session metadata")
@@ -192,14 +194,20 @@ async fn a_result_larger_than_one_frame_reassembles_byte_for_byte() {
     // When it is read over the streaming RPC
     let stream = workspace
         .service
-        .stream_execute_tool(Request::new(a_read_request(&workspace.session_id, "large.txt")))
+        .stream_execute_tool(Request::new(a_read_request(
+            &workspace.session_id,
+            "large.txt",
+        )))
         .await
         .expect("StreamExecuteTool must be accepted")
         .into_inner();
     let (result_json, is_error, error_message) = drain_result(Box::pin(stream)).await;
 
     // Then — every byte arrived, in order. This is the whole reason the RPC exists.
-    assert!(!is_error, "the read must succeed; error was '{error_message}'");
+    assert!(
+        !is_error,
+        "the read must succeed; error was '{error_message}'"
+    );
     let parsed: serde_json::Value =
         serde_json::from_str(&result_json).expect("reassembled result must be valid JSON");
     assert_eq!(
@@ -213,19 +221,28 @@ async fn a_result_larger_than_one_frame_reassembles_byte_for_byte() {
 async fn a_streamed_tool_result_equals_the_unary_result_for_the_same_call() {
     // Given a file small enough to fit in a single frame either way
     let workspace = a_workspace_session().await;
-    std::fs::write(workspace.worktree.join("small.txt"), "just a little content\n")
-        .expect("seed small file");
+    std::fs::write(
+        workspace.worktree.join("small.txt"),
+        "just a little content\n",
+    )
+    .expect("seed small file");
 
     // When the same call is made over both RPCs
     let unary = workspace
         .service
-        .execute_tool(Request::new(a_read_request(&workspace.session_id, "small.txt")))
+        .execute_tool(Request::new(a_read_request(
+            &workspace.session_id,
+            "small.txt",
+        )))
         .await
         .expect("unary ExecuteTool")
         .into_inner();
     let stream = workspace
         .service
-        .stream_execute_tool(Request::new(a_read_request(&workspace.session_id, "small.txt")))
+        .stream_execute_tool(Request::new(a_read_request(
+            &workspace.session_id,
+            "small.txt",
+        )))
         .await
         .expect("StreamExecuteTool")
         .into_inner();

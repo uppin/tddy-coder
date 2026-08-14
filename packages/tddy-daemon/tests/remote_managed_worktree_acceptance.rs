@@ -127,8 +127,7 @@ fn a_split_claude_cli_request(codebase_daemon_instance_id: &str) -> StartSession
 #[test]
 fn an_empty_codebase_daemon_is_co_located() {
     // When
-    let placement =
-        classify_codebase_placement(LOCAL_INSTANCE_ID, "", &[], true, "claude-cli");
+    let placement = classify_codebase_placement(LOCAL_INSTANCE_ID, "", &[], true, "claude-cli");
 
     // Then — every session created before this feature existed takes exactly this path
     assert_eq!(placement, Ok(CodebasePlacement::CoLocated));
@@ -232,9 +231,14 @@ fn an_unknown_codebase_daemon_is_rejected_naming_the_id_and_the_common_room() {
     let eligible = [CODEBASE_PEER_ID.to_string()];
 
     // When
-    let error =
-        classify_codebase_placement(LOCAL_INSTANCE_ID, UNKNOWN_PEER_ID, &eligible, true, "claude-cli")
-            .expect_err("an unreachable codebase daemon must be refused");
+    let error = classify_codebase_placement(
+        LOCAL_INSTANCE_ID,
+        UNKNOWN_PEER_ID,
+        &eligible,
+        true,
+        "claude-cli",
+    )
+    .expect_err("an unreachable codebase daemon must be refused");
 
     // Then — matching `classify_peer_route`'s error shape, which names both so an operator knows
     // where to look

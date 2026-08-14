@@ -292,7 +292,9 @@ pub async fn dispatch_via_livekit(
     let client: Arc<dyn tddy_rpc::RpcClientTransport> = Arc::new(
         tddy_livekit::RpcClient::new_shared(connected_room, target, rpc_events),
     );
-    dispatch_via_rpc_transport(&client, envelope, tool_name, args).await
+    // Streaming, not unary: this is the one transport whose messages are chunk-framed past
+    // MAX_CHUNK_FRAME_BYTES, where a lost chunk frame wedges the call with no error at all.
+    dispatch_via_streaming_rpc(&client, envelope, tool_name, args).await
 }
 
 /// Without the `livekit` feature the SDK is not linked, so a split session cannot reach its
@@ -405,6 +407,23 @@ pub async fn dispatch_via_daemon_http(
     }
 }
 
+/// The request both the unary and the streaming call send. Shared so the two cannot drift: the
+/// remote daemon resolves the worktree and authenticates from these fields alone, so a difference
+/// between the transports would show up as a missing worktree rather than a wrong request.
+fn execute_tool_request(
+    envelope: &SessionToolEnvelope,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> tddy_service::proto::connection::ExecuteToolRequest {
+    tddy_service::proto::connection::ExecuteToolRequest {
+        session_token: envelope.session_token.clone(),
+        session_id: envelope.session_id.clone(),
+        tool_name: tool_name.to_string(),
+        args_json: args.to_string(),
+        daemon_instance_id: envelope.daemon_instance_id.clone(),
+    }
+}
+
 /// Forward a tool call over an already-connected RPC transport (`tddy-stdio`'s `StdioRpcClient`
 /// over the sandbox socket, `tddy-livekit`'s `RpcClient` to a remote daemon), calling
 /// `connection.ConnectionService/ExecuteTool`.
@@ -418,15 +437,9 @@ pub async fn dispatch_via_rpc_transport(
     args: &serde_json::Value,
 ) -> String {
     use prost::Message;
-    use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
+    use tddy_service::proto::connection::ExecuteToolResponse;
 
-    let request = ExecuteToolRequest {
-        session_token: envelope.session_token.clone(),
-        session_id: envelope.session_id.clone(),
-        tool_name: tool_name.to_string(),
-        args_json: args.to_string(),
-        daemon_instance_id: envelope.daemon_instance_id.clone(),
-    };
+    let request = execute_tool_request(envelope, tool_name, args);
     let response_bytes = match client
         .call_unary(
             "connection.ConnectionService",
@@ -456,6 +469,99 @@ pub async fn dispatch_via_rpc_transport(
     } else {
         response.result_json
     }
+}
+
+/// Forward a tool call over an already-connected RPC transport, calling
+/// `connection.ConnectionService/StreamExecuteTool` and reassembling its frames.
+///
+/// The unary sibling returns `result_json` as one string, which over LiveKit is chunk-framed past
+/// `MAX_CHUNK_FRAME_BYTES` — and that reassembly is index-keyed and best-effort, so a lost frame
+/// wedges the call permanently with no error. The streamed frames are bounded below that threshold
+/// and the last one is marked, so a short result is *detectable* here rather than silently passed on
+/// as a complete one.
+pub async fn dispatch_via_streaming_rpc(
+    client: &std::sync::Arc<dyn tddy_rpc::RpcClientTransport>,
+    envelope: &SessionToolEnvelope,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> String {
+    use prost::Message;
+    use tddy_service::proto::connection::ExecuteToolChunk;
+
+    let request = execute_tool_request(envelope, tool_name, args);
+    let mut frames = match client
+        .call_server_stream(
+            "connection.ConnectionService",
+            "StreamExecuteTool",
+            request.encode_to_vec(),
+        )
+        .await
+    {
+        Ok(frames) => frames,
+        Err(e) => {
+            return serde_json::json!({"error": format!("tool rpc call: {e}"), "is_error": true})
+                .to_string();
+        }
+    };
+
+    let mut result = Vec::new();
+    while let Some(frame) = frames.recv().await {
+        let frame = match frame {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return serde_json::json!({
+                    "error": format!("tool rpc stream: {e}"),
+                    "is_error": true
+                })
+                .to_string();
+            }
+        };
+        let frame = match ExecuteToolChunk::decode(frame.as_slice()) {
+            Ok(frame) => frame,
+            Err(e) => {
+                return serde_json::json!({
+                    "error": format!("tool rpc decode frame: {e}"),
+                    "is_error": true
+                })
+                .to_string();
+            }
+        };
+        result.extend_from_slice(&frame.result_chunk);
+        if !frame.last {
+            continue;
+        }
+        // A frame boundary may split a multi-byte character, so only the reassembled result is
+        // required to be UTF-8; if it is not, the frames did not reassemble into what was sent.
+        let result_json = match String::from_utf8(result) {
+            Ok(text) => text,
+            Err(e) => {
+                return serde_json::json!({
+                    "error": format!("tool result frames did not reassemble as UTF-8: {e}"),
+                    "is_error": true
+                })
+                .to_string();
+            }
+        };
+        // `job_id` and `job_running` are already inside `result_json`, exactly as with the unary
+        // response — carrying them on the frame lets the daemon report them without parsing it.
+        return format_tool_dispatch_result(&serde_json::json!({
+            "result_json": result_json,
+            "is_error": frame.is_error,
+            "error_message": frame.error_message,
+        }));
+    }
+
+    // The stream ended without its final frame. The bytes collected so far are a prefix of the
+    // result, and returning them would hand the agent a half-read file that looks whole — the exact
+    // failure this RPC exists to make visible.
+    serde_json::json!({
+        "error": format!(
+            "tool result truncated: {tool_name} stream ended after {} bytes without its final frame",
+            result.len()
+        ),
+        "is_error": true
+    })
+    .to_string()
 }
 
 #[cfg(test)]

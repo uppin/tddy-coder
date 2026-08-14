@@ -171,15 +171,13 @@ for a LiveKit container twice.
   `room_join`/`can_publish`/`can_subscribe`/`can_update_own_metadata` but not `can_publish_data`,
   unlike production `TokenGenerator`. Existing cross-host tests pass, so the data channel evidently
   works — but if a new LiveKit dispatch test fails to publish, this is the first thing to check.
-- **`StreamExecuteTool` is implemented but nothing calls it.** The daemon serves it and
-  peer-forwards it, and its frame budget is pinned by a compile-time assert — but `tddy-tools`
-  still issues the **unary** `ExecuteTool` over LiveKit (`session_tool_client.rs`,
-  `dispatch_via_rpc_transport`). Until the client switches, a split session's large `Read` or broad
-  `Grep` still rides the chunk-framed unary path, where a lost frame wedges the call with no error.
-  That is precisely the failure the streaming RPC was added to remove, so the protection exists but
-  is not yet in the path. Switching the client needs its own red phase: the current tests drive a
-  transport-agnostic unary dispatch through an in-process peer, and a streaming client needs
-  reassembly and a truncation-detection test of its own.
+- ~~**`StreamExecuteTool` is implemented but nothing calls it.**~~ **Closed.** `tddy-tools`'
+  LiveKit arm now calls `dispatch_via_streaming_rpc`, which reassembles `result_chunk` in arrival
+  order and — the point of the whole exercise — treats a stream that ends without its `last` frame
+  as an **error**, discarding the accumulated prefix rather than returning half a file that reads
+  as a whole one. Same for a mid-stream error status. The output shape is byte-identical to the
+  unary path, so an agent cannot tell the transports apart. `SandboxIpc` and `DaemonHttp` keep the
+  unary call: neither crosses LiveKit chunk framing.
 - **Every remote tool call currently pays a full LiveKit room connect.** `dispatch_via_livekit`
   connects a room, waits for the codebase daemon's participant, issues one `ExecuteTool`, and drops
   the room — per call. An agent doing fifty `Read`s pays fifty connects, likely hundreds of
@@ -206,6 +204,24 @@ for a LiveKit container twice.
   `a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_daemon` would pass without
   exercising teardown at all. It is written against an agent host whose `claude` binary does not
   exist, so the failure lands *after* B has created its workspace session — keep it that way.
+
+### Merged with `#385` (deterministic test suite), and adopted its helpers
+
+`origin/master`'s `#385` landed shared determinism helpers in `tddy-testing-commons` that this
+branch had hand-rolled hours earlier. Both were replaced rather than left to drift:
+
+- `wait_until_discovered` used `timeout` + `sleep(400ms)` and panicked with a bare message. It now
+  uses `eventually_awaiting`, which polls at 25 ms and reports the eligible list it *did* see — for
+  a peer that never appears, the difference between "timed out" and "these daemons were visible and
+  yours was not".
+- The claude stub was `/bin/cat`. `#385` documents the trap: `cat` treats a positional argument as
+  a filename and exits, so the moment a fixture grew an `initial_prompt` the stub would die and the
+  failure would read as a spawn bug. It is now
+  `a_stub_agent_script(...).then_reading_stdin()`.
+
+The one merge conflict of substance was `session_tool_stdio_rpc_dispatch.rs`: master rewrote how it
+waits, this branch renamed the function it calls. Both kept — master's determinism work is better
+than what the rename would have overwritten.
 
 ### Test-environment requirements found while writing the red phase
 
