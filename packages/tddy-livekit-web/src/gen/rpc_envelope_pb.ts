@@ -10,10 +10,11 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file rpc_envelope.proto.
  */
 export const file_rpc_envelope: GenFile = /*@__PURE__*/
-  fileDesc("ChJycGNfZW52ZWxvcGUucHJvdG8SA3JwYyLcAQoKUnBjUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgFEhcKD3JlcXVlc3RfbWVzc2FnZRgCIAEoDBIoCg1jYWxsX21ldGFkYXRhGAMgASgLMhEucnBjLkNhbGxNZXRhZGF0YRIfCghtZXRhZGF0YRgEIAEoCzINLnJwYy5NZXRhZGF0YRIVCg1lbmRfb2Zfc3RyZWFtGAUgASgIEg0KBWFib3J0GAYgASgIEhwKD3NlbmRlcl9pZGVudGl0eRgHIAEoCUgAiAEBQhIKEF9zZW5kZXJfaWRlbnRpdHkisgEKC1JwY1Jlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAUSGAoQcmVzcG9uc2VfbWVzc2FnZRgCIAEoDBIfCghtZXRhZGF0YRgDIAEoCzINLnJwYy5NZXRhZGF0YRIVCg1lbmRfb2Zfc3RyZWFtGAQgASgIEhwKBWVycm9yGAUgASgLMg0ucnBjLlJwY0Vycm9yEh8KCHRyYWlsZXJzGAYgASgLMg0ucnBjLk1ldGFkYXRhIi8KDENhbGxNZXRhZGF0YRIPCgdzZXJ2aWNlGAEgASgJEg4KBm1ldGhvZBgCIAEoCSJkCghNZXRhZGF0YRIpCgZ2YWx1ZXMYASADKAsyGS5ycGMuTWV0YWRhdGEuVmFsdWVzRW50cnkaLQoLVmFsdWVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKGAQoIUnBjRXJyb3ISDAoEY29kZRgBIAEoCRIPCgdtZXNzYWdlGAIgASgJEisKB2RldGFpbHMYAyADKAsyGi5ycGMuUnBjRXJyb3IuRGV0YWlsc0VudHJ5Gi4KDERldGFpbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBYgZwcm90bzM");
+  fileDesc("ChJycGNfZW52ZWxvcGUucHJvdG8SA3JwYyLyAQoKUnBjUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgFEhcKD3JlcXVlc3RfbWVzc2FnZRgCIAEoDBIoCg1jYWxsX21ldGFkYXRhGAMgASgLMhEucnBjLkNhbGxNZXRhZGF0YRIfCghtZXRhZGF0YRgEIAEoCzINLnJwYy5NZXRhZGF0YRIVCg1lbmRfb2Zfc3RyZWFtGAUgASgIEg0KBWFib3J0GAYgASgIEhwKD3NlbmRlcl9pZGVudGl0eRgHIAEoCUgAiAEBEhQKDGNsaWVudF9lcG9jaBgIIAEoDUISChBfc2VuZGVyX2lkZW50aXR5IvIBCgtScGNSZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgFEhgKEHJlc3BvbnNlX21lc3NhZ2UYAiABKAwSHwoIbWV0YWRhdGEYAyABKAsyDS5ycGMuTWV0YWRhdGESFQoNZW5kX29mX3N0cmVhbRgEIAEoCBIcCgVlcnJvchgFIAEoCzINLnJwYy5ScGNFcnJvchIfCgh0cmFpbGVycxgGIAEoCzINLnJwYy5NZXRhZGF0YRIUCgxjbGllbnRfZXBvY2gYByABKA0SKAoNY2FsbF9tZXRhZGF0YRgIIAEoCzIRLnJwYy5DYWxsTWV0YWRhdGEiLwoMQ2FsbE1ldGFkYXRhEg8KB3NlcnZpY2UYASABKAkSDgoGbWV0aG9kGAIgASgJImQKCE1ldGFkYXRhEikKBnZhbHVlcxgBIAMoCzIZLnJwYy5NZXRhZGF0YS5WYWx1ZXNFbnRyeRotCgtWYWx1ZXNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIoYBCghScGNFcnJvchIMCgRjb2RlGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSKwoHZGV0YWlscxgDIAMoCzIaLnJwYy5ScGNFcnJvci5EZXRhaWxzRW50cnkaLgoMRGV0YWlsc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFiBnByb3RvMw");
 
 /**
- * RPC request envelope for multiplexing over LiveKit data channel
+ * RPC request envelope for multiplexing over a byte-oriented transport (LiveKit data channel,
+ * stdio pipes, ...).
  *
  * @generated from message rpc.RpcRequest
  */
@@ -49,11 +50,25 @@ export type RpcRequest = Message<"rpc.RpcRequest"> & {
   abort: boolean;
 
   /**
-   * Sender's LiveKit participant identity. Server sends responses to this identity.
+   * Sender's transport-level identity (e.g. LiveKit participant identity). The server sends
+   * responses to this identity where the transport needs explicit addressing.
    *
    * @generated from field: optional string sender_identity = 7;
    */
   senderIdentity?: string;
+
+  /**
+   * Identifies the *connection* that opened this call, so a response can be attributed to it.
+   *
+   * `request_id` alone cannot do that: it restarts whenever a client's id space is rebuilt (a
+   * browser page reload, a process restart) while the peer keeps serving streams opened by the
+   * previous connection and addressed to the same `sender_identity`. Those frames then resolve
+   * whichever call now holds the id, and their payload is decoded as that call's message type —
+   * silently, since the engines hand callers raw bytes. Minted once per client connection.
+   *
+   * @generated from field: uint32 client_epoch = 8;
+   */
+  clientEpoch: number;
 };
 
 /**
@@ -64,7 +79,7 @@ export const RpcRequestSchema: GenMessage<RpcRequest> = /*@__PURE__*/
   messageDesc(file_rpc_envelope, 0);
 
 /**
- * RPC response envelope (one message per LiveKit data packet)
+ * RPC response envelope (one message per transport data packet/frame)
  *
  * @generated from message rpc.RpcResponse
  */
@@ -98,6 +113,23 @@ export type RpcResponse = Message<"rpc.RpcResponse"> & {
    * @generated from field: rpc.Metadata trailers = 6;
    */
   trailers?: Metadata;
+
+  /**
+   * Echo of the originating RpcRequest's `client_epoch`. A client drops any response whose epoch
+   * is not its own, which is what stops a dead connection's stream from resolving a live call.
+   *
+   * @generated from field: uint32 client_epoch = 7;
+   */
+  clientEpoch: number;
+
+  /**
+   * Echo of the originating RpcRequest's `call_metadata`. Lets a client refuse a response that
+   * answers a different method than the call holding the id, rather than decoding one message
+   * type as another.
+   *
+   * @generated from field: rpc.CallMetadata call_metadata = 8;
+   */
+  callMetadata?: CallMetadata;
 };
 
 /**

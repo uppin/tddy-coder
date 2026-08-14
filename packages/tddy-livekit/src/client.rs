@@ -189,7 +189,7 @@ impl RpcClient {
         method: &str,
         request_bytes_list: Vec<Vec<u8>>,
     ) -> Result<Vec<u8>, Status> {
-        let (request_id, rx) = self.engine.register_unary();
+        let (request_id, rx) = self.engine.register_unary(service, method);
         rpc_trace!(
             "RpcClient::call_client_stream request_id={} {}/{} ({} messages)",
             request_id,
@@ -210,7 +210,7 @@ impl RpcClient {
         method: &str,
         request_bytes_list: Vec<Vec<u8>>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        let (request_id, rx) = self.engine.register_stream();
+        let (request_id, rx) = self.engine.register_stream(service, method);
         rpc_trace!(
             "RpcClient::call_bidi_stream request_id={} {}/{} ({} messages)",
             request_id,
@@ -259,7 +259,7 @@ impl RpcClient {
     /// receives one response, then sends the next. Enables protocol-level tests for
     /// real-time streaming (server processes each message as it arrives, not on end_of_stream).
     pub fn start_bidi_stream(&self, service: &str, method: &str) -> BidiStreamResult<'_> {
-        let (request_id, rx) = self.engine.register_stream();
+        let (request_id, rx) = self.engine.register_stream(service, method);
         rpc_trace!(
             "RpcClient::start_bidi_stream request_id={} {}/{}",
             request_id,

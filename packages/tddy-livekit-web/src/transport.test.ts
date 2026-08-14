@@ -70,11 +70,18 @@ function makeFakeRoom(onPublish?: (payload: Uint8Array) => void) {
 }
 
 /** Build a valid RpcResponse binary for a given requestId with a small payload. */
-function makeResponsePayload(requestId: number, responseMessageBytes: Uint8Array): Uint8Array {
+function makeResponsePayload(
+  requestId: number,
+  responseMessageBytes: Uint8Array,
+  clientEpoch: number,
+): Uint8Array {
   const response = create(RpcResponseSchema, {
     requestId,
     responseMessage: responseMessageBytes,
     endOfStream: false,
+    // A response is delivered only when it names the connection that made the call — the peer
+    // echoes what the request carried, so a test must too.
+    clientEpoch,
   });
   return toBinary(RpcResponseSchema, response);
 }
@@ -161,7 +168,7 @@ describe("LiveKitTransport meter option", () => {
 
     // Build a matching response and emit it
     const fakeMessageBytes = new Uint8Array([0x0a, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f]); // 7 bytes
-    const responsePayload = makeResponsePayload(capturedRequestId, fakeMessageBytes);
+    const responsePayload = makeResponsePayload(capturedRequestId, fakeMessageBytes, transport.clientEpoch);
     fakeRoom._emit(RoomEvent.DataReceived, responsePayload, { identity: "server" }, "tddy-rpc");
 
     // The call should now resolve
@@ -205,9 +212,9 @@ const FAKE_METHOD_RETURNING_TIMESTAMP = {
 } as any;
 
 /** A valid RpcResponse for `requestId` wrapping a `Timestamp` whose int64 `seconds` = `seconds`. */
-function aTimestampResponse(requestId: number, seconds: bigint): Uint8Array {
+function aTimestampResponse(requestId: number, seconds: bigint, clientEpoch: number): Uint8Array {
   const message = toBinary(TimestampSchema, create(TimestampSchema, { seconds }));
-  return makeResponsePayload(requestId, message);
+  return makeResponsePayload(requestId, message, clientEpoch);
 }
 
 describe("LiveKitTransport unary — responses carrying 64-bit integer fields", () => {
@@ -229,7 +236,7 @@ describe("LiveKitTransport unary — responses carrying 64-bit integer fields", 
     await Promise.resolve();
     fakeRoom._emit(
       RoomEvent.DataReceived,
-      aTimestampResponse(capturedRequestId, 1_700_000_000n),
+      aTimestampResponse(capturedRequestId, 1_700_000_000n, transport.clientEpoch),
       { identity: "server" },
       "tddy-rpc",
     );
@@ -273,7 +280,7 @@ describe("LiveKitTransport unary — call deadlines", () => {
     await Promise.resolve();
     fakeRoom._emit(
       RoomEvent.DataReceived,
-      makeResponsePayload(capturedRequestId, new Uint8Array(0)),
+      makeResponsePayload(capturedRequestId, new Uint8Array(0), transport.clientEpoch),
       { identity: "server" },
       "tddy-rpc",
     );
@@ -296,7 +303,7 @@ describe("LiveKitTransport unary — call deadlines", () => {
     await new Promise((resolve) => setTimeout(resolve, 40));
     fakeRoom._emit(
       RoomEvent.DataReceived,
-      makeResponsePayload(capturedRequestId, new Uint8Array(0)),
+      makeResponsePayload(capturedRequestId, new Uint8Array(0), transport.clientEpoch),
       { identity: "server" },
       "tddy-rpc",
     );
@@ -336,12 +343,12 @@ const REUSED_MESSAGE_ID = 7;
 const A_SMALL_FRAME_BUDGET = 200;
 
 /** A valid `RpcResponse` for `requestId` carrying a `CallMetadata` message. */
-function aCallMetadataResponse(requestId: number): Uint8Array {
+function aCallMetadataResponse(requestId: number, clientEpoch: number): Uint8Array {
   const message = toBinary(
     CallMetadataSchema,
     create(CallMetadataSchema, { service: A_LONG_SERVICE_NAME, method: "ListSessions" }),
   );
-  return makeResponsePayload(requestId, message);
+  return makeResponsePayload(requestId, message, clientEpoch);
 }
 
 /** A chunk frame of another sender's message that reuses `REUSED_MESSAGE_ID`: same header and same
@@ -362,7 +369,7 @@ describe("LiveKitTransport — chunk frames from another sender", () => {
     // 100 ms deadline so a message that never completes fails the test promptly instead of hanging.
     const callPromise = transport.unary(FAKE_METHOD_RETURNING_CALL_METADATA, undefined, 100, undefined, {});
     await Promise.resolve();
-    const envelope = aCallMetadataResponse(capturedRequestId);
+    const envelope = aCallMetadataResponse(capturedRequestId, transport.clientEpoch);
     const frames = splitIntoFrames(REUSED_MESSAGE_ID, envelope, A_SMALL_FRAME_BUDGET);
 
     // When — the peer's first two frames arrive, then an unidentified sender's final frame for the
@@ -437,7 +444,7 @@ describe("LiveKitTransport unary — empty successful responses", () => {
     // When
     const callPromise = transport.unary(FAKE_METHOD, undefined, undefined, undefined, {});
     await Promise.resolve();
-    const responsePayload = makeResponsePayload(capturedRequestId, new Uint8Array(0));
+    const responsePayload = makeResponsePayload(capturedRequestId, new Uint8Array(0), transport.clientEpoch);
     fakeRoom._emit(RoomEvent.DataReceived, responsePayload, { identity: "server" }, "tddy-rpc");
 
     // Then

@@ -5,6 +5,10 @@
 
 use tddy_rpc::envelope::{decode_request, encode_request, CallMetadata, RpcRequest};
 
+/// The connection that opened these calls. Every response is attributed to it, so a frame
+/// left over from a different connection can never resolve one of them.
+const A_CLIENT_EPOCH: u32 = 0x5f3a_91c2;
+
 #[test]
 fn rpc_request_round_trips_through_encode_and_decode() {
     // Given an RpcRequest with representative fields set, including the transport-neutral
@@ -20,6 +24,7 @@ fn rpc_request_round_trips_through_encode_and_decode() {
         end_of_stream: true,
         abort: false,
         sender_identity: Some("client-1".to_string()),
+        client_epoch: A_CLIENT_EPOCH,
     };
 
     // When encoding then decoding
