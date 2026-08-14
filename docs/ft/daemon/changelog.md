@@ -2,6 +2,17 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-14 — A session's codebase can live on a different daemon than its agent
+
+- **`StartSessionRequest.codebase_daemon_instance_id` is a second host axis.** `daemon_instance_id` says where the agent runs; this says whose filesystem holds the worktree. Empty or self-matching is exactly today's behaviour. See [remote-managed-worktree.md](remote-managed-worktree.md).
+- **Restricted to `claude-cli`, and to managed codebase.** claude-cli is the one agent that can be *prevented* from reaching a local filesystem (`--allowedTools`/`--disallowedTools`); cursor-agent has no equivalent, so a split there would be guidance rather than enforcement.
+- **`recipe`, `semantic_index` and `sandbox` are refused by name for a split** — each resolves a worktree on the daemon running the agent. The new-session form withdraws them rather than offering a choice whose only effect is a rejected request.
+- **Atomicity needed two halves.** The codebase session's id is caller-chosen (`requested_session_id`, workspace-only) so a timed-out forward can still name what to tear down; and the split forward waits `spawn_worker_request_timeout + PEER_FORWARD_TIMEOUT`, because the peer's own worktree budget outlasts the ordinary forward deadline. With only the id, this daemon tore down while the peer went on building.
+- **Paired teardown is idempotent, not credulous.** "The peer has no such session" completes the delete; unreachable refuses. The common room is checked to be *connected* first — a local no-room fault returns the same status code the peer uses for a missing session, and conflating them stranded the checkout.
+- **New `StreamExecuteTool`** carries tool results in bounded frames, so a large `Read` or broad `Grep` cannot silently wedge on the transport's chunk framing. A stream ending without its final frame is an error and the partial result is discarded.
+- **Fixed on the way:** `DeleteSession` removed worktrees only for `claude-cli`, so every `workspace` session leaked both its checkout and its `git worktree` registration — contradicting [remote-codebase-mode.md](remote-codebase-mode.md) criterion 3. `cursor-cli` still leaks; see `docs/dev/TODO.md`.
+- **Known properties, deliberately:** the agent process holds the caller's session token (not scoped to exec tools), no LiveKit RPC carries a client-side deadline, and `tddy-coder --remote` remains unimplemented. All recorded in `docs/dev/TODO.md`.
+
 ## 2026-07-30 — A session creation on a branch another session owns is refused, not silently suffixed `-1`
 
 - **`StartSession` refuses a `new_branch_from_base` request whose `new_branch_name` a session already owns**, instead of letting the worktree layer's suffixing retry silently produce `<branch>-1`. Nothing is created: no session directory, `changeset.yaml`, branch, worktree or remote push. See [session-branch-conflict.md](session-branch-conflict.md).
