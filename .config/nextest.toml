@@ -45,6 +45,15 @@ retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
 #     orchestrator session id it never creates, so branch resolution fails with
 #     "session file missing". Fix the test, then delete this line.
 #
+#   sandbox_runner_stdio_acceptance (whole binary)
+#     Two reasons. Its tests exec the tddy-sandbox-runner binary, which the
+#     `Rust tests` check no longer builds — the build moved to its own check
+#     that runs after the tests. And even with the binary present,
+#     echoes_a_message_over_sandbox_service_served_over_stdio fails on an
+#     unprivileged runner with "tool ipc server exited before bind" (confirmed
+#     on CI, survived two retries). Wiring this suite up needs a job that both
+#     builds the runner and has sandbox privileges.
+#
 #   tddy-sandbox-recipes cursor_agent_prerequisite_reads_include_install_dir_and_share_root
 #     Asserts `/Users` appears among path-traversal ancestors, which is only true
 #     on macOS. Permanent failure on Linux, not a flake.
@@ -55,6 +64,7 @@ not (
     or (package(tddy-daemon) and binary(action_sandbox_acceptance) and test(=sandboxed_bash_action_writes_to_output_dir))
     or (package(tddy-daemon) and binary(cursor_cli_session_acceptance) and test(=cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available))
     or (package(tddy-daemon) and binary(cursor_cli_session_acceptance) and test(=cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path))
+    or (package(tddy-daemon) and binary(sandbox_runner_stdio_acceptance))
     or (package(tddy-sandbox-recipes) and test(=cursor_cli::tests::cursor_agent_prerequisite_reads_include_install_dir_and_share_root))
 )
 """
