@@ -5256,11 +5256,19 @@ impl ConnectionServiceImpl {
         // even though the checkout is on `codebase_instance_id`. Opened before the agent is spawned
         // (PRD FR2), and measured by asking the codebase daemon rather than by reading a filesystem
         // this host does not have (FR5). The agent's token was minted for exactly this room.
+        //
+        // The poller signs its own credential per poll under the verified caller's identity rather
+        // than re-presenting `req.session_token`, which the codebase daemon stops accepting five
+        // minutes in — see `RoomPollTokenMinter`.
+        let token_minter = Arc::new(crate::split_session::RoomPollTokenMinter::new(
+            &livekit.api_secret,
+            &req.session_token,
+        )?);
         let remote_source = Arc::new(crate::session_room::RemoteCheckout::new(
             Arc::new(self.clone()),
             codebase_session_id.to_string(),
             codebase_instance_id.to_string(),
-            req.session_token.clone(),
+            token_minter,
             session_dir.clone(),
         ));
         let local_instance_id = local_instance_id_for_config(&self.config);

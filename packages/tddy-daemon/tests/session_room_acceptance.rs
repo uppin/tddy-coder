@@ -208,6 +208,22 @@ fn an_agent_session_request() -> StartSessionRequest {
     }
 }
 
+/// The credential a signed-in browser would present, signed with the deployment secret this
+/// daemon's config carries — the same `livekit.api_secret` every daemon verifies session tokens
+/// with. [`TEST_TOKEN`] is a bare literal the stubbed user resolver recognises, which is enough to
+/// pass an RPC here but carries no signature: split wiring mints the agent a credential of its own
+/// from the caller's claims, so the caller's has to be one that verifies.
+fn a_caller_token_signed_with_the_deployment_secret() -> String {
+    tddy_github::SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(
+        &tddy_github::GitHubUser {
+            id: 4242,
+            login: "testuser".to_string(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        },
+    )
+}
+
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: ConnectionServiceImpl,
@@ -667,7 +683,7 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
         &started.session_id,
         "some-other-codebase-host",
         "0199bbbb-0000-7000-8000-00000000000b",
-        TEST_TOKEN,
+        &a_caller_token_signed_with_the_deployment_secret(),
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
@@ -714,7 +730,7 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
         &started.session_id,
         "some-other-codebase-host",
         "0199bbbb-0000-7000-8000-00000000000b",
-        TEST_TOKEN,
+        &a_caller_token_signed_with_the_deployment_secret(),
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
