@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use livekit::prelude::RoomOptions;
@@ -29,7 +29,7 @@ use tddy_daemon::livekit_peer_discovery::{
     LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -53,6 +53,36 @@ const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "session-room-split-proj";
 const POLL_INTERVAL_MS: u64 = 200;
+
+/// The credential the browser presents on every call here, signed with [`LK_API_SECRET`] — the
+/// secret both daemons hold, and the one a session token is verified against anywhere in a
+/// deployment. Minted once and shared, because the requests and the stub user resolver have to
+/// agree on the same string; a split placement mints the agent's own credential from these claims,
+/// so an unsigned literal would name an identity no daemon could confirm.
+fn a_caller_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
+            id: 4242,
+            login: "testuser".to_string(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        })
+    })
+}
+
+/// Resolve the OS user the way a real daemon does: by verifying the credential's signature and
+/// reading the login out of its claims (`auth::build_auth_entries`), never by recognising one
+/// string. A daemon signs credentials of its own — a session room mints one per poll of a checkout
+/// it does not hold — so a resolver that only accepted the browser's exact token would authenticate
+/// the caller and nothing the deployment itself issued.
+fn resolve_user_by_verifying_the_token(token: &str) -> Option<String> {
+    SessionTokenSigner::new(LK_API_SECRET.as_bytes())
+        .verify(token)
+        .ok()
+        .filter(|claims| claims.kind == TokenKind::Access)
+        .map(|claims| claims.login)
+}
 
 /// Committed before any worktree is cut, so a checkout has a tracked file from the moment its room
 /// opens and no test needs a setup commit of its own.
@@ -217,8 +247,7 @@ async fn a_daemon(
     register_project(&sessions.path().join("projects"), repo);
     let base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-    let user_resolver: UserResolver =
-        Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
+    let user_resolver: UserResolver = Arc::new(resolve_user_by_verifying_the_token);
 
     let config_arc = Arc::new(config.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
@@ -274,7 +303,7 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
         || async {
             let daemons = service
                 .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: TEST_TOKEN.to_string(),
+                    session_token: a_caller_token().to_string(),
                 }))
                 .await
                 .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
@@ -365,7 +394,7 @@ impl SplitSession {
         let started = agent
             .service
             .start_session(Request::new(StartSessionRequest {
-                session_token: TEST_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
                 session_type: "claude-cli".to_string(),
                 model: "claude-opus-5".to_string(),
@@ -561,7 +590,7 @@ async fn read_file_in_room(
             "connection.ConnectionService",
             "ExecuteTool",
             ExecuteToolRequest {
-                session_token: TEST_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 session_id: codebase.session_id.clone(),
                 tool_name: "Read".to_string(),
                 args_json: serde_json::json!({ "path": path }).to_string(),

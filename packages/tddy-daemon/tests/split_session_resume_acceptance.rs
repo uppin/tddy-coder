@@ -15,13 +15,14 @@
 //! than an intermediate the daemon could get right on its own and hand over wrong.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tddy_core::session_metadata::{write_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ResumeSessionRequest,
@@ -32,7 +33,9 @@ use tddy_testing_commons::wait::eventually_blocking;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-const VALID_TOKEN: &str = "valid-token";
+/// The deployment-wide secret in this daemon's `livekit:` block. It signs LiveKit room JWTs *and*
+/// session tokens, which is what lets the codebase daemon verify a credential minted here.
+const LK_API_SECRET: &str = "secret";
 const MODEL: &str = "claude-opus-5";
 const PROJECT_ID: &str = "split-resume-proj";
 /// The session on this daemon — the one being resumed.
@@ -58,6 +61,21 @@ const STUB_RECORD_TIMEOUT: Duration = Duration::from_secs(10);
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/// The credential the browser presents on `ResumeSession`, signed with [`LK_API_SECRET`] so this
+/// daemon can verify it. Minted once and shared, because the request and the daemon's user resolver
+/// have to agree on the very same string, and the agent's own token is minted from *these* claims.
+fn a_caller_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
+            id: 4242,
+            login: current_os_user(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        })
+    })
+}
 
 /// The OS user the test process runs as: a real, resolvable user, so the claude-cli spawn needs no
 /// privilege drop.
@@ -104,7 +122,7 @@ claude_cli:
 livekit:
   url: {LIVEKIT_URL}
   api_key: devkey
-  api_secret: secret
+  api_secret: {LK_API_SECRET}
   common_room: {COMMON_ROOM}
 "#
     );
@@ -119,7 +137,7 @@ fn a_service(config: DaemonConfig, sessions_base: PathBuf) -> ConnectionServiceI
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
     let resolved_user = current_os_user();
     let user_resolver: UserResolver =
-        Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
+        Arc::new(move |token| (token == a_caller_token()).then(|| resolved_user.clone()));
     ConnectionServiceImpl::new(
         config,
         resolver,
@@ -223,7 +241,7 @@ async fn resume_a_split_session() -> ResumedSplitSession {
 
     service
         .resume_session(Request::new(ResumeSessionRequest {
-            session_token: VALID_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: AGENT_SESSION_ID.to_string(),
         }))
         .await
