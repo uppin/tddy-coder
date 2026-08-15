@@ -104,6 +104,22 @@ pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Opt
     Ok(projects.into_iter().find(|p| p.project_id == project_id))
 }
 
+/// Find a project the way a caller names one: by `project_id` first, then by `name`.
+///
+/// The id is tried first so a project whose *name* collides with another project's id still
+/// resolves to the row the id identifies.
+pub fn find_project_by_ref(
+    projects_dir: &Path,
+    project_ref: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    let projects = read_projects(projects_dir)?;
+    Ok(projects
+        .iter()
+        .find(|p| p.project_id == project_ref)
+        .or_else(|| projects.iter().find(|p| p.name == project_ref))
+        .cloned())
+}
+
 /// Resolves the default remote name for a registered project.
 ///
 /// Resolution order (no remote is assumed — `origin` is the last resort only):

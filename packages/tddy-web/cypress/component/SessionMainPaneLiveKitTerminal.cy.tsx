@@ -16,13 +16,15 @@
  */
 
 import React, { useMemo } from "react";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { TokenService, GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { useHttpClient } from "../../src/rpc/transportProvider";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +53,9 @@ const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
   identity: "browser-livekit-terminal-test-aaaa-0000-0000-000000000001-1719999999999",
 };
 
+/** The signed-in operator's daemon access token — what the daemon's mint refuses to act without. */
+const SESSION_TOKEN = "an-operator-access-token";
+
 const GENERATE_TOKEN_OK = toArrayBuffer(
   toBinary(
     GenerateTokenResponseSchema,
@@ -62,12 +67,13 @@ const GENERATE_TOKEN_OK = toArrayBuffer(
 // Harness
 // ---------------------------------------------------------------------------
 
-function LiveKitMainPaneHarness() {
+function LiveKitMainPaneHarness({ tokenClient: injected }: { tokenClient?: Client<typeof TokenService> } = {}) {
   const transport = useMemo(
     () => createConnectTransport({ baseUrl: `${window.location.origin}/rpc`, useBinaryFormat: true }),
     [],
   );
-  const tokenClient = useMemo(() => createClient(TokenService, transport), [transport]);
+  const ownClient = useMemo(() => createClient(TokenService, transport), [transport]);
+  const tokenClient = injected ?? ownClient;
 
   return (
     <SessionMainPane
@@ -99,6 +105,12 @@ function LiveKitMainPaneHarness() {
       focusedRuntimeId={FAKE_SESSION.sessionId}
     />
   );
+}
+
+/** The same pane whose token client comes from the app transport, so requests pass the auth gate. */
+function GatedLiveKitMainPaneHarness() {
+  const tokenClient = useHttpClient(TokenService);
+  return <LiveKitMainPaneHarness tokenClient={tokenClient} />;
 }
 
 function interceptGenerateToken() {
@@ -147,6 +159,20 @@ describe("SessionMainPane — LiveKit-routed sessions render a real terminal", (
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
       expect(req.room).to.equal(LIVEKIT_ATTACHMENT.livekitRoom);
       expect(req.identity).to.equal((LIVEKIT_ATTACHMENT as { identity: string }).identity);
+    });
+  });
+
+  it("authenticates the token request with the signed-in operator's session token", () => {
+    // Given a signed-in operator — the daemon's mint refuses an anonymous caller
+    interceptGenerateToken();
+
+    // When
+    cy.mount(withSessionTokenGate(SESSION_TOKEN, <GatedLiveKitMainPaneHarness />));
+
+    // Then
+    cy.wait("@generateToken").then((interception) => {
+      const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
+      expect(req.sessionToken).to.equal(SESSION_TOKEN);
     });
   });
 

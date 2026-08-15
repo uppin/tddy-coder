@@ -1959,7 +1959,15 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                     std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
                 ));
                 let token_provider = LiveKitTokenProvider(token_generator);
-                let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+                // Unauthenticated on purpose. A session coder holds no session-token signer —
+                // `build_auth_service_entry` gives it an *unsigned* `AuthServiceImpl` — so it can
+                // verify no `session_token`, and an authenticator here would refuse every caller
+                // and leave `--web-port` unable to open its own terminal. Reachability of this
+                // port is the authorization: it is the coder's own web surface, opened by whoever
+                // launched the process with these LiveKit credentials. The `daemon-*` identity
+                // refusal is enforced inside the service, so it applies here regardless.
+                let token_service_impl =
+                    tddy_service::TokenServiceImpl::unauthenticated(token_provider);
                 let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
                 let echo_server =
                     tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
@@ -3243,7 +3251,13 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
             ));
             let token_provider = LiveKitTokenProvider(token_generator.clone());
-            let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+            // Unauthenticated on purpose. This registration is served *inside*
+            // `args.livekit_room` over the coder's own LiveKit participant, so every caller has
+            // already been admitted to that room by a token the daemon minted. As above, the coder
+            // has no signer with which to verify a `session_token`. The `daemon-*` identity
+            // refusal is enforced inside the service and applies here too.
+            let token_service_impl =
+                tddy_service::TokenServiceImpl::unauthenticated(token_provider);
             let terminal_server = tddy_service::TerminalServiceServer::new(terminal_service);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
             let tunnel_server = tddy_service::LoopbackTunnelServiceServer::new(
@@ -3367,7 +3381,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                 std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
             ));
             let token_provider = LiveKitTokenProvider(token_generator);
-            let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
+            // Unauthenticated on purpose, for the same reason as the coder's other `--web-port`
+            // registration above: no session-token signer, so an authenticator here would refuse
+            // every caller. The `daemon-*` identity refusal is enforced inside the service.
+            let token_service_impl =
+                tddy_service::TokenServiceImpl::unauthenticated(token_provider);
             let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
             let echo_server = tddy_service::EchoServiceServer::new(tddy_service::EchoServiceImpl);
             let mut entries = vec![

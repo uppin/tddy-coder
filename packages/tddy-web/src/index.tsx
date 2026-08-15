@@ -119,6 +119,10 @@ function ConnectedTerminal({
   const isMobile = useIsMobile();
 
   useEffect(() => {
+    // `sessionToken` is not passed: the field exists on the request, so the transport's auth gate
+    // fills it with a request-time-fresh access token (see `src/rpc/authGateInterceptor.ts`). The
+    // daemon's registration of this mint refuses an unauthenticated caller; a session coder's own
+    // `--web-port` registration does not.
     client
       .generateToken({ room: roomName, identity })
       .then((res) => {

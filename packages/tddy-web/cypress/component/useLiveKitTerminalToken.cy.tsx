@@ -21,10 +21,13 @@ import {
   TokenService,
   GenerateTokenRequestSchema,
   GenerateTokenResponseSchema,
+  RefreshTokenRequestSchema,
   RefreshTokenResponseSchema,
 } from "../../src/gen/token_pb";
 import { useLiveKitTerminalToken } from "../../src/components/sessions/useLiveKitTerminalToken";
+import { useHttpClient } from "../../src/rpc/transportProvider";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +36,8 @@ import { byTestId } from "../support/testIds";
 
 const ROOM_NAME = "room-token-hook-test-0001";
 const IDENTITY = "browser-token-hook-test-0001-999";
+/** The signed-in operator's daemon access token — what the daemon's mint refuses to act without. */
+const SESSION_TOKEN = "an-operator-access-token";
 
 const GENERATE_OK = toArrayBuffer(
   toBinary(
@@ -77,6 +82,28 @@ function TokenHookHarness({ room, identity }: { room?: string; identity?: string
         type="button"
         data-testid={REFRESH_BTN}
         onClick={() => void getToken().then((res) => setRefreshedToken(res.token))}
+      >
+        refresh
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The same harness on the *production* transport (`useHttpClient`) rather than a bare
+ * `createConnectTransport`, so requests pass through the auth gate the app installs.
+ */
+function GatedTokenHookHarness({ room, identity }: { room?: string; identity?: string }) {
+  const tokenClient = useHttpClient(TokenService);
+  const { token, getToken } = useLiveKitTerminalToken(tokenClient, room, identity);
+
+  return (
+    <div>
+      <span data-testid={TOKEN_EL}>{token ?? ""}</span>
+      <button
+        type="button"
+        data-testid={REFRESH_BTN}
+        onClick={() => void getToken().then(() => undefined)}
       >
         refresh
       </button>
@@ -158,6 +185,41 @@ describe("useLiveKitTerminalToken", () => {
     // Then
     byTestId(ERROR_EL).invoke("text").should("not.equal", "");
     byTestId(TOKEN_EL).should("have.text", "");
+  });
+
+  it("sends the signed-in operator's session token with the initial generateToken request", () => {
+    // Given a signed-in operator — the daemon's mint refuses an anonymous caller
+    interceptGenerateToken(GENERATE_OK);
+
+    // When
+    cy.mount(
+      withSessionTokenGate(SESSION_TOKEN, <GatedTokenHookHarness room={ROOM_NAME} identity={IDENTITY} />),
+    );
+
+    // Then
+    cy.wait("@generateToken").then((interception) => {
+      const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
+      expect(req.sessionToken).to.equal(SESSION_TOKEN);
+    });
+  });
+
+  it("sends the signed-in operator's session token with every refreshToken request", () => {
+    // Given a signed-in operator whose terminal is already holding a token
+    interceptGenerateToken(GENERATE_OK);
+    interceptRefreshToken(REFRESH_OK);
+    cy.mount(
+      withSessionTokenGate(SESSION_TOKEN, <GatedTokenHookHarness room={ROOM_NAME} identity={IDENTITY} />),
+    );
+    cy.wait("@generateToken");
+
+    // When the terminal renews it
+    byTestId(REFRESH_BTN).click();
+
+    // Then the renewal is authenticated too — a lapsed caller cannot keep renewing room admission
+    cy.wait("@refreshToken").then((interception) => {
+      const req = fromBinary(RefreshTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
+      expect(req.sessionToken).to.equal(SESSION_TOKEN);
+    });
   });
 
   it("does not call generateToken when room or identity is not yet known", () => {

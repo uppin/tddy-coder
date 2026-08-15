@@ -15,6 +15,7 @@ import { GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../../s
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
+import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -44,6 +45,9 @@ const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
   livekitServerIdentity: "daemon-pr-stack-presenter-room-0001",
   identity: "browser-pr-stack-presenter-room-aaaa-0000-0000-000000000001-1719999999999",
 };
+
+/** The signed-in operator's daemon access token — what the daemon's mint refuses to act without. */
+const SESSION_TOKEN = "an-operator-access-token";
 
 const GENERATE_TOKEN_OK = toArrayBuffer(
   toBinary(
@@ -89,7 +93,7 @@ describe("PR-Stack Chat Screen — opens its own presenter LiveKit room from the
     interceptGenerateToken();
 
     // When
-    cy.mount(<PrStackMainPaneHarness />);
+    cy.mount(withSessionTokenGate(SESSION_TOKEN, <PrStackMainPaneHarness />));
 
     // Then — the presenter connection targets the session's own attached room, proving
     // PrStackScreen opened its own LiveKit connection instead of sitting on the always-null
@@ -97,6 +101,21 @@ describe("PR-Stack Chat Screen — opens its own presenter LiveKit room from the
     cy.wait("@generateToken").then((interception) => {
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
       expect(req.room).to.equal(LIVEKIT_ATTACHMENT.livekitRoom);
+    });
+  });
+
+  it("authenticates that token request with the signed-in operator's session token", () => {
+    // Given — a pr-stack session already attached over LiveKit, and a signed-in operator
+    interceptGenerateToken();
+
+    // When
+    cy.mount(withSessionTokenGate(SESSION_TOKEN, <PrStackMainPaneHarness />));
+
+    // Then — the daemon's mint refuses an anonymous caller, so the presenter room would never
+    // open without it
+    cy.wait("@generateToken").then((interception) => {
+      const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
+      expect(req.sessionToken).to.equal(SESSION_TOKEN);
     });
   });
 });

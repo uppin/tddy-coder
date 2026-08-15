@@ -38,7 +38,13 @@ fn an_install_tree() -> InstallTree {
 
     let release = root.join("target").join("release");
     fs::create_dir_all(&release).expect("create release dir");
-    for binary in ["tddy-daemon", "tddy-coder", "tddy-tools", "tddy-supervisor"] {
+    for binary in [
+        "tddy-daemon",
+        "tddy-coder",
+        "tddy-tools",
+        "tddy-supervisor",
+        "tddy-remote-git-repo",
+    ] {
         write_executable(&release.join(binary), "fake-binary\n");
     }
 
@@ -578,4 +584,25 @@ fn installs_the_supervisor_binary_alongside_the_daemon() {
         "expected {} to be installed",
         installed.display()
     );
+}
+
+/// The `GIT_SSH_COMMAND` shim is a client of a daemon rather than part of one, but it is installed
+/// with the daemon so `git clone <instance>:<project>` resolves it on `PATH`
+/// (docs/ft/daemon/remote-git-repo.md § Shipping).
+#[test]
+fn installs_the_git_ssh_shim_so_git_can_exec_it_from_the_path() {
+    // Given
+    let tree = an_install_tree();
+
+    // When
+    tree.install();
+
+    // Then
+    let installed = tree.bin_dir.join("tddy-remote-git-repo");
+    assert!(
+        installed.is_file(),
+        "expected {} to be installed",
+        installed.display()
+    );
+    assert_mode(&installed, 0o755);
 }

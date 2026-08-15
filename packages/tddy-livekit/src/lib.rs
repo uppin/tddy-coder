@@ -7,6 +7,7 @@ pub mod bridge;
 pub mod broadcast;
 pub mod chunking;
 pub mod client;
+pub mod client_connect;
 pub mod client_factory;
 pub mod envelope;
 pub mod participant;
@@ -31,6 +32,7 @@ pub use broadcast::{
     MAX_BROADCAST_PAYLOAD_BYTES,
 };
 pub use client::{BidiStreamSender, RpcClient};
+pub use client_connect::{connect_client, ConnectError, ConnectedClient};
 pub use client_factory::LiveKitRpcClientFactory;
 pub use envelope::{decode_request, encode_request, encode_response, response_from_result};
 pub use livekit::prelude::RoomOptions;

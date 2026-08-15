@@ -286,13 +286,14 @@ async fn bidi_stream_echo_returns_stream_of_echoes() {
 #[tokio::test]
 async fn token_service_generate_token_returns_200_with_token_and_ttl() {
     // Given a connect_router backed by the TestTokenProvider
-    let token_service = TokenServiceImpl::new(TestTokenProvider);
+    let token_service = TokenServiceImpl::unauthenticated(TestTokenProvider);
     let token_server = TokenServiceServer::new(token_service);
     let app = connect_router(RpcBridge::new(token_server));
 
     let req = GenerateTokenRequest {
         room: "my-room".to_string(),
         identity: "client".to_string(),
+        session_token: String::new(),
     };
     let body_bytes = req.encode_to_vec();
 

@@ -10,10 +10,10 @@ impl ServiceGenerator for TddyServiceGenerator {
         let rpc = &self.rpc_crate_path;
 
         // Trait imports and definition
-        writeln!(buf, "use async_trait::async_trait;").unwrap();
+        import_once(buf, "use async_trait::async_trait;");
         let needs_stream_trait = service.methods.iter().any(|m| m.server_streaming);
         if needs_stream_trait {
-            writeln!(buf, "use futures_util::Stream;").unwrap();
+            import_once(buf, "use futures_util::Stream;");
         }
         writeln!(buf).unwrap();
 
@@ -190,14 +190,14 @@ fn generate_server_struct(service: &Service, buf: &mut String, rpc: &str) {
             .iter()
             .any(|m| m.client_streaming && m.server_streaming);
 
-    writeln!(buf, "use std::sync::Arc;").unwrap();
+    import_once(buf, "use std::sync::Arc;");
     if needs_stream_ext {
-        writeln!(buf, "use futures_util::StreamExt;").unwrap();
+        import_once(buf, "use futures_util::StreamExt;");
     }
     if needs_mpsc {
-        writeln!(buf, "use tokio::sync::mpsc;").unwrap();
+        import_once(buf, "use tokio::sync::mpsc;");
     }
-    writeln!(buf, "use prost::Message;").unwrap();
+    import_once(buf, "use prost::Message;");
     writeln!(buf).unwrap();
 
     writeln!(buf, "/// Generated RpcService server for {}.", service.name).unwrap();
@@ -822,6 +822,17 @@ fn method_proto_name(method: &Method) -> String {
         method.proto_name.clone()
     } else {
         to_pascal_case(&method.name)
+    }
+}
+
+/// Write an import into the generated file unless it is already there.
+///
+/// `prost_build` hands every service in a `.proto` the *same* output buffer, so a file declaring
+/// two services would otherwise emit `use async_trait::async_trait;` twice and fail to compile —
+/// which made "one service per file" an unwritten rule rather than a choice.
+fn import_once(buf: &mut String, import: &str) {
+    if !buf.lines().any(|line| line == import) {
+        writeln!(buf, "{import}").unwrap();
     }
 }
 

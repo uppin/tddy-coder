@@ -174,24 +174,13 @@ fn main() -> anyhow::Result<()> {
     let auth_result = tddy_daemon::auth::build_auth_entries(&config, host.as_str(), port)?;
     let mut rpc_entries = auth_result.entries;
 
-    if let Some(ref lk) = config.livekit {
-        if let (Some(api_key), Some(api_secret)) = (&lk.api_key, &lk.api_secret) {
-            let token_generator = std::sync::Arc::new(tddy_livekit::TokenGenerator::new(
-                api_key.clone(),
-                api_secret.clone(),
-                "daemon".to_string(),
-                "token-provider".to_string(),
-                std::time::Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-            ));
-            let token_provider = tddy_daemon::token_provider::LiveKitTokenProvider(token_generator);
-            let token_service_impl = tddy_service::TokenServiceImpl::new(token_provider);
-            let token_server = tddy_service::TokenServiceServer::new(token_service_impl);
-            rpc_entries.push(tddy_rpc::ServiceEntry {
-                name: "token.TokenService",
-                service: std::sync::Arc::new(token_server)
-                    as std::sync::Arc<dyn tddy_rpc::RpcService>,
-            });
-        }
+    // The room-JWT mint the web UI joins rooms through. Gated on the same session token as every
+    // other daemon RPC — anything that can reach `/rpc` can call it, and a JWT it minted is
+    // admission to a LiveKit room. See `tddy_daemon::auth::build_token_service_entry`.
+    if let Some(entry) =
+        tddy_daemon::auth::build_token_service_entry(&config, auth_result.user_resolver.as_ref())
+    {
+        rpc_entries.push(entry);
     }
 
     // Create one shared ClaudeCliSessionManager — injected into both the Telegram spawn path and
@@ -408,6 +397,15 @@ fn main() -> anyhow::Result<()> {
                 })
             };
             let ss_user_resolver = user_resolver.clone();
+            let remote_git_user_resolver = user_resolver.clone();
+            // Every project a daemon serves is resolved against *that OS user's own* registry, so
+            // this mirrors `sessions_base_resolver` one directory down.
+            let projects_dir_resolver: tddy_daemon::remote_git_service::ProjectsDirResolver = {
+                let dd = tddy_data_dir.clone();
+                Arc::new(move |user: &str| {
+                    tddy_daemon::user_sessions_path::projects_path_for_user(user, Some(&dd))
+                })
+            };
             // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
             // sessions_base → `.session.yaml` repo_path) to yield a session's worktree + catalog dir.
             // Built here, before the resolvers are moved into ConnectionServiceImpl below.
@@ -556,6 +554,20 @@ fn main() -> anyhow::Result<()> {
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "tasks.TaskService",
                 service: Arc::new(task_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // RemoteGitService — every project this daemon serves, usable as a git remote by any
+            // client that can join the room (`GIT_SSH_COMMAND=tddy-remote-git-repo`).
+            let remote_git_server = tddy_service::RemoteGitServiceServer::new(
+                tddy_daemon::remote_git_service::RemoteGitServiceImpl::new(
+                    remote_git_user_resolver,
+                    projects_dir_resolver,
+                    config_arc.clone(),
+                ),
+            );
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "remote_git.RemoteGitService",
+                service: Arc::new(remote_git_server) as Arc<dyn tddy_rpc::RpcService>,
             });
 
             // ActionService — start tools by kind via tddy-actions runtimes.

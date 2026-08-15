@@ -30,12 +30,13 @@ pub use observer_service::PresenterObserverService;
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
 pub use proto::actions::ActionServiceServer;
-pub use proto::auth::AuthServiceServer;
+pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
+pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
@@ -49,7 +50,9 @@ pub use tddy_rpc::Status;
 pub use terminal_service::{
     start_virtual_tui_session, TerminalServiceVirtualTui, VirtualTuiSession,
 };
-pub use token_service::{TokenProvider, TokenServiceImpl};
+pub use token_service::{
+    SessionTokenAuthenticator, TokenProvider, TokenServiceImpl, RESERVED_DAEMON_IDENTITY_PREFIX,
+};
 
 pub mod gen {
     tonic::include_proto!("tddy.v1");
@@ -73,6 +76,12 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod connection {
         include!(concat!(env!("OUT_DIR"), "/connection.rs"));
+    }
+    /// `RemoteGitService`: a daemon project served as a git remote. See
+    /// `docs/ft/daemon/remote-git-repo.md`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod remote_git {
+        include!(concat!(env!("OUT_DIR"), "/remote_git.rs"));
     }
     #[allow(unused_imports, unused_variables)]
     pub mod bsp {

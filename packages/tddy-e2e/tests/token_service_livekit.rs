@@ -60,7 +60,7 @@ mod livekit_tests {
         let server_token = livekit.generate_token(ROOM_NAME, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(ROOM_NAME, CLIENT_IDENTITY)?;
 
-        let token_service = TokenServiceImpl::new(DevTokenProvider);
+        let token_service = TokenServiceImpl::unauthenticated(DevTokenProvider);
         let token_server = TokenServiceServer::new(token_service);
         let multi_service = MultiRpcService::new(vec![ServiceEntry {
             name: "token.TokenService",
@@ -102,6 +102,7 @@ mod livekit_tests {
         let request = GenerateTokenRequest {
             room: ROOM_NAME.to_string(),
             identity: "new-participant".to_string(),
+            session_token: String::new(),
         };
         let request_bytes = request.encode_to_vec();
 

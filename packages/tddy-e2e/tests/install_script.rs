@@ -140,7 +140,13 @@ fn copy_install_tree(dest: &Path) {
 fn write_fake_release_binaries(root: &Path) {
     let rel = root.join("target").join("release");
     fs::create_dir_all(&rel).unwrap();
-    for name in ["tddy-supervisor", "tddy-daemon", "tddy-coder", "tddy-tools"] {
+    for name in [
+        "tddy-supervisor",
+        "tddy-daemon",
+        "tddy-coder",
+        "tddy-tools",
+        "tddy-remote-git-repo",
+    ] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();
         #[cfg(unix)]
@@ -236,7 +242,12 @@ fn install_copies_binaries_to_custom_dir() {
         st.success(),
         "install should succeed with test env; got {st:?}"
     );
-    for name in ["tddy-daemon", "tddy-coder", "tddy-tools"] {
+    for name in [
+        "tddy-daemon",
+        "tddy-coder",
+        "tddy-tools",
+        "tddy-remote-git-repo",
+    ] {
         let p = bin_dir.join(name);
         assert!(p.is_file(), "expected {} installed", p.display());
         let body = fs::read_to_string(&p).unwrap();
@@ -607,6 +618,44 @@ fn install_user_mode_writes_user_service_and_config() {
         cfg.contains(home.join(".local/share/tddy/auth").to_str().unwrap()),
         "user config auth_storage must be user-writable; got:\n{cfg}"
     );
+}
+
+/// A `--user` install is the developer-machine mode, so the `GIT_SSH_COMMAND` shim has to land in
+/// the user's own bin directory — `git` resolves it on `PATH`, and nothing else installs it.
+#[test]
+fn install_user_mode_puts_the_git_ssh_shim_on_the_user_bin_path() {
+    // Given — a fake $HOME so XDG defaults resolve under the tempdir (no INSTALL_* path overrides)
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    copy_install_tree(root);
+    write_fake_release_binaries(root);
+    write_fake_codex_acp_native(root);
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    // When
+    let mut cmd = Command::new("bash");
+    cmd.current_dir(root);
+    cmd.arg(root.join("install"));
+    cmd.args(["--systemd", "--user"]);
+    cmd.env("INSTALL_NO_SYSTEMCTL", "1");
+    cmd.env("HOME", home.to_str().unwrap());
+    cmd.env_remove("XDG_CONFIG_HOME");
+    cmd.env_remove("XDG_DATA_HOME");
+    cmd.env_remove("XDG_STATE_HOME");
+    let st = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("spawn install: {e}"));
+
+    // Then
+    assert!(st.success(), "user install: {st:?}");
+    let shim = home.join(".local/bin/tddy-remote-git-repo");
+    assert!(
+        shim.is_file(),
+        "expected the git shim at {}",
+        shim.display()
+    );
+    assert_eq!(fs::read_to_string(&shim).unwrap(), "fake-binary\n");
 }
 
 /// `--headless` installs without the built tddy-web bundle: the `dist` check is skipped, nothing is

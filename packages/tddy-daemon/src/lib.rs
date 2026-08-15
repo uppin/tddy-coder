@@ -33,6 +33,7 @@ pub mod project_storage;
 pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
+pub mod remote_git_service;
 pub mod semantic_index;
 pub mod server;
 pub mod session_attachment_staging;
