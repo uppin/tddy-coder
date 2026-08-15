@@ -18,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::warn;
 use prost::Message as _;
+use tddy_core::agent_activity::{read_agent_activity, AgentActivityRecord, STATUS_RUNNING};
 use tddy_livekit::{
     BroadcastPublisher, JoinedParticipant, LiveKitParticipant, RoomMetadataClient, RpcService,
     TokenGenerator,
@@ -1532,11 +1533,14 @@ impl SessionRoomRegistry {
                 room_name: room_name.to_string(),
                 session_id: hosting.codebase_session_id.to_string(),
                 worktree_root: hosting.worktree_root.map(Path::to_path_buf),
+                session_dir: hosting.session_dir.to_path_buf(),
                 git_timeout: hosting.config.session_room_git_timeout(),
                 source,
                 metadata,
                 publisher,
+                activity: Arc::clone(&activity),
                 deltas: Arc::clone(&deltas),
+                broadcast_rows: BroadcastActivityRows::default(),
                 wip_ref_released: Arc::clone(&wip_ref_released),
                 interval: hosting.config.session_room_poll_interval(),
                 previous: measured.snapshot,
@@ -1615,32 +1619,18 @@ impl SessionRoomRegistry {
             .map(|room| Arc::clone(&room.activity))
     }
 
-    /// Publish one prost-encoded `connection.AgentActivityRecord` into the session's room.
-    ///
-    /// Published once with no destination identities, the same broadcast discipline
-    /// `worktree.activity` follows (AC4): the room's participants are exactly the ones entitled to
-    /// the record, so addressing it would be a list to keep current for no gain.
-    ///
-    /// A failure is logged and never returned. The record has already been recorded by the time
-    /// this is called, so failing the call that reported it would ask an agent to send it again —
-    /// duplicating what is stored to retry what is not.
-    pub async fn broadcast_activity(&self, codebase_session_id: &str, record_bytes: &[u8]) {
-        // The lock is released before the publish: it guards a plain map, and holding a
-        // `std::sync::Mutex` across an await would block every other opener and closer for the
-        // length of a network write.
-        let Some(publisher) = self.activity_publisher(codebase_session_id) else {
-            log::debug!(
-                "session_room: no room hosted for session {codebase_session_id}; its activity record was not broadcast"
-            );
-            return;
-        };
-        if let Err(e) = publisher.publish(record_bytes).await {
-            warn!(
-                "session_room: {} could not broadcast an activity record: {e}",
-                session_room_name(codebase_session_id)
-            );
-        }
-    }
+    // There is deliberately no `broadcast_activity` here, and adding one back would reintroduce a
+    // bug this feature already shipped once.
+    //
+    // The poll loop is the **sole** broadcaster: it attributes each new record to the tick whose
+    // delta covers it, stamps `activity_seq`, and publishes through its own clone of this
+    // publisher. A second door — an RPC handler pushing a record the moment it arrives — publishes
+    // *before* the tick holding that record's delta exists, so a client reacting to it looks the
+    // delta up and is told `UnknownCall`; and once both doors are open, every claude-cli record
+    // goes out twice, the early copy carrying `activity_seq: 0`.
+    //
+    // `activity_publisher` stays because the registry has to hand the poll loop its clone, and
+    // because answering `None` for an unhosted session is the branch an RPC route tests.
 
     /// Stop hosting the room belonging to `codebase_session_id`, if this daemon hosts one.
     pub fn close(&self, codebase_session_id: &str) {
@@ -1998,6 +1988,164 @@ fn attachment_basenames(session_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Attributing the agent's calls to the tick that covers them
+// ---------------------------------------------------------------------------
+//
+// The durable activity log is the one place every session type's tool calls meet: the daemon writes
+// it for claude-cli and sandbox sessions, the coder participant for tool and cursor-cli ones. So the
+// poll loop *tails that log* rather than being told about a call by whoever recorded it, and the
+// room ends up with one broadcaster for every session type instead of one per writer (AC5).
+//
+// It is also the only ordering that can be right. A record broadcast by its writer goes out before
+// the tick that measured the call has run, so a client that looks the delta up the moment it hears
+// about the call is told the call is unknown — a defect on one side or the other, as far as the
+// client can tell, rather than "the tick has not happened yet". Attributing here means the delta a
+// record names already exists by the time the record does.
+
+/// Which rows of a session's activity log a room has already put on the wire.
+///
+/// Keyed by call rather than by line, because [`read_agent_activity`] coalesces the log by
+/// `call_id`: a call appears once, in its latest state, so "which rows are new" can never be a count
+/// of lines read. Each call is remembered together with whether the row that went out for it was its
+/// terminal one — a call is written twice, `running` when it starts and `completed`/`error` when it
+/// finishes, and a plain seen-set would either leave a client watching a call that has long since
+/// finished, or re-broadcast every retained call on every tick.
+///
+/// It costs a call id and a bool per tool call for as long as the room is open, which is what
+/// [`SessionDeltaStore::call_ticks`] costs for the same reason: a call the log's tail cap has
+/// dropped can no longer be read back, so forgetting it would only trade memory for the risk of
+/// broadcasting it twice.
+#[derive(Debug, Default)]
+pub struct BroadcastActivityRows {
+    /// `call_id` → whether the row already broadcast for that call was its terminal one.
+    handled: HashMap<String, bool>,
+}
+
+impl BroadcastActivityRows {
+    /// True when this exact row has already gone out: the same call, in the same state.
+    ///
+    /// A call whose running row went out is *not* already broadcast once its terminal row appears —
+    /// that row supersedes it and carries the result — but it is once that terminal row has gone
+    /// out, because a finished call produces no further rows.
+    pub fn already_broadcast(&self, record: &AgentActivityRecord) -> bool {
+        match self.handled.get(&record.call_id) {
+            Some(broadcast_terminal) => *broadcast_terminal || !is_terminal(record),
+            None => false,
+        }
+    }
+
+    /// Remember that `record` went out, in the state it went out in.
+    pub fn mark_broadcast(&mut self, record: &AgentActivityRecord) {
+        self.handled
+            .insert(record.call_id.clone(), is_terminal(record));
+    }
+}
+
+/// Whether a row is the last one its call will ever produce.
+///
+/// By excluding `running` rather than by naming `completed` and `error`, so a status this build has
+/// never seen is treated as a call that is over and broadcast once — where treating it as still
+/// running would re-broadcast it on every tick for the life of the room.
+fn is_terminal(record: &AgentActivityRecord) -> bool {
+    record.status != STATUS_RUNNING
+}
+
+/// Where a tick can put the calls it found, which is what makes a record's delta resolvable at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TickAttributionTarget {
+    /// The delta this tick recorded, under `seq`: the checkout moved and its patch holds whatever
+    /// these calls changed.
+    ThisTicksDelta { seq: u64 },
+    /// The checkout did not move, so there is no delta for a call to belong to and one has to be
+    /// made: an **empty** delta at `next_seq`, on the commit the checkout is standing on.
+    ///
+    /// Empty rather than absent, because the two are different answers. A call that changed nothing
+    /// is one frame with an empty patch (AC9); a call with no delta at all is
+    /// [`DeltaLookupError::UnknownCall`], which a client reads as a defect rather than as "that call
+    /// touched nothing".
+    AnEmptyDelta { next_seq: u64, base_commit: String },
+    /// This room measures no checkout of its own — split placement, where the files are on the
+    /// codebase daemon. Its records still go out, because the room is where a participant learns
+    /// what the agent did, but they carry `activity_seq` 0, the wire's "no tick has covered it yet":
+    /// a seq naming a delta this room never recorded would send every client to reconcile against a
+    /// ring that has nothing in it.
+    NoCheckout,
+}
+
+/// What one tick does with the tail of its session's activity log.
+#[derive(Debug, Default, PartialEq)]
+pub struct TickActivity {
+    /// The records to broadcast, each stamped with the seq of the delta that covers it.
+    pub broadcast: Vec<AgentActivityRecord>,
+    /// The delta the tick has to record before those records resolve to anything — always empty,
+    /// always at the seq they were stamped with. `None` when the tick recorded a delta of its own,
+    /// when there is nothing new to attribute, or when there is no checkout to attribute against.
+    pub empty_delta: Option<ActivityDelta>,
+}
+
+/// The rows of `log` a tick has to broadcast, each attributed to the delta that covers it, and the
+/// delta that has to be recorded for that attribution to mean anything.
+///
+/// The whole per-tick decision, with the log read, the ring and the broadcast left to the caller —
+/// so what a tick decides is testable without a room, a checkout or a LiveKit connection.
+///
+/// A tick with nothing new to say numbers nothing: an empty delta per idle tick would consume the
+/// sequence a client de-duplicates by at the poll rate, and every one of those numbers would read as
+/// a delta that never arrived.
+pub fn tick_activity(
+    already_broadcast: &BroadcastActivityRows,
+    log: &[AgentActivityRecord],
+    target: &TickAttributionTarget,
+) -> TickActivity {
+    let mut broadcast: Vec<AgentActivityRecord> = log
+        .iter()
+        .filter(|record| !already_broadcast.already_broadcast(record))
+        .cloned()
+        .collect();
+    if broadcast.is_empty() {
+        return TickActivity::default();
+    }
+
+    let (seq, empty_delta) = match target {
+        TickAttributionTarget::ThisTicksDelta { seq } => (*seq, None),
+        TickAttributionTarget::AnEmptyDelta {
+            next_seq,
+            base_commit,
+        } if !base_commit.is_empty() => (
+            *next_seq,
+            Some(ActivityDelta {
+                seq: *next_seq,
+                prev_seq: next_seq.saturating_sub(1),
+                base_commit: base_commit.clone(),
+                patch: Vec::new(),
+                scoped_paths: Vec::new(),
+            }),
+        ),
+        // A delta whose base is unknown is worse than no delta, exactly as [`tick_delta`] says: the
+        // client compares `base_commit` against its own HEAD, an empty string matches nothing, and
+        // it would reconcile against a patch claiming nothing changed forever. The records still go
+        // out, carrying the honest "no tick has covered it yet".
+        TickAttributionTarget::AnEmptyDelta { .. } => {
+            warn!(
+                "session_room: {} calls are unattributed: the checkout's HEAD could not be read, so \
+                 an empty delta could not name the commit it applies onto",
+                broadcast.len()
+            );
+            (0, None)
+        }
+        TickAttributionTarget::NoCheckout => (0, None),
+    };
+
+    for record in &mut broadcast {
+        record.activity_seq = seq;
+    }
+    TickActivity {
+        broadcast,
+        empty_delta,
+    }
+}
+
 /// How many consecutive failed metadata writes a room complains about before it goes quiet about
 /// them.
 ///
@@ -2019,6 +2167,10 @@ struct SessionRoomPoll {
     /// delta and no WIP ref, because both are made out of the objects of a repository this host
     /// does not have.
     worktree_root: Option<PathBuf>,
+    /// The session directory holding the agent-activity log this loop tails. Local wherever the
+    /// checkout is: the log is written beside the agent, which is on this host by definition —
+    /// this daemon is the one hosting its room.
+    session_dir: PathBuf,
     /// The budget one tick's git work gets, the same `session_room.git_timeout_ms` the measurement
     /// spends.
     git_timeout: Duration,
@@ -2027,9 +2179,16 @@ struct SessionRoomPoll {
     source: Arc<dyn WorktreeSource>,
     metadata: RoomMetadataClient,
     publisher: BroadcastPublisher,
+    /// Where this loop puts the agent's own calls, on `session.activity` — the same publisher the
+    /// registry hands out, because the two must be one connection: a second one would be a second
+    /// participant in a room whose whole claim is that only this daemon is in it.
+    activity: Arc<BroadcastPublisher>,
     /// The ring this loop records each tick's delta in, shared with the RPC surface that serves
     /// slices of it.
     deltas: Arc<Mutex<SessionDeltaStore>>,
+    /// The rows of the activity log this loop has already broadcast. Held by the loop rather than by
+    /// the room, because it is the loop's own place in a log nothing else reads.
+    broadcast_rows: BroadcastActivityRows,
     /// See [`WipRefRelease`]: held across this loop's publish so a tick cannot outlive the close
     /// that released its ref.
     wip_ref_released: WipRefRelease,
@@ -2087,6 +2246,10 @@ impl SessionRoomPoll {
             }
             let measured = match self.source.measure().await {
                 Measurement::Taken(measured) => measured,
+                // Costs the whole tick, the activity log included: a call attributed to a window
+                // that was never measured would name a delta that does not exist, and the log is
+                // read whole on the next tick anyway — nothing is lost by waiting for one that
+                // knows what the checkout looks like.
                 Measurement::Unavailable => continue,
                 // A checkout that is gone is not a checkout that changed: a missing directory
                 // answers every git question with silence, which would read as "HEAD moved to the
@@ -2101,28 +2264,42 @@ impl SessionRoomPoll {
                     return;
                 }
             };
-            if measured.snapshot == self.previous
-                && measured.attachments == self.previous_attachments
+            // Read before the announcement, which consumes the measurement: an empty delta has to
+            // name the commit the checkout is standing on *now*, and `self.previous` is deliberately
+            // left behind when a metadata write fails.
+            let head_commit = measured.snapshot.head_commit.clone();
+
+            // A tick that measured no change still tails the activity log — it just has nothing to
+            // announce, and leaves the metadata-failure count exactly where it was. A `Read`, a
+            // `Grep`, a `Bash` that printed something: none of them move the checkout, and every one
+            // of them is a call a participant in the room is entitled to hear about. Gating the log
+            // on the checkout would make "the agent did something that changed nothing"
+            // indistinguishable from silence.
+            let mut recorded_delta_seq = None;
+            if measured.snapshot != self.previous
+                || measured.attachments != self.previous_attachments
             {
-                continue;
+                let announced = self.announce(measured, failed_metadata_writes).await;
+                recorded_delta_seq = announced.delta_seq;
+                if announced.metadata_written {
+                    failed_metadata_writes = 0;
+                } else {
+                    failed_metadata_writes = failed_metadata_writes.saturating_add(1);
+                }
             }
-            if self.announce(measured, failed_metadata_writes).await {
-                failed_metadata_writes = 0;
-            } else {
-                failed_metadata_writes = failed_metadata_writes.saturating_add(1);
-            }
+            self.broadcast_new_activity(recorded_delta_seq, &head_commit)
+                .await;
         }
     }
 
-    /// Publish one change: **metadata first, then the events**. `true` when the metadata write
-    /// landed, which is what a caller counts consecutive failures with.
+    /// Publish one change: **metadata first, then the events**.
     ///
     /// That order is the contract a receiver relies on. It makes "an event was observed" imply "the
     /// room's metadata already reflects it", so a participant woken by an event never reads a
     /// snapshot older than the event that woke it — and a late joiner that saw no event at all
     /// still reads the current summary (PRD FR9, AC7). Publishing first and writing after would
     /// leave a window in which both are wrong for whoever reacted fastest.
-    async fn announce(&mut self, measured: MeasuredWorktree, previous_failures: u32) -> bool {
+    async fn announce(&mut self, measured: MeasuredWorktree, previous_failures: u32) -> Announced {
         let at_unix_ms = unix_ms();
         let metadata_json =
             room_metadata_json(&measured.snapshot, &measured.attachments, at_unix_ms);
@@ -2146,7 +2323,7 @@ impl SessionRoomPoll {
                     previous_failures + 1
                 );
             }
-            return false;
+            return Announced::held_back();
         }
         if previous_failures > METADATA_WRITE_FAILURES_BEFORE_QUIET {
             log::info!(
@@ -2169,7 +2346,7 @@ impl SessionRoomPoll {
         // that reacts to an event by fetching the session's uncommitted state cannot be handed the
         // one from before the event that woke it. What it costs is the tick's git work of latency
         // on the event, bounded by the same `session_room.git_timeout_ms` everything else here is.
-        self.record_uncommitted_state(&measured.snapshot).await;
+        let delta_seq = self.record_uncommitted_state(&measured.snapshot).await;
         self.previous = measured.snapshot;
         self.previous_attachments = measured.attachments;
         self.next_seq += events.len() as u64;
@@ -2184,7 +2361,10 @@ impl SessionRoomPoll {
                 );
             }
         }
-        true
+        Announced {
+            metadata_written: true,
+            delta_seq,
+        }
     }
 
     /// Stage this tick's working tree, keep the delta it produced, and publish the ref that makes
@@ -2203,12 +2383,16 @@ impl SessionRoomPoll {
     ///
     /// A failure costs this tick its delta and nothing else: the loop measures again, and a client
     /// that was left with a gap reconciles by fetching that ref, which is what it is for.
-    async fn record_uncommitted_state(&mut self, measured: &WorktreeSnapshot) {
+    ///
+    /// Returns the seq of the delta this tick recorded, or `None` when it produced none — which is
+    /// where the tick's tool calls are attributed, so it is answered here rather than inferred from
+    /// [`Self::next_delta_seq`] by arithmetic.
+    async fn record_uncommitted_state(&mut self, measured: &WorktreeSnapshot) -> Option<u64> {
         let Some(worktree_root) = self.worktree_root.clone() else {
             // Split placement. A delta is a diff between two objects of the project's repository
             // and the WIP ref lives in it, so both are published by the daemon that holds the
             // files; this one hosts the room and has nothing to stage.
-            return;
+            return None;
         };
         // The pair the delta is taken between: the previous tick's measurement carrying the tree it
         // wrote, and this one's carrying the tree about to be written.
@@ -2257,15 +2441,14 @@ impl SessionRoomPoll {
                     "session_room: {} could not take this tick's uncommitted state: {join_error}",
                     self.room_name
                 );
-                return;
+                return None;
             }
         };
         if !wip_tree.is_empty() {
             self.previous_wip_tree = wip_tree;
         }
-        let Some(delta) = delta else {
-            return;
-        };
+        let delta = delta?;
+        let recorded_seq = delta.seq;
         // Advanced only for a delta that exists, so the numbers a client de-duplicates by have a
         // gap exactly where one was lost. See [`Self::next_delta_seq`].
         self.next_delta_seq += 1;
@@ -2276,6 +2459,129 @@ impl SessionRoomPoll {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .record(delta);
+        Some(recorded_seq)
+    }
+
+    /// Put the calls the agent has made since the last tick into the room, each attributed to the
+    /// delta that covers it (AC4, AC5).
+    ///
+    /// The log is the source, rather than the writer telling the room directly, for two reasons.
+    /// It is the one place every session type's calls meet — the daemon writes it for claude-cli
+    /// and sandbox sessions, the coder participant for tool and cursor-cli ones — so tailing it
+    /// makes this loop the single broadcaster instead of one per writer. And it is the only
+    /// ordering in which a record can name a delta that exists: a writer broadcasting as it records
+    /// publishes before the tick that measured the call has run, and a client looking that delta up
+    /// is told the call is unknown.
+    ///
+    /// A log that cannot be read costs this tick its attribution and nothing more — never an empty
+    /// reading, which would mark every call it holds as broadcast and lose them all silently.
+    ///
+    /// TODO(session-room): read only what was appended since the last tick. The file is read whole
+    /// every `session_room.poll_interval_ms`, and it carries the full input and full output of every
+    /// tool call, so a long session pays its own size twice a second for as long as its room is
+    /// open.
+    async fn broadcast_new_activity(&mut self, recorded_delta_seq: Option<u64>, head_commit: &str) {
+        // Blocking file I/O, on the blocking pool for the same reason the tick's git work is: this
+        // runs on the runtime that serves every room's RPC.
+        let session_dir = self.session_dir.clone();
+        let log = match tokio::task::spawn_blocking(move || read_agent_activity(&session_dir)).await
+        {
+            Ok(Ok(log)) => log,
+            Ok(Err(e)) => {
+                warn!(
+                    "session_room: {} could not read its session's activity log; this tick attributed nothing: {e}",
+                    self.room_name
+                );
+                return;
+            }
+            Err(join_error) => {
+                // A panic while reading the log is a bug, not a slow filesystem — and it must not
+                // take the loop with it.
+                warn!(
+                    "session_room: {} could not read its session's activity log: {join_error}",
+                    self.room_name
+                );
+                return;
+            }
+        };
+
+        let target = self.attribution_target(recorded_delta_seq, head_commit);
+        let decided = tick_activity(&self.broadcast_rows, &log, &target);
+        if decided.broadcast.is_empty() {
+            return;
+        }
+        let numbered_a_delta = decided.empty_delta.is_some();
+        {
+            // Recorded before the calls are attributed to it, so no lookup can find a call whose
+            // tick is not in the ring yet. One lock for both, and never held across the publish
+            // below: it is a `std::sync::Mutex` guarding a ring the RPC surface reads.
+            let mut store = self.deltas.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(delta) = decided.empty_delta {
+                store.record(delta);
+            }
+            for record in &decided.broadcast {
+                store.attribute(&record.call_id, record.activity_seq, &record.changed_paths);
+            }
+        }
+        if numbered_a_delta {
+            self.next_delta_seq += 1;
+        }
+
+        for record in decided.broadcast {
+            // Marked before the publish, and marked even when the publish fails: a row that went
+            // back into the queue would be attributed again on a later tick, and `attribute`
+            // re-points the call at *that* tick — moving the call's delta to a window that does not
+            // hold its change. A lost broadcast is a gap the client's own `seq` de-duplication
+            // already describes; a re-attributed call is a wrong answer.
+            self.broadcast_rows.mark_broadcast(&record);
+            let frame = tddy_service::agent_activity_to_proto(record).encode_to_vec();
+            if let Err(e) = self.activity.publish(&frame).await {
+                warn!(
+                    "session_room: {} could not broadcast an activity record: {e}",
+                    self.room_name
+                );
+            }
+        }
+    }
+
+    /// Where this tick's calls belong: the delta it recorded, an empty one it has to record, or
+    /// nothing at all when this room measures no checkout of its own.
+    fn attribution_target(
+        &self,
+        recorded_delta_seq: Option<u64>,
+        head_commit: &str,
+    ) -> TickAttributionTarget {
+        if self.worktree_root.is_none() {
+            return TickAttributionTarget::NoCheckout;
+        }
+        match recorded_delta_seq {
+            Some(seq) => TickAttributionTarget::ThisTicksDelta { seq },
+            None => TickAttributionTarget::AnEmptyDelta {
+                next_seq: self.next_delta_seq,
+                base_commit: head_commit.to_string(),
+            },
+        }
+    }
+}
+
+/// What one tick's announcement did.
+struct Announced {
+    /// Whether the room's metadata took the change, which is what the loop counts consecutive
+    /// failures with.
+    metadata_written: bool,
+    /// The seq of the delta this tick recorded, if it recorded one — where the calls this tick
+    /// finds in the activity log are attributed.
+    delta_seq: Option<u64>,
+}
+
+impl Announced {
+    /// The metadata write failed, so nothing else in the tick ran: the change is held back and the
+    /// next tick takes the whole step from the top.
+    fn held_back() -> Self {
+        Self {
+            metadata_written: false,
+            delta_seq: None,
+        }
     }
 }
 

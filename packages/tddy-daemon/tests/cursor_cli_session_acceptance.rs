@@ -1,15 +1,18 @@
 //! Acceptance tests: Cursor Agent CLI session type (PRD: docs/ft/daemon/cursor-cli-session.md).
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_rpc::{Code, Request};
+use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
+use tddy_daemon::session_room::{OpenedSessionRoom, SessionRoomHost};
+use tddy_rpc::{Code, Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, StartSessionRequest,
+    StartSessionResponse,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -592,6 +595,215 @@ async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
         err.message.to_ascii_lowercase().contains("not a directory"),
         "error message must explain the repo_path is not a directory, got: {}",
         err.message
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Session room (PRD: docs/ft/daemon/session-room.md).
+//
+// A cursor-cli session runs its agent on this daemon, against a checkout this
+// daemon made — so this daemon is its facilitating daemon and hosts its room,
+// exactly as it does for a claude-cli session. The room is opened before the
+// agent process exists, which is what makes the daemon its first participant.
+// ---------------------------------------------------------------------------
+
+/// One `open_for` call, as the spawn path made it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AnOpenedRoom {
+    session_id: String,
+    worktree_root: PathBuf,
+    session_dir: PathBuf,
+}
+
+/// A [`SessionRoomHost`] that records what it was asked to host, standing in for the daemon's own —
+/// which needs a LiveKit server to answer at all.
+#[derive(Default)]
+struct RecordingRoomHost {
+    opened: Mutex<Vec<AnOpenedRoom>>,
+    /// When set, the reason this host cannot open a room: a configured daemon that fails to reach
+    /// its LiveKit server answers this way.
+    refusal: Option<String>,
+}
+
+/// A daemon that hosts session rooms and records the ones it opens.
+fn a_room_host() -> RecordingRoomHost {
+    RecordingRoomHost::default()
+}
+
+impl RecordingRoomHost {
+    /// A daemon configured to host rooms that cannot reach LiveKit to open one.
+    fn that_cannot_open_a_room(mut self) -> Self {
+        self.refusal = Some("livekit is unreachable".to_string());
+        self
+    }
+
+    fn rooms_opened(&self) -> Vec<AnOpenedRoom> {
+        self.opened
+            .lock()
+            .expect("room log is not poisoned")
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionRoomHost for RecordingRoomHost {
+    async fn open_for(
+        &self,
+        session_id: &str,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> Result<Option<OpenedSessionRoom>, Status> {
+        if let Some(reason) = &self.refusal {
+            return Err(Status::internal(reason.clone()));
+        }
+        self.opened
+            .lock()
+            .expect("room log is not poisoned")
+            .push(AnOpenedRoom {
+                session_id: session_id.to_string(),
+                worktree_root: worktree_root.to_path_buf(),
+                session_dir: session_dir.to_path_buf(),
+            });
+        Ok(Some(OpenedSessionRoom {
+            room: format!("session-{session_id}"),
+            url: "ws://livekit.test".to_string(),
+            server_identity: "daemon-test-instance".to_string(),
+        }))
+    }
+}
+
+/// A daemon that can start cursor-cli sessions: a project repo with an origin, a sessions base with
+/// that project registered, and a config pointing at a stub `cursor-agent`.
+struct ACursorCliDaemon {
+    _repo: tempfile::TempDir,
+    _config_dir: tempfile::TempDir,
+    sessions: tempfile::TempDir,
+    config: DaemonConfig,
+    agents: Arc<CliSessionManager>,
+}
+
+fn a_cursor_cli_daemon() -> ACursorCliDaemon {
+    let repo = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo.path());
+    let sessions = tempfile::tempdir().unwrap();
+    register_project(&sessions.path().join("projects"), repo.path());
+    let (config_dir, config) = write_config_with_stub_cursor_agent();
+    ACursorCliDaemon {
+        _repo: repo,
+        _config_dir: config_dir,
+        sessions,
+        config,
+        agents: Arc::new(CliSessionManager::new()),
+    }
+}
+
+impl ACursorCliDaemon {
+    /// Start a cursor-cli session at the spawn helper itself, so the room host is the test's
+    /// instead of the one `ConnectionServiceImpl` builds for itself out of its LiveKit config.
+    async fn start_cursor_cli_session(
+        &self,
+        session_id: &str,
+        room_host: &dyn SessionRoomHost,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        spawn_cursor_cli_session_inner(
+            &self.config,
+            self.sessions.path(),
+            &self.agents,
+            "testuser",
+            session_id,
+            self.sessions.path().to_path_buf(),
+            TEST_MODEL,
+            TEST_PROJECT_ID,
+            "new_branch_from_base",
+            "",
+            "",
+            "",
+            "",
+            None,
+            "",
+            false,
+            &[],
+            None,
+            false,
+            false,
+            &self.agents.task_registry(),
+            room_host,
+        )
+        .await
+    }
+
+    fn session_dir(&self, session_id: &str) -> PathBuf {
+        self.sessions.path().join("sessions").join(session_id)
+    }
+
+    /// The checkout the started session recorded for itself in `.session.yaml`.
+    fn worktree_of(&self, session_id: &str) -> PathBuf {
+        let meta = read_session_metadata(&self.session_dir(session_id))
+            .expect(".session.yaml must exist for a started session");
+        PathBuf::from(
+            meta.repo_path
+                .expect("a started session records its worktree"),
+        )
+    }
+}
+
+const ROOM_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000a1";
+
+#[tokio::test]
+async fn cursor_cli_start_hosts_the_room_of_the_session_it_starts() {
+    // Given
+    let daemon = a_cursor_cli_daemon();
+    let rooms = a_room_host();
+
+    // When
+    daemon
+        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
+        .await
+        .expect("cursor-cli StartSession must succeed");
+
+    // Then
+    assert_eq!(
+        rooms.rooms_opened(),
+        vec![AnOpenedRoom {
+            session_id: ROOM_SESSION_ID.to_string(),
+            worktree_root: daemon.worktree_of(ROOM_SESSION_ID),
+            session_dir: daemon.session_dir(ROOM_SESSION_ID),
+        }],
+        "a cursor-cli session must be facilitated in a room of its own, over its own checkout"
+    );
+}
+
+#[tokio::test]
+async fn cursor_cli_start_fails_when_the_session_room_cannot_be_opened() {
+    // Given
+    let daemon = a_cursor_cli_daemon();
+    let rooms = a_room_host().that_cannot_open_a_room();
+
+    // When
+    let err = daemon
+        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
+        .await
+        .expect_err("a session whose room cannot be opened must not start");
+
+    // Then
+    assert_eq!(err.message, "livekit is unreachable");
+}
+
+#[tokio::test]
+async fn cursor_cli_agent_is_not_spawned_when_the_session_room_cannot_be_opened() {
+    // Given
+    let daemon = a_cursor_cli_daemon();
+    let rooms = a_room_host().that_cannot_open_a_room();
+
+    // When
+    let _ = daemon
+        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
+        .await;
+
+    // Then — the room is opened first, so a refused room leaves no agent behind
+    assert!(
+        daemon.agents.get(ROOM_SESSION_ID).await.is_none(),
+        "the cursor agent must not be spawned before its session room is open"
     );
 }
 

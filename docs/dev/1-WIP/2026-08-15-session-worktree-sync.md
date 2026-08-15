@@ -58,14 +58,15 @@ scoped delta and publishes `refs/tddy/session/{id}/wip`; records are stamped wit
 ran upon and the paths they declared, and broadcast into the room; both RPCs serve; and
 `tddy-session-sync` attaches, mirrors, and reconciles. Eight of the nine pieces are done.
 
-**One gap remains, and two behaviours are wired but unpinned** — see the table:
+**All nine pieces are done**, and the wiring is pinned by a LiveKit-backed suite that opens a real
+room over a real server. One session type is still out of reach — see below.
 
 | # | Remaining | Why it matters |
 |---|---|---|
 | ~~1~~ | ~~Wire `tick_delta` + `publish_wip_ref` into the poll loop~~ | ✅ done |
 | ~~2~~ | ~~Wire `delete_wip_ref` into room close~~ | ✅ done, in `close` (not `Drop`), with a release interlock so a tick in flight cannot republish after deletion |
 | ~~3~~ | ~~`session.activity` broadcast from the daemon~~ | ✅ done |
-| **4** | `tddy-coder` reports activity via `ReportAgentActivity` | ⛔ **still open** — the coder has no daemon transport at all (no HTTP client, no daemon URL on a normal session path), and the RPC authenticates with a `hook_token` + `os_user` it never carries. Its records ARE stamped correctly; what is missing is delivery, so a tool/cursor session's activity never reaches the room. |
+| ~~4~~ | ~~`tddy-coder` reports activity via `ReportAgentActivity`~~ | ✅ **solved without the transport** — the poll loop tails `agent-activity.jsonl`, which the coder already writes and the daemon already owns. No new coder credential, no new channel. |
 | ~~5~~ | ~~Stamping at the three producers~~ | ✅ done |
 | ~~6~~ | ~~`StreamAgentActivityDelta` handler + adapter~~ | ✅ done, serves all three scopes |
 | ~~7~~ | ~~`StreamReadWorktreeFile` handler + adapter~~ | ✅ done |
@@ -474,6 +475,51 @@ toolchain gates. **Four defects were found and fixed; two of them were live on a
 `build --workspace --all-targets` ✅ · `clippy --workspace --all-targets -D warnings` ✅ ·
 `fmt --all --check` ✅ · tddy-daemon 585 ✅ · tddy-core ✅ · tddy-session-sync ✅ ·
 tddy-coder ✅ · tddy-service ✅
+
+## The wiring bug that isolated tests could not see
+
+**`SessionDeltaStore::attribute()` had no production caller.** Every piece passed its own suite, and
+the feature was dead: the store recorded deltas, nothing ever mapped a `call_id` to the tick it
+landed in, so every `delta_for_call` answered `UnknownCall` — for `Call`, `Residual` *and* `Tick`,
+since all three resolve the tick through that mapping. `activity_seq` stayed 0 forever.
+
+**Only claude-cli sessions had a room at all.** `open_for` had one call site, so a cursor or tool
+session had nothing to broadcast into and nothing to attach to.
+
+Both are fixed, and the fix collapsed a second problem with them:
+
+- **The poll loop is now the single broadcaster.** It tails the session's `agent-activity.jsonl`,
+  attributes each new record to the tick's delta seq, stamps `activity_seq`, and publishes. One
+  path serves every session type — claude-cli, sandbox, cursor and tool — which is also how a
+  coder-hosted session's activity reaches the room **without** the daemon transport the coder does
+  not have: the coder already writes that log, and the daemon already owns that directory.
+- **The direct broadcast from `report_agent_activity` was removed.** It published a record *before*
+  the tick holding its delta existed, so a client reacting to it looked the delta up and got
+  `UnknownCall` — and once the poll loop broadcasts too, it would have duplicated every claude-cli
+  record with `activity_seq: 0`.
+- **A tick with new records but an unchanged tree records an empty delta.** Without it those calls
+  resolve to `UnknownCall`, which a client reads as a defect rather than "this call changed
+  nothing" (AC7).
+
+**A LiveKit-backed suite now pins the wiring** (`session_room_livekit_acceptance.rs`, 6 tests): it
+opens a real room over a real server, and the load-bearing one appends a record, dirties the file it
+declares, waits a tick, and requires `delta_for_call` to **resolve** and its patch to reproduce the
+edit. That is the assertion whose absence let this ship.
+
+### The one session type still without a room
+
+A **`tool`** session cannot get one, and this is a design constraint rather than an omission. At the
+moment the daemon spawns it, the daemon hands `tddy-coder` the *project main repo path*; the coder
+creates the session's worktree itself, later, from a branch suggestion inside its own workflow, and
+writes the session directory itself. So at spawn time the worktree does not exist and its path is
+not derivable — `SessionRoomRegistry::open` measures it, gets `Measurement::Gone`, and fails the
+start. Opening the room against the main repo would pin the poll loop to the wrong checkout for the
+session's whole life; opening it after the spawn would break the ordering the first-participant
+guarantee rests on. Closing it means the coder reporting its worktree back to the daemon.
+
+Rooms now open for **claude-cli, sandboxed claude-cli, cursor-cli and sandboxed cursor-cli**.
+Sandboxed claude-cli was a second instance of the same bug, found while fixing the first:
+`start_sandboxed_claude_cli_session` never reached the shared helper either.
 
 ## Races and invariants closed while wiring
 

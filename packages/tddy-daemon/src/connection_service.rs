@@ -2006,6 +2006,51 @@ impl crate::session_room::SessionRoomHost for DaemonSessionRoomHost {
     }
 }
 
+/// Open the session room of a session whose agent this daemon is about to spawn, and say which way
+/// it went.
+///
+/// Every spawn path that starts an agent against a checkout this daemon holds goes through here —
+/// claude-cli and cursor-cli, sandboxed or not. The room belongs to the daemon **running the
+/// agent** (`docs/ft/daemon/session-room.md` § Roles), and on all four of those paths that daemon
+/// is this one: it resolved the worktree, it holds the session directory, and it is about to fork
+/// the agent. A `workspace` session is the one session type deliberately left out — it has no
+/// agent, so no facilitating daemon and no room; see `crate::workspace_session`.
+///
+/// Before the agent exists, not after: the room's first-participant property is a consequence of
+/// this `await` completing while the only thing that could join is still unspawned (PRD FR2). A
+/// failure here fails the start — the agent's tool transport is minted for this room, so a session
+/// started without it is a session whose agent has nowhere to ask for its files. A daemon with no
+/// `livekit:` credentials at all is not a failure but a `None`: the room is an addition to a
+/// session, never a prerequisite for one, and such a daemon starts sessions exactly as it did
+/// before rooms existed.
+///
+/// Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
+/// session's *terminal* room, which the browser attaches to, and the two are different rooms with
+/// different participants. A caller that wants this one derives it from the session id through
+/// `session_room_name`, which is how the agent's own wiring gets it too.
+pub(crate) async fn open_session_room_before_spawning_agent(
+    room_host: &dyn crate::session_room::SessionRoomHost,
+    session_type: &str,
+    session_id: &str,
+    worktree_path: &Path,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    match room_host
+        .open_for(session_id, worktree_path, session_dir)
+        .await?
+    {
+        Some(room) => log::info!(
+            "{session_type} session {session_id} facilitated in {} as {}",
+            room.room,
+            room.server_identity
+        ),
+        None => log::debug!(
+            "{session_type} session {session_id} runs without a session room (LiveKit not configured)"
+        ),
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -2254,28 +2299,14 @@ async fn spawn_claude_cli_session_inner(
         env_extra.push((key, value));
     }
 
-    // Before the agent exists, not after: this daemon is the session's facilitating daemon, and the
-    // room's first-participant property is a consequence of this `await` completing while the only
-    // thing that could join is still unspawned (PRD FR2). A failure here fails the start — the
-    // agent's tool transport is minted for this room, so a session started without it is a session
-    // whose agent has nowhere to ask for its files.
-    // Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
-    // session's *terminal* room, which the browser attaches to, and the two are different rooms
-    // with different participants. A caller that wants this one derives it from the session id
-    // through `session_room_name`, which is how the agent's own wiring gets it too.
-    match room_host
-        .open_for(session_id, &worktree_path, &session_dir)
-        .await?
-    {
-        Some(room) => log::info!(
-            "claude-cli session {session_id} facilitated in {} as {}",
-            room.room,
-            room.server_identity
-        ),
-        None => log::debug!(
-            "claude-cli session {session_id} runs without a session room (LiveKit not configured)"
-        ),
-    }
+    open_session_room_before_spawning_agent(
+        room_host,
+        "claude-cli",
+        session_id,
+        &worktree_path,
+        &session_dir,
+    )
+    .await?;
 
     let handle = manager
         .start_with_options(
@@ -3029,6 +3060,18 @@ impl ConnectionServiceImpl {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
+        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
+        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
+        // reach, not who hosts its room.
+        open_session_room_before_spawning_agent(
+            &self.session_room_host(),
+            "claude-cli",
+            session_id,
+            &worktree_path,
+            &session_dir,
+        )
+        .await?;
+
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
@@ -3439,6 +3482,18 @@ impl ConnectionServiceImpl {
         }
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
+
+        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
+        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
+        // reach, not who hosts its room.
+        open_session_room_before_spawning_agent(
+            &self.session_room_host(),
+            "cursor-cli",
+            session_id,
+            &worktree_path,
+            &session_dir,
+        )
+        .await?;
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -5938,6 +5993,7 @@ impl ConnectionServiceImpl {
                 req.semantic_index,
                 req.create_remote_branch,
                 &self.task_registry,
+                &self.session_room_host(),
             )
             .await;
         }
@@ -8854,19 +8910,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 e
             );
         }
-        // AC4: the room's participants learn what the agent did from the room itself, on the
-        // `session.activity` topic beside `worktree.activity`. Encoded here rather than in the
-        // registry so the wire schema stays one thing — the same message `StreamSessionActivity`
-        // returns, mapped by the same converter, however it is delivered.
-        let broadcast = tddy_service::agent_activity_to_proto(record.clone()).encode_to_vec();
         self.agent_activity_hub.publish(&req.session_id, record);
-        // A broadcast failure is logged inside, never returned: the durable log is the source of
-        // truth and has already been written, so failing this call would ask the agent to report
-        // the call again — duplicating what is stored to retry what is not.
-        self.session_rooms
-            .broadcast_activity(&req.session_id, &broadcast)
-            .await;
-
+        // The record is **not** broadcast into the session room from here, deliberately.
+        //
+        // A record announced at this point names a tick nothing has measured yet: its
+        // `activity_seq` is still `0` and the delta covering its files is produced by the next poll
+        // tick, so a participant that reacted to it and asked for the call's delta would be told
+        // `UnknownCall` — an announcement that arrives before the thing it announces.
+        //
+        // The poll loop is the single broadcaster instead, tailing `agent-activity.jsonl`, which is
+        // also what makes cursor-cli and tool sessions visible: their agents never call this RPC at
+        // all, and a room fed only from here would carry claude-cli activity and nothing else.
         Ok(Response::new(ReportAgentActivityResponse { ok: true }))
     }
 

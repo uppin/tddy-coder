@@ -96,15 +96,19 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ### Session worktree sync — deliberate gaps (source: session-worktree-sync changeset, 2026-08-15)
 
-- **A coder-hosted session's activity never reaches its room.** `tddy-coder` stamps its records
-  correctly (`head_commit`, `changed_paths`) but cannot deliver them: it is a LiveKit *server* only
-  — no HTTP client, no daemon URL on any normal session path — and `ReportAgentActivity`
-  authenticates with a `hook_token` + `os_user` the coder never carries. So `tddy-session-sync`
-  mirrors a **claude-cli or sandbox** session fully, and a **tool or cursor-cli** session only up to
-  what `worktree.activity` and the WIP ref carry (commits and the periodic uncommitted snapshot) —
-  never per-edit deltas. Closing it means giving the coder a daemon transport and a credential it
-  can present; the existing reverse-stdio channel (`conversation_spawn_relay`) is the likeliest
-  seam.
+- **A `tool` session gets no session room, so it cannot be mirrored.** At spawn the daemon hands
+  `tddy-coder` the *project main repo path*; the coder creates the session worktree itself, later,
+  from a branch suggestion inside its workflow. So the worktree does not exist when the room would
+  open, and `SessionRoomRegistry::open` fails the start on `Measurement::Gone`. Opening against the
+  main repo would pin the poll loop to the wrong checkout for the session's life; opening after the
+  spawn breaks the first-participant ordering. Closing it means the coder reporting its worktree
+  back. Every other agent-running type — claude-cli, sandboxed claude-cli, cursor-cli, sandboxed
+  cursor-cli — now opens one.
+- **A split session's calls are broadcast but not attributed.** Its room records no deltas (the
+  checkout is on another daemon), so a seq would point into an empty ring and send the client to
+  fetch a WIP ref that lives elsewhere. Records go out with `activity_seq: 0`; serving an empty
+  patch instead would be a lie. Feeding a split session's deltas through its room is a separate
+  piece of work.
 - **A sandboxed session's in-jail tool calls are not broadcast.** They reach the durable log and the
   live hub but not the room's `session.activity` topic — `sandbox_session.rs` has no
   `SessionRoomRegistry`. Marked `TODO(session-worktree-sync)` at the call site; closing it means
@@ -112,7 +116,13 @@ its own failure message, none from that branch. New entries beyond the list abov
 - **`AgentActivityDeltaRequest.daemon_instance_id` is not honoured.** The field documents peer
   forwarding "as on ExecuteTool", but the handler only looks up the local store; a request naming
   another daemon gets a local `NOT_FOUND` rather than being forwarded.
-- **Three room-dependent behaviours are wired but unpinned.** The `session.activity` broadcast, the
+- ~~**Three room-dependent behaviours are wired but unpinned.**~~ **Closed** by
+  `packages/tddy-daemon/tests/session_room_livekit_acceptance.rs`, which opens a real room over a
+  real LiveKit server. Kept here because the suite is container-backed and therefore slower than the
+  rest: it is the only place the wiring is checked, and the reason it exists is that
+  `SessionDeltaStore::attribute` shipped with no production caller while every isolated suite stayed
+  green. Original note follows.
+  **Three room-dependent behaviours were wired but unpinned.** The `session.activity` broadcast, the
   `delta_store` lookup after a room is registered, and the `close`→`delete_wip_ref` call site all
   need a live LiveKit room to exercise; `SessionRoomRegistry::register` is private and
   `BroadcastPublisher`'s constructors are `pub(crate)`, so no seam exists to inject one. The
