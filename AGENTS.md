@@ -38,6 +38,7 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 | `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
 | `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
 | `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
+| `scripts/ci-status.sh` | Report GitHub Actions status for the current branch's PR: per-check state plus **pass/fail test counts**. `--failures` adds failing test names, files, assertion messages and failing-step log tails; `--watch` blocks until the run finishes; a bare number targets that PR. See [docs/dev/guides/ci.md](docs/dev/guides/ci.md). |
 | `./web-dev` | Start **`tddy-daemon`** (see **`DAEMON_CONFIG`** / **`dev.daemon.yaml`**) and the **`tddy-web`** Vite dev server with **`/rpc`** proxy. See [docs/ft/web/local-web-dev.md](docs/ft/web/local-web-dev.md). |
 | `./vm-tests` | Run the **VM-backed production tests** — the ones that boot a real QEMU guest. Deliberately **not** part of `./test`: every one is `#[ignore]`d, so a default run reports them as ignored and boots nothing. `./vm-tests` — all suites; `./vm-tests <substring>` — matching tests only; `./vm-tests --list` — show the suites. Requires **`TDDY_CLOUDINIT_BASE_IMAGE`** (exported or in `.env`); nothing is downloaded. Warm the cache with `./run-vm-testkit` first so the bakes are a one-time cost. Each suite runs `--test-threads=1` — not optional, since these bind fixed host ports and QEMU derives its monitor socket path from the port alone. |
 | `./run-vm-testkit` | Warm the **`tddy-vm-testkit`** image cache under `tmp/.tddy` so the VM-backed cgroups production tests don't pay for it. `--status` reports what is cached, bakes nothing. Requires **`TDDY_CLOUDINIT_BASE_IMAGE`** (exported or in `.env`) pointing at a cloud image **already on disk** — nothing is ever downloaded. First run bakes three chained images and takes hours; later runs are a boot plus an incremental `./release`. See [docs/ft/vm/tddy-vm.md](docs/ft/vm/tddy-vm.md) § VM testkit. |
@@ -165,6 +166,7 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 - [Testing practices](docs/dev/guides/testing.md) — anti-patterns, unit/integration/production test guidelines
 - [Technology stack](docs/dev/guides/tech-stack.md) — core technologies, integration patterns
 - [Changelog merge hygiene](docs/dev/guides/changelog-merge-hygiene.md) — format for `changelog.md`, `changesets.md`
+- [Continuous integration](docs/dev/guides/ci.md) — what each PR check runs, how to query results, what the gate deliberately skips
 
 ## Documentation Hierarchy
 

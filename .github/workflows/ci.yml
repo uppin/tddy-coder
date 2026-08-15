@@ -1,0 +1,227 @@
+name: CI
+
+# Every PR gets a build, a lint pass, and a test run with per-test pass/fail
+# counts reported back as check runs. See docs/dev/guides/ci.md for how to query
+# results from a terminal or an agent.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# One run per PR. A new push cancels the run still in flight rather than
+# queueing behind it — the older result is worthless once the branch moves.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write # action-junit-report publishes the test check runs
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Full debuginfo is the bulk of target/, and the runner only has ~14 GB of
+  # guaranteed disk. Line tables keep file:line in backtraces at a fraction of
+  # the size.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  rust-lint:
+    name: Rust lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          save: ${{ github.ref == 'refs/heads/master' }}
+          purge: ${{ github.ref == 'refs/heads/master' }}
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      # Only master writes the Rust cache. PRs read master's copy, which keeps
+      # the repo under GitHub's 10 GB cache budget instead of every branch
+      # evicting every other branch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: cargo fmt
+        run: ./dev cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust-test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    # The first run on a cold cache builds 57 crates including libwebrtc. Later
+    # runs restore master's cache and finish in a fraction of this.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          save: ${{ github.ref == 'refs/heads/master' }}
+          purge: ${{ github.ref == 'refs/heads/master' }}
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # Several suites shell out to workspace binaries and examples rather than
+      # linking them — tddy-sandbox-runner and the stdio/echo fixtures among
+      # them — so the bins have to exist before the tests run.
+      - name: cargo build
+        run: ./dev cargo build --workspace --bins --examples --locked
+
+      - name: cargo nextest
+        id: nextest
+        # Keep going on failure so the JUnit report still publishes; the report
+        # step below is what fails the job.
+        continue-on-error: true
+        run: ./dev cargo nextest run --workspace --profile ci --locked
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: target/nextest/ci/junit.xml
+          check_name: Rust tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-rust
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  web:
+    name: Web tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          save: false
+
+      # Cypress drives a bundled Electron, which needs these at runtime. Bun and
+      # node still come from the nix shell.
+      - name: Install Cypress runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libgbm1 libnotify4 libnss3 libxss1 libasound2t64 libxtst6 xauth xvfb
+
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: cypress-${{ runner.os }}-
+
+      - name: bun install
+        run: ./dev bun install --frozen-lockfile
+
+      - name: Build web bundle
+        run: ./dev bun run build
+
+      - name: Unit tests
+        id: unit
+        continue-on-error: true
+        run: |
+          mkdir -p reports/junit
+          ./dev bun run --filter tddy-web test:unit:ci
+
+      - name: Component tests
+        id: component
+        continue-on-error: true
+        run: |
+          mkdir -p reports/junit
+          # Run both suites even if the first fails, so one broken package does
+          # not hide the other's results from the report.
+          status=0
+          ./dev bun run --filter tddy-web cypress:component:ci || status=1
+          ./dev bun run --filter tddy-livekit-web cypress:component:ci || status=1
+          exit $status
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: reports/junit/*.xml
+          check_name: Web tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-web
+          path: reports/junit
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Cypress screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cypress-screenshots
+          path: packages/*/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 7

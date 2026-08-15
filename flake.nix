@@ -54,6 +54,9 @@
           packages = [
             rustToolchain
             pkgs.rust-analyzer
+            # Test runner used by CI (.github/workflows/ci.yml) and available
+            # locally so a CI failure can be reproduced with the same command.
+            pkgs.cargo-nextest
             pkgs.buf
             pkgs.protobuf
             pkgs.bzip2

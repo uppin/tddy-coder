@@ -14,7 +14,8 @@
   "scripts": {
     "build": "bun run generate && tsc",
     "generate": "buf generate ../tddy-livekit/proto",
-    "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component"
+    "cypress:component": "ELECTRON_EXTRA_LAUNCH_ARGS='--disable-gpu --no-sandbox' cypress run --component",
+    "cypress:component:ci": "bun run cypress:component -- --reporter junit --reporter-options 'mochaFile=../../reports/junit/livekit-web-component-[hash].xml'"
   },
   "dependencies": {
     "livekit-client": "^2.17.0",
