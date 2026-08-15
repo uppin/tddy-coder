@@ -52,12 +52,7 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 5G
-          save: ${{ github.ref == 'refs/heads/master' }}
-          purge: ${{ github.ref == 'refs/heads/master' }}
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
+          save: false # rust-build is the sole writer; see the comment there
 
       # Only master writes the Rust cache. PRs read master's copy, which keeps
       # the repo under GitHub's 10 GB cache budget instead of every branch
@@ -98,12 +93,7 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 5G
-          save: ${{ github.ref == 'refs/heads/master' }}
-          purge: ${{ github.ref == 'refs/heads/master' }}
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
+          save: false # rust-build is the sole writer; see the comment there
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -118,14 +108,15 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: rust-fixture-bins
-          path: target/debug
+          path: fixture-bins
 
-      - name: Restore the executable bit
+      - name: Install fixture binaries into target/debug
         # Artifacts are zipped without permissions, so everything arrives 0644.
         run: |
-          chmod +x target/debug/tddy-sandbox-runner \
-                   target/debug/tddy-acp-stub \
-                   target/debug/examples/echo_server
+          find fixture-bins -type f -exec chmod +x {} +
+          mkdir -p target/debug/examples
+          find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
+          find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
       - name: cargo nextest
         id: nextest
@@ -173,16 +164,19 @@ jobs:
           extra_nix_config: |
             accept-flake-config = true
 
+      # The only job that writes the nix cache. A single writer means no two
+      # jobs can race to save the same key — previously this job and rust-lint
+      # ran concurrently and both tried.
+      #
+      # `purge` is deliberately off. GitHub already evicts caches LRU past the
+      # 10 GB budget and drops entries untouched for 7 days, so purging is a
+      # racier version of what the platform does for free.
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 5G
           save: ${{ github.ref == 'refs/heads/master' }}
-          purge: ${{ github.ref == 'refs/heads/master' }}
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
-          purge-primary-key: never
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -192,31 +186,30 @@ jobs:
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
 
-      # Only the binaries the test jobs exec by path, not all of target/debug —
-      # the whole directory is many GB. Each of these belongs to a package other
-      # than the one whose tests exec it, so cargo never builds them as a side
-      # effect of running those tests:
-      #   tddy-sandbox-runner  → tddy-daemon sandbox_runner_stdio_acceptance
-      #   tddy-acp-stub        → tddy-integration-tests acp_* / codex_acp_*
-      #   examples/echo_server → tddy-livekit-web Cypress specs
+      # Binaries that tests exec by path, not all of target/debug — the whole
+      # directory is many GB. Each belongs to a package other than the one whose
+      # tests run it, so cargo never builds them as a side effect of those
+      # tests, and `CARGO_BIN_EXE_*` is unset for them. The list is everything
+      # matched by `grep -r 'target/debug/' packages/*/tests`; if you add a test
+      # that shells out to a workspace binary, add it here too.
+      #
       # Stripped because these are execution fixtures; nothing reads symbols.
       - name: Stage test fixture binaries
         run: |
-          strip target/debug/tddy-sandbox-runner \
-                target/debug/tddy-acp-stub \
-                target/debug/examples/echo_server
-          ls -lh target/debug/tddy-sandbox-runner \
-                 target/debug/tddy-acp-stub \
-                 target/debug/examples/echo_server
+          mkdir -p fixture-bins/examples
+          for b in tddy-coder tddy-tools tddy-daemon tddy-demo tddy-demo-tui \
+                   tddy-acp-stub tddy-sandbox-runner; do
+            cp "target/debug/$b" fixture-bins/
+          done
+          cp target/debug/examples/echo_server fixture-bins/examples/
+          strip fixture-bins/* fixture-bins/examples/* 2>/dev/null || true
+          du -sh fixture-bins
 
       - name: Upload test fixture binaries
         uses: actions/upload-artifact@v7
         with:
           name: rust-fixture-bins
-          path: |
-            target/debug/tddy-sandbox-runner
-            target/debug/tddy-acp-stub
-            target/debug/examples/echo_server
+          path: fixture-bins
           if-no-files-found: error
           retention-days: 1
 
@@ -228,15 +221,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # tddy-livekit-web's specs exec this against a Docker LiveKit server.
+      # tddy-livekit-web's specs exec examples/echo_server against a Docker
+      # LiveKit server.
       - name: Fetch test fixture binaries
         uses: actions/download-artifact@v7
         with:
           name: rust-fixture-bins
-          path: target/debug
+          path: fixture-bins
 
-      - name: Restore the executable bit
-        run: chmod +x target/debug/examples/echo_server
+      - name: Install fixture binaries into target/debug
+        run: |
+          find fixture-bins -type f -exec chmod +x {} +
+          mkdir -p target/debug/examples
+          find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
+          find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -247,8 +245,7 @@ jobs:
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 5G
-          save: false
+          save: false # rust-build is the sole writer; see the comment there
 
       # Cypress drives a bundled Electron, which needs these at runtime. Bun and
       # node still come from the nix shell.

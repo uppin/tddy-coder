@@ -112,7 +112,16 @@ GitHub gives the repo 10 GB of Actions cache, evicted LRU. Three things compete
 for it, so:
 
 - The nix store is cached by `nix-community/cache-nix-action`, keyed on
-  `flake.nix` + `flake.lock`, capped at 5 GB.
+  `flake.nix` + `flake.lock`, capped at 5 GB. **`Rust build` is the only job
+  that writes it**; the other three restore with `save: false`. All four jobs
+  need the identical devShell closure, so letting several of them save the same
+  key just means they race for it — and the loser does not fail, it does the
+  whole job first (garbage-collect the store, tar all of `/nix`) and only then
+  discovers the key is taken. One writer avoids that work entirely, since the
+  action's garbage collection only runs on the save path.
+- `purge` is deliberately unset. GitHub already evicts caches LRU past the
+  budget and drops entries untouched for 7 days, so purging is a racier version
+  of what the platform does for free.
 - Cargo artifacts are cached by `Swatinem/rust-cache` under three separate keys
   — `lint`, `test`, `build`. They cannot share one: clippy, `cargo test` and
   `cargo build` produce different artifacts for the same crate, so a shared key

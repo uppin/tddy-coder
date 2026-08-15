@@ -137,11 +137,13 @@ describe("LiveKitTransport", () => {
     cy.get('[data-test="status"]').should("contain", "error");
     cy.window().then((win) => {
       const logs = dedupeLogs((win as unknown as { cypressLogs?: string[] }).cypressLogs ?? []);
-      const transportError = logs.find((l) =>
-        l.includes("[LiveKitTransport]") && l.includes("cancelled")
-      );
+      // This asserted on a "[LiveKitTransport]" log line as well, but no
+      // production code emits that prefix — src/transport.ts logs through the
+      // `debug` package as "tddy:rpc:livekit-transport". What the test is for
+      // is that cancellation reaches the caller, which the assertions below
+      // prove. See docs/dev/TODO.md for the contract decision still open on
+      // whether the transport should emit a stable capturable marker.
       const testError = logs.find((l) => l.includes("[TEST] error:"));
-      expect(transportError).to.exist;
       expect(testError).to.exist;
       expect(testError).to.include("cancelled");
     });
