@@ -99,6 +99,11 @@ separate workflow, not part of `ci.yml`, and **not a required check** — it is
 slower, needs hardware virtualisation, and is new enough to want its own blast
 radius.
 
+It runs on pull requests **and on pushes to `master`**. The master half is not
+redundant: `master` is the only ref that writes the cargo cache, so without it
+the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
+It also means the branch itself has VM coverage rather than only its PRs.
+
 Scope is currently **one** of the eight suites in `./vm-tests`:
 `vm_boot_control_acceptance`. It proves the launcher, serial-console control,
 9p, SSH login and graceful shutdown against a real guest, and it is the only
