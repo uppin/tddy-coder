@@ -17,7 +17,7 @@
 //! `tests/remote_managed_worktree_acceptance.rs`.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use livekit::prelude::RoomOptions;
@@ -29,7 +29,7 @@ use tddy_daemon::livekit_peer_discovery::{
     spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
     LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -55,6 +55,36 @@ const CODEBASE_INSTANCE_ID: &str = "split-codebase-host";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "split-placement-proj";
+
+/// The credential the browser presents on every call here, signed with [`LK_API_SECRET`] — the
+/// secret both daemons hold, and the one a session token is verified against anywhere in a
+/// deployment. Minted once and shared, because the requests and the stub user resolver have to
+/// agree on the same string; a split placement mints the agent's own credential from these claims,
+/// so an unsigned literal would name an identity no daemon could confirm.
+fn a_caller_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
+            id: 4242,
+            login: "testuser".to_string(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        })
+    })
+}
+
+/// Resolve the OS user the way a real daemon does: by verifying the credential's signature and
+/// reading the login out of its claims (`auth::build_auth_entries`), never by recognising one
+/// string. A daemon signs credentials of its own — a session room mints one per poll of a checkout
+/// it does not hold — so a resolver that only accepted the browser's exact token would authenticate
+/// the caller and nothing the deployment itself issued.
+fn resolve_user_by_verifying_the_token(token: &str) -> Option<String> {
+    SessionTokenSigner::new(LK_API_SECRET.as_bytes())
+        .verify(token)
+        .ok()
+        .filter(|claims| claims.kind == TokenKind::Access)
+        .map(|claims| claims.login)
+}
 
 /// The identity a daemon actually serves `connection.ConnectionService` on. Fixed `daemon-` prefix,
 /// not a lookup — see `docs/ft/web/daemon-selector-livekit-rpc.md`.
@@ -233,7 +263,7 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
         || async {
             let daemons = service
                 .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: TEST_TOKEN.to_string(),
+                    session_token: a_caller_token().to_string(),
                 }))
                 .await
                 .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
@@ -289,8 +319,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>)
     let claude_stub = a_claude_stub(stub_dir.path());
     let claude_stub = claude_stub.to_str().expect("stub path is valid UTF-8");
 
-    let user_resolver: UserResolver =
-        Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
+    let user_resolver: UserResolver = Arc::new(resolve_user_by_verifying_the_token);
 
     let codebase = a_daemon(
         &ws_url,
@@ -342,7 +371,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>)
 /// A managed claude-cli session whose codebase is placed on daemon B.
 fn a_split_session_request() -> StartSessionRequest {
     StartSessionRequest {
-        session_token: TEST_TOKEN.to_string(),
+        session_token: a_caller_token().to_string(),
         project_id: TEST_PROJECT_ID.to_string(),
         session_type: "claude-cli".to_string(),
         model: "claude-opus-5".to_string(),
@@ -379,7 +408,7 @@ fn session_directories_on(sessions_base: &Path) -> Vec<String> {
 async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
     service
         .list_sessions(Request::new(ListSessionsRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
         }))
         .await
         .expect("ListSessions")
@@ -481,7 +510,7 @@ async fn a_split_session_addresses_tools_at_the_codebase_session_not_its_own() {
     let response = hosts
         .agent
         .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
             args_json: serde_json::json!({ "path": "split.txt", "contents": "from host a" })
@@ -526,7 +555,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
     hosts
         .agent
         .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
             tool_name: "Write".to_string(),
             args_json: serde_json::json!({ "path": "round-trip.txt", "contents": "hello b" })
@@ -540,7 +569,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
     let response = hosts
         .agent
         .execute_tool(Request::new(ExecuteToolRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: codebase_session_id,
             tool_name: "Read".to_string(),
             args_json: serde_json::json!({ "path": "round-trip.txt" }).to_string(),
@@ -580,7 +609,7 @@ async fn deleting_a_split_session_deletes_the_paired_workspace_session_and_its_w
     hosts
         .agent
         .delete_session(Request::new(DeleteSessionRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: started.session_id.clone(),
         }))
         .await
@@ -619,7 +648,7 @@ async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_ha
     hosts
         .codebase
         .delete_session(Request::new(DeleteSessionRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: codebase_session_id.clone(),
         }))
         .await
@@ -629,7 +658,7 @@ async fn deleting_a_split_session_succeeds_when_the_codebase_daemon_no_longer_ha
     hosts
         .agent
         .delete_session(Request::new(DeleteSessionRequest {
-            session_token: TEST_TOKEN.to_string(),
+            session_token: a_caller_token().to_string(),
             session_id: started.session_id.clone(),
         }))
         .await

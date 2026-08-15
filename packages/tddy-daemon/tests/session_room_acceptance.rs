@@ -208,6 +208,22 @@ fn an_agent_session_request() -> StartSessionRequest {
     }
 }
 
+/// The credential a signed-in browser would present, signed with the deployment secret this
+/// daemon's config carries — the same `livekit.api_secret` every daemon verifies session tokens
+/// with. [`TEST_TOKEN`] is a bare literal the stubbed user resolver recognises, which is enough to
+/// pass an RPC here but carries no signature: split wiring mints the agent a credential of its own
+/// from the caller's claims, so the caller's has to be one that verifies.
+fn a_caller_token_signed_with_the_deployment_secret() -> String {
+    tddy_github::SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(
+        &tddy_github::GitHubUser {
+            id: 4242,
+            login: "testuser".to_string(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        },
+    )
+}
+
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: ConnectionServiceImpl,
@@ -667,7 +683,7 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
         &started.session_id,
         "some-other-codebase-host",
         "0199bbbb-0000-7000-8000-00000000000b",
-        TEST_TOKEN,
+        &a_caller_token_signed_with_the_deployment_secret(),
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
@@ -695,6 +711,37 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
         joined.name(),
         session_room_name(&started.session_id),
         "the agent's token must place it in the session room, not the lobby"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
+    // Given a worktree-backed session on the facilitating daemon
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    let session_dir = unified_session_dir_path(&daemon.sessions_base, &started.session_id);
+
+    // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
+    let wiring = tddy_daemon::split_session::prepare_split_agent_wiring(
+        &daemon.config,
+        &session_dir,
+        &true_bin(),
+        &started.session_id,
+        "some-other-codebase-host",
+        "0199bbbb-0000-7000-8000-00000000000b",
+        &a_caller_token_signed_with_the_deployment_secret(),
+    )
+    .expect("split agent wiring must be preparable for an agent session");
+    let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
+
+    // Then the participant it is told to call is this daemon's — the one that opened the room and
+    // serves its RPC surface. The codebase host holds the files, but it hosts no room and joins
+    // none, so an agent addressed at it waits in a room that identity will never enter.
+    assert_eq!(
+        env.get("TDDY_REMOTE_SERVER_IDENTITY").map(String::as_str),
+        Some(rpc_identity(INSTANCE_ID).as_str()),
+        "a split agent must address the identity hosting the room it was given"
     );
 }
 

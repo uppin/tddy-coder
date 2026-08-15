@@ -12,8 +12,9 @@
 //! These need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`) and are `#[serial]`
 //! so they own it alone.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use livekit::prelude::RoomOptions;
@@ -28,7 +29,7 @@ use tddy_daemon::livekit_peer_discovery::{
     LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
@@ -37,7 +38,7 @@ use tddy_service::proto::connection::{
     ListEligibleDaemonsRequest, StartSessionRequest,
 };
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
-use tddy_testing_commons::stub_scripts::a_stub_agent_script;
+use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
 use tddy_testing_commons::wait::eventually_awaiting;
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -53,14 +54,67 @@ const LK_API_SECRET: &str = "secret";
 const TEST_PROJECT_ID: &str = "session-room-split-proj";
 const POLL_INTERVAL_MS: u64 = 200;
 
+/// The credential the browser presents on every call here, signed with [`LK_API_SECRET`] — the
+/// secret both daemons hold, and the one a session token is verified against anywhere in a
+/// deployment. Minted once and shared, because the requests and the stub user resolver have to
+/// agree on the same string; a split placement mints the agent's own credential from these claims,
+/// so an unsigned literal would name an identity no daemon could confirm.
+fn a_caller_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| {
+        SessionTokenSigner::new(LK_API_SECRET.as_bytes()).mint_access(&GitHubUser {
+            id: 4242,
+            login: "testuser".to_string(),
+            avatar_url: "https://avatars.githubusercontent.com/u/4242?v=4".to_string(),
+            name: "Test User".to_string(),
+        })
+    })
+}
+
+/// Resolve the OS user the way a real daemon does: by verifying the credential's signature and
+/// reading the login out of its claims (`auth::build_auth_entries`), never by recognising one
+/// string. A daemon signs credentials of its own — a session room mints one per poll of a checkout
+/// it does not hold — so a resolver that only accepted the browser's exact token would authenticate
+/// the caller and nothing the deployment itself issued.
+fn resolve_user_by_verifying_the_token(token: &str) -> Option<String> {
+    SessionTokenSigner::new(LK_API_SECRET.as_bytes())
+        .verify(token)
+        .ok()
+        .filter(|claims| claims.kind == TokenKind::Access)
+        .map(|claims| claims.login)
+}
+
 /// Committed before any worktree is cut, so a checkout has a tracked file from the moment its room
 /// opens and no test needs a setup commit of its own.
 const SEEDED_FILE: &str = "seeded.txt";
 const SEEDED_CONTENTS: &str = "one\ntwo\n";
 
+/// The environment variables that tell the agent where its codebase is reachable: which room to
+/// join, which participant in it answers tool calls, and which daemon that participant forwards to.
+/// Recorded by the stub agent so a test can assert on the wiring the daemon actually handed it.
+const AGENT_WIRING_ENV: [&str; 4] = [
+    "TDDY_REMOTE_LIVEKIT_ROOM",
+    "TDDY_REMOTE_SERVER_IDENTITY",
+    "TDDY_REMOTE_DAEMON_INSTANCE_ID",
+    "TDDY_REMOTE_SESSION_ID",
+];
+
+/// The identity the agent is told to call in its room.
+const SERVER_IDENTITY_ENV: &str = "TDDY_REMOTE_SERVER_IDENTITY";
+
+/// The session id the agent names in a tool call — the codebase daemon's, not its own.
+const REMOTE_SESSION_ID_ENV: &str = "TDDY_REMOTE_SESSION_ID";
+
+/// The daemon the room's host forwards a tool call to, to reach the checkout.
+const FORWARD_TO_DAEMON_ENV: &str = "TDDY_REMOTE_DAEMON_INSTANCE_ID";
+
 /// A cold container, two daemons discovering each other, and a measurement that crosses the wire
 /// once per poll. Ceilings, not expected durations.
 const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// The split start forwards to the other daemon, which cuts a worktree, before this daemon spawns
+/// the agent that writes the record. A ceiling for all of that, not an expected duration.
+const AGENT_SPAWN_TIMEOUT: Duration = Duration::from_secs(45);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 
@@ -193,8 +247,7 @@ async fn a_daemon(
     register_project(&sessions.path().join("projects"), repo);
     let base = sessions.path().to_path_buf();
     let resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
-    let user_resolver: UserResolver =
-        Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
+    let user_resolver: UserResolver = Arc::new(resolve_user_by_verifying_the_token);
 
     let config_arc = Arc::new(config.clone());
     let registry = Arc::new(CommonRoomPeerRegistry::new());
@@ -250,7 +303,7 @@ async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id
         || async {
             let daemons = service
                 .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: TEST_TOKEN.to_string(),
+                    session_token: a_caller_token().to_string(),
                 }))
                 .await
                 .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
@@ -276,6 +329,8 @@ struct SplitSession {
     codebase_session_id: String,
     /// The checkout, on the codebase daemon's filesystem.
     worktree: PathBuf,
+    /// Where the stub agent records the `TDDY_REMOTE_*` variables it was launched with.
+    agent_env_file: PathBuf,
     ws_url: String,
     livekit: LiveKitTestkit,
     _agent: Daemon,
@@ -298,7 +353,9 @@ impl SplitSession {
         create_test_repo_with_origin(repo_dir.path());
 
         let stub_dir = tempfile::tempdir().unwrap();
+        let agent_env_file = stub_dir.path().join("agent-env");
         let claude_stub = a_stub_agent_script(stub_dir.path(), "stub-claude.sh")
+            .recording_env_to(&agent_env_file, &AGENT_WIRING_ENV)
             .then_reading_stdin()
             .build();
         let claude_stub = claude_stub.to_str().expect("stub path is valid UTF-8");
@@ -337,7 +394,7 @@ impl SplitSession {
         let started = agent
             .service
             .start_session(Request::new(StartSessionRequest {
-                session_token: TEST_TOKEN.to_string(),
+                session_token: a_caller_token().to_string(),
                 project_id: TEST_PROJECT_ID.to_string(),
                 session_type: "claude-cli".to_string(),
                 model: "claude-opus-5".to_string(),
@@ -371,6 +428,7 @@ impl SplitSession {
             session_id: started.session_id,
             codebase_session_id,
             worktree,
+            agent_env_file,
             ws_url,
             livekit,
             _agent: agent,
@@ -385,6 +443,20 @@ impl SplitSession {
     /// The room the facilitating daemon hosts for this session.
     fn room(&self) -> String {
         session_room_name(&self.session_id)
+    }
+
+    /// The wiring the agent process was actually launched with.
+    ///
+    /// Read off the spawned agent rather than by calling the wiring helper: the start path builds
+    /// this environment itself, so a test that re-derived it would pin a contract the running agent
+    /// does not necessarily get.
+    async fn agent_wiring(&self) -> HashMap<String, String> {
+        eventually_awaiting(
+            "the split agent to record the environment it was launched with",
+            AGENT_SPAWN_TIMEOUT,
+            || async { read_recorded_env(&self.agent_env_file) },
+        )
+        .await
     }
 }
 
@@ -416,6 +488,24 @@ impl AgentProbe {
     /// room ever addresses, whichever host the files are on.
     fn rpc_to_facilitating_daemon(&self) -> RpcClient {
         LiveKitRpcClientFactory::for_room(self.room.clone()).client(rpc_identity(AGENT_INSTANCE_ID))
+    }
+
+    /// An RPC client aimed at whichever identity the caller names, for a test that takes the
+    /// identity from the agent's own wiring instead of restating it.
+    fn rpc_to(&self, identity: &str) -> RpcClient {
+        LiveKitRpcClientFactory::for_room(self.room.clone()).client(identity.to_string())
+    }
+
+    /// Who else is in the room, as this probe sees it.
+    fn remote_identities(&self) -> Vec<String> {
+        let mut identities: Vec<String> = self
+            .room
+            .remote_participants()
+            .values()
+            .map(|p| p.identity().to_string())
+            .collect();
+        identities.sort();
+        identities
     }
 
     /// The next `commit` event, discarding other kinds.
@@ -463,9 +553,35 @@ fn spawn_activity_subscription(
     rx
 }
 
+/// The checkout a tool call is about: which session holds it, and which daemon the call must be
+/// forwarded to in order to reach it. Both come from the agent's wiring in production, so a test
+/// that takes them from there passes this rather than restating either.
+struct CodebaseTarget {
+    session_id: String,
+    daemon_instance_id: String,
+}
+
+impl CodebaseTarget {
+    /// The pairing this harness set up, for a test asserting on the room rather than on the wiring.
+    fn known_to_the_harness(session_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+        }
+    }
+
+    /// The pairing the daemon handed the agent, read off the agent's own environment.
+    fn as_the_agent_was_wired(wiring: &HashMap<String, String>) -> Self {
+        Self {
+            session_id: wiring[REMOTE_SESSION_ID_ENV].clone(),
+            daemon_instance_id: wiring[FORWARD_TO_DAEMON_ENV].clone(),
+        }
+    }
+}
+
 async fn read_file_in_room(
     client: &RpcClient,
-    session_id: &str,
+    codebase: &CodebaseTarget,
     path: &str,
 ) -> ExecuteToolResponse {
     let bytes = tokio::time::timeout(
@@ -474,11 +590,11 @@ async fn read_file_in_room(
             "connection.ConnectionService",
             "ExecuteTool",
             ExecuteToolRequest {
-                session_token: TEST_TOKEN.to_string(),
-                session_id: session_id.to_string(),
+                session_token: a_caller_token().to_string(),
+                session_id: codebase.session_id.clone(),
                 tool_name: "Read".to_string(),
                 args_json: serde_json::json!({ "path": path }).to_string(),
-                daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+                daemon_instance_id: codebase.daemon_instance_id.clone(),
             }
             .encode_to_vec(),
         ),
@@ -503,7 +619,7 @@ async fn a_participant_reads_a_file_held_by_the_codebase_daemon_through_the_faci
     // When it reads a file that exists only on the codebase daemon's filesystem
     let response = read_file_in_room(
         &probe.rpc_to_facilitating_daemon(),
-        &split.codebase_session_id,
+        &CodebaseTarget::known_to_the_harness(&split.codebase_session_id),
         SEEDED_FILE,
     )
     .await;
@@ -515,6 +631,56 @@ async fn a_participant_reads_a_file_held_by_the_codebase_daemon_through_the_faci
     assert!(
         !response.is_error,
         "the forwarded tool call must succeed; error was '{}'",
+        response.error_message
+    );
+    let result: serde_json::Value =
+        serde_json::from_str(&response.result_json).expect("result_json must be JSON");
+    assert_eq!(result["content"], SEEDED_CONTENTS);
+}
+
+// ---------------------------------------------------------------------------
+// AC3c — the agent is wired to the identity that is actually in its room
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial]
+async fn the_identity_the_split_agent_is_wired_to_address_is_the_one_in_its_room() {
+    // Given a split session, whose agent was launched with the wiring its daemon minted for it
+    let split = SplitSession::start().await;
+    let wired_identity = split.agent_wiring().await[SERVER_IDENTITY_ENV].clone();
+
+    // When another participant joins the room that same wiring names
+    let probe = AgentProbe::join(&split, "probe-wiring-witness").await;
+
+    // Then the identity the agent was told to call is the one that is there. Only the facilitating
+    // daemon is: the codebase daemon holds the checkout but hosts no room and joins none, so an
+    // agent pointed at it addresses a participant that never arrives — and every tool call it makes
+    // waits out its own timeout rather than failing with anything that names the cause.
+    assert_eq!(probe.remote_identities(), vec![wired_identity]);
+}
+
+#[tokio::test]
+#[serial]
+async fn a_tool_call_made_as_the_split_agent_is_wired_reads_the_codebase_daemons_file() {
+    // Given a split session, and a participant addressing exactly what the agent's wiring names
+    let split = SplitSession::start().await;
+    let wiring = split.agent_wiring().await;
+    let probe = AgentProbe::join(&split, "probe-wired-reader").await;
+
+    // When it reads a file that exists only on the codebase daemon's filesystem
+    let response = read_file_in_room(
+        &probe.rpc_to(&wiring[SERVER_IDENTITY_ENV]),
+        &CodebaseTarget::as_the_agent_was_wired(&wiring),
+        SEEDED_FILE,
+    )
+    .await;
+
+    // Then it gets the checkout's contents. The route the agent was given is the whole claim of a
+    // split session — one identity, one room, one session id, and the files on a host it never
+    // learns about — so exercising it exactly as wired is the only thing that proves the wiring.
+    assert!(
+        !response.is_error,
+        "the tool call the agent's wiring describes must succeed; error was '{}'",
         response.error_message
     );
     let result: serde_json::Value =

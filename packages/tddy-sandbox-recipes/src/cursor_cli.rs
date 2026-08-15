@@ -557,10 +557,27 @@ mod tests {
             reads.iter().any(|r| r.host == share),
             "cursor-agent share root must be readable: {reads:?}"
         );
+        let home_root = top_level_directory_containing(&home);
         assert!(
-            reads.iter().any(|r| r.host == Path::new("/Users")),
-            "path traversal ancestors must include /Users: {reads:?}"
+            reads.iter().any(|r| r.host == home_root),
+            "path traversal ancestors must include {}: {reads:?}",
+            home_root.display()
         );
+    }
+
+    /// The directory directly under `/` that `path` lives in — `/Users` for a macOS home,
+    /// `/var` or `/home` for a Linux one.
+    ///
+    /// Derived rather than written down: the grant exists so the jail can traverse from the root to
+    /// the install dir, and which directory that traversal starts through is a property of the host
+    /// the test runs on. Naming one platform's answer asserted that this crate only ever ships to
+    /// macOS, and failed on Linux against a recipe that was behaving correctly.
+    fn top_level_directory_containing(path: &str) -> PathBuf {
+        Path::new(path)
+            .ancestors()
+            .find(|ancestor| ancestor.parent() == Some(Path::new("/")))
+            .unwrap_or_else(|| panic!("{path} must be an absolute path with a top-level directory"))
+            .to_path_buf()
     }
 
     #[cfg(unix)]

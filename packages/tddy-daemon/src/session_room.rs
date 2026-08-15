@@ -267,6 +267,13 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
     let mut child = match Command::new("git")
         .current_dir(worktree_root)
         .args(args)
+        // This measures a checkout somebody is *working in*, several times a second. `git status`
+        // and `git diff` refresh the index as a side effect, which takes `index.lock` — the same
+        // lock the developer's own `git add`, `git commit` or rebase needs, and which only one
+        // process can hold. Polling would then both lose its own measurement to whoever holds it
+        // and fail the developer's git for as long as this one runs. `GIT_OPTIONAL_LOCKS=0` is
+        // git's own answer for read-only observers: skip the refresh rather than take the lock.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         // A git that decides to ask for credentials would sit on a prompt no one can answer until
         // the kill below; closed stdin makes it fail instead.
         .stdin(Stdio::null())
@@ -850,10 +857,28 @@ pub struct RemoteCheckout {
     /// that is the paired `workspace` session, never the agent's own id.
     codebase_session_id: String,
     codebase_instance_id: String,
-    session_token: String,
+    /// Where each poll's credential comes from, rather than one credential held for the session:
+    /// see [`SessionTokenMinter`].
+    token_minter: Arc<dyn SessionTokenMinter>,
     /// The local session dir, because attachments live with the agent (PRD FR10) and are therefore
     /// measured here rather than fetched from the peer.
     session_dir: PathBuf,
+}
+
+/// The credential one poll authenticates with.
+///
+/// A minter rather than a token, because a token is a thing that expires: a session token lives
+/// [`tddy_github::SESSION_TOKEN_TTL`] — five minutes — while a room outlives the agent it belongs
+/// to, so anything frozen at session start stops being accepted by the codebase daemon long before
+/// the room stops asking, and every poll after that reads as an unreachable peer. This daemon holds
+/// the deployment's signing secret, so it can issue one per poll and needs no long-lived bearer
+/// token in memory at all.
+///
+/// Infallible: a minter can only be built where a signing secret and a verified identity are
+/// already proven to exist, so "nothing to sign with" is a precondition of constructing one and
+/// never a condition a poll has to handle.
+pub trait SessionTokenMinter: Send + Sync {
+    fn mint(&self) -> String;
 }
 
 /// One `GetWorktreeSnapshot` call, as the room's poll loop needs it.
@@ -875,14 +900,14 @@ impl RemoteCheckout {
         service: Arc<dyn RemoteSnapshotSource>,
         codebase_session_id: String,
         codebase_instance_id: String,
-        session_token: String,
+        token_minter: Arc<dyn SessionTokenMinter>,
         session_dir: PathBuf,
     ) -> Self {
         Self {
             service,
             codebase_session_id,
             codebase_instance_id,
-            session_token,
+            token_minter,
             session_dir,
         }
     }
@@ -895,11 +920,15 @@ impl WorktreeSource for RemoteCheckout {
     /// `Unavailable` rather than an empty snapshot on purpose: an empty `head_commit` differs from
     /// the previous one, so reporting it would broadcast a `commit` event to the empty sha every
     /// time the network hiccuped.
+    ///
+    /// The credential is minted per poll ([`SessionTokenMinter`]), so a room stays able to measure
+    /// for as long as it runs instead of for one token's lifetime.
     async fn measure(&self) -> Measurement {
+        let session_token = self.token_minter.mint();
         match self
             .service
             .snapshot(
-                &self.session_token,
+                &session_token,
                 &self.codebase_session_id,
                 &self.codebase_instance_id,
             )
@@ -1117,4 +1146,160 @@ fn unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod snapshot_worktree_tests {
+    use super::*;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .output()
+            .expect("git must be on PATH");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed in {dir:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A checkout with one committed file and one untracked file beside it.
+    fn a_checkout_with_an_untracked_file() -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.path().join("shipped.txt"), "shipped\n").unwrap();
+        git(repo.path(), &["add", "shipped.txt"]);
+        git(repo.path(), &["commit", "-qm", "seed"]);
+        std::fs::write(repo.path().join("scratch.txt"), "not added\n").unwrap();
+        repo
+    }
+
+    /// Take the index lock the way a developer's own `git add` does for the moment it runs.
+    fn while_another_git_holds_the_index_lock(repo: &Path) {
+        std::fs::write(repo.join(".git").join("index.lock"), b"").unwrap();
+    }
+
+    #[test]
+    fn a_checkout_is_measured_while_another_git_holds_the_index_lock() {
+        // Given a checkout whose index is locked, as it is for the moment any `git add`, `git
+        // commit` or rebase in it is running
+        let repo = a_checkout_with_an_untracked_file();
+        while_another_git_holds_the_index_lock(repo.path());
+
+        // When the room polls it
+        let snapshot = snapshot_worktree(repo.path());
+
+        // Then the poll still measured the checkout. This runs against a worktree a developer is
+        // working in, several times a second: a measurement that needs the index lock both loses
+        // the race — reporting `head_commit: ""`, which reads as a commit to the empty sha — and
+        // takes the lock often enough to fail the developer's own git.
+        assert_eq!(snapshot.branch, "main");
+        assert_eq!(snapshot.untracked_files, 1);
+        assert!(
+            !snapshot.head_commit.is_empty(),
+            "HEAD must still resolve while the index is locked"
+        );
+    }
+}
+
+#[cfg(test)]
+mod remote_checkout_tests {
+    use super::*;
+
+    /// The codebase daemon as this room reaches it, remembering every credential it was presented.
+    ///
+    /// The real peer authenticates each `GetWorktreeSnapshot` the same way it authenticates a tool
+    /// call, so what a poll hands it is the whole of what this room's freshness depends on.
+    #[derive(Default)]
+    struct RecordingCodebaseDaemon {
+        credentials_presented: Mutex<Vec<String>>,
+    }
+
+    impl RecordingCodebaseDaemon {
+        fn credentials_presented(&self) -> Vec<String> {
+            self.credentials_presented.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RemoteSnapshotSource for RecordingCodebaseDaemon {
+        async fn snapshot(
+            &self,
+            session_token: &str,
+            _codebase_session_id: &str,
+            _codebase_instance_id: &str,
+        ) -> Result<WorktreeSnapshot, Status> {
+            self.credentials_presented
+                .lock()
+                .unwrap()
+                .push(session_token.to_string());
+            Ok(WorktreeSnapshot {
+                head_commit: "c0ffee".to_string(),
+                branch: "main".to_string(),
+                ..Default::default()
+            })
+        }
+    }
+
+    /// A signing secret holder that issues a distinguishable credential each time it is asked, so a
+    /// poll reusing a stored one is visible rather than merely likely: two real tokens minted in the
+    /// same second are byte-identical, which would make "they differ" untestable.
+    struct CountingMinter {
+        issued: Mutex<u32>,
+    }
+
+    impl CountingMinter {
+        fn new() -> Self {
+            Self {
+                issued: Mutex::new(0),
+            }
+        }
+    }
+
+    impl SessionTokenMinter for CountingMinter {
+        fn mint(&self) -> String {
+            let mut issued = self.issued.lock().unwrap();
+            *issued += 1;
+            format!("minted-credential-{issued}")
+        }
+    }
+
+    fn a_remote_checkout(
+        peer: Arc<RecordingCodebaseDaemon>,
+        minter: Arc<dyn SessionTokenMinter>,
+    ) -> RemoteCheckout {
+        RemoteCheckout::new(
+            peer,
+            "0199bbbb-0000-7000-8000-00000000000b".to_string(),
+            "codebase-host".to_string(),
+            minter,
+            PathBuf::from("/nonexistent-session-dir"),
+        )
+    }
+
+    #[tokio::test]
+    async fn every_poll_presents_a_freshly_minted_credential() {
+        // Given a room polling a checkout on another daemon
+        let peer = Arc::new(RecordingCodebaseDaemon::default());
+        let checkout = a_remote_checkout(Arc::clone(&peer), Arc::new(CountingMinter::new()));
+
+        // When it is polled twice, as a long-lived room is
+        checkout.measure().await;
+        checkout.measure().await;
+
+        // Then each poll authenticated with a credential of its own. A token frozen when the
+        // session started is a five-minute one (`tddy_github::SESSION_TOKEN_TTL`), so a room built
+        // on it stops being able to measure anything minutes in — and `measure` reports that as
+        // `Unavailable`, which is indistinguishable from an unreachable peer.
+        assert_eq!(
+            peer.credentials_presented(),
+            vec!["minted-credential-1", "minted-credential-2"]
+        );
+    }
 }

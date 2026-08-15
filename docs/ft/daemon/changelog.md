@@ -2,6 +2,15 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-15 — A split agent addresses the daemon that is actually in its room
+
+- **A split session's agent is wired to the RPC identity hosting the room it joins** — the facilitating daemon — instead of the codebase daemon, which hosts no room and joins none. Since the move to per-session rooms, every tool call a split agent made waited out its timeout for a participant that would never arrive. See [remote-managed-worktree.md](remote-managed-worktree.md).
+- **`TDDY_REMOTE_DAEMON_INSTANCE_ID` is unchanged and still names the codebase daemon**: it is the forwarding hint the room's host routes on to reach the checkout, not the identity to call. Naming the codebase host in both places is what conflated the two.
+- **The room's host identity now travels with the room name** in the value the daemon resolves once and both the start and resume paths read, so an agent cannot be pointed at a participant that is not in the room it was given.
+## 2026-08-15 — Rewriting the systemd units is a flag, not an env var
+
+- **`./install --update-systemd-unit`** replaces the existing **`tddy-supervisor.service`** / **`.socket`** (or the **`--user`** **`tddy-daemon.service`**) with this script's templates. It replaces **`INSTALL_OVERWRITE_SYSTEMD_UNIT=1`**, which no longer does anything: what to install is an argument of the install, not part of its environment. Behavior is unchanged — without it an existing unit file is preserved. See [systemd-install.md](systemd-install.md#flags).
+
 ## 2026-08-14 — Every agent session gets a room of its own
 
 - **A session that runs an agent now has a LiveKit room, `session-{session_id}`**, hosted by its **facilitating daemon** — the one running the agent. It opens and joins the room *before* the agent process is spawned, so being the first participant is a consequence of ordering rather than a race. See [session-room.md](session-room.md).
