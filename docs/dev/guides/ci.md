@@ -9,20 +9,34 @@ not just a colour, so a red check names the tests that failed.
 | Check | What it runs | Cold-cache time |
 |-------|--------------|-----------------|
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets -- -D warnings` | ~8 min |
-| `Rust tests` | `cargo nextest run --workspace --profile ci` | ~15 min |
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
-| `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` Cypress component tests | ~10 min |
+| `Rust tests` | `cargo nextest run --workspace --profile ci` | ~15 min |
+| `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
 
-`Rust build` runs **after** `Rust tests`, pass or fail. Test results are the
-signal worth waiting for, so nothing is allowed to delay them — the test check
-builds only the test targets nextest needs, and bins and examples are linked
-afterwards in their own check.
+`Rust lint` runs on its own. **`Rust build` runs first, and both test checks
+wait on it**, because a number of suites exec a workspace binary by path rather
+than linking it, and cargo never builds those as a side effect of running the
+tests — they belong to a different package:
 
-The cost of that split is that suites which exec a binary from *another*
-workspace package cannot run in the test check. Today that is only
-`sandbox_runner_stdio_acceptance`, excluded with its reason in
-`.config/nextest.toml`. If you add a test that shells out to a workspace binary,
-it needs the same treatment or a job of its own.
+| Binary | Exec'd by |
+|--------|-----------|
+| `target/debug/tddy-sandbox-runner` | `tddy-daemon` `sandbox_runner_stdio_acceptance` |
+| `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
+| `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs |
+
+Jobs get separate runners, so the build publishes those three as the
+`rust-fixture-bins` artifact and each test job downloads them into
+`target/debug`. They are stripped first (execution fixtures, nobody reads their
+symbols) and the executable bit is re-applied on download, since artifacts are
+zipped without permissions.
+
+If you add a test that shells out to a workspace binary, add that binary to the
+artifact — otherwise it will pass locally and fail in CI with "not built".
+
+Worth being explicit about the limit of this: because the runners are separate,
+building first shares the *binaries*, not the compilation. `Rust tests` still
+compiles its own test targets from the cache. The gain is coverage of the suites
+that need fixtures, not speed — it costs roughly the build's wall-clock time.
 
 All three run in the **nix dev shell** via `./dev`, against the pinned
 `flake.lock`. CI therefore uses the same rustc, clippy, bun and system libraries
@@ -69,9 +83,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 | VM-backed tests (`./vm-tests`) | `#[ignore]`d by design; need a QEMU guest and a base image that is never downloaded |
 | cgroups sandbox tests | Need root and a writable cgroup root; the backend reports itself available on any Linux, then EPERMs at spawn |
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
-| `cursor_cli_peer_spawn_records_the_orchestrator_link_even_without_repo_path` | Pre-existing failure: the test names an orchestrator session id it never creates. Fix the test, then drop the exclusion |
-| `sandbox_runner_stdio_acceptance` | Execs `tddy-sandbox-runner`, which the test check does not build; and one of its three tests fails on an unprivileged runner with "tool ipc server exited before bind" even when the binary is present |
-| `tddy-livekit-web` Cypress component specs | Both specs exec the `tddy-livekit` `echo_server` example against a Docker LiveKit server. Cross-language integration tests, not web tests. `cypress:component:ci` is defined for that package, ready for a job that builds the example first |
+| `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/TODO.md`; the intended fix is a VM-backed job, not a permanent exclusion |
 | Cypress **e2e** specs | Storybook build plus a real ghostty WebGL context; not yet verified on a runner |
 | `tddy-desktop`, `tddy-rust-typescript-tests` | Need Electron and cross-language fixtures respectively |
 

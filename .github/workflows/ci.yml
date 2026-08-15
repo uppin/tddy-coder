@@ -76,6 +76,7 @@ jobs:
   rust-test:
     name: Rust tests
     runs-on: ubuntu-latest
+    needs: rust-build
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
@@ -109,13 +110,23 @@ jobs:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      # No `cargo build` here on purpose. nextest builds the test targets it
-      # needs, and linking every bin and example first only delays the test
-      # results. The `Rust build` check below covers that, after the tests.
-      #
-      # The cost: suites that exec a binary from another workspace package
-      # cannot run here. That is currently just sandbox_runner_stdio_acceptance,
-      # excluded in .config/nextest.toml with the reason.
+      # nextest builds the test targets itself. What it cannot produce is a
+      # binary belonging to another workspace package, which suites like
+      # sandbox_runner_stdio_acceptance exec by path — those come from the
+      # `Rust build` check.
+      - name: Fetch test fixture binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: target/debug
+
+      - name: Restore the executable bit
+        # Artifacts are zipped without permissions, so everything arrives 0644.
+        run: |
+          chmod +x target/debug/tddy-sandbox-runner \
+                   target/debug/tddy-acp-stub \
+                   target/debug/examples/echo_server
+
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit report still publishes; the report
@@ -144,12 +155,9 @@ jobs:
   rust-build:
     name: Rust build
     runs-on: ubuntu-latest
-    # Runs after the tests report, pass or fail — test results are the signal
-    # worth waiting for, and a compile error in a bin or example should not
-    # delay them. `!cancelled()` rather than `always()` so a cancelled run (a
-    # new push superseding this one) does not start a pointless build.
-    needs: rust-test
-    if: ${{ !cancelled() }}
+    # Runs first. Both test checks depend on it, because several suites exec
+    # workspace binaries rather than linking them, and jobs get separate
+    # runners — the only way to share a built binary is to publish it.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
@@ -181,18 +189,54 @@ jobs:
           shared-key: build
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
-      # Bins and examples, which the test check deliberately skips. Several are
-      # test fixtures other suites exec, so a break here is a real break even
-      # though no test covers it.
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
+
+      # Only the binaries the test jobs exec by path, not all of target/debug —
+      # the whole directory is many GB. Each of these belongs to a package other
+      # than the one whose tests exec it, so cargo never builds them as a side
+      # effect of running those tests:
+      #   tddy-sandbox-runner  → tddy-daemon sandbox_runner_stdio_acceptance
+      #   tddy-acp-stub        → tddy-integration-tests acp_* / codex_acp_*
+      #   examples/echo_server → tddy-livekit-web Cypress specs
+      # Stripped because these are execution fixtures; nothing reads symbols.
+      - name: Stage test fixture binaries
+        run: |
+          strip target/debug/tddy-sandbox-runner \
+                target/debug/tddy-acp-stub \
+                target/debug/examples/echo_server
+          ls -lh target/debug/tddy-sandbox-runner \
+                 target/debug/tddy-acp-stub \
+                 target/debug/examples/echo_server
+
+      - name: Upload test fixture binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: |
+            target/debug/tddy-sandbox-runner
+            target/debug/tddy-acp-stub
+            target/debug/examples/echo_server
+          if-no-files-found: error
+          retention-days: 1
 
   web:
     name: Web tests
     runs-on: ubuntu-latest
+    needs: rust-build
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+
+      # tddy-livekit-web's specs exec this against a Docker LiveKit server.
+      - name: Fetch test fixture binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: target/debug
+
+      - name: Restore the executable bit
+        run: chmod +x target/debug/examples/echo_server
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -237,15 +281,14 @@ jobs:
       - name: Component tests
         id: component
         continue-on-error: true
-        # tddy-livekit-web's two specs are not run here. Both exec the
-        # tddy-livekit `echo_server` example against a Docker LiveKit server, so
-        # they are cross-language integration tests rather than web tests, and
-        # they fail on a runner that never builds Rust. The
-        # `cypress:component:ci` script for that package is left in place for a
-        # future job that builds the example first.
         run: |
           mkdir -p reports/junit
-          ./dev bun run --filter tddy-web cypress:component:ci
+          # Run both suites even if the first fails, so one broken package does
+          # not hide the other's results from the report.
+          status=0
+          ./dev bun run --filter tddy-web cypress:component:ci || status=1
+          ./dev bun run --filter tddy-livekit-web cypress:component:ci || status=1
+          exit $status
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
