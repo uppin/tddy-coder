@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use tddy_session_sync::{layered_environment, resolve_credentials, SyncArgs};
+use tddy_session_sync::{attach, layered_environment, resolve_credentials, run, SyncArgs};
 
 /// Every secret carries `hide_env_values`: clap would otherwise print the live token in `--help`,
 /// which is the one place a user is guaranteed to look while someone is watching their screen.
@@ -64,7 +64,16 @@ struct Cli {
 /// is the normal case rather than a misconfiguration.
 const ENV_FILENAME: &str = ".env";
 
-fn main() {
+/// What a run that could not attach, or could not keep the mirror equal, exits with.
+///
+/// One code for every such failure, as [`tddy_session_sync::CredentialError::exit_code`] is one for
+/// every credential failure: a caller tells them apart by reading the message, not by switching on
+/// a number. What matters is only that it is not zero — a syncer that exited 0 having mirrored
+/// nothing is a scripted workflow that carries on against an empty directory.
+const RUN_FAILURE_EXIT_CODE: i32 = 1;
+
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let cli = Cli::parse();
@@ -100,7 +109,7 @@ fn main() {
         }
     };
     let env = layered_environment(std::env::vars().collect(), env_file.as_deref());
-    let _credentials = match resolve_credentials(&args, &env) {
+    let credentials = match resolve_credentials(&args, &env) {
         Ok(credentials) => credentials,
         Err(e) => {
             eprintln!("tddy-session-sync: {e}");
@@ -108,8 +117,21 @@ fn main() {
         }
     };
 
-    // TODO(session-worktree-sync): attach to the room and run the sync loop — AC21-AC33 of
-    // docs/ft/daemon/session-worktree-sync.md.
-    eprintln!("tddy-session-sync: the sync loop is not implemented yet");
-    std::process::exit(70);
+    // Resolve the session and join its room before anything is written locally, so a session id
+    // nobody knows fails naming itself rather than after a directory has been taken over for it.
+    let attached = match attach(&credentials).await {
+        Ok(attached) => attached,
+        Err(e) => {
+            eprintln!("tddy-session-sync: {e}");
+            std::process::exit(RUN_FAILURE_EXIT_CODE);
+        }
+    };
+
+    if let Err(failure) = run(&credentials, attached).await {
+        eprintln!("tddy-session-sync: {failure}");
+    }
+    // Non-zero either way. A session being mirrored has no completion, so returning from `run` at
+    // all means the mirror stopped being kept equal — and reporting that as success is exactly the
+    // half-written-mirror-that-looks-fine AC32 refuses.
+    std::process::exit(RUN_FAILURE_EXIT_CODE);
 }

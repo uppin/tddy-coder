@@ -53,20 +53,24 @@ by fetching the WIP ref whenever anything diverges.
 **Landed and merged-ready** (PR #401): the wire contract, and every primitive the wiring composes
 from — each tested. 660 tests green, `clippy -D warnings` and `fmt --check` clean.
 
-**Not built.** The feature does not work end to end; the room broadcasts nothing new and both new
-RPCs answer `unimplemented`. Nine pieces remain, and they are the unchecked boxes below:
+**Working end to end for daemon-hosted sessions.** The poll loop stages a WIP tree, produces a
+scoped delta and publishes `refs/tddy/session/{id}/wip`; records are stamped with the commit they
+ran upon and the paths they declared, and broadcast into the room; both RPCs serve; and
+`tddy-session-sync` attaches, mirrors, and reconciles. Eight of the nine pieces are done.
+
+**One gap remains, and two behaviours are wired but unpinned** — see the table:
 
 | # | Remaining | Why it matters |
 |---|---|---|
-| 1 | Wire `tick_delta` + `publish_wip_ref` into the poll loop | nothing produces a delta today |
-| 2 | Wire `delete_wip_ref` into room close | ⚠️ **must land on the same commit as #1** — otherwise every deleted session permanently pins a worktree of blobs in the shared project repo |
-| 3 | `session.activity` broadcast from the daemon | nothing publishes records |
-| 4 | `tddy-coder` reports activity via `ReportAgentActivity` | without it, tool/cursor sessions are a silent blind spot |
-| 5 | `head_commit` / `changed_paths` stamping at the three producers | records carry neither today |
-| 6 | `StreamAgentActivityDelta` handler + adapter | returns `unimplemented` |
-| 7 | `StreamReadWorktreeFile` handler + adapter | returns `unimplemented` |
-| 8 | Client attach + sync loop | the binary exits non-zero |
-| 9 | `./release`, `./install`, `./publish.sh` ship the binary | nothing installs it |
+| ~~1~~ | ~~Wire `tick_delta` + `publish_wip_ref` into the poll loop~~ | ✅ done |
+| ~~2~~ | ~~Wire `delete_wip_ref` into room close~~ | ✅ done, in `close` (not `Drop`), with a release interlock so a tick in flight cannot republish after deletion |
+| ~~3~~ | ~~`session.activity` broadcast from the daemon~~ | ✅ done |
+| **4** | `tddy-coder` reports activity via `ReportAgentActivity` | ⛔ **still open** — the coder has no daemon transport at all (no HTTP client, no daemon URL on a normal session path), and the RPC authenticates with a `hook_token` + `os_user` it never carries. Its records ARE stamped correctly; what is missing is delivery, so a tool/cursor session's activity never reaches the room. |
+| ~~5~~ | ~~Stamping at the three producers~~ | ✅ done |
+| ~~6~~ | ~~`StreamAgentActivityDelta` handler + adapter~~ | ✅ done, serves all three scopes |
+| ~~7~~ | ~~`StreamReadWorktreeFile` handler + adapter~~ | ✅ done |
+| ~~8~~ | ~~Client attach + sync loop~~ | ✅ done, 31 new tests |
+| ~~9~~ | ~~`./release`, `./install`, `./publish.sh` ship the binary~~ | ✅ done, pinned by `install_script.rs` |
 
 Test gaps track those exactly: AC1/AC4/AC5 (stamping, broadcast, report), AC20 (a CLI-level
 `--help` test) and AC31-36 (the end-to-end suite over a real LiveKit server).
@@ -151,7 +155,16 @@ are not enough".
 #### tddy-core
 - **`src/agent_activity.rs`**: `AgentActivityRecord` += `head_commit: String`, `activity_seq: u64`,
   `changed_paths: Vec<String>`, all `#[serde(default)]` so a JSONL written before this change still
-  reads.
+  reads. Plus `declared_paths`, the closed set of tools that name a file they will write.
+- **`src/git_head.rs`** (new): `read_head_commit`, **moved here from `tddy-daemon`**. Both sides of a
+  session must stamp records with the same HEAD — the daemon for claude-cli and sandbox sessions,
+  the coder's presenter for tool and cursor-cli ones — and `tddy-core` is the only crate both
+  already depend on. It is pure filesystem work with no daemon concept in it, so the move costs
+  nothing and `tddy-daemon` re-exports it.
+- **`src/presenter/presenter_impl.rs`**: `set_agent_activity_context` gains the worktree, as an
+  `Option` so a caller that does not know the checkout must *say so* rather than silently produce
+  unstamped records. A terminal row inherits the commit its running row carried, so a call that
+  commits does not restamp itself with the commit it just made.
 
 #### tddy-daemon
 - **`src/session_room.rs`**: `WorktreeSnapshot.wip_tree`; `write_wip_tree_within` (temporary index);
@@ -185,22 +198,23 @@ are not enough".
 - [x] `AgentActivityRecord` fields in tddy-core with backward-compatible deserialization
 - [x] `wip_tree` in `WorktreeSnapshot` via a temporary index (seeded from the agent's, never written)
 - [x] `publish_wip_ref` / `delete_wip_ref`
-- [ ] wire them to the poll tick and to room close
+- [x] wire them to the poll tick and to room close
 - [x] `diff_between` pathspec limiting + `changed_paths_between`
 - [x] `SessionDeltaStore` with bounded eviction, path scoping, and the `call_id → (seq, paths)` index
 - [x] `read_head_commit` (filesystem, no subprocess) + `declared_paths`
 - [x] `tick_delta`
-- [ ] wire `tick_delta` + `publish_wip_ref` into the poll loop beside the activity broadcast
-- [ ] `head_commit` / `changed_paths` stamping at all three record producers
-- [ ] `session.activity` broadcast from the daemon
+- [x] wire `tick_delta` + `publish_wip_ref` into the poll loop beside the activity broadcast
+- [x] `head_commit` / `changed_paths` stamping in the coder's presenter
+- [x] `head_commit` / `changed_paths` stamping at the two daemon producers
+- [x] `session.activity` broadcast from the daemon
 - [ ] `tddy-coder` reports activity to the daemon
-- [ ] `StreamAgentActivityDelta` handler + tonic adapter (stub returns `unimplemented`)
+- [x] `StreamAgentActivityDelta` handler + tonic adapter
 - [x] `read_worktree_file_bytes`
-- [ ] `StreamReadWorktreeFile` handler + tonic adapter
+- [x] `StreamReadWorktreeFile` handler + tonic adapter
 - [x] `tddy-session-sync` credentials: flag/env/`.env` resolution, refusals
 - [x] `tddy-session-sync` mirror: ownership, seq de-duplication, apply, reconcile reasons
-- [ ] `tddy-session-sync` attach: resolve the session, join the room, run the sync loop
-- [ ] Root scripts ship the new binary
+- [x] `tddy-session-sync` attach: resolve the session, join the room, run the sync loop
+- [x] Root scripts ship the new binary
 - [x] `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
 
 ## Testing Plan
@@ -460,6 +474,47 @@ toolchain gates. **Four defects were found and fixed; two of them were live on a
 `build --workspace --all-targets` ✅ · `clippy --workspace --all-targets -D warnings` ✅ ·
 `fmt --all --check` ✅ · tddy-daemon 585 ✅ · tddy-core ✅ · tddy-session-sync ✅ ·
 tddy-coder ✅ · tddy-service ✅
+
+## Races and invariants closed while wiring
+
+- **A room closing mid-tick would have leaked its WIP ref forever.** `publish_wip_ref` runs inside a
+  `spawn_blocking`; a tick already in that call when `close` ran would republish the ref *after* the
+  deletion, and nothing would ever delete it again — the exact leak AC13 exists to prevent. Closed
+  with a per-room release flag under a mutex held across the git call on both sides: a release waits
+  for a publish in flight and then deletes what it wrote, and a tick that finds the room released
+  publishes nothing.
+- **Deletion belongs in `close`, not `SessionRoomTask::drop`.** `Drop` also fires when a room is
+  replaced under the same id and when the registry is torn down at shutdown — neither means the
+  session is over, and dropping every ref at shutdown would unpin every live session's uncommitted
+  state. It runs **inline and synchronously**, because `DeleteSession` removes the session directory
+  and `RemoveWorktree` the checkout immediately afterwards; a merely-scheduled deletion would race
+  the removal it must precede.
+- **Deltas have their own sequence space.** Sharing the activity `seq` would let event numbering (a
+  commit plus a files-changed tick burns two) punch permanent holes in the delta sequence — and a
+  client reads a delta gap as a lost broadcast and reconciles.
+- **The previous WIP tree is kept beside the snapshot, not inside it.** The poll loop decides a tick
+  is idle by comparing snapshots; folding the tree in would make every measurement differ, turning
+  an idle room into one that stages the whole checkout and rewrites metadata at the poll rate.
+
+## Corrections found while wiring
+
+- **The PRD's reconcile sequence was wrong, and would have looped forever.** It said
+  `git reset --hard refs/tddy/wip`, which parks the mirror's `HEAD` on the *WIP* commit — but every
+  delta names the session's real `HEAD` as its `base_commit`, and the client compares that against
+  `rev-parse HEAD`. Verified against real git: the documented form leaves `HEAD` on the WIP commit,
+  so every following delta rejects, reconciles, parks there again, and reconciles forever. Corrected
+  to `reset --hard <wip>^` (the WIP commit's parent **is** the session's commit) plus
+  `read-tree -u --reset <wip>` to lay the uncommitted state over it without moving `HEAD`.
+  AC27, AC28 and AC31 were all updated.
+- **Session resolution cannot go over the room's RPC client.** It is circular: addressing that
+  client needs `daemon-{instance_id}`, which is one of the things being resolved. It goes over
+  Connect-HTTP to `--daemon-url` instead, which also means an unknown session fails *before* any
+  room is joined or any directory taken over.
+- **The mirror applies whole ticks, not per-call scopes.** `Mirror::apply` de-duplicates by tick
+  `seq`, so applying per-call scopes would apply the first call of a poll window and return
+  `AlreadyApplied` for every later call *and* for the residual — silently dropping both.
+  `DELTA_SCOPE_TICK` is their union by definition. The per-call scope remains on the wire and
+  tested; it is what tells a consumer *which call changed what*, and the tick is what gets applied.
 
 ## Decisions & Trade-offs
 

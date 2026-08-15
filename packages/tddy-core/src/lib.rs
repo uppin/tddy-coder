@@ -12,6 +12,7 @@ pub mod cursor_hooks;
 pub mod elapsed_format;
 pub mod error;
 pub mod feature_start_slash;
+pub mod git_head;
 pub mod log_backend;
 pub mod output;
 pub mod post_workflow;

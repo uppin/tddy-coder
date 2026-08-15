@@ -13,12 +13,24 @@
 //! or a clock.
 
 pub mod apply;
+pub mod attach;
 pub mod credentials;
 pub mod mirror;
+pub mod sync;
 
 pub use apply::{ApplyOutcome, Delta, ReconcileReason};
+pub use attach::{
+    attach, daemon_identity, resolve_session, session_room_name, syncer_identity, AttachError,
+    AttachedSession, DaemonHttpError, SessionAddress,
+};
 pub use credentials::{
     layered_environment, parse_env_file, resolve_credentials, CredentialError, Credentials,
     DaemonToken, LiveKitCredentials, SyncArgs,
 };
 pub use mirror::{Mirror, MirrorError, MirrorMarker, MARKER_FILENAME};
+pub use sync::{
+    decide_record, decide_worktree, delta_request, first_attach_commands, reassemble,
+    reconcile_commands, remote_url, run, wip_ref, DeltaError, GitInvocation, GitTransport,
+    IgnoreReason, RecordDecision, SyncError, WorktreeDecision, LOCAL_WIP_REF, MIRROR_DELTA_SCOPE,
+    REMOTE_GIT_SSH_COMMAND,
+};

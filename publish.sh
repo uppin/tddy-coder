@@ -21,7 +21,7 @@
 #   PUBLISH_GPG_KEY_ID  if set, sign .deb with dpkg-sig (must be installed)
 #
 # Layout in the .deb:
-#   /usr/bin/{tddy-daemon,tddy-coder,tddy-tools,tddy-remote-git-repo,codex-acp}
+#   /usr/bin/{tddy-daemon,tddy-coder,tddy-tools,tddy-remote-git-repo,tddy-session-sync,codex-acp}
 #   /usr/share/tddy/web/...
 #   /etc/tddy/daemon.yaml          (conffile, from daemon.yaml.production)
 #   /lib/systemd/system/tddy-daemon.service
@@ -60,7 +60,7 @@ if "$WANT_BUILD"; then
 fi
 
 # Verify build artifacts
-for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-remote-git-repo; do
+for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-remote-git-repo target/release/tddy-session-sync; do
   [[ -f "$f" ]] || { echo "publish: missing $f (run ./release or pass --build)" >&2; exit 1; }
 done
 [[ -f packages/tddy-web/dist/index.html ]] || {
@@ -101,13 +101,15 @@ mkdir -p \
   "${STAGE}/etc/tddy" \
   "${STAGE}/lib/systemd/system"
 
-# Binaries. tddy-remote-git-repo is git's GIT_SSH_COMMAND shim — a client of a daemon, not part of
-# one — but it ships here so the host's operator has it on PATH without a checkout and a Rust
-# toolchain. See docs/ft/daemon/remote-git-repo.md § Shipping.
+# Binaries. tddy-remote-git-repo (git's GIT_SSH_COMMAND shim) and tddy-session-sync (the worktree
+# mirror) are clients of a daemon, not parts of one — but they ship here so the host's operator has
+# them on PATH without a checkout and a Rust toolchain. See docs/ft/daemon/remote-git-repo.md
+# § Shipping.
 install -m 0755 target/release/tddy-daemon          "${STAGE}/usr/bin/tddy-daemon"
 install -m 0755 target/release/tddy-coder           "${STAGE}/usr/bin/tddy-coder"
 install -m 0755 target/release/tddy-tools           "${STAGE}/usr/bin/tddy-tools"
 install -m 0755 target/release/tddy-remote-git-repo "${STAGE}/usr/bin/tddy-remote-git-repo"
+install -m 0755 target/release/tddy-session-sync   "${STAGE}/usr/bin/tddy-session-sync"
 install -m 0755 "$CODEX_ACP_NATIVE"                 "${STAGE}/usr/bin/codex-acp"
 
 # Web bundle
@@ -152,7 +154,7 @@ Maintainer: ${MAINTAINER}
 Depends: ${DEPENDS}
 Installed-Size: ${INSTALLED_SIZE}
 Description: tddy — TDD-driven coder daemon, CLI, tools, and web dashboard
- Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo and codex-acp,
+ Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo, tddy-session-sync and codex-acp,
  the tddy-web static dashboard at /usr/share/tddy/web,
  a default systemd unit, and /etc/tddy/daemon.yaml.
 CTRL

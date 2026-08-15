@@ -212,6 +212,20 @@ impl Mirror {
         Ok(ApplyOutcome::Applied)
     }
 
+    /// Record that the mirror was restored from git — a fetch of the WIP ref and a reset onto it —
+    /// rather than advanced by a patch.
+    ///
+    /// `applied_seq` is the newest tick the restore is **known** to include, and the caller passes
+    /// what it can prove rather than what it suspects: a sequence recorded higher than the mirror's
+    /// actual state makes the next delta look already-applied, and skipping a delta is the one
+    /// divergence nothing downstream reports. Recording it lower costs one further reconcile, which
+    /// is logged.
+    pub fn record_restored(&mut self, applied_seq: u64) -> Result<(), MirrorError> {
+        self.marker.last_head_commit = self.head_commit()?;
+        self.marker.last_seq = applied_seq;
+        self.write_marker()
+    }
+
     /// Persist the marker, which is what lets a restart resume rather than replay.
     fn write_marker(&self) -> Result<(), MirrorError> {
         let path = self.dest.join(MARKER_FILENAME);

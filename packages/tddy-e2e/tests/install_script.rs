@@ -146,6 +146,7 @@ fn write_fake_release_binaries(root: &Path) {
         "tddy-coder",
         "tddy-tools",
         "tddy-remote-git-repo",
+        "tddy-session-sync",
     ] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();
@@ -247,6 +248,7 @@ fn install_copies_binaries_to_custom_dir() {
         "tddy-coder",
         "tddy-tools",
         "tddy-remote-git-repo",
+        "tddy-session-sync",
     ] {
         let p = bin_dir.join(name);
         assert!(p.is_file(), "expected {} installed", p.display());
@@ -656,6 +658,17 @@ fn install_user_mode_puts_the_git_ssh_shim_on_the_user_bin_path() {
         shim.display()
     );
     assert_eq!(fs::read_to_string(&shim).unwrap(), "fake-binary\n");
+
+    // The worktree mirror is a client too, and the script installs it for the same reason: a
+    // binary whose own documentation says "put it on PATH" that no script ever puts anywhere is a
+    // binary nobody has.
+    let sync = home.join(".local/bin/tddy-session-sync");
+    assert!(
+        sync.is_file(),
+        "expected the worktree mirror at {}",
+        sync.display()
+    );
+    assert_eq!(fs::read_to_string(&sync).unwrap(), "fake-binary\n");
 }
 
 /// `--headless` installs without the built tddy-web bundle: the `dist` check is skipped, nothing is

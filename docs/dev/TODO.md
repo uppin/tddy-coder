@@ -96,6 +96,29 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ### Session worktree sync — deliberate gaps (source: session-worktree-sync changeset, 2026-08-15)
 
+- **A coder-hosted session's activity never reaches its room.** `tddy-coder` stamps its records
+  correctly (`head_commit`, `changed_paths`) but cannot deliver them: it is a LiveKit *server* only
+  — no HTTP client, no daemon URL on any normal session path — and `ReportAgentActivity`
+  authenticates with a `hook_token` + `os_user` the coder never carries. So `tddy-session-sync`
+  mirrors a **claude-cli or sandbox** session fully, and a **tool or cursor-cli** session only up to
+  what `worktree.activity` and the WIP ref carry (commits and the periodic uncommitted snapshot) —
+  never per-edit deltas. Closing it means giving the coder a daemon transport and a credential it
+  can present; the existing reverse-stdio channel (`conversation_spawn_relay`) is the likeliest
+  seam.
+- **A sandboxed session's in-jail tool calls are not broadcast.** They reach the durable log and the
+  live hub but not the room's `session.activity` topic — `sandbox_session.rs` has no
+  `SessionRoomRegistry`. Marked `TODO(session-worktree-sync)` at the call site; closing it means
+  threading the registry through `dial_and_bridge`.
+- **`AgentActivityDeltaRequest.daemon_instance_id` is not honoured.** The field documents peer
+  forwarding "as on ExecuteTool", but the handler only looks up the local store; a request naming
+  another daemon gets a local `NOT_FOUND` rather than being forwarded.
+- **Three room-dependent behaviours are wired but unpinned.** The `session.activity` broadcast, the
+  `delta_store` lookup after a room is registered, and the `close`→`delete_wip_ref` call site all
+  need a live LiveKit room to exercise; `SessionRoomRegistry::register` is private and
+  `BroadcastPublisher`'s constructors are `pub(crate)`, so no seam exists to inject one. The
+  *behaviours* are tested in isolation — what is untested is the wiring. A container-backed suite
+  using `tddy-livekit-testkit` (already a dev-dependency) would close this.
+
 - **A split session mirrors committed history only.** The facilitating daemon reaches a remote
   checkout through `GetWorktreeSnapshot`, whose response carries counts and paths but **no tree**
   (`packages/tddy-service/proto/connection.proto`), so it cannot diff a worktree it does not hold —

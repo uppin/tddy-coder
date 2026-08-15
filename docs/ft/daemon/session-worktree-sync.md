@@ -117,8 +117,17 @@ at it. A client that has fallen behind fetches that ref and hard-resets to it.
 ```
 daemon:   commit-tree <wip_tree> -p HEAD  →  refs/tddy/session/{id}/wip
 mirror:   git fetch origin +refs/tddy/session/{id}/wip:refs/tddy/wip
-          git reset --hard refs/tddy/wip
+          git reset --hard refs/tddy/wip^        # HEAD ← the session's own commit
+          git read-tree -u --reset refs/tddy/wip # working tree ← the WIP tree, HEAD untouched
 ```
+
+**Two commands, not one, and the reason is load-bearing.** Resetting straight onto the WIP commit
+would leave the mirror's `HEAD` on *that* commit — but every delta names the session's real `HEAD`
+as its `base_commit`, and the client compares that against its own `rev-parse HEAD`. A mirror parked
+on the WIP commit therefore rejects every delta that follows, reconciles, parks there again, and
+reconciles forever. The WIP commit's parent **is** the session's commit (`commit-tree … -p HEAD`),
+so `refs/tddy/wip^` puts `HEAD` where the deltas expect it, and `read-tree` lays the uncommitted
+state over it without moving `HEAD` again.
 
 Under `refs/tddy/` rather than `refs/heads/` because it is not a branch: it must never appear in
 `git branch`, never be a push target, and never be a name the agent working in that checkout has to
@@ -232,18 +241,21 @@ it, and log at `error` naming what diverged. Self-healing, never quiet.
     names a **different** session. Neither is overwritten and neither is adopted — the two ways a
     managed directory silently eats someone's work.
 27. On first attach the syncer clones the project over the existing git transport
-    (`GIT_SSH_COMMAND=tddy-remote-git-repo`) and hard-resets to the session's **WIP ref** — so
-    attaching to an already-dirty session mid-flight produces a correct mirror, not one that is
-    merely correct-so-far.
-28. A `commit` activity event fetches and hard-resets the mirror to the session's WIP ref, whose
-    parent is the new `head_commit`.
+    (`GIT_SSH_COMMAND=tddy-remote-git-repo`) and restores the session's **WIP ref** as AC31
+    describes — so attaching to an already-dirty session mid-flight produces a correct mirror, not
+    one that is merely correct-so-far.
+28. A `commit` activity event re-fetches and restores the session's WIP ref, whose parent is the
+    new `head_commit` — so the mirror follows `HEAD` and the deltas that follow still apply.
 29. An edit activity fetches its delta by `call_id` and applies it with `git apply`. A delta whose
     tick `seq` has already been applied is skipped — several calls sharing one tick apply it once.
 30. Deltas are applied in `seq` order. A gap in `seq` is a lost broadcast and triggers a reconcile;
     it is never applied out of order and never skipped over.
-31. **Reconcile** is `git fetch` of the WIP ref plus `git reset --hard` onto it — never a
-    whole-worktree patch. A path that git cannot reconstruct (one the session's `.gitignore`
-    excludes, so it is in no tree) is pulled whole with `StreamReadWorktreeFile`.
+31. **Reconcile** is `git fetch` of the WIP ref, then `reset --hard <wip>^` to put `HEAD` on the
+    session's own commit and `read-tree -u --reset <wip>` to lay the uncommitted state over it —
+    never a whole-worktree patch. Resetting onto the WIP commit itself would park `HEAD` where no
+    delta's `base_commit` can match, and reconcile forever. A path that git cannot reconstruct (one
+    the session's `.gitignore` excludes, so it is in no tree) is pulled whole with
+    `StreamReadWorktreeFile`.
 32. **Every divergence is logged at `error`** naming what diverged — the expected and actual
     commit, or the rejected path, or the aged-out `call_id`. A reconcile is never silent, and a
     sync that cannot complete exits non-zero rather than leaving a half-written mirror and

@@ -115,6 +115,15 @@ pub struct Presenter {
     /// persists the agent's own tool calls here and broadcasts them as
     /// [`PresenterEvent::AgentActivity`].
     agent_activity_dir: Option<PathBuf>,
+    /// The checkout the agent edits, which is **not** [`Self::agent_activity_dir`]: the session dir
+    /// holds the log, the worktree holds the files. Every record written for this session is stamped
+    /// against it — the commit it ran upon and the paths it declared, both of which a consumer needs
+    /// to place a change in the tree.
+    ///
+    /// `None` when the caller wiring the session did not know the checkout. A record then carries an
+    /// empty `head_commit` and no paths, which is the documented "could not resolve" value
+    /// (`docs/ft/daemon/session-worktree-sync.md` AC1); nothing else is read in its place.
+    agent_activity_worktree: Option<PathBuf>,
     /// Provenance written on persisted agent-activity rows (`"coder"` | `"cursor-cli"`).
     agent_activity_source: String,
     /// Running agent-activity rows awaiting their terminal `ToolResult`, keyed by `call_id`, so the
@@ -199,16 +208,30 @@ impl Presenter {
             critical_state: Arc::new(std::sync::Mutex::new(CriticalPresenterState::default())),
             tddy_data_dir,
             agent_activity_dir: None,
+            agent_activity_worktree: None,
             agent_activity_source: "coder".to_string(),
             agent_activity_pending: std::collections::HashMap::new(),
         }
     }
 
     /// Set where the agent's own tool calls are persisted (`agent-activity.jsonl` under
-    /// `dir`) and the `source` recorded on each row. Wired by `tddy-coder` for tool / cursor-cli
-    /// sessions, where the coder process — not the daemon — executes the tools.
-    pub fn set_agent_activity_context(&mut self, dir: PathBuf, source: impl Into<String>) {
+    /// `dir`), which `worktree` those calls run in, and the `source` recorded on each row. Wired by
+    /// `tddy-coder` for tool / cursor-cli sessions, where the coder process — not the daemon —
+    /// executes the tools.
+    ///
+    /// `worktree` is asked for rather than derived because `dir` is the session folder and the
+    /// checkout is somewhere else entirely; only the caller that started the session knows which
+    /// one. It is an `Option` so a caller that does not know must say so, rather than the presenter
+    /// quietly stamping records against whatever directory it happened to hold — see
+    /// [`Self::agent_activity_worktree`].
+    pub fn set_agent_activity_context(
+        &mut self,
+        dir: PathBuf,
+        worktree: Option<PathBuf>,
+        source: impl Into<String>,
+    ) {
         self.agent_activity_dir = Some(dir);
+        self.agent_activity_worktree = worktree;
         self.agent_activity_source = source.into();
     }
 
@@ -255,6 +278,35 @@ impl Presenter {
         }
     }
 
+    /// The commit this session's checkout is on, or empty when this presenter was never told which
+    /// checkout that is.
+    ///
+    /// Empty is the documented "could not resolve" value (AC1). Reading some *other* directory's
+    /// HEAD — the session dir, the process's own cwd — would answer with a real sha for the wrong
+    /// tree, which is the fabrication AC1 forbids in its least obvious form: a mirror would apply a
+    /// change onto a base it was never cut from and report success.
+    fn agent_activity_head_commit(&self) -> String {
+        match self.agent_activity_worktree.as_deref() {
+            Some(worktree) => crate::git_head::read_head_commit(worktree),
+            None => String::new(),
+        }
+    }
+
+    /// The worktree paths a call declared it would write, relative to this session's checkout.
+    ///
+    /// Empty without a checkout, because these paths exist only as a relation to one: a pathspec is
+    /// relative to a repository root, and with no root there is nothing to express them against.
+    fn agent_activity_declared_paths(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> Vec<String> {
+        match self.agent_activity_worktree.as_deref() {
+            Some(worktree) => crate::agent_activity::declared_paths(tool_name, input, worktree),
+            None => Vec::new(),
+        }
+    }
+
     /// Persist and broadcast the agent's own tool call for a `ToolUse` / `ToolResult` progress
     /// event. No-op unless [`set_agent_activity_context`](Self::set_agent_activity_context) wired a
     /// session dir (i.e. tool / cursor-cli sessions, where the coder executes tools). Never panics:
@@ -279,24 +331,28 @@ impl Presenter {
                 let call_id = call_id
                     .clone()
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let input = crate::agent_activity::parse_activity_json(
+                    &input_json.clone().unwrap_or_default(),
+                );
                 let rec = AgentActivityRecord {
                     call_id: call_id.clone(),
                     tool_name: name.clone(),
-                    input: crate::agent_activity::parse_activity_json(
-                        &input_json.clone().unwrap_or_default(),
-                    ),
+                    // Stamped before the call runs, which is the point: this is the state the call
+                    // is about to change, so a consumer applying its delta knows what it applies
+                    // onto (AC1). Reading HEAD is a couple of file reads rather than a subprocess,
+                    // which is what makes it affordable on every tool call.
+                    head_commit: self.agent_activity_head_commit(),
+                    changed_paths: self.agent_activity_declared_paths(name, &input),
+                    input,
                     status: STATUS_RUNNING.to_string(),
                     result: serde_json::Value::Null,
                     error_message: String::new(),
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
                     source: self.agent_activity_source.clone(),
-                    // FIXME(session-worktree-sync): stamp the worktree HEAD here. Until then a
-                    // consumer cannot tell which commit this call ran upon — see
-                    // docs/ft/daemon/session-worktree-sync.md AC1.
-                    head_commit: String::new(),
+                    // The poll tick covering this call is measured by the session room, which is a
+                    // different process; 0 is its documented "no tick has covered it yet" (AC2).
                     activity_seq: 0,
-                    changed_paths: Vec::new(),
                 };
                 self.agent_activity_pending.insert(call_id, rec.clone());
                 rec
@@ -307,26 +363,29 @@ impl Presenter {
                 is_error,
             } => {
                 // Base the terminal row on the remembered running row so the coalesced record keeps
-                // the tool name / input / start time. Falls back to a minimal row if no running row
-                // was seen (e.g. the presenter attached mid-call).
-                let mut rec = self
-                    .agent_activity_pending
-                    .remove(call_id)
-                    .unwrap_or_else(|| AgentActivityRecord {
-                        call_id: call_id.clone(),
-                        tool_name: String::new(),
-                        input: serde_json::Value::Null,
-                        status: String::new(),
-                        result: serde_json::Value::Null,
-                        error_message: String::new(),
-                        started_unix_ms: 0,
-                        completed_unix_ms: 0,
-                        source: self.agent_activity_source.clone(),
-                        // FIXME(session-worktree-sync): as above — AC1.
-                        head_commit: String::new(),
-                        activity_seq: 0,
-                        changed_paths: Vec::new(),
-                    });
+                // the tool name / input / start time — and the commit that row was stamped with,
+                // which is the state the call ran upon rather than the one it left behind. Falls
+                // back to a minimal row if no running row was seen (e.g. the presenter attached
+                // mid-call).
+                let pending = self.agent_activity_pending.remove(call_id);
+                // Only for that fallback, and read here because there is nothing to inherit: this
+                // row is the first this presenter saw of the call, so the moment it is recorded is
+                // now, and now is the HEAD it can honestly name. It declares no paths, having never
+                // seen the tool's input.
+                let mut rec = pending.unwrap_or_else(|| AgentActivityRecord {
+                    call_id: call_id.clone(),
+                    tool_name: String::new(),
+                    input: serde_json::Value::Null,
+                    status: String::new(),
+                    result: serde_json::Value::Null,
+                    error_message: String::new(),
+                    started_unix_ms: 0,
+                    completed_unix_ms: 0,
+                    source: self.agent_activity_source.clone(),
+                    head_commit: self.agent_activity_head_commit(),
+                    activity_seq: 0,
+                    changed_paths: Vec::new(),
+                });
                 rec.status = if *is_error {
                     STATUS_ERROR
                 } else {
@@ -1725,6 +1784,11 @@ impl Presenter {
     }
 }
 
+/// What every activity record this presenter writes is stamped with — the commit its checkout is on
+/// and the paths its call declared (`docs/ft/daemon/session-worktree-sync.md` AC1, AC2).
+#[cfg(test)]
+mod agent_activity_stamping;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1792,7 +1856,7 @@ mod tests {
             tmp.path().to_path_buf(),
         )
         .with_broadcast(tx);
-        p.set_agent_activity_context(session_dir.clone(), "coder");
+        p.set_agent_activity_context(session_dir.clone(), None, "coder");
         inject_workflow_events(
             &mut p,
             vec![

@@ -9,9 +9,10 @@ tddy-session-sync --session-id 1780828020298-abc --dest ~/mirrors/my-app
 
 Feature: [docs/ft/daemon/session-worktree-sync.md](../../docs/ft/daemon/session-worktree-sync.md)
 
-> ⚠️ **Not usable yet.** The credential and mirror layers are built and tested; the room attach and
-> the sync loop are not, so the binary resolves its settings and then exits non-zero. See
-> [Status](#status).
+> ⚠️ **Not usable yet — the daemon side is unfinished.** Every layer of this client is built, but
+> the RPC it fetches a patch from (`StreamAgentActivityDelta`) still answers `unimplemented` and
+> nothing broadcasts `session.activity` yet, so a run attaches, mirrors the session's committed and
+> uncommitted state once, and then sees no edits. See [Status](#status).
 
 ## How it works
 
@@ -74,23 +75,47 @@ with, and an argv is world-readable through `/proc/<pid>/cmdline`.
 Exactly one of `--session-token` / `--refresh-token` is required. An access token lives 5 minutes —
 too short for something configured once — so the 7-day refresh token is accepted and exchanged.
 
+## How a mirror stays equal
+
+The mirror is a checkout of the same repository, so it is kept on the state the session's checkout
+is actually in: **`HEAD` on the session's own commit, with the agent's uncommitted edits present in
+the working tree**. That is what makes an incoming patch applicable — every delta is cut from the
+session's `HEAD`, so a mirror parked anywhere else would refuse all of them.
+
+```
+git fetch origin +refs/tddy/session/{id}/wip:refs/tddy/wip
+git reset --hard refs/tddy/wip^      # HEAD ← the session's commit (the WIP commit's parent)
+git read-tree -u --reset refs/tddy/wip   # working tree ← the WIP tree, HEAD untouched
+```
+
+Each tick's delta is fetched **once per tick, whole** (`DELTA_SCOPE_TICK`) rather than once per
+call. Several tool calls in one poll window share a tick, and the mirror applies a tick's patch
+once; asking for each call's own scope would apply the first call of a window and silently drop
+the rest, along with the residual that carries what no call declared.
+
 ## Status
 
 | Layer | State |
 |---|---|
 | `credentials` — flags, environment, `.env`, refusals | ✅ built and tested |
 | `mirror` — ownership, sequence de-duplication, apply, reconcile reasons | ✅ built and tested |
-| `attach` — resolve the session, join the room | ⛔ not built |
-| the sync loop | ⛔ not built |
+| `attach` — resolve the session, join the room, subscribe | ✅ built; the resolution and the room/identity rules are tested, joining a real room is not |
+| `sync` — first attach, deltas, reconcile | ✅ built; every decision and every git command is tested, the delta fetch needs a daemon |
 
-The daemon side it depends on is likewise partial: `StreamAgentActivityDelta` and
-`StreamReadWorktreeFile` are registered but answer `unimplemented`, and nothing broadcasts
-`session.activity` yet. See the changeset for what remains.
+The daemon side it depends on is still partial: `StreamAgentActivityDelta` and
+`StreamReadWorktreeFile` answer `unimplemented`, and nothing broadcasts `session.activity` yet. Until
+those land, a run attaches and produces a correct mirror of the session as it stands, and then
+receives nothing further. See the changeset for what remains.
+
+`StreamReadWorktreeFile` is **not** called yet: AC31's fallback for a path git cannot reconstruct —
+one the session's `.gitignore` excludes — is not implemented.
 
 ## Modules
 
 | Module | Role |
 |--------|------|
 | `credentials` | Flags with per-parameter environment fallback, and the `.env` beneath both |
+| `attach` | Resolve the session over HTTP, mint a room token, join, subscribe to both topics |
+| `sync` | The loop: what each broadcast provokes, and the git that keeps the mirror equal |
 | `mirror` | The managed destination: marker, ownership refusal, apply |
 | `apply` | What a delta is, and what applying one can conclude |
