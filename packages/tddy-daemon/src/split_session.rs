@@ -204,6 +204,11 @@ pub fn split_claude_extra_args(
 /// `livekit.api_secret` is deliberately not exported — it would let an agent running model-authored
 /// code mint a token for any room as any identity (contrast `spawner.rs`, which passes it on the
 /// command line to `tddy-coder`, where `/proc/<pid>/cmdline` exposes it).
+///
+/// The RPC server the agent addresses is the room's host, taken from the same `livekit` value that
+/// names the room: only the daemon that hosts a room is in it, so the identity and the room have to
+/// travel together. `codebase_instance_id` is not that identity — it hosts no room and joins none —
+/// it is the forwarding hint the room's host routes on to reach the checkout.
 pub fn split_remote_tool_env(
     livekit: &SplitLiveKitRoom,
     session_id: &str,
@@ -232,9 +237,7 @@ pub fn split_remote_tool_env(
         daemon_instance_id: Some(codebase_instance_id.to_string()),
         livekit_url: Some(livekit.url.clone()),
         livekit_room: Some(livekit.room.clone()),
-        server_identity: Some(crate::livekit_peer_discovery::daemon_rpc_identity(
-            codebase_instance_id,
-        )),
+        server_identity: Some(livekit.host_identity.clone()),
         livekit_token: Some(token),
     })
 }
@@ -245,6 +248,10 @@ pub struct SplitLiveKitRoom {
     pub url: String,
     pub api_key: String,
     pub api_secret: String,
+    /// The participant identity serving RPC in `room` — the facilitating daemon's, since that is
+    /// the daemon that opens the room and the only one that joins it. Carried beside the room name
+    /// so an agent can never be pointed at a participant that is not in the room it was given.
+    pub host_identity: String,
 }
 
 impl SplitLiveKitRoom {
@@ -276,6 +283,9 @@ impl SplitLiveKitRoom {
             url,
             api_key,
             api_secret,
+            host_identity: crate::livekit_peer_discovery::daemon_rpc_identity(
+                &crate::livekit_peer_discovery::local_instance_id_for_config(config),
+            ),
         })
     }
 }
@@ -314,13 +324,21 @@ pub fn prepare_split_agent_wiring(
 mod tests {
     use super::*;
 
-    fn a_room() -> SplitLiveKitRoom {
+    /// The session room as the facilitating daemon resolved it: its name, and the identity that
+    /// daemon serves RPC on inside it. The two travel together because only the daemon that hosts a
+    /// room can say who is in it.
+    fn a_room_hosted_by(host_instance_id: &str) -> SplitLiveKitRoom {
         SplitLiveKitRoom {
-            room: "tddy-lobby".to_string(),
+            room: "session-agent-side-session".to_string(),
             url: "ws://livekit.invalid:7880".to_string(),
             api_key: "devkey".to_string(),
             api_secret: "secret".to_string(),
+            host_identity: format!("daemon-{host_instance_id}"),
         }
+    }
+
+    fn a_room() -> SplitLiveKitRoom {
+        a_room_hosted_by("workstation-a")
     }
 
     fn env_value(env: &RemoteToolEnv, key: &str) -> Option<String> {
@@ -348,10 +366,53 @@ mod tests {
             env_value(&env, "TDDY_REMOTE_SESSION_ID").as_deref(),
             Some("codebase-side-session")
         );
+    }
+
+    #[test]
+    fn the_agent_addresses_the_daemon_that_hosts_the_room_it_joins() {
+        // Given the room this session's facilitating daemon opened and serves RPC in
+        let room = a_room_hosted_by("workstation-a");
+
+        // When the agent is wired for a checkout that lives on a different daemon entirely
+        let env = split_remote_tool_env(
+            &room,
+            "agent-side-session",
+            "workstation-b",
+            "codebase-side-session",
+            "token",
+        )
+        .expect("mint split env");
+
+        // Then it addresses the daemon that is in that room. The codebase daemon hosts no room and
+        // joins none, so naming it here leaves the agent calling a participant that never arrives:
+        // every tool call waits out its timeout instead of reading a file.
         assert_eq!(
             env_value(&env, "TDDY_REMOTE_SERVER_IDENTITY").as_deref(),
-            Some("daemon-workstation-b"),
-            "tools must address the peer's RPC participant, not its discovery identity"
+            Some("daemon-workstation-a")
+        );
+    }
+
+    #[test]
+    fn the_codebase_daemon_is_named_as_the_forwarding_destination_not_as_the_rpc_server() {
+        // Given the same room, hosted by the daemon running the agent
+        let room = a_room_hosted_by("workstation-a");
+
+        // When the agent is wired for a checkout on `workstation-b`
+        let env = split_remote_tool_env(
+            &room,
+            "agent-side-session",
+            "workstation-b",
+            "codebase-side-session",
+            "token",
+        )
+        .expect("mint split env");
+
+        // Then the codebase host is still named — as the hop the facilitating daemon forwards to.
+        // Addressing the room's host is only half of the route: the daemon that answers there holds
+        // no checkout, and `ExecuteTool` routes on this id to reach the one that does.
+        assert_eq!(
+            env_value(&env, "TDDY_REMOTE_DAEMON_INSTANCE_ID").as_deref(),
+            Some("workstation-b")
         );
     }
 

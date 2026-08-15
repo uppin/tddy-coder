@@ -10,6 +10,8 @@
 //!
 //! - [`StubAgentScript::recording_argv_to`] writes a temp file and `mv -f`s it over the target, so
 //!   a reader sees either the previous invocation's argv or this one's, never a mixture.
+//! - [`StubAgentScript::recording_env_to`] does the same for named environment variables, for tests
+//!   that assert on how a spawned agent was wired rather than on what it was called with.
 //! - [`StubAgentScript::appending_argv_to`] joins the whole line in a shell variable and appends it
 //!   with one `printf`, which `O_APPEND` makes atomic for line-sized writes.
 //!
@@ -17,6 +19,7 @@
 //! [`crate::wait::eventually_blocking`] / [`crate::wait::eventually`], which turn a missing record
 //! into a message naming what was actually on disk.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Builder for a `/bin/sh` stub. Sections run in the order they are declared on the builder.
@@ -66,6 +69,25 @@ impl StubAgentScript {
         self.body.push_str(&format!(
             "printf '%s\\n' \"$@\" > \"{target}.tmp.$$\"\nmv -f \"{target}.tmp.$$\" \"{target}\"\n"
         ));
+        self
+    }
+
+    /// Record the named environment variables this invocation was launched with, one `NAME=value`
+    /// line each, replacing any previous record.
+    ///
+    /// Written via temp file + `mv -f`, like [`Self::recording_argv_to`]: [`read_recorded_env`] can
+    /// never observe a partial record. A variable the spawn never set is recorded as `NAME=`, so a
+    /// missing wiring reads as an empty value rather than as a record that has not landed yet.
+    pub fn recording_env_to(mut self, env_file: &Path, names: &[&str]) -> Self {
+        let target = env_file.display();
+        self.body.push_str(&format!(": > \"{target}.tmp.$$\"\n"));
+        for name in names {
+            self.body.push_str(&format!(
+                "printf '%s=%s\\n' \"{name}\" \"${{{name}}}\" >> \"{target}.tmp.$$\"\n"
+            ));
+        }
+        self.body
+            .push_str(&format!("mv -f \"{target}.tmp.$$\" \"{target}\"\n"));
         self
     }
 
@@ -151,6 +173,25 @@ pub fn read_recorded_argv_value_after(argv_file: &Path, flag: &str) -> Result<St
         .and_then(|i| argv.get(i + 1))
         .map(String::from)
         .ok_or_else(|| format!("recorded argv has no {flag}: {argv:?}"))
+}
+
+/// Reads the environment recorded by [`StubAgentScript::recording_env_to`].
+///
+/// Probe-shaped for [`crate::wait::eventually_blocking`]: `Err` describes what is on disk now.
+pub fn read_recorded_env(env_file: &Path) -> Result<HashMap<String, String>, String> {
+    let contents = std::fs::read_to_string(env_file)
+        .map_err(|e| format!("{} is not readable yet: {e}", env_file.display()))?;
+    let mut recorded = HashMap::new();
+    for line in contents.lines().filter(|l| !l.is_empty()) {
+        let (name, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("{line:?} is not a NAME=value line"))?;
+        recorded.insert(name.to_string(), value.to_string());
+    }
+    if recorded.is_empty() {
+        return Err(format!("{} exists but is empty", env_file.display()));
+    }
+    Ok(recorded)
 }
 
 /// The most recent line appended by [`StubAgentScript::appending_argv_to`], split on tabs.
