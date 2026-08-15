@@ -71,11 +71,15 @@ pub fn verify_no_systemctl_support(contents: &str) {
     );
 }
 
-/// Optional overwrite of systemd unit (preserve User= / manual edits by default).
-pub fn verify_install_overwrite_systemd_unit(contents: &str) {
+/// Optional `--update-systemd-unit` rewrite of the unit files (preserve manual edits by default).
+pub fn verify_update_systemd_unit_flag(contents: &str) {
     assert!(
-        contents.contains("INSTALL_OVERWRITE_SYSTEMD_UNIT"),
-        "install must document INSTALL_OVERWRITE_SYSTEMD_UNIT for replacing the unit file"
+        contents.contains("--update-systemd-unit"),
+        "install must document --update-systemd-unit for replacing the unit file"
+    );
+    assert!(
+        contents.contains("want_update_unit"),
+        "install must gate the unit rewrite on a --update-systemd-unit flag (e.g. want_update_unit)"
     );
 }
 
@@ -295,7 +299,7 @@ pub fn verify_install_script_contracts(path: &Path, daemon_yaml_production_path:
     verify_env_override_references(&contents);
     verify_root_check(&contents);
     verify_no_systemctl_support(&contents);
-    verify_install_overwrite_systemd_unit(&contents);
+    verify_update_systemd_unit_flag(&contents);
     verify_build_flag_invokes_release(&contents);
     verify_user_flag_support(&contents);
     verify_headless_flag_support(&contents);
@@ -367,7 +371,7 @@ mod granular_tests {
 
     #[test]
     fn install_overwrite_systemd_unit_granular() {
-        verify_install_overwrite_systemd_unit(&read_repo_install());
+        verify_update_systemd_unit_flag(&read_repo_install());
     }
 
     #[test]

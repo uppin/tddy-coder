@@ -18,8 +18,8 @@
 # system-unit form of it), and it does NOT mask the legacy tddy-daemon.* units — in that mode the
 # tddy-daemon unit IS the deployment.
 #
-# Usage: sudo ./install --systemd [--build] [--headless]
-#        ./install --systemd --user [--build] [--headless]
+# Usage: sudo ./install --systemd [--build] [--headless] [--update-systemd-unit]
+#        ./install --systemd --user [--build] [--headless] [--update-systemd-unit]
 #
 #   --systemd   Required. Install release binaries, config templates, unit files; enable+start service.
 #   --build     Optional. Run ./release before copying binaries.
@@ -35,6 +35,12 @@
 #               pointing at an (empty) WEB_BUNDLE_DIR so the daemon still starts and serves /rpc and
 #               /api/config — only the web UI is absent. Rebuild tddy-web and re-run without
 #               --headless to add the UI later.
+#   --update-systemd-unit  Optional. Replace tddy-supervisor.service (and .socket), or the --user
+#               tddy-daemon.service, with the templates from this script. Default: if a unit file
+#               already exists, it is not overwritten (preserves Delegate=, ExecStart edits, drop-in
+#               content, etc.). A host installed before the supervisor existed has no
+#               tddy-supervisor.* unit, so its units are written without this flag; it is only needed
+#               to pull in template changes (e.g. Conflicts=, ListenStream=) on a host that has them.
 #
 # Optional (from repo root): ./dev bun install — installs @zed-industries/codex-acp and the
 # platform-specific native package under node_modules/. When that native binary exists, it is
@@ -91,14 +97,6 @@
 #   INSTALL_BUNDLE_CODEX_ACP=1  Always install ${BIN_DIR}/codex-acp from node_modules; fail if the
 #                        platform package or native binary is missing.
 #
-#   INSTALL_OVERWRITE_SYSTEMD_UNIT=1  Replace tddy-supervisor.service (and .socket), or the --user
-#                        tddy-daemon.service, with the templates from this script. Default: if a unit
-#                        file already exists, it is not overwritten (preserves Delegate=, ExecStart
-#                        edits, drop-in content, etc.). A host installed before the supervisor existed
-#                        has no tddy-supervisor.* unit, so its units are written without this flag; it
-#                        is only needed to pull in template changes (e.g. Conflicts=, ListenStream=)
-#                        on a host that has them.
-#
 # Nothing this script generates is ever overwritten in place: the configs, the unit files and the
 # AppArmor profile are rendered to a temp file and moved into place only once the whole content
 # exists, and an existing file is kept rather than replaced (see the guards below).
@@ -117,22 +115,24 @@ want_systemd=false
 want_build=false
 want_user=false
 want_headless=false
+want_update_unit=false
 for arg in "$@"; do
   case "$arg" in
     --systemd) want_systemd=true ;;
     --build) want_build=true ;;
     --user) want_user=true ;;
     --headless) want_headless=true ;;
+    --update-systemd-unit) want_update_unit=true ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: $0 --systemd [--build] [--user] [--headless]" >&2
+      echo "Usage: $0 --systemd [--build] [--user] [--headless] [--update-systemd-unit]" >&2
       exit 1
       ;;
   esac
 done
 
 if ! "$want_systemd"; then
-  echo "Usage: $0 --systemd [--build] [--user] [--headless]" >&2
+  echo "Usage: $0 --systemd [--build] [--user] [--headless] [--update-systemd-unit]" >&2
   exit 1
 fi
 
@@ -199,7 +199,6 @@ WEB_DIST_SRC="${ROOT_DIR}/packages/tddy-web/dist"
 CONFIG_FILE="${CONFIG_DIR}/daemon.yaml"
 SUPERVISOR_CONFIG_FILE="${CONFIG_DIR}/supervisor.yaml"
 NO_SYSTEMCTL="${INSTALL_NO_SYSTEMCTL:-0}"
-OVERWRITE_SYSTEMD_UNIT="${INSTALL_OVERWRITE_SYSTEMD_UNIT:-0}"
 
 # The one unit each mode installs. A --user install installs the daemon directly (no supervisor to own
 # its lifecycle), which is why the same unit name is the legacy one masked in a system install: the two
@@ -760,9 +759,9 @@ if "$want_supervisor"; then
   harden_installed_path "$SUPERVISOR_CONFIG_FILE"
 fi
 
-if [[ -f "$UNIT_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
+if [[ -f "$UNIT_PATH" ]] && ! "$want_update_unit"; then
   echo "install: keeping existing systemd unit (not overwriting): ${UNIT_PATH}"
-  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (ExecStart, etc.)"
+  echo "install:   pass --update-systemd-unit to replace with this script's template (ExecStart, etc.)"
 elif "$want_user"; then
   echo "install: writing systemd unit ${UNIT_PATH}"
   # Unquoted heredoc: ${...} is expanded on purpose, so a backtick or $( ) inside would RUN — keep
@@ -841,9 +840,9 @@ fi
 # where the daemon binds ${DAEMON_SOCKET_PATH} itself.
 if "$want_user"; then
   echo "install: (--user) skipping the supervisor socket unit; the daemon binds ${DAEMON_SOCKET_PATH} itself"
-elif [[ -f "$UNIT_SOCKET_PATH" ]] && [[ "$OVERWRITE_SYSTEMD_UNIT" != "1" ]]; then
+elif [[ -f "$UNIT_SOCKET_PATH" ]] && ! "$want_update_unit"; then
   echo "install: keeping existing systemd socket unit (not overwriting): ${UNIT_SOCKET_PATH}"
-  echo "install:   set INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to replace with this script's template (SocketGroup, ListenStream, etc.)"
+  echo "install:   pass --update-systemd-unit to replace with this script's template (SocketGroup, ListenStream, etc.)"
 else
   echo "install: writing systemd socket unit ${UNIT_SOCKET_PATH} (ListenStream=${SUPERVISOR_SOCKET_PATH}, group ${SOCKET_GROUP})"
   atomically_write "$UNIT_SOCKET_PATH" <<SOCKET
@@ -890,7 +889,7 @@ if "$want_supervisor"; then
     "Set supervisor.socket_path to it, or delete ${CONFIG_FILE} and re-run install to regenerate it."
   warn_unless_file_declares "$UNIT_SOCKET_PATH" "ListenStream=${SUPERVISOR_SOCKET_PATH}" \
     "ListenStream — where systemd actually creates the privileged socket" \
-    "Re-run with INSTALL_OVERWRITE_SYSTEMD_UNIT=1 to rewrite the unit from this script's template."
+    "Re-run with --update-systemd-unit to rewrite the unit from this script's template."
 fi
 
 # AppArmor profile granting the daemon binary unprivileged user namespaces. Still installed on a
