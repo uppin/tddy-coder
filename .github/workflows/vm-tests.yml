@@ -110,6 +110,12 @@ jobs:
         run: |
           set -o pipefail
           export TDDY_CLOUDINIT_BASE_IMAGE="$HOME/vm-images/${IMAGE_NAME}"
+          # The fixtures put their images in a tempdir that is removed when the
+          # test ends, taking the guest's console transcript with it. Redirect
+          # the transcripts somewhere that outlives the run so they can be
+          # uploaded — a guest failure is usually only explicable from its own
+          # console, and there is no other way to see it from a runner.
+          export TDDY_VM_CONSOLE_LOG_DIR="$GITHUB_WORKSPACE/vm-console-logs"
           # An unset or wrong path makes every test pass without booting, so
           # check before spending the runtime rather than after.
           test -f "$TDDY_CLOUDINIT_BASE_IMAGE" \
@@ -137,11 +143,16 @@ jobs:
           fi
           echo "6 boot-control tests ran against a real guest."
 
-      - name: Upload console log
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: vm-boot-control-log
-          path: vm-tests.log
+          name: vm-boot-control-logs
+          # vm-tests.log is what the harness printed; vm-console-logs/ is what
+          # each guest itself said, written by QEMU rather than by the test, so
+          # it survives a guest that wedged before the test could read it.
+          path: |
+            vm-tests.log
+            vm-console-logs/
           if-no-files-found: warn
           retention-days: 7
