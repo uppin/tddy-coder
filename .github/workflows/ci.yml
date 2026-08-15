@@ -1,0 +1,315 @@
+name: CI
+
+# Every PR gets a build, a lint pass, and a test run with per-test pass/fail
+# counts reported back as check runs. See docs/dev/guides/ci.md for how to query
+# results from a terminal or an agent.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# One run per PR. A new push cancels the run still in flight rather than
+# queueing behind it — the older result is worthless once the branch moves.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write # action-junit-report publishes the test check runs
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Full debuginfo is the bulk of target/, and the runner only has ~14 GB of
+  # guaranteed disk. Line tables keep file:line in backtraces at a fraction of
+  # the size.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+
+jobs:
+  rust-lint:
+    name: Rust lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      # Only master writes the Rust cache. PRs read master's copy, which keeps
+      # the repo under GitHub's 10 GB cache budget instead of every branch
+      # evicting every other branch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: cargo fmt
+        run: ./dev cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust-test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    needs: rust-build
+    # The first run on a cold cache builds 57 crates including libwebrtc. Later
+    # runs restore master's cache and finish in a fraction of this.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # nextest builds the test targets itself. What it cannot produce is a
+      # binary belonging to another workspace package, which suites like
+      # sandbox_runner_stdio_acceptance exec by path — those come from the
+      # `Rust build` check.
+      - name: Fetch test fixture binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: fixture-bins
+
+      - name: Install fixture binaries into target/debug
+        # Artifacts are zipped without permissions, so everything arrives 0644.
+        run: |
+          find fixture-bins -type f -exec chmod +x {} +
+          mkdir -p target/debug/examples
+          find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
+          find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
+
+      - name: cargo nextest
+        id: nextest
+        # Keep going on failure so the JUnit report still publishes; the report
+        # step below is what fails the job.
+        continue-on-error: true
+        run: ./dev cargo nextest run --workspace --profile ci --locked
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: target/nextest/ci/junit.xml
+          check_name: Rust tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-rust
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  rust-build:
+    name: Rust build
+    runs-on: ubuntu-latest
+    # Runs first. Both test checks depend on it, because several suites exec
+    # workspace binaries rather than linking them, and jobs get separate
+    # runners — the only way to share a built binary is to publish it.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      # The only job that writes the nix cache. A single writer means no two
+      # jobs can race to save the same key — previously this job and rust-lint
+      # ran concurrently and both tried.
+      #
+      # `purge` is deliberately off. GitHub already evicts caches LRU past the
+      # 10 GB budget and drops entries untouched for 7 days, so purging is a
+      # racier version of what the platform does for free.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          save: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: cargo build
+        run: ./dev cargo build --workspace --bins --examples --locked
+
+      # Binaries that tests exec by path, not all of target/debug — the whole
+      # directory is many GB. Each belongs to a package other than the one whose
+      # tests run it, so cargo never builds them as a side effect of those
+      # tests, and `CARGO_BIN_EXE_*` is unset for them. The list is everything
+      # matched by `grep -r 'target/debug/' packages/*/tests`; if you add a test
+      # that shells out to a workspace binary, add it here too.
+      #
+      # Stripped because these are execution fixtures; nothing reads symbols.
+      - name: Stage test fixture binaries
+        run: |
+          mkdir -p fixture-bins/examples
+          for b in tddy-coder tddy-tools tddy-daemon tddy-demo tddy-demo-tui \
+                   tddy-acp-stub tddy-sandbox-runner; do
+            cp "target/debug/$b" fixture-bins/
+          done
+          cp target/debug/examples/echo_server fixture-bins/examples/
+          strip fixture-bins/* fixture-bins/examples/* 2>/dev/null || true
+          du -sh fixture-bins
+
+      - name: Upload test fixture binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: fixture-bins
+          if-no-files-found: error
+          retention-days: 1
+
+  web:
+    name: Web tests
+    runs-on: ubuntu-latest
+    needs: rust-build
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      # tddy-livekit-web's specs exec examples/echo_server against a Docker
+      # LiveKit server.
+      - name: Fetch test fixture binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: fixture-bins
+
+      - name: Install fixture binaries into target/debug
+        run: |
+          find fixture-bins -type f -exec chmod +x {} +
+          mkdir -p target/debug/examples
+          find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
+          find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      # Cypress drives a bundled Electron, which needs these at runtime. Bun and
+      # node still come from the nix shell.
+      - name: Install Cypress runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-0 libgbm1 libnotify4 libnss3 libxss1 libasound2t64 libxtst6 xauth xvfb
+
+      - name: Cache Cypress binary
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: cypress-${{ runner.os }}-
+
+      - name: bun install
+        run: ./dev bun install --frozen-lockfile
+
+      - name: Build web bundle
+        run: ./dev bun run build
+
+      - name: Unit tests
+        id: unit
+        continue-on-error: true
+        run: |
+          mkdir -p reports/junit
+          ./dev bun run --filter tddy-web test:unit:ci
+
+      - name: Component tests
+        id: component
+        continue-on-error: true
+        run: |
+          mkdir -p reports/junit
+          # Run both suites even if the first fails, so one broken package does
+          # not hide the other's results from the report.
+          status=0
+          ./dev bun run --filter tddy-web cypress:component:ci || status=1
+          ./dev bun run --filter tddy-livekit-web cypress:component:ci || status=1
+          exit $status
+
+      - name: Publish test report
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: reports/junit/*.xml
+          check_name: Web tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-web
+          path: reports/junit
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Cypress screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cypress-screenshots
+          path: packages/*/cypress/screenshots
+          if-no-files-found: ignore
+          retention-days: 7
