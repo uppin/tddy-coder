@@ -14,6 +14,12 @@ name: VM tests
 
 on:
   pull_request:
+  # Master too, for two reasons. It is the only ref that writes the cargo cache
+  # (`save-if` below), so without it the `vm` cache is never populated and every
+  # PR compiles tddy-vm from scratch. And a check that never runs on master
+  # gives the branch no VM coverage at all.
+  push:
+    branches: [master]
   workflow_dispatch:
 
 concurrency:
