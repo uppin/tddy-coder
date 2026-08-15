@@ -18,8 +18,8 @@ use tddy_vm::cloud_init::{
     iso_tool_command, render_meta_data, render_user_data_without_completion, CloudInitUser,
     CloudInitUserData, IsoTool, NinePShare,
 };
-use tddy_vm::qemu::{ensure_uefi_vars_file, resolve_uefi_code_path};
-use tddy_vm::vm::{PortForward, UefiFirmware, VmAccel, VmArch, VmConfig, VmLogin};
+use tddy_vm::qemu::uefi_firmware_for;
+use tddy_vm::vm::{PortForward, VmAccel, VmArch, VmConfig, VmLogin};
 use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 use tddy_vm_testkit::recipes::{GUEST_PASSWORD, TDDY_SERVICE_USERNAME};
 use tddy_vm_testkit::BootedGuest;
@@ -141,19 +141,18 @@ impl TestGuestBuilder {
     pub async fn boot(self) -> BootedGuest {
         let overlay = self.work_dir.join(format!("{}.qcow2", self.name));
         let seed_iso = self.work_dir.join(format!("{}-seed.iso", self.name));
-        let vars = self.work_dir.join(format!("{}-vars.fd", self.name));
 
         create_overlay(&self.base_image, &overlay, &self.run.disk_size).await;
         write_seed_iso(&self.work_dir, &seed_iso, &self.name, &self.user_data).await;
-        ensure_uefi_vars_file(&vars).expect("UEFI vars file must be creatable");
 
-        let firmware = UefiFirmware {
-            code_path: resolve_uefi_code_path(self.run.arch)
-                .expect("UEFI firmware must be resolvable for the acceptance tests")
-                .display()
-                .to_string(),
-            vars_path: vars.display().to_string(),
-        };
+        // `uefi_firmware_for` rather than a hand-assembled pair, because it is
+        // arch-aware and this is not: it returns None on x86_64, whose q35
+        // machine boots the image's own bootloader through SeaBIOS. Attaching
+        // firmware there fails, since the writable vars store is 64 MiB — the
+        // aarch64 `virt` pflash convention — and QEMU caps combined x86 system
+        // firmware at 8 MiB.
+        let firmware = uefi_firmware_for(self.run.arch, &self.work_dir, &self.name)
+            .expect("UEFI firmware must be resolvable for the acceptance tests");
 
         let config = VmConfig {
             qcow2_path: overlay.display().to_string(),
@@ -163,7 +162,7 @@ impl TestGuestBuilder {
             accel: self.run.accel,
             memory: self.run.memory.clone(),
             cpus: self.run.cpus,
-            firmware: Some(firmware),
+            firmware,
             login: VmLogin {
                 username: self.login.username.clone(),
                 private_key_path: self.login.ssh_private_key.clone(),

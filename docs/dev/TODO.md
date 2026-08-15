@@ -152,6 +152,53 @@ its own failure message, none from that branch. New entries beyond the list abov
     existing "only registered names" tests construct `ServerReflectionImpl` directly and are
     unaffected — the impl still reports exactly what it is given; the helper decides what to give it.
 
+### `accepts_ssh_as_the_policy_user_with_the_generated_per_vm_key` cannot shut its guest down in time (source: ci-vm-tests, 2026-08-15)
+
+- `packages/tddy-vm/tests/vm_boot_control_acceptance.rs:297` fails with `guest accepted the
+  powerdown but never released port 2235`. Deterministic, not a flake: it fails the same way run
+  alone. It is the **only** remaining failure in the boot-control suite on x86_64; the other five
+  pass.
+- What is *not* wrong, established by experiment rather than reading: ACPI powerdown works fine on
+  this guest. A manually booted guest that finished cloud-init and never saw an SSH connection
+  powered off in **~40 s** — `Reached target poweroff.target` → `reboot: Power down`. The
+  `shuts_a_running_vm_down_gracefully_via_the_qemu_monitor` test, which never opens an SSH session,
+  also passes.
+- So the distinguishing factor is the SSH session this test opens. The likely mechanism is systemd
+  waiting on the `user@<uid>.service` / session scope during shutdown, which on Debian is bounded by
+  `DefaultTimeoutStopSec` (90 s). Roughly 40 s + 90 s exceeds `BootedGuest`'s `SHUTDOWN_TIMEOUT` of
+  120 s (`packages/tddy-vm-testkit/src/guest.rs`), which fits the observation — but the actual
+  duration was **not measured**, so confirm it before choosing a number.
+- Two candidate fixes, and the choice is a real one: raise `SHUTDOWN_TIMEOUT` past the measured
+  worst case, or make the session teardown deterministic (close the connection and wait for the
+  session to end) so shutdown does not depend on a systemd timeout at all. The second is a readiness
+  signal rather than a budget, and is preferable if the session can be observed ending.
+
+### The guest serial console is a 64 KiB pipe, drained only at shutdown (source: ci-vm-tests, 2026-08-15)
+
+- `QemuVmArgs::build_with_serial(config, "stdio")` (`qemu.rs:433`) gives the console-driven boot a
+  **pipe**, whose capacity is the kernel's, not ours — 64 KiB by default, 1 MiB ceiling per
+  `/proc/sys/fs/pipe-max-size`. A Debian boot with cloud-init writes more than that (measured:
+  71,443 bytes), so a guest whose console nobody reads **blocks writing to `ttyS0`**.
+- That is what broke shutdown in `accepts_ssh_as_the_policy_user_...`: `wait_for_ssh_ready` polls
+  SSH and never pumps the console, so `systemd-shutdown` blocked and the guest never powered off.
+  Fixed by draining concurrently with the port-release wait (`SerialConsole::drain_for`).
+- **The fix is narrow on purpose.** The console is still undrained between boot and shutdown, so a
+  guest can sit blocked on `ttyS0` for the whole body of a test. Nothing in the current suite needs
+  the guest to make progress during that window, so all six pass — but a future test that does will
+  hang the same way, and the symptom (an accepted powerdown that never completes, or a guest that
+  mysteriously stalls) points nowhere near the cause.
+- Options, if it ever needs to be properly unbounded:
+  - Drain continuously in the background rather than only at shutdown. Keeps the console
+    bidirectional, which the login-over-serial tests require.
+  - `fcntl(F_SETPIPE_SZ)` to 1 MiB. One line, but it moves the cliff rather than removing it.
+  - `-serial file:` is genuinely unbounded and never blocks — `QemuVmArgs::build` already uses it
+    for detached boots — but it is **write-only**, so it cannot serve the tests that log in over the
+    serial console.
+- Related: this fixture keeps only an in-memory tail of the console, which is why diagnosing the
+  above needed guests booted by hand to see what they were saying. QEMU's `-chardev …,logfile=PATH`
+  would persist a full transcript alongside the interactive backend, making a CI failure readable
+  from the uploaded artifact. The bake path already writes `<name>-boot.log`; this one does not.
+
 ## Future Enhancements
 
 ### Remote git repo over LiveKit — deliberate gaps (source: remote-git-repo-over-livekit changeset, 2026-08-15)

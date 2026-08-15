@@ -1,0 +1,158 @@
+name: VM tests
+
+# The QEMU-backed production tests — the ones that boot a real guest.
+#
+# Kept out of ci.yml deliberately: these need hardware virtualisation, take tens
+# of minutes, and are new enough in CI to deserve their own blast radius. Not a
+# required check. See docs/dev/guides/ci.md.
+#
+# Scope is currently the boot-control suite only. It is the one `./vm-tests`
+# entry that needs no baked image chain — it boots the supplied cloud image
+# directly, so it costs a 331 MB download rather than the multi-hour, multi-GB
+# bake. The other seven suites in `./vm-tests` are not run here; see
+# docs/dev/guides/ci.md for what each would need.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: vm-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # Debian 12 genericcloud, amd64 to match the x86_64 runner — VmArch::host()
+  # reads std::env::consts::ARCH, and the guest image must match it.
+  IMAGE_NAME: debian-12-genericcloud-amd64.qcow2
+  IMAGE_BASE_URL: https://cloud.debian.org/images/cloud/bookworm/latest
+
+jobs:
+  vm-boot-control:
+    name: VM boot control
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      # /dev/kvm exists on the runner image but is root:kvm 0660, so the runner
+      # account can see it and not open it. tddy-vm tests openability, not
+      # existence (packages/tddy-vm/src/vm.rs:72), and silently falls back to
+      # TCG — which would not fail, it would blow the suite's 180s boot budget.
+      - name: Grant access to /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Fail in seconds if virtualisation is unavailable, rather than after an
+      # hour of TCG. This is the same read-write open the Rust code performs.
+      - name: Require working KVM
+        run: |
+          ls -l /dev/kvm || true
+          if ! ( exec 3<>/dev/kvm ) 2>/dev/null; then
+            echo "::error::/dev/kvm is not openable read-write. The suite would fall back to TCG and time out."
+            exit 1
+          fi
+          echo "/dev/kvm is openable — guests will run accelerated."
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # ci.yml's rust-build is the sole writer
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vm
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      # The testkit never downloads anything by design, so CI supplies the image
+      # itself. Cached because it is 331 MB and Debian's mirrors are a courtesy.
+      - name: Cache Debian cloud image
+        id: image-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/vm-images
+          key: debian-cloud-image-${{ env.IMAGE_NAME }}-v1
+
+      - name: Download Debian cloud image
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/vm-images
+          cd ~/vm-images
+          curl -fsSL -O "${IMAGE_BASE_URL}/${IMAGE_NAME}"
+          curl -fsSL -O "${IMAGE_BASE_URL}/SHA512SUMS"
+          # `latest` moves, so verify against the checksums published beside it
+          # rather than pinning a snapshot that eventually 404s.
+          grep " ${IMAGE_NAME}\$" SHA512SUMS | sha512sum -c -
+          rm -f SHA512SUMS
+
+      - name: Run boot-control suite
+        run: |
+          set -o pipefail
+          export TDDY_CLOUDINIT_BASE_IMAGE="$HOME/vm-images/${IMAGE_NAME}"
+          # The fixtures put their images in a tempdir that is removed when the
+          # test ends, taking the guest's console transcript with it. Redirect
+          # the transcripts somewhere that outlives the run so they can be
+          # uploaded — a guest failure is usually only explicable from its own
+          # console, and there is no other way to see it from a runner.
+          export TDDY_VM_CONSOLE_LOG_DIR="$GITHUB_WORKSPACE/vm-console-logs"
+          # An unset or wrong path makes every test pass without booting, so
+          # check before spending the runtime rather than after.
+          test -f "$TDDY_CLOUDINIT_BASE_IMAGE" \
+            || { echo "::error::base image missing at $TDDY_CLOUDINIT_BASE_IMAGE"; exit 1; }
+          # Deliberately not `./vm-tests`, which runs all eight suites including
+          # the multi-hour bake. --test-threads=1 is not optional: these bind
+          # fixed host ports 2231-2236 and QEMU derives its monitor socket path
+          # from the port alone.
+          ./dev cargo test -p tddy-vm --test vm_boot_control_acceptance \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee vm-tests.log
+
+      # Every test in the suite returns *successfully* when the image variable
+      # is unset (vm_boot_control_acceptance.rs:81). A broken download or a
+      # mistyped path would otherwise report a green check having booted
+      # nothing, which is worse than a red one.
+      - name: Assert a guest was actually booted
+        run: |
+          if grep -q "skipping production test" vm-tests.log; then
+            echo "::error::Tests skipped — TDDY_CLOUDINIT_BASE_IMAGE never reached them. This is a false green, not a pass."
+            exit 1
+          fi
+          if ! grep -qE "test result: ok\. 6 passed" vm-tests.log; then
+            echo "::error::Expected 6 passing boot-control tests; the suite did not report them."
+            exit 1
+          fi
+          echo "6 boot-control tests ran against a real guest."
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vm-boot-control-logs
+          # vm-tests.log is what the harness printed; vm-console-logs/ is what
+          # each guest itself said, written by QEMU rather than by the test, so
+          # it survives a guest that wedged before the test could read it.
+          path: |
+            vm-tests.log
+            vm-console-logs/
+          if-no-files-found: warn
+          retention-days: 7

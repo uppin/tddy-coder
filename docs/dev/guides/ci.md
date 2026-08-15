@@ -92,6 +92,54 @@ The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 hole in the gate. Removing one is the preferred fix; suppressing a newly failing
 test there is not.
 
+## VM tests (separate workflow)
+
+`.github/workflows/vm-tests.yml` runs the QEMU-backed production tests. It is a
+separate workflow, not part of `ci.yml`, and **not a required check** — it is
+slower, needs hardware virtualisation, and is new enough to want its own blast
+radius.
+
+Scope is currently **one** of the eight suites in `./vm-tests`:
+`vm_boot_control_acceptance`. It proves the launcher, serial-console control,
+9p, SSH login and graceful shutdown against a real guest, and it is the only
+entry that needs no baked image chain — it boots the supplied cloud image
+directly. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
+against the `SHA512SUMS` published beside it, then cached) because the testkit
+never downloads anything itself by design.
+
+The runner is x86_64, and that matters in two ways. `VmArch::host()` reads
+`std::env::consts::ARCH`, so the guest image must be **amd64**, not the arm64
+one a developer on Apple silicon would use. And on x86_64 the `q35` machine
+boots through SeaBIOS, so `uefi_firmware_for` returns `None` and no `edk2` image
+has to be located — which is fortunate, since the nix QEMU package ships
+`edk2-aarch64-code.fd` but no x86_64 equivalent.
+
+### Two traps this workflow guards against
+
+**KVM is optional to the code and mandatory in practice.** `VmAccel::host_default()`
+falls back to `Tcg` when `/dev/kvm` cannot be *opened* — and `/dev/kvm` on a
+GitHub runner is `root:kvm 0660`, visible but not openable. That fallback is
+correct but roughly an order of magnitude slower, which would blow the suite's
+180-second boot budget. The workflow installs a udev rule making the node `0666`
+and then **fails fast** if a read-write open still does not succeed, so a runner
+without virtualisation reports that in seconds instead of timing out at 90
+minutes.
+
+**Every test passes when the image is missing.** Each one does
+`let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`
+(`vm_boot_control_acceptance.rs:81`), so an unset variable or a failed download
+yields a green check that booted nothing. The workflow asserts the path exists
+before running, and afterwards greps the log for both the skip message and
+`test result: ok. 6 passed`. A false green is worse than a red one.
+
+### What it would take to run the rest
+
+| Suite | Blocker |
+|-------|---------|
+| `tddy_host_vm_acceptance` (the bake) | Several hours even accelerated: installs a 9p kernel, installs Nix, and runs a cold `./release` of the whole workspace including `libwebrtc` inside a 2-vCPU guest. Per `docs/ft/vm/tddy-vm.md`, it has never been run end to end. Its output is a multi-GB qcow2 chain that does not fit the 10 GB Actions cache, so it would need external blob storage (ghcr.io via ORAS, or Releases) |
+| `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base, so they inherit the bake's problem |
+| `cloud_init_acceptance`, `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
+
 ## Flaky tests
 
 The LiveKit testkit picks a free port by binding `:0` and releasing it, leaving a
@@ -147,6 +195,9 @@ CI reports status but does not block merges until branch protection says so. In
 - `Rust tests`
 - `Rust build`
 - `Web tests`
+
+Do **not** add `VM boot control` to that list yet — it is still being proven out,
+and a required check that flakes on QEMU would block every merge.
 
 ## Forks
 

@@ -29,6 +29,14 @@ use crate::vm::{
 /// Size of the writable UEFI variables store QEMU expects on the second pflash unit.
 const UEFI_VARS_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The `-chardev` id the serial console is wired to when QEMU mirrors it to a log.
+const CONSOLE_CHARDEV_ID: &str = "tddycon";
+
+/// Redirects guest serial-console logs to a directory of the caller's choosing, instead of
+/// writing them beside each VM's image. Set it when the images live somewhere temporary and
+/// the transcripts need to outlive them — CI, chiefly.
+pub const CONSOLE_LOG_DIR_ENV: &str = "TDDY_VM_CONSOLE_LOG_DIR";
+
 /// The environment variable naming the `edk2-<arch>-code.fd` firmware explicitly,
 /// overriding the derivation from the emulator's own installation.
 pub const UEFI_CODE_ENV: &str = "TDDY_VM_UEFI_CODE";
@@ -224,7 +232,7 @@ impl QemuVmArgs {
     ///   -drive file=<qcow2>,if=virtio,format=qcow2
     ///   -drive if=pflash,format=raw,unit=0,readonly=on,file=<edk2-aarch64-code.fd>
     ///   -drive if=pflash,format=raw,unit=1,file=<vars.fd>
-    ///   -cdrom <seed.iso>
+    ///   -drive file=<seed.iso>,if=virtio,format=raw,readonly=on
     ///   -nographic
     ///   -fsdev local,id=fsdev0,path=<host dir>,security_model=none,readonly=on
     ///   -device virtio-9p-pci,fsdev=fsdev0,mount_tag=<tag>
@@ -240,9 +248,38 @@ impl QemuVmArgs {
         )
     }
 
+    /// Build the argv with the console on a `stdio` chardev that QEMU **also mirrors** to
+    /// `console_log`.
+    ///
+    /// The interactive half is still a pipe, and a pipe is bounded — so a reader that falls
+    /// behind still stalls the guest (see [`crate::serial_shell::SerialConsole::drain_for`]).
+    /// What the log adds is a complete transcript with no size cap, written by QEMU itself
+    /// rather than by whoever happens to be reading: the guest's own account of a failure
+    /// survives even when the test process never saw it. Without this the only record is the
+    /// in-memory tail quoted into an error message, which is rarely the interesting part.
+    pub fn build_with_logged_stdio_serial(config: &VmConfig, console_log: &Path) -> Vec<String> {
+        Self::build_with_serial_args(
+            config,
+            vec![
+                "-chardev".to_string(),
+                format!(
+                    "stdio,id={CONSOLE_CHARDEV_ID},signal=off,logfile={}",
+                    console_log.display()
+                ),
+                "-serial".to_string(),
+                format!("chardev:{CONSOLE_CHARDEV_ID}"),
+            ],
+        )
+    }
+
     /// Build the argv with an explicit QEMU `-serial` backend — `file:<path>` for a
     /// detached boot, `stdio` when the caller drives the console over the child's pipes.
     pub fn build_with_serial(config: &VmConfig, serial: &str) -> Vec<String> {
+        Self::build_with_serial_args(config, vec!["-serial".to_string(), serial.to_string()])
+    }
+
+    /// The shared argv builder: everything except how the serial console is wired up.
+    fn build_with_serial_args(config: &VmConfig, serial_args: Vec<String>) -> Vec<String> {
         let monitor = format!(
             "unix:{},server,nowait",
             Self::monitor_socket_path(config.ssh_host_port)
@@ -262,7 +299,7 @@ impl QemuVmArgs {
         ];
         args.extend(Self::pflash_args(config.firmware.as_ref()));
         if let Some(seed_iso) = &config.seed_iso {
-            args.extend(["-cdrom".to_string(), seed_iso.clone()]);
+            args.extend(Self::seed_drive_args(seed_iso));
         }
         args.push("-nographic".to_string());
         args.extend(Self::nine_p_args(&config.nine_p_shares));
@@ -273,9 +310,8 @@ impl QemuVmArgs {
             "virtio-net-pci,netdev=net0".to_string(),
             "-monitor".to_string(),
             monitor,
-            "-serial".to_string(),
-            serial.to_string(),
         ]);
+        args.extend(serial_args);
         args
     }
 
@@ -361,6 +397,48 @@ impl QemuVmArgs {
         Path::new(qcow2_path).with_extension("console-stderr.log")
     }
 
+    /// Where QEMU mirrors everything the guest wrote to its serial console.
+    ///
+    /// Beside the image by default, for the same reason as
+    /// [`Self::console_stderr_log_path`]: a predictable name in a world-writable directory is
+    /// a symlink target any local user can pre-create.
+    ///
+    /// That default is useless to CI, though, because the acceptance fixtures put their
+    /// images in a `tempdir()` that is removed when the test ends — taking the transcript of
+    /// the failure with it. Setting [`CONSOLE_LOG_DIR_ENV`] redirects the logs to a directory
+    /// that outlives the run, so a job can upload them.
+    pub fn console_log_path(qcow2_path: &str) -> PathBuf {
+        let beside_image = Path::new(qcow2_path).with_extension("console.log");
+        let Some(dir) = std::env::var_os(CONSOLE_LOG_DIR_ENV).filter(|d| !d.is_empty()) else {
+            return beside_image;
+        };
+        match beside_image.file_name() {
+            Some(name) => Path::new(&dir).join(name),
+            None => beside_image,
+        }
+    }
+
+    /// The argv attaching a NoCloud seed ISO, as a read-only virtio block device.
+    ///
+    /// Deliberately **not** `-cdrom`. That shorthand attaches the image on the *machine's
+    /// default* block interface, which differs by architecture: virtio on the aarch64
+    /// `virt` machine, but IDE on x86_64 `q35`. Debian's `-cloud` kernel flavour is built
+    /// for virtual hardware only and carries no ATA/AHCI drivers, so on x86_64 the guest
+    /// never sees the CD-ROM at all — no `sr0`, no `ata*`. `ds-identify` then finds no
+    /// datasource and skips cloud-init entirely, which is not an error the guest reports:
+    /// it boots normally to a login prompt with no configured user and no generated SSH
+    /// host keys, so the only visible symptoms are `Login incorrect` and a failed
+    /// `ssh.service`.
+    ///
+    /// virtio behaves identically on both architectures, and cloud-init locates the seed by
+    /// its `cidata` filesystem label rather than by device type.
+    pub fn seed_drive_args(seed_iso_path: &str) -> Vec<String> {
+        vec![
+            "-drive".to_string(),
+            format!("file={seed_iso_path},if=virtio,format=raw,readonly=on"),
+        ]
+    }
+
     /// Format a single `hostfwd` spec from a `PortForward`.
     ///
     /// Returns `"tcp::<host_port>-:<guest_port>"` (the slirp `-netdev user,hostfwd=` value format).
@@ -409,7 +487,14 @@ impl QemuVm {
         &self,
         config: &VmConfig,
     ) -> Result<BootedWithConsole, VmError> {
-        let args = QemuVmArgs::build_with_serial(config, "stdio");
+        // The guest's console is mirrored to a file by QEMU as well as being driven over the
+        // child's pipes: the pipe is what the test types into, the log is what survives.
+        let console_log_path = QemuVmArgs::console_log_path(&config.qcow2_path);
+        // QEMU will not create the directory, and refuses to start if it cannot open the log.
+        if let Some(dir) = console_log_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let args = QemuVmArgs::build_with_logged_stdio_serial(config, &console_log_path);
 
         // QEMU's own diagnostics (bad argv, a stale monitor socket, an unreadable image)
         // arrive on stderr and are the only explanation for a console that closes without
