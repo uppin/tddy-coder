@@ -8,7 +8,8 @@
 //! disk, so the room's lifecycle at the bottom of this file is built on a layer that is already
 //! pinned without it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,6 +60,18 @@ pub struct WorktreeSnapshot {
     pub lines_added: i64,
     pub lines_removed: i64,
     pub untracked_files: u32,
+    /// The tree object of the whole working tree as it stands, staged into a **temporary** index.
+    ///
+    /// This is what makes a delta possible: diffing two of these yields an ordinary git patch that
+    /// carries deletions, renames, modes and binary content, and — unlike `git diff HEAD` — it sees
+    /// a newly written *untracked* file, which is exactly what a `Write` produces.
+    ///
+    /// The index is temporary and that is not an optimisation: `git add -A` against the agent's own
+    /// index would rewrite its staging area mid-session.
+    ///
+    /// Empty when the tree could not be written; the tick then produces no delta rather than a
+    /// wrong one.
+    pub wip_tree: String,
 }
 
 impl WorktreeSnapshot {
@@ -117,7 +130,958 @@ pub fn snapshot_worktree_within(worktree_root: &Path, budget: Duration) -> Workt
         lines_added: numstat.lines_added,
         lines_removed: numstat.lines_removed,
         untracked_files: untracked_file_count(worktree_root, deadline),
+        // Deliberately NOT measured here. Writing a WIP tree is not a read: `git add -A` stages
+        // the whole checkout and materialises loose blob and tree objects in the project's shared
+        // object database. Doing that inside a function named "snapshot" would make every poll of
+        // every hosted room — twice a second by default — leave objects behind that nothing
+        // references, in a repository shared by every worktree, held for git's two-week prune
+        // grace period.
+        //
+        // So the tree is measured by whoever is about to *use* it, via [`write_wip_tree_within`],
+        // and published as a ref in the same breath ([`publish_wip_ref`]) so the objects it writes
+        // are reachable from the moment they exist.
+        wip_tree: String::new(),
     }
+}
+
+/// The tree object of `worktree_root`'s whole working tree, staged into a temporary index.
+///
+/// Runs `git add -A` with `GIT_INDEX_FILE` pointed at a scratch file, then `git write-tree`. The
+/// agent's own index is never touched.
+pub fn write_wip_tree_within(worktree_root: &Path, budget: Duration) -> String {
+    write_wip_tree_by(worktree_root, Instant::now() + budget)
+}
+
+/// [`write_wip_tree_within`] under a deadline its caller already owns, so a snapshot spends one
+/// budget over its whole sequence rather than one budget per measurement.
+///
+/// Empty when the tree could not be written, for every reason alike: this feeds a poll whose only
+/// recourse is the next tick, and a tick with no tree produces no delta rather than a wrong one.
+fn write_wip_tree_by(worktree_root: &Path, deadline: Instant) -> String {
+    let git_dir = git_stdout(
+        worktree_root,
+        &["rev-parse", "--absolute-git-dir"],
+        deadline,
+    );
+    if git_dir.is_empty() {
+        warn!("session_room: {worktree_root:?} named no git dir to stage a WIP tree in");
+        return String::new();
+    }
+
+    // The scratch index lives inside the git directory, and that placement is deliberate twice
+    // over. Anywhere under the worktree would stage the index file into the very tree being
+    // measured. The system temp directory is usually a different filesystem, which turns the copy
+    // below into a byte-for-byte transfer of a file that can be hundreds of megabytes, every tick.
+    let scratch = match tempfile::Builder::new()
+        .prefix("tddy-wip-index-")
+        .tempdir_in(&git_dir)
+    {
+        Ok(scratch) => scratch,
+        Err(e) => {
+            warn!("session_room: no scratch index for a WIP tree of {worktree_root:?}: {e}");
+            return String::new();
+        }
+    };
+    let scratch_index = scratch.path().join("index");
+
+    // Seeded from the agent's own index rather than started empty, because `git add -A` against an
+    // empty index re-hashes every file in the checkout — on a large repository that is minutes of
+    // work, repeated at the poll interval. The copy carries git's stat cache, so staging only
+    // hashes what actually changed since the agent's last `git` command.
+    //
+    // A copy, and never the file itself: `git add -A` against the agent's index would rewrite its
+    // staging area mid-session, which is the one thing this measurement must never do.
+    let agents_index = Path::new(&git_dir).join("index");
+    if agents_index.exists() {
+        if let Err(e) = std::fs::copy(&agents_index, &scratch_index) {
+            warn!("session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}");
+            return String::new();
+        }
+    }
+
+    // A torn copy — the agent's git was rewriting its index as this read it — fails the staging
+    // below rather than yielding a tree that is half one state and half another.
+    let scratch_env = [("GIT_INDEX_FILE", scratch_index.as_os_str())];
+    if let Err(reason) = git_output(worktree_root, &["add", "-A"], &scratch_env, deadline) {
+        warn!("session_room: staging a WIP tree failed: {reason}");
+        return String::new();
+    }
+    git_stdout_with(worktree_root, &["write-tree"], &scratch_env, deadline)
+}
+
+/// The worktree's `HEAD` commit, read **from the filesystem** rather than by spawning git.
+///
+/// A record is stamped with this on every tool call, and an agent makes a great many of them, so
+/// the cost has to be a couple of file reads rather than a process. That is the whole reason this
+/// exists beside `snapshot_worktree`'s `rev-parse`: the poll loop can afford a subprocess every two
+/// seconds, a `Read` tool call cannot.
+///
+/// Resolves the three shapes a checkout's HEAD takes: a detached sha, a symbolic ref pointing at a
+/// loose ref file, and a symbolic ref that only `packed-refs` knows. A session worktree is a linked
+/// `git worktree`, so `.git` is a *file* naming the real gitdir, and `packed-refs` lives in the
+/// **common** dir rather than beside HEAD.
+///
+/// Returns an empty string when HEAD cannot be resolved — an unborn branch, an unreadable path,
+/// anything. Empty is honest; AC1 forbids fabricating a sha, because a mirror that trusts one would
+/// be confidently wrong rather than merely uninformed.
+/// `worktree_root` is the root of a checkout and nothing else: unlike `git`, this does not walk up
+/// looking for a repository, because every caller already holds the root it means and a search would
+/// answer for some enclosing repository instead of saying it does not know.
+pub fn read_head_commit(worktree_root: &Path) -> String {
+    let Some(git_dir) = git_dir_of(worktree_root) else {
+        return String::new();
+    };
+    // Where the shared refs live. For an ordinary checkout that is the git dir itself; for a linked
+    // worktree it is the main repository's, which is the only place `refs/heads/*` and `packed-refs`
+    // exist — a linked worktree has its own HEAD and shares everything HEAD points at.
+    let common_dir = common_dir_of(&git_dir);
+
+    let mut name = String::from("HEAD");
+    // Bounded rather than looped until it resolves: a symbolic ref may point at another symbolic
+    // ref, and a repository whose refs form a cycle — corrupt, or written by something that is not
+    // git — must cost this a handful of file reads and not a hung tool call.
+    for _ in 0..MAX_SYMBOLIC_REF_HOPS {
+        let Some(contents) = read_ref(&git_dir, &common_dir, &name) else {
+            // An unborn branch lands here: HEAD names `refs/heads/main`, and no such ref exists
+            // until the first commit creates it.
+            return String::new();
+        };
+        match contents.strip_prefix(SYMBOLIC_REF_PREFIX) {
+            Some(target) => name = target.trim().to_string(),
+            None if is_object_id(&contents) => return contents,
+            // Neither a symbolic ref nor an object id. Returning it would hand a caller whatever
+            // bytes happened to be in the file as if it were a commit, which is the fabrication AC1
+            // forbids in its least obvious form.
+            None => {
+                warn!(
+                    "session_room: {name} of {worktree_root:?} is neither a ref nor an object id"
+                );
+                return String::new();
+            }
+        }
+    }
+    warn!(
+        "session_room: HEAD of {worktree_root:?} did not resolve in {MAX_SYMBOLIC_REF_HOPS} hops"
+    );
+    String::new()
+}
+
+/// How many symbolic refs deep HEAD may be before this gives up. Git's own limit for the same
+/// traversal is five, and a real repository uses one.
+const MAX_SYMBOLIC_REF_HOPS: usize = 5;
+
+/// What a ref file holding a symbolic ref begins with: `ref: refs/heads/main`.
+const SYMBOLIC_REF_PREFIX: &str = "ref:";
+
+/// The git directory `worktree_root` keeps its HEAD in.
+///
+/// `.git` is a directory for an ordinary checkout and a *file* for a linked `git worktree`, which is
+/// what every session worktree is — so the file case is the common path here, not the exotic one.
+/// That file holds `gitdir: <path>`, absolute or relative to the checkout.
+fn git_dir_of(worktree_root: &Path) -> Option<PathBuf> {
+    let dot_git = worktree_root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let named = pointer.trim().strip_prefix("gitdir:")?.trim();
+    if named.is_empty() {
+        return None;
+    }
+    Some(worktree_root.join(named))
+}
+
+/// The directory a linked worktree shares its refs with, named by `<git_dir>/commondir` — usually
+/// relative to the git dir. An ordinary checkout has no such file and is its own common dir.
+fn common_dir_of(git_dir: &Path) -> PathBuf {
+    match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(named) if !named.trim().is_empty() => git_dir.join(named.trim()),
+        _ => git_dir.to_path_buf(),
+    }
+}
+
+/// The contents of one ref: a loose file, or the line `packed-refs` holds for it.
+///
+/// The git dir is tried before the common dir because that ordering is what makes both kinds of ref
+/// resolve through one lookup. Per-worktree refs — HEAD itself, `refs/bisect/*`, `refs/worktree/*` —
+/// exist only in the git dir, and a linked worktree's shared refs exist only in the common dir; for
+/// an ordinary checkout the two are the same directory and the second read never happens.
+fn read_ref(git_dir: &Path, common_dir: &Path, name: &str) -> Option<String> {
+    if !is_plausible_ref_name(name) {
+        return None;
+    }
+    if let Ok(loose) = std::fs::read_to_string(git_dir.join(name)) {
+        return Some(loose.trim().to_string());
+    }
+    if let Ok(loose) = std::fs::read_to_string(common_dir.join(name)) {
+        return Some(loose.trim().to_string());
+    }
+    // Packed last, and not skippable: `git gc` packs refs away routinely, so a reader that only
+    // knew loose files would answer "" for every repository that has been collected once — which
+    // is every long-lived one.
+    packed_ref(common_dir, name)
+}
+
+/// The object id `packed-refs` records for `name`.
+///
+/// Each line is `<oid> <refname>`, with a `#` header and `^<oid>` lines carrying the commit a tag
+/// peels to. The peel line belongs to the ref above it and names no ref of its own, so taking it for
+/// one would answer some other ref's lookup with a tag's target.
+fn packed_ref(common_dir: &Path, name: &str) -> Option<String> {
+    let packed = std::fs::read_to_string(common_dir.join("packed-refs")).ok()?;
+    packed.lines().find_map(|line| {
+        let line = line.trim_end();
+        if line.starts_with('#') || line.starts_with('^') {
+            return None;
+        }
+        let (oid, packed_name) = line.split_once(' ')?;
+        (packed_name == name && is_object_id(oid)).then(|| oid.to_string())
+    })
+}
+
+/// Whether `name` is a ref name this is willing to open a file for.
+///
+/// A ref name is a path relative to the git dir, so one carrying `..` or an absolute root would read
+/// a file outside the repository entirely. Git forbids both in `check-ref-format`; this refuses them
+/// because the name comes out of a file on disk, and a checkout is not a source this trusts to have
+/// been written by git.
+fn is_plausible_ref_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('/')
+        && !name.contains('\\')
+        && !name.contains('\0')
+        && !name
+            .split('/')
+            .any(|part| part == "." || part == ".." || part.is_empty())
+}
+
+/// Whether `candidate` has the shape of an object id — 40 hex digits under SHA-1, 64 under SHA-256,
+/// the only two object formats git has.
+///
+/// Shape only. Whether the object exists is a question that needs the object database, which is the
+/// subprocess this whole function exists to avoid.
+fn is_object_id(candidate: &str) -> bool {
+    matches!(candidate.len(), 40 | 64) && candidate.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The delta one poll tick produces, or `None` when there is nothing to say.
+///
+/// `None` rather than an empty delta whenever the tick cannot be described, which is never the same
+/// as "the tick changed nothing": no previous tree to diff from (the first tick of a room), no
+/// current tree (the measurement failed), two identical trees, an unknown `HEAD`, or a diff git
+/// could not take. An empty *patch* means "this tick moved nothing" and is a delta a client may be
+/// handed; `None` means there is no tick to hand out at all.
+///
+/// The distinction is the whole safety property. A client that is handed an empty patch records the
+/// tick as applied and moves its sequence past it, so an empty patch standing in for a failure is a
+/// change the mirror will never learn about and never reconcile.
+pub fn tick_delta(
+    worktree_root: &Path,
+    prev: &WorktreeSnapshot,
+    next: &WorktreeSnapshot,
+    seq: u64,
+) -> Option<ActivityDelta> {
+    if prev.wip_tree.is_empty() || next.wip_tree.is_empty() || prev.wip_tree == next.wip_tree {
+        return None;
+    }
+    // A delta whose base is unknown is worse than no delta: the client compares it against its own
+    // HEAD, an empty string matches nothing, and every tick would reconcile forever while
+    // reporting a mismatch against a commit that was never read rather than saying so.
+    if next.head_commit.is_empty() {
+        warn!(
+            "session_room: no delta for seq {seq}: the checkout's HEAD could not be read, so a \
+             patch could not name the commit it applies onto"
+        );
+        return None;
+    }
+    let patch = match diff_between(worktree_root, &prev.wip_tree, &next.wip_tree, &[]) {
+        Ok(patch) => patch,
+        Err(reason) => {
+            warn!("session_room: no delta for seq {seq}: {reason}");
+            return None;
+        }
+    };
+    Some(ActivityDelta {
+        seq,
+        prev_seq: seq.saturating_sub(1),
+        // Where the checkout *ended up*, not where it started. A client applies a delta after it has
+        // followed HEAD, so a tick that spanned a commit and named the old commit would be rejected
+        // by every client that kept up.
+        base_commit: next.head_commit.clone(),
+        patch,
+        // The whole window, unscoped. The store narrows a tick per call on the way out, and a delta
+        // recorded already narrowed could never be sliced into the several calls that share its tick.
+        scoped_paths: Vec::new(),
+    })
+}
+
+/// The ref under which a session's uncommitted state is published, so a client can `git fetch` it.
+///
+/// Under `refs/tddy/` rather than `refs/heads/` because it is not a branch: it must never appear in
+/// `git branch`, never be a push target, and never be something `git checkout` offers by name in
+/// the daemon-side repository an agent is working in.
+pub fn wip_ref_name(session_id: &str) -> String {
+    format!("refs/tddy/session/{session_id}/wip")
+}
+
+/// Publish `wip_tree` as a commit parented on `head_commit` and point [`wip_ref_name`] at it.
+///
+/// This is what makes reconciliation a plain `git fetch` rather than a whole-worktree patch. The
+/// mirror is a clone of this repository, so git already knows how to move only the objects it is
+/// missing, delta-compressed — where a cumulative patch would re-send the entire dirty tree over a
+/// data channel every time a client fell one tick behind.
+///
+/// Wrapped in a commit rather than published as a bare tree because a tree is not a fetchable tip;
+/// the commit costs one object and makes the whole thing an ordinary fetch.
+///
+/// Returns the commit sha. The ref is deleted when the session's room closes — see
+/// [`delete_wip_ref`] — so its objects become unreachable and ordinary `git gc` reclaims them.
+pub fn publish_wip_ref(
+    worktree_root: &Path,
+    session_id: &str,
+    head_commit: &str,
+    wip_tree: &str,
+) -> Result<String, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let mut args = vec!["commit-tree", wip_tree];
+    // Parentless only when the checkout has no HEAD to parent on — an unborn branch, or a HEAD the
+    // measurement could not read. A commit-tree given an empty parent fails outright, and a WIP ref
+    // that exists is worth more to a client than one that never appears; what it loses is the
+    // shortcut of naming its base through the object graph, which the record's `head_commit` (empty
+    // for the same reason) already tells it.
+    if !head_commit.is_empty() {
+        args.push("-p");
+        args.push(head_commit);
+    }
+    let message = format!("tddy session {session_id}: work in progress");
+    args.push("-m");
+    args.push(&message);
+
+    // Signed by the daemon under a fixed identity rather than by whatever `user.email` the checkout
+    // happens to carry: this object is not the agent's work, it is a machine-made snapshot of it,
+    // and `git commit-tree` refuses outright in a repository that has configured no identity at all.
+    let identity: [(&str, &OsStr); 4] = [
+        ("GIT_AUTHOR_NAME", OsStr::new(WIP_COMMIT_IDENTITY_NAME)),
+        ("GIT_AUTHOR_EMAIL", OsStr::new(WIP_COMMIT_IDENTITY_EMAIL)),
+        ("GIT_COMMITTER_NAME", OsStr::new(WIP_COMMIT_IDENTITY_NAME)),
+        ("GIT_COMMITTER_EMAIL", OsStr::new(WIP_COMMIT_IDENTITY_EMAIL)),
+    ];
+    let commit = git_output(worktree_root, &args, &identity, deadline)?;
+    let commit = String::from_utf8_lossy(&commit).trim().to_string();
+    if commit.is_empty() {
+        return Err(format!(
+            "git commit-tree in {worktree_root:?} named no commit for tree {wip_tree}"
+        ));
+    }
+
+    git_output(
+        worktree_root,
+        &["update-ref", &wip_ref_name(session_id), &commit],
+        &[],
+        deadline,
+    )?;
+    Ok(commit)
+}
+
+/// Who the WIP commits of every session are made by. Not a person and never presented as one: an
+/// address in the reserved `.invalid` TLD cannot be mailed, so no one can mistake a snapshot for
+/// work someone signed.
+const WIP_COMMIT_IDENTITY_NAME: &str = "tddy-daemon";
+const WIP_COMMIT_IDENTITY_EMAIL: &str = "tddy-daemon@tddy.invalid";
+
+/// Drop a session's WIP ref, leaving its objects unreachable.
+///
+/// Called on the same path that closes the room. Without it a deleted session's uncommitted state
+/// would be pinned in the project repository forever, which is a leak measured in whole worktrees.
+/// A ref that was never published deletes without complaint — `git update-ref -d` treats an absent
+/// ref as already gone — so closing a room that never got as far as publishing one is not an error.
+pub fn delete_wip_ref(worktree_root: &Path, session_id: &str) -> Result<(), String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    git_output(
+        worktree_root,
+        &["update-ref", "-d", &wip_ref_name(session_id)],
+        &[],
+        deadline,
+    )?;
+    Ok(())
+}
+
+/// One patch, and what a client needs to place it.
+///
+/// `patch` is the tick's diff **limited to `scoped_paths`** — a call's own files, not its window's.
+/// A whole-tick delta is the same type with `scoped_paths` empty.
+///
+/// There is no cumulative variant: a client that has fallen behind resyncs by fetching the
+/// session's WIP ref ([`publish_wip_ref`]), which git transfers incrementally.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActivityDelta {
+    pub seq: u64,
+    pub prev_seq: u64,
+    pub base_commit: String,
+    pub patch: Vec<u8>,
+    /// The paths this patch was limited to. Empty means the whole tick.
+    pub scoped_paths: Vec<String>,
+}
+
+/// Which slice of a tick's diff to serve.
+///
+/// The three are exhaustive and disjoint by construction: every path a tick touched is claimed by
+/// some call or by none, so [`Self::Call`] over every call plus [`Self::Residual`] reconstructs
+/// [`Self::Tick`] exactly. That property is the whole reason `Residual` exists — without it, a
+/// change no tool declared would be attributed to nobody and reach no one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeltaScope {
+    /// The paths the named call is credited with.
+    #[default]
+    Call,
+    /// The paths of that tick claimed by no call at all.
+    Residual,
+    /// The whole tick, unscoped.
+    Tick,
+}
+
+/// Why a delta could not be produced for a call.
+///
+/// Two variants rather than one because the client's response differs: an unknown call is a bug on
+/// one side or the other, an aged-out delta is an ordinary reconcile. Collapsing them would make a
+/// long-running mirror's normal recovery indistinguishable from a defect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeltaLookupError {
+    UnknownCall { call_id: String },
+    AgedOut { call_id: String, seq: u64 },
+}
+
+/// The bounded ring of recent tick deltas, and the `call_id → seq` index over it.
+///
+/// Bounded on both axes because neither alone is enough: a tick count bounds a busy session's
+/// memory only if its patches are small, and a byte budget bounds a session that makes one enormous
+/// change but not one that makes a million tiny ones.
+#[derive(Debug)]
+pub struct SessionDeltaStore {
+    max_ticks: usize,
+    max_bytes: usize,
+    /// The retained ticks, oldest first.
+    ticks: VecDeque<ActivityDelta>,
+    /// `patch` bytes summed over [`Self::ticks`], carried alongside so eviction never walks the
+    /// ring to find out whether it is still over budget.
+    retained_bytes: usize,
+    /// What each call declared, by the tick it landed in. Dropped with its tick: paths whose patch
+    /// is gone can narrow nothing.
+    claims: HashMap<u64, BTreeMap<String, Vec<String>>>,
+    /// Which tick each call ever attributed belongs to, kept **after** that tick is evicted —
+    /// which is the whole difference between [`DeltaLookupError::AgedOut`] and
+    /// [`DeltaLookupError::UnknownCall`]. Forgetting a call along with its patch would make a long
+    /// mirror's routine recovery indistinguishable from a defect on one side or the other.
+    ///
+    /// It costs a call id and a `u64` per tool call for as long as the room is open, and nothing
+    /// more: the paths, which are the bulk of an attribution, live in `claims` and go with the tick.
+    call_ticks: HashMap<String, u64>,
+}
+
+impl SessionDeltaStore {
+    pub fn new(max_ticks: usize, max_bytes: usize) -> Self {
+        Self {
+            max_ticks,
+            max_bytes,
+            ticks: VecDeque::new(),
+            retained_bytes: 0,
+            claims: HashMap::new(),
+            call_ticks: HashMap::new(),
+        }
+    }
+
+    /// Record the delta produced by one tick, evicting oldest-first to stay within bounds.
+    pub fn record(&mut self, delta: ActivityDelta) {
+        let recorded_seq = delta.seq;
+        self.retained_bytes = self.retained_bytes.saturating_add(delta.patch.len());
+        self.ticks.push_back(delta);
+
+        // Until *both* bounds hold, not either: a tick count bounds a busy session only if its
+        // patches are small, and a byte budget bounds a session that makes one enormous change but
+        // not one that makes a million tiny ones. A single patch bigger than the whole budget
+        // therefore evicts itself, and a client asking for it is told it aged out — which is the
+        // same fetch-the-WIP-ref reconcile as any other gap, rather than a bound that is not one.
+        while !self.ticks.is_empty()
+            && (self.ticks.len() > self.max_ticks || self.retained_bytes > self.max_bytes)
+        {
+            if let Some(evicted) = self.ticks.pop_front() {
+                self.retained_bytes = self.retained_bytes.saturating_sub(evicted.patch.len());
+                self.claims.remove(&evicted.seq);
+            }
+        }
+
+        // Attributions for a tick that never arrived — a call credited to a window whose
+        // measurement failed — would otherwise sit here for the life of the room. Anything older
+        // than the oldest tick still held can serve nobody; anything newer is a call whose tick has
+        // yet to be recorded, which is ordinary and must survive.
+        let floor = self
+            .ticks
+            .front()
+            .map(|tick| tick.seq)
+            .unwrap_or_else(|| recorded_seq.saturating_add(1));
+        self.claims.retain(|seq, _| *seq >= floor);
+    }
+
+    /// Credit a call with the paths it declared, in the tick it landed in.
+    ///
+    /// The paths are what narrow the tick's diff to this call. A call that declared none is still
+    /// recorded — it belongs to the tick, and its delta is simply empty — so a lookup can tell
+    /// "this call changed nothing it told us about" from "we have never heard of this call".
+    pub fn attribute(&mut self, call_id: &str, seq: u64, changed_paths: &[String]) {
+        self.call_ticks.insert(call_id.to_string(), seq);
+        self.claims
+            .entry(seq)
+            .or_default()
+            .insert(call_id.to_string(), changed_paths.to_vec());
+    }
+
+    /// The delta for `call_id` under `scope`: the tick's diff limited to that call's own paths
+    /// ([`DeltaScope::Call`]), to the paths no call claimed ([`DeltaScope::Residual`]), or to
+    /// nothing at all ([`DeltaScope::Tick`]).
+    pub fn delta_for_call(
+        &self,
+        call_id: &str,
+        scope: DeltaScope,
+    ) -> Result<ActivityDelta, DeltaLookupError> {
+        let seq = *self
+            .call_ticks
+            .get(call_id)
+            .ok_or_else(|| DeltaLookupError::UnknownCall {
+                call_id: call_id.to_string(),
+            })?;
+        let tick = self.tick(seq).ok_or_else(|| DeltaLookupError::AgedOut {
+            call_id: call_id.to_string(),
+            seq,
+        })?;
+
+        let (patch, scoped_paths) = match scope {
+            DeltaScope::Call => {
+                // A call that declared nothing gets nothing — never its window's other work.
+                // Serving the whole tick here would credit this call with a neighbour's change and
+                // have a client apply that change twice.
+                let declared = self.declared_by(call_id, seq);
+                let claimed: BTreeSet<&str> = declared.iter().map(String::as_str).collect();
+                let (patch, _) =
+                    select_sections(&tick.patch, |section| section.names_any_in(&claimed));
+                (patch, declared)
+            }
+            DeltaScope::Residual => {
+                let claimed = self.claimed_paths(seq);
+                select_sections(&tick.patch, |section| !section.names_any_in(&claimed))
+            }
+            DeltaScope::Tick => (tick.patch.clone(), Vec::new()),
+        };
+
+        Ok(ActivityDelta {
+            seq: tick.seq,
+            prev_seq: tick.prev_seq,
+            base_commit: tick.base_commit.clone(),
+            patch,
+            scoped_paths,
+        })
+    }
+
+    /// The paths a tick touched that no call claimed.
+    ///
+    /// A `seq` the ring no longer holds is [`DeltaLookupError::AgedOut`] with no call to name: a
+    /// tick that was never recorded and a tick that has been evicted are the same absence here, and
+    /// both are answered by the same reconcile.
+    pub fn residual_paths(&self, seq: u64) -> Result<Vec<String>, DeltaLookupError> {
+        let tick = self.tick(seq).ok_or(DeltaLookupError::AgedOut {
+            call_id: String::new(),
+            seq,
+        })?;
+        let claimed = self.claimed_paths(seq);
+        let (_, paths) = select_sections(&tick.patch, |section| !section.names_any_in(&claimed));
+        Ok(paths)
+    }
+
+    /// How many ticks are currently retained.
+    pub fn len(&self) -> usize {
+        self.ticks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn tick(&self, seq: u64) -> Option<&ActivityDelta> {
+        self.ticks.iter().find(|tick| tick.seq == seq)
+    }
+
+    /// The paths one call declared in `seq`, empty when it declared none.
+    fn declared_by(&self, call_id: &str, seq: u64) -> Vec<String> {
+        self.claims
+            .get(&seq)
+            .and_then(|claims| claims.get(call_id))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Every path any call declared in `seq` — what the residual is the complement of.
+    fn claimed_paths(&self, seq: u64) -> BTreeSet<&str> {
+        self.claims
+            .get(&seq)
+            .into_iter()
+            .flat_map(|claims| claims.values())
+            .flatten()
+            .map(String::as_str)
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A tick's patch, sliced by path
+// ---------------------------------------------------------------------------
+//
+// A tick is measured once, for the whole window, and then partitioned: each call gets the slice
+// that touches the files it declared, and what no call declared is the residual. The partition is
+// taken from the patch that was recorded rather than by asking git for a narrower diff again —
+// which is what makes every call's slice plus the residual add back up to exactly the bytes the
+// tick produced, and keeps a lookup free of a subprocess and of any dependence on the checkout
+// still holding the trees the tick was measured from.
+//
+// Slicing is safe because a patch is a concatenation of self-contained file sections: `git apply`
+// accepts any subset of them, and the sections are delimited by a byte sequence that cannot occur
+// anywhere else at the start of a line — a hunk's lines are prefixed with ' ', '+', '-' or '\',
+// and a binary payload's lines are base85.
+
+/// The line each file's section of a git patch begins with.
+const PATCH_SECTION_HEADER: &[u8] = b"diff --git ";
+
+/// One file's slice of a `git diff --binary` patch.
+struct PatchSection<'a> {
+    /// Every name the section is about — preimage and postimage, which differ for a rename. A call
+    /// claims the section if it declared *either*: both are how that one change is described.
+    names: Vec<String>,
+    /// The single name the section is reported under: its postimage, or its preimage when it
+    /// deleted the file — the same choice `git diff --name-only` makes, so a scope's paths and
+    /// [`changed_paths_between`] describe one tick the same way.
+    reported: String,
+    bytes: &'a [u8],
+}
+
+impl PatchSection<'_> {
+    fn names_any_in(&self, claimed: &BTreeSet<&str>) -> bool {
+        self.names
+            .iter()
+            .any(|name| claimed.contains(name.as_str()))
+    }
+}
+
+/// The bytes of the sections `keep` selects, concatenated in patch order, and the names they are
+/// reported under.
+fn select_sections(
+    patch: &[u8],
+    keep: impl Fn(&PatchSection<'_>) -> bool,
+) -> (Vec<u8>, Vec<String>) {
+    let mut bytes = Vec::new();
+    let mut names = Vec::new();
+    for section in patch_sections(patch) {
+        if !keep(&section) {
+            continue;
+        }
+        bytes.extend_from_slice(section.bytes);
+        if !section.reported.is_empty() {
+            names.push(section.reported);
+        }
+    }
+    (bytes, names)
+}
+
+/// Split a patch into one section per file.
+fn patch_sections(patch: &[u8]) -> Vec<PatchSection<'_>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in patch.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(PATCH_SECTION_HEADER) {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+            patch_section(&patch[*start..end])
+        })
+        .collect()
+}
+
+/// Read one section's names out of its own header.
+fn patch_section(bytes: &[u8]) -> PatchSection<'_> {
+    let mut lines = bytes.split(|byte| *byte == b'\n');
+    let header = lines.next().unwrap_or_default();
+    let mut preimage = None;
+    let mut postimage = None;
+    for line in lines {
+        // The header ends at the first hunk or binary payload. Past that point a line beginning
+        // `--- ` is a removed line of the file's own content, and reading it as a name would take
+        // the section's identity from the text it happens to contain.
+        if line.starts_with(b"@@")
+            || line.starts_with(b"GIT binary patch")
+            || line.starts_with(b"Binary files ")
+        {
+            break;
+        }
+        if let Some(name) = line.strip_prefix(b"--- ".as_slice()) {
+            preimage = side_name(name, "a/");
+        } else if let Some(name) = line.strip_prefix(b"+++ ".as_slice()) {
+            postimage = side_name(name, "b/");
+        } else if let Some(name) = line
+            .strip_prefix(b"rename from ".as_slice())
+            .or_else(|| line.strip_prefix(b"copy from ".as_slice()))
+        {
+            preimage = Some(unquoted_name(trimmed_line_end(name)));
+        } else if let Some(name) = line
+            .strip_prefix(b"rename to ".as_slice())
+            .or_else(|| line.strip_prefix(b"copy to ".as_slice()))
+        {
+            postimage = Some(unquoted_name(trimmed_line_end(name)));
+        }
+    }
+    if preimage.is_none() && postimage.is_none() {
+        // A binary file and a bare mode change carry no `---`/`+++` pair at all, so their only
+        // names are the ones on the header line.
+        (preimage, postimage) = header_names(header);
+    }
+
+    let mut names: Vec<String> = Vec::new();
+    for name in [preimage.clone(), postimage.clone()].into_iter().flatten() {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if names.is_empty() {
+        warn!(
+            "session_room: a patch section names no file and is served as unclaimed: {}",
+            String::from_utf8_lossy(header)
+        );
+    }
+    PatchSection {
+        names,
+        reported: postimage.or(preimage).unwrap_or_default(),
+        bytes,
+    }
+}
+
+/// The name on a `---`/`+++` line, or `None` for the `/dev/null` that stands in for the side a
+/// creation or a deletion does not have.
+fn side_name(name: &[u8], prefix: &str) -> Option<String> {
+    let name = side_name_terminator_trimmed(trimmed_line_end(name));
+    if name == b"/dev/null" {
+        return None;
+    }
+    let name = unquoted_name(name);
+    Some(
+        name.strip_prefix(prefix)
+            .map(str::to_string)
+            .unwrap_or(name),
+    )
+}
+
+/// The two names on a `diff --git a/<old> b/<new>` line.
+///
+/// Only consulted for a section that has no `---`/`+++` pair, because this is the ambiguous line:
+/// an unquoted name may contain a space, and git leaves the split to the reader. Both sides naming
+/// the same file is the case that is never ambiguous and is also the common one, so that is what is
+/// looked for first; a rename of a spaced name git chose not to quote falls back to the first
+/// ` b/`.
+fn header_names(header: &[u8]) -> (Option<String>, Option<String>) {
+    let Some(rest) = header.strip_prefix(PATCH_SECTION_HEADER) else {
+        return (None, None);
+    };
+    let rest = trimmed_line_end(rest);
+
+    if rest.starts_with(b"\"") {
+        // git quotes both names or neither, so a quoted first name means a quoted second one.
+        let Some((old, after)) = take_c_quoted(rest) else {
+            return (None, None);
+        };
+        let after = after.strip_prefix(b" ".as_slice()).unwrap_or(after);
+        let Some((new, _)) = take_c_quoted(after) else {
+            return (None, None);
+        };
+        return (
+            Some(without_prefix(old, "a/")),
+            Some(without_prefix(new, "b/")),
+        );
+    }
+
+    let rest = String::from_utf8_lossy(rest);
+    let mut ambiguous = None;
+    for (at, _) in rest.match_indices(" b/") {
+        let (Some(old), Some(new)) = (
+            rest[..at].strip_prefix("a/"),
+            rest[at + 1..].strip_prefix("b/"),
+        ) else {
+            continue;
+        };
+        if old == new {
+            return (Some(old.to_string()), Some(new.to_string()));
+        }
+        ambiguous.get_or_insert((Some(old.to_string()), Some(new.to_string())));
+    }
+    ambiguous.unwrap_or((None, None))
+}
+
+/// A name as git printed it, C-quoting undone when it was quoted.
+fn unquoted_name(name: &[u8]) -> String {
+    match take_c_quoted(name) {
+        Some((unquoted, _)) => unquoted,
+        None => String::from_utf8_lossy(name).into_owned(),
+    }
+}
+
+/// Undo git's C-style quoting — the form it prints a name in when the name holds a byte that would
+/// otherwise be ambiguous — returning the name and whatever followed the closing quote.
+fn take_c_quoted(bytes: &[u8]) -> Option<(String, &[u8])> {
+    let mut rest = bytes.strip_prefix(b"\"".as_slice())?;
+    let mut name = Vec::new();
+    loop {
+        let byte = *rest.first()?;
+        rest = &rest[1..];
+        match byte {
+            b'"' => {
+                // Lossily, because a quoted name is quoted precisely when it holds bytes that may
+                // not be text at all; naming it with replacement characters beats dropping the
+                // section that mentions it.
+                return Some((String::from_utf8_lossy(&name).into_owned(), rest));
+            }
+            b'\\' => {
+                let escaped = *rest.first()?;
+                rest = &rest[1..];
+                match escaped {
+                    b'a' => name.push(0x07),
+                    b'b' => name.push(0x08),
+                    b'f' => name.push(0x0c),
+                    b'n' => name.push(b'\n'),
+                    b'r' => name.push(b'\r'),
+                    b't' => name.push(b'\t'),
+                    b'v' => name.push(0x0b),
+                    // Up to three octal digits: git's escape for a byte with no letter form of its
+                    // own, which is how every non-ASCII path arrives under `core.quotePath`.
+                    b'0'..=b'7' => {
+                        let mut value = u32::from(escaped - b'0');
+                        for _ in 0..2 {
+                            match rest.first() {
+                                Some(digit @ b'0'..=b'7') => {
+                                    value = value * 8 + u32::from(digit - b'0');
+                                    rest = &rest[1..];
+                                }
+                                _ => break,
+                            }
+                        }
+                        name.push(value as u8);
+                    }
+                    // `\"` and `\\`, and anything else git decided to escape.
+                    other => name.push(other),
+                }
+            }
+            other => name.push(other),
+        }
+    }
+}
+
+/// `name` without git's `a/`/`b/` side prefix.
+fn without_prefix(name: String, prefix: &str) -> String {
+    name.strip_prefix(prefix)
+        .map(str::to_string)
+        .unwrap_or(name)
+}
+
+/// A patch line without the carriage return a checkout with CRLF endings may leave on it.
+fn trimmed_line_end(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\r".as_slice()).unwrap_or(line)
+}
+
+/// Drop the tab git appends to a `---`/`+++` name that it chose not to quote but that contains a
+/// space.
+///
+/// Git terminates those two lines with a literal tab precisely when the unquoted name holds a
+/// space, so that a reader can find where the name ends:
+///
+/// ```text
+/// --- a/plain.txt          (no space  -> no terminator)
+/// --- a/sp ace.txt<TAB>    (a space   -> terminated)
+/// --- "a/\303\251.txt"     (quoted    -> no terminator, the quotes delimit it)
+/// ```
+///
+/// Stripping one trailing tab is unambiguous: a name git left unquoted cannot itself contain a
+/// tab, because git C-quotes any name with a control character in it. Without this, a spaced path
+/// arrives as `sp ace.txt\t`, matches no declared path, and every call that edited such a file is
+/// served an **empty** patch — indistinguishable from a call that declared nothing.
+fn side_name_terminator_trimmed(name: &[u8]) -> &[u8] {
+    name.strip_suffix(b"\t".as_slice()).unwrap_or(name)
+}
+
+/// The patch between two trees, or between `HEAD` and a tree when `from` is a commit, limited to
+/// `paths`.
+///
+/// An empty `paths` means the whole diff; otherwise git's own pathspec limiting does the narrowing,
+/// so a scoped patch is a real patch rather than a filtered rendering of one — `git apply` cannot
+/// tell the difference, which is exactly the property that makes scoping safe.
+///
+/// `git diff --binary` output, verbatim: the client applies it with `git apply`, so anything this
+/// function reformatted would be a difference the client has to understand.
+///
+/// Fallible on purpose. An empty patch is a **meaningful value** here — it is how a tick says it
+/// moved nothing — so returning one for a diff that could not be taken would tell a mirror the
+/// checkout is unchanged when it is not, and the mirror would record the tick as applied and never
+/// reconcile it.
+///
+/// The paths are passed after `--`, because a path that happens to look like a revision would
+/// otherwise select a commit instead of a file.
+pub fn diff_between(
+    worktree_root: &Path,
+    from: &str,
+    to: &str,
+    paths: &[String],
+) -> Result<Vec<u8>, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    // `--no-ext-diff` and `--no-textconv` because a repository may configure either, and both
+    // replace the patch with something for a human to read: a client would receive a rendering
+    // `git apply` cannot apply, and would have no way to tell that from a patch that simply failed.
+    let mut args = vec![
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        from,
+        to,
+    ];
+    if !paths.is_empty() {
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+    }
+    git_output(worktree_root, &args, &[], deadline)
+}
+
+/// The paths a diff between two trees touches, as plain relative paths.
+///
+/// `-z`-separated and therefore never C-quoted, unlike the `changed_paths` in room metadata: these
+/// are used to open files and to build pathspecs, so a display-quoted name would select nothing.
+pub fn changed_paths_between(
+    worktree_root: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let listed = git_output(
+        worktree_root,
+        &["diff", "--name-only", "-z", "--no-ext-diff", from, to],
+        &[],
+        deadline,
+    )?;
+    Ok(listed
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        // Lossily, for the same reason the rest of this module decodes lossily: a repository can
+        // hold a path that is not valid UTF-8, and losing every other path over that one would be
+        // worse than naming it with replacement characters.
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect())
 }
 
 /// The working tree's diff against HEAD, run and parsed exactly as [`crate::worktrees`] does it for
@@ -257,14 +1221,52 @@ pub const DEFAULT_GIT_TIMEOUT: Duration = Duration::from_millis(5_000);
 /// forever: at a two-second interval that is a room quietly eating a process-wide pool (512 threads
 /// by default) that the spawn worker and every other blocking caller shares.
 fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String {
+    git_stdout_with(worktree_root, args, &[], deadline)
+}
+
+/// [`git_stdout`] with extra environment for the child — `GIT_INDEX_FILE` for the WIP tree, the
+/// identity [`publish_wip_ref`] signs with — and the same "empty string when git could not answer".
+fn git_stdout_with(
+    worktree_root: &Path,
+    args: &[&str],
+    envs: &[(&str, &OsStr)],
+    deadline: Instant,
+) -> String {
+    match git_output(worktree_root, args, envs, deadline) {
+        Ok(stdout) => String::from_utf8_lossy(&stdout).trim().to_string(),
+        Err(reason) => {
+            warn!("snapshot_worktree: {reason}");
+            String::new()
+        }
+    }
+}
+
+/// The raw stdout of a git command in `worktree_root`, or why it could not be had.
+///
+/// Bytes rather than a string, and un-trimmed, because a patch is neither: a `git diff --binary` of
+/// a checkout holding a file that is not valid UTF-8 would not survive being decoded, and a patch
+/// missing its final newline is one `git apply` rejects.
+///
+/// The failure is returned rather than logged here because the callers differ in what a failure
+/// means: a measurement that could not be taken is a warning and an empty reading, while a WIP ref
+/// that could not be published is an error its caller has to see.
+fn git_output(
+    worktree_root: &Path,
+    args: &[&str],
+    envs: &[(&str, &OsStr)],
+    deadline: Instant,
+) -> Result<Vec<u8>, String> {
     let budget = deadline.saturating_duration_since(Instant::now());
     if budget.is_zero() {
-        warn!(
-            "snapshot_worktree: no time left for git {args:?} in {worktree_root:?}; the measurement is incomplete"
-        );
-        return String::new();
+        return Err(format!(
+            "no time left for git {args:?} in {worktree_root:?}; the measurement is incomplete"
+        ));
     }
-    let mut child = match Command::new("git")
+    let mut command = Command::new("git");
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    let mut child = match command
         .current_dir(worktree_root)
         .args(args)
         // This measures a checkout somebody is *working in*, several times a second. `git status`
@@ -283,8 +1285,9 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
     {
         Ok(child) => child,
         Err(e) => {
-            warn!("snapshot_worktree: git {args:?} in {worktree_root:?} could not be run: {e}");
-            return String::new();
+            return Err(format!(
+                "git {args:?} in {worktree_root:?} could not be run: {e}"
+            ))
         }
     };
 
@@ -293,8 +1296,9 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
     // only the exit status would time out and kill a healthy `git diff` over a large change set.
     // EOF here means git closed stdout, which it does as it exits.
     let Some(stdout) = child.stdout.take() else {
-        warn!("snapshot_worktree: git {args:?} in {worktree_root:?} produced no stdout pipe");
-        return String::new();
+        return Err(format!(
+            "git {args:?} in {worktree_root:?} produced no stdout pipe"
+        ));
     };
     let (finished_tx, finished_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -308,33 +1312,25 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
 
     match finished_rx.recv_timeout(budget) {
         Ok(Ok(collected)) => match child.wait() {
-            Ok(status) if status.success() => {
-                String::from_utf8_lossy(&collected).trim().to_string()
-            }
-            Ok(status) => {
-                warn!("snapshot_worktree: git {args:?} in {worktree_root:?} exited {status}");
-                String::new()
-            }
-            Err(e) => {
-                warn!("snapshot_worktree: git {args:?} in {worktree_root:?} could not be waited on: {e}");
-                String::new()
-            }
+            Ok(status) if status.success() => Ok(collected),
+            Ok(status) => Err(format!("git {args:?} in {worktree_root:?} exited {status}")),
+            Err(e) => Err(format!(
+                "git {args:?} in {worktree_root:?} could not be waited on: {e}"
+            )),
         },
-        Ok(Err(e)) => {
-            warn!("snapshot_worktree: reading git {args:?} in {worktree_root:?} failed: {e}");
-            String::new()
-        }
+        Ok(Err(e)) => Err(format!(
+            "reading git {args:?} in {worktree_root:?} failed: {e}"
+        )),
         Err(_) => {
             // Killed *and* reaped: a `git` left running holds an index lock and a file handle on a
             // directory the daemon may be about to remove, and an unreaped one stays a zombie for
             // the life of the daemon.
             let _ = child.kill();
             let _ = child.wait();
-            warn!(
-                "snapshot_worktree: git {args:?} in {worktree_root:?} did not answer within {}ms and was killed",
+            Err(format!(
+                "git {args:?} in {worktree_root:?} did not answer within {}ms and was killed",
                 budget.as_millis()
-            );
-            String::new()
+            ))
         }
     }
 }

@@ -79,6 +79,9 @@ impl SnapshotBuilder {
             lines_added: self.lines_added,
             lines_removed: self.lines_removed,
             untracked_files: self.untracked_files,
+            // This suite is about which events a pair of snapshots produces, which the WIP tree
+            // takes no part in — it is what a delta is cut from, not what an event is derived from.
+            wip_tree: String::new(),
         }
     }
 }

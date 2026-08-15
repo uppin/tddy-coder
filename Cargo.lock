@@ -10640,6 +10640,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-sync"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "reqwest 0.12.28",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "tddy-livekit",
+ "tddy-service",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-stdio"
 version = "0.1.0"
 dependencies = [

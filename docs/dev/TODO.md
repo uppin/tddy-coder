@@ -94,6 +94,36 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Session worktree sync — deliberate gaps (source: session-worktree-sync changeset, 2026-08-15)
+
+- **A split session mirrors committed history only.** The facilitating daemon reaches a remote
+  checkout through `GetWorktreeSnapshot`, whose response carries counts and paths but **no tree**
+  (`packages/tddy-service/proto/connection.proto`), so it cannot diff a worktree it does not hold —
+  see the `FIXME(session-worktree-sync)` at `packages/tddy-daemon/src/connection_service.rs`
+  (`remote_worktree_snapshot`). Closing it means a `wip_tree` field on
+  `GetWorktreeSnapshotResponse` and the codebase daemon writing it on every measurement. Until then
+  a split session must **say** it is committed-only rather than mirror silently stale content.
+- **`MintLiveKitToken` cannot grant a session room.** It grants the daemon's `common_room` and only
+  that (`packages/tddy-daemon/src/auth.rs`), so a client that must join `session-{id}` has to hold
+  `LIVEKIT_API_SECRET` and mint for itself — which is the fleet's session-token signing key, and
+  therefore a real widening of the client trust surface versus `tddy-remote-git-repo`. Closing it
+  means a mint that takes a session id and grants that room to a caller authorized for that session,
+  which needs the room-ownership model recorded under *Remote git repo over LiveKit* below.
+- **`StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s `SESSION_WORKTREE` scope.** Two
+  RPCs read the same bytes through two resolvers, differing only in addressing (`project_id` +
+  `worktree_path` versus `session_id`). They share the byte reader and every guard, so they cannot
+  drift on what they *allow* — but collapsing them onto one reader is the tidier end state.
+- **Per-tick attribution is not per-call attribution.** A delta covers every writer in its poll
+  window, so `activity_seq` identifies which patch to fetch, never what one call changed on its own.
+  Genuine per-call deltas would mean diffing around each tool call, which costs a `git diff` per
+  call including read-only ones.
+- **Ignored files never sync, and no RPC can reach them either.** A WIP tree is `git add -A`, which
+  respects `.gitignore`, so build output and a local `.env` are outside the mirror. That is not a
+  gap to close with `StreamReadWorktreeFile`: its listing gate exists precisely to keep
+  `.gitignore`'d paths unreadable (`worktree_files.rs`, `resolve_listed_worktree_file`), and
+  loosening it would serve every session's `.env` over LiveKit. Mirroring an ignored file needs a
+  deliberate, separately-authorized opt-in, not a wider read.
+
 ### Remote git repo over LiveKit — deliberate gaps (source: remote-git-repo-over-livekit changeset, 2026-08-15)
 
 - **No CLI login flow.** `tddy-remote-git-repo` takes a refresh token (`--refresh-token` /

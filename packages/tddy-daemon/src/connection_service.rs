@@ -87,7 +87,8 @@ use crate::worktrees::{
     WorktreeSizeStatus, WorktreeStatsCache,
 };
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolChunk,
+    AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
+    AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolChunk,
     ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
     GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
     GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
@@ -99,7 +100,7 @@ use tddy_service::proto::connection::{
     ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
     StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo,
+    ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -1971,6 +1972,13 @@ impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
             lines_added: answered.lines_added,
             lines_removed: answered.lines_removed,
             untracked_files: answered.untracked_files,
+            // FIXME(session-worktree-sync): a SPLIT session's snapshot arrives over
+            // GetWorktreeSnapshot, whose response carries no tree — so the facilitating daemon
+            // cannot diff a checkout it does not hold. Closing this means a `wip_tree` field on
+            // GetWorktreeSnapshotResponse and the codebase daemon writing it. Until then a split
+            // session syncs committed history only, and says so rather than mirroring silently
+            // stale content. See docs/dev/TODO.md.
+            wip_tree: String::new(),
         })
     }
 }
@@ -7383,6 +7391,30 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }))
     }
 
+    type StreamReadWorktreeFileStream = MpscResultStream<WorktreeFileChunk>;
+
+    // TODO(session-worktree-sync): the byte-exact streaming read — AC15-AC20 of
+    // docs/ft/daemon/session-worktree-sync.md. Pinned by
+    // packages/tddy-daemon/tests/stream_read_worktree_file_acceptance.rs.
+    async fn stream_read_worktree_file(
+        &self,
+        _request: Request<ReadWorktreeFileRequest>,
+    ) -> Result<Response<Self::StreamReadWorktreeFileStream>, Status> {
+        Err(Status::unimplemented("StreamReadWorktreeFile"))
+    }
+
+    type StreamAgentActivityDeltaStream = MpscResultStream<AgentActivityDeltaChunk>;
+
+    // TODO(session-worktree-sync): the tick delta lookup — AC6-AC14 of
+    // docs/ft/daemon/session-worktree-sync.md. Pinned by
+    // packages/tddy-daemon/tests/session_activity_delta_acceptance.rs.
+    async fn stream_agent_activity_delta(
+        &self,
+        _request: Request<AgentActivityDeltaRequest>,
+    ) -> Result<Response<Self::StreamAgentActivityDeltaStream>, Status> {
+        Err(Status::unimplemented("StreamAgentActivityDelta"))
+    }
+
     async fn list_worktrees_for_project(
         &self,
         request: Request<ListWorktreesForProjectRequest>,
@@ -8641,6 +8673,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
                     source: "claude-cli".to_string(),
+                    // FIXME(session-worktree-sync): stamp the worktree HEAD here — AC1 of
+                    // docs/ft/daemon/session-worktree-sync.md.
+                    head_commit: String::new(),
+                    activity_seq: 0,
+                    changed_paths: Vec::new(),
                 }
             }
             "PostToolUse" => {
@@ -8665,6 +8702,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     started_unix_ms: 0,
                     completed_unix_ms: now_unix_ms(),
                     source: "claude-cli".to_string(),
+                    // FIXME(session-worktree-sync): stamp the worktree HEAD here — AC1 of
+                    // docs/ft/daemon/session-worktree-sync.md.
+                    head_commit: String::new(),
+                    activity_seq: 0,
+                    changed_paths: Vec::new(),
                 }
             }
             other => {
@@ -12086,6 +12128,9 @@ mod agent_activity_unit_tests {
             started_unix_ms: 1_700_000_000_000,
             completed_unix_ms: 1_700_000_000_500,
             source: "claude-cli".to_string(),
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         }
     }
 

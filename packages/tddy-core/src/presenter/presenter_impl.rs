@@ -291,6 +291,12 @@ impl Presenter {
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
                     source: self.agent_activity_source.clone(),
+                    // FIXME(session-worktree-sync): stamp the worktree HEAD here. Until then a
+                    // consumer cannot tell which commit this call ran upon — see
+                    // docs/ft/daemon/session-worktree-sync.md AC1.
+                    head_commit: String::new(),
+                    activity_seq: 0,
+                    changed_paths: Vec::new(),
                 };
                 self.agent_activity_pending.insert(call_id, rec.clone());
                 rec
@@ -316,6 +322,10 @@ impl Presenter {
                         started_unix_ms: 0,
                         completed_unix_ms: 0,
                         source: self.agent_activity_source.clone(),
+                        // FIXME(session-worktree-sync): as above — AC1.
+                        head_commit: String::new(),
+                        activity_seq: 0,
+                        changed_paths: Vec::new(),
                     });
                 rec.status = if *is_error {
                     STATUS_ERROR

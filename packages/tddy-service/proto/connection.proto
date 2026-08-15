@@ -48,6 +48,11 @@ service ConnectionService {
   // Code pane: browse a session's worktree files (docs/ft/web/session-code-pane.md).
   rpc ListWorktreeDirectory(ListWorktreeDirectoryRequest) returns (ListWorktreeDirectoryResponse);
   rpc ReadWorktreeFile(ReadWorktreeFileRequest) returns (ReadWorktreeFileResponse);
+  // The streaming, byte-exact sibling of ReadWorktreeFile (docs/ft/daemon/session-worktree-sync.md).
+  // Same request, same worktree resolution and same guards; `bytes` rather than a UTF-8 string, so
+  // a PNG or a file in any encoding round-trips intact, and oversized files are REFUSED before the
+  // first frame rather than truncated — a truncated mirror is a wrong mirror.
+  rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
   rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
   // Browser-compatible alternative: server-streaming output + separate unary input.
   // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
@@ -88,6 +93,14 @@ service ConnectionService {
   // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
   rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
   rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
+  // The patch a call produced, scoped to that call's own files, so a participant can apply an
+  // edit rather than merely learn that the checkout moved
+  // (docs/ft/daemon/session-worktree-sync.md). This is the INCREMENTAL path only: a client that
+  // has fallen behind resyncs by fetching the session's WIP ref over git, not by asking for an
+  // ever-larger patch here. Streamed, not unary: a patch has no useful upper bound, and a payload
+  // over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed, where a lost chunk wedges
+  // the call with no error rather than failing it.
+  rpc StreamAgentActivityDelta(AgentActivityDeltaRequest) returns (stream AgentActivityDeltaChunk);
   // Read-only ACP transcript for the activity pane (see docs/ft/web/agent-activity-pane.md
   // § Read-only ACP transcript). Replays the session's persisted acp-transcript.jsonl as ACP
   // session/update frames, then (SNAPSHOT_THEN_LIVE) tails the live presenter. Each AcpReplayFrame
@@ -783,6 +796,15 @@ message ReadWorktreeFileResponse {
   uint64 byte_size = 3;
 }
 
+// One frame of StreamReadWorktreeFile. `data` is raw file bytes with no encoding applied at any
+// point on the path, so any file round-trips intact. A zero-byte file yields exactly one frame with
+// empty `data`, which is how "the file is empty" stays distinguishable from "the stream failed".
+message WorktreeFileChunk {
+  bytes data = 1;
+  // The file's full size, repeated on every frame so a reader knows the total from the first one.
+  uint64 total_byte_size = 2;
+}
+
 // --- Project branch listing (for claude-cli branch selection dropdown) ---
 
 message ListProjectBranchesRequest {
@@ -1081,6 +1103,24 @@ message AgentActivityRecord {
   uint64 started_unix_ms             = 7;
   uint64 completed_unix_ms           = 8;
   string source                      = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
+
+  // The worktree HEAD when this call was recorded. A patch is only applicable against the commit
+  // it was cut from, so a record that cannot name its base is a record a mirror must not act on.
+  // Empty when HEAD could not be read — never a fabricated sha.
+  string head_commit                 = 10;
+  // The session-room poll tick whose delta covers this call; 0 when no tick has covered it yet.
+  // Several calls in one window share a seq, but NOT the same patch — see changed_paths.
+  uint64 activity_seq                = 11;
+  // The worktree paths this call is credited with, relative to the worktree root and NOT
+  // git-C-quoted (unlike GetWorktreeSnapshot.changed_paths, which is display-only). The delta
+  // served for this call is the tick's diff limited to exactly these paths, so two calls in one
+  // poll window get two different patches rather than one shared whole-tree diff.
+  //
+  // Populated from what the call declared it would touch — an Edit's or Write's file_path. A call
+  // that declared nothing (a Bash running a formatter, a codegen step) is credited with nothing
+  // here, and whatever it changed is delivered by the tick's RESIDUAL delta instead, so no change
+  // is ever attributed away into silence.
+  repeated string changed_paths      = 12;
 }
 
 // Whether the stream replays the persisted history before tailing live records.
@@ -1186,6 +1226,64 @@ message ReportAgentActivityRequest {
 
 message ReportAgentActivityResponse {
   bool ok = 1;
+}
+
+message AgentActivityDeltaRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+  // The call whose delta is wanted: the tick's diff limited to that call's changed_paths.
+  // Required — there is no whole-worktree mode here on purpose. Reconciling is a git fetch of the
+  // session's WIP ref (see the feature doc), which is incremental and delta-compressed; a
+  // cumulative patch would re-send the entire dirty tree over a data channel every time a client
+  // fell one tick behind.
+  string call_id            = 4;
+  // What to serve when call_id is set. A client replaying a window asks for each call's scope and
+  // then the residual, and the three together reconstruct the tick exactly.
+  DeltaScope scope          = 5;
+}
+
+// Which slice of a tick's diff to serve.
+enum DeltaScope {
+  // The paths the named call is credited with. The default, because a client reacting to one
+  // activity record wants that record's change and not its neighbours'.
+  DELTA_SCOPE_CALL     = 0;
+  // The paths of that tick claimed by NO call — what an undeclared writer (a Bash running a
+  // formatter, a codegen step) changed. Without this a tick's diff would be lossy the moment any
+  // change was not declared by the tool that made it, and a mirror would drift with nothing
+  // reporting it.
+  DELTA_SCOPE_RESIDUAL = 1;
+  // The whole tick, unscoped. The union of every call scope and the residual.
+  DELTA_SCOPE_TICK     = 2;
+}
+
+// One frame of a delta. The describing fields repeat on every frame, as HostDocumentChunk's
+// total_byte_size does: a reader knows what it is receiving from the first frame without a
+// separate header frame to special-case, and a single-frame delta is not a different shape from a
+// hundred-frame one.
+message AgentActivityDeltaChunk {
+  // One slice of `git diff --binary` output — an ordinary git patch, which is why it carries
+  // deletions, renames, file modes and binary content without any of them being a field here.
+  // A call that changed nothing is one frame with empty `patch` and total_byte_size 0, so
+  // "nothing changed" stays distinguishable from "the stream failed".
+  bytes  patch           = 1;
+  // The poll tick this patch belongs to. A client de-duplicates by this: several calls sharing a
+  // tick must apply its patch once, not once each.
+  uint64 seq             = 2;
+  // The tick this one follows. A gap between a client's last applied seq and this means a lost
+  // broadcast, and is a reconcile rather than something to apply out of order.
+  uint64 prev_seq        = 3;
+  // The commit the patch applies onto.
+  string base_commit     = 4;
+  // Reserved: this field carried a `cumulative` flag while reconciliation was a whole-worktree
+  // patch. It is a git fetch of the WIP ref now, so no delta is ever cumulative.
+  reserved 5;
+  // The patch's full size, so a reader can size a buffer and detect a truncated stream.
+  uint64 total_byte_size = 6;
+  // The paths this patch is limited to — the request's scope, resolved. A client compares it
+  // against what it expected rather than trusting that the server scoped the way it asked.
+  repeated string scoped_paths = 7;
 }
 
 // --- Demo VM lifecycle (UI-driven QEMU boot/shutdown for the demo goal) ---

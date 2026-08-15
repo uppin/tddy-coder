@@ -16,6 +16,7 @@ pub mod presenter_intent_service;
 pub mod reflection_service;
 pub mod service;
 pub mod service_acp;
+pub mod session_activity;
 pub mod terminal_service;
 pub mod token_service;
 pub mod worktree_activity;
@@ -203,6 +204,9 @@ pub fn agent_activity_to_proto(
         started_unix_ms: record.started_unix_ms,
         completed_unix_ms: record.completed_unix_ms,
         source: record.source,
+        head_commit: record.head_commit,
+        activity_seq: record.activity_seq,
+        changed_paths: record.changed_paths,
     }
 }
 

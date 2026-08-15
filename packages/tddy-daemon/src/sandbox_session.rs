@@ -220,6 +220,11 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             started_unix_ms: crate::connection_service::now_unix_ms(),
             completed_unix_ms: 0,
             source: "sandbox".to_string(),
+            // FIXME(session-worktree-sync): stamp the worktree HEAD here — AC1 of
+            // docs/ft/daemon/session-worktree-sync.md.
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         };
         self.record_agent_activity(session_id, &running);
 
@@ -248,6 +253,11 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             started_unix_ms: running.started_unix_ms,
             completed_unix_ms: crate::connection_service::now_unix_ms(),
             source: "sandbox".to_string(),
+            // FIXME(session-worktree-sync): stamp the worktree HEAD here — AC1 of
+            // docs/ft/daemon/session-worktree-sync.md.
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         };
         self.record_agent_activity(session_id, &terminal);
 
