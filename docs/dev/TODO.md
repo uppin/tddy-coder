@@ -83,6 +83,15 @@ its own failure message, none from that branch. New entries beyond the list abov
   loses a UDP port race: `failed to bind host port 0.0.0.0:<port>/udp: address already in use`. Use
   `./run-livekit-testkit-server` and `LIVEKIT_TESTKIT_WS_URL` to avoid it.
 - `sandbox_runner_streams_demo_tui_dimensions_on_session_channel` (`tddy-sandbox-darwin`) — macOS-only.
+- **Two more LiveKit flakes, load-dependent** (found 2026-08-15, pre-existing):
+  `coder_serves_connection_service_from_participant` (`tddy-coder`) fails `ListExecTools timed out`
+  after `publisher data channel '_reliable' closed unexpectedly`, and
+  `common_room_room_slot_stays_populated_after_metadata_publish_with_peer_in_room` (`tddy-daemon`)
+  fails its 12 s discovery-stability assertion. Both pass on their own — verified 2/2 and 1/1
+  immediately after a `--workspace` run in which both failed. They only fail when ~595 suites share
+  one testkit container, so they are contention, not regressions. Costly to diagnose because both
+  sit in code a LiveKit-touching branch is likely to have changed; re-run in isolation before
+  suspecting your diff.
 - The sandbox set is **four** `sandboxed_cursor_cli_*`, not three (`..._connect_session_returns_empty_livekit`,
   `..._start_persists_metadata_and_empty_livekit`, `..._start_wires_specialized_agents_env_and_metadata`,
   `..._terminal_io_round_trips`), and on an unprivileged user the cgroups ones fail with
