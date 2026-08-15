@@ -48,6 +48,29 @@ server-streaming RPCs let a participant pull a scoped delta by `call_id` and rea
 bytes. `tddy-session-sync` consumes all of it and maintains a fully managed local mirror, resyncing
 by fetching the WIP ref whenever anything diverges.
 
+## Where this stands
+
+**Landed and merged-ready** (PR #401): the wire contract, and every primitive the wiring composes
+from — each tested. 660 tests green, `clippy -D warnings` and `fmt --check` clean.
+
+**Not built.** The feature does not work end to end; the room broadcasts nothing new and both new
+RPCs answer `unimplemented`. Nine pieces remain, and they are the unchecked boxes below:
+
+| # | Remaining | Why it matters |
+|---|---|---|
+| 1 | Wire `tick_delta` + `publish_wip_ref` into the poll loop | nothing produces a delta today |
+| 2 | Wire `delete_wip_ref` into room close | ⚠️ **must land on the same commit as #1** — otherwise every deleted session permanently pins a worktree of blobs in the shared project repo |
+| 3 | `session.activity` broadcast from the daemon | nothing publishes records |
+| 4 | `tddy-coder` reports activity via `ReportAgentActivity` | without it, tool/cursor sessions are a silent blind spot |
+| 5 | `head_commit` / `changed_paths` stamping at the three producers | records carry neither today |
+| 6 | `StreamAgentActivityDelta` handler + adapter | returns `unimplemented` |
+| 7 | `StreamReadWorktreeFile` handler + adapter | returns `unimplemented` |
+| 8 | Client attach + sync loop | the binary exits non-zero |
+| 9 | `./release`, `./install`, `./publish.sh` ship the binary | nothing installs it |
+
+Test gaps track those exactly: AC1/AC4/AC5 (stamping, broadcast, report), AC20 (a CLI-level
+`--help` test) and AC31-36 (the end-to-end suite over a real LiveKit server).
+
 ## Background
 
 The session room broadcasts `WorktreeActivityEvent`, which deliberately carries no paths and no
@@ -66,7 +89,7 @@ are not enough".
 - [ ] **Testing**: acceptance tests per package + one end-to-end suite over a real LiveKit server
 - [ ] **Integration**: cross-package — proto in tddy-service, producers in tddy-daemon/tddy-coder, consumer in tddy-session-sync
 - [ ] **Technical Debt**: `StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope — recorded below
-- [ ] **Code Quality**: `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
+- [x] **Code Quality**: `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
 
 ## Technical Changes
 
@@ -178,7 +201,7 @@ are not enough".
 - [x] `tddy-session-sync` mirror: ownership, seq de-duplication, apply, reconcile reasons
 - [ ] `tddy-session-sync` attach: resolve the session, join the room, run the sync loop
 - [ ] Root scripts ship the new binary
-- [ ] `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
+- [x] `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
 
 ## Testing Plan
 
@@ -243,28 +266,28 @@ as `remote_git_livekit_acceptance.rs` does.
 
 - [ ] **Happy path**: Write, Edit, delete, binary and commit all reach the mirror
 - [ ] **Error scenarios**: unknown `call_id`, aged-out delta, rejected patch, refused dest, oversized file
-- [ ] **Edge cases**: untracked-only change, rename, mode change, empty file, zero-length delta
+- [x] **Edge cases**: untracked-only change, rename, mode change, empty file, zero-length delta
 - [ ] **Integration points**: coder → daemon report; daemon → room broadcast; room → client
-- [ ] **Regression**: existing `agent-activity.jsonl` files still deserialize; `worktree.activity`
+- [x] **Regression**: existing `agent-activity.jsonl` files still deserialize; `worktree.activity`
       events unchanged; `ReadWorktreeFile` behaviour unchanged
 
 ## Acceptance Tests
 
 ### tddy-daemon
-- [ ] **Integration**: `writes_a_wip_tree_without_touching_the_agents_own_index` (AC — WIP tree)
-- [ ] **Integration**: `a_tick_delta_carries_a_newly_written_untracked_file` (AC31)
-- [ ] **Integration**: `a_tick_delta_carries_a_deletion` (AC33)
-- [ ] **Integration**: `a_tick_delta_carries_binary_content_byte_for_byte` (AC34)
-- [ ] **Integration**: `publishes_the_uncommitted_state_as_a_ref_an_ordinary_git_fetch_can_reach` (AC13)
-- [ ] **Integration**: `parents_the_published_commit_on_the_head_it_was_taken_from` (AC13)
-- [ ] **Integration**: `keeps_the_wip_ref_out_of_the_branch_listing_an_agent_sees` (AC13)
-- [ ] **Integration**: `drops_the_wip_ref_when_the_session_ends_so_its_objects_stop_being_pinned` (AC13)
-- [ ] **Integration**: `scopes_a_calls_delta_to_the_files_that_call_touched` (AC6)
-- [ ] **Integration**: `serves_a_change_no_call_declared_as_the_ticks_residual` (AC7)
-- [ ] **Integration**: `every_call_scope_plus_the_residual_reconstructs_the_whole_tick` (AC7)
-- [ ] **Integration**: `gives_a_call_that_declared_nothing_an_empty_delta_rather_than_its_neighbours_changes` (AC8)
-- [ ] **Integration**: `evicts_the_oldest_delta_once_the_ring_is_full` (AC9)
-- [ ] **Integration**: `distinguishes_an_unknown_call_from_a_delta_that_aged_out` (AC8)
+- [x] **Integration**: `writes_a_wip_tree_without_touching_the_agents_own_index` (AC — WIP tree)
+- [x] **Integration**: `a_tick_delta_carries_a_newly_written_untracked_file` (AC31)
+- [x] **Integration**: `a_tick_delta_carries_a_deletion` (AC33)
+- [x] **Integration**: `a_tick_delta_carries_binary_content_byte_for_byte` (AC34)
+- [x] **Integration**: `publishes_the_uncommitted_state_as_a_ref_an_ordinary_git_fetch_can_reach` (AC13)
+- [x] **Integration**: `parents_the_published_commit_on_the_head_it_was_taken_from` (AC13)
+- [x] **Integration**: `keeps_the_wip_ref_out_of_the_branch_listing_an_agent_sees` (AC13)
+- [x] **Integration**: `drops_the_wip_ref_when_the_session_ends_so_its_objects_stop_being_pinned` (AC13)
+- [x] **Integration**: `scopes_a_calls_delta_to_the_files_that_call_touched` (AC6)
+- [x] **Integration**: `serves_a_change_no_call_declared_as_the_ticks_residual` (AC7)
+- [x] **Integration**: `every_call_scope_plus_the_residual_reconstructs_the_whole_tick` (AC7)
+- [x] **Integration**: `gives_a_call_that_declared_nothing_an_empty_delta_rather_than_its_neighbours_changes` (AC8)
+- [x] **Integration**: `evicts_the_oldest_delta_once_the_ring_is_full` (AC9)
+- [x] **Integration**: `distinguishes_an_unknown_call_from_a_delta_that_aged_out` (AC8)
 - [x] **Integration**: `reads_the_commit_a_checkout_is_on` (AC1)
 - [x] **Integration**: `reads_a_detached_head` (AC1)
 - [x] **Integration**: `reads_a_head_only_packed_refs_still_knows` (AC1)
@@ -278,11 +301,11 @@ as `remote_git_livekit_acceptance.rs` does.
 - [x] **Integration**: `bases_a_delta_on_the_commit_the_tick_ended_at_when_the_agent_committed` (tick wiring)
 - [ ] **Integration**: `stamps_a_record_with_the_commit_it_ran_upon` (AC1)
 - [ ] **Integration**: `broadcasts_an_activity_record_on_the_session_activity_topic` (AC4)
-- [ ] **Integration**: `streams_a_png_from_a_worktree_byte_for_byte` (AC13)
-- [ ] **Integration**: `streams_a_file_larger_than_the_unary_reads_one_megabyte_cap` (AC14)
-- [ ] **Integration**: `refuses_an_oversized_file_before_the_first_frame_rather_than_truncating` (AC14)
-- [ ] **Integration**: `yields_one_empty_frame_for_an_empty_file` (AC15)
-- [ ] **Integration**: `refuses_a_path_that_escapes_the_worktree_through_a_symlink` (AC17)
+- [x] **Integration**: `reads_a_png_byte_for_byte` (AC13)
+- [x] **Integration**: `reads_a_file_larger_than_the_unary_readers_one_megabyte_cap_without_truncating_it` (AC14)
+- [x] **Integration**: `refuses_a_file_over_the_cap_rather_than_shortening_it` (AC14)
+- [x] **Integration**: `reads_an_empty_file_as_zero_bytes` (AC15)
+- [x] **Integration**: `refuses_a_symlink_that_resolves_outside_the_worktree` (AC17)
 
 ### tddy-core
 - [x] **Unit**: `reads_an_activity_row_written_before_it_carried_a_commit` (AC3)
@@ -296,13 +319,13 @@ as `remote_git_livekit_acceptance.rs` does.
 - [ ] **Integration**: `reports_its_own_activity_records_to_the_daemon` (AC5)
 
 ### tddy-session-sync
-- [ ] **Integration**: `refuses_a_destination_it_does_not_own` (AC23)
-- [ ] **Integration**: `refuses_a_destination_marked_for_another_session` (AC23)
-- [ ] **Integration**: `applies_one_delta_once_when_several_calls_share_a_tick` (AC26)
-- [ ] **Integration**: `reconciles_when_a_sequence_number_is_missing` (AC27)
-- [ ] **Integration**: `reconciles_when_a_patch_does_not_apply` (AC28)
-- [ ] **Integration**: `reports_every_divergence_at_error_level` (AC29)
-- [ ] **Integration**: `names_the_environment_variable_of_a_missing_credential` (AC21)
+- [x] **Integration**: `refuses_a_destination_it_does_not_own` (AC23)
+- [x] **Integration**: `refuses_a_destination_marked_for_another_session` (AC23)
+- [x] **Integration**: `applies_one_delta_once_when_several_calls_share_a_tick` (AC26)
+- [x] **Integration**: `reconciles_when_a_sequence_number_is_missing` (AC27)
+- [x] **Integration**: `reconciles_when_a_patch_does_not_apply` (AC28)
+- [x] **Integration**: `names_the_expected_and_actual_values_of_every_divergence` (AC29)
+- [x] **Integration**: `names_the_environment_variable_of_a_missing_credential` (AC21)
 - [ ] **Integration**: `never_prints_the_value_of_a_token_it_found_in_the_environment` (AC20)
 - [ ] **Production**: `mirrors_a_file_the_agent_wrote_without_a_commit` (AC31)
 - [ ] **Production**: `mirrors_an_edit_to_an_existing_file` (AC32)
@@ -313,20 +336,25 @@ as `remote_git_livekit_acceptance.rs` does.
 
 ## Technical Debt & Production Readiness
 
-- [ ] **`StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope.**
+- [~] **`StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope.**
       Two RPCs read the same bytes through two resolvers. Accepted deliberately — the streaming
       sibling completes an obviously incomplete pair and lets the Code pane open an image — but the
       byte reader and the guards are shared (`read_worktree_file_bytes`, `validate_rel_path`, the
       git-listing gate) so the two cannot drift on *what* they allow, only on addressing.
       Collapsing them onto one reader is a follow-up.
-- [ ] **The client holds `LIVEKIT_API_SECRET`.** A real widening of the trust surface versus
+- [~] **The client holds `LIVEKIT_API_SECRET`.** A real widening of the trust surface versus
       `tddy-remote-git-repo`, forced by `MintLiveKitToken` granting only the common room. Recorded
       in the PRD and in `docs/dev/TODO.md`; closing it means a mint that can grant a session room.
-- [ ] **Per-tick attribution.** A delta covers every writer in its window, so `activity_seq` is a
-      window id, not a causal claim. Named on the wire and in the PRD rather than papered over.
-- [ ] No fallbacks: a missing credential, an unresolvable session, an unowned destination and an
-      unappliable patch each fail loudly. Reconcile is a defined recovery path, not a fallback —
-      it is reported every time it runs.
+- [x] **Per-call scoping, with one limit named.** A call's delta is narrowed to the paths it
+      declared, and the tick's residual carries what no call claimed. The limit that remains: two
+      calls editing the *same* file in one poll window share that file's net change, because the
+      measurement is per window. Named on the wire and in the PRD rather than papered over.
+- [x] No fallbacks. Audited during PR wrap and one was found and removed: `diff_between` swallowed
+      git failure into an empty patch, which — since the trees are known to differ — meant "this
+      tick moved nothing", and a client would have recorded it applied and never reconciled. Both
+      diff helpers are now `Result`, and `tick_delta` returns `None` rather than an empty patch for
+      a failed diff or an unreadable `HEAD`. Reconcile remains a defined recovery path, not a
+      fallback — it is reported every time it runs.
 
 ## Implementation Notes
 
