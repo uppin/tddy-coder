@@ -698,6 +698,37 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
     );
 }
 
+#[tokio::test]
+#[serial]
+async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
+    // Given a worktree-backed session on the facilitating daemon
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    let session_dir = unified_session_dir_path(&daemon.sessions_base, &started.session_id);
+
+    // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
+    let wiring = tddy_daemon::split_session::prepare_split_agent_wiring(
+        &daemon.config,
+        &session_dir,
+        &true_bin(),
+        &started.session_id,
+        "some-other-codebase-host",
+        "0199bbbb-0000-7000-8000-00000000000b",
+        TEST_TOKEN,
+    )
+    .expect("split agent wiring must be preparable for an agent session");
+    let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
+
+    // Then the participant it is told to call is this daemon's — the one that opened the room and
+    // serves its RPC surface. The codebase host holds the files, but it hosts no room and joins
+    // none, so an agent addressed at it waits in a room that identity will never enter.
+    assert_eq!(
+        env.get("TDDY_REMOTE_SERVER_IDENTITY").map(String::as_str),
+        Some(rpc_identity(INSTANCE_ID).as_str()),
+        "a split agent must address the identity hosting the room it was given"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // AC3 — file access is served in the room
 // ---------------------------------------------------------------------------

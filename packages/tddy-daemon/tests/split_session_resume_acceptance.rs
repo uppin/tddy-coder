@@ -40,6 +40,8 @@ const AGENT_SESSION_ID: &str = "0199aaaa-0000-7000-8000-00000000000a";
 /// The paired `workspace` session on the codebase daemon, whose worktree the agent works in.
 const CODEBASE_SESSION_ID: &str = "0199bbbb-0000-7000-8000-00000000000b";
 const CODEBASE_INSTANCE_ID: &str = "workstation-b";
+/// This daemon — the one resuming the session, hosting its room, and running the agent.
+const FACILITATING_INSTANCE_ID: &str = "laptop-a";
 const COMMON_ROOM: &str = "tddy-lobby";
 const LIVEKIT_URL: &str = "ws://livekit.invalid:7880";
 
@@ -90,7 +92,7 @@ fn a_daemon_config(claude_binary: &std::path::Path) -> (tempfile::TempDir, Daemo
     let claude_binary = claude_binary.display();
     let yaml = format!(
         r#"
-daemon_instance_id: "laptop-a"
+daemon_instance_id: "{FACILITATING_INSTANCE_ID}"
 users:
   - github_user: "{user}"
     os_user: "{user}"
@@ -280,7 +282,7 @@ async fn a_resumed_split_agent_is_pointed_at_the_codebase_hosts_session_not_its_
 }
 
 #[tokio::test]
-async fn a_resumed_split_agent_is_re_wired_to_the_codebase_daemon_it_was_paired_with() {
+async fn a_resumed_split_agent_is_re_wired_to_its_rooms_host_and_the_daemon_it_was_paired_with() {
     // Given a stopped split session whose only record of the pairing is its .session.yaml
     // When it is resumed
     let resumed = resume_a_split_session().await;
@@ -290,8 +292,9 @@ async fn a_resumed_split_agent_is_re_wired_to_the_codebase_daemon_it_was_paired_
     // to fall back to.
     assert_eq!(
         resumed.agent_env_var("TDDY_REMOTE_SERVER_IDENTITY"),
-        format!("daemon-{CODEBASE_INSTANCE_ID}"),
-        "tool calls must be addressed at the paired daemon's RPC participant"
+        format!("daemon-{FACILITATING_INSTANCE_ID}"),
+        "tool calls are addressed at the host of the room the agent rejoins — this daemon; the \
+         codebase daemon is in no room and would never answer"
     );
     assert_eq!(
         resumed.agent_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
