@@ -224,7 +224,7 @@ impl QemuVmArgs {
     ///   -drive file=<qcow2>,if=virtio,format=qcow2
     ///   -drive if=pflash,format=raw,unit=0,readonly=on,file=<edk2-aarch64-code.fd>
     ///   -drive if=pflash,format=raw,unit=1,file=<vars.fd>
-    ///   -cdrom <seed.iso>
+    ///   -drive file=<seed.iso>,if=virtio,format=raw,readonly=on
     ///   -nographic
     ///   -fsdev local,id=fsdev0,path=<host dir>,security_model=none,readonly=on
     ///   -device virtio-9p-pci,fsdev=fsdev0,mount_tag=<tag>
@@ -262,7 +262,7 @@ impl QemuVmArgs {
         ];
         args.extend(Self::pflash_args(config.firmware.as_ref()));
         if let Some(seed_iso) = &config.seed_iso {
-            args.extend(["-cdrom".to_string(), seed_iso.clone()]);
+            args.extend(Self::seed_drive_args(seed_iso));
         }
         args.push("-nographic".to_string());
         args.extend(Self::nine_p_args(&config.nine_p_shares));
@@ -359,6 +359,27 @@ impl QemuVmArgs {
     /// file it discloses. The image's own directory is as private as the VM it belongs to.
     pub fn console_stderr_log_path(qcow2_path: &str) -> PathBuf {
         Path::new(qcow2_path).with_extension("console-stderr.log")
+    }
+
+    /// The argv attaching a NoCloud seed ISO, as a read-only virtio block device.
+    ///
+    /// Deliberately **not** `-cdrom`. That shorthand attaches the image on the *machine's
+    /// default* block interface, which differs by architecture: virtio on the aarch64
+    /// `virt` machine, but IDE on x86_64 `q35`. Debian's `-cloud` kernel flavour is built
+    /// for virtual hardware only and carries no ATA/AHCI drivers, so on x86_64 the guest
+    /// never sees the CD-ROM at all — no `sr0`, no `ata*`. `ds-identify` then finds no
+    /// datasource and skips cloud-init entirely, which is not an error the guest reports:
+    /// it boots normally to a login prompt with no configured user and no generated SSH
+    /// host keys, so the only visible symptoms are `Login incorrect` and a failed
+    /// `ssh.service`.
+    ///
+    /// virtio behaves identically on both architectures, and cloud-init locates the seed by
+    /// its `cidata` filesystem label rather than by device type.
+    pub fn seed_drive_args(seed_iso_path: &str) -> Vec<String> {
+        vec![
+            "-drive".to_string(),
+            format!("file={seed_iso_path},if=virtio,format=raw,readonly=on"),
+        ]
     }
 
     /// Format a single `hostfwd` spec from a `PortForward`.

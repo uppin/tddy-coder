@@ -804,9 +804,14 @@ fn cloud_init_boot_argv_attaches_the_seed_iso_as_a_cdrom() {
     // When building the boot argv
     let args = cloud_init_boot_argv(&cfg);
 
-    // Then the seed ISO is attached as a cdrom so NoCloud can find the cidata volume
-    let idx = args.iter().position(|a| a == "-cdrom").unwrap();
-    assert_eq!(args[idx + 1], "/images/demo-seed.iso");
+    // Then the seed ISO is attached as a read-only virtio disk, which every supported
+    // guest kernel can see — a CD-ROM is invisible to Debian's virtio-only `-cloud` kernel
+    // on x86_64, where `-cdrom` lands on the IDE bus
+    assert!(
+        args.iter()
+            .any(|a| a == "file=/images/demo-seed.iso,if=virtio,format=raw,readonly=on"),
+        "seed must be attached as a read-only virtio drive; got: {args:?}"
+    );
 }
 
 #[test]

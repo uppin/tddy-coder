@@ -236,8 +236,14 @@ fn attaches_the_cloud_init_seed_iso_when_one_is_configured() {
     // When the argv is built
     let argv = QemuVmArgs::build(&config);
 
-    // Then the seed is attached as a CD-ROM
-    assert_eq!(value_after(&argv, "-cdrom"), "/vms/guest-seed.iso");
+    // Then the seed is attached as a read-only virtio disk, not a CD-ROM: `-cdrom` uses the
+    // machine's default block interface, which is IDE on x86_64 q35, and Debian's
+    // virtio-only `-cloud` kernel cannot see an IDE device at all
+    assert!(
+        argv.iter()
+            .any(|a| a == "file=/vms/guest-seed.iso,if=virtio,format=raw,readonly=on"),
+        "seed must be attached as a read-only virtio drive; got: {argv:?}"
+    );
 }
 
 #[test]
