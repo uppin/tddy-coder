@@ -389,7 +389,18 @@ impl BootedGuest {
             force_kill(pid, &monitor_socket);
             return Err(anyhow!("guest did not shut down gracefully: {e}"));
         }
-        if !wait_for_port_release(port, SHUTDOWN_TIMEOUT).await {
+        // Drain the console while waiting. If the test worked over SSH, nothing has read the
+        // console since the guest booted, and a guest blocked on a full console pipe cannot
+        // complete its shutdown at all — see `SerialConsole::drain_for`. The drain finishing
+        // first means the console closed, which is QEMU exiting, so re-check the port rather
+        // than treating it as a failure.
+        let released = tokio::select! {
+            released = wait_for_port_release(port, SHUTDOWN_TIMEOUT) => released,
+            _ = self.console.drain_for(SHUTDOWN_TIMEOUT) => {
+                wait_for_port_release(port, Duration::from_secs(5)).await
+            }
+        };
+        if !released {
             force_kill(pid, &monitor_socket);
             return Err(anyhow!(
                 "guest accepted the powerdown but never released port {port}"

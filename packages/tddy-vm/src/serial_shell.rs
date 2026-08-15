@@ -505,6 +505,31 @@ impl SerialConsole {
         Ok(())
     }
 
+    /// Read and discard whatever the guest writes, until `timeout` elapses or the console
+    /// closes.
+    ///
+    /// The console is a pipe, and a test that works over SSH stops reading it the moment the
+    /// guest boots. Once the pipe's buffer fills — about 64 KiB, and a Debian boot with
+    /// cloud-init produces more than that — the guest blocks writing to `ttyS0`. A guest
+    /// blocked there cannot finish shutting down: `system_powerdown` is accepted, systemd
+    /// begins writing its stop messages, and the sequence stalls with QEMU still running and
+    /// still holding its forwarded ports. Draining while waiting for it to go keeps it
+    /// moving.
+    pub async fn drain_for(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            // Any error is a reason to stop draining, not a failure: the deadline passing and
+            // the console closing because QEMU exited are both expected endings here.
+            if self
+                .pump(deadline, "the guest to finish writing", VmError::BootFailed)
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+
     /// Run `command` in the guest's shell and collect its output and exit code.
     ///
     /// The command is sent with a trailing `echo <marker>$?`, and only that marker's line
