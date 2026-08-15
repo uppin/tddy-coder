@@ -9,12 +9,23 @@ The repo root **`./install`** script installs **`tddy-supervisor`**, **`tddy-dae
 ```bash
 sudo ./install --systemd           # install from existing ./target/release binaries
 sudo ./install --systemd --build # run ./release first, then install
+sudo ./install --systemd --update-systemd-unit # also rewrite the unit files from this script's templates
 ```
 
 - Requires **root** unless **`INSTALL_NO_SYSTEMCTL=1`** (test/CI harness).
 - Release binaries must exist under **`target/release/`** (use **`--build`** or run **`./release`** first).
 - Web dashboard: build **`packages/tddy-web`** (`bun run build`) so **`packages/tddy-web/dist`** exists before install if you want the bundle copied.
 - **Codex ACP:** run **`./dev bun install`** from the repo root so **`node_modules/@zed-industries/codex-acp-<os>-<arch>/bin/codex-acp`** exists; **`./install`** copies it to **`$INSTALL_BIN_DIR/codex-acp`**.
+
+### Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--systemd` | Required. Install binaries, config templates and unit files; enable+start the service. |
+| `--build` | Run `./release` before copying binaries. |
+| `--user` | Per-user install (`systemctl --user`, XDG paths, no supervisor, no root). |
+| `--headless` | Do not require or ship the **tddy-web** bundle (daemon still serves `/rpc` + `/api/config`). |
+| `--update-systemd-unit` | Replace an existing unit file; default preserves an existing file so local edits (e.g. **Delegate=**) are kept. A host installed before the supervisor existed has no `tddy-supervisor.*` unit, so it gets one without this flag — it is only needed to pull template changes (e.g. `Conflicts=`, `ListenStream=`) into a host that already has them. |
 
 ## Paths and defaults
 
@@ -49,7 +60,6 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-supervi
 | `INSTALL_SUPERVISOR_SOCKET_PATH` | Where **`tddy-supervisor.socket`** creates the privileged RPC socket (default **`/run/tddy-supervisor.sock`**). Written into `supervisor.yaml`, `daemon.yaml` and the socket unit, so all three always agree. |
 | `INSTALL_DAEMON_SOCKET_PATH` | Where the supervisor binds the **daemon's** client-facing ConnectionService socket (default **`/run/tddy-daemon.sock`**). Substituted into both the `socket:` block of the `tddy-daemon` service in `supervisor.yaml` and `local.socket_path` in `daemon.yaml`, so the two cannot drift. The supervisor binds it as root before the daemon starts and passes the listener as fd 3 — replacing what `tddy-daemon.socket` used to do, since an unprivileged child cannot bind in `/run`. |
 | `INSTALL_NO_SYSTEMCTL=1` | Skip the root check and every action needing root: all **`systemctl`** calls (reload, enable/restart, masking the legacy units, the *is-active* verification), **`groupadd`/`useradd`/`usermod`**, the daemon log + state directories and their **`chown`**, and the AppArmor profile. ⚠️ It **redirects nothing**: binaries, the web bundle, both configs and both unit files are still written to the four `INSTALL_*_DIR` destinations, so a test install must override all four as well. |
-| `INSTALL_OVERWRITE_SYSTEMD_UNIT=1` | Replace an existing unit file; default preserves an existing file so local edits (e.g. **Delegate=**) are kept. A host installed before the supervisor existed has no `tddy-supervisor.*` unit, so it gets one without this flag — it is only needed to pull template changes (e.g. `Conflicts=`, `ListenStream=`) into a host that already has them. |
 | `INSTALL_DAEMON_USER` | Unprivileged user the daemon runs as, declared in `supervisor.yaml` (default **`tddy`**). **`root`** is rejected: the supervisor refuses a root-run managed service at config load, and multi-user session spawning is now the supervisor's job (`spawn_policy.allowed_session_users`). |
 | `INSTALL_DAEMON_GROUP` | Service group (default: same as `INSTALL_DAEMON_USER`). |
 | `INSTALL_SOCKET_GROUP` | Group granted access to the supervisor socket (default **`tddy-clients`**); the daemon user is added to it. Membership only gets a client as far as `connect()` — each request is authorized by `SO_PEERCRED`. |
@@ -59,7 +69,7 @@ The generated unit uses **`ExecStart`** pointing at the resolved **`tddy-supervi
 
 - **Binaries** **`tddy-*`** are copied from **`target/release/`** (overwritten on each install). **`codex-acp`** is copied from **`node_modules/.../bin/codex-acp`** (same **`INSTALL_BIN_DIR`**).
 - **Config** is skipped if **`supervisor.yaml`** / **`daemon.yaml`** already exists (each independently). Because substitution only happens for a file this run *creates*, changing **`INSTALL_DAEMON_SOCKET_PATH`** or **`INSTALL_SUPERVISOR_SOCKET_PATH`** on a later run rewrites nothing — install re-reads the files it kept and **warns** for every one that does not name the resolved path (it cannot fix them without overwriting operator config).
-- **Unit file** behavior depends on **`INSTALL_OVERWRITE_SYSTEMD_UNIT`** (see above), for both the service and the socket unit. The AppArmor profile is guarded the same way: an existing one is kept, so operator edits survive a reinstall.
+- **Unit file** behavior depends on **`--update-systemd-unit`** (see [Flags](#flags)), for both the service and the socket unit. The AppArmor profile is guarded the same way: an existing one is kept, so operator edits survive a reinstall.
 - **Legacy daemon unit** — an inherited **`tddy-daemon.socket`** and then **`tddy-daemon.service`** are stopped, disabled and **masked**. The order matters: stopping the service does not stop the socket it is activated from, and that socket listens on the very path the supervisor is about to bind, so a `connect()` in between would re-launch the legacy daemon onto the daemon's web port and token storage. Masking (not just `disable`) is what survives a `systemctl preset-all` or a package upgrade re-adding the symlink. `./install` never deletes an operator's files, so when the legacy unit file *is* `$INSTALL_SYSTEMD_DIR/tddy-daemon.service` the mask cannot be created there — install reports that with the manual remedy (move the file aside) instead of forcing it. The supervisor unit also carries **`Conflicts=tddy-daemon.service tddy-daemon.socket`** as a backstop.
 - **`systemctl daemon-reload`**, **enable**, and **start** run after files are installed when **`INSTALL_NO_SYSTEMCTL`** is unset. The socket unit is started first so the listening fd exists before the supervisor adopts it.
 - **Start is verified, not assumed** — `Type=simple` makes `systemctl restart` return as soon as fork/exec succeeds, so a supervisor that rejects its config and exits a millisecond later would look healthy. Install samples `systemctl is-active tddy-supervisor` five times a second apart and **fails** if it is ever not `active` (a crash loop reports `activating`/`failed`), dumping `systemctl status` and the last journal lines. This matters most on upgrade: the legacy unit is already disarmed by then, so a crash loop means nothing is serving.
@@ -79,7 +89,7 @@ The unit runs **`tddy-supervisor`** as root; everything network-facing runs unpr
 - **AppArmor profile** — still rendered from `packages/tddy-daemon/apparmor/tddy-daemon` (binary path substituted), written to `INSTALL_APPARMOR_DIR` **when absent** (an existing profile is kept) and loaded with `apparmor_parser -r`. No installed unit references `AppArmorProfile=` anymore: the profile attaches by binary path under `flags=(unconfined)`, grants only `userns`, and covers the jails the daemon still builds itself. A missing **or failing** `apparmor_parser` is a warning, not a hard error.
 - **Runtime cgroup base** — nothing is hardcoded: the base is derived from `/proc/self/cgroup` at runtime (the unit's `Delegate=yes` subtree), overridable via the commented `cgroup.base_override` in `supervisor.yaml.production`.
 
-Because a unit is only overwritten when `INSTALL_OVERWRITE_SYSTEMD_UNIT=1`, a host that already has a hand-edited `tddy-supervisor.service`/`.socket` keeps it as-is and needs that flag to pick up template changes. A host installed *before* the supervisor existed has no such file, so it gets both units on the first supervised install; its `tddy-daemon.service` is a different file name and is disarmed rather than replaced.
+Because a unit is only overwritten when `--update-systemd-unit` is passed, a host that already has a hand-edited `tddy-supervisor.service`/`.socket` keeps it as-is and needs that flag to pick up template changes. A host installed *before* the supervisor existed has no such file, so it gets both units on the first supervised install; its `tddy-daemon.service` is a different file name and is disarmed rather than replaced.
 
 ## Verification and tests
 

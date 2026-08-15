@@ -6,9 +6,9 @@ use std::process::Command;
 
 use tddy_e2e::install_contract::{
     verify_build_flag_invokes_release, verify_env_override_references,
-    verify_headless_flag_support, verify_install_overwrite_systemd_unit,
-    verify_install_script_contracts, verify_no_systemctl_support, verify_requires_systemd_flag,
-    verify_root_check, verify_syntax, verify_user_flag_support,
+    verify_headless_flag_support, verify_install_script_contracts, verify_no_systemctl_support,
+    verify_requires_systemd_flag, verify_root_check, verify_syntax,
+    verify_update_systemd_unit_flag, verify_user_flag_support,
 };
 
 fn repo_root() -> PathBuf {
@@ -68,12 +68,12 @@ fn install_has_root_check() {
 }
 
 #[test]
-fn install_overwrite_systemd_unit_documented() {
+fn install_update_systemd_unit_flag_documented() {
     // Given
     let script = read_install();
 
     // When / Then
-    verify_install_overwrite_systemd_unit(&script);
+    verify_update_systemd_unit_flag(&script);
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn install_generates_unit_with_correct_paths() {
 }
 
 #[test]
-fn install_preserves_systemd_unit_unless_overwrite_env() {
+fn install_preserves_systemd_unit_unless_update_flag() {
     // Given
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -382,17 +382,15 @@ fn install_preserves_systemd_unit_unless_overwrite_env() {
         "unit must not be overwritten on reinstall; got:\n{after}"
     );
 
-    // When — third install with INSTALL_OVERWRITE_SYSTEMD_UNIT=1
-    let mut env_overwrite: Vec<(&str, &str)> = base_env.to_vec();
-    env_overwrite.push(("INSTALL_OVERWRITE_SYSTEMD_UNIT", "1"));
-    let st3 = run_install_in(root, &env_overwrite);
+    // When — third install with --update-systemd-unit
+    let st3 = run_install_args_in(root, &["--systemd", "--update-systemd-unit"], &base_env);
 
     // Then — unit is replaced
     assert!(st3.success(), "third install with overwrite: {st3:?}");
     let final_unit = fs::read_to_string(&unit_path).unwrap();
     assert!(
         !final_unit.contains("User=preserve_test"),
-        "INSTALL_OVERWRITE_SYSTEMD_UNIT=1 should replace unit; got:\n{final_unit}"
+        "--update-systemd-unit should replace unit; got:\n{final_unit}"
     );
     let cfg_file = cfg_dir.join("supervisor.yaml");
     let want_exec = format!(
