@@ -346,12 +346,15 @@ async fn run_livekit_terminal(
     server_identity: String,
     _session_token: Option<String>,
 ) -> Result<()> {
-    use livekit::prelude::*;
     use prost::Message as _;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
-    use tddy_livekit::{RpcClient, TokenGenerator};
+    use tddy_livekit::TokenGenerator;
     use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
+
+    /// How long to wait for the session's RPC-serving participant to appear. It is normally already
+    /// joined; this covers the window right after a daemon or session restart.
+    const SERVER_PARTICIPANT_WAIT: Duration = Duration::from_secs(30);
 
     let room_name = args
         .livekit_room
@@ -368,38 +371,28 @@ async fn run_livekit_terminal(
     .generate()
     .map_err(|e| anyhow::anyhow!("token: {}", e))?;
 
-    let (raw_room, mut room_events) =
-        Room::connect(&livekit_url, &client_token, RoomOptions::default())
-            .await
-            .map_err(|e| anyhow::anyhow!("room connect: {}", e))?;
-    let room = Arc::new(raw_room);
-
-    let target: ParticipantIdentity = server_identity.clone().into();
     log::info!(target: "tddy_tools::pty_relay", "waiting for session server participant \"{}\"…", server_identity);
-    if !room.remote_participants().contains_key(&target) {
-        tokio::time::timeout(Duration::from_secs(30), async {
-            while let Some(ev) = room_events.recv().await {
-                if let RoomEvent::ParticipantConnected(p) = ev {
-                    if p.identity().to_string() == server_identity {
-                        return;
-                    }
-                }
-            }
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("timed out waiting for session server participant"))?;
-    }
+    let connected = tddy_livekit::client_connect::connect_client(
+        &livekit_url,
+        &client_token,
+        &server_identity,
+        SERVER_PARTICIPANT_WAIT,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{}", e))?;
+    // Holds the room for the whole session: the client owns an `Arc<Room>` of its own, but it is
+    // moved into the bidi task below, and dropping the last handle would leave the room mid-stream.
+    let _room = Arc::clone(&connected.room);
+    let client = connected.client;
 
     log::info!(target: "tddy_tools::pty_relay", "server visible — starting terminal bidi stream");
 
-    let rpc_events_term = room.subscribe();
     let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(64);
     let (output_tx, mut output_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_bidi = Arc::clone(&shutdown);
 
     tokio::spawn(async move {
-        let client = RpcClient::new_shared(room, server_identity, rpc_events_term);
         let bidi = client.start_bidi_stream("terminal.TerminalService", "StreamTerminalIO");
         let (mut sender, mut rx) = match bidi {
             Ok(p) => p,

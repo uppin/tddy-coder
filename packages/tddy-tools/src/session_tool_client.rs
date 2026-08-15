@@ -468,40 +468,25 @@ async fn connect_livekit_client(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSessi
         token,
         server_identity,
     } = key;
-    let (connected_room, mut room_events) = Room::connect(url, token, RoomOptions::default())
-        .await
-        .map_err(|e| format!("livekit room connect: {e}"))?;
-    let connected_room = Arc::new(connected_room);
+    // The join + participant-wait + factory sequence lives in `tddy_livekit::client_connect`, which
+    // vends through `LiveKitRpcClientFactory` so every client on the room shares one request-id
+    // space and one response loop — the property this cache depends on, since it keeps the room
+    // alive across calls rather than letting each call have a short-lived room of its own.
+    let connected = tddy_livekit::client_connect::connect_client(
+        url,
+        token,
+        server_identity,
+        SERVER_PARTICIPANT_WAIT,
+    )
+    .await
+    .map_err(|e| format!("{e} (room \"{room}\")"))?;
 
-    let target: ParticipantIdentity = server_identity.clone().into();
-    if !connected_room.remote_participants().contains_key(&target) {
-        let appeared = tokio::time::timeout(SERVER_PARTICIPANT_WAIT, async {
-            while let Some(event) = room_events.recv().await {
-                if let RoomEvent::ParticipantConnected(participant) = event {
-                    if participant.identity() == target {
-                        return;
-                    }
-                }
-            }
-        })
-        .await;
-        if appeared.is_err() {
-            return Err(format!(
-                "timed out waiting for remote daemon participant \"{server_identity}\" in room \"{room}\""
-            ));
-        }
-    }
+    spawn_worktree_activity_log(Arc::clone(&connected.room));
 
-    spawn_worktree_activity_log(Arc::clone(&connected_room));
-
-    // Through the factory rather than building an RpcClient directly: it owns one ClientEngine and
-    // one response loop per room, so vended clients share a request-id space instead of each
-    // starting at 1 and leaking its own `room.subscribe()` loop. Harmless while every call had its
-    // own short-lived room; caching the room is what would make it bite.
-    let presence_room = Arc::clone(&connected_room);
-    let presence_target = target.clone();
+    let presence_room = connected.room;
+    let presence_target: ParticipantIdentity = server_identity.clone().into();
     Ok(Arc::new(LiveKitSession::new(
-        Arc::new(tddy_livekit::LiveKitRpcClientFactory::for_room(connected_room).client(target)),
+        Arc::new(connected.client),
         Box::new(move || {
             presence_room
                 .remote_participants()

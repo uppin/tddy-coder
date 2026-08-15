@@ -64,6 +64,11 @@ export function useCommonRoom(
       roomRef.current = null;
 
       try {
+        // No `sessionToken` is passed here on purpose: `token.TokenService` carries the field, so
+        // `createAuthGateInterceptor` fills it with a request-time-fresh access token on the way
+        // out (see `src/rpc/authGateInterceptor.ts`). Reading one from auth state here would send
+        // a staler credential than the gate's, and would couple this hook to an `AuthProvider`.
+        // The daemon's registration of the mint refuses an unauthenticated caller.
         const res = await tokenClient.generateToken({ room: rn, identity: id });
         if (cancelled) return;
 

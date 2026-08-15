@@ -56,6 +56,31 @@ message LogoutRequest {
 }
 message LogoutResponse {}
 
+// Mint a LiveKit room JWT for an already-authenticated caller.
+//
+// The LiveKit API secret is also the HMAC key every daemon signs session tokens with, so a client
+// that held it could mint an access token for any GitHub user on the fleet. Clients therefore ask
+// the daemon for a room JWT instead of minting one. The room and the participant identity are
+// chosen by the daemon and are never read from the request.
+service LiveKitTokenService {
+  rpc MintLiveKitToken(MintLiveKitTokenRequest) returns (MintLiveKitTokenResponse);
+}
+
+message MintLiveKitTokenRequest {
+  // Daemon access token, verified exactly as on every other token-gated RPC. A refresh-kind or
+  // expired token is rejected.
+  string session_token = 1;
+}
+message MintLiveKitTokenResponse {
+  // Short-lived LiveKit JWT. Its embedded identity is server-generated.
+  string token = 1;
+  // The LiveKit server the token is valid against.
+  string url = 2;
+  // The daemon's configured common room — the only room the token grants.
+  string room = 3;
+  uint64 ttl_seconds = 4;
+}
+
 message GitHubUser {
   string login = 1;
   string avatar_url = 2;

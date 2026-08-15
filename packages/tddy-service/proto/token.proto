@@ -10,6 +10,9 @@ service TokenService {
 message GenerateTokenRequest {
   string room = 1;
   string identity = 2;
+  // Daemon access token. Registrations that install an authenticator refuse the call unless this
+  // verifies; unauthenticated registrations (a session coder's own web port) ignore it.
+  string session_token = 3;
 }
 
 message GenerateTokenResponse {
@@ -20,6 +23,9 @@ message GenerateTokenResponse {
 message RefreshTokenRequest {
   string room = 1;
   string identity = 2;
+  // Same credential as GenerateTokenRequest: a refresh mints a brand-new JWT, so it is gated
+  // exactly like the first mint rather than trusting the token being replaced.
+  string session_token = 3;
 }
 
 message RefreshTokenResponse {

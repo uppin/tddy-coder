@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build optimized production binary. Uses nix dev shell for consistent toolchain.
 # Output: target/release/tddy-coder, target/release/tddy-tools, target/release/tddy-daemon,
-#         target/release/tddy-supervisor
+#         target/release/tddy-supervisor, target/release/tddy-remote-git-repo
 set -e
-exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-daemon -p tddy-supervisor
+exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-daemon -p tddy-supervisor -p tddy-remote-git-repo

@@ -17,6 +17,11 @@ export interface LiveKitTerminalToken {
  *
  * Does nothing (token/ttlSeconds/error stay null) until `tokenClient`, `roomName`, and `identity`
  * are all present and non-empty — e.g. before a session has finished attaching.
+ *
+ * The daemon's mint refuses an unauthenticated caller, but no `sessionToken` is passed here:
+ * `token.TokenService` requests carry the field, so `createAuthGateInterceptor` fills it with a
+ * request-time-fresh access token on the way out (see `src/rpc/authGateInterceptor.ts`) — fresher
+ * than anything this hook could read, and without coupling it to an `AuthProvider`.
  */
 export function useLiveKitTerminalToken(
   tokenClient: TokenClient | undefined,

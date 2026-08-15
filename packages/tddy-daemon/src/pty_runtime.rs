@@ -194,16 +194,20 @@ pub fn wrap_argv_for_privilege_drop(argv: &[String], uid: u32, gid: u32) -> Vec<
 
 /// The uid/gid/home of a target OS user, resolved from the passwd database.
 #[cfg(unix)]
-struct ResolvedPtyUser {
-    uid: u32,
-    gid: u32,
-    home_dir: String,
+pub struct ResolvedPtyUser {
+    pub uid: u32,
+    pub gid: u32,
+    pub home_dir: String,
 }
 
 /// Resolve `os_user` to its uid/gid/home via `getpwnam_r`. Mirrors the passwd lookup in
 /// `spawner::spawn_as_user`.
+///
+/// Public so non-PTY spawns that impersonate an OS user (the git pipe relay in
+/// [`crate::remote_git_service`]) resolve the same ids from the same place, rather than deriving
+/// their own and drifting from the PTY path.
 #[cfg(unix)]
-fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
+pub fn resolve_pty_os_user(os_user: &str) -> Result<ResolvedPtyUser, String> {
     let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
     let mut buf = vec![0u8; 16384];
     let mut result = std::ptr::null_mut();

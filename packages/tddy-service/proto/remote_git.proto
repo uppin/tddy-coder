@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package remote_git;
+
+// RemoteGitService: serves a daemon **project** as a git remote over any tddy-rpc transport
+// (LiveKit, local socket, Connect-HTTP). The client is `tddy-remote-git-repo`, which git execs as
+// its `GIT_SSH_COMMAND`; this service is the far end of that pipe.
+//
+// This is deliberately NOT the terminal RPC surface. A git pack stream needs an 8-bit-clean pipe,
+// a separate stderr, and an exit code — the terminal bridge injects a mode prologue, replays from a
+// lossy ring, and runs over a PTY whose line discipline rewrites bytes. See
+// docs/ft/daemon/remote-git-repo.md § Why this is not the terminal RPC.
+service RemoteGitService {
+  // One git operation per stream. The first client frame carries `open`; every later frame carries
+  // stdin bytes. The server streams the child's stdout/stderr back and terminates with a single
+  // frame carrying `done = true` and the child's exit code. Ending the client stream (disconnect
+  // included) kills the child — a git process never outlives the connection that asked for it.
+  rpc Serve(stream GitClientFrame) returns (stream GitServerFrame);
+}
+
+// Read only from the FIRST frame of a `Serve` stream; ignored on later frames.
+message GitOpen {
+  // Daemon access token, exactly as every other daemon RPC carries it (GitHub user -> OS user).
+  // A refresh-kind token is rejected: this is an RPC credential.
+  string session_token = 1;
+  // The project to serve, as written after the colon in the git remote: its `project_id` or its
+  // `name` in the calling OS user's `~/.tddy/projects/projects.yaml`.
+  //
+  // NEVER a filesystem path. The daemon resolves the repository location from its own project
+  // registry, so no value here can select a directory the registry does not already name.
+  string project_ref = 2;
+  // The git pack verb to run: "git-upload-pack" (clone/fetch/ls-remote) or "git-receive-pack"
+  // (push). Re-validated server-side against a closed whitelist — the client's own check is a
+  // fast path, never the gate.
+  string verb = 3;
+}
+
+message GitClientFrame {
+  // First frame only.
+  GitOpen open = 1;
+  // Raw bytes for the child's stdin, relayed verbatim. Valid on the first frame too: bytes sent
+  // alongside `open` reach the child as soon as it is spawned, rather than being dropped.
+  bytes stdin = 2;
+  // Close the child's stdin. `git-upload-pack` finishes its negotiation on EOF, so a stream that
+  // never sets this hangs the child until the connection drops.
+  bool stdin_eof = 3;
+}
+
+message GitServerFrame {
+  // Raw bytes from the child's stdout, relayed verbatim and chunked so a frame never approaches
+  // the transport's per-message limit (see tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES).
+  bytes stdout = 1;
+  // Raw bytes from the child's stderr, kept in their own field. git writes progress here while the
+  // pack goes down stdout; interleaving the two would corrupt the pack.
+  bytes stderr = 2;
+  // The child's exit status. Meaningful only on the final frame (`done = true`).
+  int32 exit_code = 3;
+  // Marks the final frame. Nothing follows it on this stream.
+  bool done = 4;
+}

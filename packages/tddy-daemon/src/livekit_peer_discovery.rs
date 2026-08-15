@@ -1088,7 +1088,13 @@ async fn common_room_discovery_cycle(
 ///
 /// See `docs/ft/web/daemon-selector-livekit-rpc.md` § The daemon identity subtlety.
 pub fn daemon_rpc_identity(instance_id: &str) -> String {
-    format!("daemon-{}", instance_id.trim())
+    // Composed from the constant `token.TokenService` refuses to mint, so no client can ever be
+    // admitted under a name that lands here.
+    format!(
+        "{}{}",
+        tddy_service::RESERVED_DAEMON_IDENTITY_PREFIX,
+        instance_id.trim()
+    )
 }
 
 /// Deadline for one forwarded unary RPC, and for opening a forwarded server stream.

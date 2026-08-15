@@ -1,0 +1,7 @@
+# Changesets Applied
+
+Wrapped changeset history for tddy-remote-git-repo.
+
+**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
+
+- **2026-08-15** [Feature] **remote-git-repo-over-livekit** — new crate: the binary git execs as its `GIT_SSH_COMMAND`, so a daemon project is an ordinary git remote (`git clone udoo-1:my-app`). `ssh_argv` implements git's SSH argv contract — shell-dequoting the command the way `ssh` receives it, stripping an ignored `user@`, accepting-and-ignoring `-o` (which is what lets the shim work whichever SSH variant git picked) and refusing every other leading option **by name**, since taking one as the host shifts every argument along and the refusal would then name the daemon as the command. Only the two git pack verbs are servable, refused before any network call, exit 128. `credentials` resolves flags with per-parameter env fallback and holds **no LiveKit credential**: the client asks the daemon to mint a room JWT (`--daemon-url` plus a session or 7-day refresh token) rather than carrying `api_secret`, which is the fleet's session-token signing key. `relay` mints, joins, and pumps local stdio over `remote_git.RemoteGitService/Serve`, exiting with the remote command's own status so git sees the truth. Feature [remote-git-repo.md](../../../docs/ft/daemon/remote-git-repo.md). (tddy-remote-git-repo)

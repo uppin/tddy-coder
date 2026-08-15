@@ -102,5 +102,9 @@ tddy-github = { path = "../tddy-github" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 serial_test = "3"
+# Already workspace dependencies (see the root `[workspace.dependencies]`); no new crate enters
+# the tree. Used by the remote-git acceptance suites for table-driven cases and readable diffs.
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"

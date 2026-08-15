@@ -424,12 +424,13 @@ mod token_service_acceptance {
     #[tokio::test]
     async fn token_service_generate_token_returns_token_and_ttl() {
         // Given — a bridge wrapping TokenServiceServer with MockTokenProvider
-        let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
+        let server = TokenServiceServer::new(TokenServiceImpl::unauthenticated(MockTokenProvider));
         let bridge = tddy_rpc::RpcBridge::new(server);
 
         let req = GenerateTokenRequest {
             room: "test-room".to_string(),
             identity: "test-identity".to_string(),
+            session_token: String::new(),
         };
         let msg = RpcMessage {
             payload: req.encode_to_vec(),
@@ -456,12 +457,13 @@ mod token_service_acceptance {
     #[tokio::test]
     async fn token_service_refresh_token_returns_token_and_ttl() {
         // Given — a bridge wrapping TokenServiceServer with MockTokenProvider
-        let server = TokenServiceServer::new(TokenServiceImpl::new(MockTokenProvider));
+        let server = TokenServiceServer::new(TokenServiceImpl::unauthenticated(MockTokenProvider));
         let bridge = tddy_rpc::RpcBridge::new(server);
 
         let req = crate::proto::token::RefreshTokenRequest {
             room: "other-room".to_string(),
             identity: "other-identity".to_string(),
+            session_token: String::new(),
         };
         let msg = RpcMessage {
             payload: req.encode_to_vec(),
