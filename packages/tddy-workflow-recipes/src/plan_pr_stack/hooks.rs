@@ -160,12 +160,12 @@ impl RunnerHooks for PlanPrStackHooks {
                 // Write stack-plan.yaml (re-serialized for canonical form).
                 let yaml = serde_yaml::to_string(&plan)
                     .map_err(|e| format!("failed to serialize stack-plan: {e}"))?;
-                std::fs::write(dir.join(STACK_PLAN_BASENAME), &yaml)
+                tddy_core::atomic_file::write_atomic(&dir.join(STACK_PLAN_BASENAME), &yaml)
                     .map_err(|e| format!("write {STACK_PLAN_BASENAME}: {e}"))?;
 
                 // Write human-readable pr-stack-plan.md.
                 let md = generate_pr_stack_plan_md(&plan);
-                std::fs::write(dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
+                tddy_core::atomic_file::write_atomic(&dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
                     .map_err(|e| format!("write {PR_STACK_PLAN_MD_BASENAME}: {e}"))?;
 
                 set_changeset_state(

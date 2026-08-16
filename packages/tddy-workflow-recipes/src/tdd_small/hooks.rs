@@ -331,7 +331,7 @@ fn after_post_green_review(
     write_evaluation_report(session_dir, &eval)?;
     let refactoring_plan_path = session_dir.join("refactoring-plan.md");
     if !refactoring_plan_path.exists() {
-        std::fs::write(
+        tddy_core::atomic_file::write_atomic(
             &refactoring_plan_path,
             format!(
                 "# Refactoring plan (tdd-small post-green)\n\n\

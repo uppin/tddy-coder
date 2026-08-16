@@ -53,7 +53,9 @@ pub fn install_cursor_hooks_in_worktree(
     if let Err(e) = std::fs::create_dir_all(&cursor_dir).and_then(|_| {
         serde_json::to_string_pretty(&hooks_settings)
             .map_err(|e| std::io::Error::other(e.to_string()))
-            .and_then(|json| std::fs::write(cursor_dir.join("hooks.json"), json))
+            .and_then(|json| {
+                tddy_core::atomic_file::write_atomic(&cursor_dir.join("hooks.json"), json)
+            })
     }) {
         log::warn!(
             "session {session_id}: failed to write .cursor/hooks.json — hooks will not fire: {e}"

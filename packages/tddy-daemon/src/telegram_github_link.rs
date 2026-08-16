@@ -180,15 +180,8 @@ impl TelegramGithubMappingStore {
     }
 
     fn save_atomic(&self, file: &TelegramGithubMappingFile) -> anyhow::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let json = serde_json::to_vec_pretty(file)?;
-        let tmp = self
-            .path
-            .with_extension(format!("tmp.{}", std::process::id()));
-        std::fs::write(&tmp, &json)?;
-        std::fs::rename(&tmp, &self.path)?;
+        tddy_core::atomic_file::write_atomic(&self.path, &json)?;
         log::debug!(
             target: "tddy_daemon::telegram_github_link",
             "TelegramGithubMappingStore: wrote {} bytes atomically to {}",

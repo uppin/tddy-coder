@@ -228,12 +228,12 @@ fn write_stack_status(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let artifacts_dir = session_dir.join("artifacts");
     std::fs::create_dir_all(&artifacts_dir)?;
-    std::fs::write(
-        artifacts_dir.join(STACK_STATUS_MD_BASENAME),
+    tddy_core::atomic_file::write_atomic(
+        &artifacts_dir.join(STACK_STATUS_MD_BASENAME),
         stack_status_md(stack),
     )?;
-    std::fs::write(
-        artifacts_dir.join(STACK_STATUS_JSON_BASENAME),
+    tddy_core::atomic_file::write_atomic(
+        &artifacts_dir.join(STACK_STATUS_JSON_BASENAME),
         stack_status_json(stack)?,
     )?;
     Ok(())
@@ -330,11 +330,11 @@ fn after_write_stack_plan(
 
     let yaml =
         serde_yaml::to_string(&plan).map_err(|e| format!("failed to serialize stack-plan: {e}"))?;
-    std::fs::write(dir.join(STACK_PLAN_BASENAME), &yaml)
+    tddy_core::atomic_file::write_atomic(&dir.join(STACK_PLAN_BASENAME), &yaml)
         .map_err(|e| format!("write {STACK_PLAN_BASENAME}: {e}"))?;
 
     let md = generate_pr_stack_plan_md(&plan);
-    std::fs::write(dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
+    tddy_core::atomic_file::write_atomic(&dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
         .map_err(|e| format!("write {PR_STACK_PLAN_MD_BASENAME}: {e}"))?;
 
     // Persist the optional code-discovery map to artifacts/exploration.md, reusing the same

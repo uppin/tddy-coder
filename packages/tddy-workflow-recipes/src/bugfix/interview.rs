@@ -94,7 +94,7 @@ pub fn persist_bugfix_interview_handoff_for_analyze(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, handoff_text)
+    tddy_core::atomic_file::write_atomic(&path, handoff_text)
 }
 
 /// Merge relay file into **`prompt`** (and visible **analyze** context) before the **analyze** system prompt runs.

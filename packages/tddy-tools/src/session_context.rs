@@ -55,7 +55,8 @@ pub fn apply_session_context_merge(
     session.context.merge_json_object_sync(obj);
 
     let out = serde_json::to_string_pretty(&session)?;
-    fs::write(&path, out).with_context(|| format!("write session file {}", path.display()))?;
+    tddy_core::atomic_file::write_atomic(&path, out)
+        .with_context(|| format!("write session file {}", path.display()))?;
     log::info!(
         target: "tddy_tools::session_context",
         "apply_session_context_merge: wrote {}",

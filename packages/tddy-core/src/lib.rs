@@ -2,6 +2,7 @@
 
 pub mod agent_activity;
 pub mod agent_skills;
+pub mod atomic_file;
 pub mod backend;
 pub mod base_sync;
 pub mod branch_worktree_intent;
@@ -44,6 +45,7 @@ pub use agent_skills::{
     ParsedSkillFrontmatter, SkillMdParseError, SkillScanReport, SlashMenuEntry, SlashMenuItem,
     AGENTS_SKILLS_DIR,
 };
+pub use atomic_file::{write_atomic, write_atomic_labelled};
 pub use backend::{
     backend_from_label, backend_selection_question, build_claude_args, clear_child_pid,
     default_model_for_agent, get_child_pid, kill_child_process, preselected_index_for_agent,

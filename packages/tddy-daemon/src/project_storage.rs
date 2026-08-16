@@ -62,7 +62,8 @@ pub fn write_projects(projects_dir: &Path, projects: &[ProjectData]) -> anyhow::
     };
     let contents =
         serde_yaml::to_string(&file).map_err(|e| anyhow::anyhow!("serialize projects: {}", e))?;
-    std::fs::write(&path, contents).map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
+    tddy_core::atomic_file::write_atomic(&path, contents)
+        .map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
 }
 
 /// Append one project after reading existing.
