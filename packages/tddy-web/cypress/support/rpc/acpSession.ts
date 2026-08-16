@@ -144,6 +144,24 @@ export function acpError(message: string): AcpAgentMessage {
   });
 }
 
+/**
+ * The text of every content block a client `prompt` frame carried, in order.
+ *
+ * Throws for a frame that is not a prompt, or a block that is not text: a spec asserting on what
+ * the operator sent must fail on the wrong shape rather than quietly compare against an empty list.
+ */
+export function promptTexts(m: AcpClientMessage): string[] {
+  if (m.msg.case !== "prompt") {
+    throw new Error(`expected a prompt frame, got '${String(m.msg.case)}'`);
+  }
+  return m.msg.value.prompt.map((block) => {
+    if (block.block.case !== "text") {
+      throw new Error(`expected a text content block, got '${String(block.block.case)}'`);
+    }
+    return block.block.value.text;
+  });
+}
+
 /** The encoded `option_id` a client sent in a `requestPermission` reply (`""` if not that shape). */
 export function selectedOptionId(m: AcpClientMessage): string {
   if (m.msg.case !== "requestPermission") return "";

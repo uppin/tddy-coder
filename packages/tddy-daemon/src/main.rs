@@ -162,8 +162,11 @@ fn main() -> anyhow::Result<()> {
     // Browser DEBUG mask (debug-package namespaces) exposed at /api/config; see DaemonConfig::debug.
     let web_debug = config.debug.clone();
 
+    // The startup snapshot the web bundle is served with. Config entries only: assistants are
+    // created and deleted while the daemon runs, so no snapshot could stay right about them —
+    // `ListAgents` is their live source, and it reads the registry on every call.
     let allowed_agents: Vec<tddy_coder::web_server::ClientAllowedAgent> =
-        tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config)
+        tddy_daemon::agent_list_mapping::agent_allowlist_rows(&config, &[])
             .into_iter()
             .map(|row| tddy_coder::web_server::ClientAllowedAgent {
                 id: row.id,
@@ -440,6 +443,18 @@ fn main() -> anyhow::Result<()> {
                     Ok((session_dir, repo_root))
                 })
             };
+            // This daemon's model registry: the providers it talks to, their models, and the
+            // assistants composed from them. Opened before ConnectionService so an assistant is
+            // listed by `ListAgents` as a selectable `--agent`.
+            let model_registry = Arc::new(
+                tddy_daemon::model_registry::ModelRegistryStore::open(
+                    &tddy_data_dir.join("models.db"),
+                    &tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config),
+                )
+                .await?
+                .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
+            );
+
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 sessions_base_resolver,
@@ -450,7 +465,8 @@ fn main() -> anyhow::Result<()> {
                 telegram_hooks.clone(),
                 Arc::clone(&shared_claude_cli_manager),
             )
-            .with_session_rooms(Arc::clone(&shared_session_rooms));
+            .with_session_rooms(Arc::clone(&shared_session_rooms))
+            .with_model_registry(Arc::clone(&model_registry));
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
             }
@@ -544,6 +560,40 @@ fn main() -> anyhow::Result<()> {
                 name: "connection.ConnectionService",
                 service: Arc::new(connection_server) as Arc<dyn tddy_rpc::RpcService>,
             });
+
+            // ModelRegistryService — this daemon's providers, models and assistants. Rides the same
+            // entries as every other service, so it is reachable over HTTP `/rpc` and LiveKit alike.
+            let model_registry_server = tddy_service::ModelRegistryServiceServer::new(
+                tddy_daemon::model_registry::ModelRegistryServiceImpl::new(
+                    Arc::clone(&model_registry),
+                    Arc::new(tddy_daemon::model_registry::DefaultProviderClients),
+                    vm_user_resolver.clone(),
+                ),
+            );
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "models.ModelRegistryService",
+                service: Arc::new(model_registry_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // The model-addressed ACP surface: chatting with a registry model or assistant. The
+            // *session*-addressed `acp.AcpService` is mounted per session process
+            // (`session_view_adapter_surface`); this one is the daemon's own, so the Models & Agents
+            // screen can open a chat without a session existing at all.
+            let model_acp_server = tddy_service::AcpServiceServer::new(
+                tddy_daemon::model_registry::ModelAcpService::new(
+                    Arc::clone(&model_registry),
+                    task_registry.clone(),
+                    vm_user_resolver.clone(),
+                ),
+            );
+            rpc_entries.push(
+                tddy_rpc::ServiceEntry {
+                    name: tddy_service::AcpServiceServer::<
+                        tddy_daemon::model_registry::ModelAcpService,
+                    >::NAME,
+                    service: Arc::new(model_acp_server) as Arc<dyn tddy_rpc::RpcService>,
+                },
+            );
 
             // TaskService — backed by the same registry as ConnectionService.
             let task_service_impl = tddy_daemon::task_service::TaskServiceImpl::new(

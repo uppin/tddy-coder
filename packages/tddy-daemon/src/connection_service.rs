@@ -1004,6 +1004,10 @@ pub struct ConnectionServiceImpl {
     /// here is what keeps a room open past the `StartSession` that created it; `DeleteSession`
     /// closes it again.
     session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    /// This daemon's model registry, whose assistants are selectable agents alongside the
+    /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
+    /// which case `ListAgents` reports the config entries alone.
+    model_registry: Option<Arc<crate::model_registry::ModelRegistryStore>>,
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -1088,7 +1092,18 @@ impl ConnectionServiceImpl {
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
+            model_registry: None,
         }
+    }
+
+    /// Share this daemon's model registry (builder), so an assistant defined in it is listed by
+    /// `ListAgents` as a selectable agent.
+    pub fn with_model_registry(
+        mut self,
+        registry: Arc<crate::model_registry::ModelRegistryStore>,
+    ) -> Self {
+        self.model_registry = Some(registry);
+        self
     }
 
     /// Share the daemon's session-room registry (builder) with everything else that opens or
@@ -2580,25 +2595,57 @@ impl ConnectionServiceImpl {
         }
     }
 
-    /// Resolve `specialized_agents` names against `<tddyhome>/agents` (+ builtins) into their
-    /// full defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
+    /// Every agent def a name can resolve against on this daemon: the builtins, the YAML defs
+    /// under `<tddyhome>/agents`, and this daemon's registry assistants — `{builtin, yaml,
+    /// sqlite}`. A registry assistant of the same name as a YAML def wins, on the same
+    /// "the more specific source is the one the operator just edited" rule that already makes a
+    /// YAML def beat a builtin.
+    pub async fn resolvable_agent_defs(
+        &self,
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        let agents_dir = self.tddy_data_dir.join("agents");
+        let mut defs = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
+        for def in self.registry_agent_defs().await? {
+            match defs.iter_mut().find(|d| d.name == def.name) {
+                Some(existing) => *existing = def,
+                None => defs.push(def),
+            }
+        }
+        Ok(defs)
+    }
+
+    /// This daemon's registry assistants as agent defs. Empty when no registry is wired (a test
+    /// fixture); a registry that is wired but unreadable is an error, never "no assistants" — a
+    /// session started against a name that silently stopped resolving runs as something else.
+    async fn registry_agent_defs(
+        &self,
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        match &self.model_registry {
+            Some(registry) => crate::model_registry::registry_agent_defs(registry)
+                .await
+                .map_err(Status::from),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Resolve `specialized_agents` names against [`Self::resolvable_agent_defs`] into their full
+    /// defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
     /// error — the session is never started with a silently-dropped subagent. An empty input
     /// resolves to an empty output, not an error.
-    fn resolve_specialized_agent_defs(
+    async fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],
     ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
         if specialized_agents.is_empty() {
             return Ok(Vec::new());
         }
-        let agents_dir = self.tddy_data_dir.join("agents");
-        let resolved = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
+        let resolved = self.resolvable_agent_defs().await?;
         let mut selected = Vec::with_capacity(specialized_agents.len());
         for name in specialized_agents {
             let def = resolved.iter().find(|d| &d.name == name).ok_or_else(|| {
                 Status::invalid_argument(format!(
-                    "specialized_agents: unknown subagent '{name}' (not a builtin and not \
-                         found under <tddyhome>/agents)"
+                    "specialized_agents: unknown subagent '{name}' (not a builtin, not found \
+                         under <tddyhome>/agents, and not an assistant in this daemon's registry)"
                 ))
             })?;
             selected.push(def.clone());
@@ -2692,7 +2739,9 @@ impl ConnectionServiceImpl {
         }
         let project_id = project_id.trim();
         let repo_path = repo_path.trim();
-        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+        let specialized_defs = self
+            .resolve_specialized_agent_defs(specialized_agents)
+            .await?;
 
         // Readiness gate: wake every specialized agent's endpoint and wait until each answers
         // before spawning the jail, so a cold/unreachable model fails session start here rather
@@ -3220,7 +3269,9 @@ impl ConnectionServiceImpl {
                 "project_id is required for cursor-cli sessions",
             ));
         }
-        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+        let specialized_defs = self
+            .resolve_specialized_agent_defs(specialized_agents)
+            .await?;
 
         // Readiness gate: wake every specialized agent's endpoint and wait until each answers
         // before spawning the jail, so a cold/unreachable model fails session start here rather
@@ -3832,7 +3883,9 @@ impl ConnectionServiceImpl {
         // daemon restarts, so a fresh `--session-id` would abort with "Session ID already in use".
         resume: bool,
     ) -> Result<u32, Status> {
-        let specialized_defs = self.resolve_specialized_agent_defs(specialized_agents)?;
+        let specialized_defs = self
+            .resolve_specialized_agent_defs(specialized_agents)
+            .await?;
 
         // The same readiness gate the start paths apply: a resumed session's subagents are only as
         // usable as a fresh one's if their endpoints are awake before the jail comes back up.
@@ -5602,12 +5655,24 @@ impl ConnectionServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
+        // An agent id names either a coding backend from the config allowlist or an assistant in
+        // this daemon's registry — the registry is a def source on equal footing with the YAML
+        // (`resolvable_agent_defs`), so an assistant `ListAgents` offers must also be startable.
         let agent_trim = req.agent.trim();
-        if !agent_trim.is_empty() {
+        let agent_def = match agent_trim.is_empty() {
+            true => None,
+            false => self
+                .resolvable_agent_defs()
+                .await?
+                .into_iter()
+                .find(|d| d.name == agent_trim),
+        };
+        if !agent_trim.is_empty() && agent_def.is_none() {
             let allowed = self.config.allowed_agents();
             if !allowed.is_empty() && !allowed.iter().any(|a| a.id == agent_trim) {
                 return Err(Status::invalid_argument(format!(
-                    "agent id {:?} is not listed in allowed_agents (configure daemon YAML)",
+                    "agent id {:?} is not listed in allowed_agents (configure daemon YAML) and is \
+                     not an assistant in this daemon's registry",
                     agent_trim
                 )));
             }
@@ -6036,6 +6101,15 @@ impl ConnectionServiceImpl {
                 Some(t.to_string())
             }
         };
+        // A spawned `tddy-coder` resolves `--agent` against the builtins and `<tddyhome>/agents`
+        // only; this daemon's registry is a source it cannot read. So the def this daemon already
+        // resolved travels with the spawn as `--agent-def`, and the child creates its backend from
+        // that rather than falling through to a different agent entirely.
+        let agent_def_for_spawn: Option<String> = agent_def
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?;
         let recipe_for_spawn: Option<String> = {
             let t = req.recipe.trim();
             if t.is_empty() {
@@ -6131,6 +6205,7 @@ impl ConnectionServiceImpl {
                         new_session_id: pre_session_id.as_deref(),
                         project_id: Some(pid_for_spawn.as_str()),
                         agent: agent_for_spawn.as_deref(),
+                        agent_def_json: agent_def_for_spawn.as_deref(),
                         mouse: spawn_mouse,
                         recipe: recipe_for_spawn.as_deref(),
                         stack_parent: stack_parent_for_spawn.as_deref(),
@@ -6157,6 +6232,7 @@ impl ConnectionServiceImpl {
                     );
                     let pid = Some(pid_for_spawn.as_str());
                     let agent = agent_for_spawn.as_deref();
+                    let agent_def = agent_def_for_spawn.as_deref();
                     let recipe = recipe_for_spawn.as_deref();
                     let stack_parent = stack_parent_for_spawn.as_deref();
                     let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
@@ -6177,6 +6253,7 @@ impl ConnectionServiceImpl {
                                 new_session_id,
                                 project_id: pid,
                                 agent,
+                                agent_def_json: agent_def,
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
@@ -6203,6 +6280,7 @@ impl ConnectionServiceImpl {
                                 new_session_id,
                                 project_id: pid,
                                 agent,
+                                agent_def_json: agent_def,
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
@@ -6294,7 +6372,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         _request: Request<ListAgentsRequest>,
     ) -> Result<Response<ListAgentsResponse>, Status> {
         log::debug!("list_agents RPC: mapping config allowlist to AgentInfo");
-        let agents: Vec<AgentInfo> = agent_allowlist_rows(&self.config)
+        // A registry this daemon has but cannot read is an error, not "there are no assistants" —
+        // a session started against a missing agent id fails much later and much less clearly.
+        let assistants = match &self.model_registry {
+            Some(registry) => registry
+                .list_assistants()
+                .await
+                .map_err(tddy_rpc::Status::from)?,
+            None => Vec::new(),
+        };
+        let agents: Vec<AgentInfo> = agent_allowlist_rows(&self.config, &assistants)
             .into_iter()
             .map(|row| AgentInfo {
                 id: row.id,
@@ -7025,6 +7112,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
         let (resume_agent, resume_recipe) = resume_agent_and_recipe(&metadata);
+        // A resumed session's agent is resolved the same way a starting one's is, so an assistant
+        // this daemon defined still reaches the child as a def it can build a backend from.
+        let resume_agent_def: Option<String> = match resume_agent.as_deref() {
+            Some(name) => self
+                .resolvable_agent_defs()
+                .await?
+                .iter()
+                .find(|d| d.name == name)
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?,
+            None => None,
+        };
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
         let daemon_log = self.config.log.clone();
@@ -7044,6 +7144,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         new_session_id: None,
                         project_id: Some(project_id_resume.as_str()).filter(|id| !id.is_empty()),
                         agent: resume_agent.as_deref(),
+                        agent_def_json: resume_agent_def.as_deref(),
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
@@ -7086,6 +7187,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 new_session_id: None,
                                 project_id: pid,
                                 agent: resume_agent.as_deref(),
+                                agent_def_json: resume_agent_def.as_deref(),
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
@@ -7115,6 +7217,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 new_session_id: None,
                                 project_id: pid,
                                 agent: resume_agent.as_deref(),
+                                agent_def_json: resume_agent_def.as_deref(),
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
@@ -13637,14 +13740,14 @@ mod specialized_subagent_env_unit_tests {
     }
 
     /// An empty `specialized_agents` name list resolves to an empty defs list, not an error.
-    #[test]
-    fn resolve_specialized_agent_defs_with_no_names_produces_no_defs() {
+    #[tokio::test]
+    async fn resolve_specialized_agent_defs_with_no_names_produces_no_defs() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
-        let result = service.resolve_specialized_agent_defs(&[]);
+        let result = service.resolve_specialized_agent_defs(&[]).await;
 
         // Then
         assert_eq!(
@@ -13656,15 +13759,17 @@ mod specialized_subagent_env_unit_tests {
 
     /// A single resolvable name (the always-available builtin `fastcontext`) resolves to that
     /// def — no `<tddyhome>/agents` override needed.
-    #[test]
-    fn resolve_specialized_agent_defs_resolves_the_builtin_fastcontext_name() {
+    #[tokio::test]
+    async fn resolve_specialized_agent_defs_resolves_the_builtin_fastcontext_name() {
         // Given — no <tddyhome>/agents overrides; "fastcontext" must still resolve via the
         // builtin def
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
-        let result = service.resolve_specialized_agent_defs(&["fastcontext".to_string()]);
+        let result = service
+            .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .await;
 
         // Then
         let defs = result.expect("fastcontext must resolve via the builtin def");
@@ -13674,17 +13779,16 @@ mod specialized_subagent_env_unit_tests {
 
     /// A name that resolves against neither the builtins nor `<tddyhome>/agents` must reject the
     /// whole request — no partial resolution for the names that *did* resolve.
-    #[test]
-    fn resolve_specialized_agent_defs_rejects_unknown_name() {
+    #[tokio::test]
+    async fn resolve_specialized_agent_defs_rejects_unknown_name() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
-        let result = service.resolve_specialized_agent_defs(&[
-            "fastcontext".to_string(),
-            "ghost-agent".to_string(),
-        ]);
+        let result = service
+            .resolve_specialized_agent_defs(&["fastcontext".to_string(), "ghost-agent".to_string()])
+            .await;
 
         // Then
         let err = result.expect_err("an unresolvable name must reject the whole request");
@@ -13699,13 +13803,14 @@ mod specialized_subagent_env_unit_tests {
     /// A resolved `fastcontext` def produces both `TDDY_SUBAGENT` (comma names) and
     /// `TDDY_SUBAGENTS_JSON` (the serialized def) — the exact env shape `tddy-tools --mcp` (see
     /// `subagents_from_env` in `tddy-tools/src/server.rs`) expects.
-    #[test]
-    fn specialized_subagent_env_builds_env_pairs_for_a_resolved_def() {
+    #[tokio::test]
+    async fn specialized_subagent_env_builds_env_pairs_for_a_resolved_def() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
         let service = make_unit_service(tddy_home.path().to_path_buf());
         let defs = service
             .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .await
             .expect("fastcontext must resolve via the builtin def");
 
         // When

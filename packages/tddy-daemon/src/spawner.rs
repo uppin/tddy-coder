@@ -405,6 +405,11 @@ pub struct SpawnOptions<'a> {
     pub new_session_id: Option<&'a str>,
     pub project_id: Option<&'a str>,
     pub agent: Option<&'a str>,
+    /// The already-resolved `SpecializedAgentDef` for `agent`, as JSON, when this daemon resolved
+    /// the name against a source the child cannot read for itself — its registry assistants.
+    /// Passed as `--agent-def <json>`; without it a registry-defined agent would reach the child as
+    /// a name it cannot resolve.
+    pub agent_def_json: Option<&'a str>,
     pub mouse: bool,
     /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
     pub recipe: Option<&'a str>,
@@ -962,6 +967,13 @@ pub fn plan_session_child(
         let a = a.trim();
         if !a.is_empty() {
             push_flag(&mut args, "--agent", a);
+        }
+    }
+
+    if let Some(def) = opts.agent_def_json {
+        let def = def.trim();
+        if !def.is_empty() {
+            push_flag(&mut args, "--agent-def", def);
         }
     }
 

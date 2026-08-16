@@ -94,6 +94,20 @@ impl Status {
         }
     }
 
+    pub fn already_exists(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::AlreadyExists,
+            message: msg.into(),
+        }
+    }
+
+    pub fn unavailable(msg: impl Into<String>) -> Self {
+        Self {
+            code: Code::Unavailable,
+            message: msg.into(),
+        }
+    }
+
     /// Returns the status code. Accessor method for use in tests and trait impls.
     pub fn code(&self) -> Code {
         self.code

@@ -15,6 +15,7 @@ pub mod fs;
 pub mod sandbox_fixtures;
 pub mod sandbox_session_channel;
 pub mod stub_http;
+pub mod stub_http_routed;
 pub mod stub_scripts;
 pub mod wait;
 
@@ -33,6 +34,10 @@ pub use sandbox_fixtures::{
 };
 pub use sandbox_session_channel::SandboxSessionChannelHost;
 pub use stub_http::{a_stub_http_endpoint_answering_ok, StubHttpEndpoint};
+pub use stub_http_routed::{
+    a_stub_http_endpoint_replying_in_sequence, a_stub_http_endpoint_routing, RecordedRequest,
+    RoutedStubHttpEndpoint,
+};
 pub use stub_scripts::{
     a_stub_agent_script, appended_invocation_count, read_last_appended_argv, read_recorded_argv,
     read_recorded_argv_value_after, StubAgentScript,

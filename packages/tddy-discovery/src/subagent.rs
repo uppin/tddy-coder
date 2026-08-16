@@ -295,6 +295,85 @@ impl CodebaseAccess {
             }
         }
     }
+
+    /// Run a shell command in the workspace (Managed-only, like the file-mutation tools: a command
+    /// is free to write anywhere, so it needs the host tool engine's confinement).
+    pub async fn shell(
+        &self,
+        command: &str,
+        block_until_ms: Option<u64>,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_mutation("SHELL")),
+            CodebaseAccess::Managed(dispatch) => {
+                let mut args = serde_json::json!({ "command": command });
+                if let Some(ms) = block_until_ms {
+                    args["block_until_ms"] = serde_json::json!(ms);
+                }
+                let result = dispatch("Shell".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// The tools that exist only as host-engine capabilities: a `Local` subagent has no job table,
+    /// no diagnostics feed and no semantic index of its own, so the honest answer is a typed
+    /// refusal rather than an empty result that reads like "nothing found".
+    fn reject_local_engine_tool(tool: &str) -> SubagentError {
+        SubagentError(format!(
+            "{tool}: this tool requires managed codebase access (the host tool engine provides it; \
+             local subagents have no equivalent)"
+        ))
+    }
+
+    /// Wait for a background shell job started by [`Self::shell`] (Managed-only; see
+    /// [`Self::reject_local_engine_tool`]).
+    pub async fn await_job(
+        &self,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("AWAIT")),
+            CodebaseAccess::Managed(dispatch) => {
+                let result = dispatch("Await".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// Read linting diagnostics for the workspace (Managed-only).
+    pub async fn read_lints(&self, path: Option<&str>) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("READ_LINTS")),
+            CodebaseAccess::Managed(dispatch) => {
+                let mut args = serde_json::json!({});
+                if let Some(p) = path {
+                    args["path"] = serde_json::Value::String(p.to_string());
+                }
+                let result = dispatch("ReadLints".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// Search the codebase semantically (Managed-only).
+    pub async fn semantic_search(
+        &self,
+        query: &str,
+        path: Option<&str>,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("SEMANTIC_SEARCH")),
+            CodebaseAccess::Managed(dispatch) => {
+                let mut args = serde_json::json!({ "query": query });
+                if let Some(p) = path {
+                    args["path"] = serde_json::Value::String(p.to_string());
+                }
+                let result = dispatch("SemanticSearch".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
 }
 
 /// Default number of lines a single un-windowed READ returns before truncating. Bounds how much
@@ -487,6 +566,23 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
         "DELETE" => {
             let path = args["path"].as_str().unwrap_or("");
             access.delete(path).await
+        }
+        "SHELL" => {
+            let command = args["command"].as_str().unwrap_or("");
+            let block_until_ms = args["block_until_ms"].as_u64();
+            access.shell(command, block_until_ms).await
+        }
+        // The engine's `Await` takes several optional selectors (job_id/task_id/timeouts); pass
+        // the model's arguments through rather than re-deriving a subset here.
+        "AWAIT" => access.await_job(args.clone()).await,
+        "READ_LINTS" => {
+            let path = args["path"].as_str();
+            access.read_lints(path).await
+        }
+        "SEMANTIC_SEARCH" => {
+            let query = args["query"].as_str().unwrap_or("");
+            let path = args["path"].as_str();
+            access.semantic_search(query, path).await
         }
         unknown => return format!("{{\"error\": \"unknown tool: {unknown}\"}}"),
     };
@@ -731,8 +827,9 @@ impl FastContextSession {
     }
 }
 
-/// Maps a bound-tool kind to the model-facing tool name (`"READ"`/`"GLOB"`/`"GREP"`/`"WRITE"`/
-/// `"STR_REPLACE"`/`"DELETE"`).
+/// Maps a bound-tool kind to the model-facing tool name — the SCREAMING_SNAKE spelling the tool
+/// loop advertises and [`dispatch_tool_call`] matches on (the same spelling a def's YAML `tools:`
+/// list uses, unlike [`crate::agent_def::SubagentTool::catalog_name`]'s exec-catalog casing).
 fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
     match tool {
         crate::agent_def::SubagentTool::Read => "READ",
@@ -741,6 +838,10 @@ fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
         crate::agent_def::SubagentTool::Write => "WRITE",
         crate::agent_def::SubagentTool::StrReplace => "STR_REPLACE",
         crate::agent_def::SubagentTool::Delete => "DELETE",
+        crate::agent_def::SubagentTool::Shell => "SHELL",
+        crate::agent_def::SubagentTool::Await => "AWAIT",
+        crate::agent_def::SubagentTool::ReadLints => "READ_LINTS",
+        crate::agent_def::SubagentTool::SemanticSearch => "SEMANTIC_SEARCH",
     }
 }
 
@@ -784,13 +885,14 @@ impl SpecializedSubagentSession {
         }
     }
 
-    /// Only the def's bound tools are advertised to the model. The filter base is the read-only
-    /// discovery trio plus the mutation tools — a def that doesn't bind `WRITE`/`STR_REPLACE`/
-    /// `DELETE` never advertises them.
+    /// Only the def's bound tools are advertised to the model. The filter base is the whole exec
+    /// catalog — the read-only discovery trio, the mutation tools and the remaining engine tools —
+    /// so a def that doesn't bind `WRITE`/`SHELL`/… never advertises them.
     fn tool_definitions(&self) -> Vec<crate::openai::ToolDefinition> {
         discovery_tool_definitions()
             .into_iter()
             .chain(crate::openai::mutation_tool_definitions())
+            .chain(crate::openai::engine_tool_definitions())
             .filter(|d| self.tools.iter().any(|t| tool_name(*t) == d.function.name))
             .collect()
     }

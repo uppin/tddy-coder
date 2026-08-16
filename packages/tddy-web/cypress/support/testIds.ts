@@ -341,7 +341,41 @@ export const TEST_IDS = {
   shellMenuTasks: "shell-menu-tasks",
   shellMenuProjects: "shell-menu-projects",
   shellMenuVms: "shell-menu-vms",
+  shellMenuModels: "shell-menu-models",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
+
+  // Models & Agents screen (#/models)
+  /** The Models & Agents screen root. */
+  modelsScreen: "models-screen",
+  /** The providers panel listing this fleet's configured providers. */
+  modelsProvidersPanel: "models-providers-panel",
+  /** Opens the add-provider form. */
+  modelsAddProviderToggle: "models-add-provider-toggle",
+  /** Add-provider form fields. */
+  modelsAddProviderKind: "models-add-provider-kind",
+  modelsAddProviderLabel: "models-add-provider-label",
+  modelsAddProviderBaseUrl: "models-add-provider-base-url",
+  modelsAddProviderApiKey: "models-add-provider-api-key",
+  modelsAddProviderSubmit: "models-add-provider-submit",
+  /** The error the add-provider form reports when the daemon refused (or was never addressed). */
+  modelsAddProviderError: "models-add-provider-error",
+  /** The models table listing every model across every connected daemon. */
+  modelsTable: "models-table",
+  /** The row the table shows instead of models; carries `data-registry-status` for why. */
+  modelsTableEmpty: "models-table-empty",
+  /** The assistants panel. */
+  modelsAssistantsPanel: "models-assistants-panel",
+  /** Opens the create-assistant dialog for the focused model. */
+  modelsCreateAssistantDialog: "models-create-assistant-dialog",
+  modelsCreateAssistantName: "models-create-assistant-name",
+  modelsCreateAssistantLabel: "models-create-assistant-label",
+  modelsCreateAssistantSystemPrompt: "models-create-assistant-system-prompt",
+  modelsCreateAssistantSubmit: "models-create-assistant-submit",
+  /** The ACP chat dialog opened from a model or assistant row. */
+  modelsChatDialog: "models-chat-dialog",
+  modelsChatInput: "models-chat-input",
+  modelsChatSend: "models-chat-send",
+  modelsChatTranscript: "models-chat-transcript",
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
@@ -1157,3 +1191,87 @@ export const createSessionAttachmentProgress = (basename: string) =>
 /** One selectable document row in the host-document picker. */
 export const createSessionHostDocRow = (relativePath: string) =>
   `create-session-host-doc-row-${relativePath}`;
+
+// ---------------------------------------------------------------------------
+// Models & Agents dynamic helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * `[data-testid="models-provider-row-<daemonInstanceId>-<providerId>"]` — one row per configured
+ * provider. Provider ids are minted per daemon (`prov-ollama` exists on every host), so the owning
+ * daemon is part of the id; without it two hosts' rows would collide in the DOM.
+ */
+export const modelsProviderRow = (daemonInstanceId: string, providerId: string) =>
+  `models-provider-row-${daemonInstanceId}-${providerId}`;
+
+/** The inline enumeration error rendered against a provider whose last refresh failed. */
+export const modelsProviderError = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-error`;
+
+/** Whether a credential is stored for a provider — never the credential itself. */
+export const modelsProviderCredential = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-credential`;
+
+/** Re-enumerates one provider's models from the provider itself. */
+export const modelsProviderRefresh = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-refresh`;
+
+/**
+ * `[data-testid="models-row-<daemonInstanceId>-<providerId>-<modelId>"]` — one row per model.
+ * A model id may contain a colon (`qwen3:32b`), so it goes through `safeTestIdPart`.
+ */
+export const modelsRow = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `models-row-${daemonInstanceId}-${providerId}-${safeTestIdPart(modelId)}`;
+
+/** The owning-daemon cell of a model row. */
+export const modelsRowDaemon = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-daemon`;
+
+/** The capability-label cell of a model row; carries `data-model-labels` for exact assertions. */
+export const modelsRowLabels = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-labels`;
+
+/** The load-state cell of a model row; carries `data-load-state`. */
+export const modelsRowLoadState = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-load-state`;
+
+/** The Load action on a model row (rendered only when the model is not loaded). */
+export const modelsRowLoad = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-load`;
+
+/** The Unload action on a model row (rendered only when the model is loaded). */
+export const modelsRowUnload = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-unload`;
+
+/** The Chat action on a model row (rendered only for chat-capable models). */
+export const modelsRowChat = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-chat`;
+
+/** The "create assistant from this model" action on a model row. */
+export const modelsRowCreateAssistant = (
+  daemonInstanceId: string,
+  providerId: string,
+  modelId: string,
+) => `${modelsRow(daemonInstanceId, providerId, modelId)}-create-assistant`;
+
+/** The per-row error surfaced when an action is rejected by the daemon. */
+export const modelsRowError = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-error`;
+
+/** The marker rendered on a model row whose provider's last enumeration failed. */
+export const modelsRowStale = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-stale`;
+
+/** The error row rendered for a daemon whose registry could not be read. */
+export const modelsDaemonError = (daemonInstanceId: string) =>
+  `models-daemon-error-${daemonInstanceId}`;
+
+/** One assistant row, keyed by the assistant's `--agent` name. */
+export const modelsAssistantRow = (name: string) => `models-assistant-row-${name}`;
+
+/** The assigned-tools cell of an assistant row; carries `data-assistant-tools`. */
+export const modelsAssistantTools = (name: string) => `models-assistant-tools-${name}`;
+
+/** One selectable tool checkbox in the create-assistant dialog. */
+export const modelsCreateAssistantTool = (toolName: string) =>
+  `models-create-assistant-tool-${toolName}`;

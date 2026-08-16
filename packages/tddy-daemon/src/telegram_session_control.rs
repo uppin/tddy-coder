@@ -1240,6 +1240,8 @@ fn telegram_spawn_options<'a>(
         new_session_id: Some(new_session_id),
         project_id: Some(project_id),
         agent: inputs.agent.as_deref(),
+        // A Telegram spawn names a config-allowlist agent, which the child resolves for itself.
+        agent_def_json: None,
         mouse: inputs.mouse,
         recipe: inputs.recipe.as_deref(),
         stack_parent: None,

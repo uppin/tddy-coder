@@ -9731,7 +9731,12 @@ name = "tddy-acp"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "async-trait",
+ "serde_json",
  "tddy-core",
+ "tddy-discovery",
+ "tddy-testing-commons",
+ "tokio",
 ]
 
 [[package]]
@@ -10014,6 +10019,7 @@ dependencies = [
 name = "tddy-daemon"
 version = "0.1.0"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "argon2",
  "assert_cmd",
@@ -10044,8 +10050,10 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "sha2 0.10.9",
+ "sqlx",
  "subtle",
  "sysinfo",
+ "tddy-acp",
  "tddy-actions",
  "tddy-bsp",
  "tddy-coder",
@@ -10740,6 +10748,7 @@ dependencies = [
  "libc",
  "pretty_assertions",
  "reqwest 0.12.28",
+ "serde_json",
  "tddy-core",
  "tddy-sandbox",
  "tddy-sandbox-darwin",

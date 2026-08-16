@@ -34,6 +34,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+# Same version + feature set `tddy-core` already uses for the session catalog store; the model
+# registry follows that precedent (runtime query API, WAL, created on demand).
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
 subtle = "2.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
 bytes = "1"
@@ -42,6 +45,11 @@ livekit = "0.7"
 prost = "0.13"
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }
+# model_registry/acp_service.rs: the daemon-hosted, model-addressed `acp.AcpService`, whose agent is
+# `tddy-acp`'s `ProviderAcpAgent`. The ACP SDK is needed directly to speak its `Agent` trait and to
+# map its session updates onto the protobuf mirror; the version is pinned to `tddy-acp`'s.
+tddy-acp = { path = "../tddy-acp" }
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }

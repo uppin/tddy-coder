@@ -1,0 +1,243 @@
+syntax = "proto3";
+package models;
+
+// Model registry service — the providers a daemon talks to, the models they offer, and the
+// assistants composed from those models.
+//
+// Deliberately separate from `connection.ListAgentModels`, which answers a different question
+// (which `--model` values does coding backend X accept?) by a different means (shelling out to
+// `tddy-tools list-models`). See docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
+//
+// Every RPC is scoped to the daemon serving it. The registry lives in that daemon's own SQLite
+// database; there is no cross-daemon forwarding here. The web fans out to each common-room daemon
+// and merges, exactly as the sessions drawer does for ListSessions.
+service ModelRegistryService {
+  // --- Providers -----------------------------------------------------------
+
+  // List the providers configured on this daemon. Never returns credentials.
+  rpc ListProviders (ListProvidersRequest) returns (ListProvidersResponse);
+
+  // Add a provider. `api_key`, if set, is stored on this daemon and never read back.
+  // Returns ALREADY_EXISTS if a provider with the same base URL is already configured.
+  rpc CreateProvider (CreateProviderRequest) returns (CreateProviderResponse);
+
+  // Remove a provider and its cached models.
+  // Returns FAILED_PRECONDITION if any assistant still references it — no cascade.
+  rpc DeleteProvider (DeleteProviderRequest) returns (DeleteProviderResponse);
+
+  // --- Models --------------------------------------------------------------
+
+  // List the cached models of every provider on this daemon, with current load state.
+  rpc ListModels (ListModelsRequest) returns (ListModelsResponse);
+
+  // Re-enumerate one provider's models from the provider itself and replace the cache.
+  // A failed enumeration returns an error; the cache is left untouched and no partial
+  // result is reported as success.
+  rpc RefreshProviderModels (RefreshProviderModelsRequest) returns (RefreshProviderModelsResponse);
+
+  // Make a model resident (Ollama: a zero-token generate with `keep_alive` set).
+  // Returns FAILED_PRECONDITION for a provider kind that has no notion of residency.
+  rpc LoadModel (LoadModelRequest) returns (LoadModelResponse);
+
+  // Evict a model from memory (Ollama: a generate with `keep_alive: 0`).
+  // Returns FAILED_PRECONDITION for a provider kind that has no notion of residency.
+  rpc UnloadModel (UnloadModelRequest) returns (UnloadModelResponse);
+
+  // --- Assistants ----------------------------------------------------------
+
+  // List the assistants defined on this daemon.
+  rpc ListAssistants (ListAssistantsRequest) returns (ListAssistantsResponse);
+
+  // Define an assistant: a model plus a system prompt plus a set of tools.
+  // Returns ALREADY_EXISTS if `name` collides with another assistant or with a builtin agent id.
+  rpc CreateAssistant (CreateAssistantRequest) returns (CreateAssistantResponse);
+
+  // Update an existing assistant in place.
+  rpc UpdateAssistant (UpdateAssistantRequest) returns (UpdateAssistantResponse);
+
+  // Delete an assistant.
+  rpc DeleteAssistant (DeleteAssistantRequest) returns (DeleteAssistantResponse);
+
+  // The tools that may be assigned to an assistant — the exec catalog
+  // (`tddy_tool_engine::tool_catalog()`), so the web renders no tool list of its own.
+  rpc ListAssignableTools (ListAssignableToolsRequest) returns (ListAssignableToolsResponse);
+}
+
+// --- Enums -----------------------------------------------------------------
+
+enum ProviderKind {
+  PROVIDER_KIND_UNSPECIFIED = 0;
+  PROVIDER_KIND_OLLAMA = 1;
+  PROVIDER_KIND_OPENAI = 2;
+  PROVIDER_KIND_FIREWORKS = 3;
+  PROVIDER_KIND_ANTHROPIC = 4;
+}
+
+enum ModelLoadState {
+  MODEL_LOAD_STATE_UNSPECIFIED = 0;
+  // Resident and ready.
+  MODEL_LOAD_STATE_LOADED = 1;
+  // Known to the provider but not resident.
+  MODEL_LOAD_STATE_NOT_LOADED = 2;
+  // The provider kind has no notion of residency (every cloud provider).
+  MODEL_LOAD_STATE_UNSUPPORTED = 3;
+}
+
+// --- Entities ---------------------------------------------------------------
+
+message ProviderEntry {
+  string provider_id = 1;
+  ProviderKind kind = 2;
+  string label = 3;
+  string base_url = 4;
+  // Whether a credential is stored for this provider. The credential itself is never returned.
+  bool has_credential = 5;
+  // The daemon that owns this provider row. Stamped by the serving daemon.
+  string daemon_instance_id = 6;
+  // Non-empty when the last enumeration failed; rendered inline next to the provider.
+  string enumeration_error = 7;
+}
+
+message ModelEntry {
+  // Provider-scoped model id — the value passed to the provider (e.g. "qwen3:32b").
+  string model_id = 1;
+  string provider_id = 2;
+  string label = 3;
+  // Capability labels derived from provider metadata:
+  // "llm" | "embedding" | "vision" | "tools" | "reranker" | "unknown".
+  // A model whose capabilities cannot be determined is labelled "unknown", never guessed.
+  repeated string labels = 4;
+  ModelLoadState load_state = 5;
+  string daemon_instance_id = 6;
+  uint64 size_bytes = 7;
+}
+
+message AssistantEntry {
+  string assistant_id = 1;
+  // The `--agent` value. Unique per daemon; must not collide with a builtin agent id.
+  string name = 2;
+  string label = 3;
+  string provider_id = 4;
+  string model_id = 5;
+  string system_prompt = 6;
+  // Exec-catalog tool names (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await,
+  // ReadLints, SemanticSearch).
+  repeated string tools = 7;
+  string daemon_instance_id = 8;
+}
+
+message AssignableTool {
+  // Exec-catalog tool name, e.g. "Read".
+  string name = 1;
+  string description = 2;
+  // True for tools that write to the worktree; the UI marks these.
+  bool is_mutating = 3;
+}
+
+// --- Provider RPCs ----------------------------------------------------------
+
+message ListProvidersRequest {
+  string session_token = 1;
+}
+message ListProvidersResponse {
+  repeated ProviderEntry providers = 1;
+}
+
+message CreateProviderRequest {
+  string session_token = 1;
+  ProviderKind kind = 2;
+  string label = 3;
+  string base_url = 4;
+  // Inbound only. Stored on the daemon; no response ever echoes it.
+  string api_key = 5;
+}
+message CreateProviderResponse {
+  ProviderEntry provider = 1;
+}
+
+message DeleteProviderRequest {
+  string session_token = 1;
+  string provider_id = 2;
+}
+message DeleteProviderResponse {}
+
+// --- Model RPCs -------------------------------------------------------------
+
+message ListModelsRequest {
+  string session_token = 1;
+}
+message ListModelsResponse {
+  repeated ModelEntry models = 1;
+}
+
+message RefreshProviderModelsRequest {
+  string session_token = 1;
+  string provider_id = 2;
+}
+message RefreshProviderModelsResponse {
+  repeated ModelEntry models = 1;
+}
+
+message LoadModelRequest {
+  string session_token = 1;
+  string provider_id = 2;
+  string model_id = 3;
+}
+message LoadModelResponse {
+  ModelEntry model = 1;
+}
+
+message UnloadModelRequest {
+  string session_token = 1;
+  string provider_id = 2;
+  string model_id = 3;
+}
+message UnloadModelResponse {
+  ModelEntry model = 1;
+}
+
+// --- Assistant RPCs ---------------------------------------------------------
+
+message ListAssistantsRequest {
+  string session_token = 1;
+}
+message ListAssistantsResponse {
+  repeated AssistantEntry assistants = 1;
+}
+
+message CreateAssistantRequest {
+  string session_token = 1;
+  string name = 2;
+  string label = 3;
+  string provider_id = 4;
+  string model_id = 5;
+  string system_prompt = 6;
+  repeated string tools = 7;
+}
+message CreateAssistantResponse {
+  AssistantEntry assistant = 1;
+}
+
+message UpdateAssistantRequest {
+  string session_token = 1;
+  string assistant_id = 2;
+  string label = 3;
+  string system_prompt = 4;
+  repeated string tools = 5;
+}
+message UpdateAssistantResponse {
+  AssistantEntry assistant = 1;
+}
+
+message DeleteAssistantRequest {
+  string session_token = 1;
+  string assistant_id = 2;
+}
+message DeleteAssistantResponse {}
+
+message ListAssignableToolsRequest {
+  string session_token = 1;
+}
+message ListAssignableToolsResponse {
+  repeated AssignableTool tools = 1;
+}

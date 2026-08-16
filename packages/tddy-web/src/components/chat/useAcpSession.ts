@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-web";
 import {
@@ -11,6 +11,7 @@ import {
   AcpClientMessageSchema,
   AcpService,
   type AcpClientMessage,
+  type ModelSessionTarget,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { tddyDebug } from "../../lib/debugMask";
 import type {
@@ -60,6 +61,31 @@ export function useAcpSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
+  return useAcpSessionOverClient(client, resumeSessionId, { room, identity: serverIdentity });
+}
+
+/**
+ * The ACP session itself, over a client the caller already holds.
+ *
+ * {@link useAcpSession} builds that client from a room plus a participant identity, which is what a
+ * session presenter needs. A caller that addresses an agent through an existing daemon-level client
+ * (`useDaemonClientFor(AcpService, …)` — the models chat) hands it in directly instead.
+ *
+ * `peer`, when given, names the participant expected to serve the stream: a send is refused with a
+ * message rather than queued into a stream nobody is reading when that participant has left the
+ * room. Omit it when presence is not the caller's liveness signal — a daemon that answers RPC over
+ * the common room is, by definition, in it.
+ *
+ * `modelTarget`, when given, rides the `new_session` handshake. A session-hosted ACP stream needs
+ * none — the agent *is* that session's workflow. The daemon-hosted surface serves every model and
+ * assistant in one registry, so it has to be told which one this session speaks as.
+ */
+export function useAcpSessionOverClient(
+  client: Client<typeof AcpService> | null,
+  resumeSessionId?: string,
+  peer?: { room: Room | null; identity: string },
+  modelTarget?: ModelSessionTarget,
+): UseAgentChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [elicitations, setElicitations] = useState<ElicitationPoint[]>([]);
   const elicitationsRef = useRef<ElicitationPoint[]>([]);
@@ -183,10 +209,13 @@ export function useAcpSession(
             id: 2n,
             msg: { case: "loadSession", value: { sessionId: { value: resumeSessionId }, cwd: "" } },
           })
-        : create(AcpClientMessageSchema, { id: 2n, msg: { case: "newSession", value: { cwd: "" } } }),
+        : create(AcpClientMessageSchema, {
+            id: 2n,
+            msg: { case: "newSession", value: { cwd: "", modelTarget } },
+          }),
     );
 
-    dbg("opening AcpService.Session (server identity=%o)", serverIdentity);
+    dbg("opening AcpService.Session (peer identity=%o)", peer?.identity ?? "");
     (async () => {
       try {
         for await (const m of client.session(queue)) {
@@ -304,14 +333,14 @@ export function useAcpSession(
         queueRef.current = null;
       }
     };
-  }, [client, resumeSessionId]);
+  }, [client, resumeSessionId, modelTarget]);
 
   const canSend = (): boolean => {
     if (!queueRef.current) {
       setSendError("Message not sent — no connection to the presenter yet.");
       return false;
     }
-    if (room && !room.remoteParticipants.has(serverIdentity)) {
+    if (peer?.room && !peer.room.remoteParticipants.has(peer.identity)) {
       setSendError("Message not sent — the presenter is not connected.");
       return false;
     }
