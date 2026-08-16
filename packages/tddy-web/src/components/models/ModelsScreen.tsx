@@ -51,6 +51,8 @@ export interface ModelsScreenProps {
   onLoadModel: (model: ModelRow) => void;
   onUnloadModel: (model: ModelRow) => void;
   onOpenChat: (model: ModelRow) => void;
+  /** Open a chat with an assistant — a model plus its system prompt and its tools. */
+  onOpenAssistantChat: (assistant: AssistantRow) => void;
   onCreateAssistant: (input: {
     model: ModelRow;
     name: string;
@@ -85,6 +87,7 @@ export function ModelsScreen({
   onLoadModel,
   onUnloadModel,
   onOpenChat,
+  onOpenAssistantChat,
   onCreateAssistant,
   onUpdateAssistant,
   onDeleteAssistant,
@@ -123,6 +126,7 @@ export function ModelsScreen({
         assistantErrors={assistantErrors}
         failures={failures}
         status={status}
+        onOpenChat={onOpenAssistantChat}
         onEditAssistant={setAssistantUnderEdit}
         onDeleteAssistant={onDeleteAssistant}
       />

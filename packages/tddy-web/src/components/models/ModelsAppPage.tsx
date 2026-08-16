@@ -1,10 +1,17 @@
 import { useCallback, useState } from "react";
 import { ModelLoadState } from "../../gen/models_pb";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
-import type { ModelRow } from "../../utils/mergeRegistryEntries";
+import type { AssistantRow, ModelRow } from "../../utils/mergeRegistryEntries";
 import { AppShell } from "../shell/AppShell";
+import { ChatWorkspaceDialog } from "./ChatWorkspaceDialog";
 import { ModelChatDialog } from "./ModelChatDialog";
 import { ModelsScreen } from "./ModelsScreen";
+import {
+  chatWithAssistant,
+  chatWithModel,
+  needsWorkspace,
+  type RegistryChatTarget,
+} from "../../utils/registryChatTarget";
 import { useModelRegistryFanOut } from "./useModelRegistryFanOut";
 
 /**
@@ -24,7 +31,11 @@ const NO_DAEMON_SELECTED = "select a daemon before adding a provider";
 export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const registry = useModelRegistryFanOut();
   const { selectedInstanceId } = useSelectedDaemon();
-  const [chatModel, setChatModel] = useState<ModelRow | null>(null);
+  const [chatTarget, setChatTarget] = useState<RegistryChatTarget | null>(null);
+  /** The assistant whose chat is waiting on a workspace for its tools; `null` when none is. */
+  const [assistantAwaitingWorkspace, setAssistantAwaitingWorkspace] = useState<AssistantRow | null>(
+    null,
+  );
 
   /**
    * Chatting with a model requires it to be resident, so a model that has been evicted is loaded
@@ -36,10 +47,24 @@ export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => vo
       if (model.loadState === ModelLoadState.NOT_LOADED && !(await registry.loadModel(model))) {
         return;
       }
-      setChatModel(model);
+      setChatTarget(chatWithModel(model));
     },
     [registry],
   );
+
+  /**
+   * An assistant with tools runs them somewhere, and the daemon only accepts a directory this
+   * operator already owns — so the workspace is chosen before the stream opens rather than
+   * discovered as a refused handshake. An assistant with no tools reaches no engine and is chatted
+   * with straight away.
+   */
+  const openAssistantChat = useCallback((assistant: AssistantRow) => {
+    if (needsWorkspace(assistant)) {
+      setAssistantAwaitingWorkspace(assistant);
+      return;
+    }
+    setChatTarget(chatWithAssistant(assistant, ""));
+  }, []);
 
   return (
     <AppShell title="Models & Agents" onNavigate={onNavigate} variant="scroll">
@@ -65,6 +90,7 @@ export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => vo
         onLoadModel={(model) => void registry.loadModel(model)}
         onUnloadModel={(model) => void registry.unloadModel(model)}
         onOpenChat={(model) => void openChat(model)}
+        onOpenAssistantChat={openAssistantChat}
         onCreateAssistant={({ model, name, label, systemPrompt, tools }) =>
           registry.createAssistant({
             daemonInstanceId: model.daemonInstanceId,
@@ -79,8 +105,18 @@ export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => vo
         onUpdateAssistant={(input) => registry.updateAssistant(input)}
         onDeleteAssistant={(assistant) => void registry.deleteAssistant(assistant)}
       />
-      {chatModel ? (
-        <ModelChatDialog model={chatModel} onClose={() => setChatModel(null)} />
+      {assistantAwaitingWorkspace ? (
+        <ChatWorkspaceDialog
+          assistant={assistantAwaitingWorkspace}
+          onChoose={(cwd) => {
+            setChatTarget(chatWithAssistant(assistantAwaitingWorkspace, cwd));
+            setAssistantAwaitingWorkspace(null);
+          }}
+          onClose={() => setAssistantAwaitingWorkspace(null)}
+        />
+      ) : null}
+      {chatTarget ? (
+        <ModelChatDialog chat={chatTarget} onClose={() => setChatTarget(null)} />
       ) : null}
     </AppShell>
   );

@@ -8,8 +8,14 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
  */
 
+import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import {
+  ListProjectsResponseSchema,
+  ProjectEntrySchema,
+  type ProjectEntry,
+} from "../../../src/gen/connection_pb";
 import {
   ModelLoadState,
   ModelRegistryService,
@@ -109,6 +115,29 @@ export function anAssistant(overrides: Partial<AssistantEntry> = {}): AssistantE
     daemonInstanceId: FIXTURE_DAEMON,
     ...overrides,
   } as AssistantEntry;
+}
+
+/**
+ * A project on the daemon that owns it — the workspace an assistant's tools may run in.
+ *
+ * `mainRepoPath` is the load-bearing field: the daemon resolves a chat's `cwd` against the very
+ * same `projects.yaml` rows, so this is the one path a tool-bearing assistant's chat can name and
+ * have accepted.
+ */
+export function aProject(overrides: Partial<Omit<ProjectEntry, "$typeName">> = {}): ProjectEntry {
+  return create(ProjectEntrySchema, {
+    projectId: "proj-1",
+    name: "tddy-coder",
+    gitUrl: "https://github.com/test/tddy-coder.git",
+    mainRepoPath: "/home/dev/Code/tddy-coder",
+    daemonInstanceId: FIXTURE_DAEMON,
+    ...overrides,
+  });
+}
+
+/** What a daemon answers `ConnectionService.ListProjects` with. */
+export function listedProjects(projects: ProjectEntry[]) {
+  return create(ListProjectsResponseSchema, { projects });
 }
 
 /** The exec catalog as the daemon advertises it — the web renders no tool list of its own. */

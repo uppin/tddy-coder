@@ -9,12 +9,16 @@
 
 import {
   byTestId,
+  modelsAssistantChat,
   modelsAssistantDelete,
   modelsAssistantEdit,
   modelsAssistantError,
   modelsAssistantRow,
   modelsAssistantsDaemonError,
   modelsAssistantTools,
+  modelsChatMessage,
+  modelsChatToolStatus,
+  modelsChatWorkspaceOption,
   modelsCreateAssistantTool,
   modelsDaemonError,
   modelsEditAssistantTool,
@@ -384,6 +388,18 @@ export const modelsScreenPage = {
     byTestId(modelsAssistantEdit(assistant.daemonInstanceId, assistant.name)).click();
   },
 
+  /** The Chat action on an assistant row. */
+  assistantChatButton: (assistant: AssistantRef, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsAssistantChat(assistant.daemonInstanceId, assistant.name), {
+      timeout: 5000,
+      ...options,
+    }),
+
+  /** Open the ACP chat with an assistant. */
+  openAssistantChat(assistant: AssistantRef) {
+    modelsScreenPage.assistantChatButton(assistant).click();
+  },
+
   /** The create-assistant dialog. */
   createAssistantDialog: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsCreateAssistantDialog, { timeout: 5000, ...options }),
@@ -494,10 +510,88 @@ export const modelsScreenPage = {
   chatError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsChatError, { timeout: 5000, ...options }),
 
+  /** One bubble of the chat transcript, by position. */
+  chatMessage: (index: number, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsChatMessage(index), { timeout: 5000, ...options }),
+
+  /** What kind of bubble one transcript entry is, read from `data-message-kind`. */
+  chatMessageKind: (index: number): Cypress.Chainable<string> =>
+    modelsScreenPage
+      .chatMessage(index)
+      .invoke("attr", "data-message-kind")
+      .then((value) => requiredAttribute(value, "data-message-kind", `chat message ${index}`)),
+
+  /** The outcome marker on a transcript entry — absent while the entry reports no outcome. */
+  chatToolStatusMarker: (index: number, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsChatToolStatus(index), { timeout: 5000, ...options }),
+
+  /** How a tool call ended, read from its marker's `data-tool-status`. */
+  chatToolStatus: (index: number): Cypress.Chainable<string> =>
+    modelsScreenPage
+      .chatToolStatusMarker(index)
+      .invoke("attr", "data-tool-status")
+      .then((value) => requiredAttribute(value, "data-tool-status", `chat message ${index}`)),
+
+  /** The workspace the open chat runs its assistant's tools in. */
+  chatWorkspace: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsChatWorkspace, { timeout: 5000, ...options }),
+
   /** Type a prompt into the chat and send it. */
   sendChatPrompt(prompt: string) {
     byTestId(TEST_IDS.modelsChatInput).clear().type(prompt);
     byTestId(TEST_IDS.modelsChatSend).click();
+  },
+
+  // ---------------------------------------------------------------------------
+  // Choosing where an assistant's tools run
+  // ---------------------------------------------------------------------------
+
+  /** The dialog asking where a tool-bearing assistant's tools should run. */
+  workspaceDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsChatWorkspaceDialog, { timeout: 5000, ...options }),
+
+  /**
+   * The workspace paths the owning daemon offers, in DOM order, read from `data-workspace-path` —
+   * so the assertion is on the path that will be sent, not on the label rendered beside it.
+   */
+  offeredWorkspaces: (): Cypress.Chainable<string[]> =>
+    modelsScreenPage
+      .workspaceDialog()
+      .find("[data-workspace-path]")
+      .then(($els) =>
+        [...$els].map((el) =>
+          requiredAttribute(
+            el.getAttribute("data-workspace-path") ?? undefined,
+            "data-workspace-path",
+            "a workspace option",
+          ),
+        ),
+      ),
+
+  /** Choose the workspace a project's main checkout provides. */
+  chooseWorkspace(projectId: string) {
+    byTestId(modelsChatWorkspaceOption(projectId)).click();
+  },
+
+  /** Why no workspace can be offered, read from `data-workspace-status`. */
+  workspaceEmptyStatus: (): Cypress.Chainable<string> =>
+    byTestId(TEST_IDS.modelsChatWorkspaceEmpty, { timeout: 5000 })
+      .invoke("attr", "data-workspace-status")
+      .then((value) =>
+        requiredAttribute(value, "data-workspace-status", "the workspace picker's empty state"),
+      ),
+
+  /** The row the workspace picker shows in place of workspaces. */
+  workspaceEmptyState: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsChatWorkspaceEmpty, { timeout: 5000, ...options }),
+
+  /** Why the owning daemon's projects could not be read. */
+  workspaceError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsChatWorkspaceError, { timeout: 5000, ...options }),
+
+  /** Leave the workspace choice without opening a chat. */
+  cancelWorkspaceChoice() {
+    byTestId(TEST_IDS.modelsChatWorkspaceCancel).click();
   },
 
   // ---------------------------------------------------------------------------

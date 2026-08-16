@@ -36,6 +36,11 @@ export interface AssistantsPanelProps {
   failures: DaemonFailure[];
   /** Why the panel is empty, when it is. */
   status: RegistryReadStatus;
+  /**
+   * Open a conversation with this assistant — its model, its system prompt and its tools. One with
+   * tools is asked where they run before the chat opens; the host decides, not this panel.
+   */
+  onOpenChat: (assistant: AssistantRow) => void;
   onEditAssistant: (assistant: AssistantRow) => void;
   onDeleteAssistant: (assistant: AssistantRow) => void;
 }
@@ -45,6 +50,7 @@ export function AssistantsPanel({
   assistantErrors,
   failures,
   status,
+  onOpenChat,
   onEditAssistant,
   onDeleteAssistant,
 }: AssistantsPanelProps) {
@@ -75,6 +81,14 @@ export function AssistantsPanel({
                 <span className="text-xs text-muted-foreground">{assistant.name}</span>
                 <span className="text-xs text-muted-foreground">{assistant.modelId}</span>
                 <span className="text-xs text-muted-foreground">{assistant.daemonInstanceId}</span>
+                <button
+                  type="button"
+                  data-testid={`${testId}-chat`}
+                  className={actionClassName}
+                  onClick={() => onOpenChat(assistant)}
+                >
+                  Chat
+                </button>
                 <button
                   type="button"
                   data-testid={`${testId}-edit`}

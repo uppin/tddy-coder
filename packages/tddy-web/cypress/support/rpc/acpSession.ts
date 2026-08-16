@@ -10,8 +10,10 @@ import { create } from "@bufbuild/protobuf";
 import {
   AcpAgentMessageSchema,
   StopReason,
+  ToolCallStatus,
   type AcpAgentMessage,
   type AcpClientMessage,
+  type NewSessionRequest,
 } from "../../../src/gen/tddy/acp/v1/acp_pb";
 
 /** A streamed agent message chunk → renders as an "agent" bubble. */
@@ -91,6 +93,64 @@ export function acpActivity(text: string): AcpAgentMessage {
   });
 }
 
+/**
+ * A real tool call opening, as `tddy-acp::provider_agent` announces one before dispatching it: an
+ * id to correlate its result by, the tool's name as the title, and `in_progress`.
+ */
+export function acpToolCall(id: string, title: string): AcpAgentMessage {
+  return create(AcpAgentMessageSchema, {
+    id: 0n,
+    msg: {
+      case: "sessionUpdate",
+      value: {
+        sessionId: { value: "s1" },
+        update: {
+          update: {
+            case: "toolCall",
+            value: {
+              toolCallId: { value: id },
+              title,
+              status: ToolCallStatus.IN_PROGRESS,
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * How a tool call ended: its terminal status and the output it produced, carried as `raw_output`
+ * (JSON, the way `tool_output_value` encodes a tool's answer) because the protobuf mirror of ACP
+ * carries `raw_output` and not `content`.
+ */
+export function acpToolCallResult(
+  id: string,
+  outcome: { failed: boolean; output: string },
+): AcpAgentMessage {
+  return create(AcpAgentMessageSchema, {
+    id: 0n,
+    msg: {
+      case: "sessionUpdate",
+      value: {
+        sessionId: { value: "s1" },
+        update: {
+          update: {
+            case: "toolCallUpdate",
+            value: {
+              toolCallId: { value: id },
+              fields: {
+                status: outcome.failed ? ToolCallStatus.FAILED : ToolCallStatus.COMPLETED,
+                rawOutput: JSON.stringify(outcome.output),
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 /** An agent-initiated permission request for a clarification (mirrors
  *  `convert_acp::clarification_request_permission`). `multi` sets the `:multi` tool-call-id
  *  convention; `allowOther` appends the free-text "other" affordance option; the question text +
@@ -136,13 +196,22 @@ export function acpPromptEnd(id: bigint = 0n): AcpAgentMessage {
   });
 }
 
-/** A JSON-RPC-style error (renders as the chat's workflow-error banner). */
-export function acpError(message: string): AcpAgentMessage {
+/**
+ * A JSON-RPC-style error (renders as the chat's workflow-error banner).
+ *
+ * `code` defaults to `internal error`; the daemon's model-addressed surface distinguishes seven
+ * (`ModelAcpService::AcpErrorCode`), of which `-32001` is a refusal to touch something that is not
+ * the caller's.
+ */
+export function acpError(message: string, code: bigint = -32603n): AcpAgentMessage {
   return create(AcpAgentMessageSchema, {
     id: 0n,
-    msg: { case: "error", value: { code: -32603n, message } },
+    msg: { case: "error", value: { code, message } },
   });
 }
+
+/** `ModelAcpService`'s `PermissionDenied` code — the workspace refusal a chat has to put in words. */
+export const ACP_PERMISSION_DENIED = -32001n;
 
 /**
  * The text of every content block a client `prompt` frame carried, in order.
@@ -160,6 +229,20 @@ export function promptTexts(m: AcpClientMessage): string[] {
     }
     return block.block.value.text;
   });
+}
+
+/**
+ * The `new_session` handshake a client opened the stream with.
+ *
+ * Throws for a frame that is not one: a spec asserting on which registry row a chat named — and on
+ * where its tools were told to run — must fail on the wrong frame rather than compare against a
+ * default-constructed request that says neither.
+ */
+export function newSessionRequest(m: AcpClientMessage): NewSessionRequest {
+  if (m.msg.case !== "newSession") {
+    throw new Error(`expected a new_session frame, got '${String(m.msg.case)}'`);
+  }
+  return m.msg.value;
 }
 
 /** The encoded `option_id` a client sent in a `requestPermission` reply (`""` if not that shape). */
@@ -184,9 +267,14 @@ export function acpScriptedSession(...frames: AcpAgentMessage[]) {
  * A `session` handler that records the operator's outbound `AcpClientMessage`s (skipping the eager
  * `initialize`/`new_session` handshake) into `sent`, optionally emitting `frames` first. Use for
  * specs asserting what the client sent (prompts, permission replies).
+ *
+ * The handshake's own `new_session` frames are recorded separately in `opened`: on the daemon's
+ * model-addressed surface that frame is where the chat names which registry row it speaks as and
+ * where that row's tools may run, so it is a claim in its own right rather than ceremony.
  */
 export function acpRecordingSession(frames: AcpAgentMessage[] = []) {
   const sent: AcpClientMessage[] = [];
+  const opened: AcpClientMessage[] = [];
   async function* session(requests: AsyncIterable<AcpClientMessage>) {
     for (const f of frames) {
       yield f;
@@ -196,7 +284,10 @@ export function acpRecordingSession(frames: AcpAgentMessage[] = []) {
       if (c === "prompt" || c === "requestPermission") {
         sent.push(req);
       }
+      if (c === "newSession") {
+        opened.push(req);
+      }
     }
   }
-  return { session, sent };
+  return { session, sent, opened };
 }

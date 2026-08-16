@@ -389,6 +389,18 @@ export const TEST_IDS = {
   modelsChatTranscript: "models-chat-transcript",
   /** Why a chat prompt was not sent, or what the stream reported. */
   modelsChatError: "models-chat-error",
+  /** The workspace a tool-bearing assistant's chat runs its tools in, once one is chosen. */
+  modelsChatWorkspace: "models-chat-workspace",
+  /** Chooses where a tool-bearing assistant's tools run, before its chat opens. */
+  modelsChatWorkspaceDialog: "models-chat-workspace-dialog",
+  /** The workspaces the owning daemon offers. */
+  modelsChatWorkspaceOptions: "models-chat-workspace-options",
+  /** Why no workspace can be offered; carries `data-workspace-status`. */
+  modelsChatWorkspaceEmpty: "models-chat-workspace-empty",
+  /** Why the owning daemon's projects could not be read. */
+  modelsChatWorkspaceError: "models-chat-workspace-error",
+  /** Leaves the workspace choice without opening a chat. */
+  modelsChatWorkspaceCancel: "models-chat-workspace-cancel",
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
@@ -1306,6 +1318,10 @@ export const modelsAssistantRow = (daemonInstanceId: string, name: string) =>
 export const modelsAssistantTools = (daemonInstanceId: string, name: string) =>
   `${modelsAssistantRow(daemonInstanceId, name)}-tools`;
 
+/** Opens the ACP chat with an assistant — its model, its system prompt and its tools. */
+export const modelsAssistantChat = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-chat`;
+
 /** Opens the edit dialog for an assistant. */
 export const modelsAssistantEdit = (daemonInstanceId: string, name: string) =>
   `${modelsAssistantRow(daemonInstanceId, name)}-edit`;
@@ -1325,3 +1341,13 @@ export const modelsCreateAssistantTool = (toolName: string) =>
 /** One selectable tool checkbox in the edit-assistant dialog. */
 export const modelsEditAssistantTool = (toolName: string) =>
   `models-edit-assistant-tool-${toolName}`;
+
+/** One workspace the owning daemon offers a tool-bearing assistant; carries `data-workspace-path`. */
+export const modelsChatWorkspaceOption = (projectId: string) =>
+  `models-chat-workspace-${safeTestIdPart(projectId)}`;
+
+/** One rendered bubble of the models chat transcript; carries `data-message-kind`. */
+export const modelsChatMessage = (index: number) => `models-chat-message-${index}`;
+
+/** A tool bubble's status marker; carries `data-tool-status`. Absent on non-tool bubbles. */
+export const modelsChatToolStatus = (index: number) => `${modelsChatMessage(index)}-tool-status`;

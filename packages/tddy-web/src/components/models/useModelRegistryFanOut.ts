@@ -143,7 +143,7 @@ export interface ModelRegistryFanOut {
  * failure an operator can act on by going to the right host — it is named rather than left to read
  * like any other error.
  */
-function errorTextOf(err: unknown): string {
+export function errorTextOf(err: unknown): string {
   const failure = ConnectError.from(err);
   const message = failure.rawMessage || String(err);
   return failure.code === Code.PermissionDenied ? `Permission denied — ${message}` : message;
@@ -187,7 +187,7 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
 }
 
 /** What a caller is told when the common room holds no connection to the daemon it addressed. */
-function noConnectionTo(daemonInstanceId: string): string {
+export function noConnectionTo(daemonInstanceId: string): string {
   return `no connection to daemon ${daemonInstanceId}`;
 }
 
