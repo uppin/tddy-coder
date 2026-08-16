@@ -9,6 +9,8 @@ import {
   isVmsPath,
   LIVEKIT_ROUTE,
   isLiveKitPath,
+  MODELS_ROUTE,
+  isModelsPath,
   SESSIONS_DRAWER_ROUTE,
   isSessionsDrawerPath,
   sessionsDrawerPathForSession,
@@ -130,6 +132,28 @@ describe("appRoutes — LiveKit route helpers", () => {
 
   it("does not match sub-paths under /livekit", () => {
     expect(isLiveKitPath("/livekit/extra")).toBe(false);
+  });
+});
+
+describe("appRoutes — Models & Agents route helpers", () => {
+  it("MODELS_ROUTE is /models", () => {
+    expect(MODELS_ROUTE).toBe("/models");
+  });
+
+  it("recognises /models as the Models & Agents path", () => {
+    expect(isModelsPath(MODELS_ROUTE)).toBe(true);
+  });
+
+  it("does not match root as a Models & Agents path", () => {
+    expect(isModelsPath("/")).toBe(false);
+  });
+
+  it("does not match /vms as a Models & Agents path", () => {
+    expect(isModelsPath("/vms")).toBe(false);
+  });
+
+  it("does not match sub-paths under /models", () => {
+    expect(isModelsPath("/models/qwen3")).toBe(false);
   });
 });
 

@@ -357,25 +357,38 @@ export const TEST_IDS = {
   modelsAddProviderBaseUrl: "models-add-provider-base-url",
   modelsAddProviderApiKey: "models-add-provider-api-key",
   modelsAddProviderSubmit: "models-add-provider-submit",
+  /** Names the daemon a newly added provider will be created on. */
+  modelsAddProviderTarget: "models-add-provider-target",
   /** The error the add-provider form reports when the daemon refused (or was never addressed). */
   modelsAddProviderError: "models-add-provider-error",
-  /** The models table listing every model across every connected daemon. */
-  modelsTable: "models-table",
   /** The row the table shows instead of models; carries `data-registry-status` for why. */
   modelsTableEmpty: "models-table-empty",
+  /** The row the providers panel shows instead of providers; carries `data-registry-status`. */
+  modelsProvidersEmpty: "models-providers-empty",
   /** The assistants panel. */
   modelsAssistantsPanel: "models-assistants-panel",
+  /** The row the assistants panel shows instead of assistants; carries `data-registry-status`. */
+  modelsAssistantsEmpty: "models-assistants-empty",
   /** Opens the create-assistant dialog for the focused model. */
   modelsCreateAssistantDialog: "models-create-assistant-dialog",
   modelsCreateAssistantName: "models-create-assistant-name",
   modelsCreateAssistantLabel: "models-create-assistant-label",
   modelsCreateAssistantSystemPrompt: "models-create-assistant-system-prompt",
   modelsCreateAssistantSubmit: "models-create-assistant-submit",
+  /** The tool fieldset of the create-assistant dialog; carries `data-tool-catalog-status`. */
+  modelsCreateAssistantTools: "models-create-assistant-tools",
+  /** The edit-assistant dialog and its fields. */
+  modelsEditAssistantDialog: "models-edit-assistant-dialog",
+  modelsEditAssistantLabel: "models-edit-assistant-label",
+  modelsEditAssistantSystemPrompt: "models-edit-assistant-system-prompt",
+  modelsEditAssistantSubmit: "models-edit-assistant-submit",
   /** The ACP chat dialog opened from a model or assistant row. */
   modelsChatDialog: "models-chat-dialog",
   modelsChatInput: "models-chat-input",
   modelsChatSend: "models-chat-send",
   modelsChatTranscript: "models-chat-transcript",
+  /** Why a chat prompt was not sent, or what the stream reported. */
+  modelsChatError: "models-chat-error",
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
@@ -1216,6 +1229,22 @@ export const modelsProviderCredential = (daemonInstanceId: string, providerId: s
 export const modelsProviderRefresh = (daemonInstanceId: string, providerId: string) =>
   `${modelsProviderRow(daemonInstanceId, providerId)}-refresh`;
 
+/** Removes a provider from the daemon that owns it. */
+export const modelsProviderDelete = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-delete`;
+
+/** Why a write against a provider was refused — held apart from its enumeration error. */
+export const modelsProviderActionError = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-action-error`;
+
+/** The failure row the providers panel renders for a daemon whose registry could not be read. */
+export const modelsProvidersDaemonError = (daemonInstanceId: string) =>
+  `models-providers-daemon-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/** The failure row the assistants panel renders for a daemon whose registry could not be read. */
+export const modelsAssistantsDaemonError = (daemonInstanceId: string) =>
+  `models-assistants-daemon-error-${safeTestIdPart(daemonInstanceId)}`;
+
 /**
  * `[data-testid="models-row-<daemonInstanceId>-<providerId>-<modelId>"]` — one row per model.
  * A model id may contain a colon (`qwen3:32b`), so it goes through `safeTestIdPart`.
@@ -1266,12 +1295,33 @@ export const modelsRowStale = (daemonInstanceId: string, providerId: string, mod
 export const modelsDaemonError = (daemonInstanceId: string) =>
   `models-daemon-error-${daemonInstanceId}`;
 
-/** One assistant row, keyed by the assistant's `--agent` name. */
-export const modelsAssistantRow = (name: string) => `models-assistant-row-${name}`;
+/**
+ * One assistant row. An assistant's `--agent` name is unique *per daemon*, so two hosts may each
+ * define a `reviewer` — the owning daemon is part of the id, or their rows would collide.
+ */
+export const modelsAssistantRow = (daemonInstanceId: string, name: string) =>
+  `models-assistant-row-${daemonInstanceId}-${safeTestIdPart(name)}`;
 
 /** The assigned-tools cell of an assistant row; carries `data-assistant-tools`. */
-export const modelsAssistantTools = (name: string) => `models-assistant-tools-${name}`;
+export const modelsAssistantTools = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-tools`;
+
+/** Opens the edit dialog for an assistant. */
+export const modelsAssistantEdit = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-edit`;
+
+/** Removes an assistant from the daemon that owns it. */
+export const modelsAssistantDelete = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-delete`;
+
+/** Why a write against an assistant was refused. */
+export const modelsAssistantError = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-error`;
 
 /** One selectable tool checkbox in the create-assistant dialog. */
 export const modelsCreateAssistantTool = (toolName: string) =>
   `models-create-assistant-tool-${toolName}`;
+
+/** One selectable tool checkbox in the edit-assistant dialog. */
+export const modelsEditAssistantTool = (toolName: string) =>
+  `models-edit-assistant-tool-${toolName}`;

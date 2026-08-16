@@ -8,7 +8,12 @@
 
 import React from "react";
 import { Code } from "@connectrpc/connect";
-import { ModelRegistryService, ProviderKind } from "../../../src/gen/models_pb";
+import { create } from "@bufbuild/protobuf";
+import {
+  CreateProviderResponseSchema,
+  ModelRegistryService,
+  ProviderKind,
+} from "../../../src/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
@@ -192,6 +197,95 @@ describe("ProvidersPanelAcceptance — adding and reporting providers", () => {
     // Then — the daemon left its cache untouched and still serves the row, so the row itself has to
     // say the catalog behind it could not be confirmed (AC7)
     page.rowIsStale(QWEN).should("equal", "true");
+  });
+
+  it("clears a provider's stale marking once a later read finds it enumerating cleanly", () => {
+    // Given — a provider whose refresh failed, leaving its one model marked stale
+    const backend = aModelRegistryBackend({
+      providers: [anOllamaProvider()],
+      models: [anLlmModel()],
+    }).failWith(
+      ModelRegistryService.method.refreshProviderModels,
+      Code.Unavailable,
+      "connection refused: http://localhost:11434/api/tags",
+    );
+    mount(backend);
+    page.refreshProvider(OLLAMA);
+    page.rowIsStale(QWEN).should("equal", "true");
+
+    // When — a later action re-reads the daemon, which now enumerates the provider without error
+    page.loadModel(QWEN);
+
+    // Then — the row is current again. A marking that only a *successful refresh click* could clear
+    // would keep every model of this provider labelled "last enumeration failed" for good
+    page.rowLoadState(QWEN).should("equal", "loaded");
+    page.rowIsStale(QWEN).should("equal", "false");
+    page.rowStaleMarker(QWEN, { timeout: 0 }).should("not.exist");
+  });
+
+  it("names the daemon a new provider will be created on", () => {
+    // Given — a fleet whose panel lists every daemon's providers, so the target cannot be inferred
+    mount(aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] }));
+
+    // When
+    page.openAddProviderForm();
+
+    // Then
+    page.addProviderTarget().should("have.text", `Adding to ${FIXTURE_DAEMON}`);
+  });
+
+  it("creates one provider when the operator submits twice before the daemon answers", () => {
+    // Given — a daemon whose create only answers once the test releases it
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const backend = aModelRegistryBackend({ providers: [], models: [] }).onUnary(
+      ModelRegistryService.method.createProvider,
+      async () => {
+        await gate;
+        return create(CreateProviderResponseSchema, { provider: aCloudProvider() });
+      },
+    );
+    mount(backend);
+
+    // When — the operator submits, then submits again while the first create is still in flight
+    page.openAddProviderForm();
+    page.fillAddProviderForm({
+      kind: String(ProviderKind.FIREWORKS),
+      label: "Fireworks",
+      baseUrl: "https://api.fireworks.ai/inference",
+      apiKey: "fw-secret-key",
+    });
+    page.addProviderSubmit().click();
+    page.addProviderSubmit().should("be.disabled");
+    page.addProviderSubmit().click({ force: true });
+    cy.then(() => release());
+
+    // Then — one provider. A duplicate is not merely untidy: the id is retired for good and its
+    // base URL is then permanently taken, so the daemon would refuse to re-create it
+    cy.wrap(backend).should((b) => {
+      expect(b.callsTo(ModelRegistryService.method.createProvider)).to.have.length(1);
+    });
+  });
+
+  it("renders a provider kind this build has no name for as the raw value", () => {
+    // Given — a daemon that knows a provider kind this web build does not (kind 7)
+    mount(
+      aModelRegistryBackend({
+        providers: [anOllamaProvider({ kind: 7 as ProviderKind, label: "Some New Cloud" })],
+        models: [],
+      }),
+    );
+
+    // When / Then — the value itself, said to be unrecognised. "Unknown" would file a daemon this
+    // tab is out of date with under ordinary data, and send the operator after the provider
+    page
+      .providerRow(OLLAMA)
+      .should(
+        "contain.text",
+        "Unrecognised provider kind 7 — the daemon sent a value this web build has no name for",
+      );
   });
 
   it("keeps a provider's stale catalog on screen but marks the provider as failed to refresh", () => {

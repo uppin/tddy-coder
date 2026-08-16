@@ -2,10 +2,12 @@ import { ModelLoadState } from "../../gen/models_pb";
 import {
   modelRowKey,
   providerRowKey,
+  registryEmptyStateText,
   type DaemonFailure,
   type ModelRow,
   type RegistryReadStatus,
 } from "../../utils/mergeRegistryEntries";
+import { unrecognisedEnumText } from "../../lib/enumSkew";
 import { safeTestIdPart } from "../../lib/testId";
 
 /**
@@ -17,7 +19,11 @@ import { safeTestIdPart } from "../../lib/testId";
  * (docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md § AC12).
  */
 
-/** The `data-load-state` vocabulary, mirroring `models.ModelLoadState`. */
+/**
+ * The `data-load-state` vocabulary, mirroring `models.ModelLoadState`. A value outside the enum this
+ * build knows is reported as itself — collapsing it into one of the known words would let a daemon
+ * newer than this tab read as ordinary data.
+ */
 export function loadStateName(state: ModelLoadState): string {
   switch (state) {
     case ModelLoadState.LOADED:
@@ -27,7 +33,7 @@ export function loadStateName(state: ModelLoadState): string {
     case ModelLoadState.UNSUPPORTED:
       return "unsupported";
     default:
-      return "unspecified";
+      return `unrecognised-${state}`;
   }
 }
 
@@ -41,7 +47,7 @@ function loadStateLabel(state: ModelLoadState): string {
     case ModelLoadState.UNSUPPORTED:
       return "Residency n/a";
     default:
-      return "Unknown";
+      return unrecognisedEnumText("residency", state);
   }
 }
 
@@ -54,20 +60,6 @@ function loadStateLabel(state: ModelLoadState): string {
  */
 export function isChatCapable(model: ModelRow): boolean {
   return model.labels.includes("llm");
-}
-
-/** What the table says when it has no rows, and why it has none. */
-function emptyStateText(status: RegistryReadStatus): string {
-  switch (status) {
-    case "not-connected":
-      return "Not connected to the common room";
-    case "no-daemons":
-      return "No daemons in the common room";
-    case "loading":
-      return "Reading the model catalog…";
-    default:
-      return "No models";
-  }
 }
 
 /** The `data-testid` stem of a model row. A model id may contain a colon (`qwen3:32b`). */
@@ -107,7 +99,7 @@ export function ModelsTable({
   onCreateAssistant,
 }: ModelsTableProps) {
   return (
-    <div data-testid="models-table" className="rounded-md border border-border">
+    <div className="rounded-md border border-border">
       <table className="w-full text-left text-sm text-foreground">
         <thead className="text-xs text-muted-foreground">
           <tr>
@@ -151,7 +143,10 @@ export function ModelsTable({
                 data-registry-status={status}
                 className="px-3 py-2 text-muted-foreground"
               >
-                {emptyStateText(status)}
+                {registryEmptyStateText(status, {
+                  loading: "Reading the model catalog…",
+                  ready: "No models",
+                })}
               </td>
             </tr>
           ) : null}

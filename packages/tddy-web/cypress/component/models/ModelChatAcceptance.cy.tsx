@@ -17,7 +17,7 @@ import {
   type AcpClientMessage,
 } from "../../../src/gen/tddy/acp/v1/acp_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
-import type { DaemonHost } from "../../../src/lib/participantRole";
+import { daemonRpcIdentity, type DaemonHost } from "../../../src/lib/participantRole";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
 import {
@@ -67,9 +67,23 @@ function aChattableRegistry(
   }).implement(AcpService, { session });
 }
 
+/**
+ * Mount with the model's owning daemon present in the common room — the state a chat is opened in.
+ * The chat names that participant as the one serving its stream, so its presence is part of the
+ * fixture rather than an implicit "some room".
+ */
 const mount = (backend: ReturnType<typeof aModelRegistryBackend>) =>
   mountWithRpc(
-    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]),
+    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST], [
+      daemonRpcIdentity(FIXTURE_DAEMON),
+    ]),
+    backend,
+  );
+
+/** The same screen after that daemon has dropped out of the common room. */
+const mountWithoutTheDaemonInTheRoom = (backend: ReturnType<typeof aModelRegistryBackend>) =>
+  mountWithRpc(
+    withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST], []),
     backend,
   );
 
@@ -141,5 +155,25 @@ describe("ModelChatAcceptance — chatting with a model over ACP", () => {
       ]);
     });
     page.chatTranscript().should("contain.text", "Ollama here, ready.");
+  });
+
+  it("refuses a prompt once the model's daemon has left the common room", () => {
+    // Given — a chat whose owning daemon is no longer a participant, so nothing is reading the
+    // stream the prompt would be enqueued onto
+    const recorder = acpRecordingSession([acpAgentChunk("Ollama here, ready.")]);
+    const backend = aChattableRegistry(recorder.session);
+    mountWithoutTheDaemonInTheRoom(backend);
+
+    // When
+    page.openChat(QWEN);
+    page.sendChatPrompt("How many parameters do you have?");
+
+    // Then — the operator is told the prompt did not go anywhere. Reporting success and echoing
+    // their own words back is the one answer that is never true
+    page.chatError().should("have.text", "Message not sent — the presenter is not connected.");
+    page.chatTranscript().should("not.contain.text", "How many parameters do you have?");
+    cy.wrap(recorder).should((r) => {
+      expect(r.sent).to.have.length(0);
+    });
   });
 });

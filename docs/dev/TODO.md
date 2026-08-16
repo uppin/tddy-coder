@@ -289,9 +289,14 @@ its own failure message, none from that branch. New entries beyond the list abov
   credentials stay on the host that uses them, but it means an assistant created on the laptop is
   invisible on the workstation. A common-room sync for the `assistant` table (not `provider`) is the
   natural follow-up.
-- **Provider API keys are plaintext at rest.** Protected by file mode 0600 inside the 0700
-  auth-storage directory, not by encryption; a host backup captures them. The schema reserves a
-  nullable `credential_ref` column for an env-var-reference mode that this changeset does not build.
+- **Provider API keys are plaintext at rest.** `<tddy-data-dir>/models.db` (plus its `-wal`/`-shm`
+  siblings) is created `0600`, but its **parent is the shared `tddy-data-dir`, mode 0755** — not the
+  `0700` auth-storage directory `github_token_store.rs` uses. The data dir is deliberately readable
+  by session processes running as other uids (`projects/`, per-user session bases), so `0700` there
+  would break them; a `0600` file inside it is unreadable by those accounts, but the filename is
+  visible. Moving to `<tddy-data-dir>/model-registry/models.db` would hide that too. Encryption is
+  not used at all, so a host backup captures every key. The schema reserves a nullable
+  `credential_ref` column for an env-var-reference mode that this changeset does not build.
 
 ### Remote git repo over LiveKit — deliberate gaps (source: remote-git-repo-over-livekit changeset, 2026-08-15)
 
@@ -1476,7 +1481,7 @@ enhancements beyond that changeset:
 ### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
 
 - ~~`--specialized-agent` CLI flag + deprecated aliases~~ — done (2026-07-02, multi-agent tool-replacement changeset; overrides and the deprecated alias fully removed 2026-07-02 in a follow-up cleanup — see below). `tddy-sandbox-app` takes repeatable `--specialized-agent <name>` + `--agents-dir`, resolves them via `spawn::resolve_specialized_agents`, and threads the resolved array into the jail as `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` via `spawn::subagent_env_overlay`. There is no `--discovery-subagent` alias and no `--fastcontext-*`/`--subagent-replaces` override flags — all configuration comes exclusively from the resolved agent's YAML def. See `docs/ft/coder/managed-codebase-subagents.md` and `docs/ft/coder/specialized-subagents.md`.
-- **`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)** — `create_backend` recognizes any resolved specialized-agent name, but `packages/tddy-coder/src/run.rs`'s clap `value_parser` on `--agent` still hardcodes a fixed allowlist and rejects a custom name (e.g. `my-explorer`) before `create_backend` ever runs. Fixing it requires resolving `<tddyhome>/agents` before `--tddy-data-dir` itself is parsed from CLI args — an ordering problem — and has no dedicated test (only `create_backend` itself is tested directly, bypassing clap). See the `TODO` comment at the `Args.agent` field.
+- ~~**`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)**~~ — **done** (models-and-assistants changeset, 2026-08-16). The clap `value_parser` allowlist on `--agent` is removed; validation moved into `create_backend`, whose former `_ => Claude` catch-all is now an error naming the known agents. A registry assistant or a `<tddyhome>/agents` def is accepted by name.
 
 ### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
 

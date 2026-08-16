@@ -201,7 +201,12 @@ export function aModelRegistryBackend(fixture: ModelRegistryFixture = {}): InMem
         (p) => p.providerId === req.providerId,
         `no such provider: ${req.providerId}`,
       );
+      // A provider goes with its cached models, as `DeleteProvider` documents — a fake that kept
+      // them would let a screen pass that leaves rows behind pointing at a provider that is gone.
       providers.splice(index, 1);
+      for (let i = models.length - 1; i >= 0; i -= 1) {
+        if (models[i].providerId === req.providerId) models.splice(i, 1);
+      }
       return {};
     })
     .onUnary(ModelRegistryService.method.listModels, () => ({ models }))

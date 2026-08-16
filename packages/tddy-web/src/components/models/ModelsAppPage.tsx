@@ -21,7 +21,7 @@ const NO_DAEMON_SELECTED = "select a daemon before adding a provider";
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
  */
-export function ModelsAppPage({ onNavigate }: { onNavigate?: (path: string) => void }) {
+export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const registry = useModelRegistryFanOut();
   const { selectedInstanceId } = useSelectedDaemon();
   const [chatModel, setChatModel] = useState<ModelRow | null>(null);
@@ -42,22 +42,26 @@ export function ModelsAppPage({ onNavigate }: { onNavigate?: (path: string) => v
   );
 
   return (
-    <AppShell title="Models & Agents" onNavigate={onNavigate ?? (() => {})} variant="scroll">
+    <AppShell title="Models & Agents" onNavigate={onNavigate} variant="scroll">
       <ModelsScreen
         providers={registry.providers}
         models={registry.models}
         assistants={registry.assistants}
         failures={registry.failures}
         providerErrors={registry.providerErrors}
+        providerActionErrors={registry.providerActionErrors}
+        assistantErrors={registry.assistantErrors}
         modelErrors={registry.modelErrors}
         status={registry.status}
         toolsFor={registry.toolsFor}
+        addProviderTarget={selectedInstanceId ?? ""}
         onAddProvider={(input) =>
           selectedInstanceId
             ? registry.createProvider({ daemonInstanceId: selectedInstanceId, ...input })
             : Promise.resolve(NO_DAEMON_SELECTED)
         }
         onRefreshProvider={(provider) => void registry.refreshProvider(provider)}
+        onDeleteProvider={(provider) => void registry.deleteProvider(provider)}
         onLoadModel={(model) => void registry.loadModel(model)}
         onUnloadModel={(model) => void registry.unloadModel(model)}
         onOpenChat={(model) => void openChat(model)}
@@ -72,6 +76,8 @@ export function ModelsAppPage({ onNavigate }: { onNavigate?: (path: string) => v
             tools,
           })
         }
+        onUpdateAssistant={(input) => registry.updateAssistant(input)}
+        onDeleteAssistant={(assistant) => void registry.deleteAssistant(assistant)}
       />
       {chatModel ? (
         <ModelChatDialog model={chatModel} onClose={() => setChatModel(null)} />

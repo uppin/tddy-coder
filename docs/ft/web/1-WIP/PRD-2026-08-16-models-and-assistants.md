@@ -88,11 +88,12 @@ not changed.
       A failed enumeration surfaces as an RPC error — no cached-list fallback, no partial success
       presented as success.
 - [ ] Each model carries **capability labels** derived from the provider's own metadata:
-      `llm`, `embedding`, `vision`, `tools`, `reranker`. For Ollama the source is the `families` /
-      `capabilities` fields of `GET /api/show`; a model whose capabilities cannot be determined is
-      labelled `unknown` rather than being guessed as `llm`.
-- [ ] Each model carries its **load state**: `loaded` (resident, with the expiry Ollama reports),
-      `not_loaded`, or `unsupported` (cloud providers — a remote model has no local residency).
+      `llm`, `embedding`, `vision`, `tools`, `reranker`. For Ollama the source is the `capabilities`
+      field of `POST /api/show` (`families` is reported but not used); a model whose capabilities
+      cannot be determined is labelled `unknown` rather than being guessed as `llm`.
+- [ ] Each model carries its **load state**: `loaded` (resident), `not_loaded`, or `unsupported`
+      (cloud providers — a remote model has no local residency). Ollama reports an expiry alongside
+      residency; it is not read or stored.
 - [ ] The screen lists models from **every connected daemon**, each row showing its owning daemon.
 
 #### Model lifecycle
@@ -112,7 +113,8 @@ not changed.
 - [ ] The operator can open a chat with **any LLM-labelled model** or with **any assistant**, from the
       Models & Agents screen. The chat rides the existing `acp.AcpService` bidi stream and the existing
       `useAcpSession` web client — no second chat implementation.
-- [ ] Chatting with a model that is not loaded loads it as part of session start.
+- [ ] Chatting with a model that is not loaded loads it first. The load is issued by the web before
+      the ACP handshake, not by the daemon as part of `new_session`.
 - [ ] An assistant's chat has its assigned tools available; tool calls surface as ACP `tool_call` /
       `tool_call_update` session updates, dispatched through `tddy_tool_engine::execute_tool`.
 

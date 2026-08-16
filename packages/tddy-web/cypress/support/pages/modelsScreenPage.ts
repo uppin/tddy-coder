@@ -9,14 +9,22 @@
 
 import {
   byTestId,
+  modelsAssistantDelete,
+  modelsAssistantEdit,
+  modelsAssistantError,
   modelsAssistantRow,
+  modelsAssistantsDaemonError,
   modelsAssistantTools,
   modelsCreateAssistantTool,
   modelsDaemonError,
+  modelsEditAssistantTool,
+  modelsProviderActionError,
   modelsProviderCredential,
+  modelsProviderDelete,
   modelsProviderError,
   modelsProviderRefresh,
   modelsProviderRow,
+  modelsProvidersDaemonError,
   modelsRow,
   modelsRowChat,
   modelsRowCreateAssistant,
@@ -47,7 +55,19 @@ export interface ProviderRef {
   providerId: string;
 }
 
+/**
+ * Identifies one assistant row across the merged, cross-daemon panel. Assistant names are unique
+ * per daemon, so two hosts may each define a `reviewer`.
+ */
+export interface AssistantRef {
+  daemonInstanceId: string;
+  name: string;
+}
+
 const rowId = (m: ModelRef) => modelsRow(m.daemonInstanceId, m.providerId, m.modelId);
+
+/** The `data-testid` stem every tool checkbox in the edit-assistant dialog shares. */
+const EDIT_ASSISTANT_TOOL_PREFIX = modelsEditAssistantTool("");
 
 /**
  * The value of an attribute the screen is expected to publish.
@@ -76,10 +96,6 @@ export const modelsScreenPage = {
   /** The Models & Agents screen root. */
   screen: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsScreen, { timeout: 5000, ...options }),
-
-  /** The models table. */
-  table: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.modelsTable, { timeout: 5000, ...options }),
 
   /**
    * Why the table has no model rows, read from `data-registry-status` — `not-connected`,
@@ -243,9 +259,41 @@ export const modelsScreenPage = {
     byTestId(modelsProviderRefresh(provider.daemonInstanceId, provider.providerId)).click();
   },
 
+  /** Remove a provider from the daemon that owns it. */
+  deleteProvider(provider: ProviderRef) {
+    byTestId(modelsProviderDelete(provider.daemonInstanceId, provider.providerId)).click();
+  },
+
+  /** Why a write against a provider was refused, rendered against that provider's row. */
+  providerActionError: (provider: ProviderRef, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsProviderActionError(provider.daemonInstanceId, provider.providerId), {
+      timeout: 5000,
+      ...options,
+    }),
+
+  /** The failure the providers panel renders for a daemon whose registry could not be read. */
+  providersDaemonError: (daemonInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsProvidersDaemonError(daemonInstanceId), { timeout: 5000, ...options }),
+
+  /** Why the providers panel has no rows, read from `data-registry-status`. */
+  providersEmptyStatus: (): Cypress.Chainable<string> =>
+    byTestId(TEST_IDS.modelsProvidersEmpty, { timeout: 5000 })
+      .invoke("attr", "data-registry-status")
+      .then((value) =>
+        requiredAttribute(value, "data-registry-status", "the providers panel's empty state"),
+      ),
+
+  /** The row the providers panel shows in place of providers. */
+  providersEmptyState: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsProvidersEmpty, { timeout: 5000, ...options }),
+
   /** The error the add-provider form reports when the provider could not be created. */
   addProviderError: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsAddProviderError, { timeout: 5000, ...options }),
+
+  /** The daemon the add-provider form says a new provider will be created on. */
+  addProviderTarget: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsAddProviderTarget, { timeout: 5000, ...options }),
 
   /** Open the add-provider form. */
   openAddProviderForm() {
@@ -253,19 +301,28 @@ export const modelsScreenPage = {
   },
 
   /**
-   * Fill and submit the add-provider form. Every field is required — a partial variant would
-   * silently skip fields and let an incomplete form look like a successful submission.
+   * Fill the add-provider form. Every field is required — a partial variant would silently skip
+   * fields and let an incomplete form look like a successful submission.
    */
+  fillAddProviderForm(provider: { kind: string; label: string; baseUrl: string; apiKey: string }) {
+    byTestId(TEST_IDS.modelsAddProviderKind).select(provider.kind);
+    byTestId(TEST_IDS.modelsAddProviderLabel).clear().type(provider.label);
+    byTestId(TEST_IDS.modelsAddProviderBaseUrl).clear().type(provider.baseUrl);
+    byTestId(TEST_IDS.modelsAddProviderApiKey).clear().type(provider.apiKey);
+  },
+
+  /** The add-provider form's submit control. */
+  addProviderSubmit: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsAddProviderSubmit, { timeout: 5000, ...options }),
+
+  /** Fill and submit the add-provider form. */
   fillAndSubmitAddProviderForm(provider: {
     kind: string;
     label: string;
     baseUrl: string;
     apiKey: string;
   }) {
-    byTestId(TEST_IDS.modelsAddProviderKind).select(provider.kind);
-    byTestId(TEST_IDS.modelsAddProviderLabel).clear().type(provider.label);
-    byTestId(TEST_IDS.modelsAddProviderBaseUrl).clear().type(provider.baseUrl);
-    byTestId(TEST_IDS.modelsAddProviderApiKey).clear().type(provider.apiKey);
+    modelsScreenPage.fillAddProviderForm(provider);
     byTestId(TEST_IDS.modelsAddProviderSubmit).click();
   },
 
@@ -277,23 +334,71 @@ export const modelsScreenPage = {
   assistantsPanel: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsAssistantsPanel, { timeout: 5000, ...options }),
 
-  /** One assistant row, keyed by its `--agent` name. */
-  assistantRow: (name: string, options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(modelsAssistantRow(name), { timeout: 5000, ...options }),
+  /** One assistant row, on the daemon that owns it. */
+  assistantRow: (assistant: AssistantRef, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsAssistantRow(assistant.daemonInstanceId, assistant.name), {
+      timeout: 5000,
+      ...options,
+    }),
 
   /** The tools assigned to an assistant, read from `data-assistant-tools`. */
-  assistantTools: (name: string): Cypress.Chainable<string[]> =>
-    byTestId(modelsAssistantTools(name), { timeout: 5000 })
+  assistantTools: (assistant: AssistantRef): Cypress.Chainable<string[]> =>
+    byTestId(modelsAssistantTools(assistant.daemonInstanceId, assistant.name), { timeout: 5000 })
       .invoke("attr", "data-assistant-tools")
       .then((value) =>
         attributeList(
-          requiredAttribute(value, "data-assistant-tools", `assistant row ${name}`),
+          requiredAttribute(value, "data-assistant-tools", `assistant row ${assistant.name}`),
         ),
       ),
+
+  /** Why a write against an assistant was refused, rendered against that assistant's row. */
+  assistantError: (assistant: AssistantRef, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsAssistantError(assistant.daemonInstanceId, assistant.name), {
+      timeout: 5000,
+      ...options,
+    }),
+
+  /** The failure the assistants panel renders for a daemon whose registry could not be read. */
+  assistantsDaemonError: (daemonInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsAssistantsDaemonError(daemonInstanceId), { timeout: 5000, ...options }),
+
+  /** Why the assistants panel has no rows, read from `data-registry-status`. */
+  assistantsEmptyStatus: (): Cypress.Chainable<string> =>
+    byTestId(TEST_IDS.modelsAssistantsEmpty, { timeout: 5000 })
+      .invoke("attr", "data-registry-status")
+      .then((value) =>
+        requiredAttribute(value, "data-registry-status", "the assistants panel's empty state"),
+      ),
+
+  /** The row the assistants panel shows in place of assistants. */
+  assistantsEmptyState: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsAssistantsEmpty, { timeout: 5000, ...options }),
+
+  /** Remove an assistant from the daemon that owns it. */
+  deleteAssistant(assistant: AssistantRef) {
+    byTestId(modelsAssistantDelete(assistant.daemonInstanceId, assistant.name)).click();
+  },
+
+  /** Open the edit dialog for an assistant. */
+  openEditAssistant(assistant: AssistantRef) {
+    byTestId(modelsAssistantEdit(assistant.daemonInstanceId, assistant.name)).click();
+  },
 
   /** The create-assistant dialog. */
   createAssistantDialog: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsCreateAssistantDialog, { timeout: 5000, ...options }),
+
+  /** The edit-assistant dialog. */
+  editAssistantDialog: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsEditAssistantDialog, { timeout: 5000, ...options }),
+
+  /** The label the edit-assistant dialog opened on. */
+  editAssistantLabelField: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsEditAssistantLabel, { timeout: 5000, ...options }),
+
+  /** The system prompt the edit-assistant dialog opened on. */
+  editAssistantSystemPromptField: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsEditAssistantSystemPrompt, { timeout: 5000, ...options }),
 
   /** The tool names offered by the create-assistant dialog, in DOM order. */
   assignableToolNames: (): Cypress.Chainable<string[]> =>
@@ -306,8 +411,27 @@ export const modelsScreenPage = {
         ),
       ),
 
-  /** Fill and submit the create-assistant dialog with the given tool selection. */
-  fillAndSubmitCreateAssistantForm(assistant: {
+  /**
+   * How the create-assistant dialog knows the daemon's exec catalog, read from
+   * `data-tool-catalog-status` — `loading`, `unavailable` or `ready`.
+   */
+  createAssistantToolCatalogStatus: (): Cypress.Chainable<string> =>
+    byTestId(TEST_IDS.modelsCreateAssistantTools, { timeout: 5000 })
+      .invoke("attr", "data-tool-catalog-status")
+      .then((value) =>
+        requiredAttribute(value, "data-tool-catalog-status", "the create-assistant tool picker"),
+      ),
+
+  /** The tool fieldset of the create-assistant dialog. */
+  createAssistantTools: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsCreateAssistantTools, { timeout: 5000, ...options }),
+
+  /** The create-assistant dialog's submit control. */
+  createAssistantSubmit: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsCreateAssistantSubmit, { timeout: 5000, ...options }),
+
+  /** Fill the create-assistant dialog with the given tool selection, without submitting. */
+  fillCreateAssistantForm(assistant: {
     name: string;
     label: string;
     systemPrompt: string;
@@ -317,7 +441,41 @@ export const modelsScreenPage = {
     byTestId(TEST_IDS.modelsCreateAssistantLabel).clear().type(assistant.label);
     byTestId(TEST_IDS.modelsCreateAssistantSystemPrompt).clear().type(assistant.systemPrompt);
     assistant.tools.forEach((tool) => byTestId(modelsCreateAssistantTool(tool)).check());
+  },
+
+  /** Fill and submit the create-assistant dialog with the given tool selection. */
+  fillAndSubmitCreateAssistantForm(assistant: {
+    name: string;
+    label: string;
+    systemPrompt: string;
+    tools: string[];
+  }) {
+    modelsScreenPage.fillCreateAssistantForm(assistant);
     byTestId(TEST_IDS.modelsCreateAssistantSubmit).click();
+  },
+
+  /**
+   * Fill and submit the edit-assistant dialog. `tools` is the assistant's full tool set *after* the
+   * edit: every box the dialog offers is set from it, so a tool left out is one the operator
+   * unticked rather than one this helper quietly left as it found it.
+   */
+  fillAndSubmitEditAssistantForm(assistant: {
+    label: string;
+    systemPrompt: string;
+    tools: string[];
+  }) {
+    byTestId(TEST_IDS.modelsEditAssistantLabel).clear().type(assistant.label);
+    byTestId(TEST_IDS.modelsEditAssistantSystemPrompt).clear().type(assistant.systemPrompt);
+    modelsScreenPage
+      .editAssistantDialog()
+      .find(`[data-testid^='${EDIT_ASSISTANT_TOOL_PREFIX}']`)
+      .each(($box) => {
+        const tool = $box.attr("data-testid")!.replace(EDIT_ASSISTANT_TOOL_PREFIX, "");
+        cy.wrap($box).then(($el) =>
+          assistant.tools.includes(tool) ? cy.wrap($el).check() : cy.wrap($el).uncheck(),
+        );
+      });
+    byTestId(TEST_IDS.modelsEditAssistantSubmit).click();
   },
 
   // ---------------------------------------------------------------------------
@@ -332,9 +490,42 @@ export const modelsScreenPage = {
   chatTranscript: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsChatTranscript, { timeout: 5000, ...options }),
 
+  /** Why a chat prompt was not sent, or what the stream reported. */
+  chatError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsChatError, { timeout: 5000, ...options }),
+
   /** Type a prompt into the chat and send it. */
   sendChatPrompt(prompt: string) {
     byTestId(TEST_IDS.modelsChatInput).clear().type(prompt);
     byTestId(TEST_IDS.modelsChatSend).click();
+  },
+
+  // ---------------------------------------------------------------------------
+  // Dismissing a dialog
+  // ---------------------------------------------------------------------------
+
+  /** Press Escape, the way an operator leaves any other tddy-web modal. */
+  pressEscape() {
+    cy.get("body").type("{esc}");
+  },
+
+  /**
+   * Press on the backdrop behind a dialog — the overlay that is the dialog panel's parent. Dispatched
+   * on the overlay itself, since "outside the dialog" is what the component reads from the event's
+   * target; the same way `VncOverlayAcceptance` presses its backdrop.
+   */
+  pressBackdropOf(dialog: () => Cypress.Chainable<JQuery<HTMLElement>>) {
+    dialog()
+      .parent()
+      .then(($overlay) => {
+        $overlay[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      });
+  },
+
+  /** Press on the create-assistant dialog itself, the way a drag across one of its fields starts. */
+  pressInsideCreateAssistantDialog() {
+    modelsScreenPage.createAssistantDialog().then(($dialog) => {
+      $dialog[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    });
   },
 };

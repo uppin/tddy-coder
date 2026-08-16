@@ -16,8 +16,16 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md § AC2, AC5, AC12.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConnectError, createClient, type Client } from "@connectrpc/connect";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import {
   ModelRegistryService,
   type AssignableTool,
@@ -31,6 +39,7 @@ import { daemonRpcIdentity } from "../../lib/participantRole";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
 import {
+  assistantRowKey,
   describeReadFailures,
   mergeRegistryEntries,
   modelRowKey,
@@ -51,7 +60,22 @@ type RegistryClient = Client<typeof ModelRegistryService>;
 /** One daemon's registry as this hook holds it, plus the tool catalog that daemon advertises. */
 interface DaemonState extends DaemonRegistrySnapshot {
   readonly assignableTools: readonly AssignableTool[];
+  /** Non-empty when `ListAssignableTools` failed — the difference between "no tools" and "unknown". */
+  readonly toolsError: string;
 }
+
+/**
+ * A daemon's exec catalog as the screen knows it. An empty list is a claim ("this daemon assigns no
+ * tools"), and a failed read must not be able to make that claim — an assistant created from it
+ * would be persisted toolless — so the three cases are distinct rather than all being `[]`.
+ */
+export type ToolCatalog =
+  | { readonly status: "loading" }
+  | { readonly status: "unavailable"; readonly error: string }
+  | { readonly status: "ready"; readonly tools: readonly AssignableTool[] };
+
+/** The catalog of a daemon that has not answered yet — one value, so identity is stable. */
+const TOOLS_LOADING: ToolCatalog = { status: "loading" };
 
 /** What a screen needs to render and act on the fleet's model registry. */
 export interface ModelRegistryFanOut {
@@ -62,17 +86,27 @@ export interface ModelRegistryFanOut {
   /** How far the fleet-wide read has got — an empty catalog alone cannot say why it is empty. */
   readonly status: RegistryReadStatus;
   /** The exec catalog the given daemon advertises — the web holds no tool list of its own. */
-  readonly toolsFor: (daemonInstanceId: string) => readonly AssignableTool[];
+  readonly toolsFor: (daemonInstanceId: string) => ToolCatalog;
   /**
    * Enumeration errors keyed by {@link providerRowKey}: the daemon's own, plus any failed refresh
-   * from this screen.
+   * from this screen. These mark the provider's models stale, so nothing but a failure to enumerate
+   * belongs here.
    */
   readonly providerErrors: ReadonlyMap<string, string>;
+  /**
+   * Errors from a write against a provider (deletion), keyed by {@link providerRowKey}. Held apart
+   * from {@link providerErrors} because a refused delete says nothing about the catalog's freshness.
+   */
+  readonly providerActionErrors: ReadonlyMap<string, string>;
+  /** Errors from a write against an assistant, keyed by {@link assistantRowKey}. */
+  readonly assistantErrors: ReadonlyMap<string, string>;
   /** Errors from a per-model action, keyed by {@link modelRowKey}. */
   readonly modelErrors: ReadonlyMap<string, string>;
   readonly loadModel: (model: ModelRow) => Promise<boolean>;
   readonly unloadModel: (model: ModelRow) => Promise<boolean>;
   readonly refreshProvider: (provider: ProviderRow) => Promise<void>;
+  /** Remove a provider from the daemon that owns it, with its cached models. */
+  readonly deleteProvider: (provider: ProviderRow) => Promise<void>;
   /** Resolves to the error to show, or `""` when the provider was created. */
   readonly createProvider: (input: {
     daemonInstanceId: string;
@@ -91,12 +125,28 @@ export interface ModelRegistryFanOut {
     systemPrompt: string;
     tools: string[];
   }) => Promise<string>;
+  /** Resolves to the error to show, or `""` when the assistant was updated. */
+  readonly updateAssistant: (input: {
+    assistant: AssistantRow;
+    label: string;
+    systemPrompt: string;
+    tools: string[];
+  }) => Promise<string>;
+  /** Remove an assistant from the daemon that owns it. */
+  readonly deleteAssistant: (assistant: AssistantRow) => Promise<void>;
 }
 
-/** The message to show for a failed RPC: the daemon's own words, never a swallowed error. */
+/**
+ * The message to show for a failed RPC: the daemon's own words, never a swallowed error.
+ *
+ * A registry write is served only by the daemon that owns the row, so a refusal to write is the one
+ * failure an operator can act on by going to the right host — it is named rather than left to read
+ * like any other error.
+ */
 function errorTextOf(err: unknown): string {
-  const message = ConnectError.from(err).rawMessage;
-  return message || String(err);
+  const failure = ConnectError.from(err);
+  const message = failure.rawMessage || String(err);
+  return failure.code === Code.PermissionDenied ? `Permission denied — ${message}` : message;
 }
 
 function providerRowOf(entry: ProviderEntry, sourceInstanceId: string): ProviderRow {
@@ -136,8 +186,6 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
   };
 }
 
-const EMPTY_TOOLS: readonly AssignableTool[] = [];
-
 /** What a caller is told when the common room holds no connection to the daemon it addressed. */
 function noConnectionTo(daemonInstanceId: string): string {
   return `no connection to daemon ${daemonInstanceId}`;
@@ -159,6 +207,10 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
 
   const [statesByDaemon, setStatesByDaemon] = useState<ReadonlyMap<string, DaemonState>>(new Map());
   const [refreshErrors, setRefreshErrors] = useState<ReadonlyMap<string, string>>(new Map());
+  const [providerActionErrors, setProviderActionErrors] = useState<ReadonlyMap<string, string>>(
+    new Map(),
+  );
+  const [assistantErrors, setAssistantErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [modelErrors, setModelErrors] = useState<ReadonlyMap<string, string>>(new Map());
 
   // Address each daemon's own RPC server over the shared common-room connection. Built per call
@@ -189,6 +241,20 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
       const put = (state: DaemonState) => {
         if (!mounted.current || signal?.aborted) return;
         setStatesByDaemon((current) => new Map(current).set(instanceId, state));
+        // A provider that has just enumerated cleanly is current again, so the failure a previous
+        // refresh recorded against it is spent. Left behind, it would mark every one of that
+        // provider's models "Stale — last enumeration failed" for as long as the screen is open,
+        // however many times the daemon has since answered.
+        const enumerating = state.providers
+          .filter((p) => p.enumerationError === "")
+          .map(providerRowKey);
+        if (enumerating.length === 0) return;
+        setRefreshErrors((current) => {
+          if (!enumerating.some((key) => current.has(key))) return current;
+          const next = new Map(current);
+          for (const key of enumerating) next.delete(key);
+          return next;
+        });
       };
       const client = clientFor(instanceId);
       if (!client) {
@@ -198,6 +264,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
           models: [],
           assistants: [],
           assignableTools: [],
+          toolsError: noConnectionTo(instanceId),
           error: noConnectionTo(instanceId),
         });
         return;
@@ -221,16 +288,27 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
         failures.push({ list, message: errorTextOf(result.reason) });
         return [];
       };
+      const providerRows = rowsOf(providers, "providers", (r) =>
+        r.providers.map((p) => providerRowOf(p, instanceId)),
+      );
+      const modelRows = rowsOf(models, "models", (r) =>
+        r.models.map((m) => modelRowOf(m, instanceId)),
+      );
+      const assistantRows = rowsOf(assistants, "assistants", (r) =>
+        r.assistants.map((a) => assistantRowOf(a, instanceId)),
+      );
+      // The tool catalog is the one list whose own failure has to be kept: a caller that cannot see
+      // it would read the empty list as "this daemon assigns no tools" and let an assistant be
+      // created toolless from a read that never arrived.
+      const toolsError = tools.status === "rejected" ? errorTextOf(tools.reason) : "";
+      const toolRows = rowsOf(tools, "tools", (r) => [...r.tools]);
       put({
         instanceId,
-        providers: rowsOf(providers, "providers", (r) =>
-          r.providers.map((p) => providerRowOf(p, instanceId)),
-        ),
-        models: rowsOf(models, "models", (r) => r.models.map((m) => modelRowOf(m, instanceId))),
-        assistants: rowsOf(assistants, "assistants", (r) =>
-          r.assistants.map((a) => assistantRowOf(a, instanceId)),
-        ),
-        assignableTools: rowsOf(tools, "tools", (r) => [...r.tools]),
+        providers: providerRows,
+        models: modelRows,
+        assistants: assistantRows,
+        assignableTools: toolRows,
+        toolsError,
         error: describeReadFailures(failures),
       });
     },
@@ -275,8 +353,12 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   );
 
   const toolsFor = useCallback(
-    (daemonInstanceId: string) =>
-      statesByDaemon.get(daemonInstanceId)?.assignableTools ?? EMPTY_TOOLS,
+    (daemonInstanceId: string): ToolCatalog => {
+      const state = statesByDaemon.get(daemonInstanceId);
+      if (!state) return TOOLS_LOADING;
+      if (state.toolsError) return { status: "unavailable", error: state.toolsError };
+      return { status: "ready", tools: state.assignableTools };
+    },
     [statesByDaemon],
   );
 
@@ -291,14 +373,26 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     return errors;
   }, [merged.providers, refreshErrors]);
 
-  const recordModelError = useCallback((model: ModelRow, error: string) => {
-    setModelErrors((current) => {
-      const next = new Map(current);
-      if (error) next.set(modelRowKey(model), error);
-      else next.delete(modelRowKey(model));
-      return next;
-    });
-  }, []);
+  /** Record — or, given `""`, clear — the error shown against one row of an error map. */
+  const recordRowError = useCallback(
+    (
+      setErrors: Dispatch<SetStateAction<ReadonlyMap<string, string>>>,
+      key: string,
+      error: string,
+    ) =>
+      setErrors((current) => {
+        const next = new Map(current);
+        if (error) next.set(key, error);
+        else next.delete(key);
+        return next;
+      }),
+    [],
+  );
+
+  const recordModelError = useCallback(
+    (model: ModelRow, error: string) => recordRowError(setModelErrors, modelRowKey(model), error),
+    [recordRowError],
+  );
 
   const setResidency = useCallback(
     async (model: ModelRow, resident: boolean): Promise<boolean> => {
@@ -331,12 +425,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   const refreshProvider = useCallback(
     async (provider: ProviderRow): Promise<void> => {
       const recordRefreshError = (error: string) =>
-        setRefreshErrors((current) => {
-          const next = new Map(current);
-          if (error) next.set(providerRowKey(provider), error);
-          else next.delete(providerRowKey(provider));
-          return next;
-        });
+        recordRowError(setRefreshErrors, providerRowKey(provider), error);
       const client = clientFor(provider.daemonInstanceId);
       if (!client) {
         // The operator asked for a refresh and is owed an answer either way; silently doing
@@ -356,7 +445,29 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
       }
       await readDaemon(provider.daemonInstanceId);
     },
-    [clientFor, token, readDaemon],
+    [clientFor, token, readDaemon, recordRowError],
+  );
+
+  const deleteProvider = useCallback(
+    async (provider: ProviderRow): Promise<void> => {
+      const key = providerRowKey(provider);
+      const client = clientFor(provider.daemonInstanceId);
+      if (!client) {
+        recordRowError(setProviderActionErrors, key, noConnectionTo(provider.daemonInstanceId));
+        return;
+      }
+      try {
+        await client.deleteProvider({ sessionToken: token, providerId: provider.providerId });
+        recordRowError(setProviderActionErrors, key, "");
+      } catch (err) {
+        // The daemon refuses a delete that would orphan an assistant, and refuses a write it does
+        // not own — either way the provider is still there, so the row has to say why.
+        recordRowError(setProviderActionErrors, key, errorTextOf(err));
+        return;
+      }
+      await readDaemon(provider.daemonInstanceId);
+    },
+    [clientFor, token, readDaemon, recordRowError],
   );
 
   const createProvider = useCallback<ModelRegistryFanOut["createProvider"]>(
@@ -397,6 +508,50 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     [clientFor, token, readDaemon],
   );
 
+  const updateAssistant = useCallback<ModelRegistryFanOut["updateAssistant"]>(
+    async ({ assistant, label, systemPrompt, tools }) => {
+      const client = clientFor(assistant.daemonInstanceId);
+      if (!client) return noConnectionTo(assistant.daemonInstanceId);
+      try {
+        await client.updateAssistant({
+          sessionToken: token,
+          assistantId: assistant.assistantId,
+          label,
+          systemPrompt,
+          tools,
+        });
+      } catch (err) {
+        return errorTextOf(err);
+      }
+      await readDaemon(assistant.daemonInstanceId);
+      return "";
+    },
+    [clientFor, token, readDaemon],
+  );
+
+  const deleteAssistant = useCallback(
+    async (assistant: AssistantRow): Promise<void> => {
+      const key = assistantRowKey(assistant);
+      const client = clientFor(assistant.daemonInstanceId);
+      if (!client) {
+        recordRowError(setAssistantErrors, key, noConnectionTo(assistant.daemonInstanceId));
+        return;
+      }
+      try {
+        await client.deleteAssistant({
+          sessionToken: token,
+          assistantId: assistant.assistantId,
+        });
+        recordRowError(setAssistantErrors, key, "");
+      } catch (err) {
+        recordRowError(setAssistantErrors, key, errorTextOf(err));
+        return;
+      }
+      await readDaemon(assistant.daemonInstanceId);
+    },
+    [clientFor, token, readDaemon, recordRowError],
+  );
+
   return {
     providers: merged.providers,
     models: merged.models,
@@ -405,11 +560,16 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     status,
     toolsFor,
     providerErrors,
+    providerActionErrors,
+    assistantErrors,
     modelErrors,
     loadModel,
     unloadModel,
     refreshProvider,
+    deleteProvider,
     createProvider,
     createAssistant,
+    updateAssistant,
+    deleteAssistant,
   };
 }

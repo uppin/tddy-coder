@@ -247,7 +247,10 @@ Cypress component specs under `packages/tddy-web/cypress/component/models/`, pag
 - [x] **AT12** (AC12) `ModelsCrossHostAcceptance.cy.tsx` — "renders an error row for an unreachable
       daemon while the other daemon's models still render"
 
-### Unit / integration tests (written, failing)
+### Unit / integration tests
+
+Counts below are the **red-phase** figures, kept for the record. Current counts after the
+hardening and wiring passes are in *Test inventory (current)* at the end of this document.
 
 | File | Tests | Pins |
 |---|---|---|
@@ -259,7 +262,7 @@ Cypress component specs under `packages/tddy-web/cypress/component/models/`, pag
 
 Supporting test infrastructure: `tddy-testing-commons::stub_http_routed` — a path-routed loopback
 HTTP stub that records request bodies and `404`s anything unrouted, shared by the Ollama and ACP
-suites. Its own two tests pass.
+suites. Its own tests pass (2 at the time of writing, 11 now).
 
 ### Test Level Decisions
 
@@ -292,10 +295,15 @@ suites. Its own two tests pass.
 
 ## Validation Results (2026-08-16, `/pr-wrap` step 1–2)
 
+> **Status: every item below has since been resolved** — see *Integration wiring* and *Registry
+> hardening*. The findings are kept verbatim because they record why the design ended up as it did,
+> not because they are outstanding. A second `/pr-wrap` pass (steps 3–4) found four further
+> blockers; those are tracked in *Second-pass findings* at the end.
+
 **Verdict: not ready to merge.** Build is clean and all 68 tests pass, but three integration seams
 were never wired, and no test covers them because every test pins a piece in isolation.
 
-### Blocking
+### Blocking (all fixed — see *Integration wiring* and *Registry hardening*)
 
 - **[CRITICAL] An assistant is listed as an agent but cannot be used as one.**
   `assistant_to_agent_def` has **no production caller** (only its definition, the `mod.rs` re-export
@@ -326,7 +334,7 @@ were never wired, and no test covers them because every test pins a piece in iso
   the resolved user, so any operator can read/delete another's providers — in a store holding
   everyone's API keys.
 
-### Non-blocking (fix before merge)
+### Non-blocking (all fixed — see *Registry hardening*)
 
 Ollama client never receives the credential (silently dropped while `has_credential: true`); no HTTP
 timeout on any provider request; `enumeration_error` stores the provider's response body verbatim and

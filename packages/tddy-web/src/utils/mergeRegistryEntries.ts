@@ -167,10 +167,43 @@ export function providerRowKey(provider: {
 }
 
 /**
+ * The stable identity of an assistant across the merged panel. Assistant names are unique *per
+ * daemon* — two hosts may each define a `reviewer` — so the owning daemon is part of the key, or
+ * one host's row would be rendered against the other's.
+ */
+export function assistantRowKey(assistant: {
+  daemonInstanceId: string;
+  name: string;
+}): string {
+  return `${assistant.daemonInstanceId}/${assistant.name}`;
+}
+
+/**
  * How far along the fleet-wide read is. The screen has to tell "still reading" and "nowhere to read
  * from" apart from "the fleet has no models" — an empty table means all three otherwise.
  */
 export type RegistryReadStatus = "not-connected" | "no-daemons" | "loading" | "ready";
+
+/**
+ * What a registry panel says when it holds no rows, and why it holds none. Only the last state is
+ * the panel's own claim ("this fleet has none"), so the caller supplies the wording for that one and
+ * for what it is reading; the two connection-level answers are the same for every panel.
+ */
+export function registryEmptyStateText(
+  status: RegistryReadStatus,
+  texts: { readonly loading: string; readonly ready: string },
+): string {
+  switch (status) {
+    case "not-connected":
+      return "Not connected to the common room";
+    case "no-daemons":
+      return "No daemons in the common room";
+    case "loading":
+      return texts.loading;
+    default:
+      return texts.ready;
+  }
+}
 
 /** {@link RegistryReadStatus} from the connection, the daemons in the room, and the reads so far. */
 export function registryReadStatus(params: {

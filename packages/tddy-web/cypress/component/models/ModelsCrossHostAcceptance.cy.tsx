@@ -19,11 +19,13 @@ import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { mountWithPerDaemonLiveKitRpc } from "../../support/rpc/perDaemonLiveKitRpc";
 import {
   aModelRegistryBackend,
+  anAssistant,
   anLlmModel,
   anOllamaProvider,
 } from "../../support/rpc/modelRegistryBackend";
 import {
   modelsScreenPage as page,
+  type AssistantRef,
   type ModelRef,
   type ProviderRef,
 } from "../../support/pages/modelsScreenPage";
@@ -110,6 +112,61 @@ function backendForHostBWithFailingProvider() {
       }),
     ],
     models: [anLlmModel({ daemonInstanceId: HOST_B.instanceId })],
+  });
+}
+
+/**
+ * The same assistant name on both hosts — the normal case, since a name is unique *per daemon*:
+ * every host that reviews code may define a `reviewer`.
+ */
+const SHARED_ASSISTANT_NAME = "reviewer";
+const REVIEWER_ON_A: AssistantRef = {
+  daemonInstanceId: HOST_A.instanceId,
+  name: SHARED_ASSISTANT_NAME,
+};
+const REVIEWER_ON_B: AssistantRef = {
+  daemonInstanceId: HOST_B.instanceId,
+  name: SHARED_ASSISTANT_NAME,
+};
+
+/** Host A's registry, with a `reviewer` assistant assigned read-only tools. */
+function backendForHostAWithReviewer() {
+  return aModelRegistryBackend({
+    providers: [anOllamaProvider({ daemonInstanceId: HOST_A.instanceId })],
+    models: [anLlmModel({ daemonInstanceId: HOST_A.instanceId })],
+    assistants: [
+      anAssistant({
+        name: SHARED_ASSISTANT_NAME,
+        label: "workstation-1 Reviewer",
+        tools: ["Read", "Grep"],
+        daemonInstanceId: HOST_A.instanceId,
+      }),
+    ],
+  });
+}
+
+/** Host B's registry, with its *own* `reviewer` — same name, different tools. */
+function backendForHostBWithReviewer() {
+  return aModelRegistryBackend({
+    providers: [
+      anOllamaProvider({
+        providerId: LLAMA_ON_B.providerId,
+        label: "server-2 Ollama",
+        daemonInstanceId: HOST_B.instanceId,
+      }),
+    ],
+    models: [],
+    assistants: [
+      anAssistant({
+        assistantId: "asst-b1",
+        name: SHARED_ASSISTANT_NAME,
+        label: "server-2 Reviewer",
+        providerId: LLAMA_ON_B.providerId,
+        modelId: LLAMA_ON_B.modelId,
+        tools: ["Read", "Shell"],
+        daemonInstanceId: HOST_B.instanceId,
+      }),
+    ],
   });
 }
 
@@ -215,6 +272,63 @@ describe("ModelsCrossHostAcceptance — one table across every connected daemon"
     // When / Then
     page.rowIsStale(QWEN_ON_B).should("equal", "true");
     page.rowIsStale(QWEN_ON_A).should("equal", "false");
+  });
+
+  it("sends a provider deletion to the daemon that owns the provider", () => {
+    // Given — host A is selected; the provider to remove lives on host B
+    const backendA = backendForHostA();
+    const backendB = backendForHostB();
+    mountCrossHost(backendA, backendB);
+
+    // When
+    page.deleteProvider({
+      daemonInstanceId: HOST_B.instanceId,
+      providerId: LLAMA_ON_B.providerId,
+    });
+
+    // Then — host B removed its own provider; host A, whose registry is untouched, was asked
+    // nothing. A write routed to the selected daemon would delete the wrong host's provider
+    cy.wrap(backendB).should((b) => {
+      expect(recordedFields(b.callsTo(ModelRegistryService.method.deleteProvider))).to.deep.equal([
+        { sessionToken: "fake-token", providerId: LLAMA_ON_B.providerId },
+      ]);
+    });
+    cy.wrap(backendA).should((b) => {
+      expect(b.callsTo(ModelRegistryService.method.deleteProvider)).to.have.length(0);
+    });
+  });
+
+  it("keeps two daemons' identically named assistants apart, each with its own tools", () => {
+    // Given — both daemons define a `reviewer`; assistant names are unique per daemon, not fleetwide
+    // When
+    mountCrossHost(backendForHostAWithReviewer(), backendForHostBWithReviewer());
+
+    // Then — two distinct rows, each carrying the tools its own daemon assigned. One id for both
+    // would render whichever daemon answered first against the other daemon's name
+    page.assistantTools(REVIEWER_ON_A).should("deep.equal", ["Read", "Grep"]);
+    page.assistantTools(REVIEWER_ON_B).should("deep.equal", ["Read", "Shell"]);
+    page.assistantRow(REVIEWER_ON_B).should("contain.text", "server-2 Reviewer");
+  });
+
+  it("sends an assistant deletion to the daemon that owns the assistant", () => {
+    // Given — both daemons define a `reviewer`, and host A is the selected one
+    const backendA = backendForHostAWithReviewer();
+    const backendB = backendForHostBWithReviewer();
+    mountCrossHost(backendA, backendB);
+
+    // When — the operator deletes host B's
+    page.deleteAssistant(REVIEWER_ON_B);
+
+    // Then — host B deleted its own assistant id; host A's `reviewer` was never addressed
+    cy.wrap(backendB).should((b) => {
+      expect(recordedFields(b.callsTo(ModelRegistryService.method.deleteAssistant))).to.deep.equal([
+        { sessionToken: "fake-token", assistantId: "asst-b1" },
+      ]);
+    });
+    cy.wrap(backendA).should((b) => {
+      expect(b.callsTo(ModelRegistryService.method.deleteAssistant)).to.have.length(0);
+    });
+    page.assistantRow(REVIEWER_ON_A).should("exist");
   });
 
   it("renders an error row for an unreachable daemon while the other daemon's models still list", () => {

@@ -9,11 +9,13 @@
 import { describe, it, expect } from "bun:test";
 import { ModelLoadState, ProviderKind } from "../gen/models_pb";
 import {
+  assistantRowKey,
   describeReadFailures,
   mergeRegistryEntries,
   modelRowKey,
   owningDaemonOf,
   providerRowKey,
+  registryEmptyStateText,
   registryReadStatus,
   type AssistantRow,
   type DaemonRegistrySnapshot,
@@ -183,6 +185,46 @@ describe("providerRowKey", () => {
     // When / Then
     expect(providerRowKey(onWorkstation)).toEqual(`${WORKSTATION}/prov-ollama`);
     expect(providerRowKey(onServer)).toEqual(`${SERVER}/prov-ollama`);
+  });
+});
+
+describe("assistantRowKey", () => {
+  it("distinguishes two daemons' assistants that were given the same name", () => {
+    // Given — an assistant name is unique per daemon, so both hosts may define a `reviewer`
+    const onWorkstation = { daemonInstanceId: WORKSTATION, name: "reviewer" };
+    const onServer = { daemonInstanceId: SERVER, name: "reviewer" };
+
+    // When / Then
+    expect(assistantRowKey(onWorkstation)).toEqual(`${WORKSTATION}/reviewer`);
+    expect(assistantRowKey(onServer)).toEqual(`${SERVER}/reviewer`);
+  });
+});
+
+describe("registryEmptyStateText", () => {
+  const PROVIDERS = { loading: "Reading the fleet's providers…", ready: "No providers configured" };
+
+  it("states the panel's own claim once every daemon has answered", () => {
+    // Given / When / Then
+    expect(registryEmptyStateText("ready", PROVIDERS)).toEqual("No providers configured");
+  });
+
+  it("states what is being read while a daemon has yet to answer", () => {
+    // Given / When / Then
+    expect(registryEmptyStateText("loading", PROVIDERS)).toEqual("Reading the fleet's providers…");
+  });
+
+  it("reports a room that is not connected rather than the panel's own claim", () => {
+    // Given / When / Then
+    expect(registryEmptyStateText("not-connected", PROVIDERS)).toEqual(
+      "Not connected to the common room",
+    );
+  });
+
+  it("reports a room with no daemons rather than the panel's own claim", () => {
+    // Given / When / Then
+    expect(registryEmptyStateText("no-daemons", PROVIDERS)).toEqual(
+      "No daemons in the common room",
+    );
   });
 });
 

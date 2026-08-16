@@ -160,8 +160,10 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
       daemons: [FIXTURE_HOST],
     });
 
-    // Then
+    // Then — the only state in which the table may say the fleet has no models, and the words it
+    // says it in
     page.emptyStateStatus().should("equal", "ready");
+    page.emptyState().should("have.text", "No models");
   });
 
   it("refuses to add a provider while no daemon is selected", () => {
@@ -171,6 +173,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
 
     // When
     page.openAddProviderForm();
+    page.addProviderTarget().should("have.text", "No daemon selected");
     page.fillAndSubmitAddProviderForm({
       kind: String(ProviderKind.OLLAMA),
       label: "Local Ollama",

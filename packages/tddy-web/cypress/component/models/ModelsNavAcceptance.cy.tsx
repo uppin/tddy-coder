@@ -10,9 +10,15 @@
 
 import React from "react";
 import { AppShell } from "../../../src/components/shell/AppShell";
+import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
 import { withSelectedDaemon } from "../../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../../support/rpc/connectionServiceBackend";
+import { mountWithRpc } from "../../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc } from "../../support/rpc/recordingLiveKitRpc";
+import {
+  aModelRegistryBackend,
+  anOllamaProvider,
+} from "../../support/rpc/modelRegistryBackend";
 import { appShellPage as shell } from "../../support/pages/appShellPage";
 
 describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () => {
@@ -72,5 +78,22 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
         "LiveKit",
         "RPC Playground",
       ]);
+  });
+
+  it("navigates away from the models screen through the handler its caller supplied", () => {
+    // Given — the models screen itself, mounted with the navigation handler every route passes it
+    const onNavigate = cy.stub().as("onNavigate");
+    mountWithRpc(
+      withSelectedDaemon(<ModelsAppPage onNavigate={onNavigate} />),
+      aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] }),
+    );
+
+    // When
+    shell.openMenu();
+    shell.projectsItem().click();
+
+    // Then — the screen passes the handler straight through to the shell. Substituting a no-op for
+    // a caller that supplied none would leave this menu silently dead
+    cy.get("@onNavigate").should("have.been.calledOnceWith", "/projects");
   });
 });

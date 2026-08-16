@@ -224,6 +224,27 @@ describe("ModelsScreenAcceptance — the model catalog", () => {
     page.providerRow({ daemonInstanceId: FIXTURE_DAEMON, providerId: "prov-ollama" }).should("exist");
   });
 
+  it("renders a residency this build has no name for as the raw value", () => {
+    // Given — a daemon reporting a load state this web build does not know (state 7)
+    const backend = aModelRegistryBackend({
+      providers: [anOllamaProvider()],
+      models: [anLlmModel({ loadState: 7 as ModelLoadState })],
+    });
+
+    // When
+    mountWithRpc(withSelectedDaemon(<ModelsAppPage onNavigate={cy.stub()} />, [FIXTURE_HOST]), backend);
+
+    // Then — the row publishes the value it was given rather than folding it into one of the three
+    // states this build knows, which would make a daemon/web skew read as ordinary data
+    page.rowLoadState(QWEN).should("equal", "unrecognised-7");
+    page
+      .row(QWEN)
+      .should(
+        "contain.text",
+        "Unrecognised residency 7 — the daemon sent a value this web build has no name for",
+      );
+  });
+
   it("renders a cloud model as residency-unsupported and offers neither Load nor Unload", () => {
     // Given — a cloud model, for which residency has no meaning
     const backend = aModelRegistryBackend({

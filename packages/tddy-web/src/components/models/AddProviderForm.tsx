@@ -19,7 +19,15 @@ export const PROVIDER_KIND_OPTIONS: ReadonlyArray<{ kind: ProviderKind; label: s
 const fieldClassName =
   "rounded border border-input bg-background px-2 py-1 text-sm text-foreground";
 
+/** What the form says when there is no daemon to create the provider on. */
+export const NO_ADD_PROVIDER_TARGET = "No daemon selected";
+
 export interface AddProviderFormProps {
+  /**
+   * The daemon the provider will be created on. The panel lists every daemon's providers, so which
+   * host a new one lands on is not something the operator can infer from what is on screen.
+   */
+  target: string;
   /** Resolves to the error to show, or `""` once the provider exists on the daemon. */
   onSubmit: (input: {
     kind: ProviderKind;
@@ -30,26 +38,36 @@ export interface AddProviderFormProps {
   onDone: () => void;
 }
 
-export function AddProviderForm({ onSubmit, onDone }: AddProviderFormProps) {
+export function AddProviderForm({ target, onSubmit, onDone }: AddProviderFormProps) {
   const [kind, setKind] = useState<ProviderKind>(ProviderKind.OLLAMA);
   const [label, setLabel] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
+  // A provider id is retired for good once minted and its base URL is then permanently taken, so a
+  // second click while the first create is in flight does not cost a duplicate row — it costs a
+  // duplicate the operator cannot fully undo.
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = async () => {
-    const failure = await onSubmit({
-      kind,
-      label: label.trim(),
-      baseUrl: baseUrl.trim(),
-      apiKey: apiKey.trim(),
-    });
-    setError(failure);
-    if (failure === "") {
-      setLabel("");
-      setBaseUrl("");
-      setApiKey("");
-      onDone();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const failure = await onSubmit({
+        kind,
+        label: label.trim(),
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim(),
+      });
+      setError(failure);
+      if (failure === "") {
+        setLabel("");
+        setBaseUrl("");
+        setApiKey("");
+        onDone();
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -58,6 +76,9 @@ export function AddProviderForm({ onSubmit, onDone }: AddProviderFormProps) {
       data-testid="models-add-provider-form"
       className="mt-3 flex flex-col gap-2 rounded-md border border-border p-3"
     >
+      <div data-testid="models-add-provider-target" className="text-xs text-muted-foreground">
+        {target === "" ? NO_ADD_PROVIDER_TARGET : `Adding to ${target}`}
+      </div>
       <select
         data-testid="models-add-provider-kind"
         className={fieldClassName}
@@ -100,10 +121,11 @@ export function AddProviderForm({ onSubmit, onDone }: AddProviderFormProps) {
       <button
         type="button"
         data-testid="models-add-provider-submit"
-        className="self-start rounded-md border border-input px-3 py-1 text-sm font-medium text-foreground hover:bg-accent"
+        className="self-start rounded-md border border-input px-3 py-1 text-sm font-medium text-foreground hover:bg-accent disabled:opacity-50"
+        disabled={submitting}
         onClick={() => void submit()}
       >
-        Add provider
+        {submitting ? "Adding…" : "Add provider"}
       </button>
     </div>
   );
