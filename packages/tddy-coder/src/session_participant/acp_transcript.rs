@@ -141,6 +141,9 @@ mod tests {
             started_unix_ms: 2_000,
             completed_unix_ms: 3_000,
             source: "coder".to_string(),
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         }
     }
 

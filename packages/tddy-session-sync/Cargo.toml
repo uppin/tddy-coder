@@ -1,0 +1,31 @@
+[package]
+name = "tddy-session-sync"
+version = "0.1.0"
+edition = "2021"
+description = "Mirror a tddy session's worktree locally by watching its LiveKit room"
+
+[lib]
+name = "tddy_session_sync"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-session-sync"
+path = "src/main.rs"
+
+[dependencies]
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-service = { path = "../tddy-service" }
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+log = "0.4"
+prost = "0.13"
+# The daemon's Connect-HTTP leg, as tddy-remote-git-repo uses it: RefreshSession is a protobuf POST.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tempfile = "3"

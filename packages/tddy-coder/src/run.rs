@@ -1759,8 +1759,12 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         // Capture the agent's own tool calls into this session's `agent-activity.jsonl` and
         // broadcast them (served live by the coder participant's `StreamSessionActivity`). The
         // coder — not the daemon — executes tools for tool / cursor-cli sessions.
+        // The worktree is the checkout the agent edits — the same one this session's
+        // `SessionConnectionService` and tool executor are given below — so a record can name the
+        // commit it ran upon and the files it declared.
         presenter.set_agent_activity_context(
             session_artifact_dir.clone(),
+            Some(agent_working_dir.clone()),
             agent_activity_source_for(agent_str),
         );
 
@@ -3066,7 +3070,11 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
     // participant's `StreamSessionActivity`).
     if let Some(dir) = args.session_dir.clone() {
         let source = agent_activity_source_for(args.agent.as_deref().unwrap_or("claude"));
-        presenter.set_agent_activity_context(dir, source);
+        // This run's checkout is the directory it was started in — the same one the session's
+        // `SessionConnectionService` and tool executor below take as their worktree. `None` when the
+        // cwd cannot be read at all, so a record says it does not know its base rather than naming
+        // a directory nobody resolved.
+        presenter.set_agent_activity_context(dir, std::env::current_dir().ok(), source);
     }
     let presenter = Arc::new(Mutex::new(presenter));
 

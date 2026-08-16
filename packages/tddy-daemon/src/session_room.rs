@@ -8,7 +8,8 @@
 //! disk, so the room's lifecycle at the bottom of this file is built on a layer that is already
 //! pinned without it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use log::warn;
 use prost::Message as _;
+use tddy_core::agent_activity::{read_agent_activity, AgentActivityRecord, STATUS_RUNNING};
 use tddy_livekit::{
     BroadcastPublisher, JoinedParticipant, LiveKitParticipant, RoomMetadataClient, RpcService,
     TokenGenerator,
@@ -31,6 +33,11 @@ use crate::worktrees::{parse_git_diff_numstat, WorktreeNumstat};
 /// schema lives: `tddy-tools` receives on the same topic and reaches `tddy-service`
 /// unconditionally, while its LiveKit dependency is feature-gated.
 pub use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
+
+/// The data-channel topic the agent's own tool calls are broadcast on inside a session room,
+/// re-exported for the same reason as [`WORKTREE_ACTIVITY_TOPIC`]: publisher and receiver live in
+/// different crates, and a topic each spelled for itself fails as silence.
+pub use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 
 /// The broadcast wire types, re-exported so a caller reaches the topic's payload and the module that
 /// produces it through one import.
@@ -59,6 +66,18 @@ pub struct WorktreeSnapshot {
     pub lines_added: i64,
     pub lines_removed: i64,
     pub untracked_files: u32,
+    /// The tree object of the whole working tree as it stands, staged into a **temporary** index.
+    ///
+    /// This is what makes a delta possible: diffing two of these yields an ordinary git patch that
+    /// carries deletions, renames, modes and binary content, and — unlike `git diff HEAD` — it sees
+    /// a newly written *untracked* file, which is exactly what a `Write` produces.
+    ///
+    /// The index is temporary and that is not an optimisation: `git add -A` against the agent's own
+    /// index would rewrite its staging area mid-session.
+    ///
+    /// Empty when the tree could not be written; the tick then produces no delta rather than a
+    /// wrong one.
+    pub wip_tree: String,
 }
 
 impl WorktreeSnapshot {
@@ -117,7 +136,827 @@ pub fn snapshot_worktree_within(worktree_root: &Path, budget: Duration) -> Workt
         lines_added: numstat.lines_added,
         lines_removed: numstat.lines_removed,
         untracked_files: untracked_file_count(worktree_root, deadline),
+        // Deliberately NOT measured here. Writing a WIP tree is not a read: `git add -A` stages
+        // the whole checkout and materialises loose blob and tree objects in the project's shared
+        // object database. Doing that inside a function named "snapshot" would make every poll of
+        // every hosted room — twice a second by default — leave objects behind that nothing
+        // references, in a repository shared by every worktree, held for git's two-week prune
+        // grace period.
+        //
+        // So the tree is measured by whoever is about to *use* it, via [`write_wip_tree_within`],
+        // and published as a ref in the same breath ([`publish_wip_ref`]) so the objects it writes
+        // are reachable from the moment they exist.
+        wip_tree: String::new(),
     }
+}
+
+/// The tree object of `worktree_root`'s whole working tree, staged into a temporary index.
+///
+/// Runs `git add -A` with `GIT_INDEX_FILE` pointed at a scratch file, then `git write-tree`. The
+/// agent's own index is never touched.
+pub fn write_wip_tree_within(worktree_root: &Path, budget: Duration) -> String {
+    write_wip_tree_by(worktree_root, Instant::now() + budget)
+}
+
+/// [`write_wip_tree_within`] under a deadline its caller already owns, so a snapshot spends one
+/// budget over its whole sequence rather than one budget per measurement.
+///
+/// Empty when the tree could not be written, for every reason alike: this feeds a poll whose only
+/// recourse is the next tick, and a tick with no tree produces no delta rather than a wrong one.
+fn write_wip_tree_by(worktree_root: &Path, deadline: Instant) -> String {
+    let git_dir = git_stdout(
+        worktree_root,
+        &["rev-parse", "--absolute-git-dir"],
+        deadline,
+    );
+    if git_dir.is_empty() {
+        warn!("session_room: {worktree_root:?} named no git dir to stage a WIP tree in");
+        return String::new();
+    }
+
+    // The scratch index lives inside the git directory, and that placement is deliberate twice
+    // over. Anywhere under the worktree would stage the index file into the very tree being
+    // measured. The system temp directory is usually a different filesystem, which turns the copy
+    // below into a byte-for-byte transfer of a file that can be hundreds of megabytes, every tick.
+    let scratch = match tempfile::Builder::new()
+        .prefix("tddy-wip-index-")
+        .tempdir_in(&git_dir)
+    {
+        Ok(scratch) => scratch,
+        Err(e) => {
+            warn!("session_room: no scratch index for a WIP tree of {worktree_root:?}: {e}");
+            return String::new();
+        }
+    };
+    let scratch_index = scratch.path().join("index");
+
+    // Seeded from the agent's own index rather than started empty, because `git add -A` against an
+    // empty index re-hashes every file in the checkout — on a large repository that is minutes of
+    // work, repeated at the poll interval. The copy carries git's stat cache, so staging only
+    // hashes what actually changed since the agent's last `git` command.
+    //
+    // A copy, and never the file itself: `git add -A` against the agent's index would rewrite its
+    // staging area mid-session, which is the one thing this measurement must never do.
+    let agents_index = Path::new(&git_dir).join("index");
+    if agents_index.exists() {
+        if let Err(e) = std::fs::copy(&agents_index, &scratch_index) {
+            warn!("session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}");
+            return String::new();
+        }
+    }
+
+    // A torn copy — the agent's git was rewriting its index as this read it — fails the staging
+    // below rather than yielding a tree that is half one state and half another.
+    let scratch_env = [("GIT_INDEX_FILE", scratch_index.as_os_str())];
+    if let Err(reason) = git_output(worktree_root, &["add", "-A"], &scratch_env, deadline) {
+        warn!("session_room: staging a WIP tree failed: {reason}");
+        return String::new();
+    }
+    git_stdout_with(worktree_root, &["write-tree"], &scratch_env, deadline)
+}
+
+/// The worktree's `HEAD`, re-exported from where it now lives.
+///
+/// Moved to `tddy-core` so the coder's presenter can stamp records with it too — `tddy-core` is
+/// the only crate both the daemon and the coder depend on. Re-exported here because every caller
+/// in this crate reaches it through this module.
+pub use tddy_core::git_head::read_head_commit;
+
+/// The delta one poll tick produces, or `None` when there is nothing to say.
+///
+/// `None` rather than an empty delta whenever the tick cannot be described, which is never the same
+/// as "the tick changed nothing": no previous tree to diff from (the first tick of a room), no
+/// current tree (the measurement failed), two identical trees, an unknown `HEAD`, or a diff git
+/// could not take. An empty *patch* means "this tick moved nothing" and is a delta a client may be
+/// handed; `None` means there is no tick to hand out at all.
+///
+/// The distinction is the whole safety property. A client that is handed an empty patch records the
+/// tick as applied and moves its sequence past it, so an empty patch standing in for a failure is a
+/// change the mirror will never learn about and never reconcile.
+pub fn tick_delta(
+    worktree_root: &Path,
+    prev: &WorktreeSnapshot,
+    next: &WorktreeSnapshot,
+    seq: u64,
+) -> Option<ActivityDelta> {
+    if prev.wip_tree.is_empty() || next.wip_tree.is_empty() || prev.wip_tree == next.wip_tree {
+        return None;
+    }
+    // A delta whose base is unknown is worse than no delta: the client compares it against its own
+    // HEAD, an empty string matches nothing, and every tick would reconcile forever while
+    // reporting a mismatch against a commit that was never read rather than saying so.
+    if next.head_commit.is_empty() {
+        log::warn!(
+            "session_room: no delta for seq {seq}: the checkout's HEAD could not be read, so a \
+             patch could not name the commit it applies onto"
+        );
+        return None;
+    }
+    let patch = match diff_between(worktree_root, &prev.wip_tree, &next.wip_tree, &[]) {
+        Ok(patch) => patch,
+        Err(reason) => {
+            warn!("session_room: no delta for seq {seq}: {reason}");
+            return None;
+        }
+    };
+    Some(ActivityDelta {
+        seq,
+        prev_seq: seq.saturating_sub(1),
+        // Where the checkout *ended up*, not where it started. A client applies a delta after it has
+        // followed HEAD, so a tick that spanned a commit and named the old commit would be rejected
+        // by every client that kept up.
+        base_commit: next.head_commit.clone(),
+        patch,
+        // The whole window, unscoped. The store narrows a tick per call on the way out, and a delta
+        // recorded already narrowed could never be sliced into the several calls that share its tick.
+        scoped_paths: Vec::new(),
+    })
+}
+
+/// The ref under which a session's uncommitted state is published, so a client can `git fetch` it.
+///
+/// Under `refs/tddy/` rather than `refs/heads/` because it is not a branch: it must never appear in
+/// `git branch`, never be a push target, and never be something `git checkout` offers by name in
+/// the daemon-side repository an agent is working in.
+pub fn wip_ref_name(session_id: &str) -> String {
+    format!("refs/tddy/session/{session_id}/wip")
+}
+
+/// Publish `wip_tree` as a commit parented on `head_commit` and point [`wip_ref_name`] at it.
+///
+/// This is what makes reconciliation a plain `git fetch` rather than a whole-worktree patch. The
+/// mirror is a clone of this repository, so git already knows how to move only the objects it is
+/// missing, delta-compressed — where a cumulative patch would re-send the entire dirty tree over a
+/// data channel every time a client fell one tick behind.
+///
+/// Wrapped in a commit rather than published as a bare tree because a tree is not a fetchable tip;
+/// the commit costs one object and makes the whole thing an ordinary fetch.
+///
+/// Returns the commit sha. The ref is deleted when the session's room closes — see
+/// [`delete_wip_ref`] — so its objects become unreachable and ordinary `git gc` reclaims them.
+pub fn publish_wip_ref(
+    worktree_root: &Path,
+    session_id: &str,
+    head_commit: &str,
+    wip_tree: &str,
+) -> Result<String, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let mut args = vec!["commit-tree", wip_tree];
+    // Parentless only when the checkout has no HEAD to parent on — an unborn branch, or a HEAD the
+    // measurement could not read. A commit-tree given an empty parent fails outright, and a WIP ref
+    // that exists is worth more to a client than one that never appears; what it loses is the
+    // shortcut of naming its base through the object graph, which the record's `head_commit` (empty
+    // for the same reason) already tells it.
+    if !head_commit.is_empty() {
+        args.push("-p");
+        args.push(head_commit);
+    }
+    let message = format!("tddy session {session_id}: work in progress");
+    args.push("-m");
+    args.push(&message);
+
+    // Signed by the daemon under a fixed identity rather than by whatever `user.email` the checkout
+    // happens to carry: this object is not the agent's work, it is a machine-made snapshot of it,
+    // and `git commit-tree` refuses outright in a repository that has configured no identity at all.
+    let identity: [(&str, &OsStr); 4] = [
+        ("GIT_AUTHOR_NAME", OsStr::new(WIP_COMMIT_IDENTITY_NAME)),
+        ("GIT_AUTHOR_EMAIL", OsStr::new(WIP_COMMIT_IDENTITY_EMAIL)),
+        ("GIT_COMMITTER_NAME", OsStr::new(WIP_COMMIT_IDENTITY_NAME)),
+        ("GIT_COMMITTER_EMAIL", OsStr::new(WIP_COMMIT_IDENTITY_EMAIL)),
+    ];
+    let commit = git_output(worktree_root, &args, &identity, deadline)?;
+    let commit = String::from_utf8_lossy(&commit).trim().to_string();
+    if commit.is_empty() {
+        return Err(format!(
+            "git commit-tree in {worktree_root:?} named no commit for tree {wip_tree}"
+        ));
+    }
+
+    git_output(
+        worktree_root,
+        &["update-ref", &wip_ref_name(session_id), &commit],
+        &[],
+        deadline,
+    )?;
+    Ok(commit)
+}
+
+/// Who the WIP commits of every session are made by. Not a person and never presented as one: an
+/// address in the reserved `.invalid` TLD cannot be mailed, so no one can mistake a snapshot for
+/// work someone signed.
+const WIP_COMMIT_IDENTITY_NAME: &str = "tddy-daemon";
+const WIP_COMMIT_IDENTITY_EMAIL: &str = "tddy-daemon@tddy.invalid";
+
+/// Drop a session's WIP ref, leaving its objects unreachable.
+///
+/// Called on the same path that closes the room. Without it a deleted session's uncommitted state
+/// would be pinned in the project repository forever, which is a leak measured in whole worktrees.
+/// A ref that was never published deletes without complaint — `git update-ref -d` treats an absent
+/// ref as already gone — so closing a room that never got as far as publishing one is not an error.
+pub fn delete_wip_ref(worktree_root: &Path, session_id: &str) -> Result<(), String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    git_output(
+        worktree_root,
+        &["update-ref", "-d", &wip_ref_name(session_id)],
+        &[],
+        deadline,
+    )?;
+    Ok(())
+}
+
+/// One patch, and what a client needs to place it.
+///
+/// `patch` is the tick's diff **limited to `scoped_paths`** — a call's own files, not its window's.
+/// A whole-tick delta is the same type with `scoped_paths` empty.
+///
+/// There is no cumulative variant: a client that has fallen behind resyncs by fetching the
+/// session's WIP ref ([`publish_wip_ref`]), which git transfers incrementally.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ActivityDelta {
+    pub seq: u64,
+    pub prev_seq: u64,
+    pub base_commit: String,
+    pub patch: Vec<u8>,
+    /// The paths this patch was limited to. Empty means the whole tick.
+    pub scoped_paths: Vec<String>,
+}
+
+/// Which slice of a tick's diff to serve.
+///
+/// The three are exhaustive and disjoint by construction: every path a tick touched is claimed by
+/// some call or by none, so [`Self::Call`] over every call plus [`Self::Residual`] reconstructs
+/// [`Self::Tick`] exactly. That property is the whole reason `Residual` exists — without it, a
+/// change no tool declared would be attributed to nobody and reach no one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DeltaScope {
+    /// The paths the named call is credited with.
+    #[default]
+    Call,
+    /// The paths of that tick claimed by no call at all.
+    Residual,
+    /// The whole tick, unscoped.
+    Tick,
+}
+
+/// Why a delta could not be produced for a call.
+///
+/// Two variants rather than one because the client's response differs: an unknown call is a bug on
+/// one side or the other, an aged-out delta is an ordinary reconcile. Collapsing them would make a
+/// long-running mirror's normal recovery indistinguishable from a defect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeltaLookupError {
+    UnknownCall { call_id: String },
+    AgedOut { call_id: String, seq: u64 },
+}
+
+/// How many ticks of delta a hosted room keeps before the oldest falls out.
+///
+/// At the shipped `session_room.poll_interval_ms` (2 s) this is a little over two minutes of
+/// history, which is the window in which a client that missed a broadcast can still be handed the
+/// patch rather than having to recover. Beyond it there is nothing to buy: a client further behind
+/// than this reconciles by fetching the WIP ref (AC12/AC13), which git transfers incrementally and
+/// which is cheaper than the cumulative patch a longer ring would be standing in for.
+pub const SESSION_DELTA_RING_TICKS: usize = 64;
+
+/// How many bytes of patch a hosted room keeps across all the ticks it retains.
+///
+/// Sized so a full [`SESSION_DELTA_RING_TICKS`] window of ordinary editing — kilobytes a tick —
+/// fits many times over, while one generated-file sweep or a rebase cannot make a single room the
+/// largest thing in the daemon: a host runs one of these per hosted session, so this bound is
+/// multiplied by every room open at once.
+pub const SESSION_DELTA_RING_BYTES: usize = 16 * 1024 * 1024;
+
+/// The bounded ring of recent tick deltas, and the `call_id → seq` index over it.
+///
+/// Bounded on both axes because neither alone is enough: a tick count bounds a busy session's
+/// memory only if its patches are small, and a byte budget bounds a session that makes one enormous
+/// change but not one that makes a million tiny ones.
+#[derive(Debug)]
+pub struct SessionDeltaStore {
+    max_ticks: usize,
+    max_bytes: usize,
+    /// The retained ticks, oldest first.
+    ticks: VecDeque<ActivityDelta>,
+    /// `patch` bytes summed over [`Self::ticks`], carried alongside so eviction never walks the
+    /// ring to find out whether it is still over budget.
+    retained_bytes: usize,
+    /// What each call declared, by the tick it landed in. Dropped with its tick: paths whose patch
+    /// is gone can narrow nothing.
+    claims: HashMap<u64, BTreeMap<String, Vec<String>>>,
+    /// Which tick each call ever attributed belongs to, kept **after** that tick is evicted —
+    /// which is the whole difference between [`DeltaLookupError::AgedOut`] and
+    /// [`DeltaLookupError::UnknownCall`]. Forgetting a call along with its patch would make a long
+    /// mirror's routine recovery indistinguishable from a defect on one side or the other.
+    ///
+    /// It costs a call id and a `u64` per tool call for as long as the room is open, and nothing
+    /// more: the paths, which are the bulk of an attribution, live in `claims` and go with the tick.
+    call_ticks: HashMap<String, u64>,
+}
+
+impl SessionDeltaStore {
+    pub fn new(max_ticks: usize, max_bytes: usize) -> Self {
+        Self {
+            max_ticks,
+            max_bytes,
+            ticks: VecDeque::new(),
+            retained_bytes: 0,
+            claims: HashMap::new(),
+            call_ticks: HashMap::new(),
+        }
+    }
+
+    /// Record the delta produced by one tick, evicting oldest-first to stay within bounds.
+    pub fn record(&mut self, delta: ActivityDelta) {
+        let recorded_seq = delta.seq;
+        self.retained_bytes = self.retained_bytes.saturating_add(delta.patch.len());
+        self.ticks.push_back(delta);
+
+        // Until *both* bounds hold, not either: a tick count bounds a busy session only if its
+        // patches are small, and a byte budget bounds a session that makes one enormous change but
+        // not one that makes a million tiny ones. A single patch bigger than the whole budget
+        // therefore evicts itself, and a client asking for it is told it aged out — which is the
+        // same fetch-the-WIP-ref reconcile as any other gap, rather than a bound that is not one.
+        while !self.ticks.is_empty()
+            && (self.ticks.len() > self.max_ticks || self.retained_bytes > self.max_bytes)
+        {
+            if let Some(evicted) = self.ticks.pop_front() {
+                self.retained_bytes = self.retained_bytes.saturating_sub(evicted.patch.len());
+                self.claims.remove(&evicted.seq);
+            }
+        }
+
+        // Attributions for a tick that never arrived — a call credited to a window whose
+        // measurement failed — would otherwise sit here for the life of the room. Anything older
+        // than the oldest tick still held can serve nobody; anything newer is a call whose tick has
+        // yet to be recorded, which is ordinary and must survive.
+        let floor = self
+            .ticks
+            .front()
+            .map(|tick| tick.seq)
+            .unwrap_or_else(|| recorded_seq.saturating_add(1));
+        self.claims.retain(|seq, _| *seq >= floor);
+    }
+
+    /// Credit a call with the paths it declared, in the tick it landed in.
+    ///
+    /// The paths are what narrow the tick's diff to this call. A call that declared none is still
+    /// recorded — it belongs to the tick, and its delta is simply empty — so a lookup can tell
+    /// "this call changed nothing it told us about" from "we have never heard of this call".
+    pub fn attribute(&mut self, call_id: &str, seq: u64, changed_paths: &[String]) {
+        self.call_ticks.insert(call_id.to_string(), seq);
+        self.claims
+            .entry(seq)
+            .or_default()
+            .insert(call_id.to_string(), changed_paths.to_vec());
+    }
+
+    /// The delta for `call_id` under `scope`: the tick's diff limited to that call's own paths
+    /// ([`DeltaScope::Call`]), to the paths no call claimed ([`DeltaScope::Residual`]), or to
+    /// nothing at all ([`DeltaScope::Tick`]).
+    pub fn delta_for_call(
+        &self,
+        call_id: &str,
+        scope: DeltaScope,
+    ) -> Result<ActivityDelta, DeltaLookupError> {
+        let seq = *self
+            .call_ticks
+            .get(call_id)
+            .ok_or_else(|| DeltaLookupError::UnknownCall {
+                call_id: call_id.to_string(),
+            })?;
+        let tick = self.tick(seq).ok_or_else(|| DeltaLookupError::AgedOut {
+            call_id: call_id.to_string(),
+            seq,
+        })?;
+
+        let (patch, scoped_paths) = match scope {
+            DeltaScope::Call => {
+                // A call that declared nothing gets nothing — never its window's other work.
+                // Serving the whole tick here would credit this call with a neighbour's change and
+                // have a client apply that change twice.
+                let declared = self.declared_by(call_id, seq);
+                let claimed: BTreeSet<&str> = declared.iter().map(String::as_str).collect();
+                let (patch, _) =
+                    select_sections(&tick.patch, |section| section.names_any_in(&claimed));
+                (patch, declared)
+            }
+            DeltaScope::Residual => {
+                let claimed = self.claimed_paths(seq);
+                select_sections(&tick.patch, |section| !section.names_any_in(&claimed))
+            }
+            DeltaScope::Tick => (tick.patch.clone(), Vec::new()),
+        };
+
+        Ok(ActivityDelta {
+            seq: tick.seq,
+            prev_seq: tick.prev_seq,
+            base_commit: tick.base_commit.clone(),
+            patch,
+            scoped_paths,
+        })
+    }
+
+    /// The paths a tick touched that no call claimed.
+    ///
+    /// A `seq` the ring no longer holds is [`DeltaLookupError::AgedOut`] with no call to name: a
+    /// tick that was never recorded and a tick that has been evicted are the same absence here, and
+    /// both are answered by the same reconcile.
+    pub fn residual_paths(&self, seq: u64) -> Result<Vec<String>, DeltaLookupError> {
+        let tick = self.tick(seq).ok_or(DeltaLookupError::AgedOut {
+            call_id: String::new(),
+            seq,
+        })?;
+        let claimed = self.claimed_paths(seq);
+        let (_, paths) = select_sections(&tick.patch, |section| !section.names_any_in(&claimed));
+        Ok(paths)
+    }
+
+    /// How many ticks are currently retained.
+    pub fn len(&self) -> usize {
+        self.ticks.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn tick(&self, seq: u64) -> Option<&ActivityDelta> {
+        self.ticks.iter().find(|tick| tick.seq == seq)
+    }
+
+    /// The paths one call declared in `seq`, empty when it declared none.
+    fn declared_by(&self, call_id: &str, seq: u64) -> Vec<String> {
+        self.claims
+            .get(&seq)
+            .and_then(|claims| claims.get(call_id))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Every path any call declared in `seq` — what the residual is the complement of.
+    fn claimed_paths(&self, seq: u64) -> BTreeSet<&str> {
+        self.claims
+            .get(&seq)
+            .into_iter()
+            .flat_map(|claims| claims.values())
+            .flatten()
+            .map(String::as_str)
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A tick's patch, sliced by path
+// ---------------------------------------------------------------------------
+//
+// A tick is measured once, for the whole window, and then partitioned: each call gets the slice
+// that touches the files it declared, and what no call declared is the residual. The partition is
+// taken from the patch that was recorded rather than by asking git for a narrower diff again —
+// which is what makes every call's slice plus the residual add back up to exactly the bytes the
+// tick produced, and keeps a lookup free of a subprocess and of any dependence on the checkout
+// still holding the trees the tick was measured from.
+//
+// Slicing is safe because a patch is a concatenation of self-contained file sections: `git apply`
+// accepts any subset of them, and the sections are delimited by a byte sequence that cannot occur
+// anywhere else at the start of a line — a hunk's lines are prefixed with ' ', '+', '-' or '\',
+// and a binary payload's lines are base85.
+
+/// The line each file's section of a git patch begins with.
+const PATCH_SECTION_HEADER: &[u8] = b"diff --git ";
+
+/// One file's slice of a `git diff --binary` patch.
+struct PatchSection<'a> {
+    /// Every name the section is about — preimage and postimage, which differ for a rename. A call
+    /// claims the section if it declared *either*: both are how that one change is described.
+    names: Vec<String>,
+    /// The single name the section is reported under: its postimage, or its preimage when it
+    /// deleted the file — the same choice `git diff --name-only` makes, so a scope's paths and
+    /// [`changed_paths_between`] describe one tick the same way.
+    reported: String,
+    bytes: &'a [u8],
+}
+
+impl PatchSection<'_> {
+    fn names_any_in(&self, claimed: &BTreeSet<&str>) -> bool {
+        self.names
+            .iter()
+            .any(|name| claimed.contains(name.as_str()))
+    }
+}
+
+/// The bytes of the sections `keep` selects, concatenated in patch order, and the names they are
+/// reported under.
+fn select_sections(
+    patch: &[u8],
+    keep: impl Fn(&PatchSection<'_>) -> bool,
+) -> (Vec<u8>, Vec<String>) {
+    let mut bytes = Vec::new();
+    let mut names = Vec::new();
+    for section in patch_sections(patch) {
+        if !keep(&section) {
+            continue;
+        }
+        bytes.extend_from_slice(section.bytes);
+        if !section.reported.is_empty() {
+            names.push(section.reported);
+        }
+    }
+    (bytes, names)
+}
+
+/// Split a patch into one section per file.
+fn patch_sections(patch: &[u8]) -> Vec<PatchSection<'_>> {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in patch.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(PATCH_SECTION_HEADER) {
+            starts.push(offset);
+        }
+        offset += line.len();
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(patch.len());
+            patch_section(&patch[*start..end])
+        })
+        .collect()
+}
+
+/// Read one section's names out of its own header.
+fn patch_section(bytes: &[u8]) -> PatchSection<'_> {
+    let mut lines = bytes.split(|byte| *byte == b'\n');
+    let header = lines.next().unwrap_or_default();
+    let mut preimage = None;
+    let mut postimage = None;
+    for line in lines {
+        // The header ends at the first hunk or binary payload. Past that point a line beginning
+        // `--- ` is a removed line of the file's own content, and reading it as a name would take
+        // the section's identity from the text it happens to contain.
+        if line.starts_with(b"@@")
+            || line.starts_with(b"GIT binary patch")
+            || line.starts_with(b"Binary files ")
+        {
+            break;
+        }
+        if let Some(name) = line.strip_prefix(b"--- ".as_slice()) {
+            preimage = side_name(name, "a/");
+        } else if let Some(name) = line.strip_prefix(b"+++ ".as_slice()) {
+            postimage = side_name(name, "b/");
+        } else if let Some(name) = line
+            .strip_prefix(b"rename from ".as_slice())
+            .or_else(|| line.strip_prefix(b"copy from ".as_slice()))
+        {
+            preimage = Some(unquoted_name(trimmed_line_end(name)));
+        } else if let Some(name) = line
+            .strip_prefix(b"rename to ".as_slice())
+            .or_else(|| line.strip_prefix(b"copy to ".as_slice()))
+        {
+            postimage = Some(unquoted_name(trimmed_line_end(name)));
+        }
+    }
+    if preimage.is_none() && postimage.is_none() {
+        // A binary file and a bare mode change carry no `---`/`+++` pair at all, so their only
+        // names are the ones on the header line.
+        (preimage, postimage) = header_names(header);
+    }
+
+    let mut names: Vec<String> = Vec::new();
+    for name in [preimage.clone(), postimage.clone()].into_iter().flatten() {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if names.is_empty() {
+        warn!(
+            "session_room: a patch section names no file and is served as unclaimed: {}",
+            String::from_utf8_lossy(header)
+        );
+    }
+    PatchSection {
+        names,
+        reported: postimage.or(preimage).unwrap_or_default(),
+        bytes,
+    }
+}
+
+/// The name on a `---`/`+++` line, or `None` for the `/dev/null` that stands in for the side a
+/// creation or a deletion does not have.
+fn side_name(name: &[u8], prefix: &str) -> Option<String> {
+    let name = side_name_terminator_trimmed(trimmed_line_end(name));
+    if name == b"/dev/null" {
+        return None;
+    }
+    let name = unquoted_name(name);
+    Some(
+        name.strip_prefix(prefix)
+            .map(str::to_string)
+            .unwrap_or(name),
+    )
+}
+
+/// The two names on a `diff --git a/<old> b/<new>` line.
+///
+/// Only consulted for a section that has no `---`/`+++` pair, because this is the ambiguous line:
+/// an unquoted name may contain a space, and git leaves the split to the reader. Both sides naming
+/// the same file is the case that is never ambiguous and is also the common one, so that is what is
+/// looked for first; a rename of a spaced name git chose not to quote falls back to the first
+/// ` b/`.
+fn header_names(header: &[u8]) -> (Option<String>, Option<String>) {
+    let Some(rest) = header.strip_prefix(PATCH_SECTION_HEADER) else {
+        return (None, None);
+    };
+    let rest = trimmed_line_end(rest);
+
+    if rest.starts_with(b"\"") {
+        // git quotes both names or neither, so a quoted first name means a quoted second one.
+        let Some((old, after)) = take_c_quoted(rest) else {
+            return (None, None);
+        };
+        let after = after.strip_prefix(b" ".as_slice()).unwrap_or(after);
+        let Some((new, _)) = take_c_quoted(after) else {
+            return (None, None);
+        };
+        return (
+            Some(without_prefix(old, "a/")),
+            Some(without_prefix(new, "b/")),
+        );
+    }
+
+    let rest = String::from_utf8_lossy(rest);
+    let mut ambiguous = None;
+    for (at, _) in rest.match_indices(" b/") {
+        let (Some(old), Some(new)) = (
+            rest[..at].strip_prefix("a/"),
+            rest[at + 1..].strip_prefix("b/"),
+        ) else {
+            continue;
+        };
+        if old == new {
+            return (Some(old.to_string()), Some(new.to_string()));
+        }
+        ambiguous.get_or_insert((Some(old.to_string()), Some(new.to_string())));
+    }
+    ambiguous.unwrap_or((None, None))
+}
+
+/// A name as git printed it, C-quoting undone when it was quoted.
+fn unquoted_name(name: &[u8]) -> String {
+    match take_c_quoted(name) {
+        Some((unquoted, _)) => unquoted,
+        None => String::from_utf8_lossy(name).into_owned(),
+    }
+}
+
+/// Undo git's C-style quoting — the form it prints a name in when the name holds a byte that would
+/// otherwise be ambiguous — returning the name and whatever followed the closing quote.
+fn take_c_quoted(bytes: &[u8]) -> Option<(String, &[u8])> {
+    let mut rest = bytes.strip_prefix(b"\"".as_slice())?;
+    let mut name = Vec::new();
+    loop {
+        let byte = *rest.first()?;
+        rest = &rest[1..];
+        match byte {
+            b'"' => {
+                // Lossily, because a quoted name is quoted precisely when it holds bytes that may
+                // not be text at all; naming it with replacement characters beats dropping the
+                // section that mentions it.
+                return Some((String::from_utf8_lossy(&name).into_owned(), rest));
+            }
+            b'\\' => {
+                let escaped = *rest.first()?;
+                rest = &rest[1..];
+                match escaped {
+                    b'a' => name.push(0x07),
+                    b'b' => name.push(0x08),
+                    b'f' => name.push(0x0c),
+                    b'n' => name.push(b'\n'),
+                    b'r' => name.push(b'\r'),
+                    b't' => name.push(b'\t'),
+                    b'v' => name.push(0x0b),
+                    // Up to three octal digits: git's escape for a byte with no letter form of its
+                    // own, which is how every non-ASCII path arrives under `core.quotePath`.
+                    b'0'..=b'7' => {
+                        let mut value = u32::from(escaped - b'0');
+                        for _ in 0..2 {
+                            match rest.first() {
+                                Some(digit @ b'0'..=b'7') => {
+                                    value = value * 8 + u32::from(digit - b'0');
+                                    rest = &rest[1..];
+                                }
+                                _ => break,
+                            }
+                        }
+                        name.push(value as u8);
+                    }
+                    // `\"` and `\\`, and anything else git decided to escape.
+                    other => name.push(other),
+                }
+            }
+            other => name.push(other),
+        }
+    }
+}
+
+/// `name` without git's `a/`/`b/` side prefix.
+fn without_prefix(name: String, prefix: &str) -> String {
+    name.strip_prefix(prefix)
+        .map(str::to_string)
+        .unwrap_or(name)
+}
+
+/// A patch line without the carriage return a checkout with CRLF endings may leave on it.
+fn trimmed_line_end(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\r".as_slice()).unwrap_or(line)
+}
+
+/// Drop the tab git appends to a `---`/`+++` name that it chose not to quote but that contains a
+/// space.
+///
+/// Git terminates those two lines with a literal tab precisely when the unquoted name holds a
+/// space, so that a reader can find where the name ends:
+///
+/// ```text
+/// --- a/plain.txt          (no space  -> no terminator)
+/// --- a/sp ace.txt<TAB>    (a space   -> terminated)
+/// --- "a/\303\251.txt"     (quoted    -> no terminator, the quotes delimit it)
+/// ```
+///
+/// Stripping one trailing tab is unambiguous: a name git left unquoted cannot itself contain a
+/// tab, because git C-quotes any name with a control character in it. Without this, a spaced path
+/// arrives as `sp ace.txt\t`, matches no declared path, and every call that edited such a file is
+/// served an **empty** patch — indistinguishable from a call that declared nothing.
+fn side_name_terminator_trimmed(name: &[u8]) -> &[u8] {
+    name.strip_suffix(b"\t".as_slice()).unwrap_or(name)
+}
+
+/// The patch between two trees, or between `HEAD` and a tree when `from` is a commit, limited to
+/// `paths`.
+///
+/// An empty `paths` means the whole diff; otherwise git's own pathspec limiting does the narrowing,
+/// so a scoped patch is a real patch rather than a filtered rendering of one — `git apply` cannot
+/// tell the difference, which is exactly the property that makes scoping safe.
+///
+/// `git diff --binary` output, verbatim: the client applies it with `git apply`, so anything this
+/// function reformatted would be a difference the client has to understand.
+///
+/// Fallible on purpose. An empty patch is a **meaningful value** here — it is how a tick says it
+/// moved nothing — so returning one for a diff that could not be taken would tell a mirror the
+/// checkout is unchanged when it is not, and the mirror would record the tick as applied and never
+/// reconcile it.
+///
+/// The paths are passed after `--`, because a path that happens to look like a revision would
+/// otherwise select a commit instead of a file.
+pub fn diff_between(
+    worktree_root: &Path,
+    from: &str,
+    to: &str,
+    paths: &[String],
+) -> Result<Vec<u8>, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    // `--no-ext-diff` and `--no-textconv` because a repository may configure either, and both
+    // replace the patch with something for a human to read: a client would receive a rendering
+    // `git apply` cannot apply, and would have no way to tell that from a patch that simply failed.
+    let mut args = vec![
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        from,
+        to,
+    ];
+    if !paths.is_empty() {
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+    }
+    git_output(worktree_root, &args, &[], deadline)
+}
+
+/// The paths a diff between two trees touches, as plain relative paths.
+///
+/// `-z`-separated and therefore never C-quoted, unlike the `changed_paths` in room metadata: these
+/// are used to open files and to build pathspecs, so a display-quoted name would select nothing.
+pub fn changed_paths_between(
+    worktree_root: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<String>, String> {
+    let deadline = Instant::now() + DEFAULT_GIT_TIMEOUT;
+    let listed = git_output(
+        worktree_root,
+        &["diff", "--name-only", "-z", "--no-ext-diff", from, to],
+        &[],
+        deadline,
+    )?;
+    Ok(listed
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+        // Lossily, for the same reason the rest of this module decodes lossily: a repository can
+        // hold a path that is not valid UTF-8, and losing every other path over that one would be
+        // worse than naming it with replacement characters.
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect())
 }
 
 /// The working tree's diff against HEAD, run and parsed exactly as [`crate::worktrees`] does it for
@@ -257,14 +1096,52 @@ pub const DEFAULT_GIT_TIMEOUT: Duration = Duration::from_millis(5_000);
 /// forever: at a two-second interval that is a room quietly eating a process-wide pool (512 threads
 /// by default) that the spawn worker and every other blocking caller shares.
 fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String {
+    git_stdout_with(worktree_root, args, &[], deadline)
+}
+
+/// [`git_stdout`] with extra environment for the child — `GIT_INDEX_FILE` for the WIP tree, the
+/// identity [`publish_wip_ref`] signs with — and the same "empty string when git could not answer".
+fn git_stdout_with(
+    worktree_root: &Path,
+    args: &[&str],
+    envs: &[(&str, &OsStr)],
+    deadline: Instant,
+) -> String {
+    match git_output(worktree_root, args, envs, deadline) {
+        Ok(stdout) => String::from_utf8_lossy(&stdout).trim().to_string(),
+        Err(reason) => {
+            warn!("snapshot_worktree: {reason}");
+            String::new()
+        }
+    }
+}
+
+/// The raw stdout of a git command in `worktree_root`, or why it could not be had.
+///
+/// Bytes rather than a string, and un-trimmed, because a patch is neither: a `git diff --binary` of
+/// a checkout holding a file that is not valid UTF-8 would not survive being decoded, and a patch
+/// missing its final newline is one `git apply` rejects.
+///
+/// The failure is returned rather than logged here because the callers differ in what a failure
+/// means: a measurement that could not be taken is a warning and an empty reading, while a WIP ref
+/// that could not be published is an error its caller has to see.
+fn git_output(
+    worktree_root: &Path,
+    args: &[&str],
+    envs: &[(&str, &OsStr)],
+    deadline: Instant,
+) -> Result<Vec<u8>, String> {
     let budget = deadline.saturating_duration_since(Instant::now());
     if budget.is_zero() {
-        warn!(
-            "snapshot_worktree: no time left for git {args:?} in {worktree_root:?}; the measurement is incomplete"
-        );
-        return String::new();
+        return Err(format!(
+            "no time left for git {args:?} in {worktree_root:?}; the measurement is incomplete"
+        ));
     }
-    let mut child = match Command::new("git")
+    let mut command = Command::new("git");
+    for (name, value) in envs {
+        command.env(name, value);
+    }
+    let mut child = match command
         .current_dir(worktree_root)
         .args(args)
         // This measures a checkout somebody is *working in*, several times a second. `git status`
@@ -283,8 +1160,9 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
     {
         Ok(child) => child,
         Err(e) => {
-            warn!("snapshot_worktree: git {args:?} in {worktree_root:?} could not be run: {e}");
-            return String::new();
+            return Err(format!(
+                "git {args:?} in {worktree_root:?} could not be run: {e}"
+            ))
         }
     };
 
@@ -293,8 +1171,9 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
     // only the exit status would time out and kill a healthy `git diff` over a large change set.
     // EOF here means git closed stdout, which it does as it exits.
     let Some(stdout) = child.stdout.take() else {
-        warn!("snapshot_worktree: git {args:?} in {worktree_root:?} produced no stdout pipe");
-        return String::new();
+        return Err(format!(
+            "git {args:?} in {worktree_root:?} produced no stdout pipe"
+        ));
     };
     let (finished_tx, finished_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -308,33 +1187,25 @@ fn git_stdout(worktree_root: &Path, args: &[&str], deadline: Instant) -> String 
 
     match finished_rx.recv_timeout(budget) {
         Ok(Ok(collected)) => match child.wait() {
-            Ok(status) if status.success() => {
-                String::from_utf8_lossy(&collected).trim().to_string()
-            }
-            Ok(status) => {
-                warn!("snapshot_worktree: git {args:?} in {worktree_root:?} exited {status}");
-                String::new()
-            }
-            Err(e) => {
-                warn!("snapshot_worktree: git {args:?} in {worktree_root:?} could not be waited on: {e}");
-                String::new()
-            }
+            Ok(status) if status.success() => Ok(collected),
+            Ok(status) => Err(format!("git {args:?} in {worktree_root:?} exited {status}")),
+            Err(e) => Err(format!(
+                "git {args:?} in {worktree_root:?} could not be waited on: {e}"
+            )),
         },
-        Ok(Err(e)) => {
-            warn!("snapshot_worktree: reading git {args:?} in {worktree_root:?} failed: {e}");
-            String::new()
-        }
+        Ok(Err(e)) => Err(format!(
+            "reading git {args:?} in {worktree_root:?} failed: {e}"
+        )),
         Err(_) => {
             // Killed *and* reaped: a `git` left running holds an index lock and a file handle on a
             // directory the daemon may be about to remove, and an unreaped one stays a zombie for
             // the life of the daemon.
             let _ = child.kill();
             let _ = child.wait();
-            warn!(
-                "snapshot_worktree: git {args:?} in {worktree_root:?} did not answer within {}ms and was killed",
+            Err(format!(
+                "git {args:?} in {worktree_root:?} did not answer within {}ms and was killed",
                 budget.as_millis()
-            );
-            String::new()
+            ))
         }
     }
 }
@@ -460,12 +1331,42 @@ pub struct SessionRoomRegistry {
     rooms: Mutex<HashMap<String, SessionRoomTask>>,
 }
 
+/// Whether a session's WIP ref has been released, shared between the tick that publishes it and the
+/// close that deletes it.
+///
+/// A lock rather than a flag, and held across the git call on both sides, because the two orderings
+/// are not equally survivable. A tick that was already measuring when its room closed would
+/// otherwise publish the ref *after* the release deleted it — and nothing would ever delete it
+/// again, pinning a whole worktree of blobs in the repository every checkout of the project shares.
+/// Holding the lock makes the two whole operations interleave: a tick that finds it released
+/// publishes nothing, and a release that finds a publish in flight waits for it and then deletes
+/// what it wrote.
+type WipRefRelease = Arc<Mutex<bool>>;
+
+/// [`WipRefRelease`], taking a poisoned lock's contents rather than panicking: what it guards is one
+/// `bool`, so a thread that panicked while holding it left nothing to be inconsistent about — and a
+/// room whose ref could no longer be released would leak exactly what the lock exists to prevent.
+fn lock_wip_ref(released: &WipRefRelease) -> MutexGuard<'_, bool> {
+    released.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// One hosted room: the task serving RPC in it, and the task measuring the checkout it describes.
 struct SessionRoomTask {
     /// The checkout this room describes. Kept so a caller holding only a path — `RemoveWorktree`,
     /// which never learns a session id — can close the room before the directory goes.
     /// The local checkout this room measures, when there is one; `None` under split placement.
     worktree_root: Option<PathBuf>,
+    /// The ring of tick deltas this room's poll loop records into and its RPC surface serves slices
+    /// of. Held here rather than by either of them, because they are two tasks and one ring: the
+    /// loop writes it, `ReportAgentActivity` attributes calls into it, and
+    /// `StreamAgentActivityDelta` reads it — all found by the same session id.
+    deltas: Arc<Mutex<SessionDeltaStore>>,
+    /// Where this room's `session.activity` records go out. An `Arc` because the publisher is not
+    /// clonable and a broadcast is made from an RPC handler that holds the registry, not from the
+    /// task that took it.
+    activity: Arc<BroadcastPublisher>,
+    /// Whether this session's WIP ref has been released. See [`WipRefRelease`].
+    wip_ref_released: WipRefRelease,
     serve: tokio::task::JoinHandle<()>,
     poll: tokio::task::JoinHandle<()>,
     /// Set when hosting ends, by whichever side ended it. The poll loop reads it so it stops
@@ -598,10 +1499,19 @@ impl SessionRoomRegistry {
         source: Arc<dyn WorktreeSource>,
     ) {
         let stopped = Arc::new(AtomicBool::new(false));
-        // Taken before `serve` consumes the connection: the poll loop broadcasts on the same
+        // Both taken before `serve` consumes the connection: the poll loop broadcasts on the same
         // connection that serves RPC, because a second connection would mean a second participant
-        // in a room whose whole claim is that only this daemon is in it.
+        // in a room whose whole claim is that only this daemon is in it. Two topics on that one
+        // connection — the checkout's movements and the agent's own calls — because a receiver that
+        // wants only commits should not have to decode every tool call to discover that.
         let publisher = joined.broadcast_on(WORKTREE_ACTIVITY_TOPIC);
+        let activity = Arc::new(joined.broadcast_on(SESSION_ACTIVITY_TOPIC));
+
+        let deltas = Arc::new(Mutex::new(SessionDeltaStore::new(
+            SESSION_DELTA_RING_TICKS,
+            SESSION_DELTA_RING_BYTES,
+        )));
+        let wip_ref_released: WipRefRelease = Arc::new(Mutex::new(false));
 
         let serve_stopped = Arc::clone(&stopped);
         let serve_room = room_name.to_string();
@@ -621,13 +1531,23 @@ impl SessionRoomRegistry {
         let poll = tokio::spawn(
             SessionRoomPoll {
                 room_name: room_name.to_string(),
+                session_id: hosting.codebase_session_id.to_string(),
+                worktree_root: hosting.worktree_root.map(Path::to_path_buf),
+                session_dir: hosting.session_dir.to_path_buf(),
+                git_timeout: hosting.config.session_room_git_timeout(),
                 source,
                 metadata,
                 publisher,
+                activity: Arc::clone(&activity),
+                deltas: Arc::clone(&deltas),
+                broadcast_rows: BroadcastActivityRows::default(),
+                wip_ref_released: Arc::clone(&wip_ref_released),
                 interval: hosting.config.session_room_poll_interval(),
                 previous: measured.snapshot,
+                previous_wip_tree: String::new(),
                 previous_attachments: measured.attachments,
                 next_seq: 0,
+                next_delta_seq: 0,
                 stopped: Arc::clone(&stopped),
             }
             .run(),
@@ -641,6 +1561,9 @@ impl SessionRoomRegistry {
             hosting.codebase_session_id.to_string(),
             SessionRoomTask {
                 worktree_root: hosting.worktree_root.map(Path::to_path_buf),
+                deltas,
+                activity,
+                wip_ref_released,
                 serve,
                 poll,
                 stopped,
@@ -675,18 +1598,83 @@ impl SessionRoomRegistry {
         })
     }
 
+    /// The ring of tick deltas of the room hosted for `codebase_session_id`, or `None` when this
+    /// daemon hosts none.
+    ///
+    /// `None` rather than an empty ring, because the two are different answers: an empty ring
+    /// reports every call as unknown — a defect on one side or the other — where "no room here"
+    /// is the fact, and the only one a caller can route on.
+    pub fn delta_store(&self, codebase_session_id: &str) -> Option<Arc<Mutex<SessionDeltaStore>>> {
+        self.lock_rooms()
+            .get(codebase_session_id)
+            .map(|room| Arc::clone(&room.deltas))
+    }
+
+    /// Where a session's activity records are broadcast, or `None` when this daemon hosts no room
+    /// for it — which is ordinary: a record is persisted whether or not there is a room to carry it,
+    /// and a session whose agent runs on another daemon has its room over there.
+    pub fn activity_publisher(&self, codebase_session_id: &str) -> Option<Arc<BroadcastPublisher>> {
+        self.lock_rooms()
+            .get(codebase_session_id)
+            .map(|room| Arc::clone(&room.activity))
+    }
+
+    // There is deliberately no `broadcast_activity` here, and adding one back would reintroduce a
+    // bug this feature already shipped once.
+    //
+    // The poll loop is the **sole** broadcaster: it attributes each new record to the tick whose
+    // delta covers it, stamps `activity_seq`, and publishes through its own clone of this
+    // publisher. A second door — an RPC handler pushing a record the moment it arrives — publishes
+    // *before* the tick holding that record's delta exists, so a client reacting to it looks the
+    // delta up and is told `UnknownCall`; and once both doors are open, every claude-cli record
+    // goes out twice, the early copy carrying `activity_seq: 0`.
+    //
+    // `activity_publisher` stays because the registry has to hand the poll loop its clone, and
+    // because answering `None` for an unhosted session is the branch an RPC route tests.
+
     /// Stop hosting the room belonging to `codebase_session_id`, if this daemon hosts one.
     pub fn close(&self, codebase_session_id: &str) {
         let removed = self.lock_rooms().remove(codebase_session_id);
-        if removed.is_some() {
-            log::info!(
-                "session_room: closed {} with its session",
-                session_room_name(codebase_session_id)
-            );
+        let Some(room) = removed else {
+            return;
+        };
+        log::info!(
+            "session_room: closed {} with its session",
+            session_room_name(codebase_session_id)
+        );
+
+        // Before the tasks are dropped and before this returns, because both callers act on that
+        // ordering: `DeleteSession` removes the session directory next, and `RemoveWorktree` the
+        // checkout — and `git update-ref -d` in a directory that has gone deletes nothing and
+        // reports why. Blocking here rather than on the blocking pool for the same reason: a
+        // deletion that had merely been *scheduled* would race the removal it must precede.
+        //
+        // Deliberately not in `SessionRoomTask::drop`, which also runs when a room is replaced
+        // under the same session id and when the registry itself goes away at shutdown. Neither
+        // means the session is over: a replacement's client may be fetching the ref this instant
+        // and the new room only republishes on its next tick, and a daemon restart leaves every
+        // workspace session alive — dropping their refs there would unpin the uncommitted state of
+        // every one of them until each room is opened again.
+        if let Some(worktree_root) = room.worktree_root.as_deref() {
+            // Taken for the whole release, so a tick that was already measuring when this ran
+            // either published before it and is deleted here, or finds the ref released and
+            // publishes nothing. What it costs is that a close waits out a publish already in
+            // flight, bounded by that tick's own git budget.
+            let mut released = lock_wip_ref(&room.wip_ref_released);
+            *released = true;
+            if let Err(reason) = delete_wip_ref(worktree_root, codebase_session_id) {
+                // Loud, because what is left behind is a whole worktree of blobs pinned in a
+                // repository shared by every checkout of the project, for as long as the ref lives.
+                log::error!(
+                    "session_room: {} still pins its uncommitted state: {reason}",
+                    wip_ref_name(codebase_session_id)
+                );
+            }
         }
+
         // Dropped here rather than inside the lock: `Drop` aborts the room's two tasks, and holding
         // the registry across that would make every other opener and closer queue behind it.
-        drop(removed);
+        drop(room);
     }
 
     /// Stop hosting the room of the checkout at `worktree_root`, whichever session owns it.
@@ -1000,6 +1988,164 @@ fn attachment_basenames(session_dir: &Path) -> Vec<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Attributing the agent's calls to the tick that covers them
+// ---------------------------------------------------------------------------
+//
+// The durable activity log is the one place every session type's tool calls meet: the daemon writes
+// it for claude-cli and sandbox sessions, the coder participant for tool and cursor-cli ones. So the
+// poll loop *tails that log* rather than being told about a call by whoever recorded it, and the
+// room ends up with one broadcaster for every session type instead of one per writer (AC5).
+//
+// It is also the only ordering that can be right. A record broadcast by its writer goes out before
+// the tick that measured the call has run, so a client that looks the delta up the moment it hears
+// about the call is told the call is unknown — a defect on one side or the other, as far as the
+// client can tell, rather than "the tick has not happened yet". Attributing here means the delta a
+// record names already exists by the time the record does.
+
+/// Which rows of a session's activity log a room has already put on the wire.
+///
+/// Keyed by call rather than by line, because [`read_agent_activity`] coalesces the log by
+/// `call_id`: a call appears once, in its latest state, so "which rows are new" can never be a count
+/// of lines read. Each call is remembered together with whether the row that went out for it was its
+/// terminal one — a call is written twice, `running` when it starts and `completed`/`error` when it
+/// finishes, and a plain seen-set would either leave a client watching a call that has long since
+/// finished, or re-broadcast every retained call on every tick.
+///
+/// It costs a call id and a bool per tool call for as long as the room is open, which is what
+/// [`SessionDeltaStore::call_ticks`] costs for the same reason: a call the log's tail cap has
+/// dropped can no longer be read back, so forgetting it would only trade memory for the risk of
+/// broadcasting it twice.
+#[derive(Debug, Default)]
+pub struct BroadcastActivityRows {
+    /// `call_id` → whether the row already broadcast for that call was its terminal one.
+    handled: HashMap<String, bool>,
+}
+
+impl BroadcastActivityRows {
+    /// True when this exact row has already gone out: the same call, in the same state.
+    ///
+    /// A call whose running row went out is *not* already broadcast once its terminal row appears —
+    /// that row supersedes it and carries the result — but it is once that terminal row has gone
+    /// out, because a finished call produces no further rows.
+    pub fn already_broadcast(&self, record: &AgentActivityRecord) -> bool {
+        match self.handled.get(&record.call_id) {
+            Some(broadcast_terminal) => *broadcast_terminal || !is_terminal(record),
+            None => false,
+        }
+    }
+
+    /// Remember that `record` went out, in the state it went out in.
+    pub fn mark_broadcast(&mut self, record: &AgentActivityRecord) {
+        self.handled
+            .insert(record.call_id.clone(), is_terminal(record));
+    }
+}
+
+/// Whether a row is the last one its call will ever produce.
+///
+/// By excluding `running` rather than by naming `completed` and `error`, so a status this build has
+/// never seen is treated as a call that is over and broadcast once — where treating it as still
+/// running would re-broadcast it on every tick for the life of the room.
+fn is_terminal(record: &AgentActivityRecord) -> bool {
+    record.status != STATUS_RUNNING
+}
+
+/// Where a tick can put the calls it found, which is what makes a record's delta resolvable at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TickAttributionTarget {
+    /// The delta this tick recorded, under `seq`: the checkout moved and its patch holds whatever
+    /// these calls changed.
+    ThisTicksDelta { seq: u64 },
+    /// The checkout did not move, so there is no delta for a call to belong to and one has to be
+    /// made: an **empty** delta at `next_seq`, on the commit the checkout is standing on.
+    ///
+    /// Empty rather than absent, because the two are different answers. A call that changed nothing
+    /// is one frame with an empty patch (AC9); a call with no delta at all is
+    /// [`DeltaLookupError::UnknownCall`], which a client reads as a defect rather than as "that call
+    /// touched nothing".
+    AnEmptyDelta { next_seq: u64, base_commit: String },
+    /// This room measures no checkout of its own — split placement, where the files are on the
+    /// codebase daemon. Its records still go out, because the room is where a participant learns
+    /// what the agent did, but they carry `activity_seq` 0, the wire's "no tick has covered it yet":
+    /// a seq naming a delta this room never recorded would send every client to reconcile against a
+    /// ring that has nothing in it.
+    NoCheckout,
+}
+
+/// What one tick does with the tail of its session's activity log.
+#[derive(Debug, Default, PartialEq)]
+pub struct TickActivity {
+    /// The records to broadcast, each stamped with the seq of the delta that covers it.
+    pub broadcast: Vec<AgentActivityRecord>,
+    /// The delta the tick has to record before those records resolve to anything — always empty,
+    /// always at the seq they were stamped with. `None` when the tick recorded a delta of its own,
+    /// when there is nothing new to attribute, or when there is no checkout to attribute against.
+    pub empty_delta: Option<ActivityDelta>,
+}
+
+/// The rows of `log` a tick has to broadcast, each attributed to the delta that covers it, and the
+/// delta that has to be recorded for that attribution to mean anything.
+///
+/// The whole per-tick decision, with the log read, the ring and the broadcast left to the caller —
+/// so what a tick decides is testable without a room, a checkout or a LiveKit connection.
+///
+/// A tick with nothing new to say numbers nothing: an empty delta per idle tick would consume the
+/// sequence a client de-duplicates by at the poll rate, and every one of those numbers would read as
+/// a delta that never arrived.
+pub fn tick_activity(
+    already_broadcast: &BroadcastActivityRows,
+    log: &[AgentActivityRecord],
+    target: &TickAttributionTarget,
+) -> TickActivity {
+    let mut broadcast: Vec<AgentActivityRecord> = log
+        .iter()
+        .filter(|record| !already_broadcast.already_broadcast(record))
+        .cloned()
+        .collect();
+    if broadcast.is_empty() {
+        return TickActivity::default();
+    }
+
+    let (seq, empty_delta) = match target {
+        TickAttributionTarget::ThisTicksDelta { seq } => (*seq, None),
+        TickAttributionTarget::AnEmptyDelta {
+            next_seq,
+            base_commit,
+        } if !base_commit.is_empty() => (
+            *next_seq,
+            Some(ActivityDelta {
+                seq: *next_seq,
+                prev_seq: next_seq.saturating_sub(1),
+                base_commit: base_commit.clone(),
+                patch: Vec::new(),
+                scoped_paths: Vec::new(),
+            }),
+        ),
+        // A delta whose base is unknown is worse than no delta, exactly as [`tick_delta`] says: the
+        // client compares `base_commit` against its own HEAD, an empty string matches nothing, and
+        // it would reconcile against a patch claiming nothing changed forever. The records still go
+        // out, carrying the honest "no tick has covered it yet".
+        TickAttributionTarget::AnEmptyDelta { .. } => {
+            warn!(
+                "session_room: {} calls are unattributed: the checkout's HEAD could not be read, so \
+                 an empty delta could not name the commit it applies onto",
+                broadcast.len()
+            );
+            (0, None)
+        }
+        TickAttributionTarget::NoCheckout => (0, None),
+    };
+
+    for record in &mut broadcast {
+        record.activity_seq = seq;
+    }
+    TickActivity {
+        broadcast,
+        empty_delta,
+    }
+}
+
 /// How many consecutive failed metadata writes a room complains about before it goes quiet about
 /// them.
 ///
@@ -1012,21 +2158,74 @@ const METADATA_WRITE_FAILURES_BEFORE_QUIET: u32 = 3;
 /// The loop that keeps a room's metadata and its participants current with the checkout.
 struct SessionRoomPoll {
     room_name: String,
+    /// The session the room belongs to, which is what its WIP ref is named after — a room name
+    /// would not do: a client fetches `refs/tddy/session/{session_id}/wip` from the project's
+    /// repository, where rooms do not exist.
+    session_id: String,
+    /// The checkout on this host, when there is one. `None` under split placement, where the files
+    /// are on the codebase daemon: a tick then measures through [`RemoteCheckout`] and produces no
+    /// delta and no WIP ref, because both are made out of the objects of a repository this host
+    /// does not have.
+    worktree_root: Option<PathBuf>,
+    /// The session directory holding the agent-activity log this loop tails. Local wherever the
+    /// checkout is: the log is written beside the agent, which is on this host by definition —
+    /// this daemon is the one hosting its room.
+    session_dir: PathBuf,
+    /// The budget one tick's git work gets, the same `session_room.git_timeout_ms` the measurement
+    /// spends.
+    git_timeout: Duration,
     /// Where each tick's picture of the checkout comes from — local git today, see
     /// [`WorktreeSource`].
     source: Arc<dyn WorktreeSource>,
     metadata: RoomMetadataClient,
     publisher: BroadcastPublisher,
+    /// Where this loop puts the agent's own calls, on `session.activity` — the same publisher the
+    /// registry hands out, because the two must be one connection: a second one would be a second
+    /// participant in a room whose whole claim is that only this daemon is in it.
+    activity: Arc<BroadcastPublisher>,
+    /// The ring this loop records each tick's delta in, shared with the RPC surface that serves
+    /// slices of it.
+    deltas: Arc<Mutex<SessionDeltaStore>>,
+    /// The rows of the activity log this loop has already broadcast. Held by the loop rather than by
+    /// the room, because it is the loop's own place in a log nothing else reads.
+    broadcast_rows: BroadcastActivityRows,
+    /// See [`WipRefRelease`]: held across this loop's publish so a tick cannot outlive the close
+    /// that released its ref.
+    wip_ref_released: WipRefRelease,
     interval: Duration,
     /// The last measurement that was successfully announced. Only advanced once the room reflects
     /// it, so a failed announcement is retried rather than skipped.
     previous: WorktreeSnapshot,
+    /// The WIP tree of the last tick that produced one — the tree every next delta is taken from.
+    ///
+    /// Beside [`Self::previous`] rather than inside it, because `previous` is compared against a
+    /// fresh measurement to decide whether a tick has anything to say at all, and a measurement
+    /// deliberately carries no tree ([`snapshot_worktree_within`]). Folding the tree into it would
+    /// make every measurement differ from it and turn an idle room into one that rewrites its
+    /// metadata, stages the whole checkout and publishes a ref at the poll rate.
+    ///
+    /// Left where it was when a tick's tree could not be written, rather than cleared: the ref
+    /// still points at it, so its objects are still reachable and the next tick that succeeds takes
+    /// a patch spanning both ticks. Clearing it would cost the *following* tick its delta too, and
+    /// that pair of changes would then exist in no delta at all.
+    previous_wip_tree: String,
     /// The attachment list last written to the room's metadata. Compared alongside the snapshot
     /// because attaching a document to a running session changes what the room advertises (PRD
     /// FR11) without touching the checkout at all — gating on git alone would leave the new
     /// attachment invisible until some unrelated edit happened to fire.
     previous_attachments: Vec<String>,
     next_seq: u64,
+    /// The number the next delta this room produces will carry — its **own** sequence, not the one
+    /// [`Self::next_seq`] numbers activity events with.
+    ///
+    /// Two counters because the two streams are de-duplicated separately and a gap means the same
+    /// thing in both: "one was lost". A delta numbered out of the event space would inherit the
+    /// events' gaps — a tick that announced a commit and a file change consumes two of those — and
+    /// every one of them would read to a client as a delta that never arrived, sending it to fetch
+    /// the WIP ref for nothing. It advances only when a delta was actually produced, so an idle
+    /// tick, an unmeasurable one, and a tick whose tree did not change all cost nothing: what a
+    /// client sees is `0, 1, 2, …` with a gap only where a delta really was lost.
+    next_delta_seq: u64,
     /// Set when this room stops being hosted, by `close`/`Drop` or by the serving task noticing the
     /// connection ended. Polling past that point measures a checkout to broadcast into a connection
     /// that is gone.
@@ -1047,6 +2246,10 @@ impl SessionRoomPoll {
             }
             let measured = match self.source.measure().await {
                 Measurement::Taken(measured) => measured,
+                // Costs the whole tick, the activity log included: a call attributed to a window
+                // that was never measured would name a delta that does not exist, and the log is
+                // read whole on the next tick anyway — nothing is lost by waiting for one that
+                // knows what the checkout looks like.
                 Measurement::Unavailable => continue,
                 // A checkout that is gone is not a checkout that changed: a missing directory
                 // answers every git question with silence, which would read as "HEAD moved to the
@@ -1061,28 +2264,42 @@ impl SessionRoomPoll {
                     return;
                 }
             };
-            if measured.snapshot == self.previous
-                && measured.attachments == self.previous_attachments
+            // Read before the announcement, which consumes the measurement: an empty delta has to
+            // name the commit the checkout is standing on *now*, and `self.previous` is deliberately
+            // left behind when a metadata write fails.
+            let head_commit = measured.snapshot.head_commit.clone();
+
+            // A tick that measured no change still tails the activity log — it just has nothing to
+            // announce, and leaves the metadata-failure count exactly where it was. A `Read`, a
+            // `Grep`, a `Bash` that printed something: none of them move the checkout, and every one
+            // of them is a call a participant in the room is entitled to hear about. Gating the log
+            // on the checkout would make "the agent did something that changed nothing"
+            // indistinguishable from silence.
+            let mut recorded_delta_seq = None;
+            if measured.snapshot != self.previous
+                || measured.attachments != self.previous_attachments
             {
-                continue;
+                let announced = self.announce(measured, failed_metadata_writes).await;
+                recorded_delta_seq = announced.delta_seq;
+                if announced.metadata_written {
+                    failed_metadata_writes = 0;
+                } else {
+                    failed_metadata_writes = failed_metadata_writes.saturating_add(1);
+                }
             }
-            if self.announce(measured, failed_metadata_writes).await {
-                failed_metadata_writes = 0;
-            } else {
-                failed_metadata_writes = failed_metadata_writes.saturating_add(1);
-            }
+            self.broadcast_new_activity(recorded_delta_seq, &head_commit)
+                .await;
         }
     }
 
-    /// Publish one change: **metadata first, then the events**. `true` when the metadata write
-    /// landed, which is what a caller counts consecutive failures with.
+    /// Publish one change: **metadata first, then the events**.
     ///
     /// That order is the contract a receiver relies on. It makes "an event was observed" imply "the
     /// room's metadata already reflects it", so a participant woken by an event never reads a
     /// snapshot older than the event that woke it — and a late joiner that saw no event at all
     /// still reads the current summary (PRD FR9, AC7). Publishing first and writing after would
     /// leave a window in which both are wrong for whoever reacted fastest.
-    async fn announce(&mut self, measured: MeasuredWorktree, previous_failures: u32) -> bool {
+    async fn announce(&mut self, measured: MeasuredWorktree, previous_failures: u32) -> Announced {
         let at_unix_ms = unix_ms();
         let metadata_json =
             room_metadata_json(&measured.snapshot, &measured.attachments, at_unix_ms);
@@ -1106,7 +2323,7 @@ impl SessionRoomPoll {
                     previous_failures + 1
                 );
             }
-            return false;
+            return Announced::held_back();
         }
         if previous_failures > METADATA_WRITE_FAILURES_BEFORE_QUIET {
             log::info!(
@@ -1121,6 +2338,15 @@ impl SessionRoomPoll {
             self.next_seq,
             at_unix_ms,
         );
+        // Between the two, because it needs both snapshots alive: the tree it writes is diffed
+        // against the previous tick's, and the events above are about the pair it sits between.
+        //
+        // And before the events go out, for the reason the metadata write is: it makes "an event
+        // was observed" imply the delta and the WIP ref for that tick already exist, so a receiver
+        // that reacts to an event by fetching the session's uncommitted state cannot be handed the
+        // one from before the event that woke it. What it costs is the tick's git work of latency
+        // on the event, bounded by the same `session_room.git_timeout_ms` everything else here is.
+        let delta_seq = self.record_uncommitted_state(&measured.snapshot).await;
         self.previous = measured.snapshot;
         self.previous_attachments = measured.attachments;
         self.next_seq += events.len() as u64;
@@ -1135,7 +2361,227 @@ impl SessionRoomPoll {
                 );
             }
         }
-        true
+        Announced {
+            metadata_written: true,
+            delta_seq,
+        }
+    }
+
+    /// Stage this tick's working tree, keep the delta it produced, and publish the ref that makes
+    /// the objects behind that delta reachable (AC13).
+    ///
+    /// All of it is git against a checkout, so all of it runs on the blocking pool — the same
+    /// reason [`LocalCheckout::measure`] does. One dispatch rather than three: the tree, the diff
+    /// taken from it and the ref that makes it fetchable are one tick's work, and a tree that had
+    /// been written by a thread which then handed it on would for that moment be an object nothing
+    /// in the repository names.
+    ///
+    /// Measuring is deliberately *not* where this happens. `git add -A` materialises loose objects
+    /// in the repository every checkout of the project shares, so it belongs where the ref that
+    /// makes them reachable is published in the same breath — here — rather than in a snapshot the
+    /// room takes twice a second whether or not anything came of it.
+    ///
+    /// A failure costs this tick its delta and nothing else: the loop measures again, and a client
+    /// that was left with a gap reconciles by fetching that ref, which is what it is for.
+    ///
+    /// Returns the seq of the delta this tick recorded, or `None` when it produced none — which is
+    /// where the tick's tool calls are attributed, so it is answered here rather than inferred from
+    /// [`Self::next_delta_seq`] by arithmetic.
+    async fn record_uncommitted_state(&mut self, measured: &WorktreeSnapshot) -> Option<u64> {
+        let Some(worktree_root) = self.worktree_root.clone() else {
+            // Split placement. A delta is a diff between two objects of the project's repository
+            // and the WIP ref lives in it, so both are published by the daemon that holds the
+            // files; this one hosts the room and has nothing to stage.
+            return None;
+        };
+        // The pair the delta is taken between: the previous tick's measurement carrying the tree it
+        // wrote, and this one's carrying the tree about to be written.
+        let previous = WorktreeSnapshot {
+            wip_tree: self.previous_wip_tree.clone(),
+            ..self.previous.clone()
+        };
+        let next = measured.clone();
+        let seq = self.next_delta_seq;
+        let session_id = self.session_id.clone();
+        let room_name = self.room_name.clone();
+        let git_timeout = self.git_timeout;
+        let wip_ref_released = Arc::clone(&self.wip_ref_released);
+
+        let produced = tokio::task::spawn_blocking(move || {
+            let next = WorktreeSnapshot {
+                wip_tree: write_wip_tree_within(&worktree_root, git_timeout),
+                ..next
+            };
+            let delta = tick_delta(&worktree_root, &previous, &next, seq);
+            if !next.wip_tree.is_empty() {
+                // Held across the publish: see [`WipRefRelease`].
+                let released = lock_wip_ref(&wip_ref_released);
+                if *released {
+                    log::debug!(
+                        "session_room: {room_name} closed while this tick was measuring; its uncommitted state was not republished"
+                    );
+                } else if let Err(reason) =
+                    publish_wip_ref(&worktree_root, &session_id, &next.head_commit, &next.wip_tree)
+                {
+                    // A client can still be handed this tick's delta; what it loses is the ref it
+                    // would recover from if it ever fell behind, which is worth saying so.
+                    warn!("session_room: {room_name} could not publish its uncommitted state: {reason}");
+                }
+            }
+            (next.wip_tree, delta)
+        })
+        .await;
+
+        let (wip_tree, delta) = match produced {
+            Ok(produced) => produced,
+            Err(join_error) => {
+                // A panic in the tick's git work is a bug, not a slow repository — and it must not
+                // take the loop with it: the room goes on measuring and announcing.
+                warn!(
+                    "session_room: {} could not take this tick's uncommitted state: {join_error}",
+                    self.room_name
+                );
+                return None;
+            }
+        };
+        if !wip_tree.is_empty() {
+            self.previous_wip_tree = wip_tree;
+        }
+        let delta = delta?;
+        let recorded_seq = delta.seq;
+        // Advanced only for a delta that exists, so the numbers a client de-duplicates by have a
+        // gap exactly where one was lost. See [`Self::next_delta_seq`].
+        self.next_delta_seq += 1;
+        // Poisoned by a panic in some other holder means one call's slice of one tick was left
+        // half-computed; the ring itself is a queue of finished deltas, and refusing to record any
+        // more of them would cost every client every remaining tick of the session.
+        self.deltas
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(delta);
+        Some(recorded_seq)
+    }
+
+    /// Put the calls the agent has made since the last tick into the room, each attributed to the
+    /// delta that covers it (AC4, AC5).
+    ///
+    /// The log is the source, rather than the writer telling the room directly, for two reasons.
+    /// It is the one place every session type's calls meet — the daemon writes it for claude-cli
+    /// and sandbox sessions, the coder participant for tool and cursor-cli ones — so tailing it
+    /// makes this loop the single broadcaster instead of one per writer. And it is the only
+    /// ordering in which a record can name a delta that exists: a writer broadcasting as it records
+    /// publishes before the tick that measured the call has run, and a client looking that delta up
+    /// is told the call is unknown.
+    ///
+    /// A log that cannot be read costs this tick its attribution and nothing more — never an empty
+    /// reading, which would mark every call it holds as broadcast and lose them all silently.
+    ///
+    /// TODO(session-room): read only what was appended since the last tick. The file is read whole
+    /// every `session_room.poll_interval_ms`, and it carries the full input and full output of every
+    /// tool call, so a long session pays its own size twice a second for as long as its room is
+    /// open.
+    async fn broadcast_new_activity(&mut self, recorded_delta_seq: Option<u64>, head_commit: &str) {
+        // Blocking file I/O, on the blocking pool for the same reason the tick's git work is: this
+        // runs on the runtime that serves every room's RPC.
+        let session_dir = self.session_dir.clone();
+        let log = match tokio::task::spawn_blocking(move || read_agent_activity(&session_dir)).await
+        {
+            Ok(Ok(log)) => log,
+            Ok(Err(e)) => {
+                warn!(
+                    "session_room: {} could not read its session's activity log; this tick attributed nothing: {e}",
+                    self.room_name
+                );
+                return;
+            }
+            Err(join_error) => {
+                // A panic while reading the log is a bug, not a slow filesystem — and it must not
+                // take the loop with it.
+                warn!(
+                    "session_room: {} could not read its session's activity log: {join_error}",
+                    self.room_name
+                );
+                return;
+            }
+        };
+
+        let target = self.attribution_target(recorded_delta_seq, head_commit);
+        let decided = tick_activity(&self.broadcast_rows, &log, &target);
+        if decided.broadcast.is_empty() {
+            return;
+        }
+        let numbered_a_delta = decided.empty_delta.is_some();
+        {
+            // Recorded before the calls are attributed to it, so no lookup can find a call whose
+            // tick is not in the ring yet. One lock for both, and never held across the publish
+            // below: it is a `std::sync::Mutex` guarding a ring the RPC surface reads.
+            let mut store = self.deltas.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(delta) = decided.empty_delta {
+                store.record(delta);
+            }
+            for record in &decided.broadcast {
+                store.attribute(&record.call_id, record.activity_seq, &record.changed_paths);
+            }
+        }
+        if numbered_a_delta {
+            self.next_delta_seq += 1;
+        }
+
+        for record in decided.broadcast {
+            // Marked before the publish, and marked even when the publish fails: a row that went
+            // back into the queue would be attributed again on a later tick, and `attribute`
+            // re-points the call at *that* tick — moving the call's delta to a window that does not
+            // hold its change. A lost broadcast is a gap the client's own `seq` de-duplication
+            // already describes; a re-attributed call is a wrong answer.
+            self.broadcast_rows.mark_broadcast(&record);
+            let frame = tddy_service::agent_activity_to_proto(record).encode_to_vec();
+            if let Err(e) = self.activity.publish(&frame).await {
+                warn!(
+                    "session_room: {} could not broadcast an activity record: {e}",
+                    self.room_name
+                );
+            }
+        }
+    }
+
+    /// Where this tick's calls belong: the delta it recorded, an empty one it has to record, or
+    /// nothing at all when this room measures no checkout of its own.
+    fn attribution_target(
+        &self,
+        recorded_delta_seq: Option<u64>,
+        head_commit: &str,
+    ) -> TickAttributionTarget {
+        if self.worktree_root.is_none() {
+            return TickAttributionTarget::NoCheckout;
+        }
+        match recorded_delta_seq {
+            Some(seq) => TickAttributionTarget::ThisTicksDelta { seq },
+            None => TickAttributionTarget::AnEmptyDelta {
+                next_seq: self.next_delta_seq,
+                base_commit: head_commit.to_string(),
+            },
+        }
+    }
+}
+
+/// What one tick's announcement did.
+struct Announced {
+    /// Whether the room's metadata took the change, which is what the loop counts consecutive
+    /// failures with.
+    metadata_written: bool,
+    /// The seq of the delta this tick recorded, if it recorded one — where the calls this tick
+    /// finds in the activity log are attributed.
+    delta_seq: Option<u64>,
+}
+
+impl Announced {
+    /// The metadata write failed, so nothing else in the tick ran: the change is held back and the
+    /// next tick takes the whole step from the top.
+    fn held_back() -> Self {
+        Self {
+            metadata_written: false,
+            delta_seq: None,
+        }
     }
 }
 

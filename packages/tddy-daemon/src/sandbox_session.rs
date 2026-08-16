@@ -210,6 +210,11 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         // tool_call_log handling in the ExecuteTool path).
         let call_id = uuid::Uuid::new_v4().to_string();
         let input = tddy_core::agent_activity::parse_activity_json(args_json);
+        // What this call is credited with, for scoping its delta — AC2 of
+        // `docs/ft/daemon/session-worktree-sync.md`. The same for both rows, because they describe
+        // one call: what it declared is in its input, and the outcome cannot add to it.
+        let declared_paths =
+            tddy_core::agent_activity::declared_paths(tool_name, &input, &self.worktree);
         let running = tddy_core::agent_activity::AgentActivityRecord {
             call_id: call_id.clone(),
             tool_name: tool_name.to_string(),
@@ -220,6 +225,14 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             started_unix_ms: crate::connection_service::now_unix_ms(),
             completed_unix_ms: 0,
             source: "sandbox".to_string(),
+            // AC1 of the same document. Read from the filesystem, not by spawning `git rev-parse`:
+            // this runs on every in-jail tool call. An unresolvable HEAD stamps an empty string
+            // rather than a fabricated sha.
+            head_commit: tddy_core::git_head::read_head_commit(&self.worktree),
+            // The covering tick is the session room's poll loop to attribute; `0` is the wire's
+            // "no tick has covered it yet".
+            activity_seq: 0,
+            changed_paths: declared_paths.clone(),
         };
         self.record_agent_activity(session_id, &running);
 
@@ -248,6 +261,12 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             started_unix_ms: running.started_unix_ms,
             completed_unix_ms: crate::connection_service::now_unix_ms(),
             source: "sandbox".to_string(),
+            // Read again rather than copied from the `running` row: the call that just finished may
+            // have been a `Bash` that committed, and this row is a record of where the checkout
+            // stood when *it* was written.
+            head_commit: tddy_core::git_head::read_head_commit(&self.worktree),
+            activity_seq: 0,
+            changed_paths: declared_paths,
         };
         self.record_agent_activity(session_id, &terminal);
 
@@ -263,6 +282,12 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
 
 impl DaemonToolHandler {
     /// Append an agent-activity row and publish it live; a persistence failure is non-fatal.
+    ///
+    // TODO(session-worktree-sync): also broadcast the row on the session room's `session.activity`
+    // topic, as `ReportAgentActivity` does — AC4/AC5 of `docs/ft/daemon/session-worktree-sync.md`.
+    // An in-jail MCP tool call reaches the durable log and the live hub but not the room, so a
+    // participant mirroring a sandboxed session sees its edits only on the next poll tick. Doing it
+    // needs `SessionRoomRegistry` threaded through `dial_and_bridge` into this handler.
     fn record_agent_activity(
         &self,
         session_id: &str,

@@ -38,6 +38,72 @@ pub struct WorktreeFileContent {
     pub byte_size: u64,
 }
 
+/// Read a listed worktree file as **raw bytes**, applying exactly the guards
+/// [`read_worktree_file_utf8`] applies and none of its encoding.
+///
+/// The two share [`validate_rel_path`] and the git-listing gate deliberately: they may differ in
+/// what they *return*, never in what they *allow*. What they do not share is the 1 MiB truncation —
+/// a caller reconstructing a file needs all of it or a refusal, and a silently shortened file is
+/// indistinguishable from a correctly synced one.
+///
+/// Product contract: `docs/ft/daemon/session-worktree-sync.md` AC15-AC20.
+pub fn read_worktree_file_bytes(
+    worktree_root: &Path,
+    rel_path: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, Status> {
+    log::debug!(
+        "read_worktree_file_bytes: worktree_root={:?} rel_path={:?} max_bytes={}",
+        worktree_root,
+        rel_path,
+        max_bytes
+    );
+    let canonical_file = resolve_listed_worktree_file(worktree_root, rel_path)?;
+
+    // Measured and refused *before* the read, not after: the point of this reader is to hand back a
+    // file a caller can reconstruct from, and a caller that asked for more than it can hold would
+    // otherwise pay for the whole read to be told so.
+    let byte_size = std::fs::metadata(&canonical_file)
+        .map_err(|e| {
+            log::error!(
+                "read_worktree_file_bytes: metadata {:?} failed: {}",
+                canonical_file,
+                e
+            );
+            Status::internal(format!("failed to size worktree file: {}", e))
+        })?
+        .len();
+    if byte_size > max_bytes {
+        log::warn!(
+            "read_worktree_file_bytes: refused {:?} at {} byte(s), over the {} byte cap",
+            rel_path,
+            byte_size,
+            max_bytes
+        );
+        return Err(Status::invalid_argument(format!(
+            "worktree file is {byte_size} bytes, over the {max_bytes} byte limit"
+        )));
+    }
+
+    // No truncation and no decoding: a shortened or re-encoded file is indistinguishable from a
+    // correct one once it has been written, and this reader exists for callers reconstructing a
+    // PNG, a UTF-16 document or a file holding one stray byte.
+    let bytes = std::fs::read(&canonical_file).map_err(|e| {
+        log::error!(
+            "read_worktree_file_bytes: read {:?} failed: {}",
+            canonical_file,
+            e
+        );
+        Status::internal(format!("failed to read worktree file: {}", e))
+    })?;
+    log::info!(
+        "read_worktree_file_bytes: read {} byte(s) from {:?}",
+        bytes.len(),
+        rel_path
+    );
+    Ok(bytes)
+}
+
 /// Lists the immediate children of `rel_path` under `worktree_root`, directories first then files
 /// (each group alphabetical). Excludes `.git` and any `.gitignore`'d path (via git's index +
 /// untracked-but-not-ignored view). `rel_path` is relative to the worktree root (empty = root);
@@ -110,42 +176,7 @@ pub fn read_worktree_file_utf8(
         worktree_root,
         rel_path
     );
-    validate_rel_path(worktree_root, rel_path)?;
-    let rel_slashed = rel_path.replace('\\', "/");
-
-    // Only files surfaced by the listing are readable, so `.git` and `.gitignore`'d files (which
-    // git never emits) are refused.
-    let files = git_listed_files(worktree_root)?;
-    if !files.iter().any(|f| f == &rel_slashed) {
-        log::warn!(
-            "read_worktree_file_utf8: rejected path not surfaced by listing: {:?}",
-            rel_path
-        );
-        return Err(Status::permission_denied(
-            "file is not a listed worktree file",
-        ));
-    }
-
-    let canonical_root = canonicalize_root(worktree_root)?;
-    let joined = worktree_root.join(&rel_slashed);
-    let canonical_file = joined.canonicalize().map_err(|e| {
-        log::debug!(
-            "read_worktree_file_utf8: canonicalize {:?} failed: {}",
-            joined,
-            e
-        );
-        Status::not_found("worktree file not found")
-    })?;
-    if !canonical_file.starts_with(&canonical_root) {
-        log::warn!(
-            "read_worktree_file_utf8: rejected path outside worktree: {:?} (root {:?})",
-            canonical_file,
-            canonical_root
-        );
-        return Err(Status::permission_denied(
-            "resolved path escapes worktree root",
-        ));
-    }
+    let canonical_file = resolve_listed_worktree_file(worktree_root, rel_path)?;
 
     let bytes = std::fs::read(&canonical_file).map_err(|e| {
         log::error!(
@@ -176,6 +207,80 @@ pub fn read_worktree_file_utf8(
         truncated,
         byte_size,
     })
+}
+
+/// The absolute path a readable worktree file resolves to, or why it may not be read.
+///
+/// Every reader goes through here, so the guards are stated once: the two readers may differ in
+/// what they *return*, never in what they *allow*.
+///
+/// - a traversing or absolute `rel_path` is `INVALID_ARGUMENT` ([`validate_rel_path`]);
+/// - a path git does not list is `PERMISSION_DENIED`, which is what keeps `.git` and every
+///   `.gitignore`'d file — a local `.env`, a credential a build wrote — unreadable;
+/// - a path that resolves outside the root is `PERMISSION_DENIED` even when git lists it, because
+///   a tracked symlink is a listed path whose *target* is somebody else's file;
+/// - a path the filesystem does not hold is `NOT_FOUND`.
+fn resolve_listed_worktree_file(worktree_root: &Path, rel_path: &str) -> Result<PathBuf, Status> {
+    validate_rel_path(worktree_root, rel_path)?;
+    let rel_slashed = rel_path.replace('\\', "/");
+
+    // The listing is asked FIRST, and the order is a security property rather than a preference.
+    //
+    // This gate exists to keep `.gitignore`'d paths — a local `.env`, a credential a build wrote,
+    // a private key — unreadable. Answering "does it exist?" before "may you see it?" would keep
+    // the *contents* secret while handing out the existence map: probe `.env` and read
+    // PERMISSION_DENIED when it is there and NOT_FOUND when it is not. So an unlisted path is
+    // refused identically whether or not anything is on disk at that name.
+    let files = git_listed_files(worktree_root)?;
+    if !files.iter().any(|f| f == &rel_slashed) {
+        log::warn!(
+            "resolve_listed_worktree_file: rejected path not surfaced by listing: {:?}",
+            rel_path
+        );
+        return Err(Status::permission_denied(
+            "file is not a listed worktree file",
+        ));
+    }
+
+    // Only now is absence worth reporting, and only for a path git *does* list — a tracked file
+    // deleted from the worktree but not yet staged. Saying NOT_FOUND here leaks nothing, because
+    // the caller has already been told the path is listed.
+    //
+    // `symlink_metadata`, so the question is only ever about a name inside the worktree — following
+    // a link here would let a tracked symlink turn this answer into a report on somebody else's
+    // file. A dangling link exists as a link and is refused further down, on resolution.
+    let joined = worktree_root.join(&rel_slashed);
+    if let Err(e) = std::fs::symlink_metadata(&joined) {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            log::debug!(
+                "resolve_listed_worktree_file: listed path {:?} is not on disk: {}",
+                rel_path,
+                e
+            );
+            return Err(Status::not_found("worktree file not found"));
+        }
+    }
+
+    let canonical_root = canonicalize_root(worktree_root)?;
+    let canonical_file = joined.canonicalize().map_err(|e| {
+        log::debug!(
+            "resolve_listed_worktree_file: canonicalize {:?} failed: {}",
+            joined,
+            e
+        );
+        Status::not_found("worktree file not found")
+    })?;
+    if !canonical_file.starts_with(&canonical_root) {
+        log::warn!(
+            "resolve_listed_worktree_file: rejected path outside worktree: {:?} (root {:?})",
+            canonical_file,
+            canonical_root
+        );
+        return Err(Status::permission_denied(
+            "resolved path escapes worktree root",
+        ));
+    }
+    Ok(canonical_file)
 }
 
 /// Size of a listed file as the filesystem reports it, following symlinks — a link's target is what
@@ -214,7 +319,12 @@ fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Sta
         );
         return Err(Status::invalid_argument("rel_path must be relative"));
     }
-    let rel = Path::new(rel_path);
+    // The traversal check reads the path with backslashes already taken as separators, the way
+    // every use of it below does. On Unix `..\secret.txt` is one legal filename rather than a
+    // traversal, so checking the raw form here and the slashed form afterwards is how a request
+    // gets refused for one reason while being looked up as something else entirely.
+    let rel_slashed = rel_path.replace('\\', "/");
+    let rel = Path::new(&rel_slashed);
     for comp in rel.components() {
         match comp {
             Component::ParentDir => {
@@ -236,8 +346,8 @@ fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Sta
     }
 
     let canonical_root = canonicalize_root(worktree_root)?;
-    if !rel_path.is_empty() {
-        let joined = worktree_root.join(rel_path);
+    if !rel_slashed.is_empty() {
+        let joined = worktree_root.join(&rel_slashed);
         if let Ok(canonical) = joined.canonicalize() {
             if !canonical.starts_with(&canonical_root) {
                 log::warn!(
@@ -252,7 +362,7 @@ fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Sta
         }
     }
 
-    Ok(rel_path.replace('\\', "/").trim_matches('/').to_string())
+    Ok(rel_slashed.trim_matches('/').to_string())
 }
 
 /// Returns the immediate-child remainder of `path` relative to `dir_prefix` (with forward-slash

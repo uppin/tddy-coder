@@ -74,6 +74,7 @@ use crate::session_deletion;
 use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 use crate::session_list_enrichment;
 use crate::session_reader;
+use crate::session_room::{ActivityDelta, DeltaLookupError, DeltaScope};
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
@@ -87,19 +88,20 @@ use crate::worktrees::{
     WorktreeSizeStatus, WorktreeStatsCache,
 };
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AgentActivityRecord as ProtoAgentActivityRecord, DemoVmState, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
-    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats,
-    HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, LiveKitRoomsEvent, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, StartDemoVmRequest,
-    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo,
+    AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
+    AgentActivityRecord as ProtoAgentActivityRecord, DeltaScope as ProtoDeltaScope, DemoVmState,
+    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest,
+    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
+    GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetTerminalHistoryRequest, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
+    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, LiveKitRoomsEvent,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -1971,6 +1973,13 @@ impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
             lines_added: answered.lines_added,
             lines_removed: answered.lines_removed,
             untracked_files: answered.untracked_files,
+            // FIXME(session-worktree-sync): a SPLIT session's snapshot arrives over
+            // GetWorktreeSnapshot, whose response carries no tree — so the facilitating daemon
+            // cannot diff a checkout it does not hold. Closing this means a `wip_tree` field on
+            // GetWorktreeSnapshotResponse and the codebase daemon writing it. Until then a split
+            // session syncs committed history only, and says so rather than mirroring silently
+            // stale content. See docs/dev/TODO.md.
+            wip_tree: String::new(),
         })
     }
 }
@@ -1995,6 +2004,51 @@ impl crate::session_room::SessionRoomHost for DaemonSessionRoomHost {
             )
             .await
     }
+}
+
+/// Open the session room of a session whose agent this daemon is about to spawn, and say which way
+/// it went.
+///
+/// Every spawn path that starts an agent against a checkout this daemon holds goes through here —
+/// claude-cli and cursor-cli, sandboxed or not. The room belongs to the daemon **running the
+/// agent** (`docs/ft/daemon/session-room.md` § Roles), and on all four of those paths that daemon
+/// is this one: it resolved the worktree, it holds the session directory, and it is about to fork
+/// the agent. A `workspace` session is the one session type deliberately left out — it has no
+/// agent, so no facilitating daemon and no room; see `crate::workspace_session`.
+///
+/// Before the agent exists, not after: the room's first-participant property is a consequence of
+/// this `await` completing while the only thing that could join is still unspawned (PRD FR2). A
+/// failure here fails the start — the agent's tool transport is minted for this room, so a session
+/// started without it is a session whose agent has nowhere to ask for its files. A daemon with no
+/// `livekit:` credentials at all is not a failure but a `None`: the room is an addition to a
+/// session, never a prerequisite for one, and such a daemon starts sessions exactly as it did
+/// before rooms existed.
+///
+/// Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
+/// session's *terminal* room, which the browser attaches to, and the two are different rooms with
+/// different participants. A caller that wants this one derives it from the session id through
+/// `session_room_name`, which is how the agent's own wiring gets it too.
+pub(crate) async fn open_session_room_before_spawning_agent(
+    room_host: &dyn crate::session_room::SessionRoomHost,
+    session_type: &str,
+    session_id: &str,
+    worktree_path: &Path,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    match room_host
+        .open_for(session_id, worktree_path, session_dir)
+        .await?
+    {
+        Some(room) => log::info!(
+            "{session_type} session {session_id} facilitated in {} as {}",
+            room.room,
+            room.server_identity
+        ),
+        None => log::debug!(
+            "{session_type} session {session_id} runs without a session room (LiveKit not configured)"
+        ),
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2245,28 +2299,14 @@ async fn spawn_claude_cli_session_inner(
         env_extra.push((key, value));
     }
 
-    // Before the agent exists, not after: this daemon is the session's facilitating daemon, and the
-    // room's first-participant property is a consequence of this `await` completing while the only
-    // thing that could join is still unspawned (PRD FR2). A failure here fails the start — the
-    // agent's tool transport is minted for this room, so a session started without it is a session
-    // whose agent has nowhere to ask for its files.
-    // Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
-    // session's *terminal* room, which the browser attaches to, and the two are different rooms
-    // with different participants. A caller that wants this one derives it from the session id
-    // through `session_room_name`, which is how the agent's own wiring gets it too.
-    match room_host
-        .open_for(session_id, &worktree_path, &session_dir)
-        .await?
-    {
-        Some(room) => log::info!(
-            "claude-cli session {session_id} facilitated in {} as {}",
-            room.room,
-            room.server_identity
-        ),
-        None => log::debug!(
-            "claude-cli session {session_id} runs without a session room (LiveKit not configured)"
-        ),
-    }
+    open_session_room_before_spawning_agent(
+        room_host,
+        "claude-cli",
+        session_id,
+        &worktree_path,
+        &session_dir,
+    )
+    .await?;
 
     let handle = manager
         .start_with_options(
@@ -3020,6 +3060,18 @@ impl ConnectionServiceImpl {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
+        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
+        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
+        // reach, not who hosts its room.
+        open_session_room_before_spawning_agent(
+            &self.session_room_host(),
+            "claude-cli",
+            session_id,
+            &worktree_path,
+            &session_dir,
+        )
+        .await?;
+
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
@@ -3430,6 +3482,18 @@ impl ConnectionServiceImpl {
         }
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
+
+        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
+        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
+        // reach, not who hosts its room.
+        open_session_room_before_spawning_agent(
+            &self.session_room_host(),
+            "cursor-cli",
+            session_id,
+            &worktree_path,
+            &session_dir,
+        )
+        .await?;
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -5929,6 +5993,7 @@ impl ConnectionServiceImpl {
                 req.semantic_index,
                 req.create_remote_branch,
                 &self.task_registry,
+                &self.session_room_host(),
             )
             .await;
         }
@@ -7383,6 +7448,140 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }))
     }
 
+    type StreamReadWorktreeFileStream = MpscResultStream<WorktreeFileChunk>;
+
+    /// The byte-exact streaming read — AC15-AC20 of `docs/ft/daemon/session-worktree-sync.md`.
+    ///
+    /// Same request message, same addressing and the same `resolve_listed_worktree` gate as the
+    /// unary `read_worktree_file`; what differs is what comes back. No UTF-8 decoding
+    /// exists on this path to fail, and the 1 MiB truncation the unary read applies is gone — the
+    /// bound is `max_attachment_bytes` and an over-cap file is **refused before the first frame**
+    /// rather than shortened, because a caller cannot tell a truncated file from a whole one once
+    /// the frames have started.
+    async fn stream_read_worktree_file(
+        &self,
+        request: Request<ReadWorktreeFileRequest>,
+    ) -> Result<Response<Self::StreamReadWorktreeFileStream>, Status> {
+        let req = request.into_inner();
+        let worktree_root =
+            self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
+
+        let rel_path = req.rel_path.clone();
+        let max_bytes = self.config.max_attachment_bytes;
+        let timeout = self.config.spawn_worker_request_timeout();
+        // The listing gate, the size refusal and the read are all filesystem and git work, so they
+        // run off the async runtime exactly as the unary read's do. Every one of them can fail the
+        // call outright, which is why they happen here rather than inside the stream: a refusal
+        // that arrived as a stream item would have to be told apart from a mid-stream read error.
+        let join = tokio::task::spawn_blocking(move || {
+            crate::worktree_files::read_worktree_file_bytes(&worktree_root, &rel_path, max_bytes)
+        });
+
+        let bytes = match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(bytes))) => bytes,
+            Ok(Ok(Err(status))) => return Err(status),
+            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => {
+                return Err(Status::deadline_exceeded(format!(
+                "StreamReadWorktreeFile: timed out after {}s (spawn_worker_request_timeout_secs)",
+                timeout.as_secs()
+            )))
+            }
+        };
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<WorktreeFileChunk, Status>>();
+        for frame in worktree_file_frames(&bytes) {
+            // The whole file is already in memory and the channel is unbounded, so this cannot
+            // block; a send only fails once the client has gone, and then there is nothing left to
+            // send it to.
+            if tx.send(Ok(frame)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    type StreamAgentActivityDeltaStream = MpscResultStream<AgentActivityDeltaChunk>;
+
+    /// The tick delta lookup — AC6-AC14 of `docs/ft/daemon/session-worktree-sync.md`.
+    ///
+    /// The delta lives in the session room's store, which is why this is answered from the room
+    /// registry rather than from disk: a patch is a measurement of a live checkout, and the daemon
+    /// hosting that room is the only one that took it.
+    ///
+    /// Authorization comes **first**, before the store is even looked up, for the reason AC14
+    /// gives: an unauthenticated caller must not be able to learn which sessions this daemon hosts
+    /// by reading apart a `NOT_FOUND` from a `PERMISSION_DENIED`.
+    async fn stream_agent_activity_delta(
+        &self,
+        request: Request<AgentActivityDeltaRequest>,
+    ) -> Result<Response<Self::StreamAgentActivityDeltaStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        self.resolve_os_user(&req.session_token)?;
+
+        let call_id = req.call_id.trim();
+        if call_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "call_id is required; there is no whole-worktree delta",
+            ));
+        }
+
+        // A room this daemon does not host has no measurement of that checkout and never will, so
+        // this is an absence rather than a failure — named, so a client can tell "wrong daemon"
+        // from "unknown call".
+        let store = self
+            .session_rooms
+            .delta_store(&req.session_id)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "no session room is hosted here for session {}, so it has no deltas",
+                    req.session_id
+                ))
+            })?;
+
+        let scope = match ProtoDeltaScope::try_from(req.scope).unwrap_or(ProtoDeltaScope::Call) {
+            ProtoDeltaScope::Call => DeltaScope::Call,
+            ProtoDeltaScope::Residual => DeltaScope::Residual,
+            ProtoDeltaScope::Tick => DeltaScope::Tick,
+        };
+
+        let delta = {
+            let store = store
+                .lock()
+                .map_err(|_| Status::internal("session delta store is poisoned"))?;
+            store.delta_for_call(call_id, scope)
+        };
+
+        // Both variants are NOT_FOUND and both carry a distinct message, because the client's
+        // response differs: an unknown call is a defect to report, an aged-out delta is an ordinary
+        // reconcile from the WIP ref. One shared message would make a long mirror's routine
+        // recovery indistinguishable from a bug on one side or the other.
+        let delta = match delta {
+            Ok(delta) => delta,
+            Err(DeltaLookupError::UnknownCall { call_id }) => {
+                return Err(Status::not_found(format!(
+                    "unknown call {call_id}: this daemon has no record of it in session {}",
+                    req.session_id
+                )))
+            }
+            Err(DeltaLookupError::AgedOut { call_id, seq }) => {
+                return Err(Status::not_found(format!(
+                    "delta for call {call_id} (tick {seq}) has aged out of this session's ring; reconcile from the WIP ref"
+                )))
+            }
+        };
+
+        let (tx, rx) =
+            tokio::sync::mpsc::unbounded_channel::<Result<AgentActivityDeltaChunk, Status>>();
+        for frame in activity_delta_frames(&delta) {
+            if tx.send(Ok(frame)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
     async fn list_worktrees_for_project(
         &self,
         request: Request<ListWorktreesForProjectRequest>,
@@ -8624,6 +8823,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Err(Status::permission_denied("invalid hook_token"));
         }
 
+        // AC1/AC2 of `docs/ft/daemon/session-worktree-sync.md`: the record names the commit it was
+        // made against and the paths it declared, so a consumer holding a patch can place it. The
+        // HEAD is read from the filesystem rather than by spawning `git rev-parse` — an agent makes
+        // a great many tool calls, and a subprocess on each would be paid on every one of them.
+        //
+        // A session with no checkout on this host stamps neither: `read_head_commit` returns an
+        // empty string when HEAD cannot be resolved, and a path has nothing to be relative to. That
+        // is the honest answer AC1 asks for, and the reason no sha is invented in its place.
+        let worktree_root = meta.repo_path.as_deref().map(PathBuf::from);
+        let head_commit = worktree_root
+            .as_deref()
+            .map(tddy_core::git_head::read_head_commit)
+            .unwrap_or_default();
+        let input = tddy_core::agent_activity::parse_activity_json(&req.input_json);
+        let changed_paths = worktree_root
+            .as_deref()
+            .map(|root| tddy_core::agent_activity::declared_paths(&req.tool_name, &input, root))
+            .unwrap_or_default();
+
         let record = match req.event.as_str() {
             "PreToolUse" => {
                 // A tool call started: mint a call_id, remember it so the paired PostToolUse can
@@ -8634,13 +8852,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
-                    input: tddy_core::agent_activity::parse_activity_json(&req.input_json),
+                    input,
                     status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
                     result: serde_json::Value::Null,
                     error_message: String::new(),
                     started_unix_ms: now_unix_ms(),
                     completed_unix_ms: 0,
                     source: "claude-cli".to_string(),
+                    head_commit,
+                    // The tick that covers this call has not been measured yet; the poll loop
+                    // attributes it when it runs. `0` is the wire's "no tick has covered it yet".
+                    activity_seq: 0,
+                    changed_paths,
                 }
             }
             "PostToolUse" => {
@@ -8658,13 +8881,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
-                    input: tddy_core::agent_activity::parse_activity_json(&req.input_json),
+                    input,
                     status: status.to_string(),
                     result: tddy_core::agent_activity::parse_activity_json(&req.result_json),
                     error_message: req.error_message,
                     started_unix_ms: 0,
                     completed_unix_ms: now_unix_ms(),
                     source: "claude-cli".to_string(),
+                    head_commit,
+                    // As on the `running` row: the covering tick is the poll loop's to attribute.
+                    activity_seq: 0,
+                    changed_paths,
                 }
             }
             other => {
@@ -8684,7 +8911,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             );
         }
         self.agent_activity_hub.publish(&req.session_id, record);
-
+        // The record is **not** broadcast into the session room from here, deliberately.
+        //
+        // A record announced at this point names a tick nothing has measured yet: its
+        // `activity_seq` is still `0` and the delta covering its files is produced by the next poll
+        // tick, so a participant that reacted to it and asked for the call's delta would be told
+        // `UnknownCall` — an announcement that arrives before the thing it announces.
+        //
+        // The poll loop is the single broadcaster instead, tailing `agent-activity.jsonl`, which is
+        // also what makes cursor-cli and tool sessions visible: their agents never call this RPC at
+        // all, and a room fed only from here would carry claude-cli activity and nothing else.
         Ok(Response::new(ReportAgentActivityResponse { ok: true }))
     }
 
@@ -10857,6 +11093,67 @@ fn stream_document_frames(
     }
 }
 
+/// Split a worktree file's bytes into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames, stamping
+/// `total_byte_size` on every one.
+///
+/// A zero-byte file still yields exactly **one** (empty) frame, so "the file is empty" stays
+/// distinguishable from "the stream produced nothing" — AC18. The size is repeated on every frame
+/// rather than sent as a header, as `HostDocumentChunk`'s is: a reader knows the total from the
+/// first frame with no header frame to special-case, and a one-frame file is not a different shape
+/// from a hundred-frame one.
+///
+/// The bytes are already in memory by the time this runs, because the reader that produced them is
+/// also the thing that applies the cap: over-cap is refused before any frame exists, so nothing
+/// here can be a partial file.
+pub fn worktree_file_frames(bytes: &[u8]) -> Vec<WorktreeFileChunk> {
+    let total_byte_size = bytes.len() as u64;
+    let mut frames: Vec<WorktreeFileChunk> = bytes
+        .chunks(HOST_DOCUMENT_FRAME_BYTES)
+        .map(|chunk| WorktreeFileChunk {
+            data: chunk.to_vec(),
+            total_byte_size,
+        })
+        .collect();
+    if frames.is_empty() {
+        frames.push(WorktreeFileChunk {
+            data: Vec::new(),
+            total_byte_size,
+        });
+    }
+    frames
+}
+
+/// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
+///
+/// Every frame carries the whole description — `seq`, `prev_seq`, `base_commit`,
+/// `total_byte_size` and `scoped_paths` — for the reason the wire contract gives: a reader knows
+/// what it is receiving from the first frame, and a client can check the server scoped the way it
+/// asked rather than trusting that it did.
+///
+/// A call that changed nothing is **one** frame with an empty patch and `total_byte_size` 0 — AC9.
+/// That is the same discipline [`worktree_file_frames`] applies, and for the same reason: an empty
+/// answer must not look like a failed one.
+pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChunk> {
+    let total_byte_size = delta.patch.len() as u64;
+    let describe = |patch: Vec<u8>| AgentActivityDeltaChunk {
+        patch,
+        seq: delta.seq,
+        prev_seq: delta.prev_seq,
+        base_commit: delta.base_commit.clone(),
+        total_byte_size,
+        scoped_paths: delta.scoped_paths.clone(),
+    };
+    let mut frames: Vec<AgentActivityDeltaChunk> = delta
+        .patch
+        .chunks(HOST_DOCUMENT_FRAME_BYTES)
+        .map(|chunk| describe(chunk.to_vec()))
+        .collect();
+    if frames.is_empty() {
+        frames.push(describe(Vec::new()));
+    }
+    frames
+}
+
 /// Resolve the daemon's default project directory — the filesystem the Host Stats Footer reports
 /// disk capacity for. Uses `$HOME` joined with the configured repos base subdirectory
 /// (`repos_base_path`, default `repos`); when `$HOME` is unset the bare subdirectory is used.
@@ -12086,6 +12383,9 @@ mod agent_activity_unit_tests {
             started_unix_ms: 1_700_000_000_000,
             completed_unix_ms: 1_700_000_000_500,
             source: "claude-cli".to_string(),
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         }
     }
 

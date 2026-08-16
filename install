@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install tddy-supervisor (and tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo) as a
+# Install tddy-supervisor (and tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo,
+# tddy-session-sync) as a
 # systemd service.
 #
 # tddy-supervisor is the only systemd unit and the only root process: it starts tddy-daemon as an
@@ -537,12 +538,13 @@ fi
 
 # tddy-supervisor is required only where it is installed: a --user install runs the daemon directly.
 #
-# tddy-remote-git-repo is a CLIENT, not a service: git execs it as GIT_SSH_COMMAND and it dials a
-# daemon over HTTP + LiveKit. It is installed in both modes anyway, because the alternative is a
-# binary whose own documentation tells the reader to put it on PATH and that no script ever puts
-# anywhere. It is one small binary, it reads no config this script writes, and the host's own
-# operator is the likeliest person to want a git remote against the projects living on it.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo)
+# tddy-remote-git-repo and tddy-session-sync are CLIENTS, not services: git execs the first as
+# GIT_SSH_COMMAND, and the second is run by hand to mirror a session's worktree. Both dial a daemon
+# over HTTP + LiveKit. They are installed in both modes anyway, because the alternative is a binary
+# whose own documentation tells the reader to put it on PATH and that no script ever puts anywhere.
+# They are small, they read no config this script writes, and the host's own operator is the
+# likeliest person to want a git remote — or a live mirror — against the projects living on it.
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi

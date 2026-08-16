@@ -545,6 +545,9 @@ mod tests {
             started_unix_ms: 2_000,
             completed_unix_ms: 3_000,
             source: "coder".to_string(),
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         }
     }
 
@@ -598,6 +601,9 @@ mod tests {
                 started_unix_ms: 1_000,
                 completed_unix_ms: 0,
                 source: "coder".to_string(),
+                head_commit: String::new(),
+                activity_seq: 0,
+                changed_paths: Vec::new(),
             }
         }
         let frames = vec![
@@ -652,6 +658,9 @@ mod tests {
             started_unix_ms: 4_000,
             completed_unix_ms: 5_000,
             source: "claude-cli".to_string(),
+            head_commit: String::new(),
+            activity_seq: 0,
+            changed_paths: Vec::new(),
         }
     }
 
