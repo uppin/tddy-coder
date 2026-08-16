@@ -1024,7 +1024,7 @@ impl Presenter {
                             log::warn!("grill ask answers: create_dir_all {}: {}", wf.display(), e);
                         } else {
                             let path = wf.join("grill_ask_answers.txt");
-                            if let Err(e) = std::fs::write(&path, &answers) {
+                            if let Err(e) = crate::atomic_file::write_atomic(&path, &answers) {
                                 log::warn!("grill ask answers: write {}: {}", path.display(), e);
                             } else {
                                 log::debug!(

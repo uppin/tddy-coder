@@ -568,12 +568,12 @@ pub fn read_changeset(session_dir: &Path) -> Result<Changeset, WorkflowError> {
 }
 
 /// Write changeset to plan directory.
+///
+/// Atomic, like [`write_changeset_atomic`] — both names now mean the same guarantee, because a
+/// half-written `changeset.yaml` is unreadable to every later goal in the session and there is no
+/// call site that wants the truncating variant.
 pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), WorkflowError> {
-    let path = session_dir.join("changeset.yaml");
-    let content =
-        serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    Ok(())
+    write_changeset_atomic(session_dir, changeset)
 }
 
 /// Ensures the session's changeset carries `recipe_name` — creates changeset.yaml with this
@@ -592,7 +592,8 @@ pub fn ensure_changeset_recipe(session_dir: &Path, recipe_name: &str) -> Result<
     write_changeset(session_dir, &cs)
 }
 
-/// Atomically replace `changeset.yaml` (write temp + rename) so readers never see a partial file.
+/// Atomically replace `changeset.yaml` (write swap file + rename) so readers never see a partial
+/// file, and a write that runs out of disk leaves the previous changeset standing.
 pub fn write_changeset_atomic(
     session_dir: &Path,
     changeset: &Changeset,
@@ -603,20 +604,9 @@ pub fn write_changeset_atomic(
         session_dir.display()
     );
     let path = session_dir.join("changeset.yaml");
-    let tmp = session_dir.join(".changeset.yaml.tmp");
     let content =
         serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    fs::write(&tmp, &content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    // Windows: rename cannot replace an existing target.
-    #[cfg(windows)]
-    {
-        let _ = fs::remove_file(&path);
-    }
-    fs::rename(&tmp, &path).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        WorkflowError::WriteFailed(e.to_string())
-    })?;
-    Ok(())
+    crate::atomic_file::write_atomic_labelled(&path, content).map_err(WorkflowError::WriteFailed)
 }
 
 /// Merges persisted workflow/demo fields from `changeset.yaml` into session [`Context`]

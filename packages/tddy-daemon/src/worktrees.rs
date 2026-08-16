@@ -238,7 +238,7 @@ fn write_worktree_stats_cache_file(path: &Path, snapshots: Vec<WorktreeStatSnaps
     let payload = WorktreeStatsCacheFile { snapshots };
     match serde_json::to_string_pretty(&payload) {
         Ok(json) => {
-            if let Err(e) = fs::write(path, json) {
+            if let Err(e) = tddy_core::atomic_file::write_atomic(path, json) {
                 warn!("write_worktree_stats_cache_file: write {:?}: {}", path, e);
             } else {
                 debug!("write_worktree_stats_cache_file: wrote {:?}", path);
@@ -694,7 +694,7 @@ fn persist_worktree_size(
     );
     match serde_json::to_string_pretty(&cache) {
         Ok(json) => {
-            if let Err(e) = fs::write(&file, json) {
+            if let Err(e) = tddy_core::atomic_file::write_atomic(&file, json) {
                 warn!("persist_worktree_size: write {:?}: {}", file, e);
             }
         }

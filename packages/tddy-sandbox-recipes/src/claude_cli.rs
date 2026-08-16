@@ -289,7 +289,7 @@ pub fn write_claude_mcp_config(
         server["env"] = serde_json::json!(mcp_env);
     }
     let config = serde_json::json!({ "mcpServers": { "tddy-tools": server } });
-    std::fs::write(&path, config.to_string())
+    tddy_core::atomic_file::write_atomic(&path, config.to_string())
         .with_context(|| format!("write MCP config: {}", path.display()))?;
     Ok(path)
 }

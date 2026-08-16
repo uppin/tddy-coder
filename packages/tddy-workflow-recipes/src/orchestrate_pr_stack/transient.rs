@@ -38,11 +38,8 @@ pub fn write_stack_op_journal(
         .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
     let content = serde_json::to_string_pretty(journal)
         .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
-    let tmp = dir.join(format!("{}.tmp", JOURNAL_FILENAME));
-    std::fs::write(&tmp, &content)
-        .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
-    std::fs::rename(&tmp, journal_path(parent_dir))
-        .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&journal_path(parent_dir), content)
+        .map_err(tddy_core::WorkflowError::WriteFailed)?;
     Ok(())
 }
 

@@ -71,7 +71,8 @@ fn slugify(s: &str, max_len: usize) -> String {
 /// Write the session ID to `.session` in the output directory.
 pub fn write_session_file(output_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
     let session_path = output_dir.join(".session");
-    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    crate::atomic_file::write_atomic_labelled(&session_path, session_id)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -84,7 +85,8 @@ pub fn read_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
 /// Write the implementation session ID to `.impl-session` in the plan directory.
 pub fn write_impl_session_file(session_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
     let session_path = session_dir.join(".impl-session");
-    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    crate::atomic_file::write_atomic_labelled(&session_path, session_id)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 

@@ -1,7 +1,6 @@
 //! Session action job execution: manifest validation, blocking invoke, async spawn, wait, stop.
 
 use std::fs::{self, File};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -134,15 +133,9 @@ fn read_job(job_dir: &Path) -> Result<Option<PersistedJob>, SessionActionJobsErr
 }
 
 fn write_job_atomic(job_dir: &Path, job: &PersistedJob) -> Result<(), SessionActionJobsError> {
-    fs::create_dir_all(job_dir)?;
-    let tmp = job_dir.join("job.json.tmp");
-    let final_path = job_record_path(job_dir);
     let payload = serde_json::to_string_pretty(job)
         .map_err(|e| SessionActionJobsError::JobState(e.to_string()))?;
-    let mut f = File::create(&tmp)?;
-    f.write_all(payload.as_bytes())?;
-    f.sync_all()?;
-    fs::rename(&tmp, &final_path)?;
+    crate::atomic_file::write_atomic(&job_record_path(job_dir), payload)?;
     debug!(
         target: "tddy_core::session_action_jobs",
         "write_job_atomic job_id={} phase={:?}",

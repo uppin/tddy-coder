@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub const ACTION_CACHE_FILENAME: &str = "action-cache.json";
@@ -290,30 +290,14 @@ fn load_or_default_action_cache_document(path: &Path) -> io::Result<ActionCacheD
 }
 
 fn flush_action_cache_document_atomic(path: &Path, doc: &ActionCacheDocument) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let tmp_name = format!("action-cache.json.part{}.tmp", uuid::Uuid::now_v7());
-    let tmp_path = path.with_file_name(&tmp_name);
-
     log::trace!(
         target: "tddy_core::workflow::action_cache",
-        "flush_action_cache tmp={:?} final={:?}",
-        tmp_path,
+        "flush_action_cache final={:?}",
         path,
     );
 
     let serialized = serde_json::to_vec_pretty(doc).map_err(|e| io::Error::other(e.to_string()))?;
-
-    {
-        let mut file = fs::File::create(&tmp_path)?;
-        file.write_all(&serialized)?;
-        file.sync_all()?;
-    }
-
-    fs::rename(&tmp_path, path)?;
-    Ok(())
+    crate::atomic_file::write_atomic(path, serialized)
 }
 
 /// Upsert (**merge**) a serialized cache entry keyed by **`storage_key`** without removing siblings.

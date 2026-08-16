@@ -687,13 +687,13 @@ fn after_validate(session_dir: &Path, output: &str) -> Result<(), Box<dyn Error 
     let parsed = parse_validate_subagents_response(output).map_err(WorkflowError::ParseError)?;
     let refactoring_plan_path = session_dir.join("refactoring-plan.md");
     if let Some(plan_md) = parsed.refactoring_plan {
-        std::fs::write(&refactoring_plan_path, plan_md).map_err(
+        tddy_core::atomic_file::write_atomic(&refactoring_plan_path, plan_md).map_err(
             |e| -> Box<dyn Error + Send + Sync> {
                 format!("write refactoring-plan.md: {}", e).into()
             },
         )?;
     } else if !refactoring_plan_path.exists() {
-        std::fs::write(
+        tddy_core::atomic_file::write_atomic(
             &refactoring_plan_path,
             "# Refactoring Plan\n## Tasks\n1. No-op refactoring task\n",
         )

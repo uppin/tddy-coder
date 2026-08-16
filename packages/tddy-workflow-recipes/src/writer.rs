@@ -68,7 +68,8 @@ fn slugify(s: &str, max_len: usize) -> String {
 /// Write the session ID to `.session` in the output directory.
 pub fn write_session_file(output_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
     let session_path = output_dir.join(".session");
-    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&session_path, session_id)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -82,7 +83,8 @@ pub fn read_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
 /// Used by the red goal so the green goal can resume the same session.
 pub fn write_impl_session_file(session_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
     let session_path = session_dir.join(".impl-session");
-    fs::write(&session_path, session_id).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&session_path, session_id)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -121,7 +123,8 @@ pub fn write_artifacts(
     );
     let prd_path = artifacts_root.join(prd_basename);
     let prd_content = inject_cross_references(&planning.prd, &artifacts_root, prd_basename);
-    fs::write(&prd_path, prd_content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&prd_path, prd_content)
+        .map_err(WorkflowError::WriteFailed)?;
 
     if let Some(exploration) = planning
         .exploration
@@ -149,7 +152,8 @@ pub fn write_exploration_file(
     fs::create_dir_all(artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     let path = artifacts_root.join(EXPLORATION_BASENAME);
     let content = inject_cross_references(exploration, artifacts_root, EXPLORATION_BASENAME);
-    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     log::info!(
         "[tddy-workflow-recipes] write_artifacts exploration at {:?}",
         path
@@ -182,7 +186,8 @@ pub fn write_demo_plan_file(session_dir: &Path, demo: &DemoPlan) -> Result<(), W
     out.push_str(&format!("## Verification\n\n{}\n", demo.verification));
     let content = inject_cross_references(&out, session_dir, "demo-plan.md");
     let path = session_dir.join("demo-plan.md");
-    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -197,7 +202,8 @@ pub fn write_demo_results_file(
         summary, steps_completed
     );
     let path = session_dir.join("demo-results.md");
-    fs::write(&path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -209,7 +215,8 @@ pub fn write_acceptance_tests_file(
     let md_path = session_dir.join("acceptance-tests.md");
     let content =
         inject_cross_references(&output.to_markdown(), session_dir, "acceptance-tests.md");
-    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -217,7 +224,8 @@ pub fn write_acceptance_tests_file(
 pub fn write_red_output_file(session_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("red-output.md");
     let content = inject_cross_references(&output.to_markdown(), session_dir, "red-output.md");
-    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -226,7 +234,8 @@ pub fn write_red_output_file(session_dir: &Path, output: &RedOutput) -> Result<(
 pub fn write_progress_file(session_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("progress.md");
     let content = output.to_progress_markdown();
-    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -235,7 +244,8 @@ pub fn write_progress_file(session_dir: &Path, output: &RedOutput) -> Result<(),
 pub fn update_progress_file(session_dir: &Path, output: &GreenOutput) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("progress.md");
     let content = output.to_updated_progress_markdown();
-    fs::write(&md_path, content).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -252,7 +262,8 @@ pub fn update_acceptance_tests_file(
     let content =
         fs::read_to_string(&md_path).map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
     let updated = output.update_acceptance_tests_content(&content);
-    fs::write(&md_path, updated).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&md_path, updated)
+        .map_err(WorkflowError::WriteFailed)?;
     Ok(())
 }
 
@@ -340,8 +351,8 @@ pub fn write_evaluation_report(
         session_dir.join("evaluation-report.md").display()
     );
 
-    fs::write(session_dir.join("evaluation-report.md"), md)
-        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    tddy_core::atomic_file::write_atomic_labelled(&session_dir.join("evaluation-report.md"), md)
+        .map_err(WorkflowError::WriteFailed)?;
 
     Ok(())
 }

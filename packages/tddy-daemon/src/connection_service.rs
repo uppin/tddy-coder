@@ -1762,7 +1762,9 @@ fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandParams
     if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {
         serde_json::to_string_pretty(&settings)
             .map_err(|e| std::io::Error::other(e.to_string()))
-            .and_then(|json| std::fs::write(claude_dir.join("settings.local.json"), json))
+            .and_then(|json| {
+                tddy_core::atomic_file::write_atomic(&claude_dir.join("settings.local.json"), json)
+            })
     }) {
         log::warn!(
             "session {}: failed to write .claude/settings.local.json — hooks will not fire: {e}",

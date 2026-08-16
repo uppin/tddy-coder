@@ -221,7 +221,7 @@ fn register_cursor_mcp_config(base_dir: &std::path::Path) -> Result<(), BackendE
             }
         }
     });
-    std::fs::write(cursor_dir.join("mcp.json"), config.to_string())
+    crate::atomic_file::write_atomic(&cursor_dir.join("mcp.json"), config.to_string())
         .map_err(|e| BackendError::InvocationFailed(format!("write .cursor/mcp.json: {e}")))?;
     Ok(())
 }
