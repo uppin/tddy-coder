@@ -36,4 +36,16 @@ export const appShellPage = {
   /** The Worktrees menu item. */
   worktreesItem: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.shellMenuWorktrees, { timeout: 5000, ...options }),
+
+  /** The Models & Agents menu item. */
+  modelsItem: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.shellMenuModels, { timeout: 5000, ...options }),
+
+  /** The Projects menu item. */
+  projectsItem: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.shellMenuProjects, { timeout: 5000, ...options }),
+
+  /** The visible labels of every menu item in the open menu, in DOM order. */
+  menuItemLabels: (): Cypress.Chainable<string[]> =>
+    appShellPage.menuItems().then(($items) => [...$items].map((el) => el.textContent!.trim())),
 };

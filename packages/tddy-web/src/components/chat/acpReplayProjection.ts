@@ -14,26 +14,13 @@
  */
 
 import {
-  ToolCallStatus,
   type AcpAgentMessage,
   type ContentChunk,
   type ToolCall,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { createAgentChunkMerger } from "./acpAgentMerge";
+import { toolStatusOf } from "./toolCallPresentation";
 import type { ChatMessage } from "./useAgentChat";
-
-/** Map an ACP `ToolCallStatus` onto the transcript's coarse status marker. Unspecified/pending/
- *  in-progress all read as "running"; a failed call reads "error"; a completed call "completed". */
-function toolStatusOf(status: ToolCallStatus): "running" | "completed" | "error" {
-  switch (status) {
-    case ToolCallStatus.COMPLETED:
-      return "completed";
-    case ToolCallStatus.FAILED:
-      return "error";
-    default:
-      return "running";
-  }
-}
 
 /**
  * The state one page-scoped projection carries from frame to frame. Every appender below reads and
@@ -154,8 +141,11 @@ export interface ReplayProjector {
  * each call returns the whole accumulated page, so a live frame extends the transcript rather than
  * replacing it.
  *
- * Frame handling mirrors the live ACP path, one appender per update case above.
- * `tool_call_update` / `plan` carry no additional bubble.
+ * Frame handling follows the live ACP path, one appender per update case above. `plan` carries no
+ * additional bubble. Neither does `tool_call_update` — unlike the live path, which folds it into the
+ * call's bubble: a *recorded* transcript already carries each call's terminal status on the
+ * `tool_call` frames the host re-emits, and its bodies are fetched by id
+ * (`ConnectionService.GetAcpToolCallDetail`) rather than read off the frame.
  */
 export function createReplayProjector(firstSeq: number): ReplayProjector {
   const ctx: ProjectionContext = {

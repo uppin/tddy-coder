@@ -35,6 +35,7 @@ pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
+pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
@@ -102,6 +103,10 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod actions {
         include!(concat!(env!("OUT_DIR"), "/actions.rs"));
+    }
+    #[allow(unused_imports, unused_variables)]
+    pub mod models {
+        include!(concat!(env!("OUT_DIR"), "/models.rs"));
     }
     #[allow(unused_imports, unused_variables)]
     pub mod vnc {

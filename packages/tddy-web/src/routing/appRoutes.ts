@@ -106,6 +106,13 @@ export function isProjectsPath(pathname: string): boolean {
   return pathname === PROJECTS_ROUTE;
 }
 
+/** Canonical path for the Models & Agents screen. */
+export const MODELS_ROUTE = "/models";
+
+export function isModelsPath(pathname: string): boolean {
+  return pathname === MODELS_ROUTE;
+}
+
 /** Path for the sessions drawer screen and its deep links. */
 export const SESSIONS_DRAWER_ROUTE = "/sessions";
 

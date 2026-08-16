@@ -264,6 +264,82 @@ its own failure message, none from that branch. New entries beyond the list abov
   loosening it would serve every session's `.env` over LiveKit. Mirroring an ignored file needs a
   deliberate, separately-authorized opt-in, not a wider read.
 
+### Models & Agents — open items at wrap (source: models-and-assistants changeset, 2026-08-16)
+
+- **A missing provider credential is not a distinct error.** `credential_for` returns
+  `Option<String>` and the client simply omits `Authorization`, so a provider that needs a key but
+  has none fails as a generic `Provider(...)` 401 carrying the provider's words rather than ours. Add
+  a `MissingCredential` variant (`packages/tddy-daemon/src/model_registry/error.rs:10-36`), refused
+  before the round trip, with its own web surface. This is the one PRD requirement that shipped
+  partial.
+- **No `UpdateProvider` RPC.** A provider's key or base URL can only be changed by deleting and
+  recreating it — and because `retired_provider_id` never reuses an id, the recreated row is a
+  different provider. Assistants must be rebuilt against it.
+- **Service registration is untested.** `packages/tddy-daemon/src/main.rs:622-653` — deleting either
+  `rpc_entries.push` leaves all 6750 tests green while the Models screen goes dead. Note also that
+  the LiveKit binding is conditional on all four of `livekit.url`/`api_key`/`api_secret`/`common_room`
+  being set, and both pushes sit inside the `if let Some(user_resolver)` block, so a daemon without a
+  user resolver registers neither.
+- **Ownership refusal is under-tested.** `LoadModel`, `UnloadModel` and the ACP chat path all resolve
+  the credential through the owner check, but only `DeleteProvider` and `RefreshProviderModels` are
+  pinned (`model_registry_service_acceptance.rs:668,705`).
+- **No service-level test for `UpdateAssistant` / `DeleteAssistant`** (store- and web-level only), no
+  `ListAgents` RPC test with a registry wired (only the `agent_list_mapping` mapper), and no
+  service-level `LoadModel`-on-cloud `FAILED_PRECONDITION` assertion (only `UnloadModel`).
+- **Per-daemon scoping has no Rust test.** It is structural — a per-daemon DB plus a
+  `daemon_instance_id` stamp, correctly with no query filter — but two daemons with two DBs are
+  exercised only web-side (`ModelsCrossHostAcceptance.cy.tsx:301`).
+- **`ProviderAcpAgent::initialize` / `authenticate` are dead in production** — the daemon hand-rolls
+  the same reply at `acp_service.rs:546-561`, so the two can diverge silently.
+- **`ModelRegistryStore::replace_models` is `pub` with no production caller** (`store.rs:365-374`);
+  `record_refresh` is the real path.
+- **`ModelSessionTarget.session_token` is unasserted.** The transport auth gate rewrites only
+  *top-level* `sessionToken` fields, so the nested one in a stream frame is never touched by it.
+  Production sets it (`ModelChatDialog.tsx:42-47`); nothing pins it.
+- **A token refresh mid-conversation restarts the chat stream.** `ModelChatDialog`'s memo has
+  `sessionToken` in its dependencies, so a refresh rebuilds the session and loses the transcript.
+- **Assistant tools run as the daemon uid.** Confinement is path-based — the ACP `cwd` is
+  canonicalised and must resolve inside the caller's own sessions base or their own `projects.yaml`
+  repo paths — but unlike every other `execute_tool` caller this runs in-process, not in a session
+  process or the sandbox under the caller's uid. Uid separation is the open half.
+- **OpenAI models offer no Chat.** `/v1/models` reports no capability information, so they carry no
+  `llm` label. Fireworks reports per-model flags and Ollama derives from `/api/show`; closing OpenAI
+  needs a different endpoint or an operator-set flag on the model row.
+
+### Models & Agents — adjacent findings (source: models-and-assistants changeset, 2026-08-16)
+
+- **`ClaudeAcpBackend::default()` hardcodes `bunx claude-agent-acp`.**
+  `packages/tddy-core/src/backend/acp.rs:360` spawns that command with no env var, no CLI flag and no
+  coder-config override — unlike `CodexAcpBackend` (`codex_acp.rs:472`), which resolves through
+  `TDDY_CODEX_ACP_CLI` → sibling of the `codex` binary → PATH, plus `--codex-acp-cli-path` and
+  `codex_acp_cli_path`. An operator with `claude-agent-acp` installed anywhere other than where `bunx`
+  finds it cannot use the backend at all. Give it the same resolution chain.
+- **`acp.rs` and `codex_acp.rs` are ~80% duplicated.** Identical `acp::Client` impls, identical
+  progress accumulators, identical `run_acp_worker` thread/`LocalSet` loops. `packages/tddy-acp`
+  exists as the extraction target and says so in its `lib.rs` doc comment, but currently holds only
+  `mapping.rs`. The models changeset adds a *third* ACP implementation there rather than unifying;
+  the unification is still owed.
+- **`ListAgentModels` has no peer forwarding.** `connection_service.rs:6247` — the
+  `daemon_instance_id` field participates only in the cache key, so the session-creation model
+  dropdown cannot enumerate a remote host's catalog even though `ListEligibleDaemons` +
+  `forward_to_peer` exist and would supply it.
+- **Two model catalogs will coexist.** `ListAgentModels` (per coding backend, via
+  `tddy-tools list-models`) and the new `ModelRegistryService` (per provider, from SQLite) answer
+  overlapping questions by different means. Unifying them — most likely by making the registry a
+  provider *behind* `ListAgentModels` — is deferred.
+- **Assistant definitions do not replicate between daemons.** Per-daemon SQLite was chosen so
+  credentials stay on the host that uses them, but it means an assistant created on the laptop is
+  invisible on the workstation. A common-room sync for the `assistant` table (not `provider`) is the
+  natural follow-up.
+- **Provider API keys are plaintext at rest.** `<tddy-data-dir>/models.db` (plus its `-wal`/`-shm`
+  siblings) is created `0600`, but its **parent is the shared `tddy-data-dir`, mode 0755** — not the
+  `0700` auth-storage directory `github_token_store.rs` uses. The data dir is deliberately readable
+  by session processes running as other uids (`projects/`, per-user session bases), so `0700` there
+  would break them; a `0600` file inside it is unreadable by those accounts, but the filename is
+  visible. Moving to `<tddy-data-dir>/model-registry/models.db` would hide that too. Encryption is
+  not used at all, so a host backup captures every key. The schema reserves a nullable
+  `credential_ref` column for an env-var-reference mode that this changeset does not build.
+
 ### Remote git repo over LiveKit — deliberate gaps (source: remote-git-repo-over-livekit changeset, 2026-08-15)
 
 - **No CLI login flow.** `tddy-remote-git-repo` takes a refresh token (`--refresh-token` /
@@ -1447,7 +1523,7 @@ enhancements beyond that changeset:
 ### tddy-sandbox-app (source: specialized-subagents changeset, 2026-07-02)
 
 - ~~`--specialized-agent` CLI flag + deprecated aliases~~ — done (2026-07-02, multi-agent tool-replacement changeset; overrides and the deprecated alias fully removed 2026-07-02 in a follow-up cleanup — see below). `tddy-sandbox-app` takes repeatable `--specialized-agent <name>` + `--agents-dir`, resolves them via `spawn::resolve_specialized_agents`, and threads the resolved array into the jail as `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` via `spawn::subagent_env_overlay`. There is no `--discovery-subagent` alias and no `--fastcontext-*`/`--subagent-replaces` override flags — all configuration comes exclusively from the resolved agent's YAML def. See `docs/ft/coder/managed-codebase-subagents.md` and `docs/ft/coder/specialized-subagents.md`.
-- **`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)** — `create_backend` recognizes any resolved specialized-agent name, but `packages/tddy-coder/src/run.rs`'s clap `value_parser` on `--agent` still hardcodes a fixed allowlist and rejects a custom name (e.g. `my-explorer`) before `create_backend` ever runs. Fixing it requires resolving `<tddyhome>/agents` before `--tddy-data-dir` itself is parsed from CLI args — an ordering problem — and has no dedicated test (only `create_backend` itself is tested directly, bypassing clap). See the `TODO` comment at the `Args.agent` field.
+- ~~**`--agent` CLI validation for custom specialized-agent names (`tddy-coder`)**~~ — **done** (models-and-assistants changeset, 2026-08-16). The clap `value_parser` allowlist on `--agent` is removed; validation moved into `create_backend`, whose former `_ => Claude` catch-all is now an error naming the known agents. A registry assistant or a `<tddyhome>/agents` def is accepted by name.
 
 ### tddy-core (source: stdio-transport-for-grpc-binaries changeset, 2026-07-01)
 

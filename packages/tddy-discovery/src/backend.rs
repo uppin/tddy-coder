@@ -27,6 +27,7 @@ use crate::tools::ToolExecutor;
 pub struct FastContextBackend {
     base_url: String,
     model: String,
+    api_key: Option<String>,
     max_turns: u32,
 }
 
@@ -35,8 +36,18 @@ impl FastContextBackend {
         Self {
             base_url: base_url.into(),
             model: model.into(),
+            api_key: None,
             max_turns,
         }
+    }
+
+    /// The bearer token every call to `base_url` carries. A local endpoint (Ollama, vLLM) needs
+    /// none — `None` sends no `Authorization` header at all — while a cloud provider answers 401
+    /// to every turn without one.
+    #[must_use]
+    pub fn api_key(mut self, api_key: Option<String>) -> Self {
+        self.api_key = api_key;
+        self
     }
 }
 
@@ -104,7 +115,7 @@ impl CodingBackend for FastContextBackend {
     }
 
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
-        let client = OpenAiClient::new(&self.base_url);
+        let client = OpenAiClient::new(&self.base_url).api_key(self.api_key.clone());
         let executor = ToolExecutor::from_invoke_request(&request);
 
         let mut messages: Vec<ChatMessage> = Vec::new();

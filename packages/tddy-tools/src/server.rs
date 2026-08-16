@@ -1678,6 +1678,9 @@ pub(crate) fn subagent_config_from_env() -> SubagentConfig {
             .unwrap_or_else(|| "http://localhost:30000".to_string()),
         model: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MODEL")
             .unwrap_or_else(|| "microsoft/FastContext-1.0-4B-RL".to_string()),
+        // Absent for the local endpoint this legacy path targets; set when that endpoint sits
+        // behind something that authenticates.
+        api_key: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_API_KEY"),
         max_turns: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS")
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(10),

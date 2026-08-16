@@ -8,16 +8,20 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// One bound tool a specialized subagent's internal tool loop may call. An extensible registry:
-/// the read-only codebase tools (`READ`/`GLOB`/`GREP`, the shipped defaults) plus the opt-in
-/// mutation tools (`WRITE`/`STR_REPLACE`/`DELETE`) a coder-role subagent binds explicitly. An
+/// One bound tool a specialized subagent's internal tool loop may call. The variants are exactly
+/// the exec catalog `tddy_tool_engine::tool_catalog()` dispatches, so a subagent declared in YAML
+/// and an assistant assembled in the Models & Agents screen speak one tool vocabulary. An
 /// unrecognized name in a YAML `tools:` list is a deserialization error (`serde`'s built-in
 /// unknown-variant rejection) — not a silently-dropped entry.
 ///
-/// The mutation tools only work over [`crate::subagent::CodebaseAccess::Managed`], where path
-/// confinement is enforced host-side by the tool engine; a `Local` subagent gets a typed error
-/// (local access has no confinement layer, so unrestricted host writes must not be grantable by
-/// a YAML field alone).
+/// The catalog names are spelled out in [`SubagentTool::catalog_name`] rather than read from
+/// `tddy-tool-engine`: this crate deliberately does not depend on it. `tddy-daemon` sees both and
+/// cross-checks the two lists (`model_registry_store_unit.rs`).
+///
+/// The mutating tools (`WRITE`/`STR_REPLACE`/`DELETE`/`SHELL`) only work over
+/// [`crate::subagent::CodebaseAccess::Managed`], where path confinement is enforced host-side by
+/// the tool engine; a `Local` subagent gets a typed error (local access has no confinement layer,
+/// so unrestricted host writes must not be grantable by a YAML field alone).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SubagentTool {
@@ -28,15 +32,60 @@ pub enum SubagentTool {
     #[serde(rename = "STR_REPLACE")]
     StrReplace,
     Delete,
+    Shell,
+    Await,
+    #[serde(rename = "READ_LINTS")]
+    ReadLints,
+    #[serde(rename = "SEMANTIC_SEARCH")]
+    SemanticSearch,
 }
 
 impl SubagentTool {
-    /// Whether this tool mutates the codebase (vs read-only discovery).
+    /// Whether this tool can change the worktree (vs read-only discovery). `SHELL` counts: a
+    /// command it runs is free to write, so it is gated exactly like the file-mutation tools.
     pub fn is_mutating(self) -> bool {
         matches!(
             self,
-            SubagentTool::Write | SubagentTool::StrReplace | SubagentTool::Delete
+            SubagentTool::Write
+                | SubagentTool::StrReplace
+                | SubagentTool::Delete
+                | SubagentTool::Shell
         )
+    }
+
+    /// This tool's exec-catalog spelling — the name `tddy_tool_engine::tool_catalog()` advertises
+    /// and `execute_tool` dispatches on (e.g. `"StrReplace"`, not the YAML `STR_REPLACE`).
+    pub fn catalog_name(self) -> &'static str {
+        match self {
+            SubagentTool::Read => "Read",
+            SubagentTool::Glob => "Glob",
+            SubagentTool::Grep => "Grep",
+            SubagentTool::Write => "Write",
+            SubagentTool::StrReplace => "StrReplace",
+            SubagentTool::Delete => "Delete",
+            SubagentTool::Shell => "Shell",
+            SubagentTool::Await => "Await",
+            SubagentTool::ReadLints => "ReadLints",
+            SubagentTool::SemanticSearch => "SemanticSearch",
+        }
+    }
+
+    /// Resolve an exec-catalog tool name to its variant. `None` for a name outside the catalog —
+    /// the caller decides how to refuse it; nothing is silently dropped here.
+    pub fn from_catalog_name(name: &str) -> Option<Self> {
+        match name {
+            "Read" => Some(SubagentTool::Read),
+            "Glob" => Some(SubagentTool::Glob),
+            "Grep" => Some(SubagentTool::Grep),
+            "Write" => Some(SubagentTool::Write),
+            "StrReplace" => Some(SubagentTool::StrReplace),
+            "Delete" => Some(SubagentTool::Delete),
+            "Shell" => Some(SubagentTool::Shell),
+            "Await" => Some(SubagentTool::Await),
+            "ReadLints" => Some(SubagentTool::ReadLints),
+            "SemanticSearch" => Some(SubagentTool::SemanticSearch),
+            _ => None,
+        }
     }
 }
 
@@ -53,7 +102,11 @@ fn default_max_turns() -> u32 {
 }
 
 /// A specialized subagent's full configuration, loaded from `<tddyhome>/agents/<name>.yaml`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// [`Debug`] is hand-written rather than derived so [`Self::api_key`] cannot reach a log line: a
+/// def is logged whole in several places, and a derived `Debug` would print the credential in
+/// every one of them.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpecializedAgentDef {
     /// Registry key. Conventionally matches the file stem, but the value inside the file is the
@@ -64,6 +117,14 @@ pub struct SpecializedAgentDef {
     pub model: String,
     #[serde(default = "default_base_url")]
     pub base_url: String,
+    /// Bearer token for the endpoint `base_url` names, for a provider that requires one. A local
+    /// endpoint (Ollama, vLLM) needs none, and `None` sends no `Authorization` header at all.
+    ///
+    /// `default` keeps every `<tddyhome>/agents/*.yaml` written before this field existed loadable
+    /// under `deny_unknown_fields`; `skip_serializing_if` keeps a def without a credential
+    /// serializing to exactly the shape that shipped before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     #[serde(default)]
     pub system_prompt: Option<String>,
     #[serde(default)]
@@ -81,6 +142,27 @@ pub struct SpecializedAgentDef {
     pub replaces: Vec<String>,
 }
 
+/// What a def's credential is shown as wherever a def is printed. The token itself is never
+/// rendered — only whether there is one, which is the part a reader is diagnosing.
+const REDACTED_API_KEY: &str = "<redacted>";
+
+impl std::fmt::Debug for SpecializedAgentDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpecializedAgentDef")
+            .field("name", &self.name)
+            .field("label", &self.label)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| REDACTED_API_KEY))
+            .field("system_prompt", &self.system_prompt)
+            .field("system_prompt_path", &self.system_prompt_path)
+            .field("tools", &self.tools)
+            .field("max_turns", &self.max_turns)
+            .field("replaces", &self.replaces)
+            .finish()
+    }
+}
+
 /// The always-available default: identical to today's shipped FastContext defaults
 /// (`packages/tddy-discovery/src/backend.rs`, `packages/tddy-coder/src/run.rs::create_backend`).
 /// Present even with an empty (or absent) `<tddyhome>/agents/` directory.
@@ -90,6 +172,7 @@ pub fn builtin_fastcontext_def() -> SpecializedAgentDef {
         label: None,
         model: "microsoft/FastContext-1.0-4B-RL".to_string(),
         base_url: default_base_url(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools: default_tools(),

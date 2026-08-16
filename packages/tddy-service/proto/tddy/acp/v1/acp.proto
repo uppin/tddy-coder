@@ -114,6 +114,26 @@ message SessionId {
 message NewSessionRequest {
   string cwd = 1;
   // mcp_servers etc. mirrored later.
+
+  // tddy extension. Absent on a session-hosted ACP stream, where the agent *is* that session's
+  // workflow and nothing has to be named. Required by the daemon-hosted surface, which serves every
+  // model and assistant in one registry from one service and therefore has to be told which.
+  optional ModelSessionTarget model_target = 2;
+}
+
+// tddy extension: which registry entry a daemon-hosted ACP session speaks as, and the session token
+// that authorizes reading that provider's stored credential.
+//
+// It rides `NewSessionRequest` rather than the envelope because the target is a property of the
+// session, not of the stream: `initialize` is answered before any target is known, and a stream may
+// outlive the session it opened.
+message ModelSessionTarget {
+  string session_token = 1;
+  // The provider and model to speak as. Ignored when `assistant_id` is set.
+  string provider_id = 2;
+  string model_id = 3;
+  // When set, the assistant supplies the provider, model, system prompt and tool set.
+  string assistant_id = 4;
 }
 
 message NewSessionResponse {

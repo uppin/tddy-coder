@@ -19,6 +19,7 @@ fn a_def(name: &str, replaces: &[&str]) -> SpecializedAgentDef {
         label: None,
         model: "some-model".to_string(),
         base_url: "http://localhost:30000".to_string(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools: vec![SubagentTool::Read],

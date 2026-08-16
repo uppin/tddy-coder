@@ -24,6 +24,7 @@ fn a_warmup_agent(name: &str, base_url: &str) -> SpecializedAgentDef {
         label: None,
         model: format!("{name}-model"),
         base_url: base_url.to_string(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools: vec![SubagentTool::Read],

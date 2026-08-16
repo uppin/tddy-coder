@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file tddy/acp/v1/acp.proto.
  */
 export const file_tddy_acp_v1_acp: GenFile = /*@__PURE__*/
-  fileDesc("ChV0ZGR5L2FjcC92MS9hY3AucHJvdG8SC3RkZHkuYWNwLnYxIqwDChBBY3BDbGllbnRNZXNzYWdlEgoKAmlkGAEgASgEEjQKCmluaXRpYWxpemUYAiABKAsyHi50ZGR5LmFjcC52MS5Jbml0aWFsaXplUmVxdWVzdEgAEjgKDGF1dGhlbnRpY2F0ZRgDIAEoCzIgLnRkZHkuYWNwLnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3RIABI1CgtuZXdfc2Vzc2lvbhgEIAEoCzIeLnRkZHkuYWNwLnYxLk5ld1Nlc3Npb25SZXF1ZXN0SAASNwoMbG9hZF9zZXNzaW9uGAUgASgLMh8udGRkeS5hY3AudjEuTG9hZFNlc3Npb25SZXF1ZXN0SAASLAoGcHJvbXB0GAYgASgLMhoudGRkeS5hY3AudjEuUHJvbXB0UmVxdWVzdEgAEjEKBmNhbmNlbBgHIAEoCzIfLnRkZHkuYWNwLnYxLkNhbmNlbE5vdGlmaWNhdGlvbkgAEkQKEnJlcXVlc3RfcGVybWlzc2lvbhgIIAEoCzImLnRkZHkuYWNwLnYxLlJlcXVlc3RQZXJtaXNzaW9uUmVzcG9uc2VIAEIFCgNtc2ci4AMKD0FjcEFnZW50TWVzc2FnZRIKCgJpZBgBIAEoBBI1Cgppbml0aWFsaXplGAIgASgLMh8udGRkeS5hY3AudjEuSW5pdGlhbGl6ZVJlc3BvbnNlSAASOQoMYXV0aGVudGljYXRlGAMgASgLMiEudGRkeS5hY3AudjEuQXV0aGVudGljYXRlUmVzcG9uc2VIABI2CgtuZXdfc2Vzc2lvbhgEIAEoCzIfLnRkZHkuYWNwLnYxLk5ld1Nlc3Npb25SZXNwb25zZUgAEjgKDGxvYWRfc2Vzc2lvbhgFIAEoCzIgLnRkZHkuYWNwLnYxLkxvYWRTZXNzaW9uUmVzcG9uc2VIABItCgZwcm9tcHQYBiABKAsyGy50ZGR5LmFjcC52MS5Qcm9tcHRSZXNwb25zZUgAEjoKDnNlc3Npb25fdXBkYXRlGAcgASgLMiAudGRkeS5hY3AudjEuU2Vzc2lvbk5vdGlmaWNhdGlvbkgAEkMKEnJlcXVlc3RfcGVybWlzc2lvbhgIIAEoCzIlLnRkZHkuYWNwLnYxLlJlcXVlc3RQZXJtaXNzaW9uUmVxdWVzdEgAEiYKBWVycm9yGAkgASgLMhUudGRkeS5hY3AudjEuQWNwRXJyb3JIAEIFCgNtc2ciRQoIQWNwRXJyb3ISDAoEY29kZRgBIAEoAxIPCgdtZXNzYWdlGAIgASgJEhEKBGRhdGEYAyABKAlIAIgBAUIHCgVfZGF0YSJNCg5JbXBsZW1lbnRhdGlvbhIMCgRuYW1lGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSEgoFdGl0bGUYAyABKAlIAIgBAUIICgZfdGl0bGUiKQoRQWdlbnRDYXBhYmlsaXRpZXMSFAoMbG9hZF9zZXNzaW9uGAEgASgIIhQKEkNsaWVudENhcGFiaWxpdGllcyLQAQoRSW5pdGlhbGl6ZVJlcXVlc3QSNgoQcHJvdG9jb2xfdmVyc2lvbhgBIAEoDjIcLnRkZHkuYWNwLnYxLlByb3RvY29sVmVyc2lvbhI1CgtjbGllbnRfaW5mbxgCIAEoCzIbLnRkZHkuYWNwLnYxLkltcGxlbWVudGF0aW9uSACIAQESPAoTY2xpZW50X2NhcGFiaWxpdGllcxgDIAEoCzIfLnRkZHkuYWNwLnYxLkNsaWVudENhcGFiaWxpdGllc0IOCgxfY2xpZW50X2luZm8izQEKEkluaXRpYWxpemVSZXNwb25zZRI2ChBwcm90b2NvbF92ZXJzaW9uGAEgASgOMhwudGRkeS5hY3AudjEuUHJvdG9jb2xWZXJzaW9uEjoKEmFnZW50X2NhcGFiaWxpdGllcxgCIAEoCzIeLnRkZHkuYWNwLnYxLkFnZW50Q2FwYWJpbGl0aWVzEjQKCmFnZW50X2luZm8YAyABKAsyGy50ZGR5LmFjcC52MS5JbXBsZW1lbnRhdGlvbkgAiAEBQg0KC19hZ2VudF9pbmZvIjsKE0F1dGhlbnRpY2F0ZVJlcXVlc3QSFgoJbWV0aG9kX2lkGAEgASgJSACIAQFCDAoKX21ldGhvZF9pZCIWChRBdXRoZW50aWNhdGVSZXNwb25zZSIaCglTZXNzaW9uSWQSDQoFdmFsdWUYASABKAkiIAoRTmV3U2Vzc2lvblJlcXVlc3QSCwoDY3dkGAEgASgJIoABChJOZXdTZXNzaW9uUmVzcG9uc2USKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIzCgZtb2RlbHMYAiABKAsyHi50ZGR5LmFjcC52MS5TZXNzaW9uTW9kZWxTdGF0ZUgAiAEBQgkKB19tb2RlbHMiTQoSTG9hZFNlc3Npb25SZXF1ZXN0EioKCnNlc3Npb25faWQYASABKAsyFi50ZGR5LmFjcC52MS5TZXNzaW9uSWQSCwoDY3dkGAIgASgJIlUKE0xvYWRTZXNzaW9uUmVzcG9uc2USMwoGbW9kZWxzGAEgASgLMh4udGRkeS5hY3AudjEuU2Vzc2lvbk1vZGVsU3RhdGVIAIgBAUIJCgdfbW9kZWxzIkAKEkNhbmNlbE5vdGlmaWNhdGlvbhIqCgpzZXNzaW9uX2lkGAEgASgLMhYudGRkeS5hY3AudjEuU2Vzc2lvbklkIisKCU1vZGVsSW5mbxIQCghtb2RlbF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJIl8KEVNlc3Npb25Nb2RlbFN0YXRlEjAKEGF2YWlsYWJsZV9tb2RlbHMYASADKAsyFi50ZGR5LmFjcC52MS5Nb2RlbEluZm8SGAoQY3VycmVudF9tb2RlbF9pZBgCIAEoCSJmCg1Qcm9tcHRSZXF1ZXN0EioKCnNlc3Npb25faWQYASABKAsyFi50ZGR5LmFjcC52MS5TZXNzaW9uSWQSKQoGcHJvbXB0GAIgAygLMhkudGRkeS5hY3AudjEuQ29udGVudEJsb2NrIj4KDlByb21wdFJlc3BvbnNlEiwKC3N0b3BfcmVhc29uGAEgASgOMhcudGRkeS5hY3AudjEuU3RvcFJlYXNvbiKAAgoMQ29udGVudEJsb2NrEigKBHRleHQYASABKAsyGC50ZGR5LmFjcC52MS5UZXh0Q29udGVudEgAEioKBWltYWdlGAIgASgLMhkudGRkeS5hY3AudjEuSW1hZ2VDb250ZW50SAASKgoFYXVkaW8YAyABKAsyGS50ZGR5LmFjcC52MS5BdWRpb0NvbnRlbnRIABIyCg1yZXNvdXJjZV9saW5rGAQgASgLMhkudGRkeS5hY3AudjEuUmVzb3VyY2VMaW5rSAASMQoIcmVzb3VyY2UYBSABKAsyHS50ZGR5LmFjcC52MS5FbWJlZGRlZFJlc291cmNlSABCBwoFYmxvY2siGwoLVGV4dENvbnRlbnQSDAoEdGV4dBgBIAEoCSJJCgxJbWFnZUNvbnRlbnQSDAoEZGF0YRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkSEAoDdXJpGAMgASgJSACIAQFCBgoEX3VyaSIvCgxBdWRpb0NvbnRlbnQSDAoEZGF0YRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkiswEKDFJlc291cmNlTGluaxILCgN1cmkYASABKAkSDAoEbmFtZRgCIAEoCRISCgV0aXRsZRgDIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAQgASgJSAGIAQESFgoJbWltZV90eXBlGAUgASgJSAKIAQESEQoEc2l6ZRgGIAEoA0gDiAEBQggKBl90aXRsZUIOCgxfZGVzY3JpcHRpb25CDAoKX21pbWVfdHlwZUIHCgVfc2l6ZSKEAQoQRW1iZWRkZWRSZXNvdXJjZRIxCgR0ZXh0GAEgASgLMiEudGRkeS5hY3AudjEuVGV4dFJlc291cmNlQ29udGVudHNIABIxCgRibG9iGAIgASgLMiEudGRkeS5hY3AudjEuQmxvYlJlc291cmNlQ29udGVudHNIAEIKCghyZXNvdXJjZSJXChRUZXh0UmVzb3VyY2VDb250ZW50cxILCgN1cmkYASABKAkSFgoJbWltZV90eXBlGAIgASgJSACIAQESDAoEdGV4dBgDIAEoCUIMCgpfbWltZV90eXBlIlcKFEJsb2JSZXNvdXJjZUNvbnRlbnRzEgsKA3VyaRgBIAEoCRIWCgltaW1lX3R5cGUYAiABKAlIAIgBARIMCgRibG9iGAMgASgJQgwKCl9taW1lX3R5cGUiOgoMQ29udGVudENodW5rEioKB2NvbnRlbnQYASABKAsyGS50ZGR5LmFjcC52MS5Db250ZW50QmxvY2siiAEKE1Nlc3Npb25Ob3RpZmljYXRpb24SKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIqCgZ1cGRhdGUYAiABKAsyGi50ZGR5LmFjcC52MS5TZXNzaW9uVXBkYXRlEhkKEXRpbWVzdGFtcF91bml4X21zGAMgASgDItgDCg1TZXNzaW9uVXBkYXRlEjcKEnVzZXJfbWVzc2FnZV9jaHVuaxgBIAEoCzIZLnRkZHkuYWNwLnYxLkNvbnRlbnRDaHVua0gAEjgKE2FnZW50X21lc3NhZ2VfY2h1bmsYAiABKAsyGS50ZGR5LmFjcC52MS5Db250ZW50Q2h1bmtIABI4ChNhZ2VudF90aG91Z2h0X2NodW5rGAMgASgLMhkudGRkeS5hY3AudjEuQ29udGVudENodW5rSAASKgoJdG9vbF9jYWxsGAQgASgLMhUudGRkeS5hY3AudjEuVG9vbENhbGxIABI3ChB0b29sX2NhbGxfdXBkYXRlGAUgASgLMhsudGRkeS5hY3AudjEuVG9vbENhbGxVcGRhdGVIABIhCgRwbGFuGAYgASgLMhEudGRkeS5hY3AudjEuUGxhbkgAEkkKGWF2YWlsYWJsZV9jb21tYW5kc191cGRhdGUYByABKAsyJC50ZGR5LmFjcC52MS5BdmFpbGFibGVDb21tYW5kc1VwZGF0ZUgAEj0KE2N1cnJlbnRfbW9kZV91cGRhdGUYCCABKAsyHi50ZGR5LmFjcC52MS5DdXJyZW50TW9kZVVwZGF0ZUgAQggKBnVwZGF0ZSIbCgpUb29sQ2FsbElkEg0KBXZhbHVlGAEgASgJIjwKEFRvb2xDYWxsTG9jYXRpb24SDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUimgIKCFRvb2xDYWxsEi0KDHRvb2xfY2FsbF9pZBgBIAEoCzIXLnRkZHkuYWNwLnYxLlRvb2xDYWxsSWQSDQoFdGl0bGUYAiABKAkSIwoEa2luZBgDIAEoDjIVLnRkZHkuYWNwLnYxLlRvb2xLaW5kEisKBnN0YXR1cxgEIAEoDjIbLnRkZHkuYWNwLnYxLlRvb2xDYWxsU3RhdHVzEjAKCWxvY2F0aW9ucxgFIAMoCzIdLnRkZHkuYWNwLnYxLlRvb2xDYWxsTG9jYXRpb24SFgoJcmF3X2lucHV0GAYgASgJSACIAQESFwoKcmF3X291dHB1dBgHIAEoCUgBiAEBQgwKCl9yYXdfaW5wdXRCDQoLX3Jhd19vdXRwdXQicgoOVG9vbENhbGxVcGRhdGUSLQoMdG9vbF9jYWxsX2lkGAEgASgLMhcudGRkeS5hY3AudjEuVG9vbENhbGxJZBIxCgZmaWVsZHMYAiABKAsyIS50ZGR5LmFjcC52MS5Ub29sQ2FsbFVwZGF0ZUZpZWxkcyKkAgoUVG9vbENhbGxVcGRhdGVGaWVsZHMSEgoFdGl0bGUYASABKAlIAIgBARIoCgRraW5kGAIgASgOMhUudGRkeS5hY3AudjEuVG9vbEtpbmRIAYgBARIwCgZzdGF0dXMYAyABKA4yGy50ZGR5LmFjcC52MS5Ub29sQ2FsbFN0YXR1c0gCiAEBEjAKCWxvY2F0aW9ucxgEIAMoCzIdLnRkZHkuYWNwLnYxLlRvb2xDYWxsTG9jYXRpb24SFgoJcmF3X2lucHV0GAUgASgJSAOIAQESFwoKcmF3X291dHB1dBgGIAEoCUgEiAEBQggKBl90aXRsZUIHCgVfa2luZEIJCgdfc3RhdHVzQgwKCl9yYXdfaW5wdXRCDQoLX3Jhd19vdXRwdXQifAoJUGxhbkVudHJ5Eg8KB2NvbnRlbnQYASABKAkSMAoIcHJpb3JpdHkYAiABKA4yHi50ZGR5LmFjcC52MS5QbGFuRW50cnlQcmlvcml0eRIsCgZzdGF0dXMYAyABKA4yHC50ZGR5LmFjcC52MS5QbGFuRW50cnlTdGF0dXMiLwoEUGxhbhInCgdlbnRyaWVzGAEgAygLMhYudGRkeS5hY3AudjEuUGxhbkVudHJ5IjUKEEF2YWlsYWJsZUNvbW1hbmQSDAoEbmFtZRgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCSJUChdBdmFpbGFibGVDb21tYW5kc1VwZGF0ZRI5ChJhdmFpbGFibGVfY29tbWFuZHMYASADKAsyHS50ZGR5LmFjcC52MS5BdmFpbGFibGVDb21tYW5kIiwKEUN1cnJlbnRNb2RlVXBkYXRlEhcKD2N1cnJlbnRfbW9kZV9pZBgBIAEoCSIjChJQZXJtaXNzaW9uT3B0aW9uSWQSDQoFdmFsdWUYASABKAkihQEKEFBlcm1pc3Npb25PcHRpb24SMgoJb3B0aW9uX2lkGAEgASgLMh8udGRkeS5hY3AudjEuUGVybWlzc2lvbk9wdGlvbklkEgwKBG5hbWUYAiABKAkSLwoEa2luZBgDIAEoDjIhLnRkZHkuYWNwLnYxLlBlcm1pc3Npb25PcHRpb25LaW5kIqYBChhSZXF1ZXN0UGVybWlzc2lvblJlcXVlc3QSKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIuCgl0b29sX2NhbGwYAiABKAsyGy50ZGR5LmFjcC52MS5Ub29sQ2FsbFVwZGF0ZRIuCgdvcHRpb25zGAMgAygLMh0udGRkeS5hY3AudjEuUGVybWlzc2lvbk9wdGlvbiJTChlSZXF1ZXN0UGVybWlzc2lvblJlc3BvbnNlEjYKB291dGNvbWUYASABKAsyJS50ZGR5LmFjcC52MS5SZXF1ZXN0UGVybWlzc2lvbk91dGNvbWUijgEKGFJlcXVlc3RQZXJtaXNzaW9uT3V0Y29tZRIrCgljYW5jZWxsZWQYASABKAsyFi50ZGR5LmFjcC52MS5DYW5jZWxsZWRIABI6CghzZWxlY3RlZBgCIAEoCzImLnRkZHkuYWNwLnYxLlNlbGVjdGVkUGVybWlzc2lvbk91dGNvbWVIAEIJCgdvdXRjb21lIgsKCUNhbmNlbGxlZCJPChlTZWxlY3RlZFBlcm1pc3Npb25PdXRjb21lEjIKCW9wdGlvbl9pZBgBIAEoCzIfLnRkZHkuYWNwLnYxLlBlcm1pc3Npb25PcHRpb25JZCpMCg9Qcm90b2NvbFZlcnNpb24SIAocUFJPVE9DT0xfVkVSU0lPTl9VTlNQRUNJRklFRBAAEhcKE1BST1RPQ09MX1ZFUlNJT05fVjEQASq2AQoKU3RvcFJlYXNvbhIbChdTVE9QX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFNUT1BfUkVBU09OX0VORF9UVVJOEAESGQoVU1RPUF9SRUFTT05fQ0FOQ0VMTEVEEAISGgoWU1RPUF9SRUFTT05fTUFYX1RPS0VOUxADEiEKHVNUT1BfUkVBU09OX01BWF9UVVJOX1JFUVVFU1RTEAQSFwoTU1RPUF9SRUFTT05fUkVGVVNBTBAFKq8BCg5Ub29sQ2FsbFN0YXR1cxIgChxUT09MX0NBTExfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHAoYVE9PTF9DQUxMX1NUQVRVU19QRU5ESU5HEAESIAocVE9PTF9DQUxMX1NUQVRVU19JTl9QUk9HUkVTUxACEh4KGlRPT0xfQ0FMTF9TVEFUVVNfQ09NUExFVEVEEAMSGwoXVE9PTF9DQUxMX1NUQVRVU19GQUlMRUQQBCrjAQoIVG9vbEtpbmQSGQoVVE9PTF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOVE9PTF9LSU5EX1JFQUQQARISCg5UT09MX0tJTkRfRURJVBACEhQKEFRPT0xfS0lORF9ERUxFVEUQAxISCg5UT09MX0tJTkRfTU9WRRAEEhQKEFRPT0xfS0lORF9TRUFSQ0gQBRIVChFUT09MX0tJTkRfRVhFQ1VURRAGEhMKD1RPT0xfS0lORF9USElOSxAHEhMKD1RPT0xfS0lORF9GRVRDSBAIEhMKD1RPT0xfS0lORF9PVEhFUhAJKpMBChFQbGFuRW50cnlQcmlvcml0eRIjCh9QTEFOX0VOVFJZX1BSSU9SSVRZX1VOU1BFQ0lGSUVEEAASHAoYUExBTl9FTlRSWV9QUklPUklUWV9ISUdIEAESHgoaUExBTl9FTlRSWV9QUklPUklUWV9NRURJVU0QAhIbChdQTEFOX0VOVFJZX1BSSU9SSVRZX0xPVxADKpcBCg9QbGFuRW50cnlTdGF0dXMSIQodUExBTl9FTlRSWV9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlQTEFOX0VOVFJZX1NUQVRVU19QRU5ESU5HEAESIQodUExBTl9FTlRSWV9TVEFUVVNfSU5fUFJPR1JFU1MQAhIfChtQTEFOX0VOVFJZX1NUQVRVU19DT01QTEVURUQQAyrgAQoUUGVybWlzc2lvbk9wdGlvbktpbmQSJgoiUEVSTUlTU0lPTl9PUFRJT05fS0lORF9VTlNQRUNJRklFRBAAEiUKIVBFUk1JU1NJT05fT1BUSU9OX0tJTkRfQUxMT1dfT05DRRABEicKI1BFUk1JU1NJT05fT1BUSU9OX0tJTkRfQUxMT1dfQUxXQVlTEAISJgoiUEVSTUlTU0lPTl9PUFRJT05fS0lORF9SRUpFQ1RfT05DRRADEigKJFBFUk1JU1NJT05fT1BUSU9OX0tJTkRfUkVKRUNUX0FMV0FZUxAEMlgKCkFjcFNlcnZpY2USSgoHU2Vzc2lvbhIdLnRkZHkuYWNwLnYxLkFjcENsaWVudE1lc3NhZ2UaHC50ZGR5LmFjcC52MS5BY3BBZ2VudE1lc3NhZ2UoATABYgZwcm90bzM");
+  fileDesc("ChV0ZGR5L2FjcC92MS9hY3AucHJvdG8SC3RkZHkuYWNwLnYxIqwDChBBY3BDbGllbnRNZXNzYWdlEgoKAmlkGAEgASgEEjQKCmluaXRpYWxpemUYAiABKAsyHi50ZGR5LmFjcC52MS5Jbml0aWFsaXplUmVxdWVzdEgAEjgKDGF1dGhlbnRpY2F0ZRgDIAEoCzIgLnRkZHkuYWNwLnYxLkF1dGhlbnRpY2F0ZVJlcXVlc3RIABI1CgtuZXdfc2Vzc2lvbhgEIAEoCzIeLnRkZHkuYWNwLnYxLk5ld1Nlc3Npb25SZXF1ZXN0SAASNwoMbG9hZF9zZXNzaW9uGAUgASgLMh8udGRkeS5hY3AudjEuTG9hZFNlc3Npb25SZXF1ZXN0SAASLAoGcHJvbXB0GAYgASgLMhoudGRkeS5hY3AudjEuUHJvbXB0UmVxdWVzdEgAEjEKBmNhbmNlbBgHIAEoCzIfLnRkZHkuYWNwLnYxLkNhbmNlbE5vdGlmaWNhdGlvbkgAEkQKEnJlcXVlc3RfcGVybWlzc2lvbhgIIAEoCzImLnRkZHkuYWNwLnYxLlJlcXVlc3RQZXJtaXNzaW9uUmVzcG9uc2VIAEIFCgNtc2ci4AMKD0FjcEFnZW50TWVzc2FnZRIKCgJpZBgBIAEoBBI1Cgppbml0aWFsaXplGAIgASgLMh8udGRkeS5hY3AudjEuSW5pdGlhbGl6ZVJlc3BvbnNlSAASOQoMYXV0aGVudGljYXRlGAMgASgLMiEudGRkeS5hY3AudjEuQXV0aGVudGljYXRlUmVzcG9uc2VIABI2CgtuZXdfc2Vzc2lvbhgEIAEoCzIfLnRkZHkuYWNwLnYxLk5ld1Nlc3Npb25SZXNwb25zZUgAEjgKDGxvYWRfc2Vzc2lvbhgFIAEoCzIgLnRkZHkuYWNwLnYxLkxvYWRTZXNzaW9uUmVzcG9uc2VIABItCgZwcm9tcHQYBiABKAsyGy50ZGR5LmFjcC52MS5Qcm9tcHRSZXNwb25zZUgAEjoKDnNlc3Npb25fdXBkYXRlGAcgASgLMiAudGRkeS5hY3AudjEuU2Vzc2lvbk5vdGlmaWNhdGlvbkgAEkMKEnJlcXVlc3RfcGVybWlzc2lvbhgIIAEoCzIlLnRkZHkuYWNwLnYxLlJlcXVlc3RQZXJtaXNzaW9uUmVxdWVzdEgAEiYKBWVycm9yGAkgASgLMhUudGRkeS5hY3AudjEuQWNwRXJyb3JIAEIFCgNtc2ciRQoIQWNwRXJyb3ISDAoEY29kZRgBIAEoAxIPCgdtZXNzYWdlGAIgASgJEhEKBGRhdGEYAyABKAlIAIgBAUIHCgVfZGF0YSJNCg5JbXBsZW1lbnRhdGlvbhIMCgRuYW1lGAEgASgJEg8KB3ZlcnNpb24YAiABKAkSEgoFdGl0bGUYAyABKAlIAIgBAUIICgZfdGl0bGUiKQoRQWdlbnRDYXBhYmlsaXRpZXMSFAoMbG9hZF9zZXNzaW9uGAEgASgIIhQKEkNsaWVudENhcGFiaWxpdGllcyLQAQoRSW5pdGlhbGl6ZVJlcXVlc3QSNgoQcHJvdG9jb2xfdmVyc2lvbhgBIAEoDjIcLnRkZHkuYWNwLnYxLlByb3RvY29sVmVyc2lvbhI1CgtjbGllbnRfaW5mbxgCIAEoCzIbLnRkZHkuYWNwLnYxLkltcGxlbWVudGF0aW9uSACIAQESPAoTY2xpZW50X2NhcGFiaWxpdGllcxgDIAEoCzIfLnRkZHkuYWNwLnYxLkNsaWVudENhcGFiaWxpdGllc0IOCgxfY2xpZW50X2luZm8izQEKEkluaXRpYWxpemVSZXNwb25zZRI2ChBwcm90b2NvbF92ZXJzaW9uGAEgASgOMhwudGRkeS5hY3AudjEuUHJvdG9jb2xWZXJzaW9uEjoKEmFnZW50X2NhcGFiaWxpdGllcxgCIAEoCzIeLnRkZHkuYWNwLnYxLkFnZW50Q2FwYWJpbGl0aWVzEjQKCmFnZW50X2luZm8YAyABKAsyGy50ZGR5LmFjcC52MS5JbXBsZW1lbnRhdGlvbkgAiAEBQg0KC19hZ2VudF9pbmZvIjsKE0F1dGhlbnRpY2F0ZVJlcXVlc3QSFgoJbWV0aG9kX2lkGAEgASgJSACIAQFCDAoKX21ldGhvZF9pZCIWChRBdXRoZW50aWNhdGVSZXNwb25zZSIaCglTZXNzaW9uSWQSDQoFdmFsdWUYASABKAkibQoRTmV3U2Vzc2lvblJlcXVlc3QSCwoDY3dkGAEgASgJEjoKDG1vZGVsX3RhcmdldBgCIAEoCzIfLnRkZHkuYWNwLnYxLk1vZGVsU2Vzc2lvblRhcmdldEgAiAEBQg8KDV9tb2RlbF90YXJnZXQiaAoSTW9kZWxTZXNzaW9uVGFyZ2V0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSEAoIbW9kZWxfaWQYAyABKAkSFAoMYXNzaXN0YW50X2lkGAQgASgJIoABChJOZXdTZXNzaW9uUmVzcG9uc2USKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIzCgZtb2RlbHMYAiABKAsyHi50ZGR5LmFjcC52MS5TZXNzaW9uTW9kZWxTdGF0ZUgAiAEBQgkKB19tb2RlbHMiTQoSTG9hZFNlc3Npb25SZXF1ZXN0EioKCnNlc3Npb25faWQYASABKAsyFi50ZGR5LmFjcC52MS5TZXNzaW9uSWQSCwoDY3dkGAIgASgJIlUKE0xvYWRTZXNzaW9uUmVzcG9uc2USMwoGbW9kZWxzGAEgASgLMh4udGRkeS5hY3AudjEuU2Vzc2lvbk1vZGVsU3RhdGVIAIgBAUIJCgdfbW9kZWxzIkAKEkNhbmNlbE5vdGlmaWNhdGlvbhIqCgpzZXNzaW9uX2lkGAEgASgLMhYudGRkeS5hY3AudjEuU2Vzc2lvbklkIisKCU1vZGVsSW5mbxIQCghtb2RlbF9pZBgBIAEoCRIMCgRuYW1lGAIgASgJIl8KEVNlc3Npb25Nb2RlbFN0YXRlEjAKEGF2YWlsYWJsZV9tb2RlbHMYASADKAsyFi50ZGR5LmFjcC52MS5Nb2RlbEluZm8SGAoQY3VycmVudF9tb2RlbF9pZBgCIAEoCSJmCg1Qcm9tcHRSZXF1ZXN0EioKCnNlc3Npb25faWQYASABKAsyFi50ZGR5LmFjcC52MS5TZXNzaW9uSWQSKQoGcHJvbXB0GAIgAygLMhkudGRkeS5hY3AudjEuQ29udGVudEJsb2NrIj4KDlByb21wdFJlc3BvbnNlEiwKC3N0b3BfcmVhc29uGAEgASgOMhcudGRkeS5hY3AudjEuU3RvcFJlYXNvbiKAAgoMQ29udGVudEJsb2NrEigKBHRleHQYASABKAsyGC50ZGR5LmFjcC52MS5UZXh0Q29udGVudEgAEioKBWltYWdlGAIgASgLMhkudGRkeS5hY3AudjEuSW1hZ2VDb250ZW50SAASKgoFYXVkaW8YAyABKAsyGS50ZGR5LmFjcC52MS5BdWRpb0NvbnRlbnRIABIyCg1yZXNvdXJjZV9saW5rGAQgASgLMhkudGRkeS5hY3AudjEuUmVzb3VyY2VMaW5rSAASMQoIcmVzb3VyY2UYBSABKAsyHS50ZGR5LmFjcC52MS5FbWJlZGRlZFJlc291cmNlSABCBwoFYmxvY2siGwoLVGV4dENvbnRlbnQSDAoEdGV4dBgBIAEoCSJJCgxJbWFnZUNvbnRlbnQSDAoEZGF0YRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkSEAoDdXJpGAMgASgJSACIAQFCBgoEX3VyaSIvCgxBdWRpb0NvbnRlbnQSDAoEZGF0YRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkiswEKDFJlc291cmNlTGluaxILCgN1cmkYASABKAkSDAoEbmFtZRgCIAEoCRISCgV0aXRsZRgDIAEoCUgAiAEBEhgKC2Rlc2NyaXB0aW9uGAQgASgJSAGIAQESFgoJbWltZV90eXBlGAUgASgJSAKIAQESEQoEc2l6ZRgGIAEoA0gDiAEBQggKBl90aXRsZUIOCgxfZGVzY3JpcHRpb25CDAoKX21pbWVfdHlwZUIHCgVfc2l6ZSKEAQoQRW1iZWRkZWRSZXNvdXJjZRIxCgR0ZXh0GAEgASgLMiEudGRkeS5hY3AudjEuVGV4dFJlc291cmNlQ29udGVudHNIABIxCgRibG9iGAIgASgLMiEudGRkeS5hY3AudjEuQmxvYlJlc291cmNlQ29udGVudHNIAEIKCghyZXNvdXJjZSJXChRUZXh0UmVzb3VyY2VDb250ZW50cxILCgN1cmkYASABKAkSFgoJbWltZV90eXBlGAIgASgJSACIAQESDAoEdGV4dBgDIAEoCUIMCgpfbWltZV90eXBlIlcKFEJsb2JSZXNvdXJjZUNvbnRlbnRzEgsKA3VyaRgBIAEoCRIWCgltaW1lX3R5cGUYAiABKAlIAIgBARIMCgRibG9iGAMgASgJQgwKCl9taW1lX3R5cGUiOgoMQ29udGVudENodW5rEioKB2NvbnRlbnQYASABKAsyGS50ZGR5LmFjcC52MS5Db250ZW50QmxvY2siiAEKE1Nlc3Npb25Ob3RpZmljYXRpb24SKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIqCgZ1cGRhdGUYAiABKAsyGi50ZGR5LmFjcC52MS5TZXNzaW9uVXBkYXRlEhkKEXRpbWVzdGFtcF91bml4X21zGAMgASgDItgDCg1TZXNzaW9uVXBkYXRlEjcKEnVzZXJfbWVzc2FnZV9jaHVuaxgBIAEoCzIZLnRkZHkuYWNwLnYxLkNvbnRlbnRDaHVua0gAEjgKE2FnZW50X21lc3NhZ2VfY2h1bmsYAiABKAsyGS50ZGR5LmFjcC52MS5Db250ZW50Q2h1bmtIABI4ChNhZ2VudF90aG91Z2h0X2NodW5rGAMgASgLMhkudGRkeS5hY3AudjEuQ29udGVudENodW5rSAASKgoJdG9vbF9jYWxsGAQgASgLMhUudGRkeS5hY3AudjEuVG9vbENhbGxIABI3ChB0b29sX2NhbGxfdXBkYXRlGAUgASgLMhsudGRkeS5hY3AudjEuVG9vbENhbGxVcGRhdGVIABIhCgRwbGFuGAYgASgLMhEudGRkeS5hY3AudjEuUGxhbkgAEkkKGWF2YWlsYWJsZV9jb21tYW5kc191cGRhdGUYByABKAsyJC50ZGR5LmFjcC52MS5BdmFpbGFibGVDb21tYW5kc1VwZGF0ZUgAEj0KE2N1cnJlbnRfbW9kZV91cGRhdGUYCCABKAsyHi50ZGR5LmFjcC52MS5DdXJyZW50TW9kZVVwZGF0ZUgAQggKBnVwZGF0ZSIbCgpUb29sQ2FsbElkEg0KBXZhbHVlGAEgASgJIjwKEFRvb2xDYWxsTG9jYXRpb24SDAoEcGF0aBgBIAEoCRIRCgRsaW5lGAIgASgNSACIAQFCBwoFX2xpbmUimgIKCFRvb2xDYWxsEi0KDHRvb2xfY2FsbF9pZBgBIAEoCzIXLnRkZHkuYWNwLnYxLlRvb2xDYWxsSWQSDQoFdGl0bGUYAiABKAkSIwoEa2luZBgDIAEoDjIVLnRkZHkuYWNwLnYxLlRvb2xLaW5kEisKBnN0YXR1cxgEIAEoDjIbLnRkZHkuYWNwLnYxLlRvb2xDYWxsU3RhdHVzEjAKCWxvY2F0aW9ucxgFIAMoCzIdLnRkZHkuYWNwLnYxLlRvb2xDYWxsTG9jYXRpb24SFgoJcmF3X2lucHV0GAYgASgJSACIAQESFwoKcmF3X291dHB1dBgHIAEoCUgBiAEBQgwKCl9yYXdfaW5wdXRCDQoLX3Jhd19vdXRwdXQicgoOVG9vbENhbGxVcGRhdGUSLQoMdG9vbF9jYWxsX2lkGAEgASgLMhcudGRkeS5hY3AudjEuVG9vbENhbGxJZBIxCgZmaWVsZHMYAiABKAsyIS50ZGR5LmFjcC52MS5Ub29sQ2FsbFVwZGF0ZUZpZWxkcyKkAgoUVG9vbENhbGxVcGRhdGVGaWVsZHMSEgoFdGl0bGUYASABKAlIAIgBARIoCgRraW5kGAIgASgOMhUudGRkeS5hY3AudjEuVG9vbEtpbmRIAYgBARIwCgZzdGF0dXMYAyABKA4yGy50ZGR5LmFjcC52MS5Ub29sQ2FsbFN0YXR1c0gCiAEBEjAKCWxvY2F0aW9ucxgEIAMoCzIdLnRkZHkuYWNwLnYxLlRvb2xDYWxsTG9jYXRpb24SFgoJcmF3X2lucHV0GAUgASgJSAOIAQESFwoKcmF3X291dHB1dBgGIAEoCUgEiAEBQggKBl90aXRsZUIHCgVfa2luZEIJCgdfc3RhdHVzQgwKCl9yYXdfaW5wdXRCDQoLX3Jhd19vdXRwdXQifAoJUGxhbkVudHJ5Eg8KB2NvbnRlbnQYASABKAkSMAoIcHJpb3JpdHkYAiABKA4yHi50ZGR5LmFjcC52MS5QbGFuRW50cnlQcmlvcml0eRIsCgZzdGF0dXMYAyABKA4yHC50ZGR5LmFjcC52MS5QbGFuRW50cnlTdGF0dXMiLwoEUGxhbhInCgdlbnRyaWVzGAEgAygLMhYudGRkeS5hY3AudjEuUGxhbkVudHJ5IjUKEEF2YWlsYWJsZUNvbW1hbmQSDAoEbmFtZRgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCSJUChdBdmFpbGFibGVDb21tYW5kc1VwZGF0ZRI5ChJhdmFpbGFibGVfY29tbWFuZHMYASADKAsyHS50ZGR5LmFjcC52MS5BdmFpbGFibGVDb21tYW5kIiwKEUN1cnJlbnRNb2RlVXBkYXRlEhcKD2N1cnJlbnRfbW9kZV9pZBgBIAEoCSIjChJQZXJtaXNzaW9uT3B0aW9uSWQSDQoFdmFsdWUYASABKAkihQEKEFBlcm1pc3Npb25PcHRpb24SMgoJb3B0aW9uX2lkGAEgASgLMh8udGRkeS5hY3AudjEuUGVybWlzc2lvbk9wdGlvbklkEgwKBG5hbWUYAiABKAkSLwoEa2luZBgDIAEoDjIhLnRkZHkuYWNwLnYxLlBlcm1pc3Npb25PcHRpb25LaW5kIqYBChhSZXF1ZXN0UGVybWlzc2lvblJlcXVlc3QSKgoKc2Vzc2lvbl9pZBgBIAEoCzIWLnRkZHkuYWNwLnYxLlNlc3Npb25JZBIuCgl0b29sX2NhbGwYAiABKAsyGy50ZGR5LmFjcC52MS5Ub29sQ2FsbFVwZGF0ZRIuCgdvcHRpb25zGAMgAygLMh0udGRkeS5hY3AudjEuUGVybWlzc2lvbk9wdGlvbiJTChlSZXF1ZXN0UGVybWlzc2lvblJlc3BvbnNlEjYKB291dGNvbWUYASABKAsyJS50ZGR5LmFjcC52MS5SZXF1ZXN0UGVybWlzc2lvbk91dGNvbWUijgEKGFJlcXVlc3RQZXJtaXNzaW9uT3V0Y29tZRIrCgljYW5jZWxsZWQYASABKAsyFi50ZGR5LmFjcC52MS5DYW5jZWxsZWRIABI6CghzZWxlY3RlZBgCIAEoCzImLnRkZHkuYWNwLnYxLlNlbGVjdGVkUGVybWlzc2lvbk91dGNvbWVIAEIJCgdvdXRjb21lIgsKCUNhbmNlbGxlZCJPChlTZWxlY3RlZFBlcm1pc3Npb25PdXRjb21lEjIKCW9wdGlvbl9pZBgBIAEoCzIfLnRkZHkuYWNwLnYxLlBlcm1pc3Npb25PcHRpb25JZCpMCg9Qcm90b2NvbFZlcnNpb24SIAocUFJPVE9DT0xfVkVSU0lPTl9VTlNQRUNJRklFRBAAEhcKE1BST1RPQ09MX1ZFUlNJT05fVjEQASq2AQoKU3RvcFJlYXNvbhIbChdTVE9QX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFNUT1BfUkVBU09OX0VORF9UVVJOEAESGQoVU1RPUF9SRUFTT05fQ0FOQ0VMTEVEEAISGgoWU1RPUF9SRUFTT05fTUFYX1RPS0VOUxADEiEKHVNUT1BfUkVBU09OX01BWF9UVVJOX1JFUVVFU1RTEAQSFwoTU1RPUF9SRUFTT05fUkVGVVNBTBAFKq8BCg5Ub29sQ2FsbFN0YXR1cxIgChxUT09MX0NBTExfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHAoYVE9PTF9DQUxMX1NUQVRVU19QRU5ESU5HEAESIAocVE9PTF9DQUxMX1NUQVRVU19JTl9QUk9HUkVTUxACEh4KGlRPT0xfQ0FMTF9TVEFUVVNfQ09NUExFVEVEEAMSGwoXVE9PTF9DQUxMX1NUQVRVU19GQUlMRUQQBCrjAQoIVG9vbEtpbmQSGQoVVE9PTF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOVE9PTF9LSU5EX1JFQUQQARISCg5UT09MX0tJTkRfRURJVBACEhQKEFRPT0xfS0lORF9ERUxFVEUQAxISCg5UT09MX0tJTkRfTU9WRRAEEhQKEFRPT0xfS0lORF9TRUFSQ0gQBRIVChFUT09MX0tJTkRfRVhFQ1VURRAGEhMKD1RPT0xfS0lORF9USElOSxAHEhMKD1RPT0xfS0lORF9GRVRDSBAIEhMKD1RPT0xfS0lORF9PVEhFUhAJKpMBChFQbGFuRW50cnlQcmlvcml0eRIjCh9QTEFOX0VOVFJZX1BSSU9SSVRZX1VOU1BFQ0lGSUVEEAASHAoYUExBTl9FTlRSWV9QUklPUklUWV9ISUdIEAESHgoaUExBTl9FTlRSWV9QUklPUklUWV9NRURJVU0QAhIbChdQTEFOX0VOVFJZX1BSSU9SSVRZX0xPVxADKpcBCg9QbGFuRW50cnlTdGF0dXMSIQodUExBTl9FTlRSWV9TVEFUVVNfVU5TUEVDSUZJRUQQABIdChlQTEFOX0VOVFJZX1NUQVRVU19QRU5ESU5HEAESIQodUExBTl9FTlRSWV9TVEFUVVNfSU5fUFJPR1JFU1MQAhIfChtQTEFOX0VOVFJZX1NUQVRVU19DT01QTEVURUQQAyrgAQoUUGVybWlzc2lvbk9wdGlvbktpbmQSJgoiUEVSTUlTU0lPTl9PUFRJT05fS0lORF9VTlNQRUNJRklFRBAAEiUKIVBFUk1JU1NJT05fT1BUSU9OX0tJTkRfQUxMT1dfT05DRRABEicKI1BFUk1JU1NJT05fT1BUSU9OX0tJTkRfQUxMT1dfQUxXQVlTEAISJgoiUEVSTUlTU0lPTl9PUFRJT05fS0lORF9SRUpFQ1RfT05DRRADEigKJFBFUk1JU1NJT05fT1BUSU9OX0tJTkRfUkVKRUNUX0FMV0FZUxAEMlgKCkFjcFNlcnZpY2USSgoHU2Vzc2lvbhIdLnRkZHkuYWNwLnYxLkFjcENsaWVudE1lc3NhZ2UaHC50ZGR5LmFjcC52MS5BY3BBZ2VudE1lc3NhZ2UoATABYgZwcm90bzM");
 
 /**
  * Client -> Agent. `id` correlates a request with its `AcpAgentMessage` reply (0 for the `cancel`
@@ -360,6 +360,15 @@ export type NewSessionRequest = Message<"tddy.acp.v1.NewSessionRequest"> & {
    * @generated from field: string cwd = 1;
    */
   cwd: string;
+
+  /**
+   * tddy extension. Absent on a session-hosted ACP stream, where the agent *is* that session's
+   * workflow and nothing has to be named. Required by the daemon-hosted surface, which serves every
+   * model and assistant in one registry from one service and therefore has to be told which.
+   *
+   * @generated from field: optional tddy.acp.v1.ModelSessionTarget model_target = 2;
+   */
+  modelTarget?: ModelSessionTarget;
 };
 
 /**
@@ -368,6 +377,49 @@ export type NewSessionRequest = Message<"tddy.acp.v1.NewSessionRequest"> & {
  */
 export const NewSessionRequestSchema: GenMessage<NewSessionRequest> = /*@__PURE__*/
   messageDesc(file_tddy_acp_v1_acp, 11);
+
+/**
+ * tddy extension: which registry entry a daemon-hosted ACP session speaks as, and the session token
+ * that authorizes reading that provider's stored credential.
+ *
+ * It rides `NewSessionRequest` rather than the envelope because the target is a property of the
+ * session, not of the stream: `initialize` is answered before any target is known, and a stream may
+ * outlive the session it opened.
+ *
+ * @generated from message tddy.acp.v1.ModelSessionTarget
+ */
+export type ModelSessionTarget = Message<"tddy.acp.v1.ModelSessionTarget"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The provider and model to speak as. Ignored when `assistant_id` is set.
+   *
+   * @generated from field: string provider_id = 2;
+   */
+  providerId: string;
+
+  /**
+   * @generated from field: string model_id = 3;
+   */
+  modelId: string;
+
+  /**
+   * When set, the assistant supplies the provider, model, system prompt and tool set.
+   *
+   * @generated from field: string assistant_id = 4;
+   */
+  assistantId: string;
+};
+
+/**
+ * Describes the message tddy.acp.v1.ModelSessionTarget.
+ * Use `create(ModelSessionTargetSchema)` to create a new message.
+ */
+export const ModelSessionTargetSchema: GenMessage<ModelSessionTarget> = /*@__PURE__*/
+  messageDesc(file_tddy_acp_v1_acp, 12);
 
 /**
  * @generated from message tddy.acp.v1.NewSessionResponse
@@ -389,7 +441,7 @@ export type NewSessionResponse = Message<"tddy.acp.v1.NewSessionResponse"> & {
  * Use `create(NewSessionResponseSchema)` to create a new message.
  */
 export const NewSessionResponseSchema: GenMessage<NewSessionResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 12);
+  messageDesc(file_tddy_acp_v1_acp, 13);
 
 /**
  * @generated from message tddy.acp.v1.LoadSessionRequest
@@ -411,7 +463,7 @@ export type LoadSessionRequest = Message<"tddy.acp.v1.LoadSessionRequest"> & {
  * Use `create(LoadSessionRequestSchema)` to create a new message.
  */
 export const LoadSessionRequestSchema: GenMessage<LoadSessionRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 13);
+  messageDesc(file_tddy_acp_v1_acp, 14);
 
 /**
  * @generated from message tddy.acp.v1.LoadSessionResponse
@@ -428,7 +480,7 @@ export type LoadSessionResponse = Message<"tddy.acp.v1.LoadSessionResponse"> & {
  * Use `create(LoadSessionResponseSchema)` to create a new message.
  */
 export const LoadSessionResponseSchema: GenMessage<LoadSessionResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 14);
+  messageDesc(file_tddy_acp_v1_acp, 15);
 
 /**
  * @generated from message tddy.acp.v1.CancelNotification
@@ -445,7 +497,7 @@ export type CancelNotification = Message<"tddy.acp.v1.CancelNotification"> & {
  * Use `create(CancelNotificationSchema)` to create a new message.
  */
 export const CancelNotificationSchema: GenMessage<CancelNotification> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 15);
+  messageDesc(file_tddy_acp_v1_acp, 16);
 
 /**
  * @generated from message tddy.acp.v1.ModelInfo
@@ -467,7 +519,7 @@ export type ModelInfo = Message<"tddy.acp.v1.ModelInfo"> & {
  * Use `create(ModelInfoSchema)` to create a new message.
  */
 export const ModelInfoSchema: GenMessage<ModelInfo> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 16);
+  messageDesc(file_tddy_acp_v1_acp, 17);
 
 /**
  * @generated from message tddy.acp.v1.SessionModelState
@@ -489,7 +541,7 @@ export type SessionModelState = Message<"tddy.acp.v1.SessionModelState"> & {
  * Use `create(SessionModelStateSchema)` to create a new message.
  */
 export const SessionModelStateSchema: GenMessage<SessionModelState> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 17);
+  messageDesc(file_tddy_acp_v1_acp, 18);
 
 /**
  * @generated from message tddy.acp.v1.PromptRequest
@@ -511,7 +563,7 @@ export type PromptRequest = Message<"tddy.acp.v1.PromptRequest"> & {
  * Use `create(PromptRequestSchema)` to create a new message.
  */
 export const PromptRequestSchema: GenMessage<PromptRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 18);
+  messageDesc(file_tddy_acp_v1_acp, 19);
 
 /**
  * @generated from message tddy.acp.v1.PromptResponse
@@ -528,7 +580,7 @@ export type PromptResponse = Message<"tddy.acp.v1.PromptResponse"> & {
  * Use `create(PromptResponseSchema)` to create a new message.
  */
 export const PromptResponseSchema: GenMessage<PromptResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 19);
+  messageDesc(file_tddy_acp_v1_acp, 20);
 
 /**
  * @generated from message tddy.acp.v1.ContentBlock
@@ -575,7 +627,7 @@ export type ContentBlock = Message<"tddy.acp.v1.ContentBlock"> & {
  * Use `create(ContentBlockSchema)` to create a new message.
  */
 export const ContentBlockSchema: GenMessage<ContentBlock> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 20);
+  messageDesc(file_tddy_acp_v1_acp, 21);
 
 /**
  * @generated from message tddy.acp.v1.TextContent
@@ -592,7 +644,7 @@ export type TextContent = Message<"tddy.acp.v1.TextContent"> & {
  * Use `create(TextContentSchema)` to create a new message.
  */
 export const TextContentSchema: GenMessage<TextContent> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 21);
+  messageDesc(file_tddy_acp_v1_acp, 22);
 
 /**
  * @generated from message tddy.acp.v1.ImageContent
@@ -621,7 +673,7 @@ export type ImageContent = Message<"tddy.acp.v1.ImageContent"> & {
  * Use `create(ImageContentSchema)` to create a new message.
  */
 export const ImageContentSchema: GenMessage<ImageContent> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 22);
+  messageDesc(file_tddy_acp_v1_acp, 23);
 
 /**
  * @generated from message tddy.acp.v1.AudioContent
@@ -645,7 +697,7 @@ export type AudioContent = Message<"tddy.acp.v1.AudioContent"> & {
  * Use `create(AudioContentSchema)` to create a new message.
  */
 export const AudioContentSchema: GenMessage<AudioContent> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 23);
+  messageDesc(file_tddy_acp_v1_acp, 24);
 
 /**
  * @generated from message tddy.acp.v1.ResourceLink
@@ -687,7 +739,7 @@ export type ResourceLink = Message<"tddy.acp.v1.ResourceLink"> & {
  * Use `create(ResourceLinkSchema)` to create a new message.
  */
 export const ResourceLinkSchema: GenMessage<ResourceLink> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 24);
+  messageDesc(file_tddy_acp_v1_acp, 25);
 
 /**
  * @generated from message tddy.acp.v1.EmbeddedResource
@@ -716,7 +768,7 @@ export type EmbeddedResource = Message<"tddy.acp.v1.EmbeddedResource"> & {
  * Use `create(EmbeddedResourceSchema)` to create a new message.
  */
 export const EmbeddedResourceSchema: GenMessage<EmbeddedResource> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 25);
+  messageDesc(file_tddy_acp_v1_acp, 26);
 
 /**
  * @generated from message tddy.acp.v1.TextResourceContents
@@ -743,7 +795,7 @@ export type TextResourceContents = Message<"tddy.acp.v1.TextResourceContents"> &
  * Use `create(TextResourceContentsSchema)` to create a new message.
  */
 export const TextResourceContentsSchema: GenMessage<TextResourceContents> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 26);
+  messageDesc(file_tddy_acp_v1_acp, 27);
 
 /**
  * @generated from message tddy.acp.v1.BlobResourceContents
@@ -772,7 +824,7 @@ export type BlobResourceContents = Message<"tddy.acp.v1.BlobResourceContents"> &
  * Use `create(BlobResourceContentsSchema)` to create a new message.
  */
 export const BlobResourceContentsSchema: GenMessage<BlobResourceContents> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 27);
+  messageDesc(file_tddy_acp_v1_acp, 28);
 
 /**
  * @generated from message tddy.acp.v1.ContentChunk
@@ -789,7 +841,7 @@ export type ContentChunk = Message<"tddy.acp.v1.ContentChunk"> & {
  * Use `create(ContentChunkSchema)` to create a new message.
  */
 export const ContentChunkSchema: GenMessage<ContentChunk> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 28);
+  messageDesc(file_tddy_acp_v1_acp, 29);
 
 /**
  * @generated from message tddy.acp.v1.SessionNotification
@@ -820,7 +872,7 @@ export type SessionNotification = Message<"tddy.acp.v1.SessionNotification"> & {
  * Use `create(SessionNotificationSchema)` to create a new message.
  */
 export const SessionNotificationSchema: GenMessage<SessionNotification> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 29);
+  messageDesc(file_tddy_acp_v1_acp, 30);
 
 /**
  * @generated from message tddy.acp.v1.SessionUpdate
@@ -885,7 +937,7 @@ export type SessionUpdate = Message<"tddy.acp.v1.SessionUpdate"> & {
  * Use `create(SessionUpdateSchema)` to create a new message.
  */
 export const SessionUpdateSchema: GenMessage<SessionUpdate> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 30);
+  messageDesc(file_tddy_acp_v1_acp, 31);
 
 /**
  * @generated from message tddy.acp.v1.ToolCallId
@@ -902,7 +954,7 @@ export type ToolCallId = Message<"tddy.acp.v1.ToolCallId"> & {
  * Use `create(ToolCallIdSchema)` to create a new message.
  */
 export const ToolCallIdSchema: GenMessage<ToolCallId> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 31);
+  messageDesc(file_tddy_acp_v1_acp, 32);
 
 /**
  * @generated from message tddy.acp.v1.ToolCallLocation
@@ -924,7 +976,7 @@ export type ToolCallLocation = Message<"tddy.acp.v1.ToolCallLocation"> & {
  * Use `create(ToolCallLocationSchema)` to create a new message.
  */
 export const ToolCallLocationSchema: GenMessage<ToolCallLocation> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 32);
+  messageDesc(file_tddy_acp_v1_acp, 33);
 
 /**
  * `content` (ToolCallContent) is mirrored later; the used subset is id + title (+ optional kind,
@@ -974,7 +1026,7 @@ export type ToolCall = Message<"tddy.acp.v1.ToolCall"> & {
  * Use `create(ToolCallSchema)` to create a new message.
  */
 export const ToolCallSchema: GenMessage<ToolCall> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 33);
+  messageDesc(file_tddy_acp_v1_acp, 34);
 
 /**
  * @generated from message tddy.acp.v1.ToolCallUpdate
@@ -996,7 +1048,7 @@ export type ToolCallUpdate = Message<"tddy.acp.v1.ToolCallUpdate"> & {
  * Use `create(ToolCallUpdateSchema)` to create a new message.
  */
 export const ToolCallUpdateSchema: GenMessage<ToolCallUpdate> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 34);
+  messageDesc(file_tddy_acp_v1_acp, 35);
 
 /**
  * @generated from message tddy.acp.v1.ToolCallUpdateFields
@@ -1038,7 +1090,7 @@ export type ToolCallUpdateFields = Message<"tddy.acp.v1.ToolCallUpdateFields"> &
  * Use `create(ToolCallUpdateFieldsSchema)` to create a new message.
  */
 export const ToolCallUpdateFieldsSchema: GenMessage<ToolCallUpdateFields> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 35);
+  messageDesc(file_tddy_acp_v1_acp, 36);
 
 /**
  * @generated from message tddy.acp.v1.PlanEntry
@@ -1065,7 +1117,7 @@ export type PlanEntry = Message<"tddy.acp.v1.PlanEntry"> & {
  * Use `create(PlanEntrySchema)` to create a new message.
  */
 export const PlanEntrySchema: GenMessage<PlanEntry> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 36);
+  messageDesc(file_tddy_acp_v1_acp, 37);
 
 /**
  * @generated from message tddy.acp.v1.Plan
@@ -1082,7 +1134,7 @@ export type Plan = Message<"tddy.acp.v1.Plan"> & {
  * Use `create(PlanSchema)` to create a new message.
  */
 export const PlanSchema: GenMessage<Plan> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 37);
+  messageDesc(file_tddy_acp_v1_acp, 38);
 
 /**
  * @generated from message tddy.acp.v1.AvailableCommand
@@ -1104,7 +1156,7 @@ export type AvailableCommand = Message<"tddy.acp.v1.AvailableCommand"> & {
  * Use `create(AvailableCommandSchema)` to create a new message.
  */
 export const AvailableCommandSchema: GenMessage<AvailableCommand> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 38);
+  messageDesc(file_tddy_acp_v1_acp, 39);
 
 /**
  * @generated from message tddy.acp.v1.AvailableCommandsUpdate
@@ -1121,7 +1173,7 @@ export type AvailableCommandsUpdate = Message<"tddy.acp.v1.AvailableCommandsUpda
  * Use `create(AvailableCommandsUpdateSchema)` to create a new message.
  */
 export const AvailableCommandsUpdateSchema: GenMessage<AvailableCommandsUpdate> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 39);
+  messageDesc(file_tddy_acp_v1_acp, 40);
 
 /**
  * @generated from message tddy.acp.v1.CurrentModeUpdate
@@ -1138,7 +1190,7 @@ export type CurrentModeUpdate = Message<"tddy.acp.v1.CurrentModeUpdate"> & {
  * Use `create(CurrentModeUpdateSchema)` to create a new message.
  */
 export const CurrentModeUpdateSchema: GenMessage<CurrentModeUpdate> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 40);
+  messageDesc(file_tddy_acp_v1_acp, 41);
 
 /**
  * @generated from message tddy.acp.v1.PermissionOptionId
@@ -1155,7 +1207,7 @@ export type PermissionOptionId = Message<"tddy.acp.v1.PermissionOptionId"> & {
  * Use `create(PermissionOptionIdSchema)` to create a new message.
  */
 export const PermissionOptionIdSchema: GenMessage<PermissionOptionId> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 41);
+  messageDesc(file_tddy_acp_v1_acp, 42);
 
 /**
  * @generated from message tddy.acp.v1.PermissionOption
@@ -1182,7 +1234,7 @@ export type PermissionOption = Message<"tddy.acp.v1.PermissionOption"> & {
  * Use `create(PermissionOptionSchema)` to create a new message.
  */
 export const PermissionOptionSchema: GenMessage<PermissionOption> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 42);
+  messageDesc(file_tddy_acp_v1_acp, 43);
 
 /**
  * @generated from message tddy.acp.v1.RequestPermissionRequest
@@ -1209,7 +1261,7 @@ export type RequestPermissionRequest = Message<"tddy.acp.v1.RequestPermissionReq
  * Use `create(RequestPermissionRequestSchema)` to create a new message.
  */
 export const RequestPermissionRequestSchema: GenMessage<RequestPermissionRequest> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 43);
+  messageDesc(file_tddy_acp_v1_acp, 44);
 
 /**
  * @generated from message tddy.acp.v1.RequestPermissionResponse
@@ -1226,7 +1278,7 @@ export type RequestPermissionResponse = Message<"tddy.acp.v1.RequestPermissionRe
  * Use `create(RequestPermissionResponseSchema)` to create a new message.
  */
 export const RequestPermissionResponseSchema: GenMessage<RequestPermissionResponse> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 44);
+  messageDesc(file_tddy_acp_v1_acp, 45);
 
 /**
  * @generated from message tddy.acp.v1.RequestPermissionOutcome
@@ -1255,7 +1307,7 @@ export type RequestPermissionOutcome = Message<"tddy.acp.v1.RequestPermissionOut
  * Use `create(RequestPermissionOutcomeSchema)` to create a new message.
  */
 export const RequestPermissionOutcomeSchema: GenMessage<RequestPermissionOutcome> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 45);
+  messageDesc(file_tddy_acp_v1_acp, 46);
 
 /**
  * @generated from message tddy.acp.v1.Cancelled
@@ -1268,7 +1320,7 @@ export type Cancelled = Message<"tddy.acp.v1.Cancelled"> & {
  * Use `create(CancelledSchema)` to create a new message.
  */
 export const CancelledSchema: GenMessage<Cancelled> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 46);
+  messageDesc(file_tddy_acp_v1_acp, 47);
 
 /**
  * @generated from message tddy.acp.v1.SelectedPermissionOutcome
@@ -1285,7 +1337,7 @@ export type SelectedPermissionOutcome = Message<"tddy.acp.v1.SelectedPermissionO
  * Use `create(SelectedPermissionOutcomeSchema)` to create a new message.
  */
 export const SelectedPermissionOutcomeSchema: GenMessage<SelectedPermissionOutcome> = /*@__PURE__*/
-  messageDesc(file_tddy_acp_v1_acp, 47);
+  messageDesc(file_tddy_acp_v1_acp, 48);
 
 /**
  * @generated from enum tddy.acp.v1.ProtocolVersion

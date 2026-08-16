@@ -185,6 +185,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/tasks.proto"], &["proto"])?;
 
+    // Model registry service (providers, models, assistants — the daemon's own SQLite registry)
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/models.proto"], &["proto"])?;
+
     // Unified action service (async trait + RpcService server)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)

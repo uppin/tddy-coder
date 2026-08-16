@@ -341,7 +341,66 @@ export const TEST_IDS = {
   shellMenuTasks: "shell-menu-tasks",
   shellMenuProjects: "shell-menu-projects",
   shellMenuVms: "shell-menu-vms",
+  shellMenuModels: "shell-menu-models",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
+
+  // Models & Agents screen (#/models)
+  /** The Models & Agents screen root. */
+  modelsScreen: "models-screen",
+  /** The providers panel listing this fleet's configured providers. */
+  modelsProvidersPanel: "models-providers-panel",
+  /** Opens the add-provider form. */
+  modelsAddProviderToggle: "models-add-provider-toggle",
+  /** Add-provider form fields. */
+  modelsAddProviderKind: "models-add-provider-kind",
+  modelsAddProviderLabel: "models-add-provider-label",
+  modelsAddProviderBaseUrl: "models-add-provider-base-url",
+  modelsAddProviderApiKey: "models-add-provider-api-key",
+  modelsAddProviderSubmit: "models-add-provider-submit",
+  /** Names the daemon a newly added provider will be created on. */
+  modelsAddProviderTarget: "models-add-provider-target",
+  /** The error the add-provider form reports when the daemon refused (or was never addressed). */
+  modelsAddProviderError: "models-add-provider-error",
+  /** The row the table shows instead of models; carries `data-registry-status` for why. */
+  modelsTableEmpty: "models-table-empty",
+  /** The row the providers panel shows instead of providers; carries `data-registry-status`. */
+  modelsProvidersEmpty: "models-providers-empty",
+  /** The assistants panel. */
+  modelsAssistantsPanel: "models-assistants-panel",
+  /** The row the assistants panel shows instead of assistants; carries `data-registry-status`. */
+  modelsAssistantsEmpty: "models-assistants-empty",
+  /** Opens the create-assistant dialog for the focused model. */
+  modelsCreateAssistantDialog: "models-create-assistant-dialog",
+  modelsCreateAssistantName: "models-create-assistant-name",
+  modelsCreateAssistantLabel: "models-create-assistant-label",
+  modelsCreateAssistantSystemPrompt: "models-create-assistant-system-prompt",
+  modelsCreateAssistantSubmit: "models-create-assistant-submit",
+  /** The tool fieldset of the create-assistant dialog; carries `data-tool-catalog-status`. */
+  modelsCreateAssistantTools: "models-create-assistant-tools",
+  /** The edit-assistant dialog and its fields. */
+  modelsEditAssistantDialog: "models-edit-assistant-dialog",
+  modelsEditAssistantLabel: "models-edit-assistant-label",
+  modelsEditAssistantSystemPrompt: "models-edit-assistant-system-prompt",
+  modelsEditAssistantSubmit: "models-edit-assistant-submit",
+  /** The ACP chat dialog opened from a model or assistant row. */
+  modelsChatDialog: "models-chat-dialog",
+  modelsChatInput: "models-chat-input",
+  modelsChatSend: "models-chat-send",
+  modelsChatTranscript: "models-chat-transcript",
+  /** Why a chat prompt was not sent, or what the stream reported. */
+  modelsChatError: "models-chat-error",
+  /** The workspace a tool-bearing assistant's chat runs its tools in, once one is chosen. */
+  modelsChatWorkspace: "models-chat-workspace",
+  /** Chooses where a tool-bearing assistant's tools run, before its chat opens. */
+  modelsChatWorkspaceDialog: "models-chat-workspace-dialog",
+  /** The workspaces the owning daemon offers. */
+  modelsChatWorkspaceOptions: "models-chat-workspace-options",
+  /** Why no workspace can be offered; carries `data-workspace-status`. */
+  modelsChatWorkspaceEmpty: "models-chat-workspace-empty",
+  /** Why the owning daemon's projects could not be read. */
+  modelsChatWorkspaceError: "models-chat-workspace-error",
+  /** Leaves the workspace choice without opening a chat. */
+  modelsChatWorkspaceCancel: "models-chat-workspace-cancel",
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
@@ -1157,3 +1216,138 @@ export const createSessionAttachmentProgress = (basename: string) =>
 /** One selectable document row in the host-document picker. */
 export const createSessionHostDocRow = (relativePath: string) =>
   `create-session-host-doc-row-${relativePath}`;
+
+// ---------------------------------------------------------------------------
+// Models & Agents dynamic helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * `[data-testid="models-provider-row-<daemonInstanceId>-<providerId>"]` — one row per configured
+ * provider. Provider ids are minted per daemon (`prov-ollama` exists on every host), so the owning
+ * daemon is part of the id; without it two hosts' rows would collide in the DOM.
+ */
+export const modelsProviderRow = (daemonInstanceId: string, providerId: string) =>
+  `models-provider-row-${daemonInstanceId}-${providerId}`;
+
+/** The inline enumeration error rendered against a provider whose last refresh failed. */
+export const modelsProviderError = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-error`;
+
+/** Whether a credential is stored for a provider — never the credential itself. */
+export const modelsProviderCredential = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-credential`;
+
+/** Re-enumerates one provider's models from the provider itself. */
+export const modelsProviderRefresh = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-refresh`;
+
+/** Removes a provider from the daemon that owns it. */
+export const modelsProviderDelete = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-delete`;
+
+/** Why a write against a provider was refused — held apart from its enumeration error. */
+export const modelsProviderActionError = (daemonInstanceId: string, providerId: string) =>
+  `${modelsProviderRow(daemonInstanceId, providerId)}-action-error`;
+
+/** The failure row the providers panel renders for a daemon whose registry could not be read. */
+export const modelsProvidersDaemonError = (daemonInstanceId: string) =>
+  `models-providers-daemon-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/** The failure row the assistants panel renders for a daemon whose registry could not be read. */
+export const modelsAssistantsDaemonError = (daemonInstanceId: string) =>
+  `models-assistants-daemon-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/**
+ * `[data-testid="models-row-<daemonInstanceId>-<providerId>-<modelId>"]` — one row per model.
+ * A model id may contain a colon (`qwen3:32b`), so it goes through `safeTestIdPart`.
+ */
+export const modelsRow = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `models-row-${daemonInstanceId}-${providerId}-${safeTestIdPart(modelId)}`;
+
+/** The owning-daemon cell of a model row. */
+export const modelsRowDaemon = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-daemon`;
+
+/** The capability-label cell of a model row; carries `data-model-labels` for exact assertions. */
+export const modelsRowLabels = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-labels`;
+
+/** The load-state cell of a model row; carries `data-load-state`. */
+export const modelsRowLoadState = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-load-state`;
+
+/** The Load action on a model row (rendered only when the model is not loaded). */
+export const modelsRowLoad = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-load`;
+
+/** The Unload action on a model row (rendered only when the model is loaded). */
+export const modelsRowUnload = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-unload`;
+
+/** The Chat action on a model row (rendered only for chat-capable models). */
+export const modelsRowChat = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-chat`;
+
+/** The "create assistant from this model" action on a model row. */
+export const modelsRowCreateAssistant = (
+  daemonInstanceId: string,
+  providerId: string,
+  modelId: string,
+) => `${modelsRow(daemonInstanceId, providerId, modelId)}-create-assistant`;
+
+/** The per-row error surfaced when an action is rejected by the daemon. */
+export const modelsRowError = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-error`;
+
+/** The marker rendered on a model row whose provider's last enumeration failed. */
+export const modelsRowStale = (daemonInstanceId: string, providerId: string, modelId: string) =>
+  `${modelsRow(daemonInstanceId, providerId, modelId)}-stale`;
+
+/** The error row rendered for a daemon whose registry could not be read. */
+export const modelsDaemonError = (daemonInstanceId: string) =>
+  `models-daemon-error-${daemonInstanceId}`;
+
+/**
+ * One assistant row. An assistant's `--agent` name is unique *per daemon*, so two hosts may each
+ * define a `reviewer` — the owning daemon is part of the id, or their rows would collide.
+ */
+export const modelsAssistantRow = (daemonInstanceId: string, name: string) =>
+  `models-assistant-row-${daemonInstanceId}-${safeTestIdPart(name)}`;
+
+/** The assigned-tools cell of an assistant row; carries `data-assistant-tools`. */
+export const modelsAssistantTools = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-tools`;
+
+/** Opens the ACP chat with an assistant — its model, its system prompt and its tools. */
+export const modelsAssistantChat = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-chat`;
+
+/** Opens the edit dialog for an assistant. */
+export const modelsAssistantEdit = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-edit`;
+
+/** Removes an assistant from the daemon that owns it. */
+export const modelsAssistantDelete = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-delete`;
+
+/** Why a write against an assistant was refused. */
+export const modelsAssistantError = (daemonInstanceId: string, name: string) =>
+  `${modelsAssistantRow(daemonInstanceId, name)}-error`;
+
+/** One selectable tool checkbox in the create-assistant dialog. */
+export const modelsCreateAssistantTool = (toolName: string) =>
+  `models-create-assistant-tool-${toolName}`;
+
+/** One selectable tool checkbox in the edit-assistant dialog. */
+export const modelsEditAssistantTool = (toolName: string) =>
+  `models-edit-assistant-tool-${toolName}`;
+
+/** One workspace the owning daemon offers a tool-bearing assistant; carries `data-workspace-path`. */
+export const modelsChatWorkspaceOption = (projectId: string) =>
+  `models-chat-workspace-${safeTestIdPart(projectId)}`;
+
+/** One rendered bubble of the models chat transcript; carries `data-message-kind`. */
+export const modelsChatMessage = (index: number) => `models-chat-message-${index}`;
+
+/** A tool bubble's status marker; carries `data-tool-status`. Absent on non-tool bubbles. */
+export const modelsChatToolStatus = (index: number) => `${modelsChatMessage(index)}-tool-status`;

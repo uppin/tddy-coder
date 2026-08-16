@@ -237,6 +237,83 @@ pub fn mutation_tool_definitions() -> Vec<ToolDefinition> {
     ]
 }
 
+/// The remaining exec-catalog tools a def may bind: `SHELL` (a mutating tool, gated exactly like
+/// the three above) plus `AWAIT`/`READ_LINTS`/`SEMANTIC_SEARCH`, which the host tool engine
+/// provides. Like [`mutation_tool_definitions`], only `SpecializedSubagentSession` — which filters
+/// by bound tools — ever sees these, so the unfiltered FastContext loops stay read-only.
+pub fn engine_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "SHELL".to_string(),
+                description: "Run a shell command in the workspace.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "description": "Command line to run." },
+                        "block_until_ms": {
+                            "type": "integer",
+                            "description": "Milliseconds to wait before backgrounding the job."
+                        }
+                    },
+                    "required": ["command"]
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "AWAIT".to_string(),
+                description: "Wait for a background shell job to complete.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "job_id": { "type": "string", "description": "Job to wait for." },
+                        "task_id": { "type": "string", "description": "Task to wait for." },
+                        "timeout_ms": {
+                            "type": "integer",
+                            "description": "Give up after this many milliseconds."
+                        },
+                        "block_until_ms": {
+                            "type": "integer",
+                            "description": "Milliseconds to block before returning progress."
+                        }
+                    }
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "READ_LINTS".to_string(),
+                description: "Read linting diagnostics for the workspace.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Optional path to scope to." }
+                    }
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: ToolFunctionDef {
+                name: "SEMANTIC_SEARCH".to_string(),
+                description: "Search the codebase semantically.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Natural-language query." },
+                        "path": { "type": "string", "description": "Optional path to scope to." }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
+    ]
+}
+
 /// Request body for `/v1/chat/completions`.
 #[derive(Debug, Serialize)]
 pub struct ChatCompletionRequest {
@@ -285,6 +362,7 @@ pub struct ChatChoice {
 
 pub struct OpenAiClient {
     base_url: String,
+    api_key: Option<String>,
     http: reqwest::Client,
 }
 
@@ -292,8 +370,40 @@ impl OpenAiClient {
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
+            api_key: None,
             http: reqwest::Client::new(),
         }
+    }
+
+    /// The bearer token to authenticate every call with. A local endpoint (Ollama, vLLM) needs
+    /// none — `None` sends no `Authorization` header at all — while a cloud provider does.
+    #[must_use]
+    pub fn api_key(mut self, api_key: Option<String>) -> Self {
+        self.api_key = api_key;
+        self
+    }
+
+    /// Give the transport a deadline instead of the default, deadline-free one.
+    ///
+    /// A provider is a third-party endpoint: it can accept the connection and then say nothing at
+    /// all, and `reqwest::Client::new()` waits for that forever. The caller owns the budget because
+    /// it knows what the call is for — an interactive chat turn and a batch enumeration do not
+    /// deserve the same patience.
+    ///
+    /// `expect` matches `reqwest::Client::new`'s own contract: the build fails only when the TLS
+    /// backend cannot be initialized, which no request in this process could survive either.
+    #[must_use]
+    pub fn timeouts(
+        mut self,
+        connect_timeout: std::time::Duration,
+        request_timeout: std::time::Duration,
+    ) -> Self {
+        self.http = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(request_timeout)
+            .build()
+            .expect("an http client builds unless the TLS backend cannot initialize");
+        self
     }
 
     /// Send a chat completion request and return the response.
@@ -315,7 +425,11 @@ impl OpenAiClient {
                 serde_json::to_string(&request).unwrap_or_else(|e| format!("<unserializable: {e}>"))
             );
         }
-        let response = self.http.post(&url).json(&request).send().await?;
+        let mut post = self.http.post(&url).json(&request);
+        if let Some(api_key) = &self.api_key {
+            post = post.bearer_auth(api_key);
+        }
+        let response = post.send().await?;
         let status = response.status();
         // Read the body as text once, so we can log the full response transcript and still parse it
         // (and surface the body on both HTTP errors and parse failures).
@@ -492,5 +606,77 @@ mod tests {
         assert_eq!(tool_calls.len(), 1, "exactly one tool call must be present");
         assert_eq!(tool_calls[0].function.name, "READ");
         assert_eq!(tool_calls[0].id, "call_abc123");
+    }
+
+    /// A cloud provider authenticates by bearer token; a local one (Ollama) is given no key and
+    /// must therefore be sent no `Authorization` header at all.
+    #[tokio::test]
+    async fn authenticates_with_the_configured_api_key_as_a_bearer_token() {
+        // Given — a server that answers anything, so the header is asserted rather than matched
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": { "role": "assistant", "content": "ok" },
+                    "finish_reason": "stop"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        // When
+        OpenAiClient::new(server.uri())
+            .api_key(Some("sk-live-1".to_string()))
+            .complete(a_hello_request())
+            .await
+            .expect("complete must succeed");
+
+        // Then
+        let sent = server.received_requests().await.expect("recorded requests");
+        let authorization = sent[0]
+            .headers
+            .get("authorization")
+            .expect("the request must carry an Authorization header")
+            .to_str()
+            .expect("an ascii Authorization header");
+        assert_eq!(authorization, "Bearer sk-live-1");
+    }
+
+    #[tokio::test]
+    async fn sends_no_authorization_header_when_no_api_key_is_configured() {
+        // Given
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": { "role": "assistant", "content": "ok" },
+                    "finish_reason": "stop"
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        // When
+        OpenAiClient::new(server.uri())
+            .complete(a_hello_request())
+            .await
+            .expect("complete must succeed");
+
+        // Then
+        let sent = server.received_requests().await.expect("recorded requests");
+        assert_eq!(sent[0].headers.get("authorization"), None);
+    }
+
+    /// The smallest well-formed request: one user message, no tools.
+    fn a_hello_request() -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+            messages: vec![ChatMessage::user("Say hello")],
+            tools: Vec::new(),
+            tool_choice: serde_json::json!("auto"),
+            temperature: 0.0,
+        }
     }
 }

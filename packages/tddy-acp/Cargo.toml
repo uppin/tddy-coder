@@ -7,3 +7,16 @@ description = "Shared ACP glue for tddy: unified client, the workflow ACP agent,
 [dependencies]
 agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 tddy-core = { path = "../tddy-core" }
+# provider_agent.rs: the ACP agent fronting a model provider. `tddy-discovery` supplies the
+# OpenAI-compatible client every provider (Ollama included) is reached through; tool execution is a
+# port (`ToolDispatcher`), so `tddy-tool-engine` deliberately stays out of this crate's tree.
+tddy-discovery = { path = "../tddy-discovery" }
+async-trait = "0.1"
+serde_json = "1"
+# provider_agent.rs: `Notify` is the per-turn cancel signal and `select!` is what makes a cancel
+# real — dropping the provider call's future cancels the in-flight HTTP request.
+tokio = { version = "1", features = ["sync", "macros"] }
+
+[dev-dependencies]
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }

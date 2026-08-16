@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { AsyncQueue } from "tddy-livekit-web";
 import {
@@ -11,8 +11,11 @@ import {
   AcpClientMessageSchema,
   AcpService,
   type AcpClientMessage,
+  type ModelSessionTarget,
+  type ToolCallUpdate,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { tddyDebug } from "../../lib/debugMask";
+import { toolEntryText, toolStatusOf } from "./toolCallPresentation";
 import type {
   ChatMessage,
   ElicitationPoint,
@@ -60,6 +63,49 @@ export function useAcpSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
+  return useAcpSessionOverClient(client, resumeSessionId, { room, identity: serverIdentity });
+}
+
+/**
+ * What a chat with a row of the daemon's model registry has to name in its handshake.
+ *
+ * Both halves are the session's own property rather than the stream's: one stream may open a
+ * session for a different assistant next time, and each assistant runs its tools somewhere else.
+ */
+export interface RegistryChatSession {
+  /** Which registry row this session speaks as — a model, or an assistant. */
+  readonly target: ModelSessionTarget;
+  /**
+   * The workspace an assistant's tools run in, on the daemon serving the chat. `""` for a chat that
+   * runs no tools; the daemon refuses an empty workspace for a tool-bearing assistant rather than
+   * choosing one on the operator's behalf.
+   */
+  readonly cwd: string;
+}
+
+/**
+ * The ACP session itself, over a client the caller already holds.
+ *
+ * {@link useAcpSession} builds that client from a room plus a participant identity, which is what a
+ * session presenter needs. A caller that addresses an agent through an existing daemon-level client
+ * (`useDaemonClientFor(AcpService, …)` — the models chat) hands it in directly instead.
+ *
+ * `peer`, when given, names the participant expected to serve the stream: a send is refused with a
+ * message rather than queued into a stream nobody is reading when that participant has left the
+ * room. Omit it when presence is not the caller's liveness signal — a daemon that answers RPC over
+ * the common room is, by definition, in it.
+ *
+ * `registry`, when given, rides the `new_session` handshake. A session-hosted ACP stream needs none
+ * — the agent *is* that session's workflow. The daemon-hosted surface serves every model and
+ * assistant in one registry, so it has to be told which one this session speaks as, and where an
+ * assistant's tools may run.
+ */
+export function useAcpSessionOverClient(
+  client: Client<typeof AcpService> | null,
+  resumeSessionId?: string,
+  peer?: { room: Room | null; identity: string },
+  registry?: RegistryChatSession,
+): UseAgentChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [elicitations, setElicitations] = useState<ElicitationPoint[]>([]);
   const elicitationsRef = useRef<ElicitationPoint[]>([]);
@@ -84,6 +130,11 @@ export function useAcpSession(
   const systemKeyRef = useRef(0);
   // Distinct key space for user turns replayed by the agent on resume (vs. locally-echoed prompts).
   const replayedUserKeyRef = useRef(0);
+  // Where each announced tool call's bubble sits, and the title it was announced under, by
+  // `tool_call_id`. The `tool_call_update` that reports how a call ended carries neither position
+  // nor, usually, a title — so without this it could only become a second, contextless entry.
+  // Mirrors `acpReplayProjection`'s `toolIndexById`.
+  const toolEntriesRef = useRef(new Map<string, { index: number; title: string }>());
 
   // --- Streaming agent-output merge (identical to useAgentChat's appendAgentChunk) ---------------
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -144,6 +195,41 @@ export function useAcpSession(
     setMessages(messagesRef.current.slice());
   };
 
+  /**
+   * A `tool_call_update`: how a tool call the agent already announced ended, and what it produced.
+   *
+   * The call's own bubble becomes a tool entry carrying that status and result. Until this arrives,
+   * a call that ran, one still running and one that failed all read identically — the announcement
+   * alone says only that the agent asked for it.
+   */
+  const applyToolCallUpdate = (call: ToolCallUpdate) => {
+    const id = call.toolCallId?.value ?? "";
+    const announced = id ? toolEntriesRef.current.get(id) : undefined;
+    const title = call.fields?.title ?? announced?.title ?? "";
+    const entry: ChatMessage = {
+      // An update for a call nobody announced still gets an entry: it happened, and dropping it
+      // would leave a tool the agent ran invisible.
+      key: announced ? messagesRef.current[announced.index].key : `system-${systemKeyRef.current++}`,
+      text: toolEntryText(title, call.fields?.rawOutput),
+      from: "tool",
+      at: Date.now(),
+      toolStatus: toolStatusOf(call.fields?.status),
+      ...(id ? { toolCallId: id } : {}),
+    };
+    if (announced) {
+      messagesRef.current[announced.index] = entry;
+    } else {
+      messagesRef.current.push(entry);
+    }
+    if (id) {
+      toolEntriesRef.current.set(id, {
+        index: announced?.index ?? messagesRef.current.length - 1,
+        title,
+      });
+    }
+    setMessages(messagesRef.current.slice());
+  };
+
   useEffect(() => {
     setMessages([]);
     setElicitations([]);
@@ -156,6 +242,7 @@ export function useAcpSession(
     sentIndexRef.current = 0;
     systemKeyRef.current = 0;
     replayedUserKeyRef.current = 0;
+    toolEntriesRef.current = new Map();
     nextIdRef.current = 3n;
     // Resuming a known session: stamp outbound prompts with its id up front (before any server
     // response), so a prompt sent before the load round-trips still targets the right session.
@@ -183,10 +270,16 @@ export function useAcpSession(
             id: 2n,
             msg: { case: "loadSession", value: { sessionId: { value: resumeSessionId }, cwd: "" } },
           })
-        : create(AcpClientMessageSchema, { id: 2n, msg: { case: "newSession", value: { cwd: "" } } }),
+        : create(AcpClientMessageSchema, {
+            id: 2n,
+            msg: {
+              case: "newSession",
+              value: { cwd: registry?.cwd ?? "", modelTarget: registry?.target },
+            },
+          }),
     );
 
-    dbg("opening AcpService.Session (server identity=%o)", serverIdentity);
+    dbg("opening AcpService.Session (peer identity=%o)", peer?.identity ?? "");
     (async () => {
       try {
         for await (const m of client.session(queue)) {
@@ -217,7 +310,16 @@ export function useAcpSession(
                   setMessages(messagesRef.current.slice());
                 }
               } else if (update?.case === "toolCall") {
-                // Tool calls (real + one-shot activity/system log lines) → "activity" bubble.
+                // Tool calls (real + one-shot activity/system log lines) → "activity" bubble. Its
+                // position is remembered so the `tool_call_update` reporting the call's result
+                // refines this same bubble rather than appending a second one.
+                const toolCallId = update.value.toolCallId?.value ?? "";
+                if (toolCallId) {
+                  toolEntriesRef.current.set(toolCallId, {
+                    index: messagesRef.current.length,
+                    title: update.value.title,
+                  });
+                }
                 messagesRef.current.push({
                   key: `system-${systemKeyRef.current++}`,
                   text: update.value.title,
@@ -225,6 +327,8 @@ export function useAcpSession(
                   at: Date.now(),
                 });
                 setMessages(messagesRef.current.slice());
+              } else if (update?.case === "toolCallUpdate") {
+                applyToolCallUpdate(update.value);
               } else if (update?.case === "userMessageChunk") {
                 // A user turn replayed by the agent on resume. `sendPrompt` already echoes a
                 // locally-sent prompt as a "user" bubble, so on the LIVE path the agent's
@@ -245,7 +349,7 @@ export function useAcpSession(
                   }
                 }
               }
-              // toolCallUpdate / plan carry no additional bubble; ignored on purpose.
+              // `plan` carries no additional bubble; ignored on purpose.
               break;
             }
             case "requestPermission": {
@@ -304,14 +408,14 @@ export function useAcpSession(
         queueRef.current = null;
       }
     };
-  }, [client, resumeSessionId]);
+  }, [client, resumeSessionId, registry]);
 
   const canSend = (): boolean => {
     if (!queueRef.current) {
       setSendError("Message not sent — no connection to the presenter yet.");
       return false;
     }
-    if (room && !room.remoteParticipants.has(serverIdentity)) {
+    if (peer?.room && !peer.room.remoteParticipants.has(peer.identity)) {
       setSendError("Message not sent — the presenter is not connected.");
       return false;
     }

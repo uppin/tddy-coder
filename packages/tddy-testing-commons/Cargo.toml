@@ -29,6 +29,9 @@ tokio = { version = "1", features = [
 ] }
 tokio-stream = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# stub_http_routed: asserting on the JSON bodies a provider client sends. Already a workspace-wide
+# dependency, so no new crate enters the tree.
+serde_json = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

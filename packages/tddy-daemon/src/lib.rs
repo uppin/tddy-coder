@@ -25,6 +25,7 @@ pub mod host_stats;
 pub mod livekit_peer_discovery;
 pub mod livekit_rooms_stream;
 pub mod local_socket_server;
+pub mod model_registry;
 pub mod multi_host;
 mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
