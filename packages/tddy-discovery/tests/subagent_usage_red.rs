@@ -38,6 +38,7 @@ fn final_answer_with_usage(
 fn a_local_config(base_url: &str) -> SubagentConfig {
     SubagentConfig {
         base_url: base_url.to_string(),
+        api_key: None,
         model: "microsoft/FastContext-1.0-4B-RL".to_string(),
         max_turns: 6,
         access: CodebaseAccess::Local,

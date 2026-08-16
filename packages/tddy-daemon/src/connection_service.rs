@@ -2614,6 +2614,34 @@ impl ConnectionServiceImpl {
         Ok(defs)
     }
 
+    /// The def a session started as `agent` must actually be built from, for `caller`.
+    ///
+    /// Differs from [`Self::resolvable_agent_defs`] in one way that matters: a registry assistant's
+    /// def comes back carrying its provider's credential. The listing path deliberately does not —
+    /// `ListAgents` is answered for every operator, and a key has no business in it — but a session
+    /// started without one comes up "successfully" and 401s on every model call.
+    pub async fn agent_def_for_spawn(
+        &self,
+        agent: &str,
+        caller: &str,
+    ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        if let Some(registry) = &self.model_registry {
+            // The registry wins over a YAML def of the same name, the same way it does in
+            // `resolvable_agent_defs`.
+            if let Some(def) =
+                crate::model_registry::registry_agent_def_with_credential(registry, agent, caller)
+                    .await
+                    .map_err(Status::from)?
+            {
+                return Ok(Some(def));
+            }
+        }
+        let agents_dir = self.tddy_data_dir.join("agents");
+        Ok(tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
+            .into_iter()
+            .find(|d| d.name == agent))
+    }
+
     /// This daemon's registry assistants as agent defs. Empty when no registry is wired (a test
     /// fixture); a registry that is wired but unreadable is an error, never "no assistants" — a
     /// session started against a name that silently stopped resolving runs as something else.
@@ -5661,11 +5689,7 @@ impl ConnectionServiceImpl {
         let agent_trim = req.agent.trim();
         let agent_def = match agent_trim.is_empty() {
             true => None,
-            false => self
-                .resolvable_agent_defs()
-                .await?
-                .into_iter()
-                .find(|d| d.name == agent_trim),
+            false => self.agent_def_for_spawn(agent_trim, &github_user).await?,
         };
         if !agent_trim.is_empty() && agent_def.is_none() {
             let allowed = self.config.allowed_agents();
@@ -7116,10 +7140,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // this daemon defined still reaches the child as a def it can build a backend from.
         let resume_agent_def: Option<String> = match resume_agent.as_deref() {
             Some(name) => self
-                .resolvable_agent_defs()
+                .agent_def_for_spawn(name, &github_user)
                 .await?
-                .iter()
-                .find(|d| d.name == name)
+                .as_ref()
                 .map(serde_json::to_string)
                 .transpose()
                 .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?,

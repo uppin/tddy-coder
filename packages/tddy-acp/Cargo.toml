@@ -13,7 +13,10 @@ tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
 async-trait = "0.1"
 serde_json = "1"
+# provider_agent.rs: `Notify` is the per-turn cancel signal and `select!` is what makes a cancel
+# real — dropping the provider call's future cancels the in-flight HTTP request.
+tokio = { version = "1", features = ["sync", "macros"] }
 
 [dev-dependencies]
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }

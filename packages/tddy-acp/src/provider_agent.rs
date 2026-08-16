@@ -17,6 +17,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use agent_client_protocol as acp;
 use tddy_discovery::openai::{
@@ -47,6 +48,16 @@ const TEMPERATURE: f32 = 0.0;
 /// TODO: make it configurable per assistant, alongside the temperature above.
 const MAX_TOOL_ROUNDS_PER_TURN: usize = 10;
 
+/// How long the provider has to accept the connection before the turn fails.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long one completion has to come back, connection included.
+///
+/// A provider is a third-party endpoint: it can accept the connection and then say nothing at all.
+/// Without a deadline the chat stream waits forever, and a LiveKit-routed RPC that never returns
+/// never errors either — the operator sees a spinner rather than a failure.
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Everything the agent needs to reach one provider and speak as one model.
 #[derive(Debug, Clone)]
 pub struct ProviderAgentConfig {
@@ -58,6 +69,25 @@ pub struct ProviderAgentConfig {
     pub api_key: Option<String>,
     /// An assistant's system prompt; it leads every conversation this agent opens.
     pub system_prompt: Option<String>,
+    /// How long the provider has to accept the connection.
+    pub connect_timeout: Duration,
+    /// How long one completion has to come back.
+    pub request_timeout: Duration,
+}
+
+impl ProviderAgentConfig {
+    /// A config for `model` on `base_url` under the default transport budget, with no credential
+    /// and no system prompt. Both are set by assignment, so a caller that forgets one is visible.
+    pub fn speaking_to(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into(),
+            model: model.into(),
+            api_key: None,
+            system_prompt: None,
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+        }
+    }
 }
 
 /// One tool the dispatcher can run, in the shape the provider is told about it.
@@ -119,6 +149,9 @@ pub struct ProviderAcpAgent {
     client: OpenAiClient,
     /// Conversation history per open session.
     sessions: RefCell<HashMap<acp::SessionId, Vec<ChatMessage>>>,
+    /// The cancel signal of the turn currently running for a session — present only while one is
+    /// in flight, so a `cancel` that arrives between turns cannot end the next one.
+    in_flight: RefCell<HashMap<acp::SessionId, Rc<tokio::sync::Notify>>>,
     next_session: Cell<u64>,
 }
 
@@ -128,13 +161,16 @@ impl ProviderAcpAgent {
         tools: Rc<dyn ToolDispatcher>,
         sink: SessionUpdateSink,
     ) -> Self {
-        let client = OpenAiClient::new(config.base_url.clone()).api_key(config.api_key.clone());
+        let client = OpenAiClient::new(config.base_url.clone())
+            .api_key(config.api_key.clone())
+            .timeouts(config.connect_timeout, config.request_timeout);
         Self {
             config,
             tools,
             sink,
             client,
             sessions: RefCell::new(HashMap::new()),
+            in_flight: RefCell::new(HashMap::new()),
             next_session: Cell::new(0),
         }
     }
@@ -225,12 +261,37 @@ impl ProviderAcpAgent {
                     } else {
                         acp::ToolCallStatus::Completed
                     })
-                    .content(vec![acp::ToolCallContent::from(outcome.output.clone())]),
+                    .content(vec![acp::ToolCallContent::from(outcome.output.clone())])
+                    // Also as `raw_output`, because a client that mirrors ACP over protobuf carries
+                    // `raw_output` but not `content` — without this the call surfaces as
+                    // pending → completed with no result text at all.
+                    .raw_output(Some(tool_output_value(&outcome.output))),
             ),
         ));
 
         ChatMessage::tool_result(outcome.output, call.id.clone(), call.function.name.clone())
     }
+
+    /// The cancel signal for `session_id`'s in-flight turn, registered for the life of that turn.
+    fn begin_turn(&self, session_id: &acp::SessionId) -> Rc<tokio::sync::Notify> {
+        let signal = Rc::new(tokio::sync::Notify::new());
+        self.in_flight
+            .borrow_mut()
+            .insert(session_id.clone(), Rc::clone(&signal));
+        signal
+    }
+
+    /// Forget `session_id`'s cancel signal, so a later `cancel` cannot end a turn that is not
+    /// running.
+    fn end_turn(&self, session_id: &acp::SessionId) {
+        self.in_flight.borrow_mut().remove(session_id);
+    }
+}
+
+/// A tool's raw output as JSON. Tools answer with JSON text, so it is carried structured when it
+/// parses and as a JSON string when it does not — never dropped, and never a fabricated shape.
+fn tool_output_value(output: &str) -> serde_json::Value {
+    serde_json::from_str(output).unwrap_or_else(|_| serde_json::Value::String(output.to_string()))
 }
 
 #[async_trait::async_trait(?Send)]
@@ -278,12 +339,61 @@ impl acp::Agent for ProviderAcpAgent {
 
     async fn prompt(&self, args: acp::PromptRequest) -> Result<acp::PromptResponse, acp::Error> {
         let session_id = args.session_id;
-        self.push_message(&session_id, ChatMessage::user(prompt_text(&args.prompt)?))?;
+        let cancelled = self.begin_turn(&session_id);
+        let outcome = self.run_turn(&session_id, args.prompt, &cancelled).await;
+        self.end_turn(&session_id);
+        outcome
+    }
+
+    /// End the session's in-flight turn, if one is running.
+    ///
+    /// `cancel` is an ACP *notification*: the turn it interrupts is what reports the outcome, as
+    /// [`acp::StopReason::Cancelled`] on its own `prompt` response. A cancel that arrives when no
+    /// turn is running has nothing to interrupt, and a session that was never opened is a client
+    /// error rather than something to ignore.
+    async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
+        if !self.sessions.borrow().contains_key(&args.session_id) {
+            return Err(provider_error(format!(
+                "unknown session {}",
+                args.session_id
+            )));
+        }
+        if let Some(signal) = self.in_flight.borrow().get(&args.session_id) {
+            // `notify_waiters` deliberately stores no permit: a cancel with no turn in flight must
+            // not end the next prompt the operator sends.
+            signal.notify_waiters();
+        }
+        Ok(())
+    }
+}
+
+impl ProviderAcpAgent {
+    /// One prompt turn, abandoned as soon as `cancelled` fires.
+    ///
+    /// The `select!`s are what make cancellation real rather than advisory: dropping the provider
+    /// call's future cancels the HTTP request, and dropping the dispatch future stops the tool
+    /// loop before the next tool starts.
+    async fn run_turn(
+        &self,
+        session_id: &acp::SessionId,
+        prompt: Vec<acp::ContentBlock>,
+        cancelled: &tokio::sync::Notify,
+    ) -> Result<acp::PromptResponse, acp::Error> {
+        self.push_message(session_id, ChatMessage::user(prompt_text(&prompt)?))?;
         let tools = tool_definitions(&self.tools.tool_defs())?;
+
+        // Registered once, before the first await, so a cancel racing the first provider call is
+        // still observed by this turn.
+        let cancelled = cancelled.notified();
+        tokio::pin!(cancelled);
 
         let mut rounds_left = MAX_TOOL_ROUNDS_PER_TURN;
         loop {
-            let message = self.complete(&session_id, tools.clone()).await?;
+            let message = tokio::select! {
+                biased;
+                () = &mut cancelled => return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled)),
+                message = self.complete(session_id, tools.clone()) => message?,
+            };
 
             if let Some(text) = message.content.clone().filter(|t| !t.is_empty()) {
                 self.emit(acp::SessionUpdate::AgentMessageChunk(
@@ -294,7 +404,7 @@ impl acp::Agent for ProviderAcpAgent {
             let calls = message.tool_calls.clone().unwrap_or_default();
             // No tool calls — either absent, or the empty list Ollama sends for a plain turn.
             if calls.is_empty() {
-                self.push_message(&session_id, ChatMessage::assistant(message.content, None))?;
+                self.push_message(session_id, ChatMessage::assistant(message.content, None))?;
                 return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
             }
 
@@ -302,26 +412,24 @@ impl acp::Agent for ProviderAcpAgent {
                 // The unanswered tool calls are dropped from the history on purpose: a provider
                 // rejects an assistant tool-call message that no tool result follows, which would
                 // poison every later prompt in this session.
-                self.push_message(&session_id, ChatMessage::assistant(message.content, None))?;
+                self.push_message(session_id, ChatMessage::assistant(message.content, None))?;
                 return Ok(acp::PromptResponse::new(acp::StopReason::MaxTurnRequests));
             }
             rounds_left -= 1;
 
             self.push_message(
-                &session_id,
+                session_id,
                 ChatMessage::assistant(message.content, Some(calls.clone())),
             )?;
             for call in &calls {
-                let result = self.dispatch(call).await;
-                self.push_message(&session_id, result)?;
+                let result = tokio::select! {
+                    biased;
+                    () = &mut cancelled => return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled)),
+                    result = self.dispatch(call) => result,
+                };
+                self.push_message(session_id, result)?;
             }
         }
-    }
-
-    async fn cancel(&self, _args: acp::CancelNotification) -> Result<(), acp::Error> {
-        // TODO: abort the in-flight provider request and tool dispatch; today a turn already under
-        // way runs to completion and reports its own stop reason.
-        Ok(())
     }
 }
 

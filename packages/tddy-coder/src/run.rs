@@ -214,24 +214,31 @@ fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
 }
 
 /// Resolve the specialized-agent def set for `create_backend` — the builtins,
-/// `<tddyhome>/agents/*.yaml`, and the def the spawning daemon resolved for us (`--agent-def`), in
-/// that precedence order. See docs/ft/coder/specialized-subagents.md.
+/// `<tddyhome>/agents/*.yaml`, and the def the spawning daemon resolved for us
+/// (`--agent-def-path`), in that precedence order. See docs/ft/coder/specialized-subagents.md.
 ///
-/// A malformed `--agent-def` fails the run: dropping it would start the session as a different
-/// agent than the daemon validated, which is precisely what carrying the def exists to prevent.
+/// An unreadable or malformed `--agent-def-path` fails the run: dropping it would start the session
+/// as a different agent than the daemon validated, which is precisely what carrying the def exists
+/// to prevent.
 fn resolve_specialized_agent_defs(
     args: &Args,
 ) -> anyhow::Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>> {
     let mut defs =
         tddy_discovery::agent_def::resolve_agent_defs(&resolve_tddy_data_dir(args).join("agents"));
-    if let Some(json) = args
-        .agent_def
-        .as_deref()
-        .map(str::trim)
-        .filter(|j| !j.is_empty())
-    {
-        let def: tddy_discovery::agent_def::SpecializedAgentDef = serde_json::from_str(json)
-            .with_context(|| format!("--agent-def is not a valid agent def: {json}"))?;
+    if let Some(path) = args.agent_def_path.as_deref() {
+        // The def carries the provider credential, which is why it arrives in a `0600` file rather
+        // than on argv (`/proc/<pid>/cmdline` is world-readable). The path never appears in the
+        // error text of a parse failure for the same reason the JSON no longer appears on argv:
+        // this message reaches logs, and the file's contents are a secret.
+        let json = std::fs::read_to_string(path)
+            .with_context(|| format!("--agent-def-path could not be read: {}", path.display()))?;
+        let def: tddy_discovery::agent_def::SpecializedAgentDef = serde_json::from_str(&json)
+            .with_context(|| {
+                format!(
+                    "--agent-def-path does not hold a valid agent def: {}",
+                    path.display()
+                )
+            })?;
         match defs.iter_mut().find(|d| d.name == def.name) {
             Some(existing) => *existing = def,
             None => defs.push(def),
@@ -444,10 +451,12 @@ pub struct Args {
     pub log_level: Option<log::LevelFilter>,
     /// When `None`, the user did not pass `--agent` (interactive backend selection).
     pub agent: Option<String>,
-    /// The full `SpecializedAgentDef` for `agent`, as JSON (`--agent-def`). Set by `tddy-daemon`
-    /// when it resolved the name against a def source this process cannot read for itself — its
-    /// model-registry assistants — so `create_backend` sees the same def the daemon validated.
-    pub agent_def: Option<String>,
+    /// File holding the full `SpecializedAgentDef` for `agent`, as JSON (`--agent-def-path`). Set
+    /// by `tddy-daemon` when it resolved the name against a def source this process cannot read for
+    /// itself — its model-registry assistants — so `create_backend` sees the same def the daemon
+    /// validated. A path rather than the JSON itself because the def carries the provider
+    /// credential, and argv is world-readable.
+    pub agent_def_path: Option<PathBuf>,
     pub prompt: Option<String>,
     /// When Some(port), gRPC server runs alongside TUI on the given port.
     pub grpc: Option<u16>,
@@ -596,21 +605,23 @@ pub struct CoderArgs {
     pub log_level: Option<String>,
 
     /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, fastcontext, stub, or the name
-    /// of a specialized agent def (`<tddyhome>/agents/*.yaml`, `--agent-def`). Omit to choose
+    /// of a specialized agent def (`<tddyhome>/agents/*.yaml`, `--agent-def-path`). Omit to choose
     /// interactively at startup.
     ///
     /// Deliberately not a static `value_parser` allowlist: a def's name is only knowable once
-    /// `--tddy-data-dir` and `--agent-def` have been parsed, which is after clap would have to
+    /// `--tddy-data-dir` and `--agent-def-path` have been parsed, which is after clap would have to
     /// validate. `create_backend` refuses an unresolvable name instead, where the whole def set is
     /// known (docs/ft/coder/specialized-subagents.md AC14).
     #[arg(long)]
     pub agent: Option<String>,
 
-    /// The full `SpecializedAgentDef` for `--agent`, as JSON. Passed by `tddy-daemon` when it
-    /// resolved the name against its model registry — a def source this process cannot read — so
-    /// the session runs as the agent the daemon validated rather than as something else.
-    #[arg(long, value_name = "JSON")]
-    pub agent_def: Option<String>,
+    /// File holding the full `SpecializedAgentDef` for `--agent`, as JSON. Written `0600` by
+    /// `tddy-daemon` when it resolved the name against its model registry — a def source this
+    /// process cannot read — so the session runs as the agent the daemon validated rather than as
+    /// something else. A path, not the JSON: the def carries the provider credential, and argv is
+    /// world-readable through `/proc/<pid>/cmdline`.
+    #[arg(long, value_name = "PATH")]
+    pub agent_def_path: Option<PathBuf>,
 
     /// Feature description (alternative to stdin). When set, skips interactive/piped input.
     #[arg(long)]
@@ -986,7 +997,7 @@ impl From<CoderArgs> for Args {
             log: None,
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent,
-            agent_def: a.agent_def,
+            agent_def_path: a.agent_def_path,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -1045,7 +1056,7 @@ impl From<DemoArgs> for Args {
             log: None,
             log_level: parse_log_level(a.log_level.as_deref()),
             agent: a.agent.or(Some("stub".to_string())),
-            agent_def: None,
+            agent_def_path: None,
             prompt: a.prompt,
             grpc: a.grpc,
             session_id: a.session_id,
@@ -2598,7 +2609,10 @@ fn create_backend(
             "[tddy-coder] FastContext backend (from resolved def '{}'): url={base_url} model={model} max_turns={max_turns}",
             def.name
         );
-        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns);
+        // The def's credential travels with it: an assistant built on a cloud provider answers 401
+        // to every turn without one, while a local endpoint gets `None` and no header at all.
+        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns)
+            .api_key(def.api_key.clone());
         return Ok(SharedBackend::from_arc(Arc::new(fc)));
     }
     if agent == "fastcontext" {
@@ -2697,6 +2711,14 @@ mod create_backend_specialized_agent_tests {
     /// FastContext-shaped `<final_answer>` completion. Returns the `http://127.0.0.1:PORT` base
     /// url to hand to the backend under test.
     fn spawn_one_shot_final_answer_server(answer: &str) -> String {
+        spawn_one_shot_final_answer_server_recording_its_request(answer).0
+    }
+
+    /// [`spawn_one_shot_final_answer_server`], plus a channel carrying the raw request it received —
+    /// the only way to observe headers the backend attached rather than only the endpoint it dialled.
+    fn spawn_one_shot_final_answer_server_recording_its_request(
+        answer: &str,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
         let port = listener.local_addr().expect("local_addr").port();
         let body = serde_json::json!({
@@ -2709,13 +2731,15 @@ mod create_backend_specialized_agent_tests {
             }]
         })
         .to_string();
+        let (recorded, received) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let Ok((mut stream, _)) = listener.accept() else {
                 return;
             };
             // Drain the request (headers + body) so the client's write completes.
             let mut buf = [0u8; 8192];
-            let _ = stream.read(&mut buf);
+            let read = stream.read(&mut buf).unwrap_or(0);
+            let _ = recorded.send(String::from_utf8_lossy(&buf[..read]).into_owned());
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -2724,7 +2748,7 @@ mod create_backend_specialized_agent_tests {
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
         });
-        format!("http://127.0.0.1:{port}")
+        (format!("http://127.0.0.1:{port}"), received)
     }
 
     /// With no explicit `--fastcontext-url`/`--fastcontext-model` CLI override, `create_backend`
@@ -2741,6 +2765,7 @@ mod create_backend_specialized_agent_tests {
             label: None,
             model: "a-locally-served-model".to_string(),
             base_url: base_url.clone(),
+            api_key: None,
             system_prompt: None,
             system_prompt_path: None,
             tools: vec![],
@@ -2779,6 +2804,58 @@ mod create_backend_specialized_agent_tests {
         assert_eq!(result.unwrap().output, "src/lib.rs:1-1");
     }
 
+    /// The def a registry assistant projects onto carries its provider's credential. A backend
+    /// built from that def without the key reaches a cloud provider and 401s on every call, which
+    /// looks to the operator like a broken assistant rather than a missing header.
+    #[tokio::test]
+    async fn create_backend_authenticates_with_the_credential_the_resolved_def_carries() {
+        // Given — a def on a provider that requires a bearer token
+        let (base_url, received) =
+            spawn_one_shot_final_answer_server_recording_its_request("src/lib.rs:1-1");
+        let def = SpecializedAgentDef {
+            name: "repo-explorer".to_string(),
+            label: None,
+            model: "accounts/fireworks/models/kimi-k2".to_string(),
+            base_url,
+            api_key: Some("fw-live-secret".to_string()),
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![],
+            max_turns: 4,
+            replaces: vec![],
+        };
+
+        // When
+        create_backend(
+            "repo-explorer",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            std::slice::from_ref(&def),
+        )
+        .expect("the resolved def must build a backend")
+        .invoke(InvokeRequest {
+            prompt: "Where is the entry point?".to_string(),
+            ..InvokeRequest::default()
+        })
+        .await
+        .expect("the backend must reach the def's endpoint");
+
+        // Then
+        let request = received
+            .recv()
+            .expect("the endpoint must record the request");
+        assert!(
+            request.contains("authorization: Bearer fw-live-secret"),
+            "the def's credential must reach the provider; sent: {request}"
+        );
+    }
+
     /// AC14: `--agent <name>` must accept any name present in the resolved specialized-agent def
     /// set, not only the literal `"fastcontext"`. Today, a custom-named def (e.g. `my-explorer`)
     /// is not recognized at all — `create_backend` falls through to the default Claude backend
@@ -2791,6 +2868,7 @@ mod create_backend_specialized_agent_tests {
             label: None,
             model: "qwen2.5-coder:7b".to_string(),
             base_url: "http://127.0.0.1:1".to_string(),
+            api_key: None,
             system_prompt: None,
             system_prompt_path: None,
             tools: vec![],
@@ -2828,8 +2906,8 @@ mod create_backend_specialized_agent_tests {
 
 #[cfg(test)]
 mod agent_def_handover_tests {
-    //! `--agent-def`: the def a spawning `tddy-daemon` resolved for us, because the name came from
-    //! its model registry — a def source this process cannot read. Without the hand-over, the
+    //! `--agent-def-path`: the def a spawning `tddy-daemon` resolved for us, because the name came
+    //! from its model registry — a def source this process cannot read. Without the hand-over, the
     //! session would come up as a different agent.
     //!
     //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md (AC9).
@@ -2838,13 +2916,14 @@ mod agent_def_handover_tests {
     use tddy_core::backend::CodingBackend;
     use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 
-    /// The def a registry assistant projects onto.
+    /// The def a registry assistant projects onto, carrying its provider's credential.
     fn a_repo_explorer_def() -> SpecializedAgentDef {
         SpecializedAgentDef {
             name: "repo-explorer".to_string(),
             label: Some("Repo explorer".to_string()),
             model: "qwen3:32b".to_string(),
             base_url: "http://127.0.0.1:11434".to_string(),
+            api_key: Some("fw-live-secret".to_string()),
             system_prompt: Some("You explore repositories.".to_string()),
             system_prompt_path: None,
             tools: vec![SubagentTool::Read, SubagentTool::Grep],
@@ -2853,11 +2932,21 @@ mod agent_def_handover_tests {
         }
     }
 
-    /// Args naming an empty `<tddyhome>` (so only the builtins resolve) plus `--agent-def`.
-    fn args_carrying(agent_def: Option<String>, tddy_data_dir: &std::path::Path) -> Args {
+    /// A def hand-over file holding `json`, as the daemon writes one.
+    fn a_handed_over_def_file(dir: &std::path::Path, json: &str) -> std::path::PathBuf {
+        let path = dir.join("agent-def.json");
+        std::fs::write(&path, json).expect("write the handed-over def");
+        path
+    }
+
+    /// Args naming an empty `<tddyhome>` (so only the builtins resolve) plus `--agent-def-path`.
+    fn args_carrying(
+        agent_def_path: Option<std::path::PathBuf>,
+        tddy_data_dir: &std::path::Path,
+    ) -> Args {
         Args {
             agent: Some("repo-explorer".to_string()),
-            agent_def,
+            agent_def_path,
             tddy_data_dir: Some(tddy_data_dir.to_path_buf()),
             ..an_empty_args()
         }
@@ -2875,7 +2964,11 @@ mod agent_def_handover_tests {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
         let def = a_repo_explorer_def();
-        let args = args_carrying(Some(serde_json::to_string(&def).unwrap()), tddy_home.path());
+        let path = a_handed_over_def_file(
+            tddy_home.path(),
+            &serde_json::to_string(&def).expect("serialize the def"),
+        );
+        let args = args_carrying(Some(path), tddy_home.path());
 
         // When
         let defs = resolve_specialized_agent_defs(&args).expect("the carried def must resolve");
@@ -2889,11 +2982,48 @@ mod agent_def_handover_tests {
     }
 
     #[test]
+    fn a_carried_def_keeps_the_provider_credential_it_was_written_with() {
+        // Given — the field that decides whether every model call 401s
+        let tddy_home = tempfile::tempdir().unwrap();
+        let path = a_handed_over_def_file(
+            tddy_home.path(),
+            &serde_json::to_string(&a_repo_explorer_def()).expect("serialize the def"),
+        );
+        let args = args_carrying(Some(path), tddy_home.path());
+
+        // When
+        let defs = resolve_specialized_agent_defs(&args).expect("the carried def must resolve");
+
+        // Then
+        assert_eq!(defs[1].api_key.as_deref(), Some("fw-live-secret"));
+    }
+
+    #[test]
     fn a_malformed_carried_def_fails_the_run() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
+        let path = a_handed_over_def_file(tddy_home.path(), "{\"name\":\"repo-explorer\"}");
+        let args = args_carrying(Some(path), tddy_home.path());
+
+        // When
+        let error = resolve_specialized_agent_defs(&args)
+            .expect_err("a def that cannot be read must not be dropped");
+
+        // Then
+        assert!(
+            error
+                .to_string()
+                .contains("--agent-def-path does not hold a valid agent def"),
+            "the failure must name the flag that could not be read; got: {error}"
+        );
+    }
+
+    #[test]
+    fn a_carried_def_that_is_not_there_fails_the_run() {
+        // Given — the daemon named a file this process cannot read
+        let tddy_home = tempfile::tempdir().unwrap();
         let args = args_carrying(
-            Some("{\"name\":\"repo-explorer\"}".to_string()),
+            Some(tddy_home.path().join("agent-def.json")),
             tddy_home.path(),
         );
 
@@ -2905,8 +3035,27 @@ mod agent_def_handover_tests {
         assert!(
             error
                 .to_string()
-                .contains("--agent-def is not a valid agent def"),
+                .contains("--agent-def-path could not be read"),
             "the failure must name the flag that could not be read; got: {error}"
+        );
+    }
+
+    #[test]
+    fn the_credential_a_def_carries_is_kept_out_of_its_debug_form() {
+        // Given — a def is logged whole in several places
+        let def = a_repo_explorer_def();
+
+        // When
+        let printed = format!("{def:?}");
+
+        // Then
+        assert!(
+            !printed.contains("fw-live-secret"),
+            "the credential leaked into a log-shaped rendering: {printed}"
+        );
+        assert!(
+            printed.contains("api_key: Some(\"<redacted>\")"),
+            "the reader must still see that there *is* a credential: {printed}"
         );
     }
 
@@ -4286,7 +4435,7 @@ mod resume_session_config_tests {
             log: None,
             log_level: None,
             agent: None,
-            agent_def: None,
+            agent_def_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4361,7 +4510,7 @@ mod resume_session_identity_tests {
             log: None,
             log_level: None,
             agent: Some("claude".to_string()),
-            agent_def: None,
+            agent_def_path: None,
             prompt: None,
             grpc: None,
             session_id: None,
@@ -4437,7 +4586,7 @@ mod session_dir_sync_tests {
             log: None,
             log_level: None,
             agent: Some("claude".to_string()),
-            agent_def: None,
+            agent_def_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4529,7 +4678,7 @@ mod changeset_agent_resume_tests {
             log: None,
             log_level: None,
             agent: Some("claude".to_string()),
-            agent_def: None,
+            agent_def_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(sid.to_string()),
@@ -4638,7 +4787,7 @@ mod post_tui_workflow_exit_tests {
             log: None,
             log_level: None,
             agent: None,
-            agent_def: None,
+            agent_def_path: None,
             prompt: None,
             grpc: None,
             session_id: Some(session_id.to_string()),

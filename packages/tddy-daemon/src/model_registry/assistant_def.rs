@@ -17,6 +17,10 @@ const DEFAULT_MAX_TURNS: u32 = 10;
 /// `provider` must be that provider: pairing an assistant with a different row would silently
 /// point the def's `base_url` at an endpoint the assistant was never built for, so a mismatch is
 /// [`ModelRegistryError::NotFound`] rather than a def nobody would notice was wrong.
+///
+/// The def carries **no credential** — the provider row's key belongs to whoever asked, and this
+/// function is not told who that is. Use [`registry_agent_def_with_credential`] on the path that
+/// actually starts a session; listing paths (`ListAgents`) deliberately keep the keyless def.
 pub fn assistant_to_agent_def(
     assistant: &AssistantEntry,
     provider: &ProviderEntry,
@@ -42,6 +46,7 @@ pub fn assistant_to_agent_def(
         label: non_empty(&assistant.label),
         model: assistant.model_id.clone(),
         base_url: provider.base_url.clone(),
+        api_key: None,
         system_prompt: non_empty(&assistant.system_prompt),
         system_prompt_path: None,
         tools,
@@ -78,6 +83,30 @@ pub async fn registry_agent_defs(
             assistant_to_agent_def(assistant, provider)
         })
         .collect()
+}
+
+/// The agent def for the registry assistant named `name`, carrying the credential of the provider
+/// it is built on — read on `caller`'s behalf, exactly as the chat path reads it.
+///
+/// `None` when this registry has no assistant of that name (the name is a YAML def, a builtin, or
+/// nothing at all — none of which is this function's business).
+///
+/// Without the credential the session starts "successfully" and every model call 401s, which is
+/// indistinguishable from a broken assistant. An assistant built on *another operator's* provider
+/// is refused here rather than started keyless, on the same rule the chat path applies.
+pub async fn registry_agent_def_with_credential(
+    store: &ModelRegistryStore,
+    name: &str,
+    caller: &str,
+) -> Result<Option<SpecializedAgentDef>, ModelRegistryError> {
+    let assistants = store.list_assistants().await?;
+    let Some(assistant) = assistants.iter().find(|a| a.name == name) else {
+        return Ok(None);
+    };
+    let provider = store.provider(&assistant.provider_id).await?;
+    let mut def = assistant_to_agent_def(assistant, &provider)?;
+    def.api_key = store.credential_for(&assistant.provider_id, caller).await?;
+    Ok(Some(def))
 }
 
 /// A proto string field carries "" for absent; the def's optional fields carry `None`.

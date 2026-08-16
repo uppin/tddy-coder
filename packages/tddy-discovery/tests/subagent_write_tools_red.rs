@@ -209,6 +209,7 @@ fn a_def_with_tools(name: &str, base_url: &str, tools: Vec<SubagentTool>) -> Spe
         label: None,
         model: "some-model".to_string(),
         base_url: base_url.to_string(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools,
@@ -220,6 +221,7 @@ fn a_def_with_tools(name: &str, base_url: &str, tools: Vec<SubagentTool>) -> Spe
 fn managed_config(access: CodebaseAccess) -> SubagentConfig {
     SubagentConfig {
         base_url: String::new(),
+        api_key: None,
         model: String::new(),
         max_turns: 0,
         access,

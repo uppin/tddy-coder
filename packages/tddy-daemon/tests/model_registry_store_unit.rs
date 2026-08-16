@@ -8,8 +8,10 @@
 //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
 
 use tddy_daemon::model_registry::{
-    assistant_to_agent_def, capabilities_to_labels, truncate_provider_detail, ModelRegistryError,
+    assistant_to_agent_def, capabilities_to_labels, registry_agent_def_with_credential,
+    reported_capabilities_to_labels, truncate_provider_detail, ModelRegistryError,
     ModelRegistryStore, NewAssistant, NewProvider, MAX_PROVIDER_DETAIL_BYTES,
+    MAX_SYSTEM_PROMPT_BYTES,
 };
 use tddy_discovery::agent_def::SubagentTool;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState, ProviderEntry, ProviderKind};
@@ -553,6 +555,71 @@ async fn refuses_an_assistant_naming_a_tool_outside_the_exec_catalog() {
 }
 
 // ---------------------------------------------------------------------------
+// The credential an assistant's session is started with
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn hands_a_registry_assistants_def_the_credential_of_the_provider_it_is_built_on() {
+    // Given an assistant on a provider that authenticates
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_credentialed_cloud_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    store
+        .create_assistant(an_assistant(&provider.provider_id), AN_OPERATOR)
+        .await
+        .expect("create the assistant");
+
+    // When the owner starts a session as it
+    let def = registry_agent_def_with_credential(&store, "repo-reader", AN_OPERATOR)
+        .await
+        .expect("resolve the def")
+        .expect("the registry defines this agent");
+
+    // Then — without the key every model call 401s, and the session looks merely broken
+    assert_eq!(def.api_key.as_deref(), Some("fw-secret-key"));
+    assert_eq!(def.base_url, "https://api.fireworks.ai/inference");
+}
+
+#[tokio::test]
+async fn refuses_another_operator_a_def_built_on_a_provider_that_is_not_theirs() {
+    // Given an assistant on the first operator's credentialed provider
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_credentialed_cloud_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    store
+        .create_assistant(an_assistant(&provider.provider_id), AN_OPERATOR)
+        .await
+        .expect("create the assistant");
+
+    // When a colleague starts a session as it
+    let result = registry_agent_def_with_credential(&store, "repo-reader", ANOTHER_OPERATOR).await;
+
+    // Then it is refused rather than started against her endpoint with no key at all
+    assert!(
+        matches!(result, Err(ModelRegistryError::PermissionDenied(_))),
+        "expected a permission refusal, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn resolves_no_def_for_a_name_this_registry_never_defined() {
+    // Given a registry with no assistants
+    let (_dir, store) = a_store().await;
+
+    // When
+    let def = registry_agent_def_with_credential(&store, "claude", AN_OPERATOR)
+        .await
+        .expect("resolve the def");
+
+    // Then — a name the registry does not define is not this function's to answer for
+    assert!(def.is_none(), "expected no def, got {def:?}");
+}
+
+// ---------------------------------------------------------------------------
 // Capability labels
 // ---------------------------------------------------------------------------
 
@@ -600,6 +667,36 @@ fn labels_a_model_reporting_only_capabilities_it_does_not_recognise_as_unknown()
     let labels = capabilities_to_labels(&["teleportation".to_string()]);
 
     // Then
+    assert_eq!(labels, vec!["unknown".to_string()]);
+}
+
+#[test]
+fn labels_a_listing_the_provider_called_chat_capable_as_an_llm() {
+    // Given the per-model flags a Fireworks `/v1/models` entry carries
+    // When
+    let labels = reported_capabilities_to_labels(Some(true), Some(true), Some(false));
+
+    // Then — the web offers Chat on a positive `llm` label and nothing less
+    assert_eq!(labels, vec!["llm".to_string(), "tools".to_string()]);
+}
+
+#[test]
+fn labels_a_listing_the_provider_said_nothing_about_as_unknown() {
+    // Given an OpenAI `/v1/models` entry, which reports no capabilities at all
+    // When
+    let labels = reported_capabilities_to_labels(None, None, None);
+
+    // Then — silence is not a chat model
+    assert_eq!(labels, vec!["unknown".to_string()]);
+}
+
+#[test]
+fn labels_a_listing_the_provider_called_not_chat_capable_as_unknown() {
+    // Given a listing that says what the model is *not* — an embedding model, in practice
+    // When
+    let labels = reported_capabilities_to_labels(Some(false), Some(false), Some(false));
+
+    // Then — nothing here says what it is, so nothing is claimed
     assert_eq!(labels, vec!["unknown".to_string()]);
 }
 
@@ -1289,4 +1386,84 @@ async fn refuses_an_assistant_with_no_model_id() {
         matches!(result, Err(ModelRegistryError::InvalidName(_))),
         "expected InvalidName, got {result:?}"
     );
+}
+
+#[tokio::test]
+async fn refuses_a_system_prompt_past_the_size_a_response_can_carry() {
+    // Given a prompt one byte over the ceiling
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let with_an_enormous_prompt = NewAssistant {
+        system_prompt: "y".repeat(MAX_SYSTEM_PROMPT_BYTES + 1),
+        ..an_assistant(&provider.provider_id)
+    };
+
+    // When
+    let result = store
+        .create_assistant(with_an_enormous_prompt, AN_OPERATOR)
+        .await;
+
+    // Then — it rides every `ListAssistants`, every spawn and every provider turn, so it is bounded
+    // where it is written rather than wherever it first fails to fit
+    assert!(
+        matches!(result, Err(ModelRegistryError::InvalidName(_))),
+        "expected InvalidName, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn refuses_an_edit_that_grows_a_system_prompt_past_that_same_ceiling() {
+    // Given an assistant created with a prompt well under the ceiling
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let assistant = store
+        .create_assistant(an_assistant(&provider.provider_id), AN_OPERATOR)
+        .await
+        .expect("create the assistant");
+
+    // When it is edited past it
+    let result = store
+        .update_assistant(
+            &assistant.assistant_id,
+            "Repo Reader",
+            &"y".repeat(MAX_SYSTEM_PROMPT_BYTES + 1),
+            &["Read".to_string()],
+            AN_OPERATOR,
+        )
+        .await;
+
+    // Then — a limit only the create path enforces is one an operator gets past by editing
+    assert!(
+        matches!(result, Err(ModelRegistryError::InvalidName(_))),
+        "expected InvalidName, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn accepts_a_system_prompt_that_exactly_fills_the_ceiling() {
+    // Given a prompt of exactly the maximum size
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let at_the_ceiling = NewAssistant {
+        system_prompt: "y".repeat(MAX_SYSTEM_PROMPT_BYTES),
+        ..an_assistant(&provider.provider_id)
+    };
+
+    // When
+    let assistant = store
+        .create_assistant(at_the_ceiling, AN_OPERATOR)
+        .await
+        .expect("a prompt at the ceiling is allowed");
+
+    // Then
+    assert_eq!(assistant.system_prompt.len(), MAX_SYSTEM_PROMPT_BYTES);
 }

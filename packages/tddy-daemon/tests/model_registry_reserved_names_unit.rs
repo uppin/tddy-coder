@@ -99,7 +99,7 @@ async fn a_coding_backend_id_is_refused() {
     // Then
     assert_eq!(
         outcome,
-        Err("already exists: 'cursor' is a coding backend".to_string())
+        Err("invalid name: 'cursor' is a coding backend".to_string())
     );
 }
 
@@ -116,7 +116,7 @@ async fn an_allowed_agents_config_id_is_refused() {
     // Then
     assert_eq!(
         outcome,
-        Err("already exists: 'house-agent' is listed in this daemon's allowed_agents".to_string())
+        Err("invalid name: 'house-agent' is listed in this daemon's allowed_agents".to_string())
     );
 }
 
@@ -133,7 +133,31 @@ async fn a_builtin_agent_def_name_is_refused() {
     // Then
     assert_eq!(
         outcome,
-        Err("already exists: 'fastcontext' is a coding backend".to_string())
+        Err("invalid name: 'fastcontext' is a coding backend".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_second_assistant_of_the_same_name_is_a_duplicate_not_a_reserved_name() {
+    // Given an assistant already holding the name
+    let registry = a_registry_reserving(&[]).await;
+    registry
+        .when_creating_an_assistant_named("repo-explorer")
+        .await
+        .expect("the first assistant must be created");
+
+    // When another is created under it
+    let outcome = registry
+        .when_creating_an_assistant_named("repo-explorer")
+        .await;
+
+    // Then it is `already exists` — there is a row to delete, unlike a name this daemon reserves
+    assert!(
+        outcome
+            .as_ref()
+            .expect_err("a duplicate name must be refused")
+            .starts_with("already exists: an assistant named 'repo-explorer' already exists"),
+        "got: {outcome:?}"
     );
 }
 

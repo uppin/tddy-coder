@@ -459,6 +459,7 @@ impl ModelRegistryStore {
                 "an assistant needs a model id".to_string(),
             ));
         }
+        reject_an_oversized_system_prompt(&assistant.system_prompt)?;
 
         let mut tx = self.pool.begin_with(BEGIN_WRITE).await?;
         self.reject_taken_name(&mut tx, &assistant.name).await?;
@@ -562,6 +563,9 @@ impl ModelRegistryStore {
         caller: &str,
     ) -> Result<AssistantEntry, ModelRegistryError> {
         let tools = validate_tools(tools)?;
+        // Bounded on update as well as on create: a limit only one of the two write paths enforces
+        // is a limit an operator gets past by creating a small assistant and then editing it.
+        reject_an_oversized_system_prompt(system_prompt)?;
         let mut tx = self.pool.begin_with(BEGIN_WRITE).await?;
         authorize(
             assistant_owner(&mut tx, assistant_id).await?,
@@ -623,18 +627,22 @@ impl ModelRegistryStore {
                  `--agent` would never match it"
             )));
         }
+        // These three are reserved names, not duplicate rows: nothing in the registry is being
+        // collided with, the name simply already means something else on this daemon. `InvalidName`
+        // is what that is — `AlreadyExists` would tell a caller to go and delete the assistant that
+        // is in the way, and there is no such assistant.
         if tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS.contains(&name) {
-            return Err(ModelRegistryError::AlreadyExists(format!(
+            return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is a coding backend"
             )));
         }
         if builtin_agent_defs().iter().any(|def| def.name == name) {
-            return Err(ModelRegistryError::AlreadyExists(format!(
+            return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is a builtin agent"
             )));
         }
         if self.reserved_agent_ids.iter().any(|id| id == name) {
-            return Err(ModelRegistryError::AlreadyExists(format!(
+            return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is listed in this daemon's allowed_agents"
             )));
         }
@@ -650,6 +658,28 @@ impl ModelRegistryStore {
             None => Ok(()),
         }
     }
+}
+
+/// How long an assistant's system prompt may be.
+///
+/// The prompt is unbounded nowhere else: it is stored on the row, returned by *every*
+/// `ListAssistants`, travels with the def to every spawned session, and is re-sent to the provider
+/// on every turn of every conversation. A `ListAssistants` response past ~60 KB is chunk-framed
+/// over LiveKit, where one lost frame wedges the call with no error at all (see
+/// [`super::error::MAX_PROVIDER_DETAIL_BYTES`]), so a handful of assistants at this ceiling still
+/// fits in one frame. 8 KiB is roughly two thousand tokens of instructions — far more than any
+/// system prompt this screen exists to write.
+pub const MAX_SYSTEM_PROMPT_BYTES: usize = 8 * 1024;
+
+/// Refuse a system prompt past [`MAX_SYSTEM_PROMPT_BYTES`], saying by how much.
+fn reject_an_oversized_system_prompt(system_prompt: &str) -> Result<(), ModelRegistryError> {
+    if system_prompt.len() > MAX_SYSTEM_PROMPT_BYTES {
+        return Err(ModelRegistryError::InvalidName(format!(
+            "a system prompt may be at most {MAX_SYSTEM_PROMPT_BYTES} bytes; this one is {}",
+            system_prompt.len()
+        )));
+    }
+    Ok(())
 }
 
 /// Everyone reads; only the row's owner writes, or reads its credential.

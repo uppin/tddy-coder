@@ -23,6 +23,10 @@ pub enum ModelRegistryError {
     /// A base URL this daemon must not be pointed at (a scheme it does not speak, or credentials
     /// embedded in the URL).
     InvalidBaseUrl(String),
+    /// The directory a chat asked to run its tools in is not a usable one: empty, relative, or not
+    /// a directory on this host. Distinct from [`Self::PermissionDenied`], which is the answer for
+    /// a real directory the caller may not reach.
+    InvalidWorkspace(String),
     /// The row belongs to another operator: everyone reads the registry, only the owner writes.
     PermissionDenied(String),
     /// The provider endpoint itself failed (unreachable, non-2xx, unparseable payload).
@@ -70,6 +74,7 @@ impl std::fmt::Display for ModelRegistryError {
             ModelRegistryError::UnknownTool(m) => write!(f, "unknown tool: {m}"),
             ModelRegistryError::InvalidName(m) => write!(f, "invalid name: {m}"),
             ModelRegistryError::InvalidBaseUrl(m) => write!(f, "invalid base url: {m}"),
+            ModelRegistryError::InvalidWorkspace(m) => write!(f, "invalid workspace: {m}"),
             ModelRegistryError::PermissionDenied(m) => write!(f, "permission denied: {m}"),
             ModelRegistryError::Provider(m) => write!(f, "{m}"),
             ModelRegistryError::UnsupportedOperation(m) => write!(f, "{m}"),
@@ -109,6 +114,7 @@ impl From<ModelRegistryError> for Status {
             }
             ModelRegistryError::InvalidName(m) => Status::invalid_argument(m),
             ModelRegistryError::InvalidBaseUrl(m) => Status::invalid_argument(m),
+            ModelRegistryError::InvalidWorkspace(m) => Status::invalid_argument(m),
             // Reads are fleet-wide; writes, and the credential, belong to the row's owner.
             ModelRegistryError::PermissionDenied(m) => Status::permission_denied(m),
             // The provider endpoint, not this daemon, is what failed — say so verbatim so the

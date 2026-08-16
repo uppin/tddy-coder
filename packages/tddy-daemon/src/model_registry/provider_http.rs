@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use super::error::ModelRegistryError;
+use super::error::{truncate_provider_detail, ModelRegistryError};
 
 /// How long a provider has to accept the connection.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -68,4 +68,37 @@ impl ProviderHttp {
             ))),
         }
     }
+}
+
+/// Read a provider response, turning a non-2xx status or an unparseable body into a
+/// [`ModelRegistryError::Provider`] naming the endpoint — never into a default value.
+///
+/// Lives here rather than beside one client because every provider client needs exactly this: a
+/// second copy is how the two drifted, with only one of them truncating a hostile error page.
+pub async fn decode<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    url: &str,
+) -> Result<T, ModelRegistryError> {
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| ModelRegistryError::Provider(format!("{url}: reading the response: {e}")))?;
+    if !status.is_success() {
+        // The body is the provider's, not ours: an error page can be hundreds of kilobytes, and
+        // this message is persisted on the provider row and returned by every `ListProviders`.
+        return Err(ModelRegistryError::Provider(format!(
+            "{url}: HTTP {}: {}",
+            status.as_u16(),
+            truncate_provider_detail(&body)
+        )));
+    }
+    serde_json::from_str(&body)
+        .map_err(|e| ModelRegistryError::Provider(format!("{url}: unexpected response ({e})")))
+}
+
+/// A provider endpoint that could not be reached at all (DNS, connect, or the transport budget
+/// above running out).
+pub fn unreachable(url: &str, error: reqwest::Error) -> ModelRegistryError {
+    ModelRegistryError::Provider(format!("{error}: {url}"))
 }

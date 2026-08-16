@@ -39,8 +39,10 @@ use tddy_task::TaskRegistry;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::error::ModelRegistryError;
+use super::provider_http::ProviderHttp;
 use super::store::ModelRegistryStore;
 use super::tool_dispatcher::EngineToolDispatcher;
+use super::workspace::{resolve_chat_workspace, ChatWorkspaceRoots};
 use crate::task_service::SessionUserResolver;
 
 /// Outbound frames for one stream. Unbounded because the agent's update sink is a plain `Fn` with
@@ -52,6 +54,8 @@ pub struct ModelAcpService {
     store: Arc<ModelRegistryStore>,
     tasks: TaskRegistry,
     user_resolver: SessionUserResolver,
+    workspace_roots: ChatWorkspaceRoots,
+    http_config: ProviderHttp,
 }
 
 impl ModelAcpService {
@@ -59,12 +63,23 @@ impl ModelAcpService {
         store: Arc<ModelRegistryStore>,
         tasks: TaskRegistry,
         user_resolver: SessionUserResolver,
+        workspace_roots: ChatWorkspaceRoots,
     ) -> Self {
         Self {
             store,
             tasks,
             user_resolver,
+            workspace_roots,
+            http_config: ProviderHttp::default(),
         }
+    }
+
+    /// Talk to providers under a different transport budget than [`ProviderHttp::default`] — the
+    /// same knob [`super::ollama::OllamaProviderClient::with_http_config`] offers, so a chat and an
+    /// enumeration against the same host are configured the same way.
+    pub fn with_http_config(mut self, http_config: ProviderHttp) -> Self {
+        self.http_config = http_config;
+        self
     }
 }
 
@@ -78,9 +93,13 @@ impl AcpServiceTrait for ModelAcpService {
     ) -> Result<Response<Self::SessionStream>, Status> {
         let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
         let inbound = request.into_inner();
-        let store = Arc::clone(&self.store);
-        let tasks = self.tasks.clone();
-        let user_resolver = Arc::clone(&self.user_resolver);
+        let context = StreamContext {
+            store: Arc::clone(&self.store),
+            tasks: self.tasks.clone(),
+            user_resolver: Arc::clone(&self.user_resolver),
+            workspace_roots: Arc::clone(&self.workspace_roots),
+            http_config: self.http_config,
+        };
 
         std::thread::Builder::new()
             .name("tddy-model-acp".to_string())
@@ -98,10 +117,7 @@ impl AcpServiceTrait for ModelAcpService {
                     }
                 };
                 let local = tokio::task::LocalSet::new();
-                local.block_on(
-                    &runtime,
-                    serve_stream(inbound, out_tx, store, tasks, user_resolver),
-                );
+                local.block_on(&runtime, serve_stream(inbound, out_tx, context));
             })
             .map_err(|e| Status::internal(format!("could not start the model chat thread: {e}")))?;
 
@@ -109,23 +125,55 @@ impl AcpServiceTrait for ModelAcpService {
     }
 }
 
+/// Everything one stream's conversation is served from. A struct rather than seven arguments
+/// because every one of them is cloned per stream and passed on together.
+struct StreamContext {
+    store: Arc<ModelRegistryStore>,
+    tasks: TaskRegistry,
+    user_resolver: SessionUserResolver,
+    workspace_roots: ChatWorkspaceRoots,
+    http_config: ProviderHttp,
+}
+
 /// The whole ACP conversation for one stream, on the thread that owns the agent.
 async fn serve_stream(
     mut inbound: Streaming<AcpClientMessage>,
     out: OutboundSender,
-    store: Arc<ModelRegistryStore>,
-    tasks: TaskRegistry,
-    user_resolver: SessionUserResolver,
+    context: StreamContext,
 ) {
     // The ACP session handle, set by `new_session`; every session update is stamped with it.
     let session_id = Rc::new(RefCell::new(String::new()));
     // What this stream's tool calls are attributed to in the daemon's task registry. Distinct from
     // the ACP handle, which is only unique within one agent, and known before the first frame.
     let chat_id = format!("model-chat-{}", uuid::Uuid::now_v7());
-    let mut agent: Option<ProviderAcpAgent> = None;
+    let mut agent: Option<Rc<ProviderAcpAgent>> = None;
+    // The last frame an error can be attributed to. A transport failure carries no id of its own,
+    // and answering `0` would look to a client like a reply to a request it never sent.
+    let mut last_id = 0u64;
+    // The turn currently running, if any. Turns are serialized — the conversation is one history —
+    // but a turn runs *off* this loop so a `cancel` frame is read while it is still going.
+    let mut in_flight: Option<tokio::task::JoinHandle<()>> = None;
 
-    while let Some(Ok(message)) = inbound.next().await {
+    loop {
+        let message = match inbound.next().await {
+            Some(Ok(message)) => message,
+            // The stream simply ended — the client hung up, which is not a failure. A turn still
+            // running answers first: dropping `out` here would truncate its transcript.
+            None => return await_in_flight(in_flight).await,
+            // A transport failure. Without a frame the client sees the stream end cleanly and
+            // reports the conversation as finished, so say what happened before going.
+            Some(Err(status)) => {
+                await_in_flight(in_flight).await;
+                let _ = out.send(Ok(error_message(
+                    last_id,
+                    AcpErrorCode::Internal,
+                    format!("the chat stream failed: {status}"),
+                )));
+                return;
+            }
+        };
         let id = message.id;
+        last_id = id;
         let reply = match message.msg {
             Some(acp_client_message::Msg::Initialize(_)) => Ok(initialize_response(id)),
             Some(acp_client_message::Msg::Authenticate(_)) => Ok(AcpAgentMessage {
@@ -135,19 +183,10 @@ async fn serve_stream(
                 )),
             }),
             Some(acp_client_message::Msg::NewSession(request)) => {
-                match open_session(
-                    request,
-                    &out,
-                    Rc::clone(&session_id),
-                    &chat_id,
-                    &store,
-                    &tasks,
-                    &user_resolver,
-                )
-                .await
+                match open_session(request, &out, Rc::clone(&session_id), &chat_id, &context).await
                 {
                     Ok((opened, response)) => {
-                        agent = Some(opened);
+                        agent = Some(Rc::new(opened));
                         Ok(AcpAgentMessage {
                             id,
                             msg: Some(acp_agent_message::Msg::NewSession(response)),
@@ -156,71 +195,133 @@ async fn serve_stream(
                     Err(e) => Err(e),
                 }
             }
-            Some(acp_client_message::Msg::LoadSession(_)) => Err(
+            Some(acp_client_message::Msg::LoadSession(_)) => Err(AcpFailure::new(
                 // Nothing is persisted here: a chat with a model is a conversation held for the
                 // life of the stream, so "resume session 5" has no answer to give.
-                "this daemon's model chat keeps no resumable sessions; open a new one".to_string(),
-            ),
-            Some(acp_client_message::Msg::Prompt(request)) => match agent.as_ref() {
+                AcpErrorCode::UnsupportedOperation,
+                "this daemon's model chat keeps no resumable sessions; open a new one",
+            )),
+            Some(acp_client_message::Msg::Prompt(request)) => match agent.clone() {
+                Some(agent) => {
+                    // One history, so one turn at a time: a prompt sent before the previous turn
+                    // answered waits for it rather than interleaving into the same conversation.
+                    await_in_flight(in_flight.take()).await;
+                    let sid = session_id.borrow().clone();
+                    // The turn runs as its own task so a `cancel` frame arriving mid-turn is read
+                    // from the stream instead of queueing behind the very turn it must interrupt.
+                    in_flight = Some(tokio::task::spawn_local(run_prompt(
+                        agent,
+                        request,
+                        id,
+                        sid,
+                        out.clone(),
+                    )));
+                    continue;
+                }
+                None => Err(AcpFailure::new(
+                    AcpErrorCode::InvalidParams,
+                    "prompt arrived before new_session named a model",
+                )),
+            },
+            Some(acp_client_message::Msg::Cancel(_)) => match agent.as_ref() {
                 Some(agent) => {
                     let sid = session_id.borrow().clone();
-                    prompt(agent, request, id, &sid).await
-                }
-                None => Err("prompt arrived before new_session named a model".to_string()),
-            },
-            Some(acp_client_message::Msg::Cancel(_)) => {
-                if let Some(agent) = agent.as_ref() {
-                    let sid = session_id.borrow().clone();
-                    let _ = agent
+                    match agent
                         .cancel(acp::CancelNotification::new(acp::SessionId::new(sid)))
-                        .await;
+                        .await
+                    {
+                        // ACP `cancel` is a notification: the interrupted turn's own response is
+                        // what reports `Cancelled`, so a successful cancel answers nothing here.
+                        Ok(()) => continue,
+                        Err(e) => Err(AcpFailure::new(
+                            AcpErrorCode::Internal,
+                            e.message.to_string(),
+                        )),
+                    }
                 }
-                continue;
-            }
+                None => Err(AcpFailure::new(
+                    AcpErrorCode::InvalidParams,
+                    "cancel arrived before new_session opened anything to cancel",
+                )),
+            },
             // Permission replies have no meaning here: this agent never asks for permission.
             Some(acp_client_message::Msg::RequestPermission(_)) | None => continue,
         };
 
-        let frame = reply.unwrap_or_else(|message| error_message(id, message));
+        let frame =
+            reply.unwrap_or_else(|failure| error_message(id, failure.code, failure.message));
         if out.send(Ok(frame)).is_err() {
             return;
         }
     }
 }
 
+/// Wait for a running turn to finish, if there is one. A turn that panicked has already lost its
+/// reply; the stream carries on rather than taking the panic with it.
+async fn await_in_flight(in_flight: Option<tokio::task::JoinHandle<()>>) {
+    if let Some(task) = in_flight {
+        if let Err(e) = task.await {
+            log::error!(
+                target: "tddy_daemon::model_registry",
+                "a model chat turn ended abnormally: {e}"
+            );
+        }
+    }
+}
+
+/// One turn, answered on the stream it came in on.
+async fn run_prompt(
+    agent: Rc<ProviderAcpAgent>,
+    request: tddy_service::proto::acp::PromptRequest,
+    id: u64,
+    session_id: String,
+    out: OutboundSender,
+) {
+    let frame = match prompt(&agent, request, id, &session_id).await {
+        Ok(frame) => frame,
+        Err(failure) => error_message(id, failure.code, failure.message),
+    };
+    let _ = out.send(Ok(frame));
+}
+
 /// Build the agent the stream will speak through, from the target the client named.
-#[allow(clippy::too_many_arguments)] // one stream's whole context; a struct would only rename it
 async fn open_session(
     request: NewSessionRequest,
     out: &OutboundSender,
     session_id: Rc<RefCell<String>>,
     chat_id: &str,
-    store: &ModelRegistryStore,
-    tasks: &TaskRegistry,
-    user_resolver: &SessionUserResolver,
-) -> Result<(ProviderAcpAgent, NewSessionResponse), String> {
-    let target = request
-        .model_target
-        .ok_or_else(|| "new_session carried no model_target; this surface serves the registry, so it has to be told which model to speak as".to_string())?;
+    context: &StreamContext,
+) -> Result<(ProviderAcpAgent, NewSessionResponse), AcpFailure> {
+    let target = request.model_target.ok_or_else(|| {
+        AcpFailure::new(
+            AcpErrorCode::InvalidParams,
+            "new_session carried no model_target; this surface serves the registry, so it has to \
+             be told which model to speak as",
+        )
+    })?;
     // The operator this chat is held as. The provider's credential is read on their behalf, so a
     // chat opened against a colleague's provider is refused by `credential_for` rather than run
     // against their endpoint with no key at all.
-    let Some(caller) = (user_resolver)(&target.session_token) else {
-        return Err("invalid or expired session token".to_string());
+    let Some(caller) = (context.user_resolver)(&target.session_token) else {
+        return Err(AcpFailure::new(
+            AcpErrorCode::AuthRequired,
+            "invalid or expired session token",
+        ));
     };
 
-    let resolved = resolve_target(&target, store, &caller)
-        .await
-        .map_err(|e| e.to_string())?;
-    let workspace = PathBuf::from(request.cwd.trim());
-    if !resolved.tools.is_empty() && workspace.as_os_str().is_empty() {
-        return Err(format!(
-            "assistant '{}' has tools, so new_session needs a cwd to run them in",
-            resolved.model
-        ));
-    }
-    let dispatcher = EngineToolDispatcher::new(&resolved.tools, workspace, tasks.clone(), chat_id)
-        .map_err(|e| e.to_string())?;
+    let resolved = resolve_target(&target, &context.store, &caller).await?;
+    // A tool-less chat runs nothing, so it needs no directory to run it in — that is the model
+    // chat the Models table opens, and it sends no cwd at all. An assistant *with* tools names one,
+    // and it is resolved against this caller's own roots before a tool exists to use it.
+    let workspace = match resolved.tools.is_empty() {
+        true => PathBuf::new(),
+        false => {
+            let roots = (context.workspace_roots)(&target.session_token)?;
+            resolve_chat_workspace(&request.cwd, &roots)?
+        }
+    };
+    let dispatcher =
+        EngineToolDispatcher::new(&resolved.tools, workspace, context.tasks.clone(), chat_id)?;
 
     let sink_session_id = Rc::clone(&session_id);
     let sink_out = out.clone();
@@ -230,6 +331,11 @@ async fn open_session(
             model: resolved.model.clone(),
             api_key: resolved.api_key,
             system_prompt: resolved.system_prompt,
+            // The chat pays the same transport budget as the enumeration that listed the model:
+            // a provider that accepts the connection and then says nothing fails the turn instead
+            // of wedging the stream.
+            connect_timeout: context.http_config.connect_timeout,
+            request_timeout: context.http_config.request_timeout,
         },
         Rc::new(dispatcher),
         Box::new(move |update| {
@@ -245,7 +351,7 @@ async fn open_session(
     let opened = agent
         .new_session(acp::NewSessionRequest::new(std::path::PathBuf::from("/")))
         .await
-        .map_err(|e| e.message.to_string())?;
+        .map_err(|e| AcpFailure::new(AcpErrorCode::Internal, e.message.to_string()))?;
     *session_id.borrow_mut() = opened.session_id.0.to_string();
 
     Ok((
@@ -274,7 +380,7 @@ async fn prompt(
     request: tddy_service::proto::acp::PromptRequest,
     id: u64,
     session_id: &str,
-) -> Result<AcpAgentMessage, String> {
+) -> Result<AcpAgentMessage, AcpFailure> {
     let text = prompt_text(&request.prompt);
     let response = agent
         .prompt(acp::PromptRequest::new(
@@ -282,7 +388,7 @@ async fn prompt(
             vec![acp::ContentBlock::from(text)],
         ))
         .await
-        .map_err(|e| e.message.to_string())?;
+        .map_err(|e| AcpFailure::new(AcpErrorCode::Internal, e.message.to_string()))?;
     Ok(prompt_response(
         id,
         to_proto_stop_reason(response.stop_reason),
@@ -304,7 +410,7 @@ async fn resolve_target(
     target: &ModelSessionTarget,
     store: &ModelRegistryStore,
     caller: &str,
-) -> Result<ResolvedTarget, ModelRegistryError> {
+) -> Result<ResolvedTarget, AcpFailure> {
     if !target.assistant_id.is_empty() {
         let assistant = store.assistant(&target.assistant_id).await?;
         let provider = store.provider(&assistant.provider_id).await?;
@@ -319,8 +425,9 @@ async fn resolve_target(
     }
 
     if target.model_id.is_empty() {
-        return Err(ModelRegistryError::NotFound(
-            "model_target named neither an assistant nor a model".to_string(),
+        return Err(AcpFailure::new(
+            AcpErrorCode::InvalidParams,
+            "model_target named neither an assistant nor a model",
         ));
     }
     let provider = store.provider(&target.provider_id).await?;
@@ -453,11 +560,96 @@ fn initialize_response(id: u64) -> AcpAgentMessage {
     }
 }
 
-fn error_message(id: u64, message: String) -> AcpAgentMessage {
+// ---------------------------------------------------------------------------
+// The error taxonomy, as JSON-RPC codes
+// ---------------------------------------------------------------------------
+
+/// What this surface answers a refusal with.
+///
+/// Everything used to arrive as `-32603` (internal error), which told the chat pane only "something
+/// broke" — "you may not touch that operator's provider", "there is no such model" and "this daemon
+/// cannot speak that API" were indistinguishable. The first three are JSON-RPC's own codes; the
+/// rest are server-defined (`-32000`..`-32099`), which is the block the spec reserves for exactly
+/// this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpErrorCode {
+    /// The request could not be acted on as sent (JSON-RPC `invalid params`).
+    InvalidParams,
+    /// This daemon failed (JSON-RPC `internal error`).
+    Internal,
+    /// The session token is missing, invalid or expired. `acp::ErrorCode::AuthRequired`.
+    AuthRequired,
+    /// The row exists and belongs to somebody else.
+    PermissionDenied,
+    /// No such provider, model or assistant on this daemon.
+    NotFound,
+    /// The operation has no meaning here (residency on a cloud provider; resuming a chat).
+    UnsupportedOperation,
+    /// The *provider* endpoint failed — not this daemon.
+    ProviderUnavailable,
+}
+
+impl AcpErrorCode {
+    /// The wire value. Fixed numbers rather than derived ones: a client matches on them.
+    fn as_i64(self) -> i64 {
+        match self {
+            AcpErrorCode::InvalidParams => -32602,
+            AcpErrorCode::Internal => -32603,
+            AcpErrorCode::AuthRequired => -32000,
+            AcpErrorCode::PermissionDenied => -32001,
+            AcpErrorCode::NotFound => -32002,
+            AcpErrorCode::UnsupportedOperation => -32003,
+            AcpErrorCode::ProviderUnavailable => -32004,
+        }
+    }
+}
+
+/// A refusal on its way to an `AcpError` frame: what went wrong, and which kind of wrong it is.
+pub struct AcpFailure {
+    code: AcpErrorCode,
+    message: String,
+}
+
+impl AcpFailure {
+    fn new(code: AcpErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<ModelRegistryError> for AcpFailure {
+    fn from(e: ModelRegistryError) -> Self {
+        let code = match &e {
+            ModelRegistryError::Storage(inner) => {
+                // The only place the sqlx detail is allowed to go: the host's log, never a frame.
+                log::error!(
+                    target: "tddy_daemon::model_registry",
+                    "model registry storage failed: {inner}"
+                );
+                AcpErrorCode::Internal
+            }
+            ModelRegistryError::AlreadyExists(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::NotFound(_) => AcpErrorCode::NotFound,
+            ModelRegistryError::InUse(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::UnknownTool(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::InvalidName(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::InvalidBaseUrl(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::InvalidWorkspace(_) => AcpErrorCode::InvalidParams,
+            ModelRegistryError::PermissionDenied(_) => AcpErrorCode::PermissionDenied,
+            ModelRegistryError::Provider(_) => AcpErrorCode::ProviderUnavailable,
+            ModelRegistryError::UnsupportedOperation(_) => AcpErrorCode::UnsupportedOperation,
+        };
+        AcpFailure::new(code, e.to_string())
+    }
+}
+
+fn error_message(id: u64, code: AcpErrorCode, message: String) -> AcpAgentMessage {
     AcpAgentMessage {
         id,
         msg: Some(acp_agent_message::Msg::Error(AcpError {
-            code: -32603, // JSON-RPC internal error, mirroring `acp::Error::internal_error()`
+            code: code.as_i64(),
             message,
             data: None,
         })),

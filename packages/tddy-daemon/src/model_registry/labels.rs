@@ -31,6 +31,34 @@ pub fn capabilities_to_labels(capabilities: &[String]) -> Vec<String> {
     labels
 }
 
+/// Derive a model's labels from the per-model capability flags an OpenAI-compatible `/v1/models`
+/// listing reported for it.
+///
+/// Each argument is `None` when the provider said nothing about that capability — which is the
+/// usual case: only some OpenAI-compatible providers (Fireworks) report per-model flags, while
+/// OpenAI's own listing carries no capability information at all. A model no flag was reported
+/// *true* for is `"unknown"`, exactly as [`capabilities_to_labels`] treats an unrecognised token:
+/// "we could not tell" is not "it is a chat model".
+///
+/// `supports_chat: Some(false)` is an answer, not silence — the model is still `"unknown"` rather
+/// than labelled, because nothing here says what it *is*, only what it is not.
+pub fn reported_capabilities_to_labels(
+    supports_chat: Option<bool>,
+    supports_tools: Option<bool>,
+    supports_image_input: Option<bool>,
+) -> Vec<String> {
+    let reported = [
+        (supports_chat, "completion"),
+        (supports_tools, "tools"),
+        (supports_image_input, "vision"),
+    ]
+    .into_iter()
+    .filter(|(supported, _)| *supported == Some(true))
+    .map(|(_, capability)| capability.to_string())
+    .collect::<Vec<_>>();
+    capabilities_to_labels(&reported)
+}
+
 /// The label one provider capability token maps to, or `None` when the token is outside the
 /// vocabulary (a newer provider capability we have no badge for).
 fn label_for(capability: &str) -> Option<&'static str> {

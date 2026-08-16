@@ -60,6 +60,7 @@ fn a_def(name: &str, base_url: &str) -> SpecializedAgentDef {
         label: None,
         model: "some-model".to_string(),
         base_url: base_url.to_string(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
@@ -71,6 +72,7 @@ fn a_def(name: &str, base_url: &str) -> SpecializedAgentDef {
 fn empty_access_config() -> SubagentConfig {
     SubagentConfig {
         base_url: String::new(),
+        api_key: None,
         model: String::new(),
         max_turns: 0,
         access: CodebaseAccess::Local,
@@ -115,6 +117,44 @@ async fn registry_from_defs_creates_a_session_using_the_matching_defs_model_and_
         server_a.received_requests().await.unwrap().len(),
         0,
         "agent-a's server must not receive a request when the caller asked for agent-b"
+    );
+}
+
+/// A def's `api_key` (when set) authenticates every call it makes. Without it, a def on a cloud
+/// provider resolves and starts and then 401s on every turn — which looks like a broken subagent
+/// rather than a missing header.
+#[tokio::test]
+async fn a_defs_api_key_authenticates_every_call_the_session_makes() {
+    // Given a def on a provider that requires a bearer token
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_response("x.rs:1-1")))
+        .mount(&server)
+        .await;
+    let mut def = a_def("cloud-agent", &server.uri());
+    def.api_key = Some("fw-live-secret".to_string());
+    let registry = SubagentRegistry::from_defs(vec![def]);
+    let mut session = registry
+        .create("cloud-agent", empty_access_config())
+        .expect("registry must resolve the registered def");
+
+    // When
+    session
+        .prompt("Where is the entry point?")
+        .await
+        .expect("prompt must succeed");
+
+    // Then
+    let sent = server.received_requests().await.expect("recorded requests");
+    assert_eq!(
+        sent[0]
+            .headers
+            .get("authorization")
+            .expect("the request must carry an Authorization header")
+            .to_str()
+            .expect("an ascii Authorization header"),
+        "Bearer fw-live-secret"
     );
 }
 

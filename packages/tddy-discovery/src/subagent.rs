@@ -526,6 +526,9 @@ pub fn resolve_replaced_tools_for_defs(
 pub struct SubagentConfig {
     pub base_url: String,
     pub model: String,
+    /// Bearer token for `base_url`, for an endpoint that requires one. A local endpoint (Ollama,
+    /// vLLM) needs none, and `None` sends no `Authorization` header at all.
+    pub api_key: Option<String>,
     pub max_turns: u32,
     pub access: CodebaseAccess,
 }
@@ -688,11 +691,12 @@ impl FastContextSession {
     pub fn new(
         base_url: impl Into<String>,
         model: impl Into<String>,
+        api_key: Option<String>,
         max_turns: u32,
         access: CodebaseAccess,
     ) -> Self {
         Self {
-            client: OpenAiClient::new(base_url),
+            client: OpenAiClient::new(base_url).api_key(api_key),
             model: model.into(),
             max_turns,
             access,
@@ -865,6 +869,7 @@ impl SpecializedSubagentSession {
     pub fn new(
         base_url: impl Into<String>,
         model: impl Into<String>,
+        api_key: Option<String>,
         max_turns: u32,
         access: CodebaseAccess,
         system_prompt: Option<String>,
@@ -875,7 +880,7 @@ impl SpecializedSubagentSession {
             messages.push(ChatMessage::system(prompt));
         }
         Self {
-            client: OpenAiClient::new(base_url),
+            client: OpenAiClient::new(base_url).api_key(api_key),
             model: model.into(),
             max_turns,
             access,
@@ -1020,6 +1025,7 @@ impl SubagentRegistry {
                 Box::new(FastContextSession::new(
                     config.base_url,
                     config.model,
+                    config.api_key,
                     config.max_turns,
                     config.access,
                 ))
@@ -1058,6 +1064,7 @@ impl SubagentRegistry {
             return Ok(Box::new(SpecializedSubagentSession::new(
                 def.base_url.clone(),
                 def.model.clone(),
+                def.api_key.clone(),
                 def.max_turns,
                 config.access,
                 def.system_prompt.clone(),

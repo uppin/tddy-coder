@@ -33,7 +33,9 @@ pub use sandbox_fixtures::{
     CONNECT_PROBE_TUNNEL_OK, EGRESS_PROBE_DIRECT_DENIED, EGRESS_PROBE_SESSION_CHANNEL_OK,
 };
 pub use sandbox_session_channel::SandboxSessionChannelHost;
-pub use stub_http::{a_stub_http_endpoint_answering_ok, StubHttpEndpoint};
+pub use stub_http::{
+    a_stub_http_endpoint_answering_ok, a_stub_http_endpoint_that_never_answers, StubHttpEndpoint,
+};
 pub use stub_http_routed::{
     a_stub_http_endpoint_replying_in_sequence, a_stub_http_endpoint_routing, RecordedRequest,
     RoutedStubHttpEndpoint,

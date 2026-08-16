@@ -407,8 +407,10 @@ pub struct SpawnOptions<'a> {
     pub agent: Option<&'a str>,
     /// The already-resolved `SpecializedAgentDef` for `agent`, as JSON, when this daemon resolved
     /// the name against a source the child cannot read for itself — its registry assistants.
-    /// Passed as `--agent-def <json>`; without it a registry-defined agent would reach the child as
-    /// a name it cannot resolve.
+    /// Without it a registry-defined agent would reach the child as a name it cannot resolve.
+    ///
+    /// It does **not** travel on argv: see [`write_agent_def_file`]. The child is passed
+    /// `--agent-def-path <file>`.
     pub agent_def_json: Option<&'a str>,
     pub mouse: bool,
     /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
@@ -860,6 +862,69 @@ pub struct SessionChildPlan {
     logs: ChildProcessLogFiles,
 }
 
+/// The file a session's resolved agent def is handed over in, inside that session's own directory.
+#[cfg(unix)]
+pub const AGENT_DEF_FILENAME: &str = "agent-def.json";
+
+/// Write the resolved agent def where the child can read it, and nobody else can.
+///
+/// **Why a file and not `--agent-def <json>`.** The def now carries the provider credential, and
+/// argv is world-readable: any account on the host can `cat /proc/<pid>/cmdline` for the whole life
+/// of the session. A `0600` file in the session's own directory is readable by the account the
+/// child runs as and by root, which is the same reach the session's other secrets already have. It
+/// also removes a latent `E2BIG`: `system_prompt` rides the def, and argv has a hard kernel limit
+/// that a JSON blob is a plausible way to reach.
+///
+/// The file is chowned to the target account when the child runs as somebody else — a `0600` file
+/// the daemon owns would otherwise be unreadable by the very process it is written for. A chown
+/// this process is not privileged enough to perform fails the spawn rather than falling back to
+/// looser permissions.
+#[cfg(unix)]
+fn write_agent_def_file(
+    session_dir: &Path,
+    def_json: &str,
+    target: &TargetAccount,
+) -> anyhow::Result<PathBuf> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+
+    std::fs::create_dir_all(session_dir).map_err(|e| {
+        anyhow::anyhow!(
+            "failed to create session dir {}: {}",
+            session_dir.display(),
+            e
+        )
+    })?;
+    let path = session_dir.join(AGENT_DEF_FILENAME);
+    // `mode` applies only when the file is created, so an existing file (a resumed session) is
+    // re-permissioned explicitly below rather than trusted to be what a previous run left.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|e| anyhow::anyhow!("failed to write agent def {}: {}", path.display(), e))?;
+    file.write_all(def_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to write agent def {}: {}", path.display(), e))?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| anyhow::anyhow!("failed to secure agent def {}: {}", path.display(), e))?;
+
+    if !target.is_this_process() {
+        let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+            .map_err(|e| anyhow::anyhow!("agent def path is not a C string: {}", e))?;
+        if unsafe { libc::chown(c_path.as_ptr(), target.uid, target.gid) } != 0 {
+            return Err(anyhow::anyhow!(
+                "failed to give {} to uid {}: {}",
+                path.display(),
+                target.uid,
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(path)
+}
+
 /// One `--flag value` pair of a child's argv.
 fn push_flag(args: &mut Vec<String>, name: &str, value: &str) {
     args.push(name.to_string());
@@ -973,7 +1038,12 @@ pub fn plan_session_child(
     if let Some(def) = opts.agent_def_json {
         let def = def.trim();
         if !def.is_empty() {
-            push_flag(&mut args, "--agent-def", def);
+            let session_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+                &resolved_tddy_data_dir,
+                &session_id,
+            );
+            let path = write_agent_def_file(&session_dir, def, &target)?;
+            push_flag(&mut args, "--agent-def-path", &path.display().to_string());
         }
     }
 

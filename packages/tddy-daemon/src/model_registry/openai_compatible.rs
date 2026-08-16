@@ -11,10 +11,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState};
 
-use super::error::{truncate_provider_detail, ModelRegistryError};
-use super::labels::UNDETERMINABLE_LABEL;
+use super::error::ModelRegistryError;
+use super::labels::reported_capabilities_to_labels;
 use super::provider_client::ProviderClient;
-use super::provider_http::ProviderHttp;
+use super::provider_http::{decode, unreachable, ProviderHttp};
 
 /// The `anthropic-version` every Anthropic API request must carry; the API refuses a request
 /// without one rather than assuming the newest.
@@ -35,6 +35,7 @@ pub struct OpenAiCompatibleProviderClient {
     daemon_instance_id: String,
     api_key: Option<String>,
     credential_style: CredentialStyle,
+    http_config: ProviderHttp,
     http: reqwest::Client,
 }
 
@@ -62,14 +63,23 @@ impl OpenAiCompatibleProviderClient {
         api_key: Option<String>,
         credential_style: CredentialStyle,
     ) -> Self {
+        let http_config = ProviderHttp::default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             provider_id: provider_id.to_string(),
             daemon_instance_id: daemon_instance_id.to_string(),
             api_key,
             credential_style,
-            http: ProviderHttp::default().client(),
+            http: http_config.client(),
+            http_config,
         }
+    }
+
+    /// Talk to this provider under a different transport budget than [`ProviderHttp::default`].
+    pub fn with_http_config(mut self, http_config: ProviderHttp) -> Self {
+        self.http = http_config.client();
+        self.http_config = http_config;
+        self
     }
 
     /// The request with this provider's credential presented the way that provider expects it.
@@ -101,45 +111,9 @@ impl OpenAiCompatibleProviderClient {
 impl ProviderClient for OpenAiCompatibleProviderClient {
     async fn list_models(&self) -> Result<Vec<ModelEntry>, ModelRegistryError> {
         let url = format!("{}/v1/models", self.base_url);
-        let response = self
-            .authorized(self.http.get(&url))
-            .send()
+        self.http_config
+            .within_enumeration_budget(&self.base_url, self.enumerate(&url))
             .await
-            .map_err(|e| ModelRegistryError::Provider(format!("{e}: {url}")))?;
-
-        let status = response.status();
-        let body = response.text().await.map_err(|e| {
-            ModelRegistryError::Provider(format!("{url}: reading the response: {e}"))
-        })?;
-        if !status.is_success() {
-            // Truncated because this message is persisted on the provider row and returned by
-            // every `ListProviders`; a cloud provider's error page is not a few bytes.
-            return Err(ModelRegistryError::Provider(format!(
-                "{url}: HTTP {}: {}",
-                status.as_u16(),
-                truncate_provider_detail(&body)
-            )));
-        }
-        let listing: ModelsResponse = serde_json::from_str(&body).map_err(|e| {
-            ModelRegistryError::Provider(format!("{url}: unexpected response ({e})"))
-        })?;
-
-        Ok(listing
-            .data
-            .into_iter()
-            .map(|entry| ModelEntry {
-                model_id: entry.id.clone(),
-                provider_id: self.provider_id.clone(),
-                label: entry.id,
-                // `/v1/models` reports no capabilities, so there is nothing to derive a label
-                // from. TODO: derive labels per provider kind once a kind-specific metadata
-                // endpoint is wired (Fireworks and OpenAI both expose one).
-                labels: vec![UNDETERMINABLE_LABEL.to_string()],
-                load_state: ModelLoadState::Unsupported as i32,
-                daemon_instance_id: self.daemon_instance_id.clone(),
-                size_bytes: 0,
-            })
-            .collect())
     }
 
     async fn load_state(&self, _model_id: &str) -> Result<ModelLoadState, ModelRegistryError> {
@@ -155,13 +129,56 @@ impl ProviderClient for OpenAiCompatibleProviderClient {
     }
 }
 
+impl OpenAiCompatibleProviderClient {
+    /// The provider's catalog, each entry labelled from whatever that entry itself reports.
+    async fn enumerate(&self, url: &str) -> Result<Vec<ModelEntry>, ModelRegistryError> {
+        let response = self
+            .authorized(self.http.get(url))
+            .send()
+            .await
+            .map_err(|e| unreachable(url, e))?;
+        let listing: ModelsResponse = decode(response, url).await?;
+
+        Ok(listing
+            .data
+            .into_iter()
+            .map(|entry| ModelEntry {
+                model_id: entry.id.clone(),
+                provider_id: self.provider_id.clone(),
+                label: entry.id,
+                labels: reported_capabilities_to_labels(
+                    entry.supports_chat,
+                    entry.supports_tools,
+                    entry.supports_image_input,
+                ),
+                load_state: ModelLoadState::Unsupported as i32,
+                daemon_instance_id: self.daemon_instance_id.clone(),
+                size_bytes: 0,
+            })
+            .collect())
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
     #[serde(default)]
     data: Vec<ModelListing>,
 }
 
+/// One `/v1/models` entry.
+///
+/// The three capability flags are optional because only some providers report them: Fireworks
+/// answers `supports_chat` / `supports_tools` / `supports_image_input` per model, while OpenAI's
+/// own `/v1/models` entry carries nothing but `id`, `created` and `owned_by`. Absent means "this
+/// provider did not say", which [`reported_capabilities_to_labels`] renders as `"unknown"` rather
+/// than as a guess.
 #[derive(Debug, Deserialize)]
 struct ModelListing {
     id: String,
+    #[serde(default)]
+    supports_chat: Option<bool>,
+    #[serde(default)]
+    supports_tools: Option<bool>,
+    #[serde(default)]
+    supports_image_input: Option<bool>,
 }

@@ -39,6 +39,15 @@ const GENERATE_ACK: &str = r#"{"model":"qwen3:32b","response":"","done":true}"#;
 const CLOUD_MODELS_LISTING: &str =
     r#"{"data":[{"id":"accounts/fireworks/models/kimi-k2","object":"model"}]}"#;
 
+/// A listing from a provider that *does* report per-model capabilities (Fireworks): one chat model
+/// that also calls tools, and one embedding model that does neither.
+const CLOUD_MODELS_LISTING_REPORTING_CAPABILITIES: &str = r#"{"data":[
+  {"id":"accounts/fireworks/models/kimi-k2","object":"model",
+   "supports_chat":true,"supports_tools":true,"supports_image_input":false},
+  {"id":"nomic-ai/nomic-embed-text-v1.5","object":"model",
+   "supports_chat":false,"supports_tools":false,"supports_image_input":false}
+]}"#;
+
 /// An Ollama serving two pulled models — a tool-capable chat model and an embedding model — of
 /// which only the chat model is resident.
 ///
@@ -232,6 +241,72 @@ async fn enumerates_a_cloud_provider_from_its_openai_models_endpoint() {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0].model_id, "accounts/fireworks/models/kimi-k2");
     assert_eq!(models[0].load_state, ModelLoadState::Unsupported as i32);
+}
+
+#[tokio::test]
+async fn labels_a_cloud_model_from_the_capabilities_its_provider_reported_for_it() {
+    // Given a provider whose listing carries per-model capability flags
+    let stub = a_stub_http_endpoint_routing(&[(
+        "/v1/models",
+        CLOUD_MODELS_LISTING_REPORTING_CAPABILITIES,
+    )])
+    .await;
+    let client = OpenAiCompatibleProviderClient::new(
+        &stub.base_url(),
+        "prov-fireworks",
+        "workstation-1",
+        Some("fw-secret-key".to_string()),
+    );
+
+    // When
+    let models = client.list_models().await.expect("enumerate the models");
+
+    // Then — a model the provider says serves chat completions is an `llm`; the web offers Chat on
+    // nothing less
+    assert_eq!(models[0].labels, vec!["llm", "tools"]);
+    assert_eq!(models[1].labels, vec!["unknown"]);
+}
+
+#[tokio::test]
+async fn labels_a_cloud_model_whose_provider_reports_no_capabilities_as_unknown() {
+    // Given OpenAI's own listing shape, which carries no capability information at all
+    let stub = a_stub_http_endpoint_routing(&[("/v1/models", CLOUD_MODELS_LISTING)]).await;
+    let client = OpenAiCompatibleProviderClient::new(
+        &stub.base_url(),
+        "prov-openai",
+        "workstation-1",
+        Some("sk-secret".to_string()),
+    );
+
+    // When
+    let models = client.list_models().await.expect("enumerate the models");
+
+    // Then — "we could not tell" and "it is a chat model" are different answers, and only one of
+    // them is true here
+    assert_eq!(models[0].labels, vec!["unknown"]);
+}
+
+#[tokio::test]
+async fn a_cloud_provider_that_accepts_the_connection_and_then_says_nothing_is_given_up_on() {
+    // Given a host that never answers, under a budget a test can outlast
+    let host = a_host_that_accepts_and_never_answers().await;
+    let client = OpenAiCompatibleProviderClient::new(
+        &host.base_url(),
+        "prov-fireworks",
+        "workstation-1",
+        None,
+    )
+    .with_http_config(a_short_budget());
+
+    // When
+    let result = tokio::time::timeout(A_GENEROUS_WAIT, client.list_models()).await;
+
+    // Then the enumeration answers, rather than the RPC that asked waiting forever
+    let result = result.expect("the client must not wait indefinitely");
+    assert!(
+        matches!(result, Err(ModelRegistryError::Provider(_))),
+        "expected a provider error, got {result:?}"
+    );
 }
 
 #[tokio::test]

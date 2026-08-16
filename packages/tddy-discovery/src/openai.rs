@@ -383,6 +383,29 @@ impl OpenAiClient {
         self
     }
 
+    /// Give the transport a deadline instead of the default, deadline-free one.
+    ///
+    /// A provider is a third-party endpoint: it can accept the connection and then say nothing at
+    /// all, and `reqwest::Client::new()` waits for that forever. The caller owns the budget because
+    /// it knows what the call is for — an interactive chat turn and a batch enumeration do not
+    /// deserve the same patience.
+    ///
+    /// `expect` matches `reqwest::Client::new`'s own contract: the build fails only when the TLS
+    /// backend cannot be initialized, which no request in this process could survive either.
+    #[must_use]
+    pub fn timeouts(
+        mut self,
+        connect_timeout: std::time::Duration,
+        request_timeout: std::time::Duration,
+    ) -> Self {
+        self.http = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(request_timeout)
+            .build()
+            .expect("an http client builds unless the TLS backend cannot initialize");
+        self
+    }
+
     /// Send a chat completion request and return the response.
     pub async fn complete(
         &self,

@@ -102,7 +102,11 @@ fn default_max_turns() -> u32 {
 }
 
 /// A specialized subagent's full configuration, loaded from `<tddyhome>/agents/<name>.yaml`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// [`Debug`] is hand-written rather than derived so [`Self::api_key`] cannot reach a log line: a
+/// def is logged whole in several places, and a derived `Debug` would print the credential in
+/// every one of them.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpecializedAgentDef {
     /// Registry key. Conventionally matches the file stem, but the value inside the file is the
@@ -113,6 +117,14 @@ pub struct SpecializedAgentDef {
     pub model: String,
     #[serde(default = "default_base_url")]
     pub base_url: String,
+    /// Bearer token for the endpoint `base_url` names, for a provider that requires one. A local
+    /// endpoint (Ollama, vLLM) needs none, and `None` sends no `Authorization` header at all.
+    ///
+    /// `default` keeps every `<tddyhome>/agents/*.yaml` written before this field existed loadable
+    /// under `deny_unknown_fields`; `skip_serializing_if` keeps a def without a credential
+    /// serializing to exactly the shape that shipped before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
     #[serde(default)]
     pub system_prompt: Option<String>,
     #[serde(default)]
@@ -130,6 +142,27 @@ pub struct SpecializedAgentDef {
     pub replaces: Vec<String>,
 }
 
+/// What a def's credential is shown as wherever a def is printed. The token itself is never
+/// rendered — only whether there is one, which is the part a reader is diagnosing.
+const REDACTED_API_KEY: &str = "<redacted>";
+
+impl std::fmt::Debug for SpecializedAgentDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SpecializedAgentDef")
+            .field("name", &self.name)
+            .field("label", &self.label)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| REDACTED_API_KEY))
+            .field("system_prompt", &self.system_prompt)
+            .field("system_prompt_path", &self.system_prompt_path)
+            .field("tools", &self.tools)
+            .field("max_turns", &self.max_turns)
+            .field("replaces", &self.replaces)
+            .finish()
+    }
+}
+
 /// The always-available default: identical to today's shipped FastContext defaults
 /// (`packages/tddy-discovery/src/backend.rs`, `packages/tddy-coder/src/run.rs::create_backend`).
 /// Present even with an empty (or absent) `<tddyhome>/agents/` directory.
@@ -139,6 +172,7 @@ pub fn builtin_fastcontext_def() -> SpecializedAgentDef {
         label: None,
         model: "microsoft/FastContext-1.0-4B-RL".to_string(),
         base_url: default_base_url(),
+        api_key: None,
         system_prompt: None,
         system_prompt_path: None,
         tools: default_tools(),

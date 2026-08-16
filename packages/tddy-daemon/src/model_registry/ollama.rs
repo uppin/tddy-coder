@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState};
 
-use super::error::{truncate_provider_detail, ModelRegistryError};
+use super::error::ModelRegistryError;
 use super::labels::capabilities_to_labels;
 use super::provider_client::ProviderClient;
-use super::provider_http::ProviderHttp;
+use super::provider_http::{decode, ProviderHttp};
 
 /// How long a loaded model stays resident before Ollama evicts it on its own. Sent as
 /// `keep_alive` on the zero-token generate that loads it.
@@ -120,7 +120,7 @@ impl OllamaProviderClient {
     }
 
     fn unreachable(&self, path: &str, error: reqwest::Error) -> ModelRegistryError {
-        ModelRegistryError::Provider(format!("{error}: {}", self.url(path)))
+        super::provider_http::unreachable(&self.url(path), error)
     }
 }
 
@@ -189,30 +189,6 @@ impl OllamaProviderClient {
         }
         Ok(models)
     }
-}
-
-/// Read a provider response, turning a non-2xx status or an unparseable body into a
-/// [`ModelRegistryError::Provider`] naming the endpoint — never into a default value.
-async fn decode<T: serde::de::DeserializeOwned>(
-    response: reqwest::Response,
-    url: &str,
-) -> Result<T, ModelRegistryError> {
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| ModelRegistryError::Provider(format!("{url}: reading the response: {e}")))?;
-    if !status.is_success() {
-        // The body is the provider's, not ours: an error page can be hundreds of kilobytes, and
-        // this message is persisted on the provider row and returned by every `ListProviders`.
-        return Err(ModelRegistryError::Provider(format!(
-            "{url}: HTTP {}: {}",
-            status.as_u16(),
-            truncate_provider_detail(&body)
-        )));
-    }
-    serde_json::from_str(&body)
-        .map_err(|e| ModelRegistryError::Provider(format!("{url}: unexpected response ({e})")))
 }
 
 #[derive(Debug, Deserialize)]

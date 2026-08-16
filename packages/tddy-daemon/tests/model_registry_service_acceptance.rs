@@ -585,10 +585,10 @@ async fn refuses_an_assistant_named_after_a_builtin_agent() {
         }))
         .await;
 
-    // Then
+    // Then — an invalid *name*, not a duplicate row: there is no assistant to delete to free it
     assert_eq!(
         result.expect_err("expected the name to be refused").code(),
-        Code::AlreadyExists
+        Code::InvalidArgument
     );
 }
 

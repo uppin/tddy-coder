@@ -21,8 +21,10 @@ use agent_client_protocol::{self as acp, Agent as _};
 use tddy_acp::provider_agent::{
     ProviderAcpAgent, ProviderAgentConfig, ProviderTool, ToolDispatcher, ToolOutcome,
 };
+use tddy_testing_commons::wait::eventually;
 use tddy_testing_commons::{
-    a_stub_http_endpoint_replying_in_sequence, a_stub_http_endpoint_routing, RoutedStubHttpEndpoint,
+    a_stub_http_endpoint_replying_in_sequence, a_stub_http_endpoint_routing,
+    a_stub_http_endpoint_that_never_answers, RoutedStubHttpEndpoint,
 };
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,24 @@ impl CapturedUpdates {
             })
             .collect()
     }
+
+    /// The `raw_output` carried by every `ToolCallUpdate`, in order. An update carrying none would
+    /// leave a client that mirrors ACP over protobuf with a completed call and no result, so it
+    /// panics rather than being filtered silently out of the assertion.
+    fn tool_call_raw_outputs(&self) -> Vec<serde_json::Value> {
+        self.0
+            .borrow()
+            .iter()
+            .filter_map(|u| match u {
+                acp::SessionUpdate::ToolCallUpdate(update) => {
+                    Some(update.fields.raw_output.clone().unwrap_or_else(|| {
+                        panic!("a tool call update carried no raw_output: {update:?}")
+                    }))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -152,13 +172,18 @@ impl CapturedUpdates {
 /// path serves; the agent only forwards it to a tool dispatcher that has one of its own.
 const A_SESSION_CWD: &str = "/tmp";
 
+/// Short enough that a hung provider is reported inside a test run, long enough that a loaded
+/// machine's loopback round trip is never mistaken for one. The production default (30 s) is sized
+/// for a real model's thinking time, which no test should sit through.
+const A_BUDGET_A_TEST_CAN_OUTLAST: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How long a test waits for a signal it cannot observe synchronously — a turn reaching the
+/// provider, a cancelled turn returning. A ceiling for a broken system, not a prediction.
+const A_CEILING_ONLY_A_BROKEN_SYSTEM_REACHES: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
 fn a_config_for(base_url: &str) -> ProviderAgentConfig {
-    ProviderAgentConfig {
-        base_url: base_url.to_string(),
-        model: "qwen3:32b".to_string(),
-        api_key: None,
-        system_prompt: None,
-    }
+    ProviderAgentConfig::speaking_to(base_url, "qwen3:32b")
 }
 
 fn a_prompt(session_id: &acp::SessionId, text: &str) -> acp::PromptRequest {
@@ -331,6 +356,55 @@ async fn fails_the_turn_when_the_provider_is_unreachable() {
     assert_eq!(updates.agent_text(), "");
 }
 
+#[tokio::test]
+async fn authenticates_every_completion_with_the_configured_api_key() {
+    // Given an assistant on a provider that requires a bearer token
+    let stub = a_stub_http_endpoint_routing(&[(COMPLETIONS_PATH, COMPLETION_SAYING_HELLO)]).await;
+    let config = ProviderAgentConfig {
+        api_key: Some("fw-live-secret".to_string()),
+        ..a_config_for(&stub.base_url())
+    };
+    let (agent, _updates, _tools) = an_agent(config);
+    let session = a_started_session(&agent).await;
+
+    // When
+    agent
+        .prompt(a_prompt(&session, "Say hello"))
+        .await
+        .expect("prompt the provider agent");
+
+    // Then — without this every turn is a 401 the operator has to decode
+    assert_eq!(
+        stub.header_for(COMPLETIONS_PATH, "authorization")
+            .as_deref(),
+        Some("Bearer fw-live-secret")
+    );
+}
+
+#[tokio::test]
+async fn fails_the_turn_when_the_provider_accepts_the_request_and_never_answers() {
+    // Given a provider that takes the request and goes quiet
+    let hung = a_stub_http_endpoint_that_never_answers().await;
+    let config = ProviderAgentConfig {
+        request_timeout: A_BUDGET_A_TEST_CAN_OUTLAST,
+        ..a_config_for(&hung.base_url())
+    };
+    let (agent, updates, _tools) = an_agent(config);
+    let session = a_started_session(&agent).await;
+
+    // When
+    let result = agent.prompt(a_prompt(&session, "Say hello")).await;
+
+    // Then — the turn ends, rather than the chat stream waiting forever with no error at all
+    assert!(result.is_err(), "expected the prompt to fail");
+    assert_eq!(updates.agent_text(), "");
+    assert_eq!(
+        hung.served_requests(),
+        1,
+        "the turn must actually have reached the provider"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
@@ -440,6 +514,27 @@ async fn reports_a_dispatched_tool_call_as_a_completed_acp_tool_call_update() {
 }
 
 #[tokio::test]
+async fn reports_what_a_tool_produced_and_not_only_that_it_finished() {
+    // Given
+    let stub = a_provider_calling_a_tool_then_answering().await;
+    let (agent, updates, _tools) = an_agent(a_config_for(&stub.base_url()));
+    let session = a_started_session(&agent).await;
+
+    // When
+    agent
+        .prompt(a_prompt(&session, "Read the readme"))
+        .await
+        .expect("prompt the provider agent");
+
+    // Then — carried on `raw_output` as well as `content`, because a client mirroring ACP over
+    // protobuf has the former and not the latter
+    assert_eq!(
+        updates.tool_call_raw_outputs(),
+        vec![serde_json::json!({ "content": "# README" })]
+    );
+}
+
+#[tokio::test]
 async fn reports_a_tool_that_failed_as_a_failed_acp_tool_call_update() {
     // Given a dispatcher whose tool cannot run
     let stub = a_provider_calling_a_tool_then_answering().await;
@@ -501,4 +596,96 @@ async fn stops_a_turn_whose_model_keeps_asking_for_tools_past_its_round_budget()
     // eleventh completion that spent the last of them; never an unbounded loop
     assert_eq!(response.stop_reason, acp::StopReason::MaxTurnRequests);
     assert_eq!(completion_requests(&stub).len(), 11);
+}
+
+// ---------------------------------------------------------------------------
+// Cancellation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn cancelling_a_turn_the_provider_is_still_thinking_about_ends_it_as_cancelled() {
+    // The agent holds `Rc` state, so a turn that runs alongside the cancel that interrupts it needs
+    // a `LocalSet` — the same shape the daemon's ACP surface gives one stream.
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // Given a turn in flight against a provider that has not answered
+            let hung = a_stub_http_endpoint_that_never_answers().await;
+            let (agent, _updates, _tools) = an_agent(a_config_for(&hung.base_url()));
+            let agent = Rc::new(agent);
+            let session = a_started_session(&agent).await;
+            let turn = {
+                let agent = Rc::clone(&agent);
+                let session = session.clone();
+                tokio::task::spawn_local(async move {
+                    agent.prompt(a_prompt(&session, "Say hello")).await
+                })
+            };
+            eventually(
+                "the turn reaches the provider",
+                A_CEILING_ONLY_A_BROKEN_SYSTEM_REACHES,
+                || match hung.served_requests() {
+                    1 => Ok(()),
+                    served => Err(format!("the provider has served {served} requests")),
+                },
+            )
+            .await;
+
+            // When
+            agent
+                .cancel(acp::CancelNotification::new(session))
+                .await
+                .expect("cancel the turn");
+
+            // Then — the interrupted turn is what reports the outcome, and it says so
+            let response = turn
+                .await
+                .expect("the cancelled turn must finish")
+                .expect("a cancelled turn answers rather than failing");
+            assert_eq!(response.stop_reason, acp::StopReason::Cancelled);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_cancel_arriving_between_turns_does_not_end_the_next_one() {
+    // Given a session with nothing in flight
+    let stub = a_stub_http_endpoint_routing(&[(COMPLETIONS_PATH, COMPLETION_SAYING_HELLO)]).await;
+    let (agent, _updates, _tools) = an_agent(a_config_for(&stub.base_url()));
+    let session = a_started_session(&agent).await;
+    agent
+        .cancel(acp::CancelNotification::new(session.clone()))
+        .await
+        .expect("a cancel with nothing to interrupt is not an error");
+
+    // When the operator prompts afterwards
+    let response = agent
+        .prompt(a_prompt(&session, "Say hello"))
+        .await
+        .expect("prompt the provider agent");
+
+    // Then the turn runs normally — a stored cancel would have ended it before it started
+    assert_eq!(response.stop_reason, acp::StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn cancelling_a_session_that_was_never_opened_is_refused_rather_than_ignored() {
+    // Given
+    let stub = a_stub_http_endpoint_routing(&[(COMPLETIONS_PATH, COMPLETION_SAYING_HELLO)]).await;
+    let (agent, _updates, _tools) = an_agent(a_config_for(&stub.base_url()));
+    a_started_session(&agent).await;
+
+    // When
+    let result = agent
+        .cancel(acp::CancelNotification::new(acp::SessionId::new(
+            "provider-99",
+        )))
+        .await;
+
+    // Then
+    assert_eq!(
+        result
+            .expect_err("cancelling an unknown session must be an error")
+            .message,
+        "unknown session provider-99"
+    );
 }

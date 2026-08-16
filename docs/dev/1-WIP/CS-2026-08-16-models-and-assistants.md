@@ -369,9 +369,9 @@ unknown-kind fallback) and the product decisions are untouched by this pass.
   allowlist.
 - **The def travels with the spawn.** A spawned `tddy-coder` resolves `--agent` against the builtins
   and `<tddyhome>/agents` only — it cannot read the daemon's `models.db`. So the daemon passes the
-  def it already resolved as **`--agent-def <json>`** (`SpawnOptions.agent_def_json` →
+  def it already resolved as **`--agent-def-path <file>`** (`SpawnOptions.agent_def_json` →
   `SpawnRequest.agent_def_json` → argv), and `resolve_specialized_agent_defs` in the coder merges it
-  into the set `create_backend` consumes. A malformed `--agent-def` fails the run rather than being
+  into the set `create_backend` consumes. A malformed `--agent-def-path` fails the run rather than being
   dropped. Considered and rejected: teaching `tddy-coder` to read `models.db` itself (a second
   reader of the daemon's schema, and a new `sqlx` dependency edge), and materialising each assistant
   as a YAML file under `<tddyhome>/agents` (two sources of truth to keep in sync on update/delete).
@@ -381,7 +381,7 @@ unknown-kind fallback) and the product decisions are untouched by this pass.
   (`args.agent.unwrap_or("claude")`, `backend_from_label`'s own `_ => ("claude", …)`), so none lost
   behaviour. `create_backend` now returns `anyhow::Result<SharedBackend>`.
 - **`--agent`'s static clap `value_parser` allowlist is removed** (the `AC14` TODO at
-  `run.rs:576`): a def's name is only knowable after `--tddy-data-dir`/`--agent-def` are parsed, so
+  `run.rs:576`): a def's name is only knowable after `--tddy-data-dir`/`--agent-def-path` are parsed, so
   validation moved to `create_backend`, where the whole def set is known.
 - **`reject_taken_name`** now refuses an empty/whitespace-only or whitespace-padded name, the
   coding-backend ids (`tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS`, the single source of truth), the
@@ -430,10 +430,10 @@ model.
 | File | Tests | Pins |
 |---|---|---|
 | `packages/tddy-daemon/tests/registry_assistant_as_agent_acceptance.rs` | 4 | the registry is a def source carrying model/base_url/tools/system prompt; `StartSession` accepts an assistant name under a non-empty allowlist; an unknown agent is still refused |
-| `packages/tddy-daemon/tests/agent_def_spawn_argv_unit.rs` | 2 | the resolved def reaches the child as `--agent-def`; a self-resolvable agent carries none |
+| `packages/tddy-daemon/tests/agent_def_spawn_argv_unit.rs` | 2 | the resolved def reaches the child as `--agent-def-path`; a self-resolvable agent carries none |
 | `packages/tddy-daemon/tests/model_registry_reserved_names_unit.rs` | 7 | the assistant name space: coding backends, `allowed_agents` ids, builtin defs, empty/whitespace names |
 | `packages/tddy-daemon/tests/model_acp_service_acceptance.rs` | 6 | the daemon's ACP surface end to end against a stub provider: reply streaming, the target's model, an assistant's tools running in the session workspace, its system prompt leading, an invalid token refused before any provider call, an unknown provider refused |
-| `packages/tddy-coder/src/run.rs` (`agent_def_handover_tests`) | 4 | `--agent-def` joins the resolvable set; a malformed one fails the run; an unresolvable agent is an error, not Claude; `claude` still resolves |
+| `packages/tddy-coder/src/run.rs` (`agent_def_handover_tests`) | 4 | `--agent-def-path` joins the resolvable set; a malformed one fails the run; an unresolvable agent is an error, not Claude; `claude` still resolves |
 
 **Not covered:** that `main.rs` pushes the `AcpService` entry into `rpc_entries`. The daemon binary's
 service wiring has no test harness in this repo (no existing suite asserts on `rpc_entries`), so
@@ -520,3 +520,77 @@ about who owns it. Every row created from now on has an owner.
 
 Every new assertion was mutation-checked: the corresponding production line was reverted to its
 previous form and the tests that must fail did (13 store, 5 service, 5 provider-client, 2 ACP).
+
+
+## Second-pass findings (`/pr-wrap` steps 3–4, 2026-08-16)
+
+A production-readiness and code-quality review of the merged feature found four blockers that **every
+one of 6667 CI tests passed through**. They were gaps *between* components that each worked correctly
+in isolation — the same shape as the two integration seams found in the first pass, and the reason a
+green suite was not sufficient evidence.
+
+### Fixed
+
+- **The tool engine ran unconfined at a client-chosen path.** `ModelAcpService` passed the ACP `cwd`
+  verbatim to `tddy_tool_engine::execute_tool` *inside the daemon process*, while every other caller
+  runs in a session process or the sandbox under the caller's uid. Now: `cwd` is canonicalised and
+  must resolve inside the caller's own sessions base or their own `projects.yaml` repo paths;
+  empty/relative/symlink-escaping paths are refused; a tool the assistant was not assigned is refused.
+  **Uid separation remains open** — this is path confinement only, and the PRD now says so instead of
+  claiming `CodebaseAccess::Managed` gating it did not have.
+- **The credential never crossed the assistant→agent boundary.** An assistant on a keyed provider
+  started "successfully" and 401'd on every call. `SpecializedAgentDef` gains a redacted-in-`Debug`
+  `api_key`, threaded into `OpenAiClient` at all three consumer sites, and attached **only** on the
+  spawn path — `ListAgents`, answered for every operator, still returns keyless defs.
+- **The def moved off argv.** `--agent-def <json>` sat in world-readable `/proc/<pid>/cmdline` for the
+  life of the session, so a credential could not be added until it moved. Now written `0600` (and
+  chowned to the target account, failing the spawn rather than loosening permissions if that is not
+  possible) and passed as `--agent-def-path`. This also removed a latent `E2BIG`; `system_prompt` is
+  additionally bounded at 8 KiB on **both** create and update.
+- **A hung provider wedged the chat stream forever and `cancel` was a no-op** while both documents
+  checked it off as delivered. The chat path now carries the same 5s/30s budget as enumeration, and
+  `cancel` is implemented against an in-flight notify that genuinely drops the HTTP future; a cancel
+  between turns cannot end the next one. Transport errors on the inbound stream now send an
+  `AcpError` frame instead of ending quietly.
+- **The ACP surface funnelled every failure to `-32603`.** Seven distinct codes now carry
+  `PermissionDenied` / `NotFound` / `UnsupportedOperation` / `ProviderUnavailable` through to the pane.
+- **`AlreadyExists` did two jobs** — reserved-name refusals now return `InvalidName`, with a spec
+  pinning the distinction so the two cannot re-merge.
+- **`decode`/`unreachable` were factored in `ollama.rs` and inlined in `openai_compatible.rs`**, and
+  had drifted: only Ollama truncated a hostile error page, only Ollama accepted a test budget. Both
+  lifted into `provider_http.rs`.
+
+### Known limitations, recorded rather than papered over
+
+- **OpenAI models offer no Chat.** `/v1/models` reports no capability information, so they stay
+  `unknown`. Fireworks reports per-model flags and does get Chat; Ollama derives from `/api/show`.
+  See the PRD's *Provider capability reporting* table.
+- **Tool results arrive but are not rendered.** `provider_agent` now sets `raw_output` and the daemon
+  maps it, but `useAcpSession.ts` ignores `toolCallUpdate` entirely — a web change not yet made.
+- **The daemon-level cancel path has no test.** With `tokio_stream::iter` every client frame is ready
+  instantly, so a `Cancel` following a `Prompt` can win the race before the turn registers its signal.
+  That race is synthetic; cancel semantics are pinned at the `tddy-acp` level against a real
+  readiness gate.
+- **`rpc_entries` registration is still not test-covered** — no suite in this repo asserts on the
+  daemon binary's service registration.
+- `packages/tddy-acp/Cargo.toml` gained `tokio` (`sync` + `macros`) for the cancel signal. No new
+  crate enters the workspace tree.
+
+### Test inventory (current)
+
+| Suite | Tests |
+|---|---|
+| `model_registry_store_unit` | 55 |
+| `ollama_provider_client_integration` | 22 |
+| `model_registry_service_acceptance` | 21 |
+| `provider_agent_acceptance` | 19 |
+| `model_acp_service_acceptance` | 17 |
+| `model_registry_reserved_names_unit` | 8 |
+| `registry_assistant_as_agent_acceptance` | 6 |
+| `agent_def_spawn_argv_unit` | 4 |
+| `subagent_tool_exec_catalog_red` | 5 |
+| Cypress `models/*` | 68 |
+| `tddy-web` unit / routing | 773 / 89 |
+
+Every assertion added in this pass was mutation-checked: the production line was broken, the specific
+test observed to fail, and the line restored.

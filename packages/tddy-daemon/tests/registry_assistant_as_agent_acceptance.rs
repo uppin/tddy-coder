@@ -28,6 +28,9 @@ const THIS_DAEMON: &str = "workstation-1";
 const VALID_TOKEN: &str = "valid-token";
 const OLLAMA_URL: &str = "http://127.0.0.1:11434";
 
+/// The key stored on the provider these assistants are built on.
+const THE_PROVIDERS_KEY: &str = "fw-live-secret";
+
 /// The operator `VALID_TOKEN` resolves to — the owner of the registry rows these tests create.
 const THE_OPERATOR: &str = "testuser";
 
@@ -106,7 +109,7 @@ async fn a_daemon_with_a_registry() -> Harness {
                 kind: ProviderKind::Ollama,
                 label: "Workstation Ollama".to_string(),
                 base_url: OLLAMA_URL.to_string(),
-                api_key: None,
+                api_key: Some(THE_PROVIDERS_KEY.to_string()),
             },
             THE_OPERATOR,
         )
@@ -179,6 +182,45 @@ async fn a_registry_assistant_resolves_as_an_agent_def_carrying_its_model_endpoi
         explorer.system_prompt.as_deref(),
         Some("You explore repositories.")
     );
+}
+
+#[tokio::test]
+async fn the_def_a_session_is_started_from_carries_its_providers_credential() {
+    // Given an assistant on a provider that authenticates
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_named("repo-explorer", &["Read"])
+        .await;
+
+    // When the daemon resolves what to start a session as
+    let def = harness
+        .service
+        .agent_def_for_spawn("repo-explorer", THE_OPERATOR)
+        .await
+        .expect("the daemon must resolve the def")
+        .expect("the registry defines this agent");
+
+    // Then — without it the session starts "successfully" and 401s on every model call
+    assert_eq!(def.api_key.as_deref(), Some(THE_PROVIDERS_KEY));
+}
+
+#[tokio::test]
+async fn the_defs_listed_to_every_operator_carry_no_credential_at_all() {
+    // Given the same assistant
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_named("repo-explorer", &["Read"])
+        .await;
+
+    // When the listing path resolves them — `ListAgents` answers whoever asks
+    let defs = harness
+        .service
+        .resolvable_agent_defs()
+        .await
+        .expect("the daemon must resolve its agent defs");
+
+    // Then a key has no business in a fleet-wide listing
+    assert_eq!(def_named(&defs, "repo-explorer").api_key, None);
 }
 
 #[tokio::test]

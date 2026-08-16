@@ -110,8 +110,9 @@ not changed.
 - [ ] A new **ACP adapter** in `tddy-acp` fronts a provider and speaks the ACP agent side
       (`initialize` / `new_session` / `prompt` / `cancel`), translating to the provider's HTTP API.
       Ollama is reached through the existing OpenAI-compatible client (`tddy-discovery::OpenAiClient`).
-- [ ] The operator can open a chat with **any LLM-labelled model** or with **any assistant**, from the
-      Models & Agents screen. The chat rides the existing `acp.AcpService` bidi stream and the existing
+- [ ] The operator can open a chat with **any `llm`-labelled model** or with **any assistant**, from
+      the Models & Agents screen. Which cloud models qualify depends on what the provider reports —
+      see "Provider capability reporting" below. The chat rides the existing `acp.AcpService` bidi stream and the existing
       `useAcpSession` web client — no second chat implementation.
 - [ ] Chatting with a model that is not loaded loads it first. The load is issued by the web before
       the ACP handshake, not by the daemon as part of `new_session`.
@@ -234,6 +235,24 @@ land and would then need all of that rebuilt for assistants-with-tools.
 - Managing the Ollama service process itself.
 - Migrating `ListAgentModels` or the session-creation model dropdown onto this registry.
 
+## Provider capability reporting — what Chat is offered for
+
+A Chat button requires a positive `llm` label, and a label is only ever derived from what the
+provider actually reports. That yields three different outcomes, none of them guessed:
+
+| Provider | Reports capabilities? | Chat offered |
+|---|---|---|
+| **Ollama** | yes — `capabilities` from `POST /api/show` | yes, for `completion`-capable models |
+| **Fireworks** | yes — `supports_chat` / `supports_tools` / `supports_image_input` per model in `/v1/models` | yes |
+| **OpenAI** | **no** — a `/v1/models` entry is `{id, object, created, owned_by}` and nothing more | **no** |
+| **Anthropic** | no, and chat is refused up front anyway (the agent speaks OpenAI-compatible completions) | no |
+
+`gpt-4o` and `text-embedding-3-small` are indistinguishable in OpenAI's listing except by name, and
+inferring capability from an id prefix is exactly the guess `labels.rs` exists to prevent — so those
+models stay `unknown` and offer no Chat. Closing that needs either a different endpoint or an
+operator-set flag on the model row; neither is built. `supports_chat: false` is likewise read as
+"nothing here says what this is" (`unknown`), never as a negative label.
+
 ## Accepted risks
 
 ### Any authenticated web user can grant `Shell`
@@ -264,8 +283,15 @@ allowlist in `daemon.yaml`, mirroring the existing `allowed_agents` / `allowed_t
   to join the room is treated as an eligible daemon. This feature adds provider/model reads and
   load/unload to what such a peer is exposed to. No new trust boundary is created, but the surface
   grows.
-- **`Shell` as an assignable assistant tool** is a meaningful privilege. It is gated to
-  `CodebaseAccess::Managed` (host-side path confinement) exactly as the mutation tools already are.
+- **`Shell` as an assignable assistant tool** is a meaningful privilege, and its confinement is
+  narrower than the other loops'. An assistant's tools run **in the daemon process, as the daemon
+  uid** — unlike every other `execute_tool` caller, which runs inside a session process or the
+  sandbox under the caller's own uid via the supervisor. What constrains them is *path* confinement,
+  not uid separation: the ACP `cwd` is canonicalised (so a symlink is judged by its target) and must
+  resolve inside one of the caller's **own** roots — their sessions base, and the `main_repo_path` /
+  `host_repo_paths` of their own `projects.yaml`. Anything outside is `PermissionDenied`; an empty or
+  relative path is refused; and a tool the assistant was not assigned is refused, so a tool-less chat
+  cannot reach the engine at all. Uid separation for this path remains open.
 
 ## Related documentation
 

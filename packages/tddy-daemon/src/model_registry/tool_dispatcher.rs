@@ -64,6 +64,12 @@ impl ToolDispatcher for EngineToolDispatcher {
     }
 
     async fn execute(&self, name: &str, input_json: &str) -> ToolOutcome {
+        // A model can ask for a tool it was never offered — hallucinated, or remembered from an
+        // earlier conversation. Refusing here is what keeps the assistant's assigned tool list the
+        // whole of what this dispatcher will run, rather than merely what it advertises.
+        if !self.tools.iter().any(|tool| tool.name == name) {
+            return ToolOutcome::failed(format!("tool '{name}' is not assigned to this assistant"));
+        }
         let outcome = tddy_tool_engine::execute_tool(
             &self.workspace,
             name,

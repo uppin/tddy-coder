@@ -85,6 +85,43 @@ pub async fn a_stub_http_endpoint_answering_ok() -> StubHttpEndpoint {
     }
 }
 
+/// A stub endpoint that accepts the connection, reads the whole request, and then **never
+/// answers** — the failure mode a deadline exists for.
+///
+/// A refused connection or a closed socket produces an error on its own; only an endpoint that
+/// takes the request and goes quiet distinguishes a client that has a timeout from one that waits
+/// forever. Requests are counted, so a test can assert the call was actually made rather than
+/// inferring it from elapsed time.
+pub async fn a_stub_http_endpoint_that_never_answers() -> StubHttpEndpoint {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind a loopback stub endpoint");
+    let port = listener
+        .local_addr()
+        .expect("stub endpoint local address")
+        .port();
+
+    let served = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&served);
+    let accepting = tokio::spawn(async move {
+        // Every accepted stream is kept alive here, so the client sees an open connection with no
+        // response rather than a peer that hung up.
+        let mut held = Vec::new();
+        while let Ok((mut stream, _)) = listener.accept().await {
+            if drain_request(&mut stream).await.is_some() {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }
+            held.push(stream);
+        }
+    });
+
+    StubHttpEndpoint {
+        port,
+        served,
+        accepting,
+    }
+}
+
 /// Drain one request, then reply `200 OK` and close.
 async fn answer_ok(mut stream: TcpStream, served: Arc<AtomicUsize>) {
     if drain_request(&mut stream).await.is_none() {

@@ -443,6 +443,62 @@ fn main() -> anyhow::Result<()> {
                     Ok((session_dir, repo_root))
                 })
             };
+            // Where a model chat may run an assistant's tools, for the operator holding the token.
+            // Same preamble as `bsp_session_resolver` above (token → OS user → their own sessions
+            // and projects): `NewSessionRequest.cwd` is client-chosen, and an assistant may be
+            // assigned `Shell`, so the answer must be "the directories this caller already owns"
+            // rather than "anywhere the daemon process can reach".
+            let chat_workspace_roots: tddy_daemon::model_registry::ChatWorkspaceRoots = {
+                let user_resolver = user_resolver.clone();
+                let config = config.clone();
+                let sessions_base_resolver = sessions_base_resolver.clone();
+                let projects_dir_resolver = projects_dir_resolver.clone();
+                Arc::new(move |token: &str| {
+                    use tddy_daemon::model_registry::ModelRegistryError;
+                    let github_user = (user_resolver)(token).ok_or_else(|| {
+                        ModelRegistryError::PermissionDenied(
+                            "invalid or expired session token".to_string(),
+                        )
+                    })?;
+                    let os_user = config
+                        .os_user_for_github(&github_user)
+                        .ok_or_else(|| {
+                            ModelRegistryError::PermissionDenied(
+                                "user not mapped to OS user".to_string(),
+                            )
+                        })?
+                        .to_string();
+                    let sessions_base = (sessions_base_resolver)(&os_user).ok_or_else(|| {
+                        ModelRegistryError::InvalidWorkspace(
+                            "could not resolve this operator's sessions path".to_string(),
+                        )
+                    })?;
+                    let projects_dir = (projects_dir_resolver)(&os_user).ok_or_else(|| {
+                        ModelRegistryError::InvalidWorkspace(
+                            "could not resolve this operator's projects path".to_string(),
+                        )
+                    })?;
+                    // Every session worktree this operator has, plus every project checkout their
+                    // own registry names — including per-host checkouts of the same project.
+                    let mut roots = vec![sessions_base.join("sessions")];
+                    let projects = tddy_daemon::project_storage::read_projects(&projects_dir)
+                        .map_err(|e| {
+                            ModelRegistryError::InvalidWorkspace(format!(
+                                "could not read this operator's projects: {e}"
+                            ))
+                        })?;
+                    for project in projects {
+                        roots.push(std::path::PathBuf::from(&project.main_repo_path));
+                        roots.extend(
+                            project
+                                .host_repo_paths
+                                .values()
+                                .map(std::path::PathBuf::from),
+                        );
+                    }
+                    Ok(roots)
+                })
+            };
             // This daemon's model registry: the providers it talks to, their models, and the
             // assistants composed from them. Opened before ConnectionService so an assistant is
             // listed by `ListAgents` as a selectable `--agent`.
@@ -584,6 +640,7 @@ fn main() -> anyhow::Result<()> {
                     Arc::clone(&model_registry),
                     task_registry.clone(),
                     vm_user_resolver.clone(),
+                    chat_workspace_roots,
                 ),
             );
             rpc_entries.push(
