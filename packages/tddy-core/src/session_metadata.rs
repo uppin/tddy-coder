@@ -525,7 +525,10 @@ status: active
         if !unwritable {
             return;
         }
-        assert!(result.is_err(), "a write that cannot complete must report it");
+        assert!(
+            result.is_err(),
+            "a write that cannot complete must report it"
+        );
         let after = after.expect("`.session.yaml` must still parse after a failed rewrite");
         assert_eq!(
             after.activity_status.as_deref(),
