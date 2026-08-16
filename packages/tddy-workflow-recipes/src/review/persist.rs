@@ -15,7 +15,7 @@ pub fn persist_review_md_to_session_dir(session_dir: &Path, json: &str) -> Resul
     let out = parse_branch_review_output(json)?;
     fs::create_dir_all(session_dir).map_err(|e| e.to_string())?;
     let path = session_dir.join(REVIEW_MD_BASENAME);
-    fs::write(
+    tddy_core::atomic_file::write_atomic(
         &path,
         out.review_body_markdown.trim_end_matches('\n').to_string() + "\n",
     )

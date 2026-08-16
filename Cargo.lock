@@ -10529,6 +10529,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde_json",
+ "tddy-core",
  "tddy-sandbox",
  "tddy-workflow-recipes",
  "tempfile",

@@ -78,7 +78,7 @@ fn write_stack_status(
             node.node_id, node.title, branch, parents, pr_phase, child_state
         ));
     }
-    std::fs::write(artifacts_dir.join(STACK_STATUS_MD_BASENAME), &md)?;
+    tddy_core::atomic_file::write_atomic(&artifacts_dir.join(STACK_STATUS_MD_BASENAME), &md)?;
 
     // JSON summary.
     let json_nodes: Vec<serde_json::Value> = stack
@@ -100,7 +100,7 @@ fn write_stack_status(
         "nodes": json_nodes,
         "updated_at": chrono::Utc::now().to_rfc3339(),
     }))?;
-    std::fs::write(artifacts_dir.join(STACK_STATUS_JSON_BASENAME), &json)?;
+    tddy_core::atomic_file::write_atomic(&artifacts_dir.join(STACK_STATUS_JSON_BASENAME), &json)?;
 
     Ok(())
 }

@@ -89,7 +89,7 @@ pub fn persist_interview_handoff_for_plan(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, handoff_text)
+    tddy_core::atomic_file::write_atomic(&path, handoff_text)
 }
 
 /// Load relay into context for [`PlanTask`](super::PlanTask) (`answers` / follow-up prompt path).

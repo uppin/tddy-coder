@@ -78,9 +78,11 @@ impl SessionStorage for FileSessionStorage {
         session: &Session,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path(&session.id);
-        tokio::fs::create_dir_all(path.parent().unwrap()).await?;
         let json = serde_json::to_string_pretty(session)?;
-        tokio::fs::write(path, json).await?;
+        // Swap-file + rename, off the reactor: a workflow snapshot that a full disk truncated is
+        // a session the engine can no longer resume, so the previous snapshot must survive a
+        // failed save. `write_atomic` creates the parent directory itself.
+        tokio::task::spawn_blocking(move || crate::atomic_file::write_atomic(&path, json)).await??;
         Ok(())
     }
 

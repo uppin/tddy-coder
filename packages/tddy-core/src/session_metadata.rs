@@ -155,6 +155,10 @@ pub fn write_initial_tool_session_metadata(
 }
 
 /// Write session metadata to the session directory.
+///
+/// Goes through [`crate::atomic_file::write_atomic`]: a session whose `.session.yaml` is
+/// truncated is a session the daemon and the web can no longer see, even while its agent process
+/// is alive, so a failed rewrite must leave the previous file standing rather than empty it.
 pub fn write_session_metadata(
     session_dir: &Path,
     metadata: &SessionMetadata,
@@ -162,9 +166,8 @@ pub fn write_session_metadata(
     let path = session_dir.join(SESSION_METADATA_FILENAME);
     let contents = serde_yaml::to_string(metadata)
         .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
-    std::fs::write(&path, contents)
-        .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
-    Ok(())
+    crate::atomic_file::write_atomic_labelled(&path, contents)
+        .map_err(crate::WorkflowError::WriteFailed)
 }
 
 /// Atomically update the `activity_status` field in an existing `.session.yaml`.
@@ -483,6 +486,55 @@ status: active
             "activity_status must default to None"
         );
         assert!(meta.hook_token.is_none(), "hook_token must default to None");
+    }
+
+    /// **The disk-full regression.** A rewrite that cannot complete must leave the session
+    /// listable: the old `.session.yaml` stays whole rather than becoming the 0-byte file that
+    /// makes a running session disappear from the daemon and the web.
+    ///
+    /// A read-only session directory stands in for the full filesystem — both make the write
+    /// impossible, and the point of the fix is that the impossibility lands on a swap file.
+    #[cfg(unix)]
+    #[test]
+    fn failed_metadata_rewrite_leaves_the_session_readable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = std::env::temp_dir().join(format!("tddy-nospace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sessions").join("sess-nospace");
+        fs::create_dir_all(&session_dir).unwrap();
+        write_initial_tool_session_metadata(
+            &session_dir,
+            InitialToolSessionMetadataOpts {
+                project_id: "proj-nospace".to_string(),
+                activity_status: Some("Running".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        fs::set_permissions(&session_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        // root ignores permission bits, leaving nothing for this case to observe.
+        let unwritable = std::fs::File::create(session_dir.join(".probe")).is_err();
+
+        let result = update_activity_status(&session_dir, "WaitingForInput");
+        let after = read_session_metadata(&session_dir);
+        fs::set_permissions(&session_dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&tmp);
+
+        if !unwritable {
+            return;
+        }
+        assert!(
+            result.is_err(),
+            "a write that cannot complete must report it"
+        );
+        let after = after.expect("`.session.yaml` must still parse after a failed rewrite");
+        assert_eq!(
+            after.activity_status.as_deref(),
+            Some("Running"),
+            "the previous metadata must survive intact, not be half-replaced"
+        );
     }
 
     /// `update_activity_status` must overwrite only `activity_status` and bump `updated_at`;

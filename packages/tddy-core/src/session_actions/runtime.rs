@@ -97,10 +97,10 @@ pub(crate) fn write_channel_logs(
     stderr_path: &Path,
 ) -> Result<(), SessionActionsError> {
     if let Some(ch) = handle.channel("stdout") {
-        std::fs::write(stdout_path, ch.replay_capture())?;
+        crate::atomic_file::write_atomic(stdout_path, ch.replay_capture())?;
     }
     if let Some(ch) = handle.channel("stderr") {
-        std::fs::write(stderr_path, ch.replay_capture())?;
+        crate::atomic_file::write_atomic(stderr_path, ch.replay_capture())?;
     }
     Ok(())
 }
