@@ -1,0 +1,75 @@
+# cargo-nextest configuration.
+#
+# `default` is a bare `cargo nextest run` locally. `ci` is what GitHub Actions
+# runs (.github/workflows/ci.yml). The `ci` profile differs in three ways, all of
+# them consequences of the runner being an unprivileged Linux container:
+#
+#   1. It writes JUnit XML, so the PR check reports pass/fail counts rather than
+#      just a red or green dot.
+#   2. It never fail-fasts. A bare `cargo test` aborts at the first failing
+#      target, so most of the workspace never runs and the visible failure count
+#      badly understates what went unrun.
+#   3. It skips tests that cannot pass without root or without macOS. See
+#      `default-filter` below.
+#
+# Keep the skip list short, and give every entry a reason. Everything listed
+# there is coverage the PR gate does not provide.
+
+[profile.default]
+retries = 0
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
+status-level = "fail"
+final-status-level = "flaky"
+
+# The LiveKit testkit finds a free port by binding :0 and releasing it, which
+# leaves a TOCTOU window before Docker claims the port
+# (packages/tddy-livekit-testkit/src/livekit_testkit.rs:26). Under load another
+# test can take it first, and the container fails with "address already in use".
+# A retry re-rolls the port. Retries are reported as "flaky", not hidden.
+retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
+
+# Tests excluded from the PR gate, by reason:
+#
+#   sandboxed_cursor_cli_acceptance, sandboxed_claude_cli_acceptance,
+#   action_sandbox_acceptance::sandboxed_bash_action_writes_to_output_dir,
+#   cursor_cli_session_acceptance::cursor_cli_sandbox_start_succeeds_...
+#     The cgroups sandbox backend needs root and a writable cgroup root. It
+#     reports itself available on any Linux, then EPERMs at spawn, so these fail
+#     rather than skip. Running them needs a root runner or the QEMU backend.
+#
+#
+#   sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio
+#     Fails on an unprivileged runner with "tool ipc server exited before bind"
+#     even with tddy-sandbox-runner built — confirmed on CI, survived two
+#     retries. The other two tests in this binary pass, so only this one is
+#     skipped. Tracked in docs/dev/TODO.md; the intended fix is a VM-backed job
+#     with a fully controlled environment rather than a permanent exclusion.
+#
+#   tddy-sandbox-recipes cursor_agent_prerequisite_reads_include_install_dir_and_share_root
+#     Asserts `/Users` appears among path-traversal ancestors, which is only true
+#     on macOS. Permanent failure on Linux, not a flake.
+default-filter = """
+not (
+    (package(tddy-daemon) and binary(sandboxed_cursor_cli_acceptance))
+    or (package(tddy-daemon) and binary(sandboxed_claude_cli_acceptance))
+    or (package(tddy-daemon) and binary(action_sandbox_acceptance) and test(=sandboxed_bash_action_writes_to_output_dir))
+    or (package(tddy-daemon) and binary(cursor_cli_session_acceptance) and test(=cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available))
+    or (package(tddy-daemon) and binary(sandbox_runner_stdio_acceptance) and test(=echoes_a_message_over_sandbox_service_served_over_stdio))
+    or (package(tddy-sandbox-recipes) and test(=cursor_cli::tests::cursor_agent_prerequisite_reads_include_install_dir_and_share_root))
+)
+"""
+
+[profile.ci.junit]
+path = "junit.xml"
+
+# Docker-backed tests contend for host ports. Holding them to one at a time
+# narrows the TOCTOU window that the retries above exist to paper over.
+[test-groups]
+docker = { max-threads = 1 }
+
+[[profile.ci.overrides]]
+filter = "package(tddy-livekit) or package(tddy-livekit-testkit) or (package(tddy-daemon) and binary(forward_to_peer_shared_registry))"
+test-group = "docker"

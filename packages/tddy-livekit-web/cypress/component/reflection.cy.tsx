@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { ReflectionTestHarness } from "./support/ReflectionTestHarness";
+import { ReflectionTestHarness } from "../support/ReflectionTestHarness";
 
 /** Deduplicate logs while preserving order (React Strict Mode safety). */
 function dedupeLogs(logs: string[]): string[] {

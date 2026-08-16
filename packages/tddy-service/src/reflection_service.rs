@@ -214,11 +214,20 @@ impl ServerReflection for ServerReflectionImpl {
     }
 }
 
-/// Build a [`tddy_rpc::ServiceEntry`] for the `ServerReflection` service, exposing only
-/// the given `registered_names` via `list_services`.
+/// Build a [`tddy_rpc::ServiceEntry`] for the `ServerReflection` service, exposing the
+/// given `registered_names` via `list_services` **plus `ServerReflection` itself**.
+///
+/// Self-advertisement is what gRPC reflection conventionally does, and callers cannot
+/// easily do it themselves: they collect the names of the entries they already have,
+/// which by construction cannot include the entry this function is about to return.
 pub fn reflection_entry_from(registered_names: &[&str]) -> tddy_rpc::ServiceEntry {
     use crate::proto::reflection::ServerReflectionServer;
-    let names: Vec<String> = registered_names.iter().map(|s| s.to_string()).collect();
+    let own_name = ServerReflectionServer::<ServerReflectionImpl>::NAME;
+    let names: Vec<String> = registered_names
+        .iter()
+        .map(|s| s.to_string())
+        .chain((!registered_names.contains(&own_name)).then(|| own_name.to_string()))
+        .collect();
     let impl_ = ServerReflectionImpl::new(names, crate::SERVICE_DESCRIPTOR_BYTES);
     tddy_rpc::ServiceEntry {
         name: ServerReflectionServer::<ServerReflectionImpl>::NAME,

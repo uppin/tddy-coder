@@ -92,6 +92,113 @@ its own failure message, none from that branch. New entries beyond the list abov
   `Malformed`, so the tampering helper sometimes produces a string that fails base64 decoding before the
   signature is ever checked. Fix the helper to mutate within the alphabet.
 
+### `echoes_a_message_over_sandbox_service_served_over_stdio` is skipped in CI (source: ci-setup, 2026-08-15)
+
+- `packages/tddy-daemon/tests/sandbox_runner_stdio_acceptance.rs` — fails on a GitHub Actions runner
+  with `tool ipc server exited before bind`, **with `tddy-sandbox-runner` built and on disk**. It
+  survived two nextest retries, so it is a permission failure rather than a flake. The other two
+  tests in the same binary pass once the runner binary is staged, so only this one is skipped.
+- Same family as the sandbox set above: an unprivileged process cannot place its own child in a
+  limited cgroup scope. The distinguishing detail is that the failure surfaces here as a *silent
+  runner exit before bind* rather than a named `EPERM`, so the runner is swallowing the real error —
+  whoever picks this up should make it report the syscall that actually failed before theorising.
+- Skipped via `default-filter` in `.config/nextest.toml` (`[profile.ci]`), which names this file.
+- **Long-term fix: run these under the VM testkit rather than on the runner.** A QEMU guest gives a
+  fully controlled environment with real root and a writable cgroup root, which is the only way this
+  suite and the rest of the sandbox set become genuine CI coverage instead of permanent exclusions.
+  See `docs/ft/vm/tddy-vm.md` § VM testkit and the `./vm-tests` script; the open question is cost,
+  since the bakes currently take hours and `TDDY_CLOUDINIT_BASE_IMAGE` is never downloaded.
+
+### `handles AbortSignal cancellation` asserts a log prefix production no longer emits (source: ci-setup, 2026-08-15)
+
+- `packages/tddy-livekit-web/cypress/component/transport.cy.tsx:141` looks for a captured log line
+  containing **`[LiveKitTransport]`** and `cancelled`, and fails `expected undefined to exist`.
+  Grepping `packages/` for the literal `[LiveKitTransport]` finds it in exactly two places — this
+  assertion and the capture filter in `cypress/support/component.ts:13`. **No production code emits
+  it.** `src/transport.ts` logs through the `debug` package as
+  `createDebug("tddy:rpc:livekit-transport")`, so the prefix is the namespace, not that bracketed
+  string. The assertion cannot pass in any environment, with or without `DEBUG` set.
+- The other five tests in the file pass; they assert on `[TEST] error:`, which the harness does emit.
+- **Interim (2026-08-15):** the `transportError` assertion was dropped so the test proves what it is
+  actually for — that cancellation reaches the caller, via the `[TEST] error: cancelled` assertions
+  that do pass. The test is narrower than it was written to be, and knowingly so.
+- **Still open:** whether the transport should emit a stable, capturable marker at all. Either
+  production logs a `[LiveKitTransport]` prefix that `cypress/support/component.ts` captures, or the
+  test asserts on the `debug` namespace and that filter is widened to match. That is a contract
+  decision about what the transport promises, not a test cleanup — which is why it was not settled
+  here.
+- Found the first time this suite ran in CI. It had never run before — see the entry below.
+
+### `reflection.cy.tsx` had never executed: wrong relative import (source: ci-setup, 2026-08-15)
+
+- `packages/tddy-livekit-web/cypress/component/reflection.cy.tsx` imported
+  `./support/ReflectionTestHarness`, but the harness lives at `cypress/support/`, one level up —
+  `transport.cy.tsx` beside it correctly uses `../support/TransportTestHarness`. Vite failed the
+  import, Cypress reported it as an uncaught error outside any test, and the spec's real assertions
+  never ran.
+- Fixed here by correcting the path. Worth noting **how long this survived**: nothing ran this suite,
+  so a spec that could not even be parsed looked no different from a passing one. That is the
+  argument for the suite being in the PR gate rather than run by hand.
+- Its first execution then found two more things, both fixed here:
+  - **`JSON.stringify` on a protobuf message.** `ReflectionTestHarness` logged the unary invoke
+    result with `JSON.stringify(response.message)`, which throws `Do not know how to serialize a
+    BigInt` on the 64-bit field — protobuf-es maps `int64` to `BigInt`. Both server-stream paths in
+    the same file already used `toJsonString`; the unary path now matches them.
+  - **Reflection did not advertise itself.** Callers of `reflection_entry_from` collect the names of
+    the entries they already hold, which by construction cannot include the reflection entry the
+    call is about to return, so `list_services` omitted `grpc.reflection.v1.ServerReflection`.
+    Appending its own name moved into the helper, so all seven call sites (tddy-coder ×5,
+    tddy-daemon, tddy-service) get the conventional gRPC behaviour rather than each fixing it. The
+    existing "only registered names" tests construct `ServerReflectionImpl` directly and are
+    unaffected — the impl still reports exactly what it is given; the helper decides what to give it.
+
+### `accepts_ssh_as_the_policy_user_with_the_generated_per_vm_key` cannot shut its guest down in time (source: ci-vm-tests, 2026-08-15)
+
+- `packages/tddy-vm/tests/vm_boot_control_acceptance.rs:297` fails with `guest accepted the
+  powerdown but never released port 2235`. Deterministic, not a flake: it fails the same way run
+  alone. It is the **only** remaining failure in the boot-control suite on x86_64; the other five
+  pass.
+- What is *not* wrong, established by experiment rather than reading: ACPI powerdown works fine on
+  this guest. A manually booted guest that finished cloud-init and never saw an SSH connection
+  powered off in **~40 s** — `Reached target poweroff.target` → `reboot: Power down`. The
+  `shuts_a_running_vm_down_gracefully_via_the_qemu_monitor` test, which never opens an SSH session,
+  also passes.
+- So the distinguishing factor is the SSH session this test opens. The likely mechanism is systemd
+  waiting on the `user@<uid>.service` / session scope during shutdown, which on Debian is bounded by
+  `DefaultTimeoutStopSec` (90 s). Roughly 40 s + 90 s exceeds `BootedGuest`'s `SHUTDOWN_TIMEOUT` of
+  120 s (`packages/tddy-vm-testkit/src/guest.rs`), which fits the observation — but the actual
+  duration was **not measured**, so confirm it before choosing a number.
+- Two candidate fixes, and the choice is a real one: raise `SHUTDOWN_TIMEOUT` past the measured
+  worst case, or make the session teardown deterministic (close the connection and wait for the
+  session to end) so shutdown does not depend on a systemd timeout at all. The second is a readiness
+  signal rather than a budget, and is preferable if the session can be observed ending.
+
+### The guest serial console is a 64 KiB pipe, drained only at shutdown (source: ci-vm-tests, 2026-08-15)
+
+- `QemuVmArgs::build_with_serial(config, "stdio")` (`qemu.rs:433`) gives the console-driven boot a
+  **pipe**, whose capacity is the kernel's, not ours — 64 KiB by default, 1 MiB ceiling per
+  `/proc/sys/fs/pipe-max-size`. A Debian boot with cloud-init writes more than that (measured:
+  71,443 bytes), so a guest whose console nobody reads **blocks writing to `ttyS0`**.
+- That is what broke shutdown in `accepts_ssh_as_the_policy_user_...`: `wait_for_ssh_ready` polls
+  SSH and never pumps the console, so `systemd-shutdown` blocked and the guest never powered off.
+  Fixed by draining concurrently with the port-release wait (`SerialConsole::drain_for`).
+- **The fix is narrow on purpose.** The console is still undrained between boot and shutdown, so a
+  guest can sit blocked on `ttyS0` for the whole body of a test. Nothing in the current suite needs
+  the guest to make progress during that window, so all six pass — but a future test that does will
+  hang the same way, and the symptom (an accepted powerdown that never completes, or a guest that
+  mysteriously stalls) points nowhere near the cause.
+- Options, if it ever needs to be properly unbounded:
+  - Drain continuously in the background rather than only at shutdown. Keeps the console
+    bidirectional, which the login-over-serial tests require.
+  - `fcntl(F_SETPIPE_SZ)` to 1 MiB. One line, but it moves the cliff rather than removing it.
+  - `-serial file:` is genuinely unbounded and never blocks — `QemuVmArgs::build` already uses it
+    for detached boots — but it is **write-only**, so it cannot serve the tests that log in over the
+    serial console.
+- Related: this fixture keeps only an in-memory tail of the console, which is why diagnosing the
+  above needed guests booted by hand to see what they were saying. QEMU's `-chardev …,logfile=PATH`
+  would persist a full transcript alongside the interactive backend, making a CI failure readable
+  from the uploaded artifact. The bake path already writes `<name>-boot.log`; this one does not.
+
 ## Future Enhancements
 
 ### Session worktree sync — deliberate gaps (source: session-worktree-sync changeset, 2026-08-15)

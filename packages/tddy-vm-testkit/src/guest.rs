@@ -16,9 +16,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use tddy_vm::cloud_init::NinePShare;
-use tddy_vm::qemu::{ensure_uefi_vars_file, resolve_uefi_code_path, scp_to_guest, QemuVm};
+use tddy_vm::qemu::{scp_to_guest, uefi_firmware_for, QemuVm};
 use tddy_vm::serial_shell::SerialConsole;
-use tddy_vm::vm::{RunningVm, UefiFirmware, VerifyResult, VmConfig, VmLogin};
+use tddy_vm::vm::{RunningVm, VerifyResult, VmConfig, VmLogin};
 use tddy_vm::vm_manifest::VmManifest;
 use tddy_vm::Vm;
 
@@ -153,16 +153,14 @@ impl BootedGuest {
     ) -> Result<Self> {
         let vm_dir = library.vm_dir(&manifest.name);
         let overlay = vm_dir.join(format!("{}.qcow2", manifest.name));
-        let vars = vm_dir.join(format!("{}-vars.fd", manifest.name));
-        ensure_uefi_vars_file(&vars).context("creating the guest's UEFI variables store")?;
 
-        let firmware = UefiFirmware {
-            code_path: resolve_uefi_code_path(manifest.run.arch)
-                .context("resolving UEFI firmware")?
-                .display()
-                .to_string(),
-            vars_path: vars.display().to_string(),
-        };
+        // Arch-aware: None on x86_64, whose q35 machine boots the image's own
+        // bootloader through SeaBIOS. Hand-assembling the pair here instead
+        // attaches a 64 MiB vars store — the aarch64 `virt` pflash convention —
+        // which QEMU rejects on x86, where combined system firmware is capped
+        // at 8 MiB.
+        let firmware = uefi_firmware_for(manifest.run.arch, &vm_dir, &manifest.name)
+            .context("resolving UEFI firmware")?;
 
         let config = VmConfig {
             qcow2_path: overlay.display().to_string(),
@@ -172,7 +170,7 @@ impl BootedGuest {
             accel: manifest.run.accel,
             memory: manifest.run.memory.clone(),
             cpus: manifest.run.cpus,
-            firmware: Some(firmware),
+            firmware,
             login: VmLogin {
                 username: manifest.login.username.clone(),
                 private_key_path: manifest.login.ssh_private_key.clone(),
@@ -391,7 +389,18 @@ impl BootedGuest {
             force_kill(pid, &monitor_socket);
             return Err(anyhow!("guest did not shut down gracefully: {e}"));
         }
-        if !wait_for_port_release(port, SHUTDOWN_TIMEOUT).await {
+        // Drain the console while waiting. If the test worked over SSH, nothing has read the
+        // console since the guest booted, and a guest blocked on a full console pipe cannot
+        // complete its shutdown at all — see `SerialConsole::drain_for`. The drain finishing
+        // first means the console closed, which is QEMU exiting, so re-check the port rather
+        // than treating it as a failure.
+        let released = tokio::select! {
+            released = wait_for_port_release(port, SHUTDOWN_TIMEOUT) => released,
+            _ = self.console.drain_for(SHUTDOWN_TIMEOUT) => {
+                wait_for_port_release(port, Duration::from_secs(5)).await
+            }
+        };
+        if !released {
             force_kill(pid, &monitor_socket);
             return Err(anyhow!(
                 "guest accepted the powerdown but never released port {port}"

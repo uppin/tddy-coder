@@ -211,8 +211,12 @@ export function ReflectionTestHarness({
             undefined,
             { message } as never,
           );
+          // toJsonString, not JSON.stringify: EchoResponse carries a 64-bit
+          // field, which protobuf-es represents as a BigInt, and JSON.stringify
+          // throws "Do not know how to serialize a BigInt" on it. Both stream
+          // paths below already do this.
           logReflection(
-            `invoke result: ${JSON.stringify(response.message)}`,
+            `invoke result: ${toJsonString(method.output as never, response.message as never)}`,
           );
           setStatus("done");
           return;

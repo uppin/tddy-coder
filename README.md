@@ -1,5 +1,7 @@
 # tddy-coder
 
+[![CI](https://github.com/uppin/tddy-coder/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/uppin/tddy-coder/actions/workflows/ci.yml)
+
 TDD-focused development workflow with a web dashboard, daemon, and Claude Code CLI integration.
 
 ## Packages

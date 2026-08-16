@@ -292,7 +292,8 @@ fn render_users<'a>(
 /// script the final stage is about to run, so the boot that ran it provisioned nothing at
 /// all and the bake sealed an empty image.
 ///
-/// `--seed` drops `/var/lib/cloud/seed`; the NoCloud seed ISO stays attached as `-cdrom`, so
+/// `--seed` drops `/var/lib/cloud/seed`; the NoCloud seed ISO stays attached as a virtio
+/// disk (see [`QemuVmArgs::seed_drive_args`]), so
 /// the next boot reads the same seed again. A reset that fails aborts the provisioning
 /// script rather than rebooting into a guest that can never finish — the bake would
 /// otherwise sit there until it timed out, which is indistinguishable from a slow one.
@@ -632,9 +633,8 @@ pub fn cloud_init_boot_argv(config: &CloudInitBootConfig) -> Vec<String> {
         format!("file={},if=virtio,format=qcow2", config.overlay_path),
     ];
     args.extend(QemuVmArgs::pflash_args(config.firmware.as_ref()));
+    args.extend(QemuVmArgs::seed_drive_args(&config.seed_iso_path));
     args.extend([
-        "-cdrom".to_string(),
-        config.seed_iso_path.clone(),
         "-m".to_string(),
         config.memory.clone(),
         "-smp".to_string(),
