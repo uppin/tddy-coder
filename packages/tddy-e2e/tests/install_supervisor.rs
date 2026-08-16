@@ -44,6 +44,7 @@ fn an_install_tree() -> InstallTree {
         "tddy-tools",
         "tddy-supervisor",
         "tddy-remote-git-repo",
+        "tddy-session-sync",
     ] {
         write_executable(&release.join(binary), "fake-binary\n");
     }
@@ -599,6 +600,27 @@ fn installs_the_git_ssh_shim_so_git_can_exec_it_from_the_path() {
 
     // Then
     let installed = tree.bin_dir.join("tddy-remote-git-repo");
+    assert!(
+        installed.is_file(),
+        "expected {} to be installed",
+        installed.display()
+    );
+    assert_mode(&installed, 0o755);
+}
+
+/// The worktree mirror is a client too, and is installed for the same reason the shim is: a binary
+/// whose own documentation says "put it on PATH" that no script ever puts anywhere is a binary
+/// nobody has.
+#[test]
+fn installs_the_worktree_mirror_so_it_can_be_run_from_the_path() {
+    // Given
+    let tree = an_install_tree();
+
+    // When
+    tree.install();
+
+    // Then
+    let installed = tree.bin_dir.join("tddy-session-sync");
     assert!(
         installed.is_file(),
         "expected {} to be installed",
