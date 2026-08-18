@@ -83,6 +83,24 @@ pub fn clone_request(
     git_url: &str,
     destination: &Path,
 ) -> SpawnSessionRequest {
+    clone_request_with_env(os_user, git_program, git_url, destination, BTreeMap::new())
+}
+
+/// The `SpawnSession` request that clones a repository as the target user, carrying transport-
+/// shim env vars the clone needs (PRD AC37).
+///
+/// `env` holds `GIT_SSH_COMMAND`, `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-
+/// provisioned clone that drives `tddy-remote-git-repo` as its `GIT_SSH_COMMAND`. The supervisor's
+/// `SpawnPolicy::allowed_env_keys` **denies** any key not on its list, so an operator must add those
+/// three keys to `spawn_policy.allowed_env_keys` in `supervisor.yaml` for facilitator clones to
+/// work under a supervisor — the daemon cannot widen the policy itself, by design.
+pub fn clone_request_with_env(
+    os_user: &str,
+    git_program: &Path,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+) -> SpawnSessionRequest {
     SpawnSessionRequest {
         os_user: os_user.to_string(),
         tool_path: git_program.to_path_buf(),
@@ -91,7 +109,7 @@ pub fn clone_request(
             git_url.to_string(),
             destination.display().to_string(),
         ],
-        env: BTreeMap::new(),
+        env,
         working_dir: None,
         scope: None,
     }
@@ -264,6 +282,20 @@ pub async fn clone_repo_via_supervisor(
     git_url: &str,
     destination: &Path,
 ) -> anyhow::Result<()> {
+    clone_repo_via_supervisor_with_env(socket_path, os_user, git_url, destination, BTreeMap::new())
+        .await
+}
+
+/// Clone a repository through the supervisor with transport-shim env vars the clone needs (PRD AC37).
+///
+/// See [`clone_request_with_env`] for the `allowed_env_keys` requirement.
+pub async fn clone_repo_via_supervisor_with_env(
+    socket_path: &Path,
+    os_user: &str,
+    git_url: &str,
+    destination: &Path,
+    env: BTreeMap<String, String>,
+) -> anyhow::Result<()> {
     if destination.exists() {
         log::info!(
             "supervisor_spawn: clone destination already exists, asking for nothing (dest={})",
@@ -282,7 +314,7 @@ pub async fn clone_repo_via_supervisor(
         git.display()
     );
     let spawned = client
-        .spawn_session(clone_request(os_user, &git, git_url, destination))
+        .spawn_session(clone_request_with_env(os_user, &git, git_url, destination, env))
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to clone the repository: {e}"))?;
 

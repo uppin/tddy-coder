@@ -39,6 +39,10 @@ pub use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
 /// different crates, and a topic each spelled for itself fails as silence.
 pub use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 
+/// The data-channel topic a session's agent roster is broadcast on inside its room, re-exported for
+/// the same reason as the two above.
+pub use tddy_service::session_agents::SESSION_AGENTS_TOPIC;
+
 /// The broadcast wire types, re-exported so a caller reaches the topic's payload and the module that
 /// produces it through one import.
 pub use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
@@ -1365,6 +1369,11 @@ struct SessionRoomTask {
     /// clonable and a broadcast is made from an RPC handler that holds the registry, not from the
     /// task that took it.
     activity: Arc<BroadcastPublisher>,
+    /// Where this room's `session.agents` snapshots go out. Taken here for the same reason
+    /// `activity` is — the publisher has to be built on the connection before it is consumed by the
+    /// serving task — but published from the roster's own handlers rather than from the poll loop:
+    /// a roster changes when an operator attaches an agent, not on a timer.
+    agents: Arc<BroadcastPublisher>,
     /// Whether this session's WIP ref has been released. See [`WipRefRelease`].
     wip_ref_released: WipRefRelease,
     serve: tokio::task::JoinHandle<()>,
@@ -1506,6 +1515,10 @@ impl SessionRoomRegistry {
         // wants only commits should not have to decode every tool call to discover that.
         let publisher = joined.broadcast_on(WORKTREE_ACTIVITY_TOPIC);
         let activity = Arc::new(joined.broadcast_on(SESSION_ACTIVITY_TOPIC));
+        // A third topic, for the same reason there are two: a consumer that wants the roster should
+        // not have to decode every tool call and every commit to find it, and the three carry
+        // different schemas.
+        let agents = Arc::new(joined.broadcast_on(SESSION_AGENTS_TOPIC));
 
         let deltas = Arc::new(Mutex::new(SessionDeltaStore::new(
             SESSION_DELTA_RING_TICKS,
@@ -1563,6 +1576,7 @@ impl SessionRoomRegistry {
                 worktree_root: hosting.worktree_root.map(Path::to_path_buf),
                 deltas,
                 activity,
+                agents,
                 wip_ref_released,
                 serve,
                 poll,
@@ -1619,6 +1633,26 @@ impl SessionRoomRegistry {
             .map(|room| Arc::clone(&room.activity))
     }
 
+    /// Where a session's roster snapshots are broadcast, or `None` when this daemon hosts no room
+    /// for it.
+    ///
+    /// `None` is ordinary and is not an error: a roster is persisted and served over
+    /// `ListSessionAgents`/`StreamSessionAgents` whether or not a room is open to carry it, and a
+    /// daemon with no LiveKit credentials hosts no rooms at all.
+    pub fn agents_publisher(&self, session_id: &str) -> Option<Arc<BroadcastPublisher>> {
+        self.lock_rooms()
+            .get(session_id)
+            .map(|room| Arc::clone(&room.agents))
+    }
+
+    /// Whether this daemon currently hosts `session_id`'s room.
+    ///
+    /// Asked before admitting an owning daemon to it: a peer told to join a room nobody opened
+    /// waits out its deadline against a participant that never arrives.
+    pub fn hosts(&self, session_id: &str) -> bool {
+        self.lock_rooms().contains_key(session_id)
+    }
+
     // There is deliberately no `broadcast_activity` here, and adding one back would reintroduce a
     // bug this feature already shipped once.
     //
@@ -1631,6 +1665,14 @@ impl SessionRoomRegistry {
     //
     // `activity_publisher` stays because the registry has to hand the poll loop its clone, and
     // because answering `None` for an unhosted session is the branch an RPC route tests.
+
+    /// Whether this daemon currently hosts the room for `codebase_session_id`. The room-admission
+    /// handshake (PRD § "What attach does" step 3) consults this to refuse admitting an owning daemon
+    /// to a session this daemon does not control — an unknown id is `NOT_FOUND`, never a token for a
+    /// room nobody hosts.
+    pub fn contains(&self, codebase_session_id: &str) -> bool {
+        self.lock_rooms().contains_key(codebase_session_id)
+    }
 
     /// Stop hosting the room belonging to `codebase_session_id`, if this daemon hosts one.
     pub fn close(&self, codebase_session_id: &str) {
@@ -2269,6 +2311,15 @@ impl SessionRoomPoll {
             // left behind when a metadata write fails.
             let head_commit = measured.snapshot.head_commit.clone();
 
+            // Before the change check, because a *quiet* session never reaches it. The WIP ref is
+            // what a participant restores its own copy of the checkout from, and until this ran it
+            // did not exist: `announce` publishes it, and `announce` only runs when the checkout has
+            // moved. A client that attached to a session nobody is editing therefore had nothing to
+            // restore from and stayed at whatever it happened to check out — indefinitely.
+            if self.previous_wip_tree.is_empty() {
+                self.seed_uncommitted_state(&measured.snapshot).await;
+            }
+
             // A tick that measured no change still tails the activity log — it just has nothing to
             // announce, and leaves the metadata-failure count exactly where it was. A `Read`, a
             // `Grep`, a `Bash` that printed something: none of them move the checkout, and every one
@@ -2387,6 +2438,60 @@ impl SessionRoomPoll {
     /// Returns the seq of the delta this tick recorded, or `None` when it produced none — which is
     /// where the tick's tool calls are attributed, so it is answered here rather than inferred from
     /// [`Self::next_delta_seq`] by arithmetic.
+    /// Publish the checkout's uncommitted state once, so a participant has something to restore
+    /// from before the session has moved at all.
+    ///
+    /// **No delta is recorded**, and that is the difference from [`Self::record_uncommitted_state`]
+    /// rather than an omission. A delta is a diff between two ticks; this one has no predecessor, so
+    /// a delta taken here would be the whole worktree against nothing — which a client would then
+    /// apply on top of a checkout that already contains it.
+    ///
+    /// Silent on failure beyond the warning [`write_wip_tree_within`] already logs: the next tick
+    /// takes this from the top, and the client waiting on the ref reports its own timeout, which is
+    /// the report an operator can act on.
+    async fn seed_uncommitted_state(&mut self, measured: &WorktreeSnapshot) {
+        let Some(worktree_root) = self.worktree_root.clone() else {
+            // Split placement: the files are on the codebase daemon, and so is the ref.
+            return;
+        };
+        let session_id = self.session_id.clone();
+        let room_name = self.room_name.clone();
+        let git_timeout = self.git_timeout;
+        let head_commit = measured.head_commit.clone();
+        let wip_ref_released = Arc::clone(&self.wip_ref_released);
+
+        let staged = tokio::task::spawn_blocking(move || {
+            let wip_tree = write_wip_tree_within(&worktree_root, git_timeout);
+            if wip_tree.is_empty() {
+                return String::new();
+            }
+            // Held across the publish: see [`WipRefRelease`].
+            let released = lock_wip_ref(&wip_ref_released);
+            if *released {
+                return String::new();
+            }
+            if let Err(reason) =
+                publish_wip_ref(&worktree_root, &session_id, &head_commit, &wip_tree)
+            {
+                warn!(
+                    "session_room: {room_name} could not publish its opening uncommitted state: {reason}"
+                );
+                return String::new();
+            }
+            wip_tree
+        })
+        .await;
+
+        match staged {
+            Ok(wip_tree) if !wip_tree.is_empty() => self.previous_wip_tree = wip_tree,
+            Ok(_) => {}
+            Err(join_error) => warn!(
+                "session_room: {} could not take its opening uncommitted state: {join_error}",
+                self.room_name
+            ),
+        }
+    }
+
     async fn record_uncommitted_state(&mut self, measured: &WorktreeSnapshot) -> Option<u64> {
         let Some(worktree_root) = self.worktree_root.clone() else {
             // Split placement. A delta is a diff between two objects of the project's repository

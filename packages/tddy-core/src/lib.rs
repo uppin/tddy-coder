@@ -22,6 +22,7 @@ pub mod session_action_jobs;
 pub mod session_action_pipeline;
 pub mod session_actions;
 pub mod session_activity;
+pub mod session_agent;
 pub mod session_catalog;
 pub mod session_chain;
 pub mod session_lifecycle;
@@ -100,6 +101,7 @@ pub use presenter::{
 pub use session_activity::{
     activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
 };
+pub use session_agent::{AgentId, AgentIdError, SessionAgentRecord};
 pub use session_chain::{
     integrate_chain_base_into_session_worktree_bootstrap, parent_is_pr_stack_orchestrator,
     pr_stack_node_for_spawn, resolve_chain_base_for_session_spawn, resolve_chain_base_ref,

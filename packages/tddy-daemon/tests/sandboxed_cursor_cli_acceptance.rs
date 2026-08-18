@@ -391,7 +391,8 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
 
     let session_dir = sessions_tmp.path().join("sessions").join(&inner.session_id);
     let meta = read_session_metadata(&session_dir).expect("metadata");
-    assert_eq!(meta.specialized_agents, vec!["fastcontext".to_string()]);
+    let persisted_roster: Vec<&str> = meta.agents.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(persisted_roster, vec!["fastcontext"]);
 
     let stream_resp = service
         .stream_terminal_output(Request::new(StreamTerminalOutputRequest {

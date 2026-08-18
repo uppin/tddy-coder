@@ -300,7 +300,7 @@ mod tests {
     fn error_display_names_agent_base_url_and_model() {
         // Given
         let err = AgentWarmupError {
-            agent: "fastcontext".to_string(),
+            agent: "explorer".to_string(),
             base_url: "http://localhost:11434".to_string(),
             model: "qwen2.5-coder:7b".to_string(),
             last_error: "connection refused".to_string(),
@@ -311,7 +311,7 @@ mod tests {
 
         // Then
         assert!(
-            message.contains("fastcontext"),
+            message.contains("explorer"),
             "message must name the agent: {message}"
         );
         assert!(

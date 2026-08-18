@@ -178,6 +178,53 @@ pub trait HostToolHandler: Send + Sync + 'static {
     ) -> ExecuteToolResponse;
 }
 
+/// Injected RPC-dispatch behavior for the host side of a sandbox `SessionChannel`.
+///
+/// The in-jail `tddy-tools` reaches its facilitating daemon's `ConnectionService` over the
+/// `SessionChannel` for the roster and conversation RPCs a managed session needs. The runner
+/// forwards each as an [`RpcRequest`]; the host dispatches it here and the response (unary or
+/// server-streaming) rides back as [`RpcStreamFrame`]s multiplexed by `request_id`. The host is
+/// the only thing the jail can reach, and these RPCs live on the daemon — so the daemon supplies
+/// the implementation that calls its `ConnectionServiceImpl`; the standalone app and tests supply
+/// [`NullRpcHandler`], which refuses every call the way a daemon-less session should.
+///
+/// [`RpcRequest`]: tddy_service::proto::sandbox::RpcRequest
+/// [`RpcStreamFrame`]: tddy_service::proto::sandbox::RpcStreamFrame
+#[async_trait]
+pub trait HostRpcHandler: Send + Sync + 'static {
+    /// Dispatch `service`/`method` with the encoded request `payload`, returning either a single
+    /// encoded response body or a server stream of them. A `Unary` error or a `ServerStream` error
+    /// is carried back to the in-jail caller as a single terminal `RpcStreamFrame` with `error` set.
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        payload: &[u8],
+    ) -> tddy_rpc::RpcResult;
+}
+
+/// An RPC handler that refuses every call with `UNIMPLEMENTED`. The correct handler for a session
+/// with no daemon in the loop (the standalone app) and for tests that do not exercise the roster
+/// or conversation RPCs: the in-jail `tddy-tools` sees the refusal, reports the roster as
+/// unavailable, and refuses every `subagent_*` call — which is the safe behaviour the runner TODO
+/// described, now reached over the bridge rather than left unreachable.
+#[derive(Default, Clone)]
+pub struct NullRpcHandler;
+
+#[async_trait]
+impl HostRpcHandler for NullRpcHandler {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        _payload: &[u8],
+    ) -> tddy_rpc::RpcResult {
+        tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::unimplemented(format!(
+            "this host does not serve {service}/{method}"
+        ))))
+    }
+}
+
 /// Wiring for [`run_host_relay`].
 pub struct HostRelayConfig {
     /// Session id used on outbound frames (e.g. `SubscribeTerminal`).
@@ -207,9 +254,34 @@ impl HostRelayConfig {
 /// egress, forward terminal output to [`HostRelayConfig::terminal_sink`], and dispatch tool
 /// requests to `tool_handler`. Returns the background task driving inbound frames; `stdin_rx`
 /// bytes are written to the jail PTY.
+///
+/// RPCs the in-jail agent forwards (the roster and conversation RPCs) are refused with
+/// `UNIMPLEMENTED` via [`NullRpcHandler`]. A caller with a daemon in the loop — the daemon itself
+/// — uses [`run_host_relay_with_rpc`] to supply a real [`HostRpcHandler`].
 pub async fn run_host_relay<H: HostToolHandler, C: SessionChannelClient>(
+    client: C,
+    tool_handler: H,
+    config: HostRelayConfig,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+) -> Result<JoinHandle<()>, String> {
+    run_host_relay_with_rpc(
+        client,
+        tool_handler,
+        Arc::new(NullRpcHandler),
+        config,
+        stdin_rx,
+    )
+    .await
+}
+
+/// [`run_host_relay`] with an explicit [`HostRpcHandler`], for callers that serve the roster and
+/// conversation RPCs to their in-jail agent. The daemon passes its `ConnectionService` dispatch
+/// here so a managed session's `tddy-tools` can follow the live roster and open conversations
+/// with remote agents over the same `SessionChannel` that carries its tool calls.
+pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient>(
     mut client: C,
     tool_handler: H,
+    rpc_handler: Arc<dyn HostRpcHandler>,
     config: HostRelayConfig,
     mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
 ) -> Result<JoinHandle<()>, String> {
@@ -236,6 +308,7 @@ pub async fn run_host_relay<H: HostToolHandler, C: SessionChannelClient>(
 
     let reader = tokio::spawn({
         let end_signal = Arc::clone(&end_signal);
+        let rpc_handler = Arc::clone(&rpc_handler);
         async move {
             // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
             let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
@@ -264,6 +337,109 @@ pub async fn run_host_relay<H: HostToolHandler, C: SessionChannelClient>(
                                 payload: Some(SessionPayload::EgressResponse(resp)),
                             })
                             .await;
+                    }
+                    Some(SessionPayload::RpcRequest(req)) => {
+                        // An RPC the in-jail `tddy-tools` asked the host to dispatch to its
+                        // `ConnectionService` (roster + conversation). The response is multiplexed
+                        // back as `RpcStreamFrame`s addressed by `request_id` — a unary RPC is one
+                        // terminal frame, a server stream is many followed by a terminal one. Sent
+                        // on the outbound stream directly (not poll-gated), the same way tunnel
+                        // frames are, so a lifetime-long `StreamSessionAgents` does not occupy the
+                        // single `awaiting_tool` slot the poll path uses.
+                        let request_id = req.request_id;
+                        let tx = host_tx_reader.clone();
+                        match rpc_handler.handle_rpc(&req.service, &req.method, &req.payload).await {
+                            tddy_rpc::RpcResult::Unary(Ok(body)) => {
+                                let _ = tx
+                                    .send(SessionFrame {
+                                        payload: Some(SessionPayload::RpcStreamFrame(
+                                            tddy_service::proto::sandbox::RpcStreamFrame {
+                                                request_id,
+                                                payload: body,
+                                                end_of_stream: true,
+                                                error: String::new(),
+                                            },
+                                        )),
+                                    })
+                                    .await;
+                            }
+                            tddy_rpc::RpcResult::Unary(Err(status)) => {
+                                let _ = tx
+                                    .send(SessionFrame {
+                                        payload: Some(SessionPayload::RpcStreamFrame(
+                                            tddy_service::proto::sandbox::RpcStreamFrame {
+                                                request_id,
+                                                payload: Vec::new(),
+                                                end_of_stream: true,
+                                                error: status.message,
+                                            },
+                                        )),
+                                    })
+                                    .await;
+                            }
+                            tddy_rpc::RpcResult::ServerStream(Ok(mut rx)) => {
+                                tokio::spawn(async move {
+                                    while let Some(frame) = rx.recv().await {
+                                        let (payload, error) = match frame {
+                                            Ok(bytes) => (bytes, String::new()),
+                                            Err(status) => (
+                                                Vec::new(),
+                                                status.message,
+                                            ),
+                                        };
+                                        let is_end = !error.is_empty();
+                                        if tx
+                                            .send(SessionFrame {
+                                                payload: Some(SessionPayload::RpcStreamFrame(
+                                                    tddy_service::proto::sandbox::RpcStreamFrame {
+                                                        request_id: request_id.clone(),
+                                                        payload,
+                                                        end_of_stream: is_end,
+                                                        error,
+                                                    },
+                                                )),
+                                            })
+                                            .await
+                                            .is_err()
+                                        {
+                                            return;
+                                        }
+                                        if is_end {
+                                            return;
+                                        }
+                                    }
+                                    // The stream ended cleanly (sender dropped) without an error
+                                    // frame — send the terminal marker so the in-jail caller's
+                                    // `recv()` loop observes end-of-stream rather than hanging.
+                                    let _ = tx
+                                        .send(SessionFrame {
+                                            payload: Some(SessionPayload::RpcStreamFrame(
+                                                tddy_service::proto::sandbox::RpcStreamFrame {
+                                                    request_id,
+                                                    payload: Vec::new(),
+                                                    end_of_stream: true,
+                                                    error: String::new(),
+                                                },
+                                            )),
+                                        })
+                                        .await;
+                                });
+                            }
+                            tddy_rpc::RpcResult::ServerStream(Err(status)) => {
+                                let _ = tx
+                                    .send(SessionFrame {
+                                        payload: Some(SessionPayload::RpcStreamFrame(
+                                            tddy_service::proto::sandbox::RpcStreamFrame {
+                                                request_id,
+                                                payload: Vec::new(),
+                                                end_of_stream: true,
+                                                error: status.message,
+                                            },
+                                        )),
+                                    })
+                                    .await;
+                            }
+                        }
                     }
                     Some(SessionPayload::TunnelOpen(open)) => {
                         // Agent issued CONNECT host:port — the host owns the real outbound socket.

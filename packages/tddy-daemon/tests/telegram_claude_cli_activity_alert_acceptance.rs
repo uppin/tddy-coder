@@ -69,7 +69,9 @@ fn write_claude_cli_session(
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

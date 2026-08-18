@@ -562,6 +562,24 @@ pub struct SpawnResult {
 /// Clone a git repository as the given OS user. If `destination` already exists, skips clone.
 #[cfg(unix)]
 pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow::Result<()> {
+    clone_as_user_with_env(os_user, git_url, destination, &[])
+}
+
+/// Clone a git repository as the given OS user with extra environment variables carried into the
+/// `git clone` child. If `destination` already exists, skips clone.
+///
+/// `extra_env` is for transport-shim env vars the clone itself needs — today `GIT_SSH_COMMAND`,
+/// `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-provisioned clone that drives
+/// `tddy-remote-git-repo` as its `GIT_SSH_COMMAND` (PRD AC37). Under a supervisor the same keys must
+/// appear in `spawn_policy.allowed_env_keys` or the supervisor refuses the spawn; this fallback path
+/// (no supervisor) sets them directly, having already dropped privilege to the target user.
+#[cfg(unix)]
+pub fn clone_as_user_with_env(
+    os_user: &str,
+    git_url: &str,
+    destination: &Path,
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
 
     let dest_str = destination
@@ -630,6 +648,11 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Transport-shim env vars (e.g. GIT_SSH_COMMAND + TDDY_* for a facilitator clone). Set before the
+    // privilege drop so a same-user clone (no setuid) carries them too.
+    for (key, value) in extra_env {
+        cmd.env(key, value);
+    }
 
     if !same_user {
         let home_dir_pre = home_dir.clone();
@@ -670,6 +693,16 @@ pub fn clone_as_user(os_user: &str, git_url: &str, destination: &Path) -> anyhow
 
 #[cfg(not(unix))]
 pub fn clone_as_user(_os_user: &str, _git_url: &str, _destination: &Path) -> anyhow::Result<()> {
+    anyhow::bail!("clone_as_user is only supported on Unix")
+}
+
+#[cfg(not(unix))]
+pub fn clone_as_user_with_env(
+    _os_user: &str,
+    _git_url: &str,
+    _destination: &Path,
+    _extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
     anyhow::bail!("clone_as_user is only supported on Unix")
 }
 

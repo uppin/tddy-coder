@@ -170,15 +170,6 @@ const SUBAGENT_TOOLS: &[&str] = &[
     "mcp__tddy-tools__subagent_cancel",
 ];
 
-/// Session-action tools a session with a replaced `Shell` must be allowed to call instead
-/// (see docs/ft/coder/no-bash-mode.md): request a new action from the Shell-replacing author
-/// subagent, list established actions, invoke one.
-const ACTION_TOOLS: &[&str] = &[
-    "mcp__tddy-tools__request_action",
-    "mcp__tddy-tools__list_actions",
-    "mcp__tddy-tools__invoke_action",
-];
-
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
 /// these, or the agent falls back to the native built-in (`PermissionServer::decide` pre-allows
 /// native calls on in-repo paths). The pairwise native+mcp disallow already covers same-named
@@ -189,12 +180,6 @@ fn native_aliases(exec_tool: &str) -> &'static [&'static str] {
         "Write" => &["Edit", "MultiEdit", "NotebookEdit"],
         _ => &[],
     }
-}
-
-/// True when the session's replaced-tool set removes direct shell — the trigger for the
-/// session-action surface ([`ACTION_TOOLS`]).
-pub fn shell_is_replaced(replaced: &[&str]) -> bool {
-    replaced.contains(&"Shell")
 }
 
 /// The semantic-index tool this crate folds into the replaced set when indexing is off.
@@ -218,10 +203,14 @@ pub fn effective_replaced_tools<'a>(
 }
 
 /// `--allowedTools` entries for sandbox claude: `mcp__tddy-tools__*` exec tools (minus any tool
-/// named in `replaced` — a subagent that declares it replaces that tool means a direct call must
-/// be impossible, not merely discouraged) + `AskUserQuestion`, plus the subagent tools when
-/// `subagent_enabled` is `true`, plus the session-action tools when `Shell` itself is replaced
-/// (with no direct shell, established session actions are the only way to run a command).
+/// named in `replaced` — an agent that declares it replaces that tool means a direct call must be
+/// impossible, not merely discouraged) + `AskUserQuestion`, plus the subagent tools when
+/// `subagent_enabled` is `true`.
+///
+/// Which tool a def replaces carries no further meaning: replacing `Shell` does not add the
+/// session-action surface, because that was a policy (no-bash mode) encoded into the mechanism
+/// that binds agents to tools. A session that wants those tools is configured with them (see
+/// docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour).
 pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<String> {
     let remaining_tools: Vec<&str> = workspace_exec_tool_names()
         .iter()
@@ -233,9 +222,6 @@ pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<
     if subagent_enabled {
         allowlist.extend(SUBAGENT_TOOLS.iter().map(|s| s.to_string()));
     }
-    if shell_is_replaced(replaced) {
-        allowlist.extend(ACTION_TOOLS.iter().map(|s| s.to_string()));
-    }
     allowlist
 }
 
@@ -243,8 +229,8 @@ pub fn build_claude_allowlist(subagent_enabled: bool, replaced: &[&str]) -> Vec<
 /// be *unreachable*, not merely absent from the allowlist. Dropping it from `--allowedTools` only
 /// un-pre-approves it — Claude's native built-in (`Grep`/`Glob`/…) and the still-advertised
 /// `mcp__tddy-tools__*` form stay callable via the permission prompt. `--disallowedTools` takes
-/// precedence and removes them outright, so the only route to a replaced tool is the subagent (or,
-/// for `Shell`, the session-action surface). Both forms are listed; a name with no native Claude
+/// precedence and removes them outright, so the only route to a replaced tool is the agent that
+/// replaced it. Both forms are listed; a name with no native Claude
 /// built-in (e.g. `SemanticSearch`) simply has no native counterpart to match, which is harmless.
 /// Differently-named native aliases ([`native_aliases`]: `Bash*` for `Shell`, `Edit`/`MultiEdit`/
 /// `NotebookEdit` for `Write`) are appended so a replacement covers every native route. Empty when
@@ -638,17 +624,25 @@ mod tests {
         }
     }
 
-    // ─── tool replacement: Shell / write tools (no-bash & no-write via `replaces`) ───
+    // ─── tool replacement ───────────────────────────────────────────────────────────
     //
-    // Feature: docs/ft/coder/no-bash-mode.md
-    // Everything is driven by the defs' `replaces` sets: replacing `Shell` swaps in the
-    // session-action surface and hard-disables the native Bash family; replacing `Write` also
-    // hard-disables the native edit aliases. No dedicated mode flags exist.
+    // Feature: docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour
+    // A def's `replaces` set is withdrawn from the main agent and nothing else follows from it.
+    // The native-alias half stays: leaving `Bash` callable while `Shell` is withdrawn withdraws
+    // nothing, which is a fact about Claude's tool names rather than a role for an agent.
 
-    /// Replacing `Shell` drops it from the allowlist, adds the three session-action tools, and
-    /// keeps every other exec tool (including the write tools).
+    /// The session-action tools, which replacing `Shell` used to confer automatically.
+    const SESSION_ACTION_TOOLS: &[&str] = &[
+        "mcp__tddy-tools__request_action",
+        "mcp__tddy-tools__list_actions",
+        "mcp__tddy-tools__invoke_action",
+    ];
+
+    /// Replacing `Shell` drops it from the allowlist, keeps every other exec tool, and confers
+    /// nothing: the session-action surface belongs to a session configured with it, not to
+    /// whichever agent happened to name `Shell`.
     #[test]
-    fn replacing_shell_swaps_it_for_the_action_tools() {
+    fn replacing_shell_drops_it_and_grants_nothing_in_its_place() {
         let allowlist = build_claude_allowlist(true, &["Shell"]);
         let allowset: HashSet<_> = allowlist.iter().cloned().collect();
 
@@ -656,10 +650,10 @@ mod tests {
             !allowset.contains("mcp__tddy-tools__Shell"),
             "Shell must leave the allowlist when replaced: {allowlist:?}"
         );
-        for tool in ACTION_TOOLS {
+        for tool in SESSION_ACTION_TOOLS {
             assert!(
-                allowset.contains(*tool),
-                "a Shell replacement must advertise {tool}: {allowlist:?}"
+                !allowset.contains(*tool),
+                "a Shell replacement must not confer {tool}: {allowlist:?}"
             );
         }
         for name in workspace_exec_tool_names()
@@ -694,9 +688,9 @@ mod tests {
     }
 
     /// Replacing the write tools drops them from the allowlist while `Shell` and the read tools
-    /// stay, and the action tools are NOT advertised (they belong to a Shell replacement).
+    /// stay.
     #[test]
-    fn replacing_the_write_tools_keeps_shell_and_adds_no_action_tools() {
+    fn replacing_the_write_tools_keeps_shell_and_the_read_tools() {
         let allowlist = build_claude_allowlist(true, &["Write", "StrReplace", "Delete"]);
         let allowset: HashSet<_> = allowlist.iter().cloned().collect();
 
@@ -717,7 +711,7 @@ mod tests {
         ] {
             assert!(allowset.contains(tool), "{tool} must stay: {allowlist:?}");
         }
-        for tool in ACTION_TOOLS {
+        for tool in SESSION_ACTION_TOOLS {
             assert!(
                 !allowset.contains(*tool),
                 "a write-only replacement must not advertise {tool}: {allowlist:?}"
@@ -749,8 +743,8 @@ mod tests {
         }
     }
 
-    /// Shell and write replacements compose (e.g. one gemma action-author plus one coder def)
-    /// into a deduplicated union.
+    /// Shell and write replacements compose (e.g. one agent replacing `Shell` plus one replacing
+    /// the mutation tools) into a deduplicated union.
     #[test]
     fn shell_and_write_replacements_compose_without_duplicates() {
         let disallowed = build_claude_disallowlist(&["Shell", "Write", "StrReplace", "Delete"]);
@@ -766,10 +760,10 @@ mod tests {
 
         let allowlist = build_claude_allowlist(true, &["Shell", "Write", "StrReplace", "Delete"]);
         let allowset: HashSet<_> = allowlist.iter().cloned().collect();
-        for tool in ACTION_TOOLS {
+        for tool in SESSION_ACTION_TOOLS {
             assert!(
-                allowset.contains(*tool),
-                "the composed session must still advertise {tool}: {allowlist:?}"
+                !allowset.contains(*tool),
+                "no combination of replacements may confer {tool}: {allowlist:?}"
             );
         }
     }
@@ -784,7 +778,7 @@ mod tests {
         for name in workspace_exec_tool_names() {
             assert!(allowset.contains(&format!("mcp__tddy-tools__{name}")));
         }
-        for tool in ACTION_TOOLS {
+        for tool in SESSION_ACTION_TOOLS {
             assert!(
                 !allowset.contains(*tool),
                 "no replacement must not advertise {tool}"

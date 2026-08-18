@@ -234,6 +234,10 @@ export const sessionsDrawerPage = {
   inspectorToolsTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsInspectorTabTools, { timeout: 5000, ...options }),
 
+  /** The Agents tab button in the inspector tab strip — reveals the session's agent roster. */
+  inspectorAgentsTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsInspectorTabAgents, { timeout: 5000, ...options }),
+
   /** The Worktree tab button in the inspector tab strip. */
   inspectorWorktreeTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionInspectorTabWorktree, { timeout: 5000, ...options }),

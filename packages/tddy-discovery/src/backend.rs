@@ -1,4 +1,4 @@
-//! `FastContextBackend: CodingBackend` — multi-turn OpenAI loop producing citations.
+//! `SpecializedAgentBackend: CodingBackend` — multi-turn OpenAI loop producing citations.
 //!
 //! The backend:
 //! - Selects `ToolExecutor::Local` or `::Remote` from `InvokeRequest.remote`.
@@ -19,35 +19,38 @@ use async_trait::async_trait;
 use tddy_core::backend::{CodingBackend, InvokeRequest, InvokeResponse};
 use tddy_core::{BackendError, ProgressEvent};
 
+use crate::agent_def::SpecializedAgentDef;
 use crate::discovery::extract_final_answer;
 use crate::openai::{discovery_tool_definitions, ChatCompletionRequest, ChatMessage, OpenAiClient};
 use crate::tools::ToolExecutor;
 
-/// FastContext Discovery backend — drives the multi-turn model loop.
-pub struct FastContextBackend {
+/// A specialized agent's discovery backend — drives the multi-turn model loop for one
+/// [`SpecializedAgentDef`].
+///
+/// Every field comes from the def, which is the whole configuration: there is no default model,
+/// no default endpoint and no name of its own to fall back on. A backend that could be built
+/// without a def would be a hardcoded agent again, one indirection out (see
+/// docs/ft/daemon/session-agent-roster.md § Removing the hardcoded agents).
+pub struct SpecializedAgentBackend {
+    name: String,
     base_url: String,
     model: String,
+    /// The bearer token every call to `base_url` carries. A local endpoint (Ollama, vLLM) needs
+    /// none — `None` sends no `Authorization` header at all — while a cloud provider answers 401
+    /// to every turn without one.
     api_key: Option<String>,
     max_turns: u32,
 }
 
-impl FastContextBackend {
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>, max_turns: u32) -> Self {
+impl SpecializedAgentBackend {
+    pub fn from_def(def: &SpecializedAgentDef) -> Self {
         Self {
-            base_url: base_url.into(),
-            model: model.into(),
-            api_key: None,
-            max_turns,
+            name: def.name.clone(),
+            base_url: def.base_url.clone(),
+            model: def.model.clone(),
+            api_key: def.api_key.clone(),
+            max_turns: def.max_turns,
         }
-    }
-
-    /// The bearer token every call to `base_url` carries. A local endpoint (Ollama, vLLM) needs
-    /// none — `None` sends no `Authorization` header at all — while a cloud provider answers 401
-    /// to every turn without one.
-    #[must_use]
-    pub fn api_key(mut self, api_key: Option<String>) -> Self {
-        self.api_key = api_key;
-        self
     }
 }
 
@@ -109,9 +112,9 @@ async fn dispatch_tool(executor: &ToolExecutor, tc: &crate::openai::ToolCall) ->
 }
 
 #[async_trait]
-impl CodingBackend for FastContextBackend {
+impl CodingBackend for SpecializedAgentBackend {
     fn name(&self) -> &str {
-        "fastcontext"
+        &self.name
     }
 
     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, BackendError> {
@@ -137,10 +140,9 @@ impl CodingBackend for FastContextBackend {
             };
 
             let request_started = std::time::Instant::now();
-            let response = client
-                .complete(req)
-                .await
-                .map_err(|e| BackendError::InvocationFailed(format!("FastContextBackend: {e}")))?;
+            let response = client.complete(req).await.map_err(|e| {
+                BackendError::InvocationFailed(format!("SpecializedAgentBackend: {e}"))
+            })?;
             let request_elapsed = request_started.elapsed();
 
             if let Some(ref sink) = request.progress_sink {
@@ -236,10 +238,9 @@ impl CodingBackend for FastContextBackend {
 
 #[cfg(test)]
 mod tests {
-    //! Integration tests: FastContextBackend multi-turn loop against a mock server.
+    //! Integration tests: the specialized-agent multi-turn loop against a mock server.
     //!
     //! Feature: docs/ft/coder/discovery-agent.md (Phase B criteria 7–8)
-    //! Changeset: docs/dev/1-WIP/2026-06-24-changeset-fastcontext-discovery.md
 
     use std::sync::{Arc, Mutex};
 
@@ -247,7 +248,25 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use super::FastContextBackend;
+    use super::SpecializedAgentBackend;
+    use crate::agent_def::SpecializedAgentDef;
+
+    /// A def naming `model` on `base_url`, with the turn budget the scenario needs. The def is the
+    /// backend's whole configuration, so every test states the part of it that matters.
+    fn a_def(base_url: impl Into<String>, model: &str, max_turns: u32) -> SpecializedAgentDef {
+        SpecializedAgentDef {
+            name: "explorer".to_string(),
+            label: None,
+            model: model.to_string(),
+            base_url: base_url.into(),
+            api_key: None,
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: Vec::new(),
+            max_turns,
+            replaces: Vec::new(),
+        }
+    }
 
     fn tool_call_response(tool_name: &str, args: serde_json::Value) -> serde_json::Value {
         serde_json::json!({
@@ -294,28 +313,25 @@ mod tests {
         })
     }
 
-    /// `name()` must return `"fastcontext"` as the backend identifier.
+    /// The backend reports the name of the def it was built from. A literal here would be a
+    /// hardcoded agent: every session running a specialized agent would report the same name
+    /// whichever def it actually ran.
     #[test]
-    fn invoke_reports_name_as_fastcontext() {
+    fn reports_the_name_of_the_def_it_was_built_from() {
         // Given
-        let backend = FastContextBackend::new(
-            "http://localhost:30000",
-            "microsoft/FastContext-1.0-4B-RL",
-            6,
-        );
+        let mut def = a_def("http://localhost:11434", "qwen2.5-coder:7b", 6);
+        def.name = "my-explorer".to_string();
+
+        // When
+        let backend = SpecializedAgentBackend::from_def(&def);
 
         // Then
-        assert_eq!(
-            backend.name(),
-            "fastcontext",
-            "FastContextBackend::name() must return \"fastcontext\""
-        );
+        assert_eq!(backend.name(), "my-explorer");
     }
 
-    /// A custom (non-default) model id passed to `FastContextBackend::new` must be sent verbatim
-    /// as the `model` field of the outgoing `/v1/chat/completions` request body — this is what
-    /// lets the backend target a locally-served model tag (e.g. an Ollama model) instead of the
-    /// hardcoded `microsoft/FastContext-1.0-4B-RL` default.
+    /// The def's model id must be sent verbatim as the `model` field of the outgoing
+    /// `/v1/chat/completions` request body — this is what lets the backend target a locally-served
+    /// model tag (e.g. an Ollama model) rather than anything the binary chose for it.
     #[tokio::test]
     async fn invoke_sends_the_configured_model_name_in_the_request_body() {
         // Given — a mock server that immediately returns a final answer
@@ -328,8 +344,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let custom_model = "hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M";
-        let backend = FastContextBackend::new(server.uri(), custom_model, 2);
+        let custom_model = "hf.co/mitkox/Qwen2.5-Coder-7B-GGUF:Q4_K_M";
+        let backend = SpecializedAgentBackend::from_def(&a_def(server.uri(), custom_model, 2));
         let request = InvokeRequest {
             prompt: "Where is the entry point?".to_string(),
             ..InvokeRequest::default()
@@ -341,7 +357,7 @@ mod tests {
             .await
             .expect("invoke must succeed when the model produces a final answer");
 
-        // Then — the request body's `model` field is the custom tag, not the microsoft default
+        // Then — the request body's `model` field is the def's tag, verbatim
         let calls = server.received_requests().await.unwrap();
         assert_eq!(calls.len(), 1, "exactly one model call must be made");
         let body: serde_json::Value =
@@ -349,13 +365,13 @@ mod tests {
         assert_eq!(
             body["model"].as_str(),
             Some(custom_model),
-            "request body must carry the configured model id, not the microsoft default"
+            "request body must carry the def's model id, verbatim"
         );
     }
 
     /// Each dispatched tool call must emit a `ProgressEvent::ToolUse` on `InvokeRequest.progress_sink`
     /// — the same mechanism `ClaudeCodeBackend`/`CursorBackend` use to drive the TUI activity log —
-    /// so a user running `--agent fastcontext` interactively sees tool activity as it happens,
+    /// so a user running `--agent <their def>` interactively sees tool activity as it happens,
     /// instead of the CLI going silent for the whole multi-turn loop.
     #[tokio::test]
     async fn invoke_emits_a_tool_use_progress_event_for_each_dispatched_tool_call() {
@@ -378,7 +394,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let backend =
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", 6));
         let recorded: Arc<Mutex<Vec<tddy_core::ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let recorded_for_sink = recorded.clone();
         let progress_sink = tddy_core::backend::ProgressSink::new(move |ev| {
@@ -439,7 +456,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let backend =
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", 6));
         let recorded: Arc<Mutex<Vec<tddy_core::ProgressEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let recorded_for_sink = recorded.clone();
         let progress_sink = tddy_core::backend::ProgressSink::new(move |ev| {
@@ -507,7 +525,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let backend =
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", 6));
         let recorded: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let recorded_for_sink = recorded.clone();
         let agent_output_sink = tddy_core::backend::AgentOutputSink::new(move |s: &str| {
@@ -561,7 +580,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let backend =
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", 6));
         let request = InvokeRequest {
             prompt: "Where is the authentication logic?".to_string(),
             ..InvokeRequest::default()
@@ -606,7 +626,7 @@ mod tests {
 
         let max_turns = 3u32;
         let backend =
-            FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", max_turns);
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", max_turns));
         let request = InvokeRequest {
             prompt: "Find all Rust files".to_string(),
             ..InvokeRequest::default()
@@ -685,7 +705,7 @@ mod tests {
 
         let max_turns = 2u32;
         let backend =
-            FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", max_turns);
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", max_turns));
         let request = InvokeRequest {
             prompt: "Where is docker support implemented?".to_string(),
             ..InvokeRequest::default()
@@ -730,7 +750,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let backend = FastContextBackend::new(server.uri(), "microsoft/FastContext-1.0-4B-RL", 6);
+        let backend =
+            SpecializedAgentBackend::from_def(&a_def(server.uri(), "qwen2.5-coder:7b", 6));
         let request = InvokeRequest {
             prompt: "Where is the entry point?".to_string(),
             ..InvokeRequest::default()

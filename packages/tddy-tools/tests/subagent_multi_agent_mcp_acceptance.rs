@@ -1,5 +1,5 @@
 //! Acceptance tests: multiple YAML-defined specialized subagents (`TDDY_SUBAGENTS_JSON`) over the
-//! real `tddy-tools --mcp` stdio wire — generalizing the single hardcoded `"fastcontext"` factory
+//! real `tddy-tools --mcp` stdio wire — the multi-agent counterpart to the single-agent wire
 //! `subagent_mcp_acceptance.rs` covers.
 //!
 //! Feature: docs/ft/coder/specialized-subagents.md (criteria 9-10)
@@ -127,7 +127,7 @@ fn two_agent_defs_json() -> String {
 
 /// `subagent_new_session { agent: "agent-two" }` must resolve the *second* of two defs configured
 /// via `TDDY_SUBAGENTS_JSON` — proving the registry distinguishes multiple specialized agents by
-/// name, not just the single hardcoded `"fastcontext"` factory `subagent_mcp_acceptance.rs` covers.
+/// name rather than serving whichever one happens to be first.
 #[tokio::test]
 async fn subagent_new_session_selects_the_named_agent_among_multiple_configured_via_json() {
     // Given
@@ -161,9 +161,8 @@ async fn subagent_new_session_selects_the_named_agent_among_multiple_configured_
     );
 }
 
-/// `subagent_new_session` with an `agent` name that is present in neither `TDDY_SUBAGENTS_JSON`
-/// nor the legacy hardcoded `"fastcontext"` factory must return `is_error:true`, not silently
-/// create a session for a different (wrong) agent.
+/// `subagent_new_session` with an `agent` name absent from `TDDY_SUBAGENTS_JSON` must return
+/// `is_error:true`, not silently create a session for a different (wrong) agent.
 #[tokio::test]
 async fn subagent_new_session_rejects_an_agent_name_not_present_in_tddy_subagents_json() {
     // Given
@@ -197,14 +196,16 @@ async fn subagent_new_session_rejects_an_agent_name_not_present_in_tddy_subagent
     );
 }
 
-/// Back-compat: with only `TDDY_SUBAGENT=fastcontext` set (no `TDDY_SUBAGENTS_JSON` at all), the
-/// legacy single-agent path from `subagent_mcp_acceptance.rs` must keep working unmodified.
+/// `subagent_new_session` naming no agent is an error listing the agents there are. With any
+/// number of agents attachable there is no defensible default, and picking one would make the
+/// main agent's choice depend on resolution order (docs/ft/daemon/session-agent-roster.md AC18).
 #[tokio::test]
-async fn back_compat_tddy_subagent_fastcontext_alone_still_resolves_without_subagents_json() {
-    // Given — no TDDY_SUBAGENTS_JSON at all, matching today's shipped (#254) configuration
+async fn subagent_new_session_without_an_agent_field_is_an_error_listing_the_configured_agents() {
+    // Given
+    let defs_json = two_agent_defs_json();
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", "http://127.0.0.1:1"),
+        ("TDDY_SUBAGENT", "agent-one,agent-two"),
+        ("TDDY_SUBAGENTS_JSON", &defs_json),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -224,9 +225,13 @@ async fn back_compat_tddy_subagent_fastcontext_alone_still_resolves_without_suba
     // Then
     let body = tool_result_json(&response);
     assert_eq!(
-        body["sessionId"].as_str(),
-        Some("conv-3"),
-        "TDDY_SUBAGENT=fastcontext alone (no TDDY_SUBAGENTS_JSON) must still resolve via the \
-         legacy SubagentRegistry::new() path; got: {body}"
+        body["is_error"].as_bool(),
+        Some(true),
+        "a call naming no agent must be refused, not answered with a default; got: {body}"
+    );
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("agent-one") && message.contains("agent-two"),
+        "the refusal must list the agents there are; got: {message:?}"
     );
 }

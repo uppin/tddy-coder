@@ -12,7 +12,14 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
-import { TEST_IDS, byTestId, createSessionSubagentCheckbox } from "../support/testIds";
+import { TEST_IDS, byTestId, createSessionAgentOption } from "../support/testIds";
+
+/** The daemon serving this form. Agents are offered — and submitted — as `<name>@<host>`, since a
+ *  bare name cannot say which host offers a def once more than one does
+ *  (docs/ft/daemon/session-agent-roster.md § Web UI). */
+const HOST = "local";
+
+const FASTCONTEXT = `fastcontext@${HOST}`;
 
 /** A backend seeded with every RPC CreateSessionPane calls on mount, including one stubbed
  * specialized subagent, plus a StartSession stub. */
@@ -30,7 +37,13 @@ function aCreateSessionBackend() {
     .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }))
     .onUnary(ConnectionService.method.listSubagents, () => ({
       subagents: [
-        { name: "fastcontext", label: "FastContext", model: "microsoft/FastContext-1.0-4B-RL" },
+        {
+          name: "fastcontext",
+          label: "FastContext",
+          model: "microsoft/FastContext-1.0-4B-RL",
+          daemonInstanceId: HOST,
+          agentId: FASTCONTEXT,
+        },
       ],
     }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "managed-wf-1" }));
@@ -84,7 +97,7 @@ describe("CreateSession managed-codebase workflow", () => {
     // Then — both the recipe picker and the subagent list appear
     byTestId(TEST_IDS.createSessionRecipeSelect).should("be.visible");
     byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("be.visible");
-    byTestId(createSessionSubagentCheckbox("fastcontext")).should("be.visible");
+    byTestId(createSessionAgentOption(FASTCONTEXT)).should("be.visible");
   });
 
   it("creating a managed claude-cli session sends managedCodebase=true and the selected recipe", () => {
@@ -97,17 +110,18 @@ describe("CreateSession managed-codebase workflow", () => {
 
     // When — choose the bugfix recipe and one subagent, then submit
     byTestId(TEST_IDS.createSessionRecipeSelect).select("bugfix");
-    byTestId(createSessionSubagentCheckbox("fastcontext")).click();
+    byTestId(createSessionAgentOption(FASTCONTEXT)).click();
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
-    // Then — the typed StartSession request carried the explicit flag, recipe, and subagent
+    // Then — the typed StartSession request carried the explicit flag, recipe, and the
+    // subagent’s qualified id
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(ConnectionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("claude-cli");
       expect(calls[0].managedCodebase).to.eq(true);
       expect(calls[0].recipe).to.eq("bugfix");
-      expect(calls[0].specializedAgents).to.deep.equal(["fastcontext"]);
+      expect(calls[0].specializedAgents).to.deep.equal([FASTCONTEXT]);
     });
   });
 

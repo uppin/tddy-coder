@@ -293,6 +293,7 @@ impl PermissionServer {
     pub fn new() -> Self {
         let socket_path = permission_relay_socket_path();
         let mut tool_router = Self::tool_router();
+        let seed_defs = seed_subagents_or_report();
         // Session-tool transport (sandbox IPC or daemon HTTP) present => forward the
         // dynamic exec-tool catalog too, so Claude Code sees Read/Write/Shell/etc.
         // alongside the 3 static tools. Both transport variants use the same static
@@ -302,24 +303,27 @@ impl PermissionServer {
             // declares it `replaces` is delegated to that subagent, so this server must not
             // advertise it — a direct call must be impossible at the tool server too, not only
             // gated by Claude's allow/disallow lists. Empty when no subagent replaces anything.
-            let replaced = resolve_replaced_tools_for_defs(&subagents_from_env());
+            let replaced = resolve_replaced_tools_for_defs(&seed_defs);
             let catalog: Vec<RemoteToolDef> = exec_tool_catalog()
                 .into_iter()
                 .filter(|tool| !replaced.contains(&tool.name))
                 .collect();
             tool_router.merge(dynamic_tool_router(&catalog));
-        }
-        // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — merged only
-        // when a subagent is actually configured, mirroring the exec-tool merge above.
-        if subagent_enabled() {
-            tool_router.merge(subagent_tool_router());
-        }
-        // Session-action tools (request_action/list_actions/invoke_action): with a def replacing
-        // `Shell` there is no direct shell, so declarative session actions authored by that def
-        // become the command surface (docs/ft/coder/no-bash-mode.md).
-        if shell_replacing_author(&subagents_from_env()).is_some() {
+            // Session-action tools (request_action/list_actions/invoke_action). All three are host
+            // round-trips over this very transport — `EstablishAction`, `ListActions`,
+            // `InvokeAction` — since the session directory the actions live in exists only on the
+            // host. So having that surface to reach is the whole of what they need, and the whole
+            // of what gates them. Nothing here reads a def's `replaces`: an action surface is not
+            // granted by an agent happening to name a particular tool
+            // (docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour).
             tool_router.merge(crate::action_tools::action_tool_router());
         }
+        // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — registered
+        // unconditionally, and *advertised* only while the roster has someone to address (see
+        // `advertised_tools`). Registration cannot be the gate any more: an agent attached at
+        // minute forty has to become callable without the process restarting, and the router is
+        // built once at construction.
+        tool_router.merge(subagent_tool_router());
         // LSP tools: the single language-agnostic `Lsp*` set is exposed only when the owner
         // signalled (via `TDDY_LSP_TOOLS`) that a language server is available for the repo.
         // They forward over the same session-tool transport as the exec tools.
@@ -332,20 +336,36 @@ impl PermissionServer {
         }
     }
 
-    /// Every tool name currently registered in this server's live `ToolRouter` — the exact
-    /// set `tools/list` will report, including any merged-in dynamic exec tools.
+    /// Every tool name this server advertises right now — the exact set `tools/list` will report,
+    /// including any merged-in dynamic exec tools.
     pub fn tool_names(&self) -> Vec<String> {
-        self.tool_router
-            .list_all()
+        self.advertised_tools()
             .into_iter()
             .map(|t| t.name.to_string())
             .collect()
     }
 
+    /// The tools `tools/list` reports: everything in this server's router, minus the subagent
+    /// conversation tools while **no agent is attached**.
+    ///
+    /// Computed per call rather than baked into the router at construction, because the roster is
+    /// live: an attach makes the tools appear and a detach makes them go, and each applied revision
+    /// sends `notifications/tools/list_changed` so the main agent re-lists and sees it
+    /// (docs/ft/daemon/session-agent-roster.md § The roster stream). Advertising them on an empty
+    /// roster would show the operator four tools that can only answer "no agents are attached".
+    fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        let mut tools = self.tool_router.list_all();
+        if crate::session_agents::session_agent_roster().is_empty() {
+            let conversation_tools = subagent_tool_names();
+            tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
+        }
+        tools
+    }
+
     /// Enumerate every tool this server would advertise to an agent, as [`RemoteToolDef`]s
     /// (name + description + JSON input schema): the static workflow `#[tool]`s, the exec-tool
-    /// catalog (unconditionally — Read/Write/Shell/…), and the subagent tools when a subagent is
-    /// configured. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
+    /// catalog (unconditionally — Read/Write/Shell/…), and the subagent tools while an agent is
+    /// attached. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
     /// web Inspector → Tools panel. Does NOT include the Bash CLI subcommands (submit/ask/…); the
     /// `list-tools` command appends those.
     pub fn advertised_tool_defs() -> Vec<RemoteToolDef> {
@@ -363,7 +383,7 @@ impl PermissionServer {
             .map(map_tool)
             .collect();
         defs.extend(exec_tool_catalog());
-        if subagent_enabled() {
+        if !crate::session_agents::session_agent_roster().is_empty() {
             defs.extend(subagent_tool_router().list_all().into_iter().map(map_tool));
         }
         defs
@@ -1401,6 +1421,23 @@ impl rmcp::ServerHandler for PermissionServer {
              **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
         )
     }
+
+    /// Answered from [`PermissionServer::advertised_tools`] rather than from the router directly,
+    /// so the subagent conversation tools follow the live roster. `#[tool_handler]` only generates
+    /// the methods an impl does not already define, so this replaces its `list_tools` and leaves
+    /// `call_tool` alone — a call to a tool that is registered but currently unadvertised is
+    /// answered by its own handler's refusal, which names what is missing.
+    async fn list_tools(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::ListToolsResult, rmcp::ErrorData> {
+        Ok(rmcp::model::ListToolsResult {
+            tools: self.advertised_tools(),
+            meta: None,
+            next_cursor: None,
+        })
+    }
 }
 
 // --- Remote-codebase mode: dynamic tool catalog helpers ---
@@ -1472,7 +1509,18 @@ pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
 ///
 /// Uses [`crate::session_tool_client::dispatch_session_tool`] — sandbox IPC when
 /// `TDDY_SANDBOX_TOOL_IPC` is set, otherwise HTTP to `TDDY_REMOTE_DAEMON_URL`.
+///
+/// A tool the session's **live** roster has withdrawn is refused here rather than run. This is the
+/// second of the two enforcement layers in docs/ft/daemon/session-agent-roster.md § Enforced at two
+/// layers: `--allowedTools` is fixed when `claude` spawns, so an agent attached at minute forty can
+/// only take a tool over by having the call refused where it is made. The refusal is hard — there is
+/// no path that runs the tool anyway.
 pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> String {
+    let roster = crate::session_agents::session_agent_roster();
+    if let Err(refusal) = roster.check_tool_available(tool_name) {
+        log::info!(target: "tddy_tools::server", "refusing {tool_name}: {refusal}");
+        return serde_json::json!({"error": refusal.to_string(), "is_error": true}).to_string();
+    }
     crate::session_tool_client::dispatch_session_tool(tool_name, args).await
 }
 
@@ -1587,23 +1635,51 @@ pub fn dynamic_tool_router(
 
 // --- Discovery subagent MCP tools (ACP-shaped: session/new, session/prompt, session/cancel) ---
 
-/// True when a discovery subagent is configured for this process (`TDDY_SUBAGENT` non-empty).
-fn subagent_enabled() -> bool {
-    env_non_empty("TDDY_SUBAGENT").is_some()
+/// The names of the ACP-shaped conversation tools, read off the router that defines them so the
+/// advertisement filter cannot drift from the set it filters.
+fn subagent_tool_names() -> Vec<String> {
+    subagent_tool_router()
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect()
 }
 
-/// The subagent that authors session-action manifests for `request_action`: the def (from
-/// `TDDY_SUBAGENTS_JSON`) whose `replaces` covers `Shell`. Replacing `Shell` is what opts a
-/// session into the declarative-actions surface (docs/ft/coder/no-bash-mode.md) — no separate
-/// mode flag exists. `None` when no def replaces `Shell`.
-pub(crate) fn shell_replacing_author(defs: &[SpecializedAgentDef]) -> Option<String> {
-    defs.iter()
-        .find(|def| {
-            tddy_discovery::subagent::normalize_replaced_tools(&def.replaces)
-                .iter()
-                .any(|t| t == "Shell")
-        })
-        .map(|def| def.name.clone())
+/// Why an attached agent cannot be run from here: its def lives on the daemon that owns it.
+///
+/// Shared by every tool that opens a turn loop, so the main agent reads one wording for one
+/// condition however it arrived at it.
+fn unreachable_agent_error(entry: &tddy_service::proto::connection::SessionAgentEntry) -> String {
+    format!(
+        "agent '{}' is attached but this session cannot reach it: its conversations are routed \
+         by daemon '{}', which this build does not yet ask",
+        entry.agent_id, entry.daemon_instance_id
+    )
+}
+
+/// Open a turn loop with the roster agent `agent_id`, for a tool that runs one bounded exchange of
+/// its own instead of handing a conversation to the main agent (`request_action`).
+///
+/// Resolved against the live roster exactly as [`subagent_new_session_tool`] resolves it — same
+/// ids, same refusals, no default for a call that names none — so which agents are addressable does
+/// not depend on which tool is asking, and no tool confers a role on an agent by inspecting what it
+/// `replaces`.
+///
+/// No conversation is registered with the roster: the exchange opens and ends inside the call, so
+/// there is nothing a later `subagent_cancel` or a detach could address.
+pub(crate) fn open_roster_agent_session(
+    agent_id: &str,
+) -> Result<(String, Box<dyn SubagentSession>), String> {
+    let roster = crate::session_agents::session_agent_roster();
+    let entry = roster.resolve(Some(agent_id)).map_err(|e| e.to_string())?;
+    let def = roster
+        .local_def_for(&entry)
+        .ok_or_else(|| unreachable_agent_error(&entry))?;
+    let name = def.name.clone();
+    let session = SubagentRegistry::from_defs(vec![def])
+        .create(&name, subagent_config_from_env())
+        .map_err(|e| format!("agent '{}': {e}", entry.agent_id))?;
+    Ok((entry.agent_id, session))
 }
 
 pub(crate) fn env_non_empty(key: &str) -> Option<String> {
@@ -1619,14 +1695,40 @@ struct SubagentConversation {
     session: Box<dyn SubagentSession>,
 }
 
-type SubagentSessionTable = tokio::sync::Mutex<HashMap<String, SubagentConversation>>;
+/// Every conversation this process has run: the ones still open, and the accounting of the ones
+/// that ended.
+#[derive(Default)]
+struct SubagentConversations {
+    open: HashMap<String, SubagentConversation>,
+    /// Conversations that ended — cancelled by the main agent, or whose agent was detached
+    /// underneath them.
+    ///
+    /// Their tokens were spent, so they stay enumerable: the accounting file is rewritten wholesale
+    /// from this table, and dropping a conversation before the rewrite erases its totals from the
+    /// host's view of what the session cost.
+    retired: Vec<tddy_core::token_accounting::ConversationRecord>,
+}
+
+impl SubagentConversations {
+    /// End `conversation_id`, keeping its accounting. Returns whether it was open.
+    fn retire(&mut self, conversation_id: &str) -> bool {
+        let Some(conversation) = self.open.remove(conversation_id) else {
+            return false;
+        };
+        self.retired
+            .push(conversation_record(conversation_id, &conversation));
+        true
+    }
+}
+
+type SubagentSessionTable = tokio::sync::Mutex<SubagentConversations>;
 
 /// Process-wide session table — `PermissionServer` merges the subagent router at construction
 /// time, but the conversation must survive across separate `tools/call` invocations, so the table
 /// lives outside any single `PermissionServer` instance.
 fn subagent_sessions() -> &'static SubagentSessionTable {
     static SESSIONS: OnceLock<SubagentSessionTable> = OnceLock::new();
-    SESSIONS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
+    SESSIONS.get_or_init(|| tokio::sync::Mutex::new(SubagentConversations::default()))
 }
 
 /// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
@@ -1658,32 +1760,46 @@ fn managed_codebase_access() -> CodebaseAccess {
 
 /// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
 /// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
-/// process. Empty (unset, blank, or unparseable) when the env var is absent — the caller falls
-/// back to the legacy single-fastcontext `SubagentRegistry::new()` path in that case, preserving
-/// today's `TDDY_SUBAGENT=fastcontext` + `TDDY_SUBAGENT_FASTCONTEXT_*` behavior unchanged.
-pub(crate) fn subagents_from_env() -> Vec<SpecializedAgentDef> {
-    env_non_empty("TDDY_SUBAGENTS_JSON")
-        .and_then(|json| serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).ok())
-        .unwrap_or_default()
+/// process. Empty when the env var is unset or blank: with no def there is no agent, since every
+/// agent this process can address came from a def source someone wrote.
+///
+/// A value that is *set* and does not parse is an error, never an empty seed. `SpecializedAgentDef`
+/// is `deny_unknown_fields`, so a `tddy-tools` older than the daemon that wrote the value parses
+/// exactly this way — and an empty seed means no agent is attached and none of the withdrawn tools
+/// are served by anyone, with nothing naming the variable that caused it.
+///
+/// The message carries serde's position, never the value: a def carries a provider credential.
+pub fn subagents_from_env() -> Result<Vec<SpecializedAgentDef>, String> {
+    let Some(json) = env_non_empty("TDDY_SUBAGENTS_JSON") else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).map_err(|e| {
+        format!(
+            "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
+             This is what a tddy-tools older than the daemon that spawned it sees, and treating \
+             it as 'no agents are attached' would silently un-withdraw every tool the session's \
+             agents took over"
+        )
+    })
 }
 
-/// Build a [`SubagentConfig`] from `TDDY_SUBAGENT_FASTCONTEXT_*` env vars, with defaults matching
-/// `tddy-coder`'s `--fastcontext-*` CLI flags (see docs/ft/coder/discovery-agent.md). Only
-/// `access` is meaningful when the registry was built via [`subagents_from_env`]'s defs (the def
-/// itself supplies base_url/model/max_turns in that case — see
-/// `SubagentRegistry::create`'s doc comment in `tddy-discovery`).
+/// The spawn seed for the two lazy constructions that have no caller to refuse to — the MCP
+/// server's router and the process-wide roster.
+///
+/// `--mcp` already refused to start on an unparseable value (see `run_mcp_server`), so reaching the
+/// error arm means a caller that never passed that gate. It is reported at `error` naming the
+/// variable rather than passed off as a session nobody attached an agent to.
+pub(crate) fn seed_subagents_or_report() -> Vec<SpecializedAgentDef> {
+    subagents_from_env().unwrap_or_else(|e| {
+        log::error!(target: "tddy_tools::server", "{e}");
+        Vec::new()
+    })
+}
+
+/// The only thing a caller supplies that a def cannot: how this process reaches the codebase.
+/// Endpoint, model, credential and turn budget come from the def itself.
 pub(crate) fn subagent_config_from_env() -> SubagentConfig {
     SubagentConfig {
-        base_url: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_URL")
-            .unwrap_or_else(|| "http://localhost:30000".to_string()),
-        model: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MODEL")
-            .unwrap_or_else(|| "microsoft/FastContext-1.0-4B-RL".to_string()),
-        // Absent for the local endpoint this legacy path targets; set when that endpoint sits
-        // behind something that authenticates.
-        api_key: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_API_KEY"),
-        max_turns: env_non_empty("TDDY_SUBAGENT_FASTCONTEXT_MAX_TURNS")
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(10),
         access: subagent_codebase_access_from_env(),
     }
 }
@@ -1705,83 +1821,117 @@ fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     .to_string()
 }
 
-/// Snapshot every open conversation as the shared [`ConversationRecord`] shape used by
+/// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
 /// `subagent_list` and the accounting file.
+fn conversation_record(
+    id: &str,
+    conv: &SubagentConversation,
+) -> tddy_core::token_accounting::ConversationRecord {
+    let usage = conv.session.cumulative_usage();
+    tddy_core::token_accounting::ConversationRecord {
+        agent: conv.agent.clone(),
+        id: id.to_string(),
+        model: conv.session.model().to_string(),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total(),
+        turns: conv.turns,
+    }
+}
+
+/// Every conversation this process has run, open ones first. The retired ones are included because
+/// their tokens were spent by this session: an accounting file that lists only what is still open
+/// reports a detached agent's consumption as zero.
 fn conversation_records(
-    sessions: &HashMap<String, SubagentConversation>,
+    conversations: &SubagentConversations,
 ) -> Vec<tddy_core::token_accounting::ConversationRecord> {
-    sessions
+    conversations
+        .open
         .iter()
-        .map(|(id, conv)| {
-            let usage = conv.session.cumulative_usage();
-            tddy_core::token_accounting::ConversationRecord {
-                agent: conv.agent.clone(),
-                id: id.clone(),
-                model: conv.session.model().to_string(),
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                total_tokens: usage.total(),
-                turns: conv.turns,
-            }
-        })
+        .map(|(id, conv)| conversation_record(id, conv))
+        .chain(conversations.retired.iter().cloned())
         .collect()
 }
 
 /// Overwrite the host-visible accounting file (`TDDY_TOOLS_ACCOUNTING_FILE`, pointed by the runner
 /// into the session egress dir) with the current conversation list. A no-op when the env var is
 /// unset; write failures are ignored — accounting is best-effort telemetry, never load-bearing.
-fn write_accounting_file(sessions: &HashMap<String, SubagentConversation>) {
+fn write_accounting_file(conversations: &SubagentConversations) {
     let Some(path) = env_non_empty("TDDY_TOOLS_ACCOUNTING_FILE") else {
         return;
     };
-    let payload = serde_json::json!({ "conversations": conversation_records(sessions) });
+    let payload = serde_json::json!({ "conversations": conversation_records(conversations) });
     if let Ok(text) = serde_json::to_string_pretty(&payload) {
         let _ = std::fs::write(&path, text);
     }
 }
 
 /// `subagent_new_session` (ACP `session/new`-shaped): opens a conversation with the named
-/// subagent (default: `TDDY_SUBAGENT`) under the given `sessionId` — the caller decides the
-/// conversation id; one is generated only when omitted.
+/// subagent under the given `sessionId` — the caller decides the conversation id; one is generated
+/// only when omitted.
+///
+/// The agent is resolved against the session's **live roster**, not against the spawn env: an agent
+/// attached after this process started is callable, and one detached is refused naming the id (see
+/// docs/ft/daemon/session-agent-roster.md § Invoking an agent).
+///
+/// A call naming no agent is an error listing the agents there are. There is no default: with any
+/// number of agents attachable, picking one for the caller would make the choice depend on attach
+/// order rather than on what the main agent asked for.
 async fn subagent_new_session_tool(args: serde_json::Value) -> String {
-    let agent_name = args
+    let roster = crate::session_agents::session_agent_roster();
+    let agent_id = args
         .get("agent")
         .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| env_non_empty("TDDY_SUBAGENT"));
-    let Some(agent_name) = agent_name else {
-        return subagent_error_json("no subagent configured: set TDDY_SUBAGENT or pass 'agent'");
-    };
+        .unwrap_or_default();
     let session_id = args
         .get("sessionId")
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let defs = subagents_from_env();
-    let registry = if defs.is_empty() {
-        SubagentRegistry::new()
-    } else {
-        SubagentRegistry::from_defs(defs)
+    let entry = match roster.open_conversation_as(&session_id, agent_id) {
+        Ok(entry) => entry,
+        Err(e) => return subagent_error_json(e),
     };
+    // A roster entry carries no endpoint, credential or turn budget — deliberately, so editing a def
+    // cannot change what a running session may call. This process can therefore only run the loop of
+    // an agent it holds the def for.
+    //
+    // TODO(session-agent-roster): route the rest through the facilitating daemon's
+    // `OpenAgentConversation` / `PromptAgentConversation` / `CancelAgentConversation`, which is what
+    // makes a remote agent — and a local one attached after spawn — callable at all. Those handlers
+    // are the roster's daemon-side tranche.
+    let Some(def) = roster.local_def_for(&entry) else {
+        roster.close_conversation(&session_id);
+        return subagent_error_json(unreachable_agent_error(&entry));
+    };
+    let agent_name = def.name.clone();
+    let registry = SubagentRegistry::from_defs(vec![def]);
     match registry.create(&agent_name, subagent_config_from_env()) {
         Ok(session) => {
-            subagent_sessions().lock().await.insert(
+            subagent_sessions().lock().await.open.insert(
                 session_id.clone(),
                 SubagentConversation {
-                    agent: agent_name,
+                    agent: entry.agent_id,
                     turns: 0,
                     session,
                 },
             );
             serde_json::json!({ "sessionId": session_id }).to_string()
         }
-        Err(e) => subagent_error_json(e),
+        Err(e) => {
+            roster.close_conversation(&session_id);
+            subagent_error_json(e)
+        }
     }
 }
 
 /// `subagent_prompt` (ACP `session/prompt`-shaped): sends one prompt turn to an already-open
 /// session and returns `{stopReason, content}` once the subagent yields.
+///
+/// A conversation whose agent was detached underneath it is refused naming the detach rather than
+/// prompted: the main agent waits on this call, so a conversation that can no longer be answered has
+/// to fail rather than hang.
 async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
@@ -1799,7 +1949,25 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     }
 
     let mut sessions = subagent_sessions().lock().await;
-    let Some(conv) = sessions.get_mut(session_id) else {
+    if sessions.open.contains_key(session_id) {
+        let roster = crate::session_agents::session_agent_roster();
+        if let crate::session_agents::ConversationState::Cancelled { reason } =
+            roster.conversation_state(session_id)
+        {
+            // Its agent is no longer attached, so drop the loop still holding the conversation's
+            // history rather than leaving a session behind that can never be prompted again. Its
+            // accounting is retired rather than dropped: those tokens were spent, and the file
+            // below is rewritten wholesale.
+            sessions.retire(session_id);
+            // The roster tracked this conversation only so it could be cancelled; nothing will ask
+            // about it again, and a cancelled entry nobody forgets is rescanned by every later
+            // frame for the process lifetime.
+            roster.close_conversation(session_id);
+            write_accounting_file(&sessions);
+            return subagent_error_json(reason);
+        }
+    }
+    let Some(conv) = sessions.open.get_mut(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
     let response = match conv.session.prompt(&prompt_text).await {
@@ -1819,12 +1987,18 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
         return subagent_error_json("missing required field: sessionId");
     };
     let mut sessions = subagent_sessions().lock().await;
-    let cancelled = sessions.remove(session_id).is_some();
+    // Retired rather than forgotten: a cancelled conversation's tokens were spent by this session,
+    // and the accounting file below is rewritten from this table wholesale.
+    let cancelled = sessions.retire(session_id);
+    // The roster tracks the same conversation, so that a later detach of its agent does not report
+    // a cancellation for something the main agent already closed.
+    crate::session_agents::session_agent_roster().close_conversation(session_id);
     write_accounting_file(&sessions);
     serde_json::json!({ "cancelled": cancelled }).to_string()
 }
 
-/// `subagent_list`: enumerate every open conversation with its per-conversation token accounting.
+/// `subagent_list`: enumerate every conversation this session ran — open and ended — with its
+/// per-conversation token accounting.
 async fn subagent_list_tool(_args: serde_json::Value) -> String {
     let sessions = subagent_sessions().lock().await;
     serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
@@ -1874,7 +2048,7 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         schema_object(serde_json::json!({
             "type": "object",
             "properties": {
-                "agent": {"type": "string", "description": "Subagent name, e.g. 'fastcontext'. Defaults to TDDY_SUBAGENT."},
+                "agent": {"type": "string", "description": "Required. The name of the subagent attached to this session to open a conversation with."},
                 "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
                 "cwd": {"type": "string", "description": "Optional working directory hint."}
             }
@@ -2278,7 +2452,7 @@ mod tests {
     /// tests only — these vars are process-global.
     fn with_subagent_replacing<R>(replaced: &[&str], f: impl FnOnce() -> R) -> R {
         let defs = format!(
-            r#"[{{"name":"fastcontext","model":"m","replaces":[{}]}}]"#,
+            r#"[{{"name":"explorer","model":"m","base_url":"http://127.0.0.1:1","replaces":[{}]}}]"#,
             replaced
                 .iter()
                 .map(|t| format!("\"{t}\""))
@@ -2286,7 +2460,7 @@ mod tests {
                 .join(",")
         );
         std::env::set_var(IPC_SOCKET_ENV, "/tmp/tddy-test-ipc.sock");
-        std::env::set_var("TDDY_SUBAGENT", "fastcontext");
+        std::env::set_var("TDDY_SUBAGENT", "explorer");
         std::env::set_var("TDDY_SUBAGENTS_JSON", defs);
         let result = f();
         std::env::remove_var(IPC_SOCKET_ENV);

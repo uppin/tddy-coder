@@ -1,5 +1,27 @@
 # Specialized Subagents (YAML-defined) + Session-Creation Picker
 
+> ## ⚠️ Partially superseded — 2026-08-17
+>
+> The **session agent roster**
+> ([docs/ft/daemon/session-agent-roster.md](../daemon/session-agent-roster.md)) replaced this
+> feature's start-time model with a revisioned roster that is mutated while a session runs, and
+> **deleted every hardcoded agent**. The def format, the `tools` catalog and the `replaces`
+> mechanism described below are still current; the criteria marked ~~struck through~~ are not.
+>
+> What changed, in one list:
+> - `builtin_fastcontext_def()` / `builtin_agent_defs()` are **gone**. `resolve_agent_defs(dir)`
+>   returns exactly what the directory holds; an empty `<tddyhome>/agents/` offers no agents.
+> - `base_url` is **required** — there is no default endpoint.
+> - `FastContextBackend` is `SpecializedAgentBackend`, built only from a def, reporting the def's
+>   own name.
+> - `TDDY_SUBAGENT` no longer selects a default agent; `subagent_new_session` without an `agent`
+>   errors listing the roster's ids.
+> - The hardcoded per-tool roles (`Shell` ⇒ action author, `Write` ⇒ coder, at-most-one-Shell,
+>   must-bind-the-tool-you-replace) are **deleted**. `replaces` is a plain declarative list.
+> - Agents are addressed as **`name@daemon_instance_id`**, may live on another daemon, and are
+>   attached/detached on a *live* session rather than fixed at spawn.
+
+
 ## Summary
 
 Generalizes the single hardcoded FastContext discovery subagent
@@ -33,11 +55,12 @@ def (identical to today's shipped defaults) is always available.
 name: my-explorer
 label: "My Explorer (local Qwen)"        # optional, defaults to name
 model: qwen2.5-coder:7b
-base_url: http://localhost:11434         # optional, defaults to http://localhost:30000
+base_url: http://localhost:11434         # required — no default endpoint exists
 system_prompt: |                          # optional; system_prompt_path also supported
   You are a codebase explorer. Answer with <final_answer> citations only.
 tools: [READ, GLOB, GREP]                 # optional, defaults to [READ, GLOB, GREP];
-                                          # WRITE/STR_REPLACE/DELETE available for coder-role defs
+                                          # WRITE/STR_REPLACE/DELETE/SHELL/AWAIT/READ_LINTS/
+                                          # SEMANTIC_SEARCH also bindable
 max_turns: 10                             # optional, defaults to 10
 replaces: [Grep, Glob]                    # optional, defaults to [] (replaces nothing)
 ```
@@ -45,17 +68,23 @@ replaces: [Grep, Glob]                    # optional, defaults to [] (replaces n
 `replaces` names main-agent exec-catalog tools this agent takes over — **any** exec tool, not the
 same universe as `tools` above (this agent's own internal tool loop). See
 [managed-codebase-subagents.md](managed-codebase-subagents.md) § Tool replacement for the base
-enforcement/guidance contract and how multiple agents' `replaces` lists are unioned. Two
-replacements carry extra semantics ([no-bash-mode.md](no-bash-mode.md)): replacing **`Shell`**
-makes the def the session's *action author* (Shell + the native `Bash` family are hard-disabled;
-commands run only through `request_action`/`invoke_action` session actions; at most one def may
-replace Shell), and replacing **`Write`/`StrReplace`/`Delete`** makes it the session's *coder*
-(native `Edit`/`MultiEdit`/`NotebookEdit` are hard-disabled too; the def must bind the matching
-internal tool or the session is rejected before spawn).
+enforcement/guidance contract and how multiple agents' `replaces` lists are unioned.
+
+~~Two replacements carry extra semantics: `Shell` ⇒ *action author*, `Write`/`StrReplace`/`Delete`
+⇒ *coder*.~~ **Superseded (2026-08-17).** `replaces` carries **no** per-tool meaning: the union
+across the roster is withdrawn from the main agent, and nothing else follows from which name is in
+the list. Two agents may both replace `Shell`; an agent may replace a tool its own loop does not
+bind (the def that motivated the field did exactly that, replacing `SemanticSearch` and answering it
+from a read/glob/grep loop).
+
+What *does* survive is `native_aliases`, and it is not a role: withdrawing `Shell` also hard-disables
+`Bash`/`BashOutput`/`KillShell`, and withdrawing `Write` also disables
+`Edit`/`MultiEdit`/`NotebookEdit`. That is a fact about Claude's native tool names — leaving them
+callable would make the withdrawal meaningless — not a policy about what an agent means.
 
 `tools` is an **extensible registry** — `SubagentTool` is a Rust enum with one variant per bound-tool
-kind: the read-only discovery trio `READ`/`GLOB`/`GREP` (the defaults) plus the opt-in mutation
-tools `WRITE`/`STR_REPLACE`/`DELETE` for coder-role defs. The mutation tools are **Managed-access
+kind: the read-only discovery trio `READ`/`GLOB`/`GREP` (the defaults) plus `WRITE`/`STR_REPLACE`/
+`DELETE`/`SHELL`/`AWAIT`/`READ_LINTS`/`SEMANTIC_SEARCH`. The mutation tools are **Managed-access
 only** — path confinement comes from the host tool engine; a `Local`-access subagent gets a typed
 error, so a YAML `tools:` entry alone can never grant unconfined host writes. A def naming an
 unrecognized tool is rejected at load time (typed error, no silent drop).
@@ -100,11 +129,13 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 
 1. `load_agent_defs(dir)` parses every `*.yaml` file in `dir` into a `SpecializedAgentDef`; a
    malformed file is skipped (logged), not a panic and not a silent empty result for the whole dir.
-2. `builtin_fastcontext_def()` returns a def with `name: "fastcontext"`,
-   `model: "microsoft/FastContext-1.0-4B-RL"`, `base_url: "http://localhost:30000"`,
-   `tools: [READ, GLOB, GREP]`, `max_turns: 10` — matching today's shipped defaults exactly.
-3. A user-defined YAML file named `fastcontext.yaml` (or any def with `name: fastcontext`) overrides
-   the builtin def of the same name — user config always wins over the shipped default.
+2. ~~`builtin_fastcontext_def()` returns a def…~~ **Superseded (2026-08-17).** There is no builtin.
+   `resolve_agent_defs(dir)` returns exactly what `dir` holds, and a missing directory yields an
+   empty list. Pinned by `packages/tddy-discovery/tests/no_builtin_agents_acceptance.rs`, which also
+   scans `packages/*/src/**.rs` so the name and the shipped model id cannot return.
+3. ~~A user-defined `fastcontext.yaml` overrides the builtin…~~ **Superseded.** A def named
+   `fastcontext` is an ordinary def with nothing to override. Separately, `base_url` is now
+   **required**: a def omitting it fails to load rather than defaulting to `http://localhost:30000`.
 4. `SubagentTool` deserializes `READ`/`GLOB`/`GREP` (case as shown); an unknown tool name is a typed
    load error, not a silently-dropped tool.
 
@@ -123,8 +154,12 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 9. With `TDDY_SUBAGENTS_JSON` set to a JSON array of defs and `TDDY_SUBAGENT` naming one or more of
    them (comma-separated), `tools/list` over MCP exposes the subagent tools, and
    `subagent_new_session { agent: "<name>" }` selects among the multiple registered defs.
-10. Back-compat: `TDDY_SUBAGENT=fastcontext` with no `TDDY_SUBAGENTS_JSON` set still works, resolving
-    to `builtin_fastcontext_def()` (today's #254 env-var shape keeps working unmodified).
+10. ~~Back-compat: `TDDY_SUBAGENT=fastcontext` … still works~~ **Superseded.** `TDDY_SUBAGENT` is
+    gone from `tddy-tools` entirely; `TDDY_SUBAGENTS_JSON` is the spawn **seed** and the live roster
+    (`StreamSessionAgents`) is the source of truth. `subagent_new_session` without an `agent` field
+    is an error listing the attached ids — with an unbounded roster there is no defensible default,
+    and picking the first entry would make the choice depend on attach order. The conversation tools
+    are advertised only while the roster is non-empty.
 
 ### Standalone CLI (`tddy-sandbox-app`)
 
@@ -139,13 +174,15 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 
 ### Workflow backend (`tddy-coder`)
 
-13. `create_backend("fastcontext", ...)` builds a `FastContextBackend` whose `model`/`base_url` come
-    from the resolved `fastcontext` def (builtin or `<tddyhome>/agents/fastcontext.yaml` override),
-    not from hardcoded literals.
-14. *(partially implemented)* `create_backend` itself accepts any name present in the resolved def
-    set. `--agent <name>`'s clap `value_parser` still hardcodes a fixed allowlist and rejects a
-    custom name before `create_backend` runs — see the `TODO` at `Args.agent` in
-    `packages/tddy-coder/src/run.rs` and `docs/dev/TODO.md`.
+13. ~~`create_backend("fastcontext", …)` builds a `FastContextBackend`…~~ **Superseded.**
+    `create_backend` builds a `SpecializedAgentBackend` from the resolved def and nothing else;
+    `name()` returns the def's own name. The `--fastcontext-url` / `--fastcontext-model` /
+    `--fastcontext-max-turns` flags that could override a def's endpoint are **deleted** — a def is
+    the whole configuration, pinned by
+    `packages/tddy-coder/tests/specialized_agent_backend_acceptance.rs`.
+14. ~~*(partially implemented)* … `--agent`'s clap `value_parser` still hardcodes an allowlist~~
+    **Resolved.** `Args.agent` carries no static allowlist; `create_backend` refuses an unresolvable
+    name where the whole def set is known, naming the agents that do resolve.
 15. The def's `system_prompt` does **not** override a workflow goal's own system prompt — per-goal
     system prompts (`GoalHints`, `InvokeRequest.system_prompt`) remain the source of truth for the
     one-shot `CodingBackend::invoke` path; `system_prompt` on a def only seeds the stateful MCP
@@ -209,7 +246,8 @@ no fallback to starting the session anyway.
 ## Non-goals (out of scope for v1)
 
 - ~~Tool kinds beyond `READ`/`GLOB`/`GREP`~~ — shipped 2026-07-21: `WRITE`/`STR_REPLACE`/`DELETE`
-  for coder-role defs (see [no-bash-mode.md](no-bash-mode.md)). Further kinds remain one new
+  (see [no-bash-mode.md](no-bash-mode.md); the *roles* that doc describes are superseded — see the
+  banner). Further kinds remain one new
   variant + match arm each.
 - Streaming partial subagent output mid-turn (inherited from #254).
 - Per-project (repo-local) agent defs; hot-reloading `<tddyhome>/agents` while a daemon is running.

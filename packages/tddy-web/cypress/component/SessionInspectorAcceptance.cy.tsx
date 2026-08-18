@@ -9,8 +9,10 @@ import { ConnectionService, Signal } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
+import { anAttachedAgent } from "../support/rpc/sessionAgentRosterBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { sessionAgentRosterPage } from "../support/pages/sessionAgentRosterPage";
 import { sessionActivitiesPage } from "../support/pages/sessionActivitiesPage";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,9 @@ const DISCONNECTED_SESSION = {
   workflowGoal: "Older work",
   pendingElicitation: false,
 };
+
+/** The agent attached to the session whose roster the Agents tab shows, under its qualified id. */
+const ROSTERED_AGENT = "explorer@local";
 
 /** Session with new optional fields — used to verify they render in the inspector metadata. */
 const SESSION_WITH_NEW_FIELDS = {
@@ -320,6 +325,36 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // Then — metadata restored, Tools panel gone
     sessionsDrawerPage.inspectorMetadata().should("be.visible");
     cy.get(`[data-testid="sessions-inspector-tools-panel"]`, { timeout: 100 }).should("not.exist");
+  });
+
+  // -------------------------------------------------------------------------
+  // The Agents tab is the only way an operator reaches the session's agent roster
+  // (docs/ft/daemon/session-agent-roster.md § Web UI). `SessionAgentRosterPane.cy.tsx` mounts that
+  // pane directly, so without this the tab could be removed — or wired to another panel — with the
+  // whole roster suite still green.
+  // -------------------------------------------------------------------------
+
+  it("reveals the session's agent roster when the Agents tab is selected", () => {
+    // Given — the session's daemon holds one attached agent
+    const backend = aConnectionServiceBackend({
+      sessions: [DISCONNECTED_SESSION],
+      sessionAgents: {
+        sessionId: DISCONNECTED_SESSION.sessionId,
+        initial: [anAttachedAgent(ROSTERED_AGENT)],
+        rev: 1,
+      },
+    });
+
+    // When
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorToggle().click();
+    sessionsDrawerPage.inspectorAgentsTab().click();
+
+    // Then — the roster pane is what the tab leads to, showing the daemon's roster
+    sessionAgentRosterPage.pane().should("exist");
+    sessionAgentRosterPage.row(ROSTERED_AGENT).should("exist");
+    sessionsDrawerPage.inspectorMetadata().should("not.exist");
   });
 });
 

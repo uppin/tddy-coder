@@ -52,11 +52,43 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// The daemon under test, holding a registry with one Ollama provider.
 struct Harness {
     _dir: tempfile::TempDir,
+    agents_dir: PathBuf,
     service: ConnectionServiceImpl,
     store: Arc<ModelRegistryStore>,
 }
 
 impl Harness {
+    /// Write a `<tddyhome>/agents/<name>.yaml` def — the daemon's other `--agent` source.
+    fn given_an_agent_def_named(&self, name: &str) -> PathBuf {
+        std::fs::create_dir_all(&self.agents_dir).expect("the agents directory must be creatable");
+        let path = self.agents_dir.join(format!("{name}.yaml"));
+        std::fs::write(
+            &path,
+            format!("name: {name}\nmodel: qwen3:32b\nbase_url: \"{OLLAMA_URL}\"\ntools: [READ]\n"),
+        )
+        .expect("the agent def must be writable");
+        path
+    }
+
+    /// Ask the registry for an assistant of this name, and answer with how it refused.
+    async fn when_creating_an_assistant_named(&self, name: &str) -> String {
+        self.store
+            .create_assistant(
+                NewAssistant {
+                    name: name.to_string(),
+                    label: "Repo explorer".to_string(),
+                    provider_id: "prov-ollama".to_string(),
+                    model_id: "qwen3:32b".to_string(),
+                    system_prompt: "You explore repositories.".to_string(),
+                    tools: vec!["Read".to_string()],
+                },
+                THE_OPERATOR,
+            )
+            .await
+            .expect_err("the assistant must be refused")
+            .to_string()
+    }
+
     /// Define an assistant on `qwen3:32b` with the given name and tool set.
     async fn given_an_assistant_named(&self, name: &str, tools: &[&str]) {
         self.store
@@ -97,8 +129,12 @@ async fn a_daemon_with_a_registry() -> Harness {
     std::fs::write(&config_path, DAEMON_YAML).expect("write the daemon config");
     let config = DaemonConfig::load(&config_path).expect("the daemon config must parse");
 
+    // The registry's name space and the daemon's def resolution read the same `<tddyhome>/agents`,
+    // as they do in production — the store is opened on the directory `ConnectionServiceImpl`
+    // resolves YAML defs from.
+    let agents_dir = dir.path().join("agents");
     let store = Arc::new(
-        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON)
+        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON, &agents_dir)
             .await
             .expect("open the registry store")
             .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
@@ -136,6 +172,7 @@ async fn a_daemon_with_a_registry() -> Harness {
 
     Harness {
         _dir: dir,
+        agents_dir,
         service,
         store,
     }
@@ -224,7 +261,7 @@ async fn the_defs_listed_to_every_operator_carry_no_credential_at_all() {
 }
 
 #[tokio::test]
-async fn the_registry_is_a_third_def_source_alongside_the_builtins() {
+async fn the_registry_is_a_def_source_alongside_the_agents_directory() {
     // Given
     let harness = a_daemon_with_a_registry().await;
     harness
@@ -240,7 +277,29 @@ async fn the_registry_is_a_third_def_source_alongside_the_builtins() {
 
     // Then
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, vec!["fastcontext", "repo-explorer"]);
+    assert_eq!(names, vec!["repo-explorer"]);
+}
+
+#[tokio::test]
+async fn an_assistant_cannot_be_created_under_the_name_of_an_agents_directory_def() {
+    // Given a def this daemon already resolves `--agent repo-explorer` to
+    let harness = a_daemon_with_a_registry().await;
+    let def_file = harness.given_an_agent_def_named("repo-explorer");
+
+    // When an assistant asks for the same name
+    let refusal = harness
+        .when_creating_an_assistant_named("repo-explorer")
+        .await;
+
+    // Then it is refused naming the def in the way — a registry assistant wins the tie, so
+    // admitting it would have stopped the operator's own def resolving, silently
+    assert_eq!(
+        refusal,
+        format!(
+            "invalid name: 'repo-explorer' is defined by the agent def {}",
+            def_file.display()
+        )
+    );
 }
 
 #[tokio::test]

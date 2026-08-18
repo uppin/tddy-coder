@@ -1,5 +1,22 @@
 # Tool replacement: no-bash & no-write sessions (`tddy-sandbox-app`)
 
+> ## ⚠️ Partially superseded — 2026-08-17
+>
+> The **session agent roster**
+> ([docs/ft/daemon/session-agent-roster.md](../daemon/session-agent-roster.md)) removed every
+> hardcoded per-tool *role*. `replaces` no longer grants anything — it only withdraws a tool from
+> the main agent.
+>
+> The no-bash **workflow** below is still real and still supported: withdraw `Shell`, author
+> session actions, invoke them. What changed is that it is now assembled from parts rather than
+> triggered by a tool name:
+> - the action tools are advertised whenever the session has a **host tool transport** (they are
+>   pure host round-trips and cannot work without one) — not when some def replaces `Shell`;
+> - `request_action` takes an explicit **`agent`** argument, resolved against the live roster with
+>   the same ids `subagent_new_session` uses. There is no implicit "action author";
+> - **more than one** def may replace `Shell`; ambiguity is resolved by naming the agent per call.
+
+
 > **Added: 2026-07-21** — Agent-driven tool restriction for sandboxed CLI sessions (macOS
 > in-process path). Everything is declared on the specialized-agent defs themselves
 > (`replaces:` — the same array of agent coordinates used for `fastcontext`); there are **no
@@ -20,11 +37,13 @@ place the main agent gets three session-action tools:
 
 | Tool | Role |
 |------|------|
-| **`mcp__tddy-tools__request_action`** | Describe a needed command in natural language (`{description, suggested_id?}`). The author subagent writes a [session-action](session-actions.md) YAML manifest for it; after validation it is **auto-established** under `<session_dir>/actions/<id>.yaml` and immediately invocable. Returns `{id, summary, path, has_input_schema}`. |
+| **`mcp__tddy-tools__request_action`** | Describe a needed command in natural language (`{agent, description, suggested_id?}` — `agent` is a qualified roster id, as `subagent_new_session` takes). The author subagent writes a [session-action](session-actions.md) YAML manifest for it; after validation it is **auto-established** under `<session_dir>/actions/<id>.yaml` and immediately invocable. Returns `{id, summary, path, has_input_schema}`. |
 | **`mcp__tddy-tools__list_actions`** | List established actions (session overlay + per-repo store), same shape as `tddy-tools list-actions`. |
 | **`mcp__tddy-tools__invoke_action`** | Invoke an action by id (`{action, data?}`), blocking until the child exits. Returns `{exit_code, stdout, stderr}` (+ `summary` for `result_kind: test_summary`). |
 
-At most one def may replace `Shell` (ambiguous authorship is rejected before spawn).
+~~At most one def may replace `Shell` (ambiguous authorship is rejected before spawn).~~
+**Superseded (2026-08-17):** any number of defs may replace `Shell`. Authorship is not inferred at
+all — `request_action` names its author explicitly, so there is no ambiguity to reject.
 
 **Replacing `Write`/`StrReplace`/`Delete` (no-write).** The replacing def is the session's
 **coder**: the main agent's mutation tools (plus native `Edit`/`MultiEdit`/`NotebookEdit`)
@@ -69,8 +88,10 @@ Each replaced tool is unreachable at several independent layers:
    aliases (`native_aliases`: `Bash*` for `Shell`; `Edit`/`MultiEdit`/`NotebookEdit` for
    `Write`) — `build_claude_disallowlist`.
 3. Filtered from the in-jail MCP server's advertised catalog (derived from
-   `TDDY_SUBAGENTS_JSON`, `PermissionServer::new`); the action tools are merged only when a def
-   replaces `Shell` (`shell_replacing_author`).
+   `TDDY_SUBAGENTS_JSON`, `PermissionServer::new`); the action tools are merged whenever the
+   session has a **host tool transport**, because `EstablishAction`/`ListActions`/`InvokeAction`
+   are pure host round-trips (the session directory exists only on the host) — the same fact that
+   already gates the exec catalog. Nothing here reads a def's `replaces`.
 4. For `Shell`/`Await` only: hard-rejected at the host relay boundary
    (`AppToolHandler::policy_rejects`) — a raw-IPC dispatch from a compromised jail fails too.
    Other replaced tools cannot be host-rejected because the replacing subagent itself dispatches
@@ -108,7 +129,7 @@ Each replaced tool is unreachable at several independent layers:
 | Allow/disallow lists incl. native aliases + `ACTION_TOOLS` | `packages/tddy-sandbox-recipes/src/claude_cli.rs` (`native_aliases`, `shell_is_replaced`) |
 | Replacement validation (one Shell author; coder bindings) | `tddy-sandbox-app::config::validate_tool_replacements` |
 | CLAUDE.md/AGENTS.md appendix rendering | `packages/tddy-sandbox/src/context_dir.rs` (`sandbox_remote_appendix`) |
-| MCP catalog gating + action tools | `packages/tddy-tools/src/server.rs` (`shell_replacing_author`), `packages/tddy-tools/src/action_tools.rs` |
+| MCP catalog gating + action tools | `packages/tddy-tools/src/server.rs` (transport-gated merge; `open_roster_agent_session`), `packages/tddy-tools/src/action_tools.rs` |
 | Host-side establish/list/invoke + Shell/Await reject | `packages/tddy-sandbox-app/src/{bridge,host_actions}.rs` |
 | Shared authored-manifest validation | `tddy_core::session_actions::validate_authored_manifest` |
 | Write-capable subagent tools | `packages/tddy-discovery/src/{agent_def,subagent,openai}.rs` |

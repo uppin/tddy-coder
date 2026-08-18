@@ -267,7 +267,9 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

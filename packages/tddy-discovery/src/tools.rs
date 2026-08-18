@@ -1,4 +1,4 @@
-//! READ/GLOB/GREP tool executor for the FastContext Discovery loop.
+//! READ/GLOB/GREP tool executor for the discovery loop.
 //!
 //! `ToolExecutor` has two modes:
 //! - `Local`: executes against the local filesystem (std::fs, glob, regex).
@@ -210,7 +210,6 @@ mod tests {
     //! Unit tests: ToolExecutor local and remote modes.
     //!
     //! Feature: docs/ft/coder/discovery-agent.md (Phase C criteria 9–11)
-    //! Changeset: docs/dev/1-WIP/2026-06-24-changeset-fastcontext-discovery.md
 
     use std::io::Write;
 

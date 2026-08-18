@@ -11,6 +11,7 @@ import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { PARAM_INSPECTOR } from "../../routing/appLocation";
 import { isInspectorTabName } from "../../routing/appRoutes";
 import { useAppLocation } from "../../routing/useAppLocation";
+import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
 import { SessionWorktreeTab } from "./SessionWorktreeTab";
@@ -348,6 +349,19 @@ export function SessionInspectorDrawer({
                     })
                   : Promise.resolve({ resultJson: "", isError: true, errorMessage: "no client" });
               }}
+            />
+          </ScrollArea>
+        ) : tab === "agents" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            {/* The roster is served by the daemon facilitating the session; an empty
+                `daemonInstanceId` addresses the daemon this drawer is talking to, the same
+                convention the Tools tab's calls use. `client` is this drawer's live daemon
+                connection, so its absence is exactly "not connected to that host". */}
+            <SessionAgentRosterPane
+              sessionId={session.sessionId}
+              sessionToken={sessionToken ?? ""}
+              daemonInstanceId={session.daemonInstanceId}
+              daemonConnected={client !== undefined}
             />
           </ScrollArea>
         ) : tab === "usage" ? (

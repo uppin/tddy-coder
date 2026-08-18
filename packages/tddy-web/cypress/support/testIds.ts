@@ -184,6 +184,8 @@ export const TEST_IDS = {
   // Session inspector — tabs
   sessionsInspectorTabDetails: "sessions-inspector-tab-details",
   sessionsInspectorTabTools: "sessions-inspector-tab-tools",
+  /** Opens the session's agent roster (`agentRosterPane`). */
+  sessionsInspectorTabAgents: "sessions-inspector-tab-agents",
   sessionsInspectorToolsPanel: "sessions-inspector-tools-panel",
 
   // Session inspector — Tools tab: invoke panel
@@ -333,6 +335,32 @@ export const TEST_IDS = {
   sessionAgentsRow: "session-agents-row",
   /** The "switch" action on a peer row — focuses that peer's runtime. */
   sessionAgentsSwitchBtn: "session-agents-switch-btn",
+
+  // Agent roster — the specialized agents attached to a session (docs/ft/daemon/session-agent-roster.md).
+  // Deliberately NOT the `sessionAgents*` ids above: those are peer child *sessions*, a different
+  // concept that happens to share the word "agent".
+  /** The roster pane in the session inspector. */
+  agentRosterPane: "agent-roster-pane",
+  /** Rendered while the first roster frame has not arrived. */
+  agentRosterLoading: "agent-roster-loading",
+  /** Rendered when the session's daemon is not connected. */
+  agentRosterDisconnected: "agent-roster-disconnected",
+  /** Rendered when the roster could not be read — distinct from "no agents attached". */
+  agentRosterError: "agent-roster-error",
+  /** Rendered when the roster is genuinely empty. */
+  agentRosterEmpty: "agent-roster-empty",
+  /** Opens the fanned-out agent picker. */
+  agentRosterAddBtn: "agent-roster-add-btn",
+  /** The picker dialog opened by `agentRosterAddBtn`. */
+  agentRosterPicker: "agent-roster-picker",
+  /** Warning naming the tools the main agent loses if the highlighted agent is attached. */
+  agentRosterPickerWithdrawalWarning: "agent-roster-picker-withdrawal-warning",
+  /** Confirms the attach of the agent selected in the picker. */
+  agentRosterPickerConfirmBtn: "agent-roster-picker-confirm-btn",
+  /** Confirmation shown before a detach that deletes a checkout on another host. */
+  agentRosterDetachConfirm: "agent-roster-detach-confirm",
+  /** Accepts `agentRosterDetachConfirm`. */
+  agentRosterDetachConfirmBtn: "agent-roster-detach-confirm-btn",
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
@@ -641,11 +669,6 @@ export const sessionsTable = (projectId: string) => `sessions-table-${projectId}
 
 /** `[data-testid="connect-<sessionId>"]` */
 export const connectBtn = (sessionId: string) => `connect-${sessionId}`;
-
-/** `[data-testid="create-session-subagent-checkbox-<name>"]` — one per row in the "Managed
- * codebase" specialized-subagent multi-select. See docs/ft/coder/specialized-subagents.md. */
-export const createSessionSubagentCheckbox = (name: string) =>
-  `create-session-subagent-checkbox-${name}`;
 
 /** `[data-testid="delete-session-<sessionId>"]` */
 export const deleteSessionBtn = (sessionId: string) => `delete-session-${sessionId}`;
@@ -1351,3 +1374,48 @@ export const modelsChatMessage = (index: number) => `models-chat-message-${index
 
 /** A tool bubble's status marker; carries `data-tool-status`. Absent on non-tool bubbles. */
 export const modelsChatToolStatus = (index: number) => `${modelsChatMessage(index)}-tool-status`;
+
+// --- Agent roster ------------------------------------------------------------------------------
+// Every id is keyed by the agent's *qualified* id (`name@daemon_instance_id`), because that is what
+// makes a row unique: two hosts routinely offer an agent of the same name.
+
+/** One attached agent's row in the roster pane. */
+export const agentRosterRow = (agentId: string) => `agent-roster-row-${safeTestIdPart(agentId)}`;
+
+/** The owning-daemon label on an attached agent's row. */
+export const agentRosterRowHost = (agentId: string) => `${agentRosterRow(agentId)}-host`;
+
+/** The tools an attached agent withdraws from the main agent. */
+export const agentRosterRowReplaces = (agentId: string) => `${agentRosterRow(agentId)}-replaces`;
+
+/** An attached agent's clone state; carries `data-clone-state`. */
+export const agentRosterRowCloneState = (agentId: string) =>
+  `${agentRosterRow(agentId)}-clone-state`;
+
+/** The detach action on an attached agent's row. */
+export const agentRosterRowDetachBtn = (agentId: string) =>
+  `${agentRosterRow(agentId)}-detach-btn`;
+
+/** One selectable agent in the fanned-out picker. */
+export const agentRosterPickerOption = (agentId: string) =>
+  `agent-roster-picker-option-${safeTestIdPart(agentId)}`;
+
+/** The owning-daemon label on a picker option. */
+export const agentRosterPickerOptionHost = (agentId: string) =>
+  `${agentRosterPickerOption(agentId)}-host`;
+
+/** One error row for a host that could not answer the picker's fan-out. */
+export const agentRosterPickerHostError = (daemonInstanceId: string) =>
+  `agent-roster-picker-host-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/** A selectable agent in the create-session form's multi-select, keyed by qualified id. */
+export const createSessionAgentOption = (agentId: string) =>
+  `create-session-agent-${safeTestIdPart(agentId)}`;
+
+/** The owning-daemon label on a create-session agent option. */
+export const createSessionAgentOptionHost = (agentId: string) =>
+  `${createSessionAgentOption(agentId)}-host`;
+
+/** One error row for a host that could not answer the create-session picker's fan-out. */
+export const createSessionAgentHostError = (daemonInstanceId: string) =>
+  `create-session-agent-host-error-${safeTestIdPart(daemonInstanceId)}`;

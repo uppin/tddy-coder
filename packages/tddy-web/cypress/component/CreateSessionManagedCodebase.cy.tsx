@@ -13,7 +13,15 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
-import { TEST_IDS, byTestId, createSessionSubagentCheckbox } from "../support/testIds";
+import { TEST_IDS, byTestId, createSessionAgentOption } from "../support/testIds";
+
+/** The daemon serving this form. Its agents are offered under `<name>@<host>`: a bare name cannot
+ *  say which host an agent lives on once more than one offers a def of that name, so the picker
+ *  lists and submits qualified ids (docs/ft/daemon/session-agent-roster.md § Web UI). */
+const HOST = "local";
+
+const FASTCONTEXT = `fastcontext@${HOST}`;
+const MY_EXPLORER = `my-explorer@${HOST}`;
 
 /** A backend seeded with every RPC `CreateSessionPane` calls on mount, including two stubbed
  * specialized subagents, plus a StartSession stub. */
@@ -31,8 +39,20 @@ function aCreateSessionBackend() {
     .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }))
     .onUnary(ConnectionService.method.listSubagents, () => ({
       subagents: [
-        { name: "fastcontext", label: "FastContext", model: "microsoft/FastContext-1.0-4B-RL" },
-        { name: "my-explorer", label: "My Explorer", model: "qwen2.5-coder:7b" },
+        {
+          name: "fastcontext",
+          label: "FastContext",
+          model: "microsoft/FastContext-1.0-4B-RL",
+          daemonInstanceId: HOST,
+          agentId: `fastcontext@${HOST}`,
+        },
+        {
+          name: "my-explorer",
+          label: "My Explorer",
+          model: "qwen2.5-coder:7b",
+          daemonInstanceId: HOST,
+          agentId: `my-explorer@${HOST}`,
+        },
       ],
     }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "managed-new-1" }));
@@ -85,11 +105,11 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
 
     // Then
     byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("be.visible");
-    byTestId(createSessionSubagentCheckbox("fastcontext")).should("be.visible");
-    byTestId(createSessionSubagentCheckbox("my-explorer")).should("be.visible");
+    byTestId(createSessionAgentOption(FASTCONTEXT)).should("be.visible");
+    byTestId(createSessionAgentOption(MY_EXPLORER)).should("be.visible");
   });
 
-  it("creating a session with two selected subagents sends managedCodebase and both names", () => {
+  it("creating a session with two selected subagents sends managedCodebase and both qualified ids", () => {
     // Given
     const backend = aCreateSessionBackend();
     mountCreatePane(backend);
@@ -98,17 +118,17 @@ describe("CreateSession managed-codebase specialized-subagent picker", () => {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
 
     // When
-    byTestId(createSessionSubagentCheckbox("fastcontext")).click();
-    byTestId(createSessionSubagentCheckbox("my-explorer")).click();
+    byTestId(createSessionAgentOption(FASTCONTEXT)).click();
+    byTestId(createSessionAgentOption(MY_EXPLORER)).click();
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
-    // Then — the typed StartSession request carried managedCodebase + both subagent names
+    // Then — the typed StartSession request carried managedCodebase + both qualified ids
     cy.wrap(null).should(() => {
       const calls = backend.callsTo(ConnectionService.method.startSession);
       expect(calls).to.have.length(1);
       expect(calls[0].sessionType).to.eq("claude-cli");
       expect(calls[0].managedCodebase).to.eq(true);
-      expect(calls[0].specializedAgents).to.deep.equal(["fastcontext", "my-explorer"]);
+      expect(calls[0].specializedAgents).to.deep.equal([FASTCONTEXT, MY_EXPLORER]);
     });
   });
 });

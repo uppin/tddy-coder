@@ -506,6 +506,9 @@ fn main() -> anyhow::Result<()> {
                 tddy_daemon::model_registry::ModelRegistryStore::open(
                     &tddy_data_dir.join("models.db"),
                     &tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config),
+                    // The same directory `ConnectionServiceImpl` resolves YAML defs from, so an
+                    // assistant cannot be created under a name one of them already answers to.
+                    &tddy_data_dir.join("agents"),
                 )
                 .await?
                 .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
@@ -533,8 +536,16 @@ fn main() -> anyhow::Result<()> {
             // local Unix-domain-socket tonic server both reference the same Arc, so a session
             // started over the socket is visible over every other transport.
             let connection_arc = Arc::new(connection_impl);
+            // Record the self-handle so `&self` methods (the sandbox-IPC RPC bridge, reached via
+            // `dial_and_bridge`) can recover this `Arc` and hand it to the in-jail `tddy-tools`'s
+            // roster/conversation dispatch. Set on the original; shared across `Clone`s.
+            connection_arc.set_self_handle(Arc::downgrade(&connection_arc));
             // Get the shared TaskRegistry before handing the impl to the servers.
             let task_registry = connection_arc.task_registry();
+            // The admission registry is shared with the SessionAdmissionService served on the
+            // common room (PRD § "What attach does" step 3); capture it before `connection_arc`
+            // moves into the ConnectionServiceServer below.
+            let session_admissions = connection_arc.session_admissions();
 
             // Register the build-catalog provider so a populated session catalog includes the
             // repository's `BUILD.yaml` targets (discovery lives in `tddy-bsp` on top of
@@ -667,7 +678,7 @@ fn main() -> anyhow::Result<()> {
             // client that can join the room (`GIT_SSH_COMMAND=tddy-remote-git-repo`).
             let remote_git_server = tddy_service::RemoteGitServiceServer::new(
                 tddy_daemon::remote_git_service::RemoteGitServiceImpl::new(
-                    remote_git_user_resolver,
+                    remote_git_user_resolver.clone(),
                     projects_dir_resolver,
                     config_arc.clone(),
                 ),
@@ -675,6 +686,28 @@ fn main() -> anyhow::Result<()> {
             rpc_entries.push(tddy_rpc::ServiceEntry {
                 name: "remote_git.RemoteGitService",
                 service: Arc::new(remote_git_server) as Arc<dyn tddy_rpc::RpcService>,
+            });
+
+            // SessionAdmissionService — the room-admission handshake (PRD § "What attach does"
+            // step 3). The facilitating daemon mints a scoped short-TTL token for an owning daemon
+            // it has admitted, and revokes it when the last agent that daemon owns detaches. Served
+            // on the common-room `daemon-{this}` participant so an owning daemon that is in the
+            // session room (but whose token is expiring) can still reach this daemon over the
+            // common room it never left.
+            let session_admission_server = tddy_service::SessionAdmissionServiceServer::new(
+                tddy_daemon::session_admission_service::SessionAdmissionServiceImpl::new(
+                    remote_git_user_resolver.clone(),
+                    config_arc.clone(),
+                    session_admissions,
+                    Arc::new({
+                        let rooms = Arc::clone(&shared_session_rooms);
+                        move |session_id: &str| rooms.contains(session_id)
+                    }),
+                ),
+            );
+            rpc_entries.push(tddy_rpc::ServiceEntry {
+                name: "session_admission.SessionAdmissionService",
+                service: Arc::new(session_admission_server) as Arc<dyn tddy_rpc::RpcService>,
             });
 
             // ActionService — start tools by kind via tddy-actions runtimes.

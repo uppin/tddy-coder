@@ -40,6 +40,16 @@ const MAIN_TERMINAL_ID: &str = "main";
 /// Hosts `connection.ConnectionService/ExecuteTool` over the tool-IPC socket, using `tddy-rpc`'s
 /// length-prefixed framing instead of the old unframed single-`read()`/`write_all()` JSON
 /// protocol (which silently truncated payloads that didn't arrive in one syscall).
+///
+/// Also forwards the roster and conversation RPCs — `StreamSessionAgents`,
+/// `OpenAgentConversation`, `PromptAgentConversation` and `CancelAgentConversation` — to the
+/// facilitating daemon over the `SessionChannel`, multiplexed by `request_id` so a
+/// lifetime-long `StreamSessionAgents` shares the channel with the tool calls behind it. The
+/// host side (`run_host_relay_with_rpc`) dispatches them to its `HostRpcHandler`, which the
+/// daemon implements over its `ConnectionServiceImpl`. `ExecuteTool` still rides the
+/// poll-gated `ToolRequest`/`ToolResponse` pair (one at a time, as it was built for); the new
+/// RPCs ride `RpcRequest`/`RpcStreamFrame` on the outbound stream directly, the way tunnel
+/// frames do, so they never block a tool call.
 struct ToolExecService {
     relay: Arc<SandboxSessionRelay>,
 }
@@ -53,21 +63,62 @@ impl tddy_rpc::RpcService for ToolExecService {
         message: &tddy_rpc::RpcMessage,
     ) -> tddy_rpc::RpcResult {
         use prost::Message;
-        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+        // `ExecuteTool` rides the poll-gated `ToolRequest`/`ToolResponse` pair, unchanged — the
+        // one call at a time it was built for.
+        if service == "connection.ConnectionService" && method == "ExecuteTool" {
+            let req = match ExecuteToolRequest::decode(message.payload.as_ref()) {
+                Ok(r) => r,
+                Err(e) => {
+                    return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                        format!("decode ExecuteToolRequest: {e}"),
+                    )));
+                }
+            };
+            let resp = self.relay.call_tool(&req.tool_name, &req.args_json).await;
+            return tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()));
+        }
+        // The roster and conversation RPCs live on the facilitating daemon's
+        // `ConnectionService`, not on the runner — forward them over the `SessionChannel` as a
+        // multiplexed `RpcRequest` and hand the caller the response stream. `StreamSessionAgents`
+        // and `PromptAgentConversation` are server streams (held for the turn / the process
+        // lifetime); `OpenAgentConversation` and `CancelAgentConversation` are unary. The runner
+        // does not know which is which, and does not need to: a unary RPC is a stream that ends
+        // after one frame, and the caller drains the receiver the same way either way.
+        const FORWARDED_RPCS: &[(&str, &str)] = &[
+            ("connection.ConnectionService", "StreamSessionAgents"),
+            ("connection.ConnectionService", "OpenAgentConversation"),
+            ("connection.ConnectionService", "PromptAgentConversation"),
+            ("connection.ConnectionService", "CancelAgentConversation"),
+        ];
+        if !FORWARDED_RPCS.iter().any(|(s, m)| (*s == service) && (*m == method)) {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "unknown {service}/{method}"
             ))));
         }
-        let req = match ExecuteToolRequest::decode(message.payload.as_ref()) {
-            Ok(r) => r,
-            Err(e) => {
-                return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
-                    format!("decode ExecuteToolRequest: {e}"),
-                )))
-            }
+        let Some((request_id, mut rx)) = self.relay.call_rpc(service, method, message.payload.to_vec()).await else {
+            return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::unavailable(
+                "the sandbox session channel is not connected to the host daemon yet",
+            )));
         };
-        let resp = self.relay.call_tool(&req.tool_name, &req.args_json).await;
-        tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()))
+        // Adapt the unbounded receiver to the `mpsc::Receiver` shape `RpcResult::ServerStream`
+        // expects. A unary RPC arrives as exactly one terminal frame; a server stream as many
+        // followed by one. The caller (tddy-tools' roster stream / conversation dispatch) drains
+        // it the same way either way. On early close (the caller dropped the stream), the relay's
+        // registration is cancelled so a host still forwarding frames does not find a stale sender.
+        let (out_tx, out_rx) = tokio::sync::mpsc::channel(16);
+        let relay = Arc::clone(&self.relay);
+        let request_id_for_cleanup = request_id.clone();
+        let _join = tokio::spawn(async move {
+            while let Some(frame) = rx.recv().await {
+                if out_tx.send(frame).await.is_err() {
+                    // The caller dropped the stream — cancel the relay registration so the host's
+                    // forwarder does not keep pushing frames to a dead receiver, and stop.
+                    relay.cancel_rpc(&request_id_for_cleanup);
+                    break;
+                }
+            }
+        });
+        tddy_rpc::RpcResult::ServerStream(Ok(out_rx))
     }
 }
 
@@ -309,6 +360,8 @@ struct SandboxSessionRelay {
     /// backlog is drained. See `signal_session_ended`.
     session_ended: Mutex<Option<i32>>,
     egress_seq: AtomicU64,
+    /// Minted `request_id`s for forwarded RPCs (`rpc-{n}`), so two concurrent calls never collide.
+    rpc_seq: AtomicU64,
     /// Server-stream sender, captured when the host opens the `SessionChannel`. Tunnel frames are
     /// pushed here directly (not poll-gated) so relayed TLS bytes don't incur the `HostPoll` cadence.
     outbound: Mutex<Option<OutboundSender>>,
@@ -317,6 +370,12 @@ struct SandboxSessionRelay {
     /// Pending `CONNECT` opens awaiting a `TunnelOpenAck` from the host.
     tunnel_acks: Mutex<HashMap<String, oneshot::Sender<TunnelOpenAck>>>,
     tunnel_seq: AtomicU64,
+    /// In-flight RPC streams the in-jail `tddy-tools` opened over the tool-IPC socket, keyed by
+    /// the `request_id` the runner minted and sent in the `RpcRequest`. Inbound `RpcStreamFrame`s
+    /// are routed to the matching sender; a frame with `end_of_stream` or `error` drops the entry.
+    /// This is the multiplexing the poll-gated `awaiting_tool` slot cannot do: a lifetime-long
+    /// `StreamSessionAgents` lives here alongside the tool calls behind it without blocking them.
+    rpc_streams: Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Result<Vec<u8>, tddy_rpc::Status>>>>,
 }
 
 impl SandboxSessionRelay {
@@ -439,6 +498,91 @@ impl SandboxSessionRelay {
     /// Host closed its end: drop the sender so the agent-facing writer shuts down.
     fn deliver_tunnel_close(&self, close: TunnelClose) {
         self.tunnels.lock().unwrap().remove(&close.tunnel_id);
+    }
+
+    /// Forward an RPC the in-jail `tddy-tools` issued over the tool-IPC socket to the host daemon,
+    /// returning the `request_id` and the receiver the caller drains for the response stream. The
+    /// `RpcRequest` is pushed on the outbound `SessionChannel` directly (not poll-gated), the way
+    /// tunnel frames are, so a server stream that lives for the process lifetime — the roster
+    /// stream — does not occupy the single `awaiting_tool` slot the poll path uses.
+    ///
+    /// Returns `None` when the host has not attached its `SessionChannel` yet, so the caller can
+    /// fail the RPC with a "session channel disconnected" error rather than panicking on a dropped
+    /// receiver.
+    async fn call_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        payload: Vec<u8>,
+    ) -> Option<(
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<Result<Vec<u8>, tddy_rpc::Status>>,
+    )> {
+        let request_id = format!("rpc-{}", self.rpc_seq.fetch_add(1, Ordering::Relaxed));
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.rpc_streams
+            .lock()
+            .unwrap()
+            .insert(request_id.clone(), tx);
+        let outbound = self.outbound.lock().unwrap().clone();
+        let Some(outbound) = outbound else {
+            // The host has not opened the SessionChannel. Drop the registration so a late
+            // inbound frame does not find a stale sender, and tell the caller to fail.
+            self.rpc_streams.lock().unwrap().remove(&request_id);
+            return None;
+        };
+        let frame = SessionFrame {
+            payload: Some(SessionPayload::RpcRequest(
+                tddy_service::proto::sandbox::RpcRequest {
+                    request_id: request_id.clone(),
+                    service: service.to_string(),
+                    method: method.to_string(),
+                    payload,
+                },
+            )),
+        };
+        if outbound.send(Ok(frame)).is_err() {
+            self.rpc_streams.lock().unwrap().remove(&request_id);
+            return None;
+        }
+        Some((request_id, rx))
+    }
+
+    /// Route an inbound `RpcStreamFrame` (host → jail) to the in-jail caller that minted the
+    /// `request_id`. A frame with `end_of_stream` or a non-empty `error` is terminal: the entry
+    /// is removed after the delivery, so a later frame for the same id (a duplicate the host
+    /// cannot produce, but a reconnecting stream might) finds no sender and is dropped.
+    fn deliver_rpc_stream_frame(&self, frame: tddy_service::proto::sandbox::RpcStreamFrame) {
+        let terminal = frame.end_of_stream || !frame.error.is_empty();
+        let entry = if terminal {
+            self.rpc_streams.lock().unwrap().remove(&frame.request_id)
+        } else {
+            self.rpc_streams
+                .lock()
+                .unwrap()
+                .get(&frame.request_id)
+                .cloned()
+        };
+        let Some(tx) = entry else {
+            // No in-jail caller is waiting for this id — either it already terminated, or the
+            // host sent a frame for an id this jail never minted. Either way, dropping it is the
+            // safe thing; there is nobody to hand it to.
+            return;
+        };
+        let result = if !frame.error.is_empty() {
+            Err(tddy_rpc::Status::internal(frame.error))
+        } else {
+            Ok(frame.payload)
+        };
+        let _ = tx.send(result);
+    }
+
+    /// Drop the in-jail registration for an RPC whose caller closed its receiver early, so a
+    /// host that keeps forwarding frames (the daemon's stream has not ended yet) does not find a
+    /// stale sender and the entry does not live for the session's whole life. Idempotent: a
+    /// terminal frame that arrives after this still finds nothing and is dropped.
+    fn cancel_rpc(&self, request_id: &str) {
+        self.rpc_streams.lock().unwrap().remove(request_id);
     }
 
     async fn call_egress(&self, method: &str, url: &str) -> EgressResponse {
@@ -606,6 +750,9 @@ impl TonicSandboxService for SandboxRunnerService {
                     Some(SessionPayload::TunnelOpenAck(ack)) => relay.deliver_tunnel_ack(ack),
                     Some(SessionPayload::TunnelData(data)) => relay.deliver_tunnel_data(data),
                     Some(SessionPayload::TunnelClose(close)) => relay.deliver_tunnel_close(close),
+                    Some(SessionPayload::RpcStreamFrame(frame)) => {
+                        relay.deliver_rpc_stream_frame(frame)
+                    }
                     Some(SessionPayload::HostPoll(_)) => {
                         relay.handle_host_poll(&out_tx);
                     }
@@ -724,6 +871,9 @@ impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
                     Some(SessionPayload::TunnelOpenAck(ack)) => relay.deliver_tunnel_ack(ack),
                     Some(SessionPayload::TunnelData(data)) => relay.deliver_tunnel_data(data),
                     Some(SessionPayload::TunnelClose(close)) => relay.deliver_tunnel_close(close),
+                    Some(SessionPayload::RpcStreamFrame(frame)) => {
+                        relay.deliver_rpc_stream_frame(frame)
+                    }
                     Some(SessionPayload::HostPoll(_)) => {
                         relay.handle_host_poll(&out_tx);
                     }
@@ -1159,49 +1309,75 @@ fn run_claude_pty_thread(
     Ok(())
 }
 
-/// Pure resolution of the effective replaced-tool set: no subagent name (absent or blank) means
-/// nothing is replaced, regardless of any override — there's no subagent behind it to honor.
-/// Otherwise delegates to [`tddy_discovery::subagent::resolve_replaced_tools`], so the
-/// default/override contract matches the one `tddy-discovery` already specifies.
+/// Pure resolution of the effective replaced-tool set from the legacy single-agent env pair: no
+/// subagent name (absent or blank) means nothing is replaced whatever the CSV says — there is no
+/// agent behind it to serve the withdrawn tool. The CSV is the agent's own declared `replaces`
+/// list, normalized against the canonical exec-tool names ([`tddy_discovery::subagent::
+/// normalize_replaced_tools`]); a name carries no replaced set of its own.
 fn resolve_subagent_replaced_tools(
     subagent_name: Option<&str>,
-    override_csv: Option<&str>,
+    replaces_csv: Option<&str>,
 ) -> Vec<String> {
-    match subagent_name.map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) => tddy_discovery::subagent::resolve_replaced_tools(name, override_csv),
-        None => Vec::new(),
+    if subagent_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .is_none()
+    {
+        return Vec::new();
     }
+    let Some(csv) = replaces_csv.map(str::trim).filter(|csv| !csv.is_empty()) else {
+        return Vec::new();
+    };
+    let tokens: Vec<String> = csv.split(',').map(str::trim).map(str::to_string).collect();
+    tddy_discovery::subagent::normalize_replaced_tools(&tokens)
 }
 
 /// Pure resolution of the effective replaced-tool set from a raw `TDDY_SUBAGENTS_JSON` payload
 /// (a serialized `Vec<SpecializedAgentDef>`): parses the JSON and unions every def's own
-/// `replaces` list via [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`]. Absent,
-/// blank, or unparseable JSON resolves to an empty set — no panic, no fallback fabrication.
-fn subagents_json_replaced_tools(raw_json: Option<&str>) -> Vec<String> {
+/// `replaces` list via [`tddy_discovery::subagent::resolve_replaced_tools_for_defs`]. Absent or
+/// blank JSON resolves to an empty set — with no def there is no agent, and nothing to withdraw.
+///
+/// A payload that is *present* and does not parse is an **error**, never an empty set.
+/// `SpecializedAgentDef` is `deny_unknown_fields`, so a jail whose runner predates a field the
+/// spawning daemon writes lands exactly here — and reading it as "nothing is replaced" would leave
+/// the main agent holding every tool the operator withdrew, with no line anywhere saying so.
+fn subagents_json_replaced_tools(raw_json: Option<&str>) -> Result<Vec<String>> {
     let raw_json = match raw_json.map(str::trim).filter(|s| !s.is_empty()) {
         Some(raw_json) => raw_json,
-        None => return Vec::new(),
+        None => return Ok(Vec::new()),
     };
-    match serde_json::from_str::<Vec<tddy_discovery::agent_def::SpecializedAgentDef>>(raw_json) {
-        Ok(defs) => tddy_discovery::subagent::resolve_replaced_tools_for_defs(&defs),
-        Err(_) => Vec::new(),
-    }
+    // The message carries serde's position, never the payload: a def holds a provider credential.
+    let defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef> = serde_json::from_str(raw_json)
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
+                 This is what a sandbox-runner older than the daemon that spawned it sees, and \
+                 starting the agent anyway would hand back every tool the session's agents took \
+                 over"
+            )
+        })?;
+    Ok(tddy_discovery::subagent::resolve_replaced_tools_for_defs(
+        &defs,
+    ))
 }
 
 /// Thin env-reading wrapper around [`resolve_subagent_replaced_tools`] and
 /// [`subagents_json_replaced_tools`]: prefers the array model (`TDDY_SUBAGENTS_JSON`) when it
 /// parses to a non-empty replaced-tool set, otherwise falls back to the legacy single-subagent
 /// pair (`TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`).
-fn subagent_replaced_tools_from_env() -> Vec<String> {
+///
+/// An unparseable `TDDY_SUBAGENTS_JSON` propagates, failing the spawn — it is not the same thing as
+/// "the array model is not in use", and the legacy pair must not stand in for a value that was set.
+fn subagent_replaced_tools_from_env() -> Result<Vec<String>> {
     let from_json =
-        subagents_json_replaced_tools(std::env::var("TDDY_SUBAGENTS_JSON").ok().as_deref());
+        subagents_json_replaced_tools(std::env::var("TDDY_SUBAGENTS_JSON").ok().as_deref())?;
     if !from_json.is_empty() {
-        return from_json;
+        return Ok(from_json);
     }
-    resolve_subagent_replaced_tools(
+    Ok(resolve_subagent_replaced_tools(
         std::env::var("TDDY_SUBAGENT").ok().as_deref(),
         std::env::var("TDDY_SUBAGENT_REPLACES").ok().as_deref(),
-    )
+    ))
 }
 
 struct SpawnClaudePtyParams<'a> {
@@ -1292,7 +1468,11 @@ fn spawn_claude_pty(params: SpawnClaudePtyParams<'_>) -> Result<PtyState> {
     let subagent_enabled = std::env::var("TDDY_SUBAGENT")
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false);
-    let replaced_tools = subagent_replaced_tools_from_env();
+    // No fallback: an unreadable seed fails the spawn rather than starting an agent whose tool
+    // withdrawals silently turned themselves off.
+    let replaced_tools = subagent_replaced_tools_from_env().inspect_err(|e| {
+        boot_log_error("spawn_claude_pty", format!("{e:#}"));
+    })?;
     let subagent_replaced_refs: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
     // `SemanticSearch` is available only when the session was started with a semantic index —
     // signalled by the daemon injecting `TDDY_SEMANTIC_INDEX_DB` (the per-session index DB the tool
@@ -2222,8 +2402,8 @@ mod tests {
     // `subagent_replaced_tools_from_env` wrapper reads `TDDY_SUBAGENT`/`TDDY_SUBAGENT_REPLACES`
     // and delegates here.
 
-    /// No subagent name means nothing is replaced, regardless of any override — there is no
-    /// subagent behind the override to honor.
+    /// No subagent name means nothing is replaced, whatever the CSV says — there is no agent
+    /// behind it to serve the withdrawn tool.
     #[test]
     fn resolve_subagent_replaced_tools_is_empty_when_no_subagent_name_is_given() {
         // When
@@ -2244,48 +2424,45 @@ mod tests {
         assert_eq!(replaced, Vec::<String>::new());
     }
 
-    /// With a known subagent name and no override, the runner falls back to that subagent's
-    /// declared default — so `--specialized-agent fastcontext` alone still filters `Grep`/`Glob`
-    /// from the allowlist.
+    /// A named agent with no declared `replaces` CSV withdraws nothing: a name has no replaced
+    /// set of its own to fall back on.
     #[test]
-    fn resolve_subagent_replaced_tools_falls_back_to_the_subagent_default_when_no_override_env_is_set(
-    ) {
+    fn resolve_subagent_replaced_tools_is_empty_when_the_agent_declares_no_replaces() {
         // When
-        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), None);
+        let replaced = resolve_subagent_replaced_tools(Some("explorer"), None);
 
         // Then
-        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+        assert_eq!(replaced, Vec::<String>::new());
     }
 
-    /// An explicit `TDDY_SUBAGENT_REPLACES` override (comma-separated, arbitrary whitespace)
-    /// wins over the subagent's declared default.
+    /// The `TDDY_SUBAGENT_REPLACES` CSV (comma-separated, arbitrary whitespace) is the agent's
+    /// declared set, normalized to canonical casing.
     #[test]
-    fn resolve_subagent_replaced_tools_honors_a_csv_override_with_whitespace() {
+    fn resolve_subagent_replaced_tools_honors_a_csv_with_whitespace() {
         // When
-        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(" read , grep "));
+        let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(" read , grep "));
 
         // Then
         assert_eq!(replaced, vec!["Read".to_string(), "Grep".to_string()]);
     }
 
-    /// An override that is present but empty is treated as "no override" — the subagent default
-    /// applies, matching `resolve_replaced_tools`'s own contract (criterion 14).
+    /// A CSV that is present but empty withdraws nothing.
     #[test]
-    fn resolve_subagent_replaced_tools_treats_an_empty_override_as_no_override() {
+    fn resolve_subagent_replaced_tools_treats_an_empty_csv_as_replacing_nothing() {
         // When
-        let replaced = resolve_subagent_replaced_tools(Some("fastcontext"), Some(""));
+        let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(""));
 
         // Then
-        assert_eq!(replaced, vec!["Grep".to_string(), "Glob".to_string()]);
+        assert_eq!(replaced, Vec::<String>::new());
     }
 
-    /// An unknown token in the override is dropped, not passed through — a typo in
-    /// `--subagent-replaces` must not silently produce a nonsense allowlist entry.
+    /// An unknown token in the CSV is dropped, not passed through — a typo must not silently
+    /// produce a nonsense allowlist entry.
     #[test]
-    fn resolve_subagent_replaced_tools_drops_unrecognized_override_tokens() {
+    fn resolve_subagent_replaced_tools_drops_unrecognized_csv_tokens() {
         // When
         let replaced =
-            resolve_subagent_replaced_tools(Some("fastcontext"), Some("grep,not-a-real-tool"));
+            resolve_subagent_replaced_tools(Some("explorer"), Some("grep,not-a-real-tool"));
 
         // Then
         assert_eq!(replaced, vec!["Grep".to_string()]);
@@ -2295,16 +2472,15 @@ mod tests {
     /// `tddy_discovery::subagent`'s canonical exec-tool name table is intentionally kept local to
     /// avoid a `tddy-discovery -> tddy-sandbox` dependency, so nothing enforces that it stays in
     /// sync with `tddy_sandbox::workspace_exec_tool_names()` at the type level. Round-trip every
-    /// real exec tool name through an override to catch the list silently falling behind: a tool
+    /// real exec tool name through the CSV to catch the list silently falling behind: a tool
     /// missing from the canonical table would be dropped here instead of resolving to itself.
     #[test]
-    fn every_workspace_exec_tool_name_round_trips_through_an_override() {
+    fn every_workspace_exec_tool_name_round_trips_through_the_replaces_csv() {
         // Given — the canonical exec-tool names this runner's allowlist is built from
-        // When — each one is passed as a single-tool override
+        // When — each one is passed as a single-tool CSV
         // Then — it must resolve back to itself; a dropped name means the tables diverged
         for name in tddy_sandbox::workspace_exec_tool_names() {
-            let replaced =
-                tddy_discovery::subagent::resolve_replaced_tools("fastcontext", Some(name));
+            let replaced = resolve_subagent_replaced_tools(Some("explorer"), Some(name));
             assert_eq!(
                 replaced,
                 vec![name.to_string()],
@@ -2327,9 +2503,9 @@ mod tests {
         // Given — two defs, one replacing Grep+Glob, the other replacing ReadLints
         let raw_json = serde_json::json!([
             {
-                "name": "fastcontext",
+                "name": "explorer",
                 "model": "some-model",
-                "base_url": "http://localhost:30000",
+                "base_url": "http://localhost:11434",
                 "tools": ["READ"],
                 "max_turns": 6,
                 "replaces": ["Grep", "Glob"]
@@ -2346,7 +2522,7 @@ mod tests {
         .to_string();
 
         // When
-        let replaced = subagents_json_replaced_tools(Some(&raw_json));
+        let replaced = subagents_json_replaced_tools(Some(&raw_json)).expect("the defs must parse");
 
         // Then
         assert_eq!(
@@ -2359,23 +2535,69 @@ mod tests {
         );
     }
 
-    /// Absent or blank JSON resolves to an empty set — no panic, no fallback fabrication.
+    /// Absent JSON resolves to an empty set: with no def there is no agent, and nothing to
+    /// withdraw.
     #[test]
-    fn subagents_json_replaced_tools_returns_empty_for_absent_or_blank_json() {
-        assert_eq!(subagents_json_replaced_tools(None), Vec::<String>::new());
-        assert_eq!(
-            subagents_json_replaced_tools(Some("   ")),
-            Vec::<String>::new()
+    fn subagents_json_replaced_tools_returns_empty_when_no_json_is_set() {
+        // Given / When
+        let replaced = subagents_json_replaced_tools(None).expect("an absent seed is not an error");
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// A blank value is the same as an absent one — the daemon writes no defs that way.
+    #[test]
+    fn subagents_json_replaced_tools_returns_empty_for_blank_json() {
+        // Given / When
+        let replaced =
+            subagents_json_replaced_tools(Some("   ")).expect("a blank seed is not an error");
+
+        // Then
+        assert_eq!(replaced, Vec::<String>::new());
+    }
+
+    /// A def field this runner predates makes the whole payload unparseable — `SpecializedAgentDef`
+    /// is `deny_unknown_fields` — and that is exactly the version skew that must not be read as
+    /// "nothing is replaced". Resolving it to an empty set would hand the main agent back every
+    /// tool the operator withdrew, silently.
+    #[test]
+    fn subagents_json_replaced_tools_refuses_a_def_carrying_an_unknown_field() {
+        // Given — the def a newer daemon serialized
+        let raw_json = serde_json::json!([{
+            "name": "explorer",
+            "model": "some-model",
+            "base_url": "http://localhost:11434",
+            "tools": ["READ"],
+            "max_turns": 6,
+            "replaces": ["Grep"],
+            "a_field_this_runner_predates": "value"
+        }])
+        .to_string();
+
+        // When
+        let result = subagents_json_replaced_tools(Some(&raw_json));
+
+        // Then
+        let error = result.expect_err("an unreadable seed must fail the spawn");
+        assert!(
+            error.to_string().contains("TDDY_SUBAGENTS_JSON"),
+            "the failure must name the variable it could not read, was: {error}"
         );
     }
 
-    /// Unparseable JSON resolves to an empty set rather than panicking — a malformed
-    /// `TDDY_SUBAGENTS_JSON` must degrade to "nothing replaced", not crash the sandbox runner.
+    /// Malformed JSON is refused for the same reason: the spawn fails rather than starting an agent
+    /// whose tool withdrawals turned themselves off.
     #[test]
-    fn subagents_json_replaced_tools_returns_empty_for_unparseable_json() {
-        assert_eq!(
-            subagents_json_replaced_tools(Some("not valid json")),
-            Vec::<String>::new()
+    fn subagents_json_replaced_tools_refuses_unparseable_json() {
+        // Given / When
+        let result = subagents_json_replaced_tools(Some("not valid json"));
+
+        // Then
+        let error = result.expect_err("an unreadable seed must fail the spawn");
+        assert!(
+            error.to_string().contains("TDDY_SUBAGENTS_JSON"),
+            "the failure must name the variable it could not read, was: {error}"
         );
     }
 

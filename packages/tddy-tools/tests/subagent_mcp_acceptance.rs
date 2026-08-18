@@ -20,6 +20,20 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// `TDDY_SUBAGENTS_JSON` holding one def named `explorer` pointed at `base_url` — the shape the
+/// daemon injects into the jail, and the only source of a subagent's configuration.
+fn explorer_def_json(base_url: &str) -> String {
+    json!([{
+        "name": "explorer",
+        "model": "qwen2.5-coder:7b",
+        "base_url": base_url,
+        "tools": ["READ", "GLOB", "GREP"],
+        "max_turns": 6,
+        "replaces": []
+    }])
+    .to_string()
+}
+
 fn final_answer_response(answer: &str) -> Value {
     json!({
         "choices": [{
@@ -136,17 +150,18 @@ async fn tools_list_names(
         .collect()
 }
 
-// ─── AC6: gating on TDDY_SUBAGENT ──────────────────────────────────────────────
+// ─── AC6: the roster decides whether the conversation tools are advertised ─────
 
-/// With `TDDY_SUBAGENT=fastcontext` set, `tools/list` must advertise all three ACP-shaped
-/// subagent tools.
+/// With an agent on the session's roster — here the spawn seed, before any frame — `tools/list`
+/// advertises all three ACP-shaped subagent tools. `TDDY_SUBAGENT` is deliberately not set: the
+/// roster is what decides, and a session's agents are no longer a spawn-time env var.
 #[tokio::test]
-async fn tools_list_includes_subagent_tools_when_tddy_subagent_env_is_set() {
+async fn tools_list_advertises_the_subagent_tools_when_an_agent_is_attached() {
     // Given
-    let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", "http://127.0.0.1:1"),
-    ]);
+    let mut child = spawn_mcp_server(&[(
+        "TDDY_SUBAGENTS_JSON",
+        &explorer_def_json("http://127.0.0.1:1"),
+    )]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
     initialize_mcp_session(&mut stdin, &mut stdout).await;
@@ -159,15 +174,16 @@ async fn tools_list_includes_subagent_tools_when_tddy_subagent_env_is_set() {
     for tool in ["subagent_new_session", "subagent_prompt", "subagent_cancel"] {
         assert!(
             names.contains(&tool.to_string()),
-            "tools/list must advertise '{tool}' when TDDY_SUBAGENT is set; got: {names:?}"
+            "tools/list must advertise '{tool}' while an agent is attached; got: {names:?}"
         );
     }
 }
 
-/// Without `TDDY_SUBAGENT` set, none of the three subagent tools should be advertised — there is
-/// nothing configured behind them to dispatch to.
+/// With no agent attached, none of the three subagent tools is advertised — there is nobody behind
+/// them to open a conversation with, and four tools that can only answer "no agents are attached"
+/// are noise in the main agent's tool list.
 #[tokio::test]
-async fn tools_list_omits_subagent_tools_when_tddy_subagent_env_is_unset() {
+async fn tools_list_omits_the_subagent_tools_when_no_agent_is_attached() {
     // Given
     let mut child = spawn_mcp_server(&[]);
     let mut stdin = child.stdin.take().expect("child stdin");
@@ -182,7 +198,7 @@ async fn tools_list_omits_subagent_tools_when_tddy_subagent_env_is_unset() {
     for tool in ["subagent_new_session", "subagent_prompt", "subagent_cancel"] {
         assert!(
             !names.contains(&tool.to_string()),
-            "tools/list must NOT advertise '{tool}' without TDDY_SUBAGENT set; got: {names:?}"
+            "tools/list must NOT advertise '{tool}' with an empty roster; got: {names:?}"
         );
     }
 }
@@ -195,8 +211,11 @@ async fn tools_list_omits_subagent_tools_when_tddy_subagent_env_is_unset() {
 async fn subagent_new_session_honors_a_caller_supplied_session_id() {
     // Given
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", "http://127.0.0.1:1"),
+        ("TDDY_SUBAGENT", "explorer"),
+        (
+            "TDDY_SUBAGENTS_JSON",
+            &explorer_def_json("http://127.0.0.1:1"),
+        ),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -208,7 +227,7 @@ async fn subagent_new_session_honors_a_caller_supplied_session_id() {
         &mut stdout,
         1,
         "subagent_new_session",
-        json!({"sessionId": "conv-42"}),
+        json!({"agent": "explorer", "sessionId": "conv-42"}),
     )
     .await;
     let _ = child.kill().await;
@@ -230,7 +249,7 @@ async fn subagent_new_session_honors_a_caller_supplied_session_id() {
 /// separate MCP `tools/call` invocations, not reconstructed fresh each time.
 #[tokio::test]
 async fn subagent_prompt_ping_pongs_against_the_same_session_and_retains_history() {
-    // Given — the mock FastContext endpoint always answers immediately
+    // Given — the mock endpoint always answers immediately
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
@@ -241,8 +260,8 @@ async fn subagent_prompt_ping_pongs_against_the_same_session_and_retains_history
         .await;
 
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", server.uri().as_str()),
+        ("TDDY_SUBAGENT", "explorer"),
+        ("TDDY_SUBAGENTS_JSON", &explorer_def_json(&server.uri())),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -253,7 +272,7 @@ async fn subagent_prompt_ping_pongs_against_the_same_session_and_retains_history
         &mut stdout,
         1,
         "subagent_new_session",
-        json!({"sessionId": "conv-77"}),
+        json!({"agent": "explorer", "sessionId": "conv-77"}),
     )
     .await;
 
@@ -309,6 +328,50 @@ async fn subagent_prompt_ping_pongs_against_the_same_session_and_retains_history
     );
 }
 
+// ─── The spawn seed must parse, or nothing is served ────────────────────────────
+
+/// A daemon newer than this binary writes a def field it does not know, and `SpecializedAgentDef`
+/// is `deny_unknown_fields` — so the seed does not parse. Serving on would mean an empty roster:
+/// no agent attached, and every tool the session's agents took over handed straight back to the
+/// main agent, with nothing naming the cause. The server refuses to start instead, saying which
+/// variable it could not read.
+#[tokio::test]
+async fn refuses_to_start_when_the_spawn_seed_carries_a_field_this_build_does_not_know() {
+    // Given — the def a newer daemon serialized, carrying one field this build predates
+    let seed_from_a_newer_daemon = json!([{
+        "name": "explorer",
+        "model": "qwen2.5-coder:7b",
+        "base_url": "http://127.0.0.1:1",
+        "tools": ["READ"],
+        "max_turns": 6,
+        "replaces": ["Grep"],
+        "a_field_this_build_predates": "value"
+    }])
+    .to_string();
+
+    // When
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_tddy-tools"))
+        .arg("--mcp")
+        .env("TDDY_SUBAGENT", "explorer")
+        .env("TDDY_SUBAGENTS_JSON", &seed_from_a_newer_daemon)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .expect("run tddy-tools --mcp");
+
+    // Then
+    assert!(
+        !output.status.success(),
+        "an unreadable spawn seed must fail the start; exit status was {}",
+        output.status
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("TDDY_SUBAGENTS_JSON"),
+        "the failure must name the variable it could not read, was: {stderr}"
+    );
+}
+
 // ─── AC9: unknown session id ────────────────────────────────────────────────────
 
 /// `subagent_prompt` against a `sessionId` that was never opened via `subagent_new_session` must
@@ -317,8 +380,11 @@ async fn subagent_prompt_ping_pongs_against_the_same_session_and_retains_history
 async fn subagent_prompt_against_an_unknown_session_id_returns_an_error_result() {
     // Given
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", "http://127.0.0.1:1"),
+        ("TDDY_SUBAGENT", "explorer"),
+        (
+            "TDDY_SUBAGENTS_JSON",
+            &explorer_def_json("http://127.0.0.1:1"),
+        ),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));

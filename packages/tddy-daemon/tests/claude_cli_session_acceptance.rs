@@ -336,7 +336,9 @@ async fn claude_cli_session_enrichment_reads_from_metadata() {
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };
@@ -430,7 +432,9 @@ async fn claude_cli_session_resume_relaunches_in_worktree() {
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

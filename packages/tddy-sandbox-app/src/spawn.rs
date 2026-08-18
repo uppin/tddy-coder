@@ -981,7 +981,7 @@ mod tests {
     #[test]
     fn subagent_env_overlay_carries_name_and_json_for_a_single_def() {
         // Given
-        let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
+        let defs = vec![a_def("explorer", &["Grep", "Glob"])];
 
         // When
         let overlay = subagent_env_overlay(&defs);
@@ -989,13 +989,13 @@ mod tests {
         // Then
         assert_eq!(
             overlay.get("TDDY_SUBAGENT").map(String::as_str),
-            Some("fastcontext")
+            Some("explorer")
         );
         let defs_json = overlay
             .get("TDDY_SUBAGENTS_JSON")
             .expect("TDDY_SUBAGENTS_JSON must be present");
         assert!(
-            defs_json.contains("fastcontext"),
+            defs_json.contains("explorer"),
             "TDDY_SUBAGENTS_JSON must serialize the def; got: {defs_json}"
         );
     }
@@ -1006,7 +1006,7 @@ mod tests {
     fn subagent_env_overlay_carries_comma_joined_names_for_multiple_defs() {
         // Given
         let defs = vec![
-            a_def("fastcontext", &["Grep", "Glob"]),
+            a_def("explorer", &["Grep", "Glob"]),
             a_def("my-linter", &["ReadLints"]),
         ];
 
@@ -1016,7 +1016,7 @@ mod tests {
         // Then
         assert_eq!(
             overlay.get("TDDY_SUBAGENT").map(String::as_str),
-            Some("fastcontext,my-linter")
+            Some("explorer,my-linter")
         );
         assert!(
             !overlay.contains_key("TDDY_SUBAGENT_REPLACES"),
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn subagent_env_overlay_single_agent_uses_declared_default() {
         // Given
-        let defs = vec![a_def("fastcontext", &["Grep", "Glob"])];
+        let defs = vec![a_def("explorer", &["Grep", "Glob"])];
 
         // When
         let overlay = subagent_env_overlay(&defs);

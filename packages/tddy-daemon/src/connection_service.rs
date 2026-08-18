@@ -21,34 +21,36 @@ use tddy_service::proto::connection::{
 };
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentInfo, BranchConflict, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
-    ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
-    CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    AgentConversationChunk, AgentInfo, AttachSessionAgentRequest, BranchConflict,
+    CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
+    CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
+    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
-    EligibleDaemonEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    DetachSessionAgentRequest, EligibleDaemonEntry, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
+    ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
-    ProjectEntry as ProtoProjectEntry, ReadSessionWorkflowFileRequest,
+    OpenAgentConversationRequest, OpenAgentConversationResponse, ProjectEntry as ProtoProjectEntry,
+    PromptAgentConversationRequest, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
     RemoveWorktreeRequest, RemoveWorktreeResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
     SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
     SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
     SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
     StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
-    SubagentInfo, TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, ToolInfo,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    StopTerminalSessionResponse, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
+    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
+    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
     WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
     WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
@@ -1008,6 +1010,101 @@ pub struct ConnectionServiceImpl {
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.
     model_registry: Option<Arc<crate::model_registry::ModelRegistryStore>>,
+    /// The agent roster of every session this daemon facilitates
+    /// (`docs/ft/daemon/session-agent-roster.md`). Shared across clones so an attach made on one
+    /// handler is the roster the next handler — and every `StreamSessionAgents` subscriber — sees.
+    session_agent_rosters: Arc<crate::session_agent_roster::SessionAgentRosterStore>,
+    /// The checkouts this daemon asked peers to build for its sessions' remote agents. Read by
+    /// every roster snapshot, so an entry reports the state of the clone actually serving it.
+    session_agent_clones: Arc<crate::session_agent_clone::SessionAgentCloneStore>,
+    /// The checkouts this daemon holds on *other* daemons' behalf — the other half of the same
+    /// feature, and deliberately a separate map: a daemon is routinely both, and merging the two
+    /// would let a clone this daemon hosts answer a question about one it commissioned.
+    hosted_agent_clones: Arc<crate::session_agent_clone::HostedAgentClones>,
+    /// The per-session registry of owning daemons this daemon (as the facilitating daemon) has
+    /// admitted to its session rooms — the room-admission handshake (PRD § "What attach does"
+    /// step 3). The admission RPC refreshes entries here; the attach path records the first admit;
+    /// the detach path revokes an owning daemon when its last agent in a session goes; the
+    /// session-delete path revokes every owning daemon a session admitted at once.
+    session_admissions: Arc<crate::session_admission_service::SessionAdmissionRegistry>,
+    /// Open conversations with roster agents, keyed by conversation id. Local entries hold a live
+    /// turn loop here; remote entries hold only the routing, because the loop runs on the owning
+    /// daemon.
+    agent_conversations:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, AgentConversation>>>,
+    /// Self-reference for handing out `Arc<ConnectionServiceImpl>` from a `&self` method. Set
+    /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `main.rs`;
+    /// shared across `Clone`s because it is itself behind an `Arc`, so a clone tonic holds can
+    /// still recover the original `Arc`. Used by the sandbox-IPC RPC bridge: a sandboxed session's
+    /// `dial_and_bridge` builds a `DaemonRpcHandler` from `self_arc()` so the in-jail `tddy-tools`
+    /// can reach the roster and conversation RPCs on this daemon over the `SessionChannel`.
+    self_handle:
+        Arc<std::sync::OnceLock<std::sync::Weak<ConnectionServiceImpl>>>,
+}
+
+/// One open conversation with a roster agent.
+///
+/// The two variants are what the main agent must not be able to tell apart: both answer
+/// `{stopReason, content}`, and only the daemon deciding where the turn loop runs sees the
+/// difference.
+enum AgentConversation {
+    /// The turn loop runs here, in this process.
+    Local {
+        session_id: String,
+        agent_id: String,
+        /// Shared rather than owned by the map, so a turn can be awaited on this lock alone with the
+        /// map's lock released — a turn that pinned the map would block every cancel for its whole
+        /// duration, including the cancel meant to interrupt it.
+        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
+        /// Signalled when the conversation is closed. `notify_one` rather than `notify_waiters`, so
+        /// a cancel that lands between the turn being spawned and its first await is still seen.
+        closed: Arc<tokio::sync::Notify>,
+    },
+    /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
+    Remote {
+        session_id: String,
+        agent_id: String,
+        daemon_instance_id: String,
+    },
+}
+
+/// The clone an attach claimed for a remote agent.
+///
+/// `commissioned` is what makes a failed attach unwindable without taking a checkout away from an
+/// agent that is still using it: two agents on one host share one clone, and only the attach that
+/// minted it may delete it.
+struct ClaimedAgentClone {
+    codebase_session_id: String,
+    commissioned: bool,
+}
+
+/// What one open conversation hands a prompt, taken out of the map so the map's lock can be
+/// released before the turn is awaited.
+enum PromptRouting {
+    Local {
+        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
+        closed: Arc<tokio::sync::Notify>,
+    },
+    Remote(String),
+}
+
+impl AgentConversation {
+    /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its loop.
+    fn is_with(&self, session_id: &str, agent_id: &str) -> bool {
+        let (open_session, open_agent) = match self {
+            AgentConversation::Local {
+                session_id,
+                agent_id,
+                ..
+            } => (session_id, agent_id),
+            AgentConversation::Remote {
+                session_id,
+                agent_id,
+                ..
+            } => (session_id, agent_id),
+        };
+        open_session == session_id && open_agent == agent_id
+    }
 }
 
 /// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
@@ -1066,6 +1163,11 @@ impl ConnectionServiceImpl {
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
+        // Built here rather than inline below because the roster store reads it: an entry's
+        // `clone_state` is the state of the checkout serving it, and two stores would let a roster
+        // report READY for a clone nobody built.
+        let session_agent_clones =
+            Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
         Self {
             config,
             sessions_base_for_user,
@@ -1093,7 +1195,41 @@ impl ConnectionServiceImpl {
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
             model_registry: None,
+            session_agent_rosters: Arc::new(
+                crate::session_agent_roster::SessionAgentRosterStore::new(Arc::clone(
+                    &session_agent_clones,
+                )),
+            ),
+            session_agent_clones,
+            hosted_agent_clones: Arc::new(crate::session_agent_clone::HostedAgentClones::new()),
+            session_admissions: Arc::new(
+                crate::session_admission_service::SessionAdmissionRegistry::new(),
+            ),
+            agent_conversations: Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
+            self_handle: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// Record the `Weak` to the top-level `Arc<ConnectionServiceImpl>` so a `&self` method can
+    /// recover the `Arc` via [`Self::self_arc`]. Called once, right after `Arc::new`, in `main.rs`.
+    /// Shared across `Clone`s (the field is an `Arc<OnceLock<…>>`), so a clone tonic holds still
+    /// sees the same handle. Idempotent: a second call is a no-op, which is what tests want when
+    /// they re-construct a service in the same process.
+    pub fn set_self_handle(&self, handle: std::sync::Weak<ConnectionServiceImpl>) {
+        let _ = self.self_handle.set(handle);
+    }
+
+    /// Recover the `Arc<ConnectionServiceImpl>` this `&self` belongs to. Panics if
+    /// [`Self::set_self_handle`] was never called — which is a wiring bug, not a runtime condition:
+    /// the daemon's `main.rs` sets it at startup, and tests that do not exercise the sandbox-IPC
+    /// RPC bridge never call this.
+    pub fn self_arc(&self) -> Arc<ConnectionServiceImpl> {
+        self.self_handle
+            .get()
+            .and_then(|weak| weak.upgrade())
+            .expect("ConnectionServiceImpl::self_arc called before set_self_handle")
     }
 
     /// Share this daemon's model registry (builder), so an assistant defined in it is listed by
@@ -1105,6 +1241,72 @@ impl ConnectionServiceImpl {
         self.model_registry = Some(registry);
         self
     }
+
+    /// The per-session admission registry — shared with the `SessionAdmissionService` served on
+    /// the common room, so the attach path records the first admit, the RPC refreshes it, and the
+    /// detach/session-delete paths revoke against the same set (PRD § "What attach does" step 3).
+    pub fn session_admissions(
+        &self,
+    ) -> Arc<crate::session_admission_service::SessionAdmissionRegistry> {
+        Arc::clone(&self.session_admissions)
+    }
+
+    /// Whether this daemon currently hosts the session room for `session_id` — the
+    /// `SessionAdmissionService`'s `session_exists` check, exposed so a test fixture wiring the
+    /// admission service against this daemon's registry can build the same checker `main.rs` does
+    /// without reaching into private fields.
+    pub fn hosts_session(&self, session_id: &str) -> bool {
+        self.session_rooms.contains(session_id)
+    }
+
+    /// The shared session-room registry — so a test fixture wiring `SessionAdmissionService`
+    /// against this daemon can build the `session_exists` checker `main.rs` builds over the same
+    /// registry the connection service updates when it opens and closes a session room.
+    pub fn session_rooms(&self) -> Arc<crate::session_room::SessionRoomRegistry> {
+        Arc::clone(&self.session_rooms)
+    }
+
+    /// The first admit — the facilitating daemon records the owning daemon in the admission registry
+    /// and mints the scoped, short-TTL token it forwards along with the StartSession (PRD § "What
+    /// attach does" step 3). The owning daemon joins `session-{session_id}` with this token and
+    /// nothing else, then runs the re-admit loop against `AdmitOwningDaemon` before it expires.
+    ///
+    /// Returns `None` when this daemon cannot admit (LiveKit not configured), so a caller can skip
+    /// the handshake and fall back to the owning daemon self-minting — never silently, but as a
+    /// recorded deviation. `Some(token, url, room, ttl)` is what the caller forwards.
+    fn mint_first_admission_token(
+        &self,
+        session_id: &str,
+        owning_daemon_instance_id: &str,
+    ) -> Option<(String, String, String, u64)> {
+        use crate::livekit_peer_discovery::{daemon_rpc_identity, livekit_common_room_connect_strings};
+        use crate::session_admission_service::ADMISSION_TOKEN_TTL;
+        use crate::session_room::session_room_name;
+        use tddy_livekit::TokenGenerator;
+
+        let (_common_room, url, api_key, api_secret) =
+            livekit_common_room_connect_strings(&self.config).ok()?;
+        self.session_admissions
+            .admit(session_id, owning_daemon_instance_id);
+        let room = session_room_name(session_id);
+        let identity = daemon_rpc_identity(owning_daemon_instance_id);
+        let token = TokenGenerator::new(
+            api_key,
+            api_secret,
+            room.clone(),
+            identity,
+            ADMISSION_TOKEN_TTL,
+        )
+        .generate()
+        .ok()?;
+        log::info!(
+            "provision_agent_clone: minted first admission token for daemon \
+             {owning_daemon_instance_id} to session {session_id} (room {room}, ttl={}s)",
+            ADMISSION_TOKEN_TTL.as_secs()
+        );
+        Some((token, url, room, ADMISSION_TOKEN_TTL.as_secs()))
+    }
+
 
     /// Share the daemon's session-room registry (builder) with everything else that opens or
     /// closes rooms — Telegram's Delete path holds the same `Arc`. Without it this service keeps
@@ -1806,6 +2008,27 @@ pub fn local_daemon_hook_url(config: &DaemonConfig) -> String {
     )
 }
 
+/// Externally-reachable HTTP base URL peer daemons use to reach this daemon's Connect-HTTP surface
+/// (today: `auth.LiveKitTokenService/MintLiveKitToken`, used by `tddy-remote-git-repo` to mint the
+/// common-room LiveKit token before driving `remote_git.RemoteGitService/Serve`).
+///
+/// Explicit `listen.advertise_url` wins; otherwise the loopback URL derived from the web port —
+/// the same default `claude_hook_daemon_url` falls back to, and for the same reason: a daemon that
+/// never configured an external URL is one a peer on another host cannot reach, but one a peer on
+/// the same host (and every test) can. The facilitating daemon publishes this in
+/// `AgentClonePlacement.facilitating_daemon_url` so an owning daemon that has never seen the
+/// project can clone it (PRD AC37).
+pub fn advertise_daemon_url(config: &DaemonConfig) -> String {
+    config
+        .listen
+        .advertise_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| local_daemon_hook_url(config))
+}
+
 /// Base URL a claude-cli session's hook commands call `ReportSessionStatus` on: the configured
 /// `claude_cli.daemon_url`, else this daemon's own web port.
 pub fn claude_hook_daemon_url(config: &DaemonConfig) -> String {
@@ -2066,6 +2289,229 @@ pub(crate) async fn open_session_room_before_spawning_agent(
         ),
     }
     Ok(())
+}
+
+/// The exec-catalog names of the tools a def's own loop may call — the spelling the wire, the
+/// roster and `execute_tool`'s dispatch all use, rather than the `UPPERCASE` YAML spelling.
+fn def_tool_names(def: &tddy_discovery::agent_def::SpecializedAgentDef) -> Vec<String> {
+    def.tools
+        .iter()
+        .map(|t| t.catalog_name().to_string())
+        .collect()
+}
+
+/// One resolved def as the `ListSubagents` row a picker attaches from.
+fn subagent_info(
+    def: &tddy_discovery::agent_def::SpecializedAgentDef,
+    daemon_instance_id: &str,
+) -> Result<SubagentInfo, tddy_core::AgentIdError> {
+    Ok(SubagentInfo {
+        agent_id: qualified_agent_id(&def.name, daemon_instance_id)?,
+        name: def.name.clone(),
+        label: def
+            .label
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| def.name.clone()),
+        model: def.model.clone(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+        replaces: tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+        tools: def_tool_names(def),
+    })
+}
+
+/// One resolved def as the roster entry attaching it produces.
+///
+/// `replaces` and `tools` are copied in here and never re-read: editing the YAML def or the
+/// registry assistant afterwards would otherwise silently change what a running session's main
+/// agent is allowed to call (PRD § An entry). Detaching and re-attaching is the explicit way to
+/// pick an edit up.
+fn roster_record(
+    def: &tddy_discovery::agent_def::SpecializedAgentDef,
+    daemon_instance_id: &str,
+) -> Result<tddy_core::SessionAgentRecord, tddy_core::AgentIdError> {
+    Ok(tddy_core::SessionAgentRecord {
+        agent_id: qualified_agent_id(&def.name, daemon_instance_id)?,
+        name: def.name.clone(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+        label: def.label.clone().filter(|s| !s.trim().is_empty()),
+        model: def.model.clone(),
+        replaces: tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+        tools: def_tool_names(def),
+        // A local agent works the facilitating daemon's real worktree, so there is no clone to name.
+        codebase_session_id: None,
+    })
+}
+
+/// The qualified id a def resolved on `daemon_instance_id` is addressed by.
+///
+/// Refused at the point the id is minted when the def's own name contains `@`: such an id parses
+/// back as a different pair, so letting it through would put an entry in the roster that routes
+/// somewhere the operator never picked.
+fn qualified_agent_id(
+    name: &str,
+    daemon_instance_id: &str,
+) -> Result<String, tddy_core::AgentIdError> {
+    tddy_core::AgentId {
+        name: name.to_string(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+    }
+    .try_qualified()
+}
+
+/// The agent a `StartSessionRequest.specialized_agents` entry names.
+///
+/// The field keeps its wire shape (`repeated string`) and now carries either form: a qualified
+/// `name@daemon_instance_id`, or a bare name. A bare name resolves against *this* daemon, and only
+/// here — it is the one place where that reading is not a guess, because a start request has never
+/// been able to name any other daemon. Attach takes no such reading (PRD § Identity is qualified,
+/// always).
+fn started_agent_id(
+    reference: &str,
+    local_instance_id: &str,
+) -> Result<tddy_core::AgentId, Status> {
+    match tddy_core::AgentId::parse(reference) {
+        Ok(id) => Ok(id),
+        Err(tddy_core::AgentIdError::Unqualified(_)) => Ok(tddy_core::AgentId {
+            name: reference.to_string(),
+            daemon_instance_id: local_instance_id.to_string(),
+        }),
+        Err(e) => Err(Status::invalid_argument(format!("specialized_agents: {e}"))),
+    }
+}
+
+/// The `.session.yaml` roster a session start records, from the defs its request resolved to.
+///
+/// Order is the request's, which is the order the roster keeps and the main agent sees.
+fn started_roster(
+    defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+    local_instance_id: &str,
+) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
+    defs.iter()
+        .map(|def| {
+            roster_record(def, local_instance_id)
+                .map_err(|e| Status::invalid_argument(format!("specialized_agents: {e}")))
+        })
+        .collect()
+}
+
+/// The revision a freshly started session's roster is at: 1 when it was seeded with agents, 0
+/// when it was started with none (PRD § Revision, not diff).
+pub(crate) fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u64 {
+    u64::from(!agents.is_empty())
+}
+
+/// The refusal an agent owned by another daemon gets in a session's **start** request.
+///
+/// Attaching one to a live session is supported (see [`ConnectionServiceImpl::roster_record_for`]);
+/// seeding one at start is not, and the difference is not arbitrary. A remote agent needs the
+/// session's room to exist so its owning daemon can be admitted to it, and the room is opened by the
+/// spawn this request has not reached yet — so a seed resolved here would name a clone that could
+/// not be provisioned until after the agent process it was meant to configure had started.
+///
+/// TODO(session-agent-roster): seed a remote agent by attaching it immediately after the spawn has
+/// opened the room, so `specialized_agents` and `AttachSessionAgent` accept the same ids
+/// (docs/ft/daemon/session-agent-roster.md § Remote agents). Refused, never read as local: a local
+/// def of the same name is a *different* agent, and running it would answer from the wrong host
+/// without saying so — which is the exact failure qualified ids exist to prevent.
+fn remote_agent_at_start_unsupported(agent_id: &str, owning_daemon: &str) -> Status {
+    Status::unimplemented(format!(
+        "agent '{agent_id}' is owned by daemon '{owning_daemon}'; a session cannot be *started* \
+         with an agent from a peer, because that peer is admitted to the session's room and given \
+         its clone only once the room exists. Start the session and attach the agent to it."
+    ))
+}
+
+/// The exec tools a roster agent's own loop serves from the checkout it reads.
+///
+/// Everything else — `Write`, `StrReplace`, `Delete`, `Shell`, `Await` — is proxied to the
+/// facilitating daemon, because there is exactly one worktree that counts and it is that daemon's. A
+/// mutation applied to a clone would be overwritten by the next sync tick and would never reach the
+/// session's branch (docs/ft/daemon/session-agent-roster.md § Reads are local; writes proxy).
+///
+/// A name outside the catalog is **not** read-only. The split has to fail closed: a tool this list
+/// has never heard of is one nobody has decided about, and running it against a mirror is the
+/// outcome that loses work silently.
+fn agent_tool_reads_the_clone(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "Read" | "Glob" | "Grep" | "SemanticSearch" | "ReadLints"
+    )
+}
+
+/// One exec-tool result as an agent's managed-dispatch layer reads it.
+///
+/// A failure is rendered as the `{is_error, error}` envelope
+/// [`tddy_discovery::subagent::CodebaseAccess`] surfaces as `Err`, rather than as a result string —
+/// returning the error envelope as if it were a successful result is how a model is told a file
+/// contains the words "file not found".
+fn dispatch_envelope(response: ExecuteToolResponse) -> String {
+    match response.is_error {
+        true => {
+            serde_json::json!({ "is_error": true, "error": response.error_message }).to_string()
+        }
+        false => response.result_json,
+    }
+}
+
+/// The wire spelling of a turn's stop reason.
+///
+/// ACP's spelling, matched character for character, because that is what the main agent's
+/// `subagent_prompt` hands back and a consumer comparing against `"EndTurn"` has no way to learn
+/// this daemon chose another.
+fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'static str {
+    match reason {
+        tddy_discovery::subagent::StopReason::EndTurn => "EndTurn",
+        tddy_discovery::subagent::StopReason::MaxTurnRequests => "MaxTurnRequests",
+        tddy_discovery::subagent::StopReason::Cancelled => "Cancelled",
+    }
+}
+
+/// Refuse an attach whose withdrawal the session could not enforce.
+///
+/// In a managed-codebase session the main agent's file tools **are** `mcp__tddy-tools__*` — the
+/// jail is what puts them there — so a withdrawn tool is refused on the path the call already
+/// takes. The main agent of a session that runs no jail holds native tools that never reach
+/// `tddy-tools`, so accepting the attach would advertise an enforcement that does not exist, and
+/// the operator would believe the main agent had been forced through the agent when it had not
+/// (PRD § Enforced at two layers, AC24).
+///
+/// An agent that replaces nothing has nothing to enforce and attaches to either kind of session.
+fn refuse_unenforceable_withdrawal(
+    session_id: &str,
+    session_dir: &Path,
+    record: &tddy_core::SessionAgentRecord,
+) -> Result<(), Status> {
+    if record.replaces.is_empty() {
+        return Ok(());
+    }
+    let meta = tddy_core::read_session_metadata(session_dir).map_err(|e| {
+        Status::not_found(format!(
+            "session '{session_id}' has no readable metadata at {}: {e}",
+            session_dir.display()
+        ))
+    })?;
+    if meta.sandbox == Some(true) {
+        return Ok(());
+    }
+    Err(Status::failed_precondition(format!(
+        "agent '{}' replaces {} on session '{session_id}', which does not run a managed codebase: \
+         its main agent calls those tools natively, never through tddy-tools, so the withdrawal \
+         could not be enforced. Attach it to a managed-codebase session, or attach an agent that \
+         replaces nothing.",
+        record.agent_id,
+        record.replaces.join(", ")
+    )))
+}
+
+/// The qualified ids a persisted roster holds, for the resume paths that re-resolve each agent
+/// before relaunching the jail.
+///
+/// Qualified rather than bare: a resume that resolved `explorer` locally would run *this* daemon's
+/// `explorer` for an entry the operator attached from another host, and report it under the id they
+/// picked. An id naming a peer is refused by resolution instead.
+fn roster_agent_ids(agents: &[tddy_core::SessionAgentRecord]) -> Vec<String> {
+    agents.iter().map(|a| a.agent_id.clone()).collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2371,7 +2817,9 @@ async fn spawn_claude_cli_session_inner(
         sandbox: None,
         agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };
@@ -2506,12 +2954,21 @@ impl ConnectionServiceImpl {
     /// registered here, otherwise from a peer daemon that hosts it (reusing the logical
     /// `project_id`). The blocking clone runs off the async runtime; a project unknown locally and
     /// on every peer surfaces as `NotFound`.
+    ///
+    /// When `agent_clone` is set, this daemon is the **owning** side of an agent clone and the
+    /// project is provisioned from the facilitating daemon's `remote_git.RemoteGitService` rather
+    /// than from a peer-discovered forge URL — `git clone {facilitating_instance_id}:{project_id}`
+    /// with `GIT_SSH_COMMAND=tddy-remote-git-repo --daemon-url {facilitating_daemon_url}
+    /// --session-token {session_token}`. That closes the two cases the peer fan-out fails for a
+    /// remote owning daemon: a peer with no common room of its own, and a project whose `git_url`
+    /// names a forge the peer cannot reach (PRD AC37).
     async fn ensure_project_available_for_start(
         &self,
         os_user: &str,
         projects_dir: &Path,
         project_id: &str,
         session_token: &str,
+        agent_clone: Option<&tddy_service::proto::connection::AgentClonePlacement>,
     ) -> Result<project_storage::ProjectData, Status> {
         // Resolved lazily: only a peer-provisioned clone needs a base path. A locally-registered
         // project (the common case) never consults it, so a `None` here must not fail the start —
@@ -2523,14 +2980,35 @@ impl ConnectionServiceImpl {
         let project_id_owned = project_id.to_string();
         let timeout = self.config.spawn_worker_request_timeout();
 
+        // An agent clone provisions from its facilitating daemon directly, so it never fans out
+        // `ListProjects` across the common room — the fan-out is the path that fails for a peer
+        // with no room of its own, and it is the one AC37 replaces.
+        let facilitating = match agent_clone {
+            Some(placement) => {
+                let facilitating_instance_id = placement.facilitating_daemon_instance_id.trim();
+                let facilitating_daemon_url = placement.facilitating_daemon_url.trim();
+                if facilitating_instance_id.is_empty() || facilitating_daemon_url.is_empty() {
+                    return Err(Status::invalid_argument(format!(
+                        "agent_clone placement is incomplete: facilitating_daemon_instance_id and \
+                         facilitating_daemon_url are both required to provision a clone on a daemon \
+                         that has never seen the project (got instance_id={facilitating_instance_id:?}, \
+                         url={facilitating_daemon_url:?})"
+                    )));
+                }
+                Some((facilitating_instance_id.to_string(), facilitating_daemon_url.to_string()))
+            }
+            None => None,
+        };
+
         // Peer discovery is an async RPC fan-out; resolve it here rather than inside the blocking
         // clone task. It is only needed when the project is not registered on this host — a
         // locally-registered project clones from its stored `git_url` with no peer lookup — so the
-        // fan-out is skipped entirely in that case.
+        // fan-out is skipped entirely in that case. An agent clone skips the fan-out unconditionally
+        // (it provisions from its facilitator, above).
         let registered_locally = project_storage::find_project(projects_dir, project_id)
             .map_err(|e| Status::internal(format!("read project registry: {e}")))?
             .is_some();
-        let peer_entries = if registered_locally {
+        let peer_entries = if registered_locally || facilitating.is_some() {
             Vec::new()
         } else {
             self.eligible_daemon_source
@@ -2544,48 +3022,86 @@ impl ConnectionServiceImpl {
         // on a blocking thread, which is precisely where awaiting a future by blocking belongs.
         let runtime = tokio::runtime::Handle::current();
 
+        // The transport-shim env var a facilitator-provisioned clone sets on the `git clone` child.
+        // `tddy-remote-git-repo` takes its daemon URL and session token as `--long` flags on the
+        // `GIT_SSH_COMMAND` string, so a single env var carries both — the supervisor's
+        // `allowed_env_keys` needs only `GIT_SSH_COMMAND` to admit it.
+        let ssh_command = facilitating.as_ref().map(|(_, daemon_url)| {
+            format!(
+                "{} --daemon-url {daemon_url} --session-token {session_token}",
+                crate::project_provision::resolve_remote_git_repo_path()
+            )
+        });
+        let facilitating_remote_url = facilitating
+            .as_ref()
+            .map(|(instance_id, _)| format!("{instance_id}:{project_id_owned}"));
+
         let handle = tokio::task::spawn_blocking(move || {
             let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
                 match &spawn_backend {
                     crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+                        let mut env = std::collections::BTreeMap::new();
+                        if let Some(ref ssh) = ssh_command {
+                            env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
+                        }
                         runtime
-                            .block_on(crate::supervisor_spawn::clone_repo_via_supervisor(
+                            .block_on(crate::supervisor_spawn::clone_repo_via_supervisor_with_env(
                                 socket_path,
                                 &os_user_owned,
                                 git_url,
                                 dest,
+                                env,
                             ))
                             .map_err(|e| format!("{e:#}"))
                     }
                     crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                         if let Some(ref client) = spawn_client {
-                            client
-                                .clone_repo(spawn_worker::CloneRequest {
-                                    os_user: os_user_owned.clone(),
-                                    git_url: git_url.to_string(),
-                                    destination: dest.display().to_string(),
-                                })
-                                .map_err(|e| e.to_string())
-                        } else {
-                            spawner::clone_as_user(&os_user_owned, git_url, dest)
-                                .map_err(|e| e.to_string())
+                            if ssh_command.is_none() {
+                                // No transport env var to carry: the forked worker's `clone_repo` is
+                                // the original path (it has no env-var channel).
+                                return client
+                                    .clone_repo(spawn_worker::CloneRequest {
+                                        os_user: os_user_owned.clone(),
+                                        git_url: git_url.to_string(),
+                                        destination: dest.display().to_string(),
+                                    })
+                                    .map_err(|e| e.to_string());
+                            }
                         }
+                        // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
+                        // the in-process `clone_as_user_with_env` carries the transport env var directly.
+                        let extra: Vec<(&str, &str)> = ssh_command
+                            .as_ref()
+                            .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
+                            .unwrap_or_default();
+                        spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
+                            .map_err(|e| e.to_string())
                     }
                 }
             };
-            let peer_lookup = |id: &str| {
-                peer_entries
-                    .iter()
-                    .find(|p| p.project_id == id)
-                    .map(|p| (p.name.clone(), p.git_url.clone()))
-            };
-            crate::project_provision::ensure_project_available_locally(
-                &projects_dir_owned,
-                &project_id_owned,
-                repos_base_dir.as_deref(),
-                cloner,
-                peer_lookup,
-            )
+            if let Some(remote_url) = facilitating_remote_url {
+                crate::project_provision::ensure_project_available_from_facilitator(
+                    &projects_dir_owned,
+                    &project_id_owned,
+                    repos_base_dir.as_deref(),
+                    &remote_url,
+                    cloner,
+                )
+            } else {
+                let peer_lookup = |id: &str| {
+                    peer_entries
+                        .iter()
+                        .find(|p| p.project_id == id)
+                        .map(|p| (p.name.clone(), p.git_url.clone()))
+                };
+                crate::project_provision::ensure_project_available_locally(
+                    &projects_dir_owned,
+                    &project_id_owned,
+                    repos_base_dir.as_deref(),
+                    cloner,
+                    peer_lookup,
+                )
+            }
         });
 
         match tokio::time::timeout(timeout, handle).await {
@@ -2597,7 +3113,40 @@ impl ConnectionServiceImpl {
         }
     }
 
-    /// Every agent def a name can resolve against on this daemon: the builtins, the YAML defs
+    /// Report — once per `(agents dir, name)` per process — that a registry assistant is shadowing
+    /// a `<tddyhome>/agents` def of the same name.
+    ///
+    /// `create_assistant` refuses a name a def already answers to, so this can only happen the
+    /// other way round: the def was written *after* the assistant existed. Resolution deliberately
+    /// does **not** refuse in that case. `resolvable_agent_defs` answers `ListAgents`,
+    /// `ListSubagents`, `StartSession` and roster attach, so making a name tie fatal here would let
+    /// one stray YAML file break every agent listing and every session start on the daemon —
+    /// the operator's typo would cost them the daemon. Flipping the winner instead would silently
+    /// change which agent an existing session runs, which is the thing the create-time guard exists
+    /// to prevent, in the other direction.
+    ///
+    /// So the ordering stands and the silence is what gets fixed. Deduplicated because this runs on
+    /// every `ListAgents`; an undeduplicated line here would flood the log rather than inform it.
+    fn report_shadowed_agent_def(agents_dir: &std::path::Path, name: &str) {
+        static REPORTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        let key = format!("{}\u{0}{name}", agents_dir.display());
+        let mut reported = REPORTED
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !reported.insert(key) {
+            return;
+        }
+        log::error!(
+            "agent '{name}' is defined both as a registry assistant and by a def in {} — the \
+             assistant wins and the def will not resolve. Rename one of them; \
+             `--agent {name}` currently runs the assistant.",
+            agents_dir.display()
+        );
+    }
+
+    /// Every agent def a name can resolve against on this daemon: the YAML defs
     /// under `<tddyhome>/agents`, and this daemon's registry assistants — `{builtin, yaml,
     /// sqlite}`. A registry assistant of the same name as a YAML def wins, on the same
     /// "the more specific source is the one the operator just edited" rule that already makes a
@@ -2609,7 +3158,10 @@ impl ConnectionServiceImpl {
         let mut defs = tddy_discovery::agent_def::resolve_agent_defs(&agents_dir);
         for def in self.registry_agent_defs().await? {
             match defs.iter_mut().find(|d| d.name == def.name) {
-                Some(existing) => *existing = def,
+                Some(existing) => {
+                    Self::report_shadowed_agent_def(&agents_dir, &def.name);
+                    *existing = def;
+                }
                 None => defs.push(def),
             }
         }
@@ -2658,10 +3210,11 @@ impl ConnectionServiceImpl {
         }
     }
 
-    /// Resolve `specialized_agents` names against [`Self::resolvable_agent_defs`] into their full
-    /// defs (see docs/ft/coder/specialized-subagents.md). An unresolvable name is a request
-    /// error — the session is never started with a silently-dropped subagent. An empty input
-    /// resolves to an empty output, not an error.
+    /// Resolve `specialized_agents` references against [`Self::resolvable_agent_defs`] into their
+    /// full defs (see docs/ft/coder/specialized-subagents.md). Each entry is either a qualified
+    /// `name@daemon_instance_id` or a bare name read as this daemon's (see [`started_agent_id`]).
+    /// An unresolvable reference is a request error — the session is never started with a
+    /// silently-dropped subagent. An empty input resolves to an empty output, not an error.
     async fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],
@@ -2669,13 +3222,21 @@ impl ConnectionServiceImpl {
         if specialized_agents.is_empty() {
             return Ok(Vec::new());
         }
+        let local_instance_id = local_instance_id_for_config(&self.config);
         let resolved = self.resolvable_agent_defs().await?;
         let mut selected = Vec::with_capacity(specialized_agents.len());
-        for name in specialized_agents {
-            let def = resolved.iter().find(|d| &d.name == name).ok_or_else(|| {
+        for reference in specialized_agents {
+            let id = started_agent_id(reference, &local_instance_id)?;
+            if id.daemon_instance_id != local_instance_id {
+                return Err(remote_agent_at_start_unsupported(
+                    reference,
+                    &id.daemon_instance_id,
+                ));
+            }
+            let def = resolved.iter().find(|d| d.name == id.name).ok_or_else(|| {
                 Status::invalid_argument(format!(
-                    "specialized_agents: unknown subagent '{name}' (not a builtin, not found \
-                         under <tddyhome>/agents, and not an assistant in this daemon's registry)"
+                    "specialized_agents: unknown subagent '{reference}' (not found under \
+                     <tddyhome>/agents, and not an assistant in this daemon's registry)"
                 ))
             })?;
             selected.push(def.clone());
@@ -2683,9 +3244,1215 @@ impl ConnectionServiceImpl {
         Ok(selected)
     }
 
+    /// The session directory a roster call addresses, resolved **only after** its caller has been.
+    ///
+    /// Auth first is load-bearing rather than tidy: attaching an agent owned by another daemon
+    /// contacts that peer and provisions a checkout on it, so a check that ran afterwards would let
+    /// an unauthenticated caller build a clone on another host (PRD AC12).
+    fn roster_session_dir(&self, session_token: &str, session_id: &str) -> Result<PathBuf, Status> {
+        let github_user = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        // Resolved for the authorization decision alone: a caller who maps to no OS user may not
+        // reach a session, but the path itself is this daemon's, not that user's — config is the
+        // single source of the sessions base (`sessions_base_for_user`).
+        self.config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+        self.session_dir_for(session_id)
+    }
+
+    /// Where a session this daemon serves keeps its `.session.yaml`.
+    ///
+    /// The id is validated as a single path segment before it is joined, because every roster call
+    /// takes it from the caller and the directory it names is read-modify-written: an id carrying
+    /// `../` would have an attach rewrite another user's `.session.yaml` outside this daemon's
+    /// sessions base entirely.
+    fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
+        validate_session_id_segment(session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        Ok(self.tddy_data_dir.join(SESSIONS_SUBDIR).join(session_id))
+    }
+
+    // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
+    //
+    // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
+
+    /// Open the session's room, if it is not open already, so an owning daemon has something to be
+    /// admitted to.
+    ///
+    /// A session started through the ordinary spawn path already has its room — it is opened before
+    /// the agent process exists. This covers the session that does not: a resumed session whose
+    /// daemon restarted, and any session whose first remote agent arrives after the room was closed.
+    /// A peer told to join a room nobody opened waits out its deadline against a participant that
+    /// never arrives, so this is done *before* the peer is asked for anything.
+    async fn ensure_session_room_for_agents(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+    ) -> Result<(), Status> {
+        if self.session_rooms.hosts(session_id) {
+            return Ok(());
+        }
+        let meta = read_session_metadata(session_dir).map_err(|e| {
+            Status::not_found(format!(
+                "session '{session_id}' has no readable metadata at {}: {e}",
+                session_dir.display()
+            ))
+        })?;
+        let worktree_root = meta.repo_path.as_ref().map(PathBuf::from).ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "session '{session_id}' has no checkout on this daemon, so its room cannot be \
+                 opened here; a remote agent reads a mirror of that checkout and there is nothing \
+                 to mirror"
+            ))
+        })?;
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let hosting = crate::session_room::DaemonRoomHosting {
+            config: &self.config,
+            instance_id: &local_instance_id,
+            rooms: &self.session_rooms,
+        }
+        .for_worktree(session_id, &worktree_root, session_dir);
+        match self
+            .session_rooms
+            .open(
+                &hosting,
+                tddy_service::ConnectionServiceServer::new(self.clone()),
+            )
+            .await?
+        {
+            Some(room) => {
+                log::info!(
+                    "AttachSessionAgent: opened {} as {} so an owning daemon can be admitted to it",
+                    room.room,
+                    room.server_identity
+                );
+                Ok(())
+            }
+            // A daemon with no LiveKit credentials hosts no rooms, which is fine for a local agent
+            // and impossible for a remote one: there would be no room to sync the clone from and no
+            // route to the owning daemon.
+            None => Err(Status::failed_precondition(format!(
+                "session '{session_id}' cannot take an agent from another daemon: this daemon has \
+                 no LiveKit configuration, so it hosts no session room for that daemon to join"
+            ))),
+        }
+    }
+
+    /// Claim the clone serving `daemon_instance_id`'s agents on this session, and start building it
+    /// if this is the first agent that daemon owns here.
+    ///
+    /// Returns the clone's `workspace` session id, which the roster entry records. The id is minted
+    /// **before** the peer is contacted and travels in the request as `requested_session_id`, so a
+    /// forward that never answers still leaves this daemon able to name — and therefore tear down —
+    /// whatever the peer built.
+    async fn claim_agent_clone(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        daemon_instance_id: &str,
+        session_token: &str,
+    ) -> Result<ClaimedAgentClone, Status> {
+        // Before the claim: a room this daemon could not open is a clone that could never sync, and
+        // a claim recorded for it would leave the roster naming a checkout nobody will build.
+        self.ensure_session_room_for_agents(session_id, session_dir)
+            .await?;
+
+        let (codebase_session_id, provision) =
+            self.session_agent_clones
+                .claim(session_id, daemon_instance_id, || {
+                    Uuid::now_v7().to_string()
+                });
+        if !provision {
+            return Ok(ClaimedAgentClone {
+                codebase_session_id,
+                commissioned: false,
+            });
+        }
+
+        // Spawned rather than awaited: the peer resolves the project — cloning it if it does not
+        // have it — and cuts a worktree, which its own `spawn_worker_request_timeout` bounds at five
+        // minutes. Holding the attach open for that would make a 90-second `git clone` look like a
+        // hung RPC, so the entry is published PROVISIONING and republished when the peer reports.
+        let service = self.clone();
+        let session_id = session_id.to_string();
+        let daemon_instance_id = daemon_instance_id.to_string();
+        let session_dir = session_dir.to_path_buf();
+        let clone_id = codebase_session_id.clone();
+        let session_token = session_token.to_string();
+        tokio::spawn(async move {
+            if let Err(status) = service
+                .provision_agent_clone(
+                    &session_id,
+                    &session_dir,
+                    &daemon_instance_id,
+                    &clone_id,
+                    &session_token,
+                )
+                .await
+            {
+                log::error!(
+                    "AttachSessionAgent: could not build session {session_id}'s clone \
+                     {clone_id} on daemon {daemon_instance_id}: {}",
+                    status.message()
+                );
+                service.session_agent_clones.fail(
+                    &session_id,
+                    &daemon_instance_id,
+                    status.message(),
+                );
+            }
+            // The attach that commissioned this clone may have failed while the peer was still
+            // cutting the checkout. Its unwind cannot delete a session the peer had not created yet,
+            // so the side that knows the checkout now exists finishes the job: no claim under this
+            // id means nothing will ever read it.
+            let still_claimed = service
+                .session_agent_clones
+                .get(&session_id, &daemon_instance_id)
+                .is_some_and(|clone| clone.codebase_session_id == clone_id);
+            if !still_claimed {
+                log::info!(
+                    "AttachSessionAgent: session {session_id} no longer claims clone {clone_id}; \
+                     deleting it on daemon {daemon_instance_id}"
+                );
+                service
+                    .delete_clone_on_peer(&daemon_instance_id, &clone_id, &session_token)
+                    .await;
+                return;
+            }
+            // Either way the roster now says something new about the clone, and a subscriber that
+            // only heard about `rev` changes would show `provisioning` until an attach that may
+            // never come.
+            service
+                .publish_roster_change(&session_id, &session_dir)
+                .await;
+        });
+        Ok(ClaimedAgentClone {
+            codebase_session_id,
+            commissioned: true,
+        })
+    }
+
+    /// Give back a clone this attach commissioned, because the attach did not complete.
+    ///
+    /// Only the call that *commissioned* the checkout may take it away: a second agent on the same
+    /// host shares the first one's clone, and unwinding that one would delete a checkout the roster
+    /// still names (PRD § One clone per (session, remote daemon)).
+    ///
+    /// The claim is dropped before the peer is asked, so a checkout the peer creates after this ran
+    /// is deleted by the provisioning task that created it rather than left orphaned.
+    async fn unwind_agent_clone_claim(
+        &self,
+        session_id: &str,
+        daemon_instance_id: &str,
+        claimed: &ClaimedAgentClone,
+        session_token: &str,
+    ) {
+        if !claimed.commissioned {
+            return;
+        }
+        self.session_agent_clones
+            .forget(session_id, daemon_instance_id);
+        self.delete_clone_on_peer(
+            daemon_instance_id,
+            &claimed.codebase_session_id,
+            session_token,
+        )
+        .await;
+    }
+
+    /// Ask `daemon_instance_id` for the checkout this session's agents on it will read.
+    ///
+    /// The same `workspace`-session primitive a split placement uses, and for the same reasons: the
+    /// peer knows how to provision a project by clone when it does not have one, how to cut a
+    /// worktree for it, and how to report and delete it — and an operator sees the result as an
+    /// ordinary session rather than as a directory the daemon made up.
+    ///
+    /// The placement carries this daemon's Connect-HTTP root (`facilitating_daemon_url`) so a peer
+    /// that has never seen the project clones it from this daemon's `remote_git.RemoteGitService`
+    /// rather than from its own peer fan-out — `git clone {facilitating_instance_id}:{project_id}`
+    /// with `GIT_SSH_COMMAND=tddy-remote-git-repo`, the transport `tddy-session-sync` already uses
+    /// (`docs/ft/daemon/remote-git-repo.md`). That closes the two cases the fan-out fails: a peer in
+    /// this daemon's room that keeps no room of its own has nobody to ask, and a project whose
+    /// `git_url` names a forge the peer cannot reach has nothing to clone (PRD AC37).
+    async fn provision_agent_clone(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        let meta = read_session_metadata(session_dir).map_err(|e| {
+            Status::not_found(format!(
+                "session '{session_id}' has no readable metadata: {e}"
+            ))
+        })?;
+        let slot = self.common_room_slot("AttachSessionAgent")?.clone();
+        // The room-admission handshake (PRD § "What attach does" step 3): the facilitating daemon
+        // records the owning daemon in the per-session admission registry and mints the scoped,
+        // short-TTL token it forwards along with the StartSession. The owning daemon joins
+        // `session-{session_id}` with this token and nothing else, then runs the re-admit loop
+        // against `session_admission.SessionAdmissionService/AdmitOwningDaemon` before it expires.
+        // `None` (LiveKit not configured) falls back to the owning daemon self-minting — a recorded
+        // deviation, never a silent one.
+        let first_admission = self.mint_first_admission_token(session_id, daemon_instance_id);
+        let (first_admission_token, first_admission_url, first_admission_room, _ttl) =
+            match first_admission {
+                Some((token, url, room, ttl)) => (token, url, room, ttl),
+                None => {
+                    log::warn!(
+                        "session {session_id}: facilitating daemon could not mint an admission \
+                         token for owning daemon {daemon_instance_id}; the owning daemon will fall \
+                         back to self-minting a room token (PRD § Deviations — no handshake)"
+                    );
+                    (String::new(), String::new(), String::new(), 0u64)
+                }
+            };
+        let request = StartSessionRequest {
+            session_token: session_token.to_string(),
+            session_type: "workspace".to_string(),
+            project_id: meta.project_id.clone(),
+            // Empty: the peer holds this checkout itself and must not route the request onward.
+            daemon_instance_id: String::new(),
+            codebase_daemon_instance_id: String::new(),
+            requested_session_id: codebase_session_id.to_string(),
+            agent_clone: Some(tddy_service::proto::connection::AgentClonePlacement {
+                session_id: session_id.to_string(),
+                facilitating_daemon_instance_id: local_instance_id_for_config(&self.config),
+                facilitating_daemon_url: advertise_daemon_url(&self.config),
+                first_admission_token,
+                first_admission_url,
+                first_admission_room,
+            }),
+            ..StartSessionRequest::default()
+        };
+        // The split forward's deadline, for the split forward's reason: giving up after the ordinary
+        // 30 s would mean erroring while the peer is still cloning, and a peer that carried on would
+        // leave a checkout on a host nobody is watching.
+        let answered = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
+            &slot,
+            daemon_instance_id,
+            &request,
+            self.split_forward_deadline(),
+        )
+        .await?;
+        let created = answered.session_id.trim();
+        if created != codebase_session_id {
+            // A peer that ignored `requested_session_id` cannot give the guarantee above, so what it
+            // did create is torn down under the id it reported and the clone fails.
+            self.delete_clone_on_peer(daemon_instance_id, created, session_token)
+                .await;
+            return Err(Status::internal(format!(
+                "daemon {daemon_instance_id} created workspace session {created:?} instead of the \
+                 requested {codebase_session_id:?}; it does not honour requested_session_id, so \
+                 this clone could not be reclaimed after a failed attach"
+            )));
+        }
+        // Nothing is marked READY here. The peer joins the session room and restores the checkout
+        // from the session's WIP ref after it has answered, and only it can say when that is done —
+        // so it reports (`ReportAgentCloneState`) and this daemon waits to be told. Marking readiness
+        // from the side that cannot see the checkout is how a prompt gets served from an empty tree.
+        log::info!(
+            "AttachSessionAgent: daemon {daemon_instance_id} is building session {session_id}'s \
+             clone as workspace session {codebase_session_id}"
+        );
+        Ok(())
+    }
+
+    /// Delete a clone's `workspace` session on the daemon holding it.
+    ///
+    /// Used only to unwind a failed provisioning, where the caller already has the more useful error
+    /// to return — so a teardown failure names the orphan in the log rather than replacing it.
+    async fn delete_clone_on_peer(
+        &self,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+        session_token: &str,
+    ) {
+        let Ok(slot) = self.common_room_slot("AttachSessionAgent") else {
+            log::error!(
+                "could not reach the common room to delete workspace session \
+                 {codebase_session_id} on daemon {daemon_instance_id}; its checkout is orphaned there"
+            );
+            return;
+        };
+        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+            slot,
+            daemon_instance_id,
+            &DeleteSessionRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session_id.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(_) => log::info!(
+                "deleted workspace session {codebase_session_id} on daemon {daemon_instance_id}"
+            ),
+            Err(e) if peer_has_no_such_session(&e) => log::info!(
+                "daemon {daemon_instance_id} no longer has workspace session \
+                 {codebase_session_id} ({e}); it was already torn down"
+            ),
+            Err(e) => log::error!(
+                "could not delete workspace session {codebase_session_id} on daemon \
+                 {daemon_instance_id} ({e}); its checkout is orphaned there"
+            ),
+        }
+    }
+
+    /// Tear down the clone `daemon_instance_id` holds for this session.
+    ///
+    /// Follows the discipline `docs/ft/daemon/remote-managed-worktree.md` § Teardown established:
+    /// the peer answering **"no such session" is success** — the clone is an ordinary listable
+    /// session an operator may have deleted directly, and treating that as an error would make the
+    /// agent permanently undetachable, with a message naming a checkout that no longer exists. Only
+    /// *unreachable or failed* refuses, naming the checkout left behind.
+    ///
+    /// The refusals say nothing about what the caller has already changed locally, because the two
+    /// callers differ: `DetachSessionAgent` has removed and persisted the entry before it gets here,
+    /// while `DeleteSession` has deleted nothing yet and is refused outright. Each adds that half
+    /// itself.
+    async fn tear_down_agent_clone(
+        &self,
+        session_id: &str,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        let slot = self.common_room_slot("DetachSessionAgent")?;
+        // Being *configured* for a common room is not being in one, and the two failures are
+        // indistinguishable from their status codes alone: a forward attempted with no room fails
+        // locally with `failed_precondition`, exactly as a peer that does not have the session does.
+        // Without this check a momentary disconnect would read as "already torn down".
+        if slot.read().await.is_none() {
+            return Err(Status::failed_precondition(format!(
+                "cannot reach the common room to delete session {session_id}'s clone \
+                 {codebase_session_id} on daemon {daemon_instance_id}, so its checkout is still \
+                 there; delete workspace session {codebase_session_id} on {daemon_instance_id} once \
+                 the daemons can see each other"
+            )));
+        }
+        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+            slot,
+            daemon_instance_id,
+            &DeleteSessionRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session_id.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(_) => log::info!(
+                "deleted session {session_id}'s clone {codebase_session_id} on daemon \
+                 {daemon_instance_id}"
+            ),
+            Err(e) if peer_has_no_such_session(&e) => log::info!(
+                "daemon {daemon_instance_id} no longer has session {session_id}'s clone \
+                 {codebase_session_id} ({e}); it was already torn down, so the detach continues"
+            ),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "could not delete session {session_id}'s clone {codebase_session_id} on daemon \
+                     {daemon_instance_id} ({e}); its checkout is left behind there — delete \
+                     workspace session {codebase_session_id} on {daemon_instance_id} directly"
+                )))
+            }
+        }
+        self.session_agent_clones
+            .forget(session_id, daemon_instance_id);
+        // The admission this clone's owning daemon held is gone with it: a later `AdmitOwningDaemon`
+        // call from that daemon (its mirror's re-admit loop, or a stale retry) must now refuse, and
+        // the only way it can refuse is if the registry no longer lists the daemon as admitted. This
+        // is the revocation half of the handshake (PRD § "What attach does" step 3) — the detach
+        // path. The session-delete path revokes every admitted daemon at once via
+        // `revoke_all_for_session`.
+        let revoked = self
+            .session_admissions
+            .revoke(session_id, daemon_instance_id);
+        if revoked {
+            log::info!(
+                "revoked admission for daemon {daemon_instance_id} to session {session_id} \
+                 (last agent detached)"
+            );
+        }
+        Ok(())
+    }
+
+    /// Delete every clone a session created, on every host that built one.
+    ///
+    /// Called by `DeleteSession`. One failure fails the deletion naming the orphan, for the same
+    /// reason a split session's paired workspace does: a delete that succeeded locally while a
+    /// checkout survived on another host is exactly the silent leak the pairing exists to prevent.
+    async fn tear_down_every_agent_clone(
+        &self,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        for (daemon_instance_id, clone) in self.session_agent_clones.for_session(session_id) {
+            self.tear_down_agent_clone(
+                session_id,
+                &daemon_instance_id,
+                &clone.codebase_session_id,
+                session_token,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Push the session's current roster to its `StreamSessionAgents` subscribers and to its room.
+    ///
+    /// Best-effort on the room and loud on the stream: a subscriber that cannot be reached is a
+    /// consumer running on a stale roster, which is the failure this whole feature exists to
+    /// prevent, while a room that is not open is the ordinary state of a session whose daemon has
+    /// no LiveKit configuration.
+    async fn publish_roster_change(&self, session_id: &str, session_dir: &Path) {
+        if let Err(e) = self
+            .session_agent_rosters
+            .republish(session_id, session_dir)
+        {
+            log::warn!(
+                "could not republish session {session_id}'s roster to its subscribers: {}",
+                e.message()
+            );
+            return;
+        }
+        let Ok(roster) = self.session_agent_rosters.snapshot(session_id, session_dir) else {
+            return;
+        };
+        self.broadcast_roster(session_id, &roster).await;
+    }
+
+    /// Broadcast one roster snapshot on the session room's `session.agents` topic.
+    ///
+    /// Published once, to the whole room, with no `destination_identities` — the same broadcast
+    /// discipline `worktree.activity` follows. Every frame is a whole snapshot that every
+    /// participant of the session is entitled to, and addressing it would mean the publisher
+    /// deciding who is interested, which it cannot know: a browser tab or a newly admitted owning
+    /// daemon joins at any time.
+    async fn broadcast_roster(&self, session_id: &str, roster: &SessionAgentRoster) {
+        let Some(publisher) = self.session_rooms.agents_publisher(session_id) else {
+            return;
+        };
+        if let Err(e) = publisher.publish(&roster.encode_to_vec()).await {
+            log::warn!(
+                "could not broadcast session {session_id}'s roster on \
+                 {}: {e}",
+                crate::session_room::SESSION_AGENTS_TOPIC
+            );
+        }
+    }
+
+    /// The identities currently joined to a session's room, as the LiveKit server reports them.
+    ///
+    /// Read from the server API rather than from this daemon's own connection: the question is who
+    /// is in the room, and only the server can answer it for participants this daemon did not admit.
+    pub async fn session_room_participant_identities(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<String>, Status> {
+        let room_name = crate::session_room::session_room_name(session_id);
+        let rooms = self.room_roster.list_rooms().await.map_err(Status::from)?;
+        let room = rooms
+            .into_iter()
+            .find(|room| room.name == room_name)
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "the LiveKit server has no room called {room_name}; session {session_id} is \
+                     not being facilitated in one"
+                ))
+            })?;
+        let mut identities: Vec<String> = room
+            .participants
+            .into_iter()
+            .map(|participant| participant.identity)
+            .collect();
+        identities.sort();
+        Ok(identities)
+    }
+
+    /// Where the checkout serving `agent_id` is, on the daemon that owns it.
+    ///
+    /// Reported by that daemon rather than derived here: this daemon does not have the filesystem
+    /// the path names, and a path it computed would describe a directory nobody created.
+    pub async fn agent_clone_worktree_path(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<PathBuf, Status> {
+        let clone = self.agent_clone_for(session_id, agent_id)?;
+        clone.worktree_path.ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "the daemon owning '{agent_id}' has not reported where session {session_id}'s \
+                 clone landed (its state is {:?})",
+                clone.state
+            ))
+        })
+    }
+
+    /// Every reconcile the daemon owning `agent_id` has reported for this session's clone.
+    ///
+    /// A reconcile is never silent: a mirror that repairs itself without saying so hides a real
+    /// fault, which here is a second writer nobody knows about.
+    pub async fn agent_clone_divergences(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<Vec<String>, Status> {
+        Ok(self.agent_clone_for(session_id, agent_id)?.divergences)
+    }
+
+    /// The clone serving `agent_id`, found through the roster entry that names its owning daemon.
+    fn agent_clone_for(
+        &self,
+        session_id: &str,
+        agent_id: &str,
+    ) -> Result<crate::session_agent_clone::AgentClone, Status> {
+        let session_dir = self.session_dir_for(session_id)?;
+        let record = self
+            .session_agent_rosters
+            .entry(session_id, &session_dir, agent_id)?
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "agent '{agent_id}' is not attached to session '{session_id}'"
+                ))
+            })?;
+        self.session_agent_clones
+            .get(session_id, &record.daemon_instance_id)
+            .ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "agent '{agent_id}' is served locally by daemon \
+                     '{}', which works the session's own worktree and has no clone",
+                    record.daemon_instance_id
+                ))
+            })
+    }
+
+    /// The clone this daemon hosts for `session_id`, when it holds one.
+    ///
+    /// What makes an exec tool addressed at this daemon for another daemon's session resolvable at
+    /// all: the session lives elsewhere, so the ordinary "resolve the worktree from my own sessions
+    /// base" would find nothing.
+    fn hosted_clone_for(
+        &self,
+        session_id: &str,
+    ) -> Option<Arc<crate::session_agent_clone::HostedClone>> {
+        self.hosted_agent_clones.get(session_id)
+    }
+
+    /// Serve one exec tool for a session whose checkout this daemon holds as an agent clone.
+    ///
+    /// This is where the read/write split actually happens, so the agent's own turn loop and an
+    /// exec-tool RPC addressed here take exactly one path. A read is answered from the clone with no
+    /// round trip — which is the entire reason for placing an agent on this host — and a mutation is
+    /// proxied to the facilitating daemon's authoritative worktree.
+    ///
+    /// Which tree is worked is settled by the clone link rather than by the caller: a hosted clone is
+    /// a checkout this daemon built for exactly one session on exactly one peer, at the request of a
+    /// `StartSession` it already authenticated, so the request cannot select any other tree and the
+    /// OS user the tools run as was settled then. *Who may drive them* is settled by the caller's
+    /// session token, which every path into here — the RPC handlers and this daemon's own agent turn
+    /// loop — establishes before this is reached: the mutating half proxies to the facilitating
+    /// daemon under the clone's stored credential, so an unauthenticated caller reaching here would
+    /// be writing into another host's authoritative worktree under a credential it never held.
+    ///
+    /// TODO(session-agent-roster): narrow that to a session-scoped tool token — audience = this
+    /// clone's session, exec-tool methods only — which is the same credential the split placement's
+    /// trust model already wants and `docs/dev/TODO.md` already records.
+    async fn run_hosted_clone_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        clone: &crate::session_agent_clone::HostedClone,
+    ) -> ExecuteToolResponse {
+        if !agent_tool_reads_the_clone(&req.tool_name) {
+            return match clone
+                .execute_tool_on_facilitator(&req.tool_name, &req.args_json)
+                .await
+            {
+                Ok(result_json) => ExecuteToolResponse {
+                    result_json,
+                    is_error: false,
+                    error_message: String::new(),
+                    job_id: String::new(),
+                    job_running: false,
+                },
+                // Carried in the response rather than raised, exactly as a locally-run tool failure
+                // is: the agent asked for a tool and the tool did not happen, which is a tool result
+                // and not a transport failure.
+                Err(status) => ExecuteToolResponse {
+                    result_json: serde_json::json!({ "error": status.message() }).to_string(),
+                    is_error: true,
+                    error_message: status.message().to_string(),
+                    job_id: String::new(),
+                    job_running: false,
+                },
+            };
+        }
+        let outcome = tool_engine::execute_tool(
+            &clone.worktree_path,
+            &req.tool_name,
+            &req.args_json,
+            &self.task_registry,
+            &req.session_id,
+        )
+        .await;
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
+    }
+
+    /// Turn a freshly created `workspace` checkout into a live mirror of the facilitating daemon's
+    /// session.
+    ///
+    /// Spawned rather than awaited: the caller is the facilitating daemon's forwarded
+    /// `StartSession`, and holding that open while this joins a room and restores a whole worktree
+    /// would push it past a deadline that is already generous for a `git clone`. The mirror reports
+    /// its own readiness afterwards (`ReportAgentCloneState`), which is the only account of it that
+    /// can be trusted — nothing on the facilitating daemon can see this checkout.
+    async fn start_hosted_agent_clone(
+        &self,
+        placement: &tddy_service::proto::connection::AgentClonePlacement,
+        sessions_base: &Path,
+        codebase_session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        let session_id = placement.session_id.trim();
+        let facilitating = placement.facilitating_daemon_instance_id.trim();
+        if session_id.is_empty() || facilitating.is_empty() {
+            return Err(Status::invalid_argument(
+                "agent_clone must name both the session it mirrors and the daemon facilitating it; \
+                 half a placement names a room to join with nobody in it to address",
+            ));
+        }
+        let (_common_room, url, api_key, api_secret) =
+            crate::livekit_peer_discovery::livekit_common_room_connect_strings(&self.config)
+                .map_err(|e| {
+                    Status::failed_precondition(format!(
+                        "this daemon cannot hold an agent clone: {e}"
+                    ))
+                })?;
+        let worktree_path = workspace_session::resolve_worktree_root_for_session(
+            sessions_base,
+            codebase_session_id,
+        )?;
+        // The repository the checkout was cut from, which is where its WIP ref is fetched from.
+        let projects_dir = projects_path_for_user(
+            self.config
+                .os_user_for_github(
+                    &(self.user_resolver)(session_token)
+                        .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?,
+                )
+                .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        let project = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "project '{project_id}' is not registered here, so an agent clone of it has \
+                     nothing to fetch the session's WIP ref from"
+                ))
+            })?;
+
+        // Only a checkout that was cloned *from the facilitating daemon* fetches its WIP ref over
+        // `tddy-remote-git-repo` — its `origin` is the facilitator's `{instance_id}:{project_id}` URL,
+        // the only place that ref lives. A checkout the owning daemon already had on the shared
+        // filesystem fetches the ref from that local repo directly (the facilitating daemon
+        // published it there), so it must NOT carry the transport-shim env var: `origin` there is the
+        // forge URL, which `tddy-remote-git-repo` would try to reach and fail. (PRD AC37.)
+        let facilitator_origin_prefix = format!("{facilitating}:");
+        let is_facilitator_clone = project.git_url.starts_with(&facilitator_origin_prefix);
+
+        let spec = crate::session_agent_clone::CloneMirrorSpec {
+            session_id: session_id.to_string(),
+            facilitating_daemon_instance_id: facilitating.to_string(),
+            owning_daemon_instance_id: local_instance_id_for_config(&self.config),
+            codebase_session_id: codebase_session_id.to_string(),
+            worktree_path,
+            project_repo_path: PathBuf::from(&project.main_repo_path),
+            project_id: project_id.to_string(),
+            session_token: session_token.to_string(),
+            livekit_url: url,
+            livekit_api_key: api_key,
+            livekit_api_secret: api_secret,
+            facilitating_daemon_url: if is_facilitator_clone {
+                let u = placement.facilitating_daemon_url.trim();
+                if u.is_empty() { None } else { Some(u.to_string()) }
+            } else {
+                None
+            },
+            first_admission_token: placement.first_admission_token.clone(),
+            first_admission_url: placement.first_admission_url.clone(),
+            first_admission_room: placement.first_admission_room.clone(),
+            common_room_slot: self.common_room_livekit_room.clone(),
+        };
+        let hosted = Arc::clone(&self.hosted_agent_clones);
+        let clone_id = codebase_session_id.to_string();
+        tokio::spawn(async move {
+            if let Err(status) = crate::session_agent_clone::run_clone_mirror(spec, hosted).await {
+                // Loud and final: the facilitating daemon has already been told the clone failed
+                // (the mirror reports before it returns), and there is nothing here that could
+                // repair a room this daemon cannot reach.
+                log::error!(
+                    "agent clone {clone_id} stopped mirroring: {}",
+                    status.message()
+                );
+            }
+        });
+        Ok(())
+    }
+
+    /// Refuse a prompt to an agent whose checkout is not ready to serve reads, naming the state.
+    ///
+    /// Queuing it would make a 90-second `git clone` look like a hung agent, and serving it would
+    /// read an empty checkout and report "not found" for a file that is simply not there yet
+    /// (PRD AC33).
+    fn refuse_unready_clone(
+        &self,
+        session_id: &str,
+        record: &tddy_core::SessionAgentRecord,
+    ) -> Result<(), Status> {
+        use tddy_service::proto::connection::AgentCloneState;
+        let clone = self
+            .session_agent_clones
+            .get(session_id, &record.daemon_instance_id);
+        let (state, error) = match clone {
+            Some(clone) => (clone.state, clone.error),
+            None => (AgentCloneState::Unspecified, String::new()),
+        };
+        match state {
+            AgentCloneState::Ready | AgentCloneState::Local => Ok(()),
+            AgentCloneState::Provisioning => Err(Status::failed_precondition(format!(
+                "agent '{}' cannot be prompted yet: its clone on daemon '{}' is still \
+                 provisioning",
+                record.agent_id, record.daemon_instance_id
+            ))),
+            AgentCloneState::Error => Err(Status::failed_precondition(format!(
+                "agent '{}' cannot be prompted: its clone on daemon '{}' is in the error state \
+                 ({error})",
+                record.agent_id, record.daemon_instance_id
+            ))),
+            AgentCloneState::Unspecified => Err(Status::failed_precondition(format!(
+                "agent '{}' cannot be prompted: this daemon has no clone on daemon '{}' for \
+                 session '{session_id}' — the state is unknown, which is not the same as ready",
+                record.agent_id, record.daemon_instance_id
+            ))),
+        }
+    }
+
+    /// Refuse to address an owning daemon that is no longer in the common room.
+    ///
+    /// Named rather than left to a forward deadline: an agent on a departed daemon must fail *its
+    /// own* prompts with an error naming that daemon, while the rest of the roster keeps working
+    /// (PRD AC35). Waiting out `PEER_FORWARD_TIMEOUT` reaches the same answer thirty seconds later
+    /// and tells the operator only that something timed out.
+    async fn refuse_departed_daemon(&self, daemon_instance_id: &str) -> Result<(), Status> {
+        if self
+            .eligible_instance_ids()
+            .iter()
+            .any(|candidate| candidate == daemon_instance_id)
+        {
+            return Ok(());
+        }
+        Err(Status::unavailable(format!(
+            "daemon '{daemon_instance_id}' has left the common room, so the agents it owns on this \
+             session cannot be reached; the rest of the roster is unaffected"
+        )))
+    }
+
+    /// Ask the owning daemon to open the conversation on its side, under the id this daemon minted.
+    ///
+    /// The id travels rather than being minted there, so a forward that times out still leaves this
+    /// daemon able to name — and therefore cancel — whatever the peer opened.
+    async fn forward_open_agent_conversation(
+        &self,
+        req: &OpenAgentConversationRequest,
+        record: &tddy_core::SessionAgentRecord,
+        conversation_id: &str,
+    ) -> Result<(), Status> {
+        let slot = self.common_room_slot("OpenAgentConversation")?;
+        let forwarded = OpenAgentConversationRequest {
+            conversation_id: conversation_id.to_string(),
+            daemon_instance_id: record.daemon_instance_id.clone(),
+            ..req.clone()
+        };
+        let answered = crate::livekit_peer_discovery::forward_to_peer(
+            slot,
+            &record.daemon_instance_id,
+            "connection.ConnectionService",
+            "OpenAgentConversation",
+            forwarded.encode_to_vec(),
+        )
+        .await?;
+        let opened = OpenAgentConversationResponse::decode(answered.as_slice())
+            .map_err(|e| Status::internal(format!("decode OpenAgentConversationResponse: {e}")))?;
+        if opened.conversation_id != conversation_id {
+            return Err(Status::internal(format!(
+                "daemon '{}' opened conversation {:?} instead of the requested {conversation_id:?}, \
+                 so a prompt to it could not be routed and a cancel could not name it",
+                record.daemon_instance_id, opened.conversation_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// A turn loop for an agent this daemon resolves and serves from the session's own worktree.
+    async fn open_local_agent_session(
+        &self,
+        session_id: &str,
+        record: &tddy_core::SessionAgentRecord,
+        session_token: &str,
+    ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
+        let github_user = (self.user_resolver)(session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        // Through the spawn resolver rather than the listing one: a registry assistant's def comes
+        // back carrying its provider's credential there, and a session opened without one comes up
+        // "successfully" and 401s on every model call.
+        let def = self
+            .agent_def_for_spawn(&record.name, &github_user)
+            .await?
+            .ok_or_else(|| {
+                Status::invalid_argument(format!(
+                    "agent '{}' resolves to no def on this daemon any more",
+                    record.agent_id
+                ))
+            })?;
+        Ok(Box::new(
+            tddy_discovery::subagent::SpecializedSubagentSession::new(
+                def.base_url.clone(),
+                def.model.clone(),
+                def.api_key.clone(),
+                def.max_turns,
+                self.local_agent_codebase_access(session_id, session_token),
+                def.system_prompt.clone(),
+                def.tools.clone(),
+            ),
+        ))
+    }
+
+    /// A turn loop for an agent **this** daemon owns, reading the clone it holds for another
+    /// daemon's session.
+    async fn open_owned_agent_session(
+        &self,
+        agent_id: &str,
+        clone: &Arc<crate::session_agent_clone::HostedClone>,
+    ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
+        let id = tddy_core::AgentId::parse(agent_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        if id.daemon_instance_id != local_instance_id {
+            return Err(Status::invalid_argument(format!(
+                "agent '{agent_id}' is owned by daemon '{}', not by this one ('{local_instance_id}')",
+                id.daemon_instance_id
+            )));
+        }
+        let def = self
+            .resolvable_agent_defs()
+            .await?
+            .into_iter()
+            .find(|d| d.name == id.name)
+            .ok_or_else(|| {
+                Status::invalid_argument(format!(
+                    "agent '{agent_id}' resolves to no def on daemon '{local_instance_id}'"
+                ))
+            })?;
+        Ok(Box::new(
+            tddy_discovery::subagent::SpecializedSubagentSession::new(
+                def.base_url.clone(),
+                def.model.clone(),
+                def.api_key.clone(),
+                def.max_turns,
+                self.owned_agent_codebase_access(clone),
+                def.system_prompt.clone(),
+                def.tools.clone(),
+            ),
+        ))
+    }
+
+    /// How an agent this daemon owns reaches files: reads from its clone, mutations proxied.
+    ///
+    /// Managed rather than [`CodebaseAccess::Local`] even though the checkout is on this host: the
+    /// tool engine is what confines a path to the worktree, and a loop given direct filesystem
+    /// access would be one YAML field away from writing anywhere this daemon can.
+    fn owned_agent_codebase_access(
+        &self,
+        clone: &Arc<crate::session_agent_clone::HostedClone>,
+    ) -> tddy_discovery::subagent::CodebaseAccess {
+        let service = self.clone();
+        let clone = Arc::clone(clone);
+        tddy_discovery::subagent::CodebaseAccess::managed(move |tool_name, args| {
+            let service = service.clone();
+            let clone = Arc::clone(&clone);
+            Box::pin(async move {
+                let request = ExecuteToolRequest {
+                    session_token: String::new(),
+                    session_id: clone.session_id.clone(),
+                    daemon_instance_id: String::new(),
+                    tool_name,
+                    args_json: args.to_string(),
+                };
+                dispatch_envelope(service.run_hosted_clone_tool(&request, &clone).await)
+            })
+        })
+    }
+
+    /// How an agent this daemon serves locally reaches files: the session's own worktree, through
+    /// the same tool engine every other exec-tool caller goes through.
+    fn local_agent_codebase_access(
+        &self,
+        session_id: &str,
+        session_token: &str,
+    ) -> tddy_discovery::subagent::CodebaseAccess {
+        let service = self.clone();
+        let session_token = session_token.to_string();
+        let session_id = session_id.to_string();
+        tddy_discovery::subagent::CodebaseAccess::managed(move |tool_name, args| {
+            let service = service.clone();
+            let session_token = session_token.clone();
+            let session_id = session_id.clone();
+            Box::pin(async move {
+                let request = ExecuteToolRequest {
+                    session_token,
+                    session_id,
+                    daemon_instance_id: String::new(),
+                    tool_name,
+                    args_json: args.to_string(),
+                };
+                match service.resolve_exec_tool_worktree(&request) {
+                    Ok((sessions_base, worktree_root)) => dispatch_envelope(
+                        service
+                            .run_exec_tool_locally(&request, &sessions_base, &worktree_root)
+                            .await,
+                    ),
+                    Err(status) => {
+                        serde_json::json!({ "is_error": true, "error": status.message() })
+                            .to_string()
+                    }
+                }
+            })
+        })
+    }
+
+    /// Close every open conversation with `agent_id`.
+    ///
+    /// An in-flight `prompt` returns an error naming the closure rather than hanging or returning a
+    /// partial answer as if complete: the caller is the main agent, and a truncated answer accepted
+    /// as whole is the failure that reaches the operator as a wrong review (PRD § What detach does,
+    /// step 2).
+    ///
+    /// A conversation whose loop runs on another daemon is cancelled *there* as well as forgotten
+    /// here. Dropping the routing record alone would leave the owning daemon's turn loop running
+    /// against a clone this detach is about to delete, with nothing left on this side able to name
+    /// it.
+    async fn cancel_conversations_with(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        agent_id: &str,
+    ) {
+        let mut cancelled_remotely: Vec<(String, String)> = Vec::new();
+        {
+            let mut open = self.agent_conversations.lock().await;
+            open.retain(|conversation_id, conversation| {
+                if !conversation.is_with(session_id, agent_id) {
+                    return true;
+                }
+                match conversation {
+                    AgentConversation::Local { closed, .. } => closed.notify_one(),
+                    AgentConversation::Remote {
+                        daemon_instance_id, ..
+                    } => cancelled_remotely
+                        .push((daemon_instance_id.clone(), conversation_id.clone())),
+                }
+                false
+            });
+        }
+
+        for (daemon_instance_id, conversation_id) in cancelled_remotely {
+            if let Err(e) = self
+                .forward_cancel_agent_conversation(
+                    session_token,
+                    session_id,
+                    &daemon_instance_id,
+                    &conversation_id,
+                )
+                .await
+            {
+                // Loud and non-fatal: the entry is already gone here, so failing the detach would
+                // leave the roster and this map disagreeing about an agent that is no longer on it.
+                log::error!(
+                    "could not cancel conversation {conversation_id} with '{agent_id}' on daemon \
+                     {daemon_instance_id} ({}); its turn loop may still be running there",
+                    e.message()
+                );
+            }
+        }
+    }
+
+    /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
+    async fn forward_cancel_agent_conversation(
+        &self,
+        session_token: &str,
+        session_id: &str,
+        daemon_instance_id: &str,
+        conversation_id: &str,
+    ) -> Result<(), Status> {
+        let slot = self.common_room_slot("CancelAgentConversation")?;
+        crate::livekit_peer_discovery::forward_to_peer(
+            slot,
+            daemon_instance_id,
+            "connection.ConnectionService",
+            "CancelAgentConversation",
+            CancelAgentConversationRequest {
+                // The detaching caller's own token: the peer authenticates a cancel exactly as it
+                // authenticated the open, and this daemon holds no other credential to present.
+                session_token: session_token.to_string(),
+                session_id: session_id.to_string(),
+                daemon_instance_id: daemon_instance_id.to_string(),
+                conversation_id: conversation_id.to_string(),
+            }
+            .encode_to_vec(),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// The roster entry a qualified `agent_id` attaches as.
+    ///
+    /// The id must be qualified: there is deliberately no "assume the local daemon" reading, which
+    /// is the reading that silently picks the wrong host the moment two daemons offer a def of the
+    /// same name.
+    async fn roster_record_for_agent_id(
+        &self,
+        agent_id: &str,
+    ) -> Result<tddy_core::SessionAgentRecord, Status> {
+        let id = tddy_core::AgentId::parse(agent_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        self.roster_record_for(&id, agent_id).await
+    }
+
+    /// The roster entry `id` resolves to, reporting any refusal under `named_as` — the string the
+    /// caller actually sent, so an operator is never sent looking for an id they never typed.
+    async fn roster_record_for(
+        &self,
+        id: &tddy_core::AgentId,
+        named_as: &str,
+    ) -> Result<tddy_core::SessionAgentRecord, Status> {
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        if id.daemon_instance_id != local_instance_id {
+            return self.remote_roster_record_for(id, named_as).await;
+        }
+        let def = self
+            .resolvable_agent_defs()
+            .await?
+            .into_iter()
+            .find(|d| d.name == id.name)
+            .ok_or_else(|| {
+                Status::invalid_argument(format!(
+                    "agent '{named_as}' resolves to no def on daemon '{local_instance_id}' (not \
+                     found under <tddyhome>/agents, and not an assistant in its registry)"
+                ))
+            })?;
+        roster_record(&def, &local_instance_id).map_err(|e| Status::invalid_argument(e.to_string()))
+    }
+
+    /// The roster entry an id naming a **peer** resolves to, taken from that peer's own
+    /// `ListSubagents`.
+    ///
+    /// Resolved there and nowhere else, deliberately: a local def of the same name is a *different*
+    /// agent, and answering from it would run the wrong host's agent under the id the operator
+    /// picked — the exact failure qualified ids exist to prevent (PRD § What attach does, step 1).
+    ///
+    /// The peer must be visible in the common room *before* it is asked. A daemon that resolves on
+    /// no host is `INVALID_ARGUMENT` naming the id, decided from the eligible-daemon list rather
+    /// than by waiting out a forward deadline against a participant that was never there — the
+    /// caller mistyped an id, which is a bad request and not a slow one.
+    async fn remote_roster_record_for(
+        &self,
+        id: &tddy_core::AgentId,
+        named_as: &str,
+    ) -> Result<tddy_core::SessionAgentRecord, Status> {
+        let owning_daemon = id.daemon_instance_id.as_str();
+        if !self
+            .eligible_instance_ids()
+            .iter()
+            .any(|candidate| candidate == owning_daemon)
+        {
+            return Err(Status::invalid_argument(format!(
+                "agent '{named_as}' is owned by daemon '{owning_daemon}', which is not in this \
+                 daemon's common room; nothing was attached and no checkout was created"
+            )));
+        }
+
+        let slot = self.common_room_slot("AttachSessionAgent")?;
+        let answered = crate::livekit_peer_discovery::forward_to_peer(
+            slot,
+            owning_daemon,
+            "connection.ConnectionService",
+            "ListSubagents",
+            ListSubagentsRequest {}.encode_to_vec(),
+        )
+        .await
+        .map_err(|e| {
+            Status::unavailable(format!(
+                "daemon '{owning_daemon}' owns agent '{named_as}' but did not answer \
+                 ListSubagents ({}); nothing was attached and no checkout was created",
+                e.message()
+            ))
+        })?;
+        let listed = ListSubagentsResponse::decode(answered.as_slice())
+            .map_err(|e| Status::internal(format!("decode ListSubagentsResponse: {e}")))?;
+
+        let row = listed
+            .subagents
+            .into_iter()
+            .find(|s| s.name == id.name)
+            .ok_or_else(|| {
+                Status::invalid_argument(format!(
+                    "agent '{named_as}' resolves to no def on daemon '{owning_daemon}' (it \
+                     answered with no subagent called '{}')",
+                    id.name
+                ))
+            })?;
+
+        // The peer stamps the id it minted, and it is taken verbatim rather than reassembled here:
+        // an id the two sides spelled differently routes to a daemon the operator never picked.
+        let agent_id = match row.agent_id.trim().is_empty() {
+            true => qualified_agent_id(&row.name, owning_daemon)
+                .map_err(|e| Status::invalid_argument(e.to_string()))?,
+            false => row.agent_id,
+        };
+        Ok(tddy_core::SessionAgentRecord {
+            agent_id,
+            name: row.name,
+            daemon_instance_id: owning_daemon.to_string(),
+            label: Some(row.label).filter(|l| !l.is_empty()),
+            model: row.model,
+            replaces: row.replaces,
+            tools: row.tools,
+            // Filled in by the caller once the clone for (session, owning daemon) is claimed: the
+            // record is resolved before this daemon knows which session it is being attached to.
+            codebase_session_id: None,
+        })
+    }
+
     /// Build the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for already-resolved
     /// specialized-agent defs (see [`Self::resolve_specialized_agent_defs`]). Empty input produces
     /// no env pairs.
+    ///
+    /// TODO(session-agent-roster): the in-jail runner derives `--allowedTools` /
+    /// `--disallowedTools` from these seeded defs, so a def whose `replaces` was edited between the
+    /// attach and the relaunch changes what the relaunched main agent may call — the one thing
+    /// snapshotting `replaces` into the roster exists to prevent. Closing it means handing the
+    /// runner the roster's replaced set outright instead of letting it re-derive one
+    /// (docs/ft/daemon/session-agent-roster.md AC25).
     fn specialized_subagent_env(
         &self,
         defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
@@ -2705,6 +4472,27 @@ impl ConnectionServiceImpl {
             ("TDDY_SUBAGENT".to_string(), names),
             ("TDDY_SUBAGENTS_JSON".to_string(), defs_json),
         ])
+    }
+
+    /// Tell the jail which daemon facilitates it.
+    ///
+    /// Exported unconditionally, and not folded into [`Self::specialized_subagent_env`] which is
+    /// skipped for a session that starts with no agents: the roster is mutated while the session
+    /// runs, so a jail started empty still needs to be able to qualify what it is later told.
+    ///
+    /// Without it the in-jail `tddy-tools` cannot qualify its seeded agent ids — a seed resolved on
+    /// this daemon is `explorer`, and the id the main agent must type is `explorer@{this daemon}`.
+    /// The two other transports carry the id in their own environment
+    /// (`TDDY_REMOTE_DAEMON_INSTANCE_ID`, the HTTP daemon's own); a sandbox-IPC jail is told nothing
+    /// at all, and a bare id resolves against whichever daemon happens to answer.
+    ///
+    /// Named after the daemon's own `TDDY_DAEMON_INSTANCE_ID` startup override, so the value and the
+    /// variable an operator would set to change it are spelled the same on both sides.
+    fn jail_daemon_identity_env(&self) -> Vec<(String, String)> {
+        vec![(
+            "TDDY_DAEMON_INSTANCE_ID".to_string(),
+            local_instance_id_for_config(&self.config),
+        )]
     }
 
     /// The `TDDY_LSP_TOOLS` jail env pair — set when a language server is available for the
@@ -2958,7 +4746,14 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        // The roster the session starts with, built before the jail rather than at the metadata
+        // write below: it is what the withdrawal is computed from, and a request naming a def whose
+        // id cannot be minted must fail before a jail exists rather than after.
+        let started_agents = started_roster(
+            &specialized_defs,
+            &local_instance_id_for_config(&self.config),
+        )?;
+        let replacement_pairs = roster_replacement_pairs(&started_agents);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
             .map(|(_, tools)| tools.iter().map(String::as_str).collect())
@@ -3136,6 +4931,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
@@ -3200,6 +4996,9 @@ impl ConnectionServiceImpl {
             Arc::new(session_env),
             session_dir.clone(),
             self.agent_activity_hub(),
+            Arc::new(DaemonRpcHandler {
+                conn: self.self_arc(),
+            }),
         )
         .await
         .map_err(Status::internal)?;
@@ -3242,7 +5041,9 @@ impl ConnectionServiceImpl {
             sandbox: Some(true),
             agent: None,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            specialized_agents: specialized_agents.to_vec(),
+            agents_rev: started_roster_rev(&started_agents),
+            agents: started_agents,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -3417,7 +5218,13 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        // As on the sandboxed claude-cli path: the roster the session starts with is what the
+        // withdrawal is computed from, and it is minted before the jail exists.
+        let started_agents = started_roster(
+            &specialized_defs,
+            &local_instance_id_for_config(&self.config),
+        )?;
+        let replacement_pairs = roster_replacement_pairs(&started_agents);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
             .map(|(_, tools)| tools.iter().map(String::as_str).collect())
@@ -3561,6 +5368,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
@@ -3622,6 +5430,9 @@ impl ConnectionServiceImpl {
             Arc::new(session_env),
             session_dir.clone(),
             self.agent_activity_hub(),
+            Arc::new(DaemonRpcHandler {
+                conn: self.self_arc(),
+            }),
         )
         .await
         .map_err(Status::internal)?;
@@ -3664,7 +5475,9 @@ impl ConnectionServiceImpl {
             sandbox: Some(true),
             agent: None,
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-            specialized_agents: specialized_agents.to_vec(),
+            agents_rev: started_roster_rev(&started_agents),
+            agents: started_agents,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -3870,7 +5683,7 @@ impl ConnectionServiceImpl {
                 &worktree_path,
                 &model,
                 "auto",
-                &meta.specialized_agents,
+                &meta.agents,
                 managed_recipe,
                 // Resume path: the transcript already exists under the persistent sandbox claude
                 // HOME, so the runner must launch `claude --resume <id>`, not `--session-id <id>`.
@@ -3905,7 +5718,11 @@ impl ConnectionServiceImpl {
         worktree_path: &Path,
         model: &str,
         permission_mode: &str,
-        specialized_agents: &[String],
+        // The session's **persisted** roster, not the names its start request carried: an agent
+        // attached while the session ran is in the former and in neither the latter nor the jail's
+        // previous seed, and a relaunch that read the request would hand the main agent back a tool
+        // the operator had withdrawn from it (PRD AC25).
+        agents: &[tddy_core::SessionAgentRecord],
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
         // When true, spawn the runner with `--resume` so the jailed `claude` continues the existing
         // on-disk transcript (`--resume <id>`) instead of assigning the id to a fresh session
@@ -3913,8 +5730,11 @@ impl ConnectionServiceImpl {
         // daemon restarts, so a fresh `--session-id` would abort with "Session ID already in use".
         resume: bool,
     ) -> Result<u32, Status> {
+        // The defs are re-resolved for what the jail's *seed* and the warm-up need — an endpoint to
+        // wake and a registry to start from. What the main agent loses comes from the roster below,
+        // never from these: a def edited since the attach must not change a running session's tools.
         let specialized_defs = self
-            .resolve_specialized_agent_defs(specialized_agents)
+            .resolve_specialized_agent_defs(&roster_agent_ids(agents))
             .await?;
 
         // The same readiness gate the start paths apply: a resumed session's subagents are only as
@@ -3947,7 +5767,7 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        let replacement_pairs = subagent_replacement_pairs(&specialized_defs);
+        let replacement_pairs = roster_replacement_pairs(agents);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
             .map(|(_, tools)| tools.iter().map(String::as_str).collect())
@@ -4082,6 +5902,7 @@ impl ConnectionServiceImpl {
         if !specialized_defs.is_empty() {
             env.extend(self.specialized_subagent_env(&specialized_defs)?);
         }
+        env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(worktree_path));
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
@@ -4136,6 +5957,9 @@ impl ConnectionServiceImpl {
             Arc::new(session_env),
             session_dir.to_path_buf(),
             self.agent_activity_hub(),
+            Arc::new(DaemonRpcHandler {
+                conn: self.self_arc(),
+            }),
         )
         .await
         .map_err(|e| {
@@ -4463,17 +6287,26 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
     }
 }
 
-/// Build the (name, replaced-tools) pairs for every resolved specialized-agent def — each its own
-/// name + its own YAML-declared `replaces`, normalized.
-fn subagent_replacement_pairs(
-    specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
+/// Build the (agent name, replaced-tools) pairs a session's roster withdraws — one per attached
+/// agent, each with its own `replaces`, normalized.
+///
+/// From the roster's snapshot of `replaces` rather than from the def each entry resolved from:
+/// editing a YAML def or a registry assistant under a running session must not change what its main
+/// agent may call (PRD § An entry).
+///
+/// The single source of what a session's roster withdraws: every spawn path — a fresh sandboxed
+/// `claude-cli` session, a fresh sandboxed `cursor-cli` one, and a relaunch of either — computes the
+/// withdrawal by calling this on the roster it is starting from, so there is one answer to derive
+/// an appendix, an allowlist or a disallowlist from.
+pub fn roster_replacement_pairs(
+    agents: &[tddy_core::SessionAgentRecord],
 ) -> Vec<(String, Vec<String>)> {
-    specialized_defs
+    agents
         .iter()
-        .map(|def| {
+        .map(|agent| {
             (
-                def.name.clone(),
-                tddy_discovery::subagent::normalize_replaced_tools(&def.replaces),
+                agent.name.clone(),
+                tddy_discovery::subagent::normalize_replaced_tools(&agent.replaces),
             )
         })
         .collect()
@@ -4782,8 +6615,14 @@ impl ConnectionServiceImpl {
         Ok(route)
     }
 
-    /// Authenticate an exec-tool caller and resolve, on this daemon, the sessions base and the
-    /// worktree its tools run in.
+    /// Authenticate an exec-tool caller, and answer with the OS user its tools run as here.
+    ///
+    /// Separate from [`Self::resolve_exec_tool_worktree`] because it has to run **before** the
+    /// hosted-clone branch, which resolves no worktree of this daemon's at all and whose mutating
+    /// half proxies to the facilitating daemon under the *clone's* stored credential. Reached with
+    /// no check of its own, that branch would let any common-room participant that read a session id
+    /// out of a `session.agents` broadcast land an arbitrary write in another host's authoritative
+    /// worktree.
     ///
     /// Both refusals name **this** daemon. For a split session the tools are served on the codebase
     /// host while the error is rendered in the agent's transcript on the agent host, where an
@@ -4792,10 +6631,7 @@ impl ConnectionServiceImpl {
     /// session token is a stateless HMAC, verifiable only by daemons holding the same secret), and a
     /// GitHub user mapped on the agent host but not on the codebase host. Each is also logged here,
     /// because the operator debugging it is reading *this* daemon's log.
-    fn resolve_exec_tool_worktree(
-        &self,
-        req: &ExecuteToolRequest,
-    ) -> Result<(PathBuf, PathBuf), Status> {
+    fn authorize_exec_tool_caller(&self, req: &ExecuteToolRequest) -> Result<&str, Status> {
         let local_instance_id = local_instance_id_for_config(&self.config);
         let Some(github_user) = (self.user_resolver)(&req.session_token) else {
             log::warn!(
@@ -4817,6 +6653,16 @@ impl ConnectionServiceImpl {
                 "daemon {local_instance_id} has no OS user mapped for GitHub user {github_user}; add a users[] entry there — a split session's tools run as that user on the daemon holding the codebase"
             )));
         };
+        Ok(os_user)
+    }
+
+    /// Resolve, on this daemon, the sessions base and the worktree an exec tool runs in — for a
+    /// caller [`Self::authorize_exec_tool_caller`] has already accepted.
+    fn resolve_exec_tool_worktree(
+        &self,
+        req: &ExecuteToolRequest,
+    ) -> Result<(PathBuf, PathBuf), Status> {
+        let os_user = self.authorize_exec_tool_caller(req)?;
 
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
@@ -5505,7 +7351,9 @@ impl ConnectionServiceImpl {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
             codebase_session_id: Some(codebase_session_id.to_string()),
         };
@@ -5813,6 +7661,7 @@ impl ConnectionServiceImpl {
                     &projects_dir,
                     project_id,
                     &req.session_token,
+                    req.agent_clone.as_ref(),
                 )
                 .await?;
             }
@@ -5907,21 +7756,45 @@ impl ConnectionServiceImpl {
             // The room serves this very service: a participant of a session room reaches the same
             // `ExecuteTool` / `ReadHostDocument` surface a caller reaches over the common room or
             // HTTP, on the same daemon, rooted at the checkout it just made.
-            return workspace_session::start_workspace_session(
+            // An agent clone is a workspace session with a job: its checkout is a mirror rather than
+            // a branch to work on, so it is cut differently, and it then joins the facilitating
+            // daemon's session room and keeps itself equal to that session's worktree. Readiness is
+            // reported from there, because only this daemon can say when the mirror has caught up.
+            let Some(placement) = req.agent_clone.clone() else {
+                return workspace_session::start_workspace_session(
+                    os_user,
+                    &session_id,
+                    sessions_base,
+                    req.project_id.trim(),
+                    &workspace_session::WorkspaceBranchIntent {
+                        branch_worktree_intent: req.branch_worktree_intent.trim(),
+                        new_branch_name: req.new_branch_name.trim(),
+                        selected_integration_base_ref: req.selected_integration_base_ref.trim(),
+                        selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
+                    },
+                    &self.tddy_data_dir,
+                    timeout,
+                )
+                .await;
+            };
+            let started = workspace_session::start_agent_clone_session(
                 os_user,
                 &session_id,
-                sessions_base,
+                sessions_base.clone(),
                 req.project_id.trim(),
-                &workspace_session::WorkspaceBranchIntent {
-                    branch_worktree_intent: req.branch_worktree_intent.trim(),
-                    new_branch_name: req.new_branch_name.trim(),
-                    selected_integration_base_ref: req.selected_integration_base_ref.trim(),
-                    selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
-                },
                 &self.tddy_data_dir,
                 timeout,
             )
-            .await;
+            .await?;
+            self.start_hosted_agent_clone(
+                &placement,
+                &sessions_base,
+                &session_id,
+                req.project_id.trim(),
+                &req.session_token,
+            )
+            .await?;
+            return Ok(started);
         }
 
         // --- claude-cli branch: no LiveKit; resolves project and creates a real git worktree ---
@@ -6062,6 +7935,15 @@ impl ConnectionServiceImpl {
                     )
                     .await;
             }
+            // Resolved before the spawn, not after: an agent the request names and this daemon
+            // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
+            // than persisting a roster entry that resolves to nothing on the next resume.
+            let started_agents = started_roster(
+                &self
+                    .resolve_specialized_agent_defs(&req.specialized_agents)
+                    .await?,
+                &local_instance_id_for_config(&self.config),
+            )?;
             return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
                 &self.config,
                 &self.tddy_data_dir,
@@ -6079,7 +7961,7 @@ impl ConnectionServiceImpl {
                 Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                 req.initial_prompt.trim(),
                 req.managed_codebase,
-                &req.specialized_agents,
+                &started_agents,
                 managed_recipe,
                 req.semantic_index,
                 req.create_remote_branch,
@@ -6365,6 +8247,126 @@ async fn merge_listed_projects_with_peers(
     merged
 }
 
+/// The host-side RPC dispatch for a sandboxed session's `SessionChannel`: routes the roster and
+/// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
+/// to this daemon's `ConnectionServiceImpl`. The runner's `ToolExecService` forwards
+/// `StreamSessionAgents` / `OpenAgentConversation` / `PromptAgentConversation` /
+/// `CancelAgentConversation`; this handler decodes each, calls the matching typed method on the
+/// `Arc<ConnectionServiceImpl>` it holds, and returns the encoded response — unary for the two
+/// unary RPCs, a server stream of encoded frames for the two streaming ones. `tonic::Status`
+/// errors are carried back to the in-jail caller as a single terminal `RpcStreamFrame` with
+/// `error` set, which the runner's relay turns into the `tddy_rpc::Status` the caller sees.
+struct DaemonRpcHandler {
+    conn: Arc<ConnectionServiceImpl>,
+}
+
+#[async_trait::async_trait]
+impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
+    async fn handle_rpc(
+        &self,
+        service: &str,
+        method: &str,
+        payload: &[u8],
+    ) -> tddy_rpc::RpcResult {
+        use prost::Message;
+        use tddy_rpc::Request;
+        // Only the four RPCs the runner forwards ride this bridge; anything else is a wiring bug
+        // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
+        // rather than reaching arbitrary `ConnectionService` surface from inside a jail.
+        match (service, method) {
+            ("connection.ConnectionService", "StreamSessionAgents") => {
+                let req = match StreamSessionAgentsRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                            format!("decode StreamSessionAgentsRequest: {e}"),
+                        )));
+                    }
+                };
+                match self.conn.stream_session_agents(Request::new(req)).await {
+                    Ok(resp) => {
+                        let mut stream = resp.into_inner();
+                        let (tx, rx) = tokio::sync::mpsc::channel(16);
+                        tokio::spawn(async move {
+                            while let Some(frame) = stream.next().await {
+                                let encoded = frame.map(|roster| roster.encode_to_vec());
+                                if tx.send(encoded).await.is_err() {
+                                    return;
+                                }
+                            }
+                            // The daemon's stream ended cleanly; the receiver observes
+                            // end-of-stream when this sender drops.
+                        });
+                        tddy_rpc::RpcResult::ServerStream(Ok(rx))
+                    }
+                    Err(status) => tddy_rpc::RpcResult::ServerStream(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "OpenAgentConversation") => {
+                let req = match OpenAgentConversationRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                            format!("decode OpenAgentConversationRequest: {e}"),
+                        )));
+                    }
+                };
+                match self.conn.open_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => {
+                        tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec()))
+                    }
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "PromptAgentConversation") => {
+                let req = match PromptAgentConversationRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                            format!("decode PromptAgentConversationRequest: {e}"),
+                        )));
+                    }
+                };
+                match self.conn.prompt_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => {
+                        let mut stream = resp.into_inner();
+                        let (tx, rx) = tokio::sync::mpsc::channel(16);
+                        tokio::spawn(async move {
+                            while let Some(frame) = stream.next().await {
+                                let encoded = frame.map(|chunk| chunk.encode_to_vec());
+                                if tx.send(encoded).await.is_err() {
+                                    return;
+                                }
+                            }
+                        });
+                        tddy_rpc::RpcResult::ServerStream(Ok(rx))
+                    }
+                    Err(status) => tddy_rpc::RpcResult::ServerStream(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "CancelAgentConversation") => {
+                let req = match CancelAgentConversationRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
+                            format!("decode CancelAgentConversationRequest: {e}"),
+                        )));
+                    }
+                };
+                match self.conn.cancel_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => {
+                        tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec()))
+                    }
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
+                "DaemonRpcHandler does not serve {service}/{method}"
+            )))),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl ConnectionServiceTrait for ConnectionServiceImpl {
     async fn list_tools(
@@ -6484,26 +8486,32 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(resp))
     }
 
-    /// Resolved specialized-agent defs (builtin + `<tddyhome>/agents/*.yaml` — see
+    /// Resolved specialized-agent defs (`<tddyhome>/agents/*.yaml` — see
     /// docs/ft/coder/specialized-subagents.md) available to wire into a managed-codebase session.
+    ///
+    /// Every row is stamped with this daemon's instance id and the qualified `agent_id` it is
+    /// attached by. A picker fans this call out across every common-room daemon, and two of them
+    /// routinely answer with a def called `explorer`: without the stamp the merged list cannot say
+    /// which host offers which row, and the id the picker sends would be a guess rather than the
+    /// one the serving daemon minted.
+    ///
+    /// A def whose own name contains `@` is dropped with a warning: its qualified id would parse
+    /// back as a different pair, so advertising it would hand a picker an id that routes elsewhere.
     async fn list_subagents(
         &self,
         _request: Request<ListSubagentsRequest>,
     ) -> Result<Response<ListSubagentsResponse>, Status> {
         log::debug!("list_subagents RPC: resolving <tddyhome>/agents defs");
+        let daemon_instance_id = local_instance_id_for_config(&self.config);
         let agents_dir = self.tddy_data_dir.join("agents");
         let subagents: Vec<SubagentInfo> =
             tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
                 .into_iter()
-                .map(|def| {
-                    let label = def
-                        .label
-                        .filter(|s| !s.trim().is_empty())
-                        .unwrap_or_else(|| def.name.clone());
-                    SubagentInfo {
-                        name: def.name,
-                        label,
-                        model: def.model,
+                .filter_map(|def| match subagent_info(&def, &daemon_instance_id) {
+                    Ok(info) => Some(info),
+                    Err(e) => {
+                        log::warn!("list_subagents RPC: not advertising a def — {e}");
+                        None
                     }
                 })
                 .collect();
@@ -6512,6 +8520,508 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             subagents.len()
         );
         Ok(Response::new(ListSubagentsResponse { subagents }))
+    }
+
+    // ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ─────────────────────────
+
+    /// Attach one agent to a live session, or report the roster unchanged when it is already there.
+    ///
+    /// The order is the contract: the caller is authenticated, then the id is resolved, then the
+    /// session is checked for being able to enforce what the agent withdraws, then the roster is
+    /// written. Every step before the write is one that must not happen for a caller who turns out
+    /// not to be allowed — resolving a remote id contacts a peer and provisions a checkout on it
+    /// (PRD AC12).
+    async fn attach_session_agent(
+        &self,
+        request: Request<AttachSessionAgentRequest>,
+    ) -> Result<Response<SessionAgentRoster>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let mut record = self.roster_record_for_agent_id(&req.agent_id).await?;
+        refuse_unenforceable_withdrawal(&req.session_id, &session_dir, &record)?;
+        // An agent owned by a peer reads a checkout on that peer, so the entry has to name one
+        // before it is written. Claiming it is also what opens the session's room — and both happen
+        // before the roster is touched, so an attach that cannot be completed leaves the session
+        // looking exactly as it did (PRD § What attach does: "no roster entry, no half-built clone,
+        // no room membership").
+        let mut claimed = None;
+        if record.daemon_instance_id != local_instance_id_for_config(&self.config) {
+            let clone = self
+                .claim_agent_clone(
+                    &req.session_id,
+                    &session_dir,
+                    &record.daemon_instance_id,
+                    &req.session_token,
+                )
+                .await?;
+            record.codebase_session_id = Some(clone.codebase_session_id.clone());
+            claimed = Some((record.daemon_instance_id.clone(), clone));
+        }
+        // A roster this daemon could not write is an attach that did not happen, and the clone
+        // claimed a moment ago is the half of it the peer has already been told to build: without
+        // this the caller would be handed an error while a checkout it can no longer name kept being
+        // cut on another host ("no roster entry, no half-built clone, no room membership").
+        let roster = match self
+            .session_agent_rosters
+            .attach(&req.session_id, &session_dir, record)
+        {
+            Ok(roster) => roster,
+            Err(e) => {
+                if let Some((daemon_instance_id, clone)) = claimed {
+                    self.unwind_agent_clone_claim(
+                        &req.session_id,
+                        &daemon_instance_id,
+                        &clone,
+                        &req.session_token,
+                    )
+                    .await;
+                }
+                return Err(e);
+            }
+        };
+        self.broadcast_roster(&req.session_id, &roster).await;
+        log::info!(
+            "AttachSessionAgent: session {} holds {} agent(s) at rev {}",
+            req.session_id,
+            roster.agents.len(),
+            roster.rev
+        );
+        Ok(Response::new(roster))
+    }
+
+    /// Detach one agent. An id the roster does not hold is `NOT_FOUND`, never a silent success.
+    ///
+    /// The entry is removed first and the checkout torn down after, in that order: a teardown that
+    /// ran first and then failed to remove the entry would leave the roster naming a checkout that
+    /// is gone, which is the state a prompt is served from.
+    async fn detach_session_agent(
+        &self,
+        request: Request<DetachSessionAgentRequest>,
+    ) -> Result<Response<SessionAgentRoster>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let detached =
+            self.session_agent_rosters
+                .entry(&req.session_id, &session_dir, &req.agent_id)?;
+        let roster =
+            self.session_agent_rosters
+                .detach(&req.session_id, &session_dir, &req.agent_id)?;
+        self.cancel_conversations_with(&req.session_token, &req.session_id, &req.agent_id)
+            .await;
+
+        // The clone survives while another agent on that host still reads it — two agents on one
+        // host share one checkout, so the last one out is what removes it.
+        if let Some(record) = detached.filter(|r| r.codebase_session_id.is_some()) {
+            let still_used = !self
+                .session_agent_rosters
+                .agents_owned_by(&req.session_id, &session_dir, &record.daemon_instance_id)?
+                .is_empty();
+            if !still_used {
+                let codebase_session_id = record
+                    .codebase_session_id
+                    .clone()
+                    .expect("filtered to entries naming a clone");
+                // The entry is already gone and persisted by now, so the refusal says so: a message
+                // that read as "the agent was left attached, retry" would send an operator into a
+                // retry that answers NOT_FOUND while the checkout stays exactly where it is.
+                if let Err(e) = self
+                    .tear_down_agent_clone(
+                        &req.session_id,
+                        &record.daemon_instance_id,
+                        &codebase_session_id,
+                        &req.session_token,
+                    )
+                    .await
+                {
+                    self.broadcast_roster(&req.session_id, &roster).await;
+                    return Err(Status {
+                        code: e.code(),
+                        message: format!(
+                            "agent '{}' was detached from session '{}' (rev {}), but its clone \
+                             could not be removed: {}. Retrying the detach reports NOT_FOUND — the \
+                             checkout has to be deleted where it is.",
+                            req.agent_id,
+                            req.session_id,
+                            roster.rev,
+                            e.message()
+                        ),
+                    });
+                }
+            }
+        }
+
+        self.broadcast_roster(&req.session_id, &roster).await;
+        log::info!(
+            "DetachSessionAgent: session {} holds {} agent(s) at rev {}",
+            req.session_id,
+            roster.agents.len(),
+            roster.rev
+        );
+        Ok(Response::new(roster))
+    }
+
+    async fn list_session_agents(
+        &self,
+        request: Request<ListSessionAgentsRequest>,
+    ) -> Result<Response<SessionAgentRoster>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        Ok(Response::new(
+            self.session_agent_rosters
+                .snapshot(&req.session_id, &session_dir)?,
+        ))
+    }
+
+    type StreamSessionAgentsStream = MpscResultStream<SessionAgentRoster>;
+
+    /// The roster, now and on every change.
+    ///
+    /// The first frame is the current snapshot, taken with the subscription under one lock, so a
+    /// late subscriber — the in-jail `tddy-tools` reconnecting, a browser tab opening — needs no
+    /// separate priming read and cannot miss a change published between the two.
+    async fn stream_session_agents(
+        &self,
+        request: Request<StreamSessionAgentsRequest>,
+    ) -> Result<Response<Self::StreamSessionAgentsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let (snapshot, mut published) = self
+            .session_agent_rosters
+            .subscribe(&req.session_id, &session_dir)?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        if tx.send(Ok(snapshot)).is_err() {
+            return Err(Status::internal(
+                "StreamSessionAgents: the subscriber went away before its first frame",
+            ));
+        }
+        let session_id = req.session_id.clone();
+        tokio::spawn(async move {
+            loop {
+                match published.recv().await {
+                    Ok(roster) => {
+                        if tx.send(Ok(roster)).is_err() {
+                            break;
+                        }
+                    }
+                    // Every frame is a whole roster, so a subscriber that fell behind is brought
+                    // fully current by the next one — the dropped frames carried nothing the
+                    // survivor does not also carry.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        log::debug!(
+                            "StreamSessionAgents: subscriber to session {session_id} fell {missed} \
+                             snapshot(s) behind; the next one supersedes them"
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    /// Open a conversation with one roster agent.
+    ///
+    /// A local entry gets a turn loop in this process; a remote entry gets a routing record and the
+    /// same call forwarded to its owning daemon. The caller cannot tell which happened, which is the
+    /// property that makes remote agents usable at all (PRD AC28).
+    ///
+    /// A clone that is still being built refuses the open naming its state. Queuing it would make a
+    /// 90-second `git clone` look like a hung agent, and serving it would read an empty checkout and
+    /// report "not found" for a file that is simply not there yet (AC33).
+    async fn open_agent_conversation(
+        &self,
+        request: Request<OpenAgentConversationRequest>,
+    ) -> Result<Response<OpenAgentConversationResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        // Caller-chosen where offered, so an open that times out still leaves the caller able to
+        // name — and therefore cancel — whatever this daemon built.
+        let conversation_id = match req.conversation_id.trim().is_empty() {
+            true => Uuid::now_v7().to_string(),
+            false => req.conversation_id.trim().to_string(),
+        };
+
+        // This daemon *owns* the agent: the session is another daemon's, its roster is over there,
+        // and the def is here. Resolving it against a roster this daemon does not hold would report
+        // a session that legitimately is not here as the reason an agent it does own cannot answer.
+        let conversation = match self.hosted_clone_for(&req.session_id) {
+            Some(clone) => AgentConversation::Local {
+                session_id: req.session_id.clone(),
+                agent_id: req.agent_id.clone(),
+                session: Arc::new(tokio::sync::Mutex::new(
+                    self.open_owned_agent_session(&req.agent_id, &clone).await?,
+                )),
+                closed: Arc::new(tokio::sync::Notify::new()),
+            },
+            None => {
+                let record = self
+                    .session_agent_rosters
+                    .entry(&req.session_id, &session_dir, &req.agent_id)?
+                    .ok_or_else(|| {
+                        Status::invalid_argument(format!(
+                            "agent '{}' is not attached to session '{}'",
+                            req.agent_id, req.session_id
+                        ))
+                    })?;
+                let local_instance_id = local_instance_id_for_config(&self.config);
+                match record.daemon_instance_id == local_instance_id {
+                    true => AgentConversation::Local {
+                        session_id: req.session_id.clone(),
+                        agent_id: record.agent_id.clone(),
+                        session: Arc::new(tokio::sync::Mutex::new(
+                            self.open_local_agent_session(
+                                &req.session_id,
+                                &record,
+                                &req.session_token,
+                            )
+                            .await?,
+                        )),
+                        closed: Arc::new(tokio::sync::Notify::new()),
+                    },
+                    false => {
+                        self.refuse_unready_clone(&req.session_id, &record)?;
+                        self.refuse_departed_daemon(&record.daemon_instance_id)
+                            .await?;
+                        self.forward_open_agent_conversation(&req, &record, &conversation_id)
+                            .await?;
+                        AgentConversation::Remote {
+                            session_id: req.session_id.clone(),
+                            agent_id: record.agent_id.clone(),
+                            daemon_instance_id: record.daemon_instance_id.clone(),
+                        }
+                    }
+                }
+            }
+        };
+        self.agent_conversations
+            .lock()
+            .await
+            .insert(conversation_id.clone(), conversation);
+        Ok(Response::new(OpenAgentConversationResponse {
+            conversation_id,
+        }))
+    }
+
+    type PromptAgentConversationStream = MpscResultStream<AgentConversationChunk>;
+
+    /// Prompt an open conversation, streaming the agent's answer back.
+    ///
+    /// Both variants end with exactly one `last` frame carrying the stop reason, so a consumer never
+    /// has to distinguish "said nothing" from "nothing arrived", and a stream that ends without one
+    /// was truncated rather than completed.
+    async fn prompt_agent_conversation(
+        &self,
+        request: Request<PromptAgentConversationRequest>,
+    ) -> Result<Response<Self::PromptAgentConversationStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        self.roster_session_dir(&req.session_token, &req.session_id)?;
+
+        // Everything the turn needs is taken out of the map here, under one lock, and the guard is
+        // dropped before anything is awaited on it.
+        let routing = {
+            let open = self.agent_conversations.lock().await;
+            match open.get(&req.conversation_id) {
+                None => {
+                    return Err(Status::not_found(format!(
+                        "conversation '{}' is not open on session '{}'",
+                        req.conversation_id, req.session_id
+                    )))
+                }
+                Some(AgentConversation::Local {
+                    session, closed, ..
+                }) => PromptRouting::Local {
+                    session: Arc::clone(session),
+                    closed: Arc::clone(closed),
+                },
+                Some(AgentConversation::Remote {
+                    daemon_instance_id, ..
+                }) => PromptRouting::Remote(daemon_instance_id.clone()),
+            }
+        };
+
+        let (session, closed) = match routing {
+            PromptRouting::Local { session, closed } => (session, closed),
+            PromptRouting::Remote(daemon_instance_id) => {
+                let slot = self.common_room_slot("PromptAgentConversation")?;
+                self.refuse_departed_daemon(&daemon_instance_id).await?;
+                let rx = crate::livekit_peer_discovery::forward_server_stream_to_peer(
+                    slot,
+                    &daemon_instance_id,
+                    "connection.ConnectionService",
+                    "PromptAgentConversation",
+                    req.encode_to_vec(),
+                    |bytes| {
+                        AgentConversationChunk::decode(bytes.as_slice()).map_err(|e| {
+                            Status::internal(format!(
+                                "decode AgentConversationChunk from peer: {e}"
+                            ))
+                        })
+                    },
+                )
+                .await?;
+                return Ok(Response::new(MpscResultStream { rx }));
+            }
+        };
+
+        // The turn loop runs here. Spawned rather than awaited so the stream's frames are produced
+        // while the caller reads them, and awaited on the *conversation's* lock alone: two prompts on
+        // one conversation are still serialized, but the map of open conversations is not held, so a
+        // cancel can land while this turn is in flight — which is the only moment a cancel matters.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let conversation_id = req.conversation_id.clone();
+        let prompt = req.prompt.clone();
+        tokio::spawn(async move {
+            let outcome = tokio::select! {
+                // Biased so a conversation already closed is reported as closed rather than racing
+                // one more turn out of a model.
+                biased;
+                _ = closed.notified() => {
+                    let _ = tx.send(Err(Status::failed_precondition(format!(
+                        "conversation '{conversation_id}' was closed while its turn was in flight"
+                    ))));
+                    return;
+                }
+                outcome = async { session.lock().await.prompt(&prompt).await } => outcome,
+            };
+            match outcome {
+                // Framed rather than sent whole: over LiveKit anything past MAX_CHUNK_FRAME_BYTES is
+                // chunk-framed, and one lost chunk frame wedges the call with no error at all.
+                Ok(outcome) => {
+                    let content = outcome
+                        .content
+                        .iter()
+                        .map(|block| block.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("");
+                    for frame in
+                        agent_conversation_frames(&content, agent_stop_reason(outcome.stop_reason))
+                    {
+                        if tx.send(Ok(frame)).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(Status::internal(format!(
+                        "agent conversation '{conversation_id}' failed: {e}"
+                    ))));
+                }
+            }
+        });
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    /// Cancel an open conversation. An id nothing holds is `NOT_FOUND`, never a silent success — a
+    /// caller told a turn was cancelled when it is still running would go on to read a stale answer.
+    async fn cancel_agent_conversation(
+        &self,
+        request: Request<CancelAgentConversationRequest>,
+    ) -> Result<Response<CancelAgentConversationResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let removed = self
+            .agent_conversations
+            .lock()
+            .await
+            .remove(&req.conversation_id);
+        match removed {
+            None => Err(Status::not_found(format!(
+                "conversation '{}' is not open on session '{}'",
+                req.conversation_id, req.session_id
+            ))),
+            Some(AgentConversation::Local { closed, .. }) => {
+                // A turn already in flight is interrupted rather than left to finish: the caller has
+                // been told the conversation is cancelled, and an answer arriving afterwards would
+                // be one it has no reason to expect.
+                closed.notify_one();
+                Ok(Response::new(CancelAgentConversationResponse {}))
+            }
+            Some(AgentConversation::Remote {
+                daemon_instance_id, ..
+            }) => {
+                let slot = self.common_room_slot("CancelAgentConversation")?;
+                crate::livekit_peer_discovery::forward_to_peer(
+                    slot,
+                    &daemon_instance_id,
+                    "connection.ConnectionService",
+                    "CancelAgentConversation",
+                    req.encode_to_vec(),
+                )
+                .await?;
+                Ok(Response::new(CancelAgentConversationResponse {}))
+            }
+        }
+    }
+
+    /// The owning daemon telling this one how its clone is doing.
+    ///
+    /// Pushed rather than polled because only the daemon holding the checkout can say any of it, and
+    /// accepted only for a clone this daemon actually asked that daemon for — the report is what
+    /// authorizes an entry to start serving prompts.
+    ///
+    /// Authenticated first, and that is not ceremony: the (session, daemon, clone) triple the store
+    /// matches on is published in the session's `session.agents` broadcast, so on the triple alone
+    /// any participant that saw a roster frame could report a still-provisioning clone READY and
+    /// have the next prompt served from an empty checkout.
+    ///
+    /// TODO(session-agent-roster): also bind the report to the *reporting participant*. The verified
+    /// LiveKit participant identity is known at the transport but is not carried into
+    /// `RequestMetadata` — `sender_identity` there is taken from the request envelope, which the
+    /// sender writes itself, so checking `daemon_instance_id` against it would look like a check
+    /// while refusing nothing.
+    async fn report_agent_clone_state(
+        &self,
+        request: Request<tddy_service::proto::connection::ReportAgentCloneStateRequest>,
+    ) -> Result<Response<tddy_service::proto::connection::ReportAgentCloneStateResponse>, Status>
+    {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let state = tddy_service::proto::connection::AgentCloneState::try_from(req.clone_state)
+            .unwrap_or(tddy_service::proto::connection::AgentCloneState::Unspecified);
+        self.session_agent_clones
+            .record_report(&crate::session_agent_clone::AgentCloneReport {
+                session_id: req.session_id.clone(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+                codebase_session_id: req.codebase_session_id.clone(),
+                state,
+                error: req.clone_error.clone(),
+                worktree_path: Some(req.worktree_path.clone())
+                    .filter(|p| !p.is_empty())
+                    .map(PathBuf::from),
+                divergences: req.divergences.clone(),
+            })?;
+        log::info!(
+            "ReportAgentCloneState: daemon {} reports session {}'s clone {} as {state:?}{}",
+            req.daemon_instance_id,
+            req.session_id,
+            req.codebase_session_id,
+            match req.divergences.len() {
+                0 => String::new(),
+                n => format!(" with {n} divergence(s)"),
+            }
+        );
+        for divergence in &req.divergences {
+            log::error!(
+                "session {}'s clone on daemon {} diverged and was reconciled: {divergence}",
+                req.session_id,
+                req.daemon_instance_id
+            );
+        }
+        let session_dir = self.session_dir_for(&req.session_id)?;
+        self.publish_roster_change(&req.session_id, &session_dir)
+            .await;
+        Ok(Response::new(
+            tddy_service::proto::connection::ReportAgentCloneStateResponse {},
+        ))
     }
 
     async fn list_sessions(
@@ -7388,6 +9898,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // failure to reach that daemon fails the delete rather than silently dropping its half.
         self.delete_paired_codebase_session(&sessions_base, session_id, &req.session_token)
             .await?;
+        // Every clone this session's roster created, on every host that built one — including hosts
+        // the operator never looked at. Refused rather than continued if one cannot be reached, for
+        // the same reason the paired workspace above is: a delete that succeeded here while a
+        // checkout survived elsewhere is exactly the silent leak this is for.
+        self.tear_down_every_agent_clone(session_id, &req.session_token)
+            .await?;
+        // Every admission this session minted is void with the session: a mirror that re-admits
+        // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation
+        // that does it. (Per-daemon revocation on the last detach is in `tear_down_agent_clone`;
+        // this is the session-wide sweep that catches admissions whose clones were already gone.)
+        let revoked = self.session_admissions.revoke_all_for_session(session_id);
+        if revoked > 0 {
+            log::info!(
+                "revoked {revoked} admission(s) for session {session_id} on session delete"
+            );
+        }
+        // The other direction: this daemon may be *holding* a clone, whose workspace session is the
+        // one being deleted. Forgetting it before the directory goes is what stops a tool call
+        // arriving a moment later from being served out of a checkout that no longer exists.
+        self.hosted_agent_clones.forget_checkout(session_id);
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }
@@ -8630,6 +11160,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(inner));
         }
 
+        // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
+        // that is not this daemon's and proxies its mutations under the clone's own credential.
+        self.authorize_exec_tool_caller(&req)?;
+
+        // A session this daemon holds an *agent clone* for lives on another daemon, so the ordinary
+        // "resolve the worktree from my own sessions base" would find nothing. Checked before that
+        // resolution rather than after it, so the read/write split is what answers rather than a
+        // not-found for a session that legitimately is not here.
+        if let Some(clone) = self.hosted_clone_for(&req.session_id) {
+            reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+            return Ok(Response::new(
+                self.run_hosted_clone_tool(&req, &clone).await,
+            ));
+        }
+
         let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req)?;
         reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
         let response = self
@@ -8671,11 +11216,24 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscResultStream { rx }));
         }
 
-        let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req)?;
-        reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
-        let response = self
-            .run_exec_tool_locally(&req, &sessions_base, &worktree_root)
-            .await;
+        // See the unary handler: auth first, because the hosted-clone branch resolves no worktree of
+        // this daemon's and would otherwise be reachable with no credential at all.
+        self.authorize_exec_tool_caller(&req)?;
+
+        // A session this daemon holds an agent clone for is served by the read/write split, from a
+        // checkout that is not in this daemon's own sessions base.
+        let response = match self.hosted_clone_for(&req.session_id) {
+            Some(clone) => {
+                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+                self.run_hosted_clone_tool(&req, &clone).await
+            }
+            None => {
+                let (sessions_base, worktree_root) = self.resolve_exec_tool_worktree(&req)?;
+                reject_exec_tool_path_traversal(&req.tool_name, &req.args_json)?;
+                self.run_exec_tool_locally(&req, &sessions_base, &worktree_root)
+                    .await
+            }
+        };
 
         // The result is already complete in memory, so every frame can be queued now: the stream
         // exists to bound each frame's size, not to interleave with the tool's execution.
@@ -11141,6 +13699,40 @@ fn exec_tool_result_frames(response: ExecuteToolResponse) -> Vec<ExecuteToolChun
     frames
 }
 
+/// Split one agent turn's answer into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
+///
+/// The stop reason rides the **final** frame, and an empty answer still yields exactly one frame, so
+/// a consumer never has to tell "said nothing" from "nothing arrived" and a stream that ends without
+/// a `last` frame is unambiguously a truncation. Framed rather than sent whole for the reason
+/// `StreamExecuteTool` frames its results: over LiveKit anything past `MAX_CHUNK_FRAME_BYTES` is
+/// chunk-framed, and one lost chunk frame wedges the call with no error at all
+/// (`docs/ft/coder/rpc-multi-transport.md`).
+fn agent_conversation_frames(content: &str, stop_reason: &str) -> Vec<AgentConversationChunk> {
+    let mut frames: Vec<AgentConversationChunk> = Vec::new();
+    let mut rest = content;
+    while !rest.is_empty() {
+        // Split on a char boundary at or below the budget: a frame cut mid-codepoint would not be a
+        // `String` at all, and the two halves would each decode as replacement characters.
+        let mut take = rest.len().min(HOST_DOCUMENT_FRAME_BYTES);
+        while take > 0 && !rest.is_char_boundary(take) {
+            take -= 1;
+        }
+        let (head, tail) = rest.split_at(take);
+        frames.push(AgentConversationChunk {
+            content_chunk: head.to_string(),
+            ..Default::default()
+        });
+        rest = tail;
+    }
+    if frames.is_empty() {
+        frames.push(AgentConversationChunk::default());
+    }
+    let last = frames.last_mut().expect("at least one frame");
+    last.stop_reason = stop_reason.to_string();
+    last.last = true;
+    frames
+}
+
 /// Bytes per `StreamReadHostDocument` frame. Mirrors the 48 KiB the upload path chunks with, which
 /// every transport in the stack (ConnectRPC-HTTP, LiveKit data channels) already carries per
 /// message without its own chunk framing.
@@ -11709,7 +14301,9 @@ mod signal_session_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -12136,7 +14730,9 @@ mod list_sessions_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -12233,7 +14829,9 @@ mod report_session_status_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -12335,7 +14933,9 @@ mod report_session_status_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -12457,7 +15057,9 @@ mod agent_activity_unit_tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -13742,6 +16344,17 @@ mod specialized_subagent_env_unit_tests {
         )
     }
 
+    /// A def under `<tddyhome>/agents`, which is where every YAML-defined agent comes from.
+    fn an_agent_def(tddy_home: &std::path::Path, name: &str) {
+        let agents = tddy_home.join("agents");
+        std::fs::create_dir_all(&agents).expect("create agents dir");
+        std::fs::write(
+            agents.join(format!("{name}.yaml")),
+            format!("name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n"),
+        )
+        .expect("write agent def");
+    }
+
     /// An empty `specialized_agents` list is never consulted by the caller (see the `if
     /// !specialized_defs.is_empty()` guard in `start_sandboxed_claude_cli_session`) — this test
     /// documents that `specialized_subagent_env` itself, when called directly with an empty def
@@ -13782,37 +16395,38 @@ mod specialized_subagent_env_unit_tests {
         );
     }
 
-    /// A single resolvable name (the always-available builtin `fastcontext`) resolves to that
-    /// def — no `<tddyhome>/agents` override needed.
+    /// A `<tddyhome>/agents` def resolves by name. That directory is the only place a YAML-defined
+    /// agent can come from — nothing resolves out of the binary.
     #[tokio::test]
-    async fn resolve_specialized_agent_defs_resolves_the_builtin_fastcontext_name() {
-        // Given — no <tddyhome>/agents overrides; "fastcontext" must still resolve via the
-        // builtin def
+    async fn resolve_specialized_agent_defs_resolves_a_def_from_the_agents_dir() {
+        // Given
         let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def(tddy_home.path(), "explorer");
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
         let result = service
-            .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .resolve_specialized_agent_defs(&["explorer".to_string()])
             .await;
 
         // Then
-        let defs = result.expect("fastcontext must resolve via the builtin def");
+        let defs = result.expect("a def under <tddyhome>/agents must resolve by name");
         assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].name, "fastcontext");
+        assert_eq!(defs[0].name, "explorer");
     }
 
-    /// A name that resolves against neither the builtins nor `<tddyhome>/agents` must reject the
-    /// whole request — no partial resolution for the names that *did* resolve.
+    /// A name that resolves against no def source must reject the whole request — no partial
+    /// resolution for the names that *did* resolve.
     #[tokio::test]
     async fn resolve_specialized_agent_defs_rejects_unknown_name() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def(tddy_home.path(), "explorer");
         let service = make_unit_service(tddy_home.path().to_path_buf());
 
         // When
         let result = service
-            .resolve_specialized_agent_defs(&["fastcontext".to_string(), "ghost-agent".to_string()])
+            .resolve_specialized_agent_defs(&["explorer".to_string(), "ghost-agent".to_string()])
             .await;
 
         // Then
@@ -13825,18 +16439,19 @@ mod specialized_subagent_env_unit_tests {
         );
     }
 
-    /// A resolved `fastcontext` def produces both `TDDY_SUBAGENT` (comma names) and
-    /// `TDDY_SUBAGENTS_JSON` (the serialized def) — the exact env shape `tddy-tools --mcp` (see
-    /// `subagents_from_env` in `tddy-tools/src/server.rs`) expects.
+    /// A resolved def produces both `TDDY_SUBAGENT` (comma names) and `TDDY_SUBAGENTS_JSON` (the
+    /// serialized def) — the exact env shape `tddy-tools --mcp` (see `subagents_from_env` in
+    /// `tddy-tools/src/server.rs`) expects.
     #[tokio::test]
     async fn specialized_subagent_env_builds_env_pairs_for_a_resolved_def() {
         // Given
         let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def(tddy_home.path(), "explorer");
         let service = make_unit_service(tddy_home.path().to_path_buf());
         let defs = service
-            .resolve_specialized_agent_defs(&["fastcontext".to_string()])
+            .resolve_specialized_agent_defs(&["explorer".to_string()])
             .await
-            .expect("fastcontext must resolve via the builtin def");
+            .expect("a def under <tddyhome>/agents must resolve by name");
 
         // When
         let result = service.specialized_subagent_env(&defs);
@@ -13847,15 +16462,15 @@ mod specialized_subagent_env_unit_tests {
             .iter()
             .find(|(k, _)| k == "TDDY_SUBAGENT")
             .map(|(_, v)| v.clone());
-        assert_eq!(names.as_deref(), Some("fastcontext"));
+        assert_eq!(names.as_deref(), Some("explorer"));
         let defs_json = env
             .iter()
             .find(|(k, _)| k == "TDDY_SUBAGENTS_JSON")
             .map(|(_, v)| v.clone())
             .expect("TDDY_SUBAGENTS_JSON must be present");
         assert!(
-            defs_json.contains("fastcontext"),
-            "TDDY_SUBAGENTS_JSON must serialize the resolved fastcontext def; got: {defs_json}"
+            defs_json.contains("explorer"),
+            "TDDY_SUBAGENTS_JSON must serialize the resolved def; got: {defs_json}"
         );
     }
 }

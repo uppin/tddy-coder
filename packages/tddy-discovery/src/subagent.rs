@@ -1,14 +1,13 @@
 //! Stateful subagent sessions exposed over MCP by `tddy-tools` (see
-//! docs/ft/coder/managed-codebase-subagents.md). Unlike `FastContextBackend::invoke` (one-shot per
-//! `InvokeRequest`), a `SubagentSession` is a long-lived conversation: `prompt()` can be called
-//! repeatedly and each call sees the prior turns.
+//! docs/ft/coder/managed-codebase-subagents.md). Unlike `SpecializedAgentBackend::invoke`
+//! (one-shot per `InvokeRequest`), a `SubagentSession` is a long-lived conversation: `prompt()`
+//! can be called repeatedly and each call sees the prior turns.
 //!
 //! `CodebaseAccess` lets the internal READ/GLOB/GREP tool loop read either the local filesystem
 //! (`Local`) or a proxied codebase through an injected dispatch function (`Managed`) — the same
 //! function `tddy-tools` uses for its exec-tool proxying — without `tddy-discovery` depending on
 //! `tddy-tools`/`tddy-rpc`/`tddy-stdio`.
 
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -482,39 +481,10 @@ pub fn normalize_replaced_tools(tools: &[String]) -> Vec<String> {
     out
 }
 
-/// Tools this subagent replaces on the main agent. Empty for unknown names — no fabricated tool
-/// name, no panic. The `"fastcontext"` set derives from
-/// [`crate::agent_def::builtin_fastcontext_def`]'s own `replaces` field (single source of truth —
-/// no separate hardcoded literal to drift out of sync).
-pub fn subagent_replaced_tools(name: &str) -> Vec<String> {
-    match name {
-        "fastcontext" => {
-            normalize_replaced_tools(&crate::agent_def::builtin_fastcontext_def().replaces)
-        }
-        _ => Vec::new(),
-    }
-}
-
-/// Effective replaced set for `name`: a non-empty `override_csv` replaces the declared default
-/// outright (never merges with it); `None` or an empty override falls back to the default.
-///
-/// Override tokens are comma-separated, trimmed, matched case-insensitively against the
-/// canonical exec-tool names, and normalized to that canonical casing. A token that doesn't match
-/// a known exec tool is dropped rather than passed through — a typo must not silently disable
-/// enforcement or invent a tool name.
-pub fn resolve_replaced_tools(name: &str, override_csv: Option<&str>) -> Vec<String> {
-    match override_csv.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(csv) => {
-            let tokens: Vec<String> = csv.split(',').map(str::trim).map(str::to_string).collect();
-            normalize_replaced_tools(&tokens)
-        }
-        None => subagent_replaced_tools(name),
-    }
-}
-
-/// Deduped, canonical union of every def's own `replaces` list. Pure aggregation — no CSV-override
-/// concept here, since each def's YAML is itself the user-editable source of truth (unlike the
-/// single-name [`resolve_replaced_tools`], which supports a runtime override).
+/// Deduped, canonical union of every def's own `replaces` list. Pure aggregation: a def's own
+/// `replaces` is the only source of a withdrawn tool — no name is special-cased and no override
+/// widens the set (see docs/ft/daemon/session-agent-roster.md § Tool replacement, without
+/// behaviour).
 pub fn resolve_replaced_tools_for_defs(
     defs: &[crate::agent_def::SpecializedAgentDef],
 ) -> Vec<String> {
@@ -522,14 +492,11 @@ pub fn resolve_replaced_tools_for_defs(
     normalize_replaced_tools(&combined)
 }
 
-/// Configuration for constructing a subagent session via [`SubagentRegistry::create`].
+/// Configuration for constructing a subagent session via [`SubagentRegistry::create`]: everything
+/// the *caller* knows and the def does not. The endpoint, model, credential and turn budget are
+/// not here — they are the def's, and a caller able to override them could run a session against a
+/// model the operator never configured while still reporting the def's name.
 pub struct SubagentConfig {
-    pub base_url: String,
-    pub model: String,
-    /// Bearer token for `base_url`, for an endpoint that requires one. A local endpoint (Ollama,
-    /// vLLM) needs none, and `None` sends no `Authorization` header at all.
-    pub api_key: Option<String>,
-    pub max_turns: u32,
     pub access: CodebaseAccess,
 }
 
@@ -596,12 +563,11 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> St
     }
 }
 
-/// Shared prefix of every subagent turn loop (`FastContextSession`/`SpecializedSubagentSession`):
-/// send the current history, then short-circuit with `EndTurn` if the model produced a non-empty
-/// `<final_answer>`. Returns `Ok(Some(outcome))` on a final answer (the assistant message has
-/// already been appended to `messages`); returns `Ok(None)` with `messages` unchanged otherwise,
-/// leaving the model's `ChatMessage` in `last_message` for the caller to handle tool-calls / plain
-/// prose itself (those two cases differ between the two session types).
+/// Shared prefix of a subagent turn loop: send the current history, then short-circuit with
+/// `EndTurn` if the model produced a non-empty `<final_answer>`. Returns `Ok(Some(outcome))` on a
+/// final answer (the assistant message has already been appended to `messages`); returns
+/// `Ok(None)` with `messages` unchanged otherwise, leaving the model's `ChatMessage` in
+/// `last_message` for the caller to handle tool-calls / plain prose itself.
 async fn send_turn_and_check_final_answer(
     client: &OpenAiClient,
     model: &str,
@@ -676,161 +642,6 @@ enum TurnStep {
     Continue(ChatMessage),
 }
 
-/// Stateful FastContext discovery session: owns its message history across `prompt()` calls,
-/// unlike `FastContextBackend::invoke`'s one-shot-per-`InvokeRequest` loop.
-pub struct FastContextSession {
-    client: OpenAiClient,
-    model: String,
-    max_turns: u32,
-    access: CodebaseAccess,
-    messages: Vec<ChatMessage>,
-    cumulative: TokenUsage,
-}
-
-impl FastContextSession {
-    pub fn new(
-        base_url: impl Into<String>,
-        model: impl Into<String>,
-        api_key: Option<String>,
-        max_turns: u32,
-        access: CodebaseAccess,
-    ) -> Self {
-        Self {
-            client: OpenAiClient::new(base_url).api_key(api_key),
-            model: model.into(),
-            max_turns,
-            access,
-            messages: Vec::new(),
-            cumulative: TokenUsage::default(),
-        }
-    }
-}
-
-impl FastContextSession {
-    /// One model round-trip: sends the current history, appends the response, and dispatches any
-    /// tool calls. Returns `Some(outcome)` once the model yields a `<final_answer>`, or `None` to
-    /// keep looping.
-    async fn run_one_turn(&mut self) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
-        let (step, turn_usage) = send_turn_and_check_final_answer(
-            &self.client,
-            &self.model,
-            &mut self.messages,
-            discovery_tool_definitions(),
-            "FastContextSession",
-        )
-        .await?;
-        let message = match step {
-            TurnStep::FinalAnswer(outcome) => return Ok((Some(outcome), turn_usage)),
-            TurnStep::Continue(message) => message,
-        };
-
-        match message.tool_calls {
-            Some(ref tool_calls) if !tool_calls.is_empty() => {
-                self.messages.push(ChatMessage::assistant(
-                    message.content.clone(),
-                    message.tool_calls.clone(),
-                ));
-                for tool_call in tool_calls {
-                    let result_str = dispatch_tool_call(&self.access, tool_call).await;
-                    self.messages.push(ChatMessage::tool_result(
-                        result_str,
-                        tool_call.id.clone(),
-                        tool_call.function.name.clone(),
-                    ));
-                }
-            }
-            // No tool calls: either the field was absent, or present-but-empty (the same shape
-            // Ollama sends for a plain-text turn) — both are a no-op assistant turn.
-            _ => {
-                self.messages
-                    .push(ChatMessage::assistant(message.content.clone(), None));
-            }
-        }
-        Ok((None, turn_usage))
-    }
-}
-
-#[async_trait]
-impl SubagentSession for FastContextSession {
-    async fn prompt(&mut self, text: &str) -> Result<PromptOutcome, SubagentError> {
-        self.messages.push(ChatMessage::user(text.to_string()));
-
-        let mut call_usage = TokenUsage::default();
-        for _turn in 0..self.max_turns {
-            let (maybe_outcome, turn_usage) = self.run_one_turn().await?;
-            call_usage = call_usage + turn_usage;
-            if let Some(mut outcome) = maybe_outcome {
-                outcome.usage = call_usage;
-                self.cumulative = self.cumulative + call_usage;
-                return Ok(outcome);
-            }
-        }
-
-        let (mut outcome, turn_usage) = self.synthesize_findings().await?;
-        call_usage = call_usage + turn_usage;
-        outcome.usage = call_usage;
-        self.cumulative = self.cumulative + call_usage;
-        Ok(outcome)
-    }
-
-    fn model(&self) -> &str {
-        &self.model
-    }
-
-    fn cumulative_usage(&self) -> TokenUsage {
-        self.cumulative
-    }
-}
-
-impl FastContextSession {
-    /// The search budget is exhausted without a `<final_answer>`. Rather than discard everything
-    /// gathered so far and return empty content, spend one final turn — with no tools, so the model
-    /// cannot keep searching — asking it to summarize its findings. Always yields
-    /// `StopReason::MaxTurnRequests`, but with the synthesized prose as content.
-    async fn synthesize_findings(&mut self) -> Result<(PromptOutcome, TokenUsage), SubagentError> {
-        self.messages.push(ChatMessage::user(
-            "You have reached your search budget and may not call any more tools. \
-             Summarize your findings now from what you have already read, citing the specific \
-             file:line locations you found."
-                .to_string(),
-        ));
-
-        let (step, turn_usage) = send_turn_and_check_final_answer(
-            &self.client,
-            &self.model,
-            &mut self.messages,
-            Vec::new(),
-            "FastContextSession synthesis",
-        )
-        .await?;
-        let message = match step {
-            TurnStep::FinalAnswer(outcome) => {
-                return Ok((
-                    PromptOutcome {
-                        stop_reason: StopReason::MaxTurnRequests,
-                        content: outcome.content,
-                        usage: turn_usage,
-                    },
-                    turn_usage,
-                ))
-            }
-            TurnStep::Continue(message) => message,
-        };
-
-        let content = message.content.clone().unwrap_or_default();
-        self.messages
-            .push(ChatMessage::assistant(message.content.clone(), None));
-        Ok((
-            PromptOutcome {
-                stop_reason: StopReason::MaxTurnRequests,
-                content: vec![ContentBlock::text(content)],
-                usage: turn_usage,
-            },
-            turn_usage,
-        ))
-    }
-}
-
 /// Maps a bound-tool kind to the model-facing tool name — the SCREAMING_SNAKE spelling the tool
 /// loop advertises and [`dispatch_tool_call`] matches on (the same spelling a def's YAML `tools:`
 /// list uses, unlike [`crate::agent_def::SubagentTool::catalog_name`]'s exec-catalog casing).
@@ -849,12 +660,13 @@ fn tool_name(tool: crate::agent_def::SubagentTool) -> &'static str {
     }
 }
 
-/// A subagent session built from a YAML-defined [`crate::agent_def::SpecializedAgentDef`] rather
-/// than the single hardcoded `"fastcontext"` factory (see [`FastContextSession`]). Generalizes
-/// that session in three ways: an optional system prompt seeds the conversation, only the def's
-/// bound tools are advertised to (and dispatchable by) the model, and a plain-prose turn with no
-/// tool call and no `<final_answer>` terminates `EndTurn` instead of continuing toward
-/// `max_turns` — useful for a model that doesn't follow FastContext's citation convention.
+/// A subagent session built from a [`crate::agent_def::SpecializedAgentDef`] — the only kind
+/// there is, since every agent comes from a def an operator wrote. An optional system prompt seeds
+/// the conversation, only the def's bound tools are advertised to (and dispatchable by) the model,
+/// a plain-prose turn with no tool call and no `<final_answer>` terminates `EndTurn` rather than
+/// continuing toward `max_turns` (a def is free not to follow any citation convention), and an
+/// exhausted budget ends in one tool-less synthesis turn rather than in silence
+/// ([`Self::run_synthesis_turn`]).
 pub struct SpecializedSubagentSession {
     client: OpenAiClient,
     model: String,
@@ -949,10 +761,9 @@ impl SpecializedSubagentSession {
                 }
                 Ok((None, turn_usage))
             }
-            // No tool call and no <final_answer> — plain prose. Unlike FastContextSession (which
-            // keeps looping toward max_turns on such a turn, matching the citation convention it
-            // expects), a generic specialized agent may simply answer in prose on a single turn —
-            // treat that prose as the answer instead of forcing max_turns.
+            // No tool call and no <final_answer> — plain prose. A specialized agent may simply
+            // answer in prose on a single turn, so that prose is the answer rather than a reason
+            // to keep spending turns.
             _ => {
                 let content = message.content.clone().unwrap_or_default();
                 self.messages
@@ -967,6 +778,59 @@ impl SpecializedSubagentSession {
                 ))
             }
         }
+    }
+
+    /// The turn budget is spent with no `<final_answer>`. Rather than discard everything gathered
+    /// so far and answer with nothing, spend one final turn asking the model to summarize what it
+    /// already read. In incident 019f2d14 the model burned every turn tool-calling (each turn
+    /// `content=0 chars`) and the caller got an empty answer back.
+    ///
+    /// The turn advertises **no tools**, so the model cannot keep searching — without that the
+    /// budget is not a budget, it is one more search turn.
+    ///
+    /// The instruction is spliced into *this request* and never retained: the session is long-lived
+    /// and multi-prompt, so an instruction left in the history would be replayed as prior context
+    /// on the next `subagent_prompt` — and a model that honours it would stop calling tools for the
+    /// rest of the conversation, on a budget that was just refilled. The summary it produces *is*
+    /// kept: it answers the user prompt that is still in the history.
+    async fn run_synthesis_turn(&mut self) -> Result<PromptOutcome, SubagentError> {
+        let mut request_messages = self.messages.clone();
+        request_messages.push(ChatMessage::user(
+            "You have reached your search budget and may not call any more tools. \
+             Summarize your findings now from what you have already read, citing the specific \
+             file:line locations you found."
+                .to_string(),
+        ));
+
+        let (step, turn_usage) = send_turn_and_check_final_answer(
+            &self.client,
+            &self.model,
+            &mut request_messages,
+            Vec::new(),
+            "SpecializedSubagentSession synthesis",
+        )
+        .await?;
+        let content = match step {
+            TurnStep::FinalAnswer(outcome) => outcome.content,
+            TurnStep::Continue(message) => {
+                vec![ContentBlock::text(message.content.unwrap_or_default())]
+            }
+        };
+        self.messages.push(ChatMessage::assistant(
+            Some(
+                content
+                    .iter()
+                    .map(|block| block.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            None,
+        ));
+        Ok(PromptOutcome {
+            stop_reason: StopReason::MaxTurnRequests,
+            content,
+            usage: turn_usage,
+        })
     }
 }
 
@@ -986,10 +850,20 @@ impl SubagentSession for SpecializedSubagentSession {
             }
         }
 
+        // Budget exhausted — one tool-less turn, so the caller gets what was gathered rather than
+        // nothing (see [`Self::run_synthesis_turn`]).
+        //
+        // The turns already spent are charged *before* that call: they were spent whatever it does,
+        // and folding them in afterwards discards the whole prompt's usage when the one extra call
+        // times out or is refused — the conversation's running total would then under-report every
+        // turn the prompt paid for.
         self.cumulative = self.cumulative + call_usage;
+        let synthesis = self.run_synthesis_turn().await?;
+        self.cumulative = self.cumulative + synthesis.usage;
+        let call_usage = call_usage + synthesis.usage;
         Ok(PromptOutcome {
             stop_reason: StopReason::MaxTurnRequests,
-            content: Vec::new(),
+            content: synthesis.content,
             usage: call_usage,
         })
     }
@@ -1003,63 +877,29 @@ impl SubagentSession for SpecializedSubagentSession {
     }
 }
 
-type SessionFactory = Box<dyn Fn(SubagentConfig) -> Box<dyn SubagentSession> + Send + Sync>;
-
-/// Name → factory registry for subagent sessions. Pluggable: `"fastcontext"` ships built in;
-/// future subagents register under their own name.
-///
-/// `defs` (populated via [`SubagentRegistry::from_defs`]) is the generalized path — see
-/// docs/ft/coder/specialized-subagents.md: any number of YAML-defined
-/// [`crate::agent_def::SpecializedAgentDef`]s, not just the one hardcoded `factories` entry.
+/// Name → def registry for subagent sessions: any number of
+/// [`crate::agent_def::SpecializedAgentDef`]s, each resolved by its own `name`. Defs are the only
+/// source — a registry cannot hold an agent nobody defined (see
+/// docs/ft/daemon/session-agent-roster.md § Removing the hardcoded agents).
 pub struct SubagentRegistry {
-    factories: HashMap<String, SessionFactory>,
     defs: Vec<crate::agent_def::SpecializedAgentDef>,
 }
 
 impl SubagentRegistry {
-    pub fn new() -> Self {
-        let mut factories: HashMap<String, SessionFactory> = HashMap::new();
-        factories.insert(
-            "fastcontext".to_string(),
-            Box::new(|config: SubagentConfig| -> Box<dyn SubagentSession> {
-                Box::new(FastContextSession::new(
-                    config.base_url,
-                    config.model,
-                    config.api_key,
-                    config.max_turns,
-                    config.access,
-                ))
-            }) as SessionFactory,
-        );
-        Self {
-            factories,
-            defs: Vec::new(),
-        }
-    }
-
-    /// Build a registry backed by YAML-defined [`crate::agent_def::SpecializedAgentDef`]s instead
-    /// of the single hardcoded `"fastcontext"` factory — any number of defs, each resolved by its
-    /// own `name`. See docs/ft/coder/specialized-subagents.md.
     pub fn from_defs(defs: Vec<crate::agent_def::SpecializedAgentDef>) -> Self {
-        Self {
-            factories: HashMap::new(),
-            defs,
-        }
+        Self { defs }
     }
 
     /// Create a session for `name`, or a [`SubagentError`] naming the unknown subagent.
     ///
-    /// `config.access` is always honored (it depends on the runtime transport, not on a static
-    /// def); when `name` resolves through `defs` rather than the legacy `factories` map,
-    /// `config.base_url`/`model`/`max_turns` are ignored in favor of the def's own values.
+    /// `config.access` is the whole configuration a caller supplies: it depends on the runtime
+    /// transport rather than on the agent, while base URL, model, credential, turn budget, system
+    /// prompt and bound tools all come from the def.
     pub fn create(
         &self,
         name: &str,
         config: SubagentConfig,
     ) -> Result<Box<dyn SubagentSession>, SubagentError> {
-        if let Some(factory) = self.factories.get(name) {
-            return Ok(factory(config));
-        }
         if let Some(def) = self.defs.iter().find(|d| d.name == name) {
             return Ok(Box::new(SpecializedSubagentSession::new(
                 def.base_url.clone(),
@@ -1072,11 +912,5 @@ impl SubagentRegistry {
             )));
         }
         Err(SubagentError(format!("unknown subagent: {name}")))
-    }
-}
-
-impl Default for SubagentRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }

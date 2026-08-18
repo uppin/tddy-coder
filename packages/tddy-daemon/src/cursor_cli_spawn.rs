@@ -130,7 +130,11 @@ pub async fn spawn_cursor_cli_session_inner(
     stack_parent: Option<&str>,
     initial_prompt: &str,
     managed_codebase: bool,
-    specialized_agents: &[String],
+    // The session's starting agent roster, already resolved against the request's
+    // `specialized_agents` by the caller (docs/ft/daemon/session-agent-roster.md). Resolved there
+    // rather than here because qualifying an id needs this daemon's def sources *and* its registry
+    // assistants, and this free function is handed neither.
+    agents: &[tddy_core::SessionAgentRecord],
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     // When true, index the worktree before launch (blocking; aborts on failure) and point the
     // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
@@ -283,7 +287,7 @@ pub async fn spawn_cursor_cli_session_inner(
             );
         }
     }
-    let _ = (managed_codebase, specialized_agents);
+    let _ = managed_codebase;
 
     // Semantic index: index the worktree into the session dir before launch (blocking; a missing
     // embedder or a failed index aborts the start — no unindexed fallback), and point the
@@ -365,7 +369,9 @@ pub async fn spawn_cursor_cli_session_inner(
         sandbox: None,
         agent: None,
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        specialized_agents: specialized_agents.to_vec(),
+        agents_rev: crate::connection_service::started_roster_rev(agents),
+        agents: agents.to_vec(),
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

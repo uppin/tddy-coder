@@ -26,7 +26,7 @@ use tddy_discovery::openai::{
 };
 
 /// Sampling temperature for the provider call. Zero, matching the other provider loops in the
-/// workspace (`tddy_discovery::subagent`, `FastContextBackend`).
+/// workspace (`tddy_discovery::subagent`, `SpecializedAgentBackend`).
 ///
 /// TODO: carry it on `ProviderAgentConfig` once an assistant can be configured with one.
 const TEMPERATURE: f32 = 0.0;

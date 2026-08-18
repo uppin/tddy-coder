@@ -14,11 +14,11 @@
 //!   the owner's alone. A row written before the registry had owners carries `NULL`, which means
 //!   "unowned" and is writable by anyone — see the changeset for why that beats the alternatives.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use tddy_discovery::agent_def::{builtin_agent_defs, SubagentTool};
+use tddy_discovery::agent_def::{load_agent_defs, SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::models::{AssistantEntry, ModelEntry, ProviderEntry, ProviderKind};
 
 use super::error::{truncate_provider_detail, ModelRegistryError};
@@ -82,14 +82,28 @@ pub struct ModelRegistryStore {
     /// this daemon's `allowed_agents` config entries. Supplied at open time
     /// ([`ModelRegistryStore::reserving_agent_ids`]) because the store cannot read daemon config.
     reserved_agent_ids: Vec<String>,
+    /// This daemon's `<tddyhome>/agents` directory — the other `--agent` def source, whose names
+    /// an assistant may not take either.
+    ///
+    /// Held as the directory rather than as the names in it, and read on every check: a def
+    /// written after this daemon started is resolvable the moment the file lands, so a snapshot
+    /// taken at open time would admit exactly the collision this guard exists to refuse.
+    agents_dir: PathBuf,
 }
 
 impl ModelRegistryStore {
     /// Open (creating if missing) the registry at `db_path`, ensuring its schema exists and that
     /// the operator running this daemon is the only account that can read it.
+    ///
+    /// `agents_dir` is this daemon's `<tddyhome>/agents` directory. It is a required argument
+    /// rather than an opt-in builder because it is the *other* source `--agent <name>` resolves
+    /// against: a store opened without it would hand out assistant names that silently shadow an
+    /// operator's YAML def, and a name guard nobody remembered to switch on is worse than none.
+    /// The directory need not exist.
     pub async fn open(
         db_path: &Path,
         daemon_instance_id: &str,
+        agents_dir: &Path,
     ) -> Result<Self, ModelRegistryError> {
         if let Some(parent) = db_path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -123,6 +137,7 @@ impl ModelRegistryStore {
             pool,
             daemon_instance_id: daemon_instance_id.to_string(),
             reserved_agent_ids: Vec::new(),
+            agents_dir: agents_dir.to_path_buf(),
         })
     }
 
@@ -607,8 +622,8 @@ impl ModelRegistryStore {
     }
 
     /// Refuse a name that is not usable as an `--agent` value, or that is already resolvable as
-    /// one — a coding backend id, a configured `allowed_agents` id, a builtin def, or another
-    /// assistant. Every such collision would make `--agent <name>` ambiguous.
+    /// one — a coding backend id, a configured `allowed_agents` id, a `<tddyhome>/agents` def, or
+    /// another assistant. Every such collision would make `--agent <name>` ambiguous.
     async fn reject_taken_name(
         &self,
         tx: &mut Transaction<'_, Sqlite>,
@@ -627,23 +642,27 @@ impl ModelRegistryStore {
                  `--agent` would never match it"
             )));
         }
-        // These three are reserved names, not duplicate rows: nothing in the registry is being
-        // collided with, the name simply already means something else on this daemon. `InvalidName`
-        // is what that is — `AlreadyExists` would tell a caller to go and delete the assistant that
-        // is in the way, and there is no such assistant.
+        // These are reserved names, not duplicate rows: nothing in the registry is being collided
+        // with, the name simply already means something else on this daemon. `InvalidName` is what
+        // that is — `AlreadyExists` would tell a caller to go and delete the assistant that is in
+        // the way, and there is no such assistant.
         if tddy_coder::run::BUILTIN_BACKEND_AGENT_IDS.contains(&name) {
             return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is a coding backend"
             )));
         }
-        if builtin_agent_defs().iter().any(|def| def.name == name) {
-            return Err(ModelRegistryError::InvalidName(format!(
-                "'{name}' is a builtin agent"
-            )));
-        }
         if self.reserved_agent_ids.iter().any(|id| id == name) {
             return Err(ModelRegistryError::InvalidName(format!(
                 "'{name}' is listed in this daemon's allowed_agents"
+            )));
+        }
+        // The registry wins over a YAML def of the same name wherever both resolve
+        // (`ConnectionServiceImpl::resolvable_agent_defs`), so admitting this name would stop the
+        // operator's own def from resolving, with nothing said about it anywhere.
+        if let Some(def_file) = self.agent_def_named(name)? {
+            return Err(ModelRegistryError::InvalidName(format!(
+                "'{name}' is defined by the agent def {}",
+                def_file.display()
             )));
         }
         let existing: Option<String> =
@@ -657,6 +676,65 @@ impl ModelRegistryStore {
             ))),
             None => Ok(()),
         }
+    }
+
+    /// The file of the `<tddyhome>/agents` def `name` already resolves to, or `None` when no def
+    /// answers to it.
+    ///
+    /// Whether a def answers is decided by [`load_agent_defs`] — the same call
+    /// `ConnectionServiceImpl::resolvable_agent_defs` makes — so this guard and the resolver can
+    /// never disagree about what `--agent <name>` means. A malformed YAML file therefore reserves
+    /// nothing: it resolves to no agent, so no name is taken by it.
+    ///
+    /// A missing directory is a determinate "no defs" — a `<tddyhome>` with no agents in it is the
+    /// ordinary case. A directory that exists but cannot be read is not: the guard has no answer,
+    /// and an unanswerable guard refuses the write rather than admitting a name it never checked.
+    fn agent_def_named(&self, name: &str) -> Result<Option<PathBuf>, ModelRegistryError> {
+        match std::fs::read_dir(&self.agents_dir) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(io_failure(
+                    &format!("agent defs directory {}", self.agents_dir.display()),
+                    e,
+                ))
+            }
+        }
+        if !load_agent_defs(&self.agents_dir)
+            .iter()
+            .any(|def| def.name == name)
+        {
+            return Ok(None);
+        }
+        Ok(Some(self.agent_def_file_named(name)))
+    }
+
+    /// Which file in `agents_dir` defines `name`, for the operator who has to go and edit it.
+    ///
+    /// [`SpecializedAgentDef`] does not carry the path it was parsed from, and a def's name need
+    /// not match its file stem, so the file is recovered by re-reading the directory. Only the
+    /// message depends on this: [`Self::agent_def_named`] has already decided the name is taken,
+    /// so a file renamed between the two reads still refuses the name and points at the directory
+    /// holding it.
+    fn agent_def_file_named(&self, name: &str) -> PathBuf {
+        let Ok(entries) = std::fs::read_dir(&self.agents_dir) else {
+            return self.agents_dir.clone();
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let names_it = serde_yaml::from_str::<SpecializedAgentDef>(&contents)
+                .is_ok_and(|def| def.name == name);
+            if names_it {
+                return path;
+            }
+        }
+        self.agents_dir.clone()
     }
 }
 

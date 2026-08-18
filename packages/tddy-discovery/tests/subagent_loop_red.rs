@@ -1,16 +1,19 @@
-//! Integration tests: subagent turn-loop behaviours that address the fastcontext runaway in
-//! session 019f2d14.
+//! Integration tests: subagent turn-loop behaviours that address the runaway in session
+//! 019f2d14.
 //!
 //!   A. READ-window wiring — a model-issued `READ` with `offset`/`limit` must come back windowed,
-//!      proving `dispatch_tool_call` actually reads those args (today they are silently dropped).
+//!      proving `dispatch_tool_call` actually reads those args (they were silently dropped).
 //!
 //!   B. Forced synthesis on budget exhaustion — when the per-prompt turn budget runs out with no
 //!      `<final_answer>`, the session must spend one final tool-less turn to synthesise findings
 //!      from what it gathered, instead of returning empty content. In 019f2d14 the model burned all
 //!      10 turns tool-calling (every turn `content=0 chars`) and the caller got nothing back.
 //!
-//! Root-cause: packages/tddy-discovery/src/subagent.rs (`dispatch_tool_call`, `FastContextSession`).
+//! Root-cause: packages/tddy-discovery/src/subagent.rs (`dispatch_tool_call`,
+//! `SpecializedSubagentSession`).
 
+use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+use tddy_discovery::openai::TokenUsage;
 use tddy_discovery::subagent::{CodebaseAccess, StopReason, SubagentConfig, SubagentRegistry};
 use wiremock::matchers::{method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -44,6 +47,20 @@ fn glob_tool_call_response() -> serde_json::Value {
     tool_call_response("GLOB", serde_json::json!({ "pattern": "**/*.rs" }))
 }
 
+/// A tool-calling turn that also reports what it cost, as both hosted endpoints and Ollama do.
+fn glob_tool_call_response_with_usage(
+    prompt_tokens: u64,
+    completion_tokens: u64,
+) -> serde_json::Value {
+    let mut response = glob_tool_call_response();
+    response["usage"] = serde_json::json!({
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens
+    });
+    response
+}
+
 fn read_window_tool_call_response(path: &str, offset: u64, limit: u64) -> serde_json::Value {
     tool_call_response(
         "READ",
@@ -68,14 +85,42 @@ fn tool_call_response(tool_name: &str, args: serde_json::Value) -> serde_json::V
     })
 }
 
-fn a_local_config(base_url: &str, max_turns: u32) -> SubagentConfig {
-    SubagentConfig {
+/// An agent def pointing at `base_url`, binding the read-side loop this file exercises.
+fn a_def(base_url: &str, max_turns: u32) -> SpecializedAgentDef {
+    SpecializedAgentDef {
+        name: "explorer".to_string(),
+        label: None,
+        model: "qwen2.5-coder:7b".to_string(),
         base_url: base_url.to_string(),
         api_key: None,
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
         max_turns,
+        replaces: Vec::new(),
+    }
+}
+
+fn a_local_config() -> SubagentConfig {
+    SubagentConfig {
         access: CodebaseAccess::Local,
     }
+}
+
+/// The chat messages of the request that carried `prompt`, found by the prompt text rather than by
+/// position — a turn count is an implementation detail, the prompt that was sent is not.
+fn messages_of_the_request_carrying(
+    requests: &[wiremock::Request],
+    prompt: &str,
+) -> Vec<serde_json::Value> {
+    requests
+        .iter()
+        .map(|r| serde_json::from_slice::<serde_json::Value>(&r.body).expect("a JSON request body"))
+        .find(|body| body["messages"].to_string().contains(prompt))
+        .unwrap_or_else(|| panic!("no request carried the prompt {prompt:?}"))["messages"]
+        .as_array()
+        .expect("request body must carry a messages array")
+        .clone()
 }
 
 fn numbered_lines(count: usize) -> String {
@@ -112,9 +157,9 @@ async fn a_read_tool_call_with_offset_and_limit_returns_a_windowed_tool_result()
         .respond_with(ResponseTemplate::new(200).set_body_json(final_answer_response("done")))
         .mount(&server)
         .await;
-    let mut session = SubagentRegistry::new()
-        .create("fastcontext", a_local_config(&server.uri(), 6))
-        .expect("fastcontext must be registered");
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 6)])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     session
@@ -172,9 +217,9 @@ async fn exhausting_the_turn_budget_forces_one_synthesis_turn_and_returns_its_fi
         )))
         .mount(&server)
         .await;
-    let mut session = SubagentRegistry::new()
-        .create("fastcontext", a_local_config(&server.uri(), 3))
-        .expect("fastcontext must be registered");
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 3)])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     let outcome = session
@@ -202,6 +247,107 @@ async fn exhausting_the_turn_budget_forces_one_synthesis_turn_and_returns_its_fi
     );
 }
 
+/// The budget instruction is spliced into the synthesis request only, never kept. This session is
+/// long-lived and multi-prompt: an instruction left in the history is replayed as prior context, and
+/// a model that honours "you may not call any more tools" would stop searching for the rest of the
+/// conversation on a budget that was just refilled.
+#[tokio::test]
+async fn does_not_replay_the_budget_instruction_to_the_next_prompt() {
+    // Given — the first prompt exhausts three search turns and is synthesised; the second finalises
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_matcher("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(glob_tool_call_response()))
+        .up_to_n_times(3)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_matcher("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(prose_response("Config is loaded in src/config.rs:12.")),
+        )
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_matcher("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_response("src/daemon.rs:88")),
+        )
+        .mount(&server)
+        .await;
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 3)])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
+    session
+        .prompt("Find where config is loaded")
+        .await
+        .expect("the first prompt must be synthesised");
+
+    // When
+    session
+        .prompt("And the shutdown path?")
+        .await
+        .expect("the second prompt must succeed");
+
+    // Then — the request that carried the second prompt replays no budget instruction
+    let calls = server.received_requests().await.unwrap();
+    let messages = messages_of_the_request_carrying(&calls, "And the shutdown path?");
+    let replayed = messages
+        .iter()
+        .filter(|m| {
+            m["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("search budget")
+        })
+        .count();
+    assert_eq!(
+        replayed, 0,
+        "the budget instruction must not be replayed to a prompt with a fresh budget; got: \
+         {messages:?}"
+    );
+}
+
+/// The turns a prompt already spent are charged even when the forced synthesis turn fails. They
+/// were spent whatever that one extra call does, and a conversation whose running total drops them
+/// under-reports what the session cost for the rest of its life.
+#[tokio::test]
+async fn charges_every_spent_turn_when_the_synthesis_turn_is_refused() {
+    // Given — three search turns reporting 100 + 40 tokens each, then a refused synthesis call
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_matcher("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(glob_tool_call_response_with_usage(100, 40)),
+        )
+        .up_to_n_times(3)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_matcher("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 3)])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
+
+    // When
+    let result = session.prompt("Find where config is loaded").await;
+
+    // Then
+    result.expect_err("a refused synthesis call must surface as an error");
+    assert_eq!(
+        session.cumulative_usage(),
+        TokenUsage {
+            input_tokens: 300,
+            output_tokens: 120,
+        }
+    );
+}
+
 /// The forced synthesis turn advertises no tools, so the model cannot keep searching and is
 /// compelled to answer from the context it already gathered.
 #[tokio::test]
@@ -219,9 +365,9 @@ async fn the_forced_synthesis_turn_advertises_no_tools() {
         .respond_with(ResponseTemplate::new(200).set_body_json(prose_response("Answered.")))
         .mount(&server)
         .await;
-    let mut session = SubagentRegistry::new()
-        .create("fastcontext", a_local_config(&server.uri(), 3))
-        .expect("fastcontext must be registered");
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 3)])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     session

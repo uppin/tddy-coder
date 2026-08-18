@@ -49,8 +49,8 @@ struct Args {
     repo: PathBuf,
 
     /// Optional YAML config (schema: `config::SandboxAppConfig`). CLI flags override its values.
-    /// Inline `subagents:` defs let you e.g. point `fastcontext` at a local Ollama server without
-    /// a separate agents dir.
+    /// Inline `subagents:` defs let you e.g. point an explorer agent at a local Ollama server
+    /// without a separate agents dir.
     #[arg(long, short = 'c')]
     config: Option<PathBuf>,
 
@@ -118,7 +118,7 @@ struct Args {
     #[arg(long)]
     codebase_mode: Option<String>,
 
-    /// Specialized agent to wire into the session (e.g. `fastcontext`), repeatable for multiple
+    /// Specialized agent to wire into the session, by def name, repeatable for multiple
     /// agents. When set, Claude gains the `subagent_new_session`/`subagent_prompt`/
     /// `subagent_cancel` MCP tools (see docs/ft/coder/specialized-subagents.md).
     #[arg(long = "specialized-agent")]
@@ -359,17 +359,14 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let specialized_defs =
         config::resolve_session_agents(&named_agents, &cfg.subagents, &agents_dir)?;
 
-    // Every tool restriction is declared on the defs themselves (`replaces:` — see
-    // docs/ft/coder/no-bash-mode.md): a def replacing Shell is the session's action author; a
-    // def replacing the mutation tools is its coder. Validate the composition up front and keep
-    // the replaced set for the host-side policy checks.
-    config::validate_tool_replacements(&specialized_defs)?;
+    // Every tool restriction is declared on the defs themselves (`replaces:`), and declaring it is
+    // all it does: the union is withdrawn from the main agent and no def gains a role from which
+    // tool name it named (docs/ft/daemon/session-agent-roster.md § Tool replacement, without
+    // behaviour). Keep the replaced set for the host-side policy checks.
     let replaced_tools =
         tddy_discovery::subagent::resolve_replaced_tools_for_defs(&specialized_defs);
-    if replaced_tools.iter().any(|t| t == "Shell") {
-        eprintln!(
-            "Shell replaced: commands run only through session actions (request_action/invoke_action)"
-        );
+    if !replaced_tools.is_empty() {
+        eprintln!("replaced_tools={}", replaced_tools.join(","));
     }
     if !specialized_defs.is_empty() {
         eprintln!(

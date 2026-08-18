@@ -33,9 +33,13 @@ const ANOTHER_OPERATOR: &str = "bob";
 /// A store over a fresh DB file. The tempdir is returned so it outlives the store.
 async fn a_store() -> (tempfile::TempDir, ModelRegistryStore) {
     let dir = tempfile::tempdir().expect("a tempdir for the registry db");
-    let store = ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON)
-        .await
-        .expect("open the registry store");
+    let store = ModelRegistryStore::open(
+        &dir.path().join("models.db"),
+        THIS_DAEMON,
+        &dir.path().join("agents"),
+    )
+    .await
+    .expect("open the registry store");
     (dir, store)
 }
 
@@ -856,7 +860,7 @@ async fn creates_the_database_owner_only_because_it_holds_plaintext_api_keys() {
     let db_path = dir.path().join("models.db");
 
     // When the registry is opened and a credentialed provider is stored in it
-    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON)
+    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &dir.path().join("agents"))
         .await
         .expect("open the registry store");
     store
@@ -888,7 +892,7 @@ async fn restricts_a_database_an_earlier_daemon_left_world_readable() {
     let dir = tempfile::tempdir().expect("a tempdir for the registry db");
     let db_path = dir.path().join("models.db");
     {
-        let store = ModelRegistryStore::open(&db_path, THIS_DAEMON)
+        let store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &dir.path().join("agents"))
             .await
             .expect("open the registry store");
         store
@@ -900,7 +904,7 @@ async fn restricts_a_database_an_earlier_daemon_left_world_readable() {
         .expect("leave the db world-readable, as an older daemon did");
 
     // When the daemon restarts
-    let _store = ModelRegistryStore::open(&db_path, THIS_DAEMON)
+    let _store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &dir.path().join("agents"))
         .await
         .expect("reopen the registry store");
 
@@ -1302,7 +1306,7 @@ async fn treats_a_row_written_before_ownership_existed_as_unowned() {
     write_a_pre_ownership_registry(&db_path).await;
 
     // When this daemon opens it
-    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON)
+    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &dir.path().join("agents"))
         .await
         .expect("open the registry store");
 

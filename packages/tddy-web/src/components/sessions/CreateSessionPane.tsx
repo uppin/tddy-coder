@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, SubagentInfo, ToolInfo } from "../../gen/connection_pb";
+import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
+import { safeTestIdPart } from "../../lib/testId";
 import type { BaseBranchOption } from "./prstack/baseBranchChoice";
 import {
   startSessionOverridesFor,
@@ -20,6 +21,7 @@ import {
   type StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 import { Button } from "../ui/button";
+import { useAvailableAgents } from "./useAvailableAgents";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
 import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
@@ -182,8 +184,10 @@ export function CreateSessionPane({
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
-  const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
-  const [selectedSubagents, setSelectedSubagents] = useState<string[]>([]);
+  // The qualified ids (`name@daemon_instance_id`) of the agents to attach at start. Qualified rather
+  // than bare names because the picker lists every host's agents and two hosts routinely offer a def
+  // of the same name — a bare name cannot say which of them was picked.
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [managedCodebase, setManagedCodebase] = useState(false);
   const [semanticIndex, setSemanticIndex] = useState(false);
   // Which daemon's filesystem holds the worktree. Empty means "same as host" — the co-located
@@ -253,9 +257,14 @@ export function CreateSessionPane({
     setModel(agentModels.defaultModel);
   }, [agentModels.defaultModel]);
 
-  const toggleSubagent = (name: string) => {
-    setSelectedSubagents((prev) =>
-      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+  // Every common-room daemon's specialized agents, each labelled with the host that offers it. A
+  // host that cannot answer costs one error row rather than the whole picker — see
+  // docs/ft/daemon/session-agent-roster.md § Web UI.
+  const availableAgents = useAvailableAgents(client, selectedInstanceId ?? "");
+
+  const toggleAgent = (agentId: string) => {
+    setSelectedAgentIds((prev) =>
+      prev.includes(agentId) ? prev.filter((id) => id !== agentId) : [...prev, agentId],
     );
   };
 
@@ -273,21 +282,6 @@ export function CreateSessionPane({
       .catch(() => {
         // Session list is best-effort; failing to fetch it just leaves the stack-parent and
         // stack-base pickers with nothing to offer.
-      });
-
-    // Fetch subagents separately (best-effort, like sessions above) — a daemon that doesn't
-    // implement ListSubagents yet, or a test double that doesn't stub it, must not block the
-    // core project/agent/tool fields from loading.
-    client
-      .listSubagents({})
-      .then((resp) => {
-        if (!cancelled) {
-          setSubagents(resp.subagents as SubagentInfo[]);
-        }
-      })
-      .catch(() => {
-        // Specialized subagents are best-effort; failing to fetch them just leaves the
-        // "Managed codebase" section with no options to pick.
       });
 
     Promise.all([
@@ -498,7 +492,7 @@ export function CreateSessionPane({
         initialPrompt,
         sandbox,
         managedCodebase,
-        specializedAgents: managedCodebase ? selectedSubagents : [],
+        specializedAgents: managedCodebase ? selectedAgentIds : [],
         semanticIndex: managedCodebase ? semanticIndex : false,
         // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
         // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
@@ -523,9 +517,9 @@ export function CreateSessionPane({
       initialPrompt,
       sandbox: isSplitCodebase ? false : sandbox,
       managedCodebase,
-      // Only send subagents when managed codebase is enabled — the picker is hidden otherwise,
+      // Only send agents when managed codebase is enabled — the picker is hidden otherwise,
       // so a selection made before unchecking the toggle must not leak into the request.
-      specializedAgents: managedCodebase ? selectedSubagents : [],
+      specializedAgents: managedCodebase ? selectedAgentIds : [],
       semanticIndex: managedCodebase && !isSplitCodebase ? semanticIndex : false,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
@@ -626,6 +620,49 @@ export function CreateSessionPane({
             </option>
           ))}
         </select>
+      )}
+    </div>
+  );
+
+  // The specialized-agent multi-select, shared by the cursor-cli and claude-cli managed-codebase
+  // blocks. Every host's agents are listed together, so each option names the host that offers it
+  // and submits the qualified id — picking "explorer" here cannot silently start another host's
+  // agent of the same name. A host that could not be listed is one row; the rest stay on offer.
+  const agentPickerSection = (
+    <div data-testid="create-session-managed-codebase-section" className="space-y-1">
+      {availableAgents.failures.map((failure) => (
+        <p
+          key={failure.daemonInstanceId}
+          data-testid={`create-session-agent-host-error-${safeTestIdPart(failure.daemonInstanceId)}`}
+          className="text-sm text-destructive"
+        >
+          {`${failure.daemonInstanceId}: ${failure.message}`}
+        </p>
+      ))}
+      {availableAgents.agents.length === 0 && availableAgents.failures.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No specialized agents available</p>
+      ) : (
+        availableAgents.agents.map((agent) => (
+          <label
+            key={agent.agentId}
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+          >
+            <input
+              data-testid={`create-session-agent-${safeTestIdPart(agent.agentId)}`}
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={selectedAgentIds.includes(agent.agentId)}
+              onChange={() => toggleAgent(agent.agentId)}
+            />
+            <span>{agent.label || agent.name}</span>
+            <span
+              data-testid={`create-session-agent-${safeTestIdPart(agent.agentId)}-host`}
+              className="text-xs"
+            >
+              {agent.daemonInstanceId}
+            </span>
+          </label>
+        ))
       )}
     </div>
   );
@@ -867,32 +904,7 @@ export function CreateSessionPane({
                     ))}
                   </select>
                 </div>
-                <div
-                  data-testid="create-session-managed-codebase-section"
-                  className="space-y-1"
-                >
-                  {subagents.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No specialized subagents available
-                    </p>
-                  ) : (
-                    subagents.map((sa) => (
-                      <label
-                        key={sa.name}
-                        className="flex items-center gap-2 text-sm text-muted-foreground"
-                      >
-                        <input
-                          data-testid={`create-session-subagent-checkbox-${sa.name}`}
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-input"
-                          checked={selectedSubagents.includes(sa.name)}
-                          onChange={() => toggleSubagent(sa.name)}
-                        />
-                        {sa.label || sa.name}
-                      </label>
-                    ))
-                  )}
-                </div>
+                {agentPickerSection}
                 {/* No split guard here, unlike the claude-cli copy below: `isSplitCodebase` requires
                     claude-cli, so inside this cursor-cli branch it is always false. */}
                 <div>
@@ -1059,32 +1071,7 @@ export function CreateSessionPane({
                     </select>
                   </div>
                 )}
-                <div
-                  data-testid="create-session-managed-codebase-section"
-                  className="space-y-1"
-                >
-                  {subagents.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No specialized subagents available
-                    </p>
-                  ) : (
-                    subagents.map((sa) => (
-                      <label
-                        key={sa.name}
-                        className="flex items-center gap-2 text-sm text-muted-foreground"
-                      >
-                        <input
-                          data-testid={`create-session-subagent-checkbox-${sa.name}`}
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-input"
-                          checked={selectedSubagents.includes(sa.name)}
-                          onChange={() => toggleSubagent(sa.name)}
-                        />
-                        {sa.label || sa.name}
-                      </label>
-                    ))
-                  )}
-                </div>
+                {agentPickerSection}
                 {/* Indexing runs against a worktree on this daemon before launch, which a split
                     session does not have — refused by the daemon, so not offered here. */}
                 {!isSplitCodebase && (

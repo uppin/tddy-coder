@@ -10076,6 +10076,7 @@ dependencies = [
  "tddy-sandbox-runner",
  "tddy-semantic-index",
  "tddy-service",
+ "tddy-session-sync",
  "tddy-stdio",
  "tddy-supervisor",
  "tddy-task",

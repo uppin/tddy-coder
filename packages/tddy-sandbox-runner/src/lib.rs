@@ -10,8 +10,8 @@ pub mod host_relay;
 pub mod runner;
 
 pub use host_relay::{
-    relay_egress_request, run_host_relay, HostRelayConfig, HostToolHandler, NullToolHandler,
-    SessionChannelClient, StdioSandboxClient,
+    relay_egress_request, run_host_relay, run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler,
+    HostToolHandler, NullRpcHandler, NullToolHandler, SessionChannelClient, StdioSandboxClient,
 };
 pub use runner::{
     connect_sandbox_client, connect_sandbox_client_uds, connect_uds_channel, resolve_secret_envs,

@@ -141,9 +141,13 @@ impl Harness {
 async fn a_service_with(behavior: FakeProviderBehavior) -> Harness {
     let dir = tempfile::tempdir().expect("a tempdir for the registry db");
     let store = Arc::new(
-        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON)
-            .await
-            .expect("open the registry store"),
+        ModelRegistryStore::open(
+            &dir.path().join("models.db"),
+            THIS_DAEMON,
+            &dir.path().join("agents"),
+        )
+        .await
+        .expect("open the registry store"),
     );
     let loaded = Arc::new(Mutex::new(Vec::new()));
     let unloaded = Arc::new(Mutex::new(Vec::new()));
@@ -556,41 +560,6 @@ async fn marks_the_worktree_changing_tools_as_mutating_in_the_assignable_catalog
 // ---------------------------------------------------------------------------
 // An assistant is a selectable agent (AC9)
 // ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn refuses_an_assistant_named_after_a_builtin_agent() {
-    // Given
-    let harness = a_service_with(FakeProviderBehavior {
-        models: vec![a_model("prov-1", "qwen3:32b", &["llm"])],
-        ..Default::default()
-    })
-    .await;
-    let provider = harness
-        .store
-        .create_provider(an_ollama_provider(), THE_OPERATOR)
-        .await
-        .expect("create the provider");
-
-    // When — `fastcontext` is a builtin def, so the name is already taken
-    let result = harness
-        .service
-        .create_assistant(Request::new(CreateAssistantRequest {
-            session_token: VALID_TOKEN.to_string(),
-            name: "fastcontext".to_string(),
-            label: "Fast Context".to_string(),
-            provider_id: provider.provider_id.clone(),
-            model_id: "qwen3:32b".to_string(),
-            system_prompt: String::new(),
-            tools: vec!["Read".to_string()],
-        }))
-        .await;
-
-    // Then — an invalid *name*, not a duplicate row: there is no assistant to delete to free it
-    assert_eq!(
-        result.expect_err("expected the name to be refused").code(),
-        Code::InvalidArgument
-    );
-}
 
 #[tokio::test]
 async fn lists_a_created_assistant_among_the_daemons_selectable_agents() {

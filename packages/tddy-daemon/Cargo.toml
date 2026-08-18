@@ -62,6 +62,11 @@ tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
+# The mirror algorithm an agent clone runs in-process (docs/ft/daemon/session-worktree-sync.md).
+# The same crate the standalone `tddy-session-sync` client is built from, used as a library: a
+# second implementation of "restore from the WIP ref, apply a delta, notice a divergence" would be
+# two mirrors that disagree, and the disagreement is silent.
+tddy-session-sync = { path = "../tddy-session-sync" }
 tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
 tddy-pty = { path = "../tddy-pty" }

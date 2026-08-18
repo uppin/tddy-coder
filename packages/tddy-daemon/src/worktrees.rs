@@ -897,14 +897,22 @@ pub fn remove_worktree_under_repo(
         .to_str()
         .ok_or_else(|| RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string()))?;
 
-    let status = Command::new("git")
+    // `output()` rather than `status()`: git explains its refusals on stderr — "contains modified or
+    // untracked files" is the usual one — and a `status()` child inherits the daemon's own stderr,
+    // which puts that message somewhere nothing collects it and, under the TUI, straight through the
+    // display. Captured, it becomes the reason the caller's error carries.
+    let out = Command::new("git")
         .current_dir(repo_root)
         .args(["worktree", "remove", wt_str])
-        .status()
+        .output()
         .map_err(|e| RemoveWorktreeError::Io(e.to_string()))?;
 
-    if !status.success() {
-        let msg = format!("git worktree remove failed: {:?}", status);
+    if !out.status.success() {
+        let msg = format!(
+            "git worktree remove failed ({:?}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        );
         warn!("remove_worktree_under_repo: {}", msg);
         return Err(RemoveWorktreeError::GitFailed { message: msg });
     }

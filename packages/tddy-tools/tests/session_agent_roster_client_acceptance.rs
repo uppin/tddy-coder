@@ -1,0 +1,558 @@
+//! Acceptance tests: the in-jail registry follows the session's live roster.
+//!
+//! Feature: docs/ft/daemon/session-agent-roster.md (AC13-AC18, AC20)
+//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
+//!
+//! `tddy-tools --mcp` used to build its `SubagentRegistry` from `TDDY_SUBAGENTS_JSON` — an env var
+//! fixed when the jail was spawned. An agent attached at minute forty was therefore uncallable
+//! until the session restarted, and one detached was still callable forever. The registry now
+//! follows `StreamSessionAgents`, and the env var is only the seed that covers the window before
+//! the first frame arrives.
+//!
+//! Frames are pushed directly rather than served over a socket. The transport is already covered
+//! where it is implemented; what is wrong-able *here* is what the registry does with a frame, and
+//! a real stream would only make that non-deterministic.
+
+use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+use tddy_service::proto::connection::{SessionAgentEntry, SessionAgentRoster};
+use tddy_tools::session_agents::{ConversationState, LiveAgentRoster, RosterError};
+
+// ---------------------------------------------------------------------------
+// Builders
+// ---------------------------------------------------------------------------
+
+/// A roster entry as the daemon publishes it.
+fn an_entry(agent_id: &str) -> SessionAgentEntry {
+    let (name, daemon) = agent_id
+        .split_once('@')
+        .expect("builder was given a qualified agent id");
+    SessionAgentEntry {
+        agent_id: agent_id.to_string(),
+        name: name.to_string(),
+        daemon_instance_id: daemon.to_string(),
+        label: format!("{name} (local)"),
+        model: "qwen2.5-coder:7b".to_string(),
+        replaces: Vec::new(),
+        tools: vec!["Read".to_string(), "Glob".to_string(), "Grep".to_string()],
+        codebase_session_id: String::new(),
+        clone_state: 1, // AGENT_CLONE_STATE_LOCAL
+        clone_error: String::new(),
+    }
+}
+
+fn an_entry_replacing(agent_id: &str, replaces: &[&str]) -> SessionAgentEntry {
+    SessionAgentEntry {
+        replaces: replaces.iter().map(|r| r.to_string()).collect(),
+        ..an_entry(agent_id)
+    }
+}
+
+/// A published roster at revision `rev`.
+fn a_roster(rev: u64, agents: Vec<SessionAgentEntry>) -> SessionAgentRoster {
+    SessionAgentRoster {
+        session_id: "1780828020298-roster".to_string(),
+        rev,
+        agents,
+    }
+}
+
+/// The seed the jail is spawned with — one def, as `TDDY_SUBAGENTS_JSON` carries it.
+fn a_seed_def(name: &str) -> SpecializedAgentDef {
+    SpecializedAgentDef {
+        name: name.to_string(),
+        label: None,
+        model: "qwen2.5-coder:7b".to_string(),
+        base_url: "http://localhost:11434".to_string(),
+        api_key: None,
+        system_prompt: None,
+        system_prompt_path: None,
+        tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
+        max_turns: 10,
+        replaces: Vec::new(),
+    }
+}
+
+/// A registry seeded from the spawn env, with no frame applied yet.
+fn a_seeded_registry(seed: &[&str]) -> LiveAgentRoster {
+    LiveAgentRoster::seeded_from(
+        "1780828020298-roster",
+        seed.iter().map(|n| a_seed_def(n)).collect(),
+        "ws-01",
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Assertions
+// ---------------------------------------------------------------------------
+
+fn assert_refused_naming(result: Result<impl std::fmt::Debug, RosterError>, fragment: &str) {
+    let error = result.expect_err("the call must be refused");
+    assert!(
+        error.to_string().contains(fragment),
+        "refusal must name '{fragment}', was: {error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC13 — the seed is only a seed
+// ---------------------------------------------------------------------------
+
+/// The first frame replaces the seed wholesale rather than merging with it. A merge would keep a
+/// seeded agent alive after the daemon stopped listing it, which is the same silent disagreement
+/// the frozen env var caused.
+#[test]
+fn replaces_the_seeded_registry_with_the_first_roster_it_receives() {
+    // Given — spawned with `explorer` in TDDY_SUBAGENTS_JSON
+    let registry = a_seeded_registry(&["explorer"]);
+    registry
+        .resolve(Some("explorer@ws-01"))
+        .expect("the seed must be usable before the first frame");
+
+    // When — the daemon's first frame lists a different agent
+    registry.apply_snapshot(a_roster(2, vec![an_entry("linter@ws-01")]));
+
+    // Then
+    registry
+        .resolve(Some("linter@ws-01"))
+        .expect("the frame's agent must be resolvable");
+    assert_refused_naming(registry.resolve(Some("explorer@ws-01")), "explorer@ws-01");
+}
+
+/// A frame older than the one already applied is ignored. Frames are whole snapshots, so applying
+/// a stale one would move the registry backwards — and reordering is exactly what a reconnect can
+/// produce.
+#[test]
+fn ignores_a_roster_frame_older_than_the_one_already_applied() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(5, vec![an_entry("linter@ws-01")]));
+
+    // When
+    registry.apply_snapshot(a_roster(3, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    registry
+        .resolve(Some("linter@ws-01"))
+        .expect("the newer frame must still be in force");
+    assert_refused_naming(registry.resolve(Some("explorer@ws-01")), "explorer@ws-01");
+}
+
+// ---------------------------------------------------------------------------
+// AC14-AC15 — attach and detach take effect in-process
+// ---------------------------------------------------------------------------
+
+/// The headline of live attach: an agent added while the jail is running becomes callable without
+/// the process restarting.
+#[test]
+fn opens_a_conversation_with_an_agent_attached_after_it_started() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When
+    registry.apply_snapshot(a_roster(
+        2,
+        vec![an_entry("explorer@ws-01"), an_entry("linter@ws-02")],
+    ));
+
+    // Then
+    let conversation = registry
+        .open_conversation("linter@ws-02")
+        .expect("an agent attached after startup must be callable");
+    assert_eq!(
+        registry.conversation_state(&conversation),
+        ConversationState::Open
+    );
+}
+
+/// The other half: a detached agent stops being callable, and the refusal names the id so the main
+/// agent's next turn can say what happened rather than retrying forever.
+#[test]
+fn refuses_an_agent_that_was_detached_and_names_the_id() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry("explorer@ws-01"), an_entry("linter@ws-02")],
+    ));
+
+    // When
+    registry.apply_snapshot(a_roster(2, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert_refused_naming(registry.resolve(Some("linter@ws-02")), "linter@ws-02");
+}
+
+/// A conversation already open with a detached agent is cancelled, not left hanging. An in-flight
+/// `subagent_prompt` that never returns is worse than one that errors: the main agent waits on it.
+#[test]
+fn cancels_a_conversation_whose_agent_was_detached_underneath_it() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("linter@ws-02")]));
+    let conversation = registry
+        .open_conversation("linter@ws-02")
+        .expect("open a conversation");
+
+    // When
+    registry.apply_snapshot(a_roster(2, vec![]));
+
+    // Then
+    assert_eq!(
+        registry.conversation_state(&conversation),
+        ConversationState::Cancelled {
+            reason: "agent linter@ws-02 was detached from this session".to_string()
+        }
+    );
+}
+
+/// A conversation with an agent that stayed attached is untouched by someone else's detach.
+#[test]
+fn leaves_a_conversation_open_when_a_different_agent_is_detached() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry("explorer@ws-01"), an_entry("linter@ws-02")],
+    ));
+    let conversation = registry
+        .open_conversation("explorer@ws-01")
+        .expect("open a conversation");
+
+    // When
+    registry.apply_snapshot(a_roster(2, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert_eq!(
+        registry.conversation_state(&conversation),
+        ConversationState::Open
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC16 — the main agent is told its tools changed
+// ---------------------------------------------------------------------------
+
+/// Each applied revision produces exactly one MCP `notifications/tools/list_changed`. One per
+/// revision, not one per entry: the main agent re-lists once and sees the whole new set.
+#[test]
+fn announces_exactly_one_tool_list_change_per_roster_revision() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+
+    // When
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+    registry.apply_snapshot(a_roster(
+        2,
+        vec![an_entry("explorer@ws-01"), an_entry("linter@ws-02")],
+    ));
+
+    // Then
+    assert_eq!(registry.tool_list_change_count(), 2);
+}
+
+/// A frame that changes nothing announces nothing. The daemon does not publish a no-op revision,
+/// but a reconnect re-delivers the current snapshot — and that must not spam the main agent.
+#[test]
+fn announces_nothing_when_a_reconnect_redelivers_the_revision_already_applied() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert_eq!(registry.tool_list_change_count(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// AC17 — a registry that cannot be kept current refuses
+// ---------------------------------------------------------------------------
+
+/// Serving the last known roster after the stream dies is the failure this whole design exists to
+/// prevent: it answers for detached agents and refuses attached ones, silently. So it refuses
+/// instead, and says why.
+#[test]
+fn refuses_subagent_calls_when_it_cannot_keep_the_roster_current() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When
+    registry.mark_unavailable("roster stream closed after 3 reconnect attempts");
+
+    // Then
+    assert_refused_naming(
+        registry.resolve(Some("explorer@ws-01")),
+        "roster stream closed",
+    );
+}
+
+/// A registry that has never received a frame and cannot open the stream refuses too — it does not
+/// keep serving the spawn seed indefinitely.
+#[test]
+fn refuses_rather_than_serving_the_spawn_seed_forever() {
+    // Given
+    let registry = a_seeded_registry(&["explorer"]);
+
+    // When
+    registry.mark_unavailable("roster stream could not be opened");
+
+    // Then
+    assert_refused_naming(
+        registry.resolve(Some("explorer@ws-01")),
+        "roster stream could not be opened",
+    );
+}
+
+/// Recovering the stream recovers the registry — an unavailable roster is a state, not a
+/// terminal one, and a reconnect that succeeds must not leave the session permanently refusing.
+#[test]
+fn serves_again_once_the_roster_stream_recovers() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.mark_unavailable("roster stream closed");
+
+    // When
+    registry.apply_snapshot(a_roster(4, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    registry
+        .resolve(Some("explorer@ws-01"))
+        .expect("a recovered stream must restore service");
+}
+
+/// A frame whose revision is too old to apply still proves the stream is being served, so it
+/// restores service. Refusing while frames keep arriving is a stream that reads as healthy to the
+/// follower — which resets its failure count on every frame — and dead to every caller.
+#[test]
+fn serves_again_when_a_frame_arrives_that_is_too_old_to_apply() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(5, vec![an_entry("explorer@ws-01")]));
+    registry.mark_unavailable("roster stream closed after 3 reconnect attempts");
+
+    // When
+    registry.apply_snapshot(a_roster(3, vec![an_entry("linter@ws-02")]));
+
+    // Then
+    registry
+        .resolve(Some("explorer@ws-01"))
+        .expect("a frame proving the stream is served must restore service at the applied rev");
+}
+
+// ---------------------------------------------------------------------------
+// AC18 — there is no default agent
+// ---------------------------------------------------------------------------
+
+/// With an unbounded roster there is no defensible default. Picking the first entry would make the
+/// main agent's choice depend on attach order, which is not something it can see.
+#[test]
+fn refuses_a_conversation_that_names_no_agent_and_lists_the_ones_it_has() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry("explorer@ws-01"), an_entry("linter@ws-02")],
+    ));
+
+    // When
+    let result = registry.resolve(None);
+
+    // Then
+    let error = result.expect_err("a conversation naming no agent must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("explorer@ws-01") && message.contains("linter@ws-02"),
+        "the refusal must list the agents that are available, was: {message}"
+    );
+}
+
+/// An empty roster refuses the same way, and says the roster is empty rather than listing nothing
+/// and leaving the main agent to infer it.
+#[test]
+fn refuses_a_conversation_when_no_agent_is_attached_at_all() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![]));
+
+    // When
+    let result = registry.resolve(None);
+
+    // Then
+    assert_refused_naming(result, "no agents are attached");
+}
+
+// ---------------------------------------------------------------------------
+// AC13 — a seeded def runs only the agent it was seeded for
+// ---------------------------------------------------------------------------
+
+/// The seeded def is the material this process runs a local agent's turn loop from, and it stays
+/// available after a frame re-lists the same agent — a frame carries no endpoint or credential.
+#[test]
+fn runs_a_seeded_agent_from_the_def_it_was_spawned_with() {
+    // Given
+    let registry = a_seeded_registry(&["explorer"]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When
+    let entry = registry
+        .resolve(Some("explorer@ws-01"))
+        .expect("the seeded agent must still be listed");
+
+    // Then
+    let def = registry
+        .local_def_for(&entry)
+        .expect("a seeded agent's def must run its turn loop in-process");
+    assert_eq!(def.base_url, "http://localhost:11434");
+}
+
+/// An agent attached after spawn under a name a seeded def happens to share is a *different* agent.
+/// Answering it from the seed would run someone else's endpoint, model and credential under its id.
+#[test]
+fn has_no_local_def_for_an_agent_attached_after_spawn_under_a_seeded_name() {
+    // Given — seeded with `explorer` owned by ws-01
+    let registry = a_seeded_registry(&["explorer"]);
+
+    // When — a second daemon attaches its own agent, also called `explorer`
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-02")]));
+    let entry = registry
+        .resolve(Some("explorer@ws-02"))
+        .expect("the attached agent must be listed");
+
+    // Then
+    assert!(
+        registry.local_def_for(&entry).is_none(),
+        "an agent attached after spawn must not inherit a same-named seed's credential"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC20 — a replaced tool is refused at the call site
+// ---------------------------------------------------------------------------
+
+/// This is what makes live attach enforceable: `--allowedTools` was fixed at spawn, so an agent
+/// attached afterwards can only withdraw a tool by having the call refused where it is made.
+#[test]
+fn refuses_a_replaced_tool_and_names_the_agent_that_serves_it() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_replacing("explorer@ws-01", &["Grep"])],
+    ));
+
+    // When
+    let result = registry.check_tool_available("Grep");
+
+    // Then
+    let error = result.expect_err("a replaced tool must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains("explorer@ws-01"),
+        "the refusal must name the agent to address instead, was: {message}"
+    );
+}
+
+/// A tool nobody replaced is unaffected — the refusal is scoped to the roster's union, not to
+/// everything the roster's agents happen to bind.
+#[test]
+fn allows_a_tool_no_attached_agent_replaces() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_replacing("explorer@ws-01", &["Grep"])],
+    ));
+
+    // When / Then
+    registry
+        .check_tool_available("Read")
+        .expect("a tool no agent replaced must stay callable");
+}
+
+/// A roster that **was** current and then went stale keeps enforcing its withdrawal: those agents
+/// were real, and handing back access the operator withdrew is the worse of the two ways to be
+/// wrong.
+#[test]
+fn keeps_a_tool_withdrawn_when_a_roster_it_did_receive_goes_stale() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_replacing("explorer@ws-01", &["Grep"])],
+    ));
+
+    // When
+    registry.mark_unavailable("roster stream closed after 3 reconnect attempts");
+
+    // Then
+    assert_refused_naming(registry.check_tool_available("Grep"), "explorer@ws-01");
+}
+
+/// A withdrawal must never outlive the reachability of its replacement. When the stream gave up
+/// before delivering a single frame, every agent the seed names is refused — so enforcing the
+/// seed's `replaces` union would leave the session without `Grep` *and* without the agent that took
+/// it over, with no recovery short of a restart.
+#[test]
+fn stops_withdrawing_a_tool_when_no_roster_frame_ever_arrived() {
+    // Given — spawned with an agent that replaces Grep, and the stream never delivered a frame
+    let registry = LiveAgentRoster::seeded_from(
+        "1780828020298-roster",
+        vec![SpecializedAgentDef {
+            replaces: vec!["Grep".to_string()],
+            ..a_seed_def("explorer")
+        }],
+        "ws-01",
+    );
+
+    // When
+    registry.mark_unavailable("the roster stream has no client for this transport");
+
+    // Then
+    registry
+        .check_tool_available("Grep")
+        .expect("a withdrawal whose replacement can never be reached must not be enforced");
+}
+
+/// Before the stream has given up, the seed is a roster whose agents *are* addressable — so its
+/// withdrawals are enforced, which is what covers the window between spawn and the first frame.
+#[test]
+fn withdraws_a_tool_the_spawn_seed_replaces_while_the_seed_is_still_addressable() {
+    // Given
+    let registry = LiveAgentRoster::seeded_from(
+        "1780828020298-roster",
+        vec![SpecializedAgentDef {
+            replaces: vec!["Grep".to_string()],
+            ..a_seed_def("explorer")
+        }],
+        "ws-01",
+    );
+
+    // When / Then
+    assert_refused_naming(registry.check_tool_available("Grep"), "explorer@ws-01");
+}
+
+/// Detaching the agent restores the tool in the same process — no relaunch, which is the whole
+/// reason the refusal lives here rather than only in the spawn allowlist.
+#[test]
+fn allows_a_replaced_tool_again_once_its_agent_is_detached() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_replacing("explorer@ws-01", &["Grep"])],
+    ));
+    registry
+        .check_tool_available("Grep")
+        .expect_err("Grep must be withdrawn while the agent is attached");
+
+    // When
+    registry.apply_snapshot(a_roster(2, vec![]));
+
+    // Then
+    registry
+        .check_tool_available("Grep")
+        .expect("detaching the last replacing agent must restore the tool");
+}

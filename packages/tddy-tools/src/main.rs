@@ -156,8 +156,35 @@ async fn main() -> Result<()> {
 }
 
 async fn run_mcp_server() -> Result<()> {
+    // The spawn seed is parsed before anything is served, and an unparseable value fails the start.
+    // `SpecializedAgentDef` is `deny_unknown_fields`, so a `tddy-tools` older than the daemon that
+    // wrote `TDDY_SUBAGENTS_JSON` lands here — and serving on with an empty seed would hand the
+    // main agent back every tool the session's agents took over, with no line anywhere naming the
+    // cause. A security control that turns itself off on version skew is worse than one that
+    // refuses to start.
+    let seed = tddy_tools::server::subagents_from_env().map_err(|e| anyhow::anyhow!(e))?;
+    log::info!(
+        target: "tddy_tools::server",
+        "spawn seed carries {} specialized agent def(s)",
+        seed.len()
+    );
     let service = PermissionServer::new();
     let server = service.serve(rmcp::transport::stdio()).await?;
+    // Follow the session's agent roster for as long as this process serves MCP, telling the main
+    // agent to re-list its tools on every revision (docs/ft/daemon/session-agent-roster.md § The
+    // roster stream). Started after the handshake so the first notification has a peer to reach.
+    let peer = server.peer().clone();
+    tddy_tools::session_agents::follow_session_agent_roster(move || {
+        let peer = peer.clone();
+        tokio::spawn(async move {
+            if let Err(e) = peer.notify_tool_list_changed().await {
+                log::warn!(
+                    target: "tddy_tools::session_agents",
+                    "the roster changed but tools/list_changed could not be sent: {e}"
+                );
+            }
+        });
+    });
     server.waiting().await?;
     Ok(())
 }

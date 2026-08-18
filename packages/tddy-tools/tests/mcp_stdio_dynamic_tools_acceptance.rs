@@ -127,8 +127,14 @@ struct FakeToolExecService;
 #[async_trait]
 impl RpcService for FakeToolExecService {
     async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
-        assert_eq!(service, "connection.ConnectionService");
-        assert_eq!(method, "ExecuteTool");
+        // Anything but `ExecuteTool` is refused exactly as the runner refuses it — the socket now
+        // carries more than tool calls (`tddy-tools` also subscribes to the session's agent roster
+        // over it), and this fake stands in for the runner, not for the whole daemon.
+        if service != "connection.ConnectionService" || method != "ExecuteTool" {
+            return RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
+                "unknown {service}/{method}"
+            ))));
+        }
         let request = ExecuteToolRequest::decode(message.payload.as_ref())
             .expect("decode ExecuteToolRequest");
         let response = ExecuteToolResponse {
@@ -155,12 +161,22 @@ async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
     // same tddy-rpc-framed protocol the real ToolExecService hosts.
     let socket_path = tddy_sandbox::SandboxSpec::short_ipc_socket_path("mcpcallred");
     let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind fake tool ipc socket");
+    // Every connection, not one: the jail dispatches each tool call on a connection of its own and
+    // holds a separate one for the roster subscription, so a listener that accepted once would
+    // leave whichever came second waiting forever.
     let fake_ipc = tokio::spawn(async move {
-        let (stream, _addr) = listener.accept().await.expect("accept fake ipc connection");
-        let (read_half, write_half) = tokio::io::split(stream);
-        let (_client, endpoint) =
-            tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, FakeToolExecService);
-        endpoint.run().await;
+        loop {
+            let (stream, _addr) = listener.accept().await.expect("accept fake ipc connection");
+            tokio::spawn(async move {
+                let (read_half, write_half) = tokio::io::split(stream);
+                let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                    read_half,
+                    write_half,
+                    FakeToolExecService,
+                );
+                endpoint.run().await;
+            });
+        }
     });
 
     let mut child = spawn_mcp_server(&[(
@@ -184,10 +200,7 @@ async fn mcp_tools_call_over_stdio_forwards_dynamic_tool_through_sandbox_ipc() {
     .await;
     let response = read_json_line(&mut stdout).await;
     let _ = child.kill().await;
-    tokio::time::timeout(IO_TIMEOUT, fake_ipc)
-        .await
-        .expect("fake ipc listener task timed out")
-        .expect("fake ipc listener task panicked");
+    fake_ipc.abort();
 
     // Then
     assert!(

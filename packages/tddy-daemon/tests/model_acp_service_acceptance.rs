@@ -169,9 +169,13 @@ impl Harness {
 async fn a_daemon_serving(stub: RoutedStubHttpEndpoint) -> Harness {
     let dir = tempfile::tempdir().expect("a tempdir for the registry db");
     let store = Arc::new(
-        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON)
-            .await
-            .expect("open the registry store"),
+        ModelRegistryStore::open(
+            &dir.path().join("models.db"),
+            THIS_DAEMON,
+            &dir.path().join("agents"),
+        )
+        .await
+        .expect("open the registry store"),
     );
     store
         .create_provider(
@@ -796,9 +800,13 @@ async fn a_provider_that_accepts_the_connection_and_never_answers_fails_the_turn
     let hung = tddy_testing_commons::a_stub_http_endpoint_that_never_answers().await;
     let dir = tempfile::tempdir().expect("a tempdir for the registry db");
     let store = Arc::new(
-        ModelRegistryStore::open(&dir.path().join("models.db"), THIS_DAEMON)
-            .await
-            .expect("open the registry store"),
+        ModelRegistryStore::open(
+            &dir.path().join("models.db"),
+            THIS_DAEMON,
+            &dir.path().join("agents"),
+        )
+        .await
+        .expect("open the registry store"),
     );
     store
         .create_provider(

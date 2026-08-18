@@ -3,11 +3,12 @@
 //! Feature: docs/ft/coder/managed-codebase-subagents.md (criteria 1-3)
 //! Changeset: docs/dev/1-WIP/2026-07-01-changeset-managed-codebase-subagents.md
 //!
-//! A `SubagentSession` is a *stateful* conversation: unlike `FastContextBackend::invoke` (one-shot
-//! per `InvokeRequest`), `prompt()` can be called repeatedly against the same session and must see
-//! prior turns — this is what lets the main agent ping-pong codebase questions against one
-//! conversation id instead of re-explaining context on every call.
+//! A `SubagentSession` is a *stateful* conversation: unlike `SpecializedAgentBackend::invoke`
+//! (one-shot per `InvokeRequest`), `prompt()` can be called repeatedly against the same session
+//! and must see prior turns — this is what lets the main agent ping-pong codebase questions
+//! against one conversation id instead of re-explaining context on every call.
 
+use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::subagent::{CodebaseAccess, StopReason, SubagentConfig, SubagentRegistry};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -44,49 +45,37 @@ fn tool_call_response(tool_name: &str, args: serde_json::Value) -> serde_json::V
     })
 }
 
-fn a_local_config(base_url: &str) -> SubagentConfig {
-    SubagentConfig {
+/// An agent def pointing at `base_url`, with the turn budget the scenario needs. A def is the
+/// only source of a session's endpoint, model and budget.
+fn a_def(base_url: &str, max_turns: u32) -> SpecializedAgentDef {
+    SpecializedAgentDef {
+        name: "explorer".to_string(),
+        label: None,
+        model: "qwen2.5-coder:7b".to_string(),
         base_url: base_url.to_string(),
         api_key: None,
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
-        max_turns: 6,
+        system_prompt: None,
+        system_prompt_path: None,
+        tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
+        max_turns,
+        replaces: Vec::new(),
+    }
+}
+
+fn a_local_config() -> SubagentConfig {
+    SubagentConfig {
         access: CodebaseAccess::Local,
     }
 }
 
 // ─── SubagentRegistry ──────────────────────────────────────────────────────────
 
-/// `SubagentRegistry` resolves the built-in `"fastcontext"` name to a working session.
-#[tokio::test]
-async fn subagent_registry_creates_a_fastcontext_session_for_the_registered_name() {
-    // Given
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/chat/completions"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(final_answer_response("src/lib.rs:1-1")),
-        )
-        .mount(&server)
-        .await;
-    let registry = SubagentRegistry::new();
-
-    // When
-    let session = registry.create("fastcontext", a_local_config(&server.uri()));
-
-    // Then
-    assert!(
-        session.is_ok(),
-        "registry must resolve the built-in 'fastcontext' name; got: {:?}",
-        session.err()
-    );
-}
-
-/// An unregistered subagent name is a typed error, not a panic or a silent default backend.
+/// A name no def defines is a typed error, not a panic or a silent default backend.
 #[tokio::test]
 async fn subagent_registry_returns_an_error_for_an_unknown_subagent_name() {
     // Given
-    let registry = SubagentRegistry::new();
-    let config = a_local_config("http://127.0.0.1:1");
+    let registry = SubagentRegistry::from_defs(vec![a_def("http://127.0.0.1:1", 6)]);
+    let config = a_local_config();
 
     // When
     let result = registry.create("not-a-real-subagent", config);
@@ -103,13 +92,13 @@ async fn subagent_registry_returns_an_error_for_an_unknown_subagent_name() {
     );
 }
 
-// ─── FastContextSession: statefulness + stop reasons ──────────────────────────
+// ─── statefulness + stop reasons ──────────────────────────────────────────────
 
 /// A second `prompt()` call on the same session must include the first call's user message and
 /// the model's first answer in the request sent to the model — proving the conversation is
 /// retained across calls rather than reset each time.
 #[tokio::test]
-async fn fast_context_session_retains_history_across_two_prompts() {
+async fn a_session_retains_history_across_two_prompts() {
     // Given — every request gets an immediate final answer
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -119,10 +108,10 @@ async fn fast_context_session_retains_history_across_two_prompts() {
         )
         .mount(&server)
         .await;
-    let registry = SubagentRegistry::new();
+    let registry = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 6)]);
     let mut session = registry
-        .create("fastcontext", a_local_config(&server.uri()))
-        .expect("fastcontext must be registered");
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     session
@@ -160,7 +149,7 @@ async fn fast_context_session_retains_history_across_two_prompts() {
 /// When the model produces a `<final_answer>`, `prompt()` yields with `StopReason::EndTurn` and
 /// the citations as the response content.
 #[tokio::test]
-async fn fast_context_session_prompt_returns_end_turn_when_final_answer_is_produced() {
+async fn prompt_returns_end_turn_when_final_answer_is_produced() {
     // Given
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -170,10 +159,10 @@ async fn fast_context_session_prompt_returns_end_turn_when_final_answer_is_produ
         )
         .mount(&server)
         .await;
-    let registry = SubagentRegistry::new();
+    let registry = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 6)]);
     let mut session = registry
-        .create("fastcontext", a_local_config(&server.uri()))
-        .expect("fastcontext must be registered");
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     let outcome = session
@@ -194,7 +183,7 @@ async fn fast_context_session_prompt_returns_end_turn_when_final_answer_is_produ
 /// When the per-prompt turn budget is exhausted with no `<final_answer>`, `prompt()` yields with
 /// `StopReason::MaxTurnRequests` instead of looping forever or panicking.
 #[tokio::test]
-async fn fast_context_session_prompt_returns_max_turn_requests_when_turn_budget_is_exhausted() {
+async fn prompt_returns_max_turn_requests_when_the_turn_budget_is_exhausted() {
     // Given — the model always returns a tool call, never a final answer
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -205,12 +194,10 @@ async fn fast_context_session_prompt_returns_max_turn_requests_when_turn_budget_
         )))
         .mount(&server)
         .await;
-    let registry = SubagentRegistry::new();
-    let mut config = a_local_config(&server.uri());
-    config.max_turns = 3;
+    let registry = SubagentRegistry::from_defs(vec![a_def(&server.uri(), 3)]);
     let mut session = registry
-        .create("fastcontext", config)
-        .expect("fastcontext must be registered");
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     let outcome = session

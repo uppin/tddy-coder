@@ -2,6 +2,37 @@
 
 ## Known failing tests
 
+### `restores_a_clone_that_diverged_and_says_so` is suite-order sensitive (source: session-agent-roster changeset, 2026-08-17)
+
+- `packages/tddy-daemon/tests/session_agent_remote_acceptance.rs` — passes **3/3 in isolation**
+  (`-- --test-threads=1 restores_a_clone_that_diverged`, ~6 s each) and passes in most full-suite
+  runs, but failed once in a full `--test-threads=1` run against a shared testkit
+  (`LIVEKIT_TESTKIT_WS_URL`), where every Docker port flake is already eliminated. So it is neither
+  the port flake nor a hard regression — it is timing-sensitive within the suite.
+- It asserts the reconcile path: corrupt the clone by hand, move the session, and expect the mirror
+  to restore the clone **and record a divergence**. The likely sensitivity is the window between
+  `mirror.apply` writing and `restore()`'s divergence check, which
+  `session_agent_clone.rs` now gates on `mirror.marker().last_seq == restored_at_seq` (the fix for
+  a *false* divergence on every ordinary edit). Under suite load the ordering that makes the
+  hand-corruption observable can be missed.
+- Worth fixing properly rather than retrying: the test should drive the corruption against a
+  signal the fixture controls (hold the mirror, corrupt, release) instead of racing a poll tick.
+
+### ~~`provisions_the_project_on_a_daemon_that_has_never_seen_it` — AC37 is not implemented~~ — resolved 2026-08-18 (source: session-agent-roster changeset, 2026-08-17)
+
+- AC37 is now implemented. The facilitating daemon serves `remote_git.RemoteGitService` on its
+  common-room `daemon-{A}` participant; the owning daemon clones with
+  `git clone {facilitating_instance_id}:{project_id}` using
+  `GIT_SSH_COMMAND=tddy-remote-git-repo --daemon-url {facilitating_url} --session-token {token}`,
+  the same transport `tddy-session-sync` uses. `provision_agent_clone` forwards the facilitating
+  URL in `AgentClonePlacement.facilitating_daemon_url`; `start_hosted_agent_clone` sets it only
+  for facilitator clones (shared-filesystem clones keep reading the local project repo). The
+  acceptance test `provisions_the_project_on_a_daemon_that_has_never_seen_it` passes
+  deterministically as part of the 20/20 `session_agent_remote_acceptance` suite.
+- The same work closes the second gap it named: a clone's mirror fetches the WIP ref over the
+  same `tddy-remote-git-repo` transport, so cross-host commit-following works without the two
+  daemons already sharing the repository.
+
 ### ~~`session_action_wait_times_out_while_running` is load-sensitive~~ — resolved 2026-08-14 (found 2026-08-13, pre-existing — not caused by the deterministic-test-suite changeset)
 
 - `packages/tddy-tools/tests/session_action_jobs_acceptance.rs` — after the bounded wait timed out as
@@ -200,6 +231,86 @@ its own failure message, none from that branch. New entries beyond the list abov
   from the uploaded artifact. The bake path already writes `<name>-boot.log`; this one does not.
 
 ## Future Enhancements
+
+### Session agent roster — the sandbox bridge, and other deliberate gaps (source: session-agent-roster changeset, 2026-08-17)
+
+- **⛔ BLOCKER — `subagent_*` is refused inside a managed jail, so the feature does not work in a
+  sandboxed session.** `tddy-tools` follows the session's roster over `StreamSessionAgents`, but
+  `tddy_sandbox_runner::ToolExecService` (`packages/tddy-sandbox-runner/src/runner.rs:56`) answers
+  `not_found` to every `service/method` pair except `connection.ConnectionService/ExecuteTool`. The
+  follower therefore retries three times and calls `mark_unavailable`, and — correctly, per the
+  PRD's no-fallback rule — every `subagent_new_session` / `subagent_prompt` / `subagent_cancel` in
+  that session then refuses with "cannot keep the roster current". Serving the stale seed instead
+  was rejected deliberately: a frozen registry answers for detached agents and refuses attached
+  ones, silently. Live attach consequently works from the web and the daemon, but not from inside a
+  jailed agent, which is the primary deployment mode.
+  ~~**The session does not merely fail to gain agents — it loses capability it had.**~~ **Closed**
+  for the capability half: `LiveAgentRoster` now distinguishes a roster that *was* current and went
+  stale (`RosterCurrency::Stale` — still enforces its `replaces` union, because those agents were
+  real) from one that never received a frame and whose stream gave up (`RosterCurrency::Unreachable`
+  — enforces nothing, because the replacement is unreachable too). A sandboxed session therefore
+  keeps `Grep`/`Glob` at the call site instead of losing search entirely. The withdrawal is still
+  applied at spawn through the allowlist/disallowlist, and `subagent_*` still refuses, so the
+  blocker above stands. Original note follows.
+  `LiveAgentRoster::check_tool_available` kept enforcing the last-known roster's `replaces` union
+  while the roster was `Unavailable`, and in a sandboxed session it is *permanently* unavailable. So
+  a managed session started with an agent declaring `replaces: [Grep, Glob]` lost `Grep`/`Glob` at
+  spawn (allowlist + disallowlist), had them refused again at call time, and ~45 s later had every
+  `subagent_*` call refused too: no search capability at all, and no recovery short of restarting
+  the session.
+  Three concrete blockers, and together they are a change to the channel's contract rather than
+  four more match arms:
+  1. `SandboxSessionRelay` holds a **single** `awaiting_tool` slot popped positionally, so a
+     lifetime-long `StreamSessionAgents` would occupy the channel forever and block every tool
+     call. Multiplexing needs a request id on `SessionFrame` and an in-flight map on both sides.
+  2. `SessionFrame` carries one typed message per call, not a
+     `{request_id, service, method, payload}` + `end_of_stream` envelope.
+  3. The host side dispatches to `HostToolHandler::execute(session_id, tool_name, args_json)`,
+     which deliberately does not carry the daemon's `ConnectionServiceImpl` — the conversation RPCs
+     need it.
+  The daemon half is already in place: `TDDY_DAEMON_INSTANCE_ID` is exported into all three sandbox
+  spawn paths so a seeded agent id can be qualified once the bridge exists.
+- **The sandbox runner re-derives the replaced-tool set from the spawn seed, not from the roster.**
+  `runner.rs` reads `TDDY_SUBAGENTS_JSON` and feeds `append_claude_mcp_args`, while the daemon's
+  `roster_replacement_pairs` and the context appendix it feeds use the roster's snapshot of
+  `replaces`. For
+  an unedited def the two agree. They diverge exactly in the case the snapshot-at-attach design
+  exists to prevent: a YAML def whose `replaces` is edited between attach and relaunch. Closing it
+  means the daemon handing the runner the roster's replaced set outright, which changes the runner's
+  env contract — and `tddy-sandbox-app`, which has no daemon, must keep deriving from the seed.
+- **Detach cancels no conversation, local or remote.** `cancel_conversations_with`
+  (`connection_service.rs:3988`) `retain`s the `Remote` routing record out of the *local* map and
+  never sends `CancelAgentConversation` to the owning daemon, so the peer's session keeps running
+  and stays registered in its own `agent_conversations` forever; an in-flight forwarded
+  `PromptAgentConversation` is not aborted, and the caller can still receive a completed answer for
+  an agent that is no longer attached. A local conversation records no agent id at all, so it is not
+  even matched. AC15 is therefore unmet on both paths. The code comment at that site claims the
+  remote path works — it does not.
+- **Conversation RPCs ride the common room, not the session room.** The PRD says the owning daemon
+  serves its agent surface in `session-{id}`; it does join and mirror there, but A→B conversation
+  forwarding uses the common-room peer path. Serving a second RPC surface on the session-room
+  connection needs `LiveKitParticipant` to expose its room as a shared handle so one connection can
+  both serve and subscribe — it does not, and a second connection under the same identity is one
+  LiveKit disconnects.
+- ~~**No room-admission handshake exists.**~~ **Closed 2026-08-18.** The handshake is built:
+  `SessionAdmissionRegistry` records admitted owning daemons per session; `provision_agent_clone`
+  mints a scoped 5-min token and forwards it in `AgentClonePlacement.first_admission_*`;
+  `SessionAdmissionService.AdmitOwningDaemon` (served on A's common-room participant) refreshes
+  it; `run_clone_mirror` runs a re-admit loop (full-rejoin) on room disconnect; revocation is
+  wired in `tear_down_agent_clone` (last detach) and `delete_session`
+  (`revoke_all_for_session`). The PRD § "What attach does" step 3 has been rewritten to match.
+- **A hosted clone's exec-tool path authenticates by the clone link, not a user token.** Documented
+  at `run_hosted_clone_tool`. A session-scoped tool token (audience = this session, exec-tool
+  methods only) is the intended fix and is the same open item
+  [remote-managed-worktree.md § Trust model](../ft/daemon/remote-managed-worktree.md) already
+  records for split sessions. Note this is *separate* from the missing authentication on that path,
+  which is a defect being fixed rather than accepted debt.
+- **`docs/ft/coder/specialized-subagents.md` contradicts the code in five criteria.** Its criteria
+  2, 3, 10, 13 and 14 still describe `builtin_fastcontext_def()`, the back-compat
+  `TDDY_SUBAGENT=fastcontext` path, `FastContextBackend` and a clap allowlist — none of which exist
+  after this branch. It is superseded by
+  [session-agent-roster.md](../ft/daemon/session-agent-roster.md) and needs either a rewrite or an
+  explicit "superseded by" banner.
 
 ### Session worktree sync — deliberate gaps (source: session-worktree-sync changeset, 2026-08-15)
 

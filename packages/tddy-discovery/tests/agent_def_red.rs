@@ -8,9 +8,7 @@
 //! `tddy-sandbox-app` CLI, and the `tddy-coder` workflow backend — see the crate doc comment on
 //! `agent_def.rs`.
 
-use tddy_discovery::agent_def::{
-    builtin_fastcontext_def, load_agent_defs, resolve_agent_defs, SpecializedAgentDef,
-};
+use tddy_discovery::agent_def::{load_agent_defs, SpecializedAgentDef};
 
 fn write_yaml(dir: &std::path::Path, filename: &str, contents: &str) {
     std::fs::write(dir.join(filename), contents).expect("write fixture YAML file");
@@ -30,7 +28,7 @@ fn load_agent_defs_parses_every_yaml_file_in_the_directory() {
     write_yaml(
         dir.path(),
         "reviewer.yaml",
-        "name: my-reviewer\nmodel: qwen2.5-coder:14b\n",
+        "name: my-reviewer\nmodel: qwen2.5-coder:14b\nbase_url: http://localhost:11434\n",
     );
 
     // When
@@ -57,13 +55,13 @@ fn load_agent_defs_skips_a_malformed_file_and_still_loads_the_rest() {
     write_yaml(
         dir.path(),
         "good.yaml",
-        "name: good-agent\nmodel: qwen2.5-coder:7b\n",
+        "name: good-agent\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
     );
     write_yaml(dir.path(), "broken.yaml", "not: [valid: yaml: at all");
     write_yaml(
         dir.path(),
         "bad-tool.yaml",
-        "name: bad-tool-agent\nmodel: qwen2.5-coder:7b\ntools: [READ, NOT_A_REAL_TOOL]\n",
+        "name: bad-tool-agent\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\ntools: [READ, NOT_A_REAL_TOOL]\n",
     );
 
     // When
@@ -77,41 +75,6 @@ fn load_agent_defs_skips_a_malformed_file_and_still_loads_the_rest() {
     );
 }
 
-/// `builtin_fastcontext_def` matches today's shipped defaults exactly (see
-/// `packages/tddy-discovery/src/backend.rs`, `packages/tddy-coder/src/run.rs::create_backend`) —
-/// zero-config behavior must be unchanged by this generalization.
-#[test]
-fn builtin_fastcontext_def_matches_todays_shipped_defaults() {
-    // When
-    let def = builtin_fastcontext_def();
-
-    // Then
-    assert_eq!(def.name, "fastcontext");
-    assert_eq!(def.model, "microsoft/FastContext-1.0-4B-RL");
-    assert_eq!(def.base_url, "http://localhost:30000");
-    assert_eq!(def.max_turns, 10);
-    assert_eq!(
-        def.tools,
-        vec![
-            tddy_discovery::agent_def::SubagentTool::Read,
-            tddy_discovery::agent_def::SubagentTool::Glob,
-            tddy_discovery::agent_def::SubagentTool::Grep,
-        ]
-    );
-}
-
-/// The builtin `fastcontext` def declares `Grep`/`Glob` as tools it replaces on the main agent —
-/// this is the single source of truth `subagent_replaced_tools("fastcontext")` derives from (see
-/// docs/ft/coder/managed-codebase-subagents.md § Tool replacement, AC19).
-#[test]
-fn builtin_fastcontext_def_declares_grep_and_glob_in_replaces() {
-    // When
-    let def = builtin_fastcontext_def();
-
-    // Then
-    assert_eq!(def.replaces, vec!["Grep".to_string(), "Glob".to_string()]);
-}
-
 /// A YAML def without a `replaces:` key deserializes to an empty list — absent means "replaces
 /// nothing", not a parse error.
 #[test]
@@ -121,7 +84,7 @@ fn agent_def_replaces_field_defaults_to_empty_when_absent() {
     write_yaml(
         dir.path(),
         "my-explorer.yaml",
-        "name: my-explorer\nmodel: qwen2.5-coder:7b\n",
+        "name: my-explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
     );
 
     // When
@@ -132,49 +95,52 @@ fn agent_def_replaces_field_defaults_to_empty_when_absent() {
     assert_eq!(defs[0].replaces, Vec::<String>::new());
 }
 
-/// A user-defined `<tddyhome>/agents/fastcontext.yaml` (or any def named `fastcontext`) overrides
-/// the builtin def of the same name — user config always wins over the shipped default.
+/// A def that omits `base_url` names no endpoint, and nothing supplies one for it: it fails to
+/// load, saying which field is missing. A default here would be one host's port living on in every
+/// operator's def, so an agent would resolve and then talk to whatever happened to answer there.
 #[test]
-fn a_user_defined_fastcontext_def_overrides_the_builtin_def_of_the_same_name() {
-    // Given — a user def that reuses the "fastcontext" name with a different model/base_url
-    let dir = tempfile::tempdir().expect("tempdir");
-    write_yaml(
-        dir.path(),
-        "fastcontext.yaml",
-        "name: fastcontext\nmodel: hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M\nbase_url: http://localhost:11434\n",
-    );
+fn a_def_that_names_no_endpoint_fails_to_load_rather_than_getting_a_default_one() {
+    // Given
+    let yaml = "name: my-explorer\nmodel: qwen2.5-coder:7b\n";
 
     // When
-    let defs = resolve_agent_defs(dir.path());
+    let result: Result<SpecializedAgentDef, _> = serde_yaml::from_str(yaml);
 
-    // Then — exactly one "fastcontext" entry, carrying the user's override values
-    let fastcontext_defs: Vec<_> = defs.iter().filter(|d| d.name == "fastcontext").collect();
-    assert_eq!(
-        fastcontext_defs.len(),
-        1,
-        "the user override must replace the builtin, not sit alongside it; got: {defs:?}"
-    );
-    assert_eq!(
-        fastcontext_defs[0].model,
-        "hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M",
-        "the resolved fastcontext def must carry the user's overridden model, not the builtin default"
+    // Then
+    let error = result
+        .expect_err("a def with no base_url must not deserialize")
+        .to_string();
+    assert!(
+        error.contains("base_url"),
+        "the failure must name the missing field; got: {error}"
     );
 }
 
-/// With no `<tddyhome>/agents` overrides at all, `resolve_agent_defs` still surfaces the builtin
-/// `fastcontext` def — a fresh install with an empty (or absent) agents directory keeps working.
+/// The same at directory-load level: the endpoint-less def is dropped (the log names its file),
+/// and the rest of the directory still loads. Nothing is loaded pointing at a substituted endpoint.
 #[test]
-fn resolve_agent_defs_includes_the_builtin_fastcontext_def_when_the_directory_is_empty() {
+fn load_agent_defs_drops_a_def_that_names_no_endpoint() {
     // Given
     let dir = tempfile::tempdir().expect("tempdir");
+    write_yaml(
+        dir.path(),
+        "endpointless.yaml",
+        "name: endpointless\nmodel: qwen2.5-coder:7b\n",
+    );
+    write_yaml(
+        dir.path(),
+        "explorer.yaml",
+        "name: my-explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
+    );
 
     // When
-    let defs = resolve_agent_defs(dir.path());
+    let defs = load_agent_defs(dir.path());
 
     // Then
-    assert!(
-        defs.iter().any(|d| d.name == "fastcontext"),
-        "resolve_agent_defs must always include the builtin fastcontext def; got: {defs:?}"
+    assert_eq!(
+        defs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+        vec!["my-explorer"],
+        "a def naming no endpoint must not load at all; got: {defs:?}"
     );
 }
 
@@ -209,7 +175,8 @@ fn load_agent_defs_returns_empty_for_a_directory_that_does_not_exist() {
 #[test]
 fn specialized_agent_def_yaml_rejects_an_unrecognized_tool_name() {
     // Given
-    let yaml = "name: bad-tool-agent\nmodel: qwen2.5-coder:7b\ntools: [READ, NOT_A_REAL_TOOL]\n";
+    let yaml = "name: bad-tool-agent\nmodel: qwen2.5-coder:7b\n\
+                base_url: http://localhost:11434\ntools: [READ, NOT_A_REAL_TOOL]\n";
 
     // When
     let result: Result<SpecializedAgentDef, _> = serde_yaml::from_str(yaml);

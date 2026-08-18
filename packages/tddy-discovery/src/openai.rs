@@ -1,4 +1,4 @@
-//! OpenAI `/v1/chat/completions` client for the FastContext multi-turn loop.
+//! OpenAI `/v1/chat/completions` client for the multi-turn subagent loops.
 
 use serde::{Deserialize, Serialize};
 
@@ -114,10 +114,10 @@ pub struct ToolFunctionDef {
 }
 
 /// The READ/GLOB/GREP tool schemas sent to the model on every turn — shared by
-/// `FastContextBackend::invoke` (one-shot) and `FastContextSession` (stateful), the two turn
-/// loops that both talk to a FastContext-compatible endpoint. Deliberately read-only: the
-/// mutation tools live in [`mutation_tool_definitions`] so the always-unfiltered FastContext
-/// loops can never advertise them.
+/// `SpecializedAgentBackend::invoke` (one-shot) and `SpecializedSubagentSession` (stateful), the
+/// two turn loops that talk to an OpenAI-compatible endpoint. Deliberately read-only: the
+/// mutation tools live in [`mutation_tool_definitions`] so a loop that advertises this whole set
+/// unfiltered can never advertise them.
 pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -179,7 +179,7 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
 /// The WRITE/STR_REPLACE/DELETE tool schemas a coder-role subagent binds explicitly via its
 /// def's `tools:` list (see `SubagentTool`). Kept out of [`discovery_tool_definitions`] on
 /// purpose: only `SpecializedSubagentSession` — which filters by bound tools — ever sees these,
-/// so the unfiltered FastContext loops stay read-only.
+/// so a loop advertising the discovery set unfiltered stays read-only.
 pub fn mutation_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -240,7 +240,8 @@ pub fn mutation_tool_definitions() -> Vec<ToolDefinition> {
 /// The remaining exec-catalog tools a def may bind: `SHELL` (a mutating tool, gated exactly like
 /// the three above) plus `AWAIT`/`READ_LINTS`/`SEMANTIC_SEARCH`, which the host tool engine
 /// provides. Like [`mutation_tool_definitions`], only `SpecializedSubagentSession` — which filters
-/// by bound tools — ever sees these, so the unfiltered FastContext loops stay read-only.
+/// by bound tools — ever sees these, so a loop advertising the discovery set unfiltered stays
+/// read-only.
 pub fn engine_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -449,7 +450,6 @@ mod tests {
     //! Unit tests: OpenAI chat completion client parses and serialises correctly.
     //!
     //! Feature: docs/ft/coder/discovery-agent.md (Phase B criterion 8)
-    //! Changeset: docs/dev/1-WIP/2026-06-24-changeset-fastcontext-discovery.md
 
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -519,7 +519,7 @@ mod tests {
 
         let client = OpenAiClient::new(server.uri());
         let request = ChatCompletionRequest {
-            model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+            model: "qwen2.5-coder:7b".to_string(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: Some("Find the auth module".to_string()),
@@ -578,7 +578,7 @@ mod tests {
 
         let client = OpenAiClient::new(server.uri());
         let request = ChatCompletionRequest {
-            model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+            model: "qwen2.5-coder:7b".to_string(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: Some("Find auth module".to_string()),
@@ -672,7 +672,7 @@ mod tests {
     /// The smallest well-formed request: one user message, no tools.
     fn a_hello_request() -> ChatCompletionRequest {
         ChatCompletionRequest {
-            model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+            model: "qwen2.5-coder:7b".to_string(),
             messages: vec![ChatMessage::user("Say hello")],
             tools: Vec::new(),
             tool_choice: serde_json::json!("auto"),

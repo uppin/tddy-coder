@@ -40,6 +40,18 @@ export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
         Tools
       </button>
       <button
+        data-testid="sessions-inspector-tab-agents"
+        aria-selected={value === "agents"}
+        onClick={() => onChange("agents")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "agents"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        Agents
+      </button>
+      <button
         data-testid="sessions-inspector-tab-usage"
         aria-selected={value === "usage"}
         onClick={() => onChange("usage")}

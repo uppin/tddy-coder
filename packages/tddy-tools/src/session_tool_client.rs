@@ -663,20 +663,44 @@ pub async fn dispatch_via_sandbox_ipc(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
-    let stream = match tokio::net::UnixStream::connect(socket_path).await {
-        Ok(s) => s,
+    let client = match connect_sandbox_ipc(socket_path).await {
+        Ok(client) => client,
         Err(e) => {
-            return serde_json::json!({"error": format!("tool ipc connect: {e}"), "is_error": true})
-                .to_string();
+            return serde_json::json!({"error": e, "is_error": true}).to_string();
         }
     };
+    // The socket itself identifies the session to the sandbox-runner, so the envelope stays empty.
+    dispatch_via_rpc_transport(&client, &SessionToolEnvelope::default(), tool_name, args).await
+}
+
+/// Open one sandbox-IPC connection and return the RPC transport over it.
+///
+/// A connection per caller, which is what the socket is for: the sandbox-runner accepts each one and
+/// bridges it to the host daemon, and a dispatch that shared a connection with a long-lived server
+/// stream would interleave with frames it does not read.
+pub async fn connect_sandbox_ipc(
+    socket_path: &std::path::Path,
+) -> Result<Arc<dyn tddy_rpc::RpcClientTransport>, String> {
+    let stream = tokio::net::UnixStream::connect(socket_path)
+        .await
+        .map_err(|e| format!("tool ipc connect: {e}"))?;
     let (read_half, write_half) = tokio::io::split(stream);
     let (client, endpoint) =
         tddy_stdio::StdioEndpoint::from_duplex(read_half, write_half, NoCallbackToolService);
     tokio::spawn(endpoint.run());
-    let client: std::sync::Arc<dyn tddy_rpc::RpcClientTransport> = client;
-    // The socket itself identifies the session to the sandbox-runner, so the envelope stays empty.
-    dispatch_via_rpc_transport(&client, &SessionToolEnvelope::default(), tool_name, args).await
+    Ok(client)
+}
+
+/// The held connection to the daemon `key` names, connecting it if this is the first caller.
+///
+/// Public so the roster stream rides the *same* room connection tool dispatch uses: one join, one
+/// request-id space and one response loop per destination — which is the property
+/// [`LiveKitRoomCache`] exists to keep.
+#[cfg(feature = "livekit")]
+pub async fn livekit_session(key: &LiveKitRoomKey) -> Result<Arc<LiveKitSession>, String> {
+    livekit_room_cache()
+        .client_via(key, || connect_livekit_client(key))
+        .await
 }
 
 /// Forward a tool call via HTTP to `ConnectionService/ExecuteTool`.

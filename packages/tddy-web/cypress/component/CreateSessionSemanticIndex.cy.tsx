@@ -29,8 +29,16 @@ function aCreateSessionBackend() {
     .onUnary(ConnectionService.method.listAgents, () => ({ agents: [] }))
     .onUnary(ConnectionService.method.listTools, () => ({ tools: [] }))
     .onUnary(ConnectionService.method.listSubagents, () => ({
+      // Qualified by its owning daemon, the way the picker lists and submits agents
+      // (docs/ft/daemon/session-agent-roster.md § Web UI).
       subagents: [
-        { name: "fastcontext", label: "FastContext", model: "microsoft/FastContext-1.0-4B-RL" },
+        {
+          name: "fastcontext",
+          label: "FastContext",
+          model: "microsoft/FastContext-1.0-4B-RL",
+          daemonInstanceId: "local",
+          agentId: "fastcontext@local",
+        },
       ],
     }))
     .onUnary(ConnectionService.method.startSession, () => ({ sessionId: "semantic-1" }));

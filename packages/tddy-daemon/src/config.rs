@@ -894,6 +894,18 @@ pub struct ListenConfig {
     pub web_port: Option<u16>,
     #[serde(default)]
     pub web_host: Option<String>,
+    /// Externally-reachable HTTP base URL peer daemons use to reach this daemon's Connect-HTTP
+    /// surface (today: `auth.LiveKitTokenService/MintLiveKitToken`, used by `tddy-remote-git-repo`
+    /// to mint the common-room LiveKit token before driving `remote_git.RemoteGitService/Serve`).
+    ///
+    /// When unset, falls back to `http://127.0.0.1:{web_port}` — correct for single-host deployments
+    /// and tests where every daemon is in-process on loopback, but unreachable from a peer on
+    /// another host. Operators with peers on other hosts set this to the daemon's external URL
+    /// (e.g. `http://ws-01.internal:9000`). The facilitating daemon publishes this in
+    /// `AgentClonePlacement.facilitating_daemon_url` so an owning daemon that has never seen the
+    /// project can clone it (PRD AC37).
+    #[serde(default)]
+    pub advertise_url: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
