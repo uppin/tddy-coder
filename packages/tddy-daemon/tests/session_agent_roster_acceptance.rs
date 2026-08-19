@@ -14,6 +14,7 @@
 //! stamped something else entirely.
 
 use std::path::Path;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
@@ -30,6 +31,12 @@ use tddy_service::proto::connection::{
 
 /// `AgentCloneState::READY`, as the proto numbers it.
 const CLONE_STATE_READY: i32 = 3;
+
+/// The keepalive cadence the keepalive tests run the service at.
+///
+/// Short enough to observe inside the integration budget, long enough that a scheduling hiccup on a
+/// loaded runner cannot land a keepalive between an attach and the frame it publishes.
+const A_BRISK_KEEPALIVE: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -134,6 +141,21 @@ fn a_session_with_agents_available(agents: &[(&str, &str)]) -> RosteredSession {
         service: test_service(sessions.path().to_path_buf()),
         session_id,
         _sessions: sessions,
+    }
+}
+
+/// The same session, on a daemon whose roster subscriptions re-send at `interval` instead of the
+/// production cadence — so a keepalive can be observed without waiting for it.
+fn a_session_whose_roster_keepalive_ticks_every(interval: Duration) -> RosteredSession {
+    let RosteredSession {
+        service,
+        session_id,
+        _sessions,
+    } = a_session_with_agents_available(&[("explorer", "Grep"), ("linter", "")]);
+    RosteredSession {
+        service: service.with_roster_keepalive_interval(interval),
+        session_id,
+        _sessions,
     }
 }
 
@@ -474,6 +496,85 @@ async fn publishes_no_frame_for_an_attach_that_changed_nothing() {
     // Then — the next frame is the *linter* attach, so the no-op published nothing
     let next = next_frame(&mut stream).await;
     next.assert_agent_ids(&[&explorer, &linter]).assert_rev(2);
+}
+
+// ---------------------------------------------------------------------------
+// Keepalive — a subscription nobody changes still produces frames
+// ---------------------------------------------------------------------------
+
+/// A roster nobody is changing must still produce frames, because a silent stream and a dead one
+/// look identical to anything between the publisher and the subscriber. A split session's
+/// subscription is forwarded across a relay that terminates a stream which stops producing, and
+/// re-sending the roster already applied is the one thing that costs a subscriber nothing: applying
+/// the revision it holds is a defined no-op that announces no change.
+#[tokio::test]
+async fn re_sends_the_roster_it_last_sent_when_nothing_changes() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When — the cadence elapses with nothing attached or detached
+    tokio::time::sleep(A_BRISK_KEEPALIVE * 2).await;
+
+    // Then
+    next_frame(&mut stream)
+        .await
+        .assert_agent_ids(&[&explorer])
+        .assert_rev(1);
+}
+
+/// One frame would only move the deadline once. The subscription lives as long as the session, so
+/// the cadence has to as well.
+#[tokio::test]
+async fn keeps_re_sending_the_roster_for_as_long_as_the_subscription_lives() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When — several cadences elapse with nothing attached or detached
+    tokio::time::sleep(A_BRISK_KEEPALIVE * 4).await;
+
+    // Then
+    let revs = vec![
+        next_frame(&mut stream).await.rev,
+        next_frame(&mut stream).await.rev,
+        next_frame(&mut stream).await.rev,
+    ];
+    assert_eq!(
+        revs,
+        vec![1, 1, 1],
+        "every keepalive must carry the revision the subscriber already holds"
+    );
+}
+
+/// The keepalive carries the roster the subscription last *sent*, not the one it opened with. A
+/// reconnecting subscriber that missed the change and then reads a keepalive would otherwise be told
+/// the roster is the one from before it — a stale answer with a current-looking revision.
+#[tokio::test]
+async fn re_sends_the_change_it_last_published_rather_than_the_snapshot_it_opened_with() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    let linter = session.agent_id_for("linter").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When
+    session.attach(&linter).await.expect("attach linter");
+    next_frame(&mut stream).await.assert_rev(2);
+
+    // Then
+    next_frame(&mut stream)
+        .await
+        .assert_agent_ids(&[&explorer, &linter])
+        .assert_rev(2);
 }
 
 // ---------------------------------------------------------------------------

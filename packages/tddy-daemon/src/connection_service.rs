@@ -712,6 +712,20 @@ const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
 /// the volatile fact on that panel, hence far shorter than the host-stats disk tick.
 const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// Cadence at which a `StreamSessionAgents` subscription re-sends the roster it last sent, when
+/// nothing has been published in the meantime.
+///
+/// A roster nobody is changing produces no frames for hours, and a *forwarded* subscription — the
+/// split session's case, where the agent runs on one daemon and its roster lives on another — rides
+/// a relay that terminates a stream which stops producing
+/// ([`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`]). That deadline is
+/// deliberate: a stream that goes quiet must never read as one that ended, or a truncated forward
+/// passes for a complete one. So the roster has to keep talking. Re-sending the applied revision is
+/// the cheapest frame there is — applying a revision already held is a defined no-op that announces
+/// no change — and at this cadence two of them fit inside the deadline, so one lost frame does not
+/// end the subscription.
+pub const ROSTER_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(8);
+
 /// Stream adapter backed by an mpsc channel for [`LiveKitRoomsEvent`] server-streaming.
 ///
 /// Carries results rather than events: a roster read that fails ends the stream with that error,
@@ -982,6 +996,9 @@ pub struct ConnectionServiceImpl {
     /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the roster (overridable for
     /// tests).
     room_poll_interval: Duration,
+    /// Cadence at which a `StreamSessionAgents` subscription re-sends an unchanged roster
+    /// (overridable for tests).
+    roster_keepalive_interval: Duration,
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
@@ -1187,6 +1204,7 @@ impl ConnectionServiceImpl {
             host_disk_interval: HOST_DISK_INTERVAL,
             room_roster,
             room_poll_interval: LIVEKIT_ROOMS_POLL_INTERVAL,
+            roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
@@ -1412,6 +1430,13 @@ impl ConnectionServiceImpl {
     /// change event without waiting the production three seconds for it.
     pub fn with_room_poll_interval(mut self, interval: Duration) -> Self {
         self.room_poll_interval = interval;
+        self
+    }
+
+    /// Override the `StreamSessionAgents` keepalive cadence (builder pattern) — lets tests observe a
+    /// re-sent roster without waiting the production eight seconds for it.
+    pub fn with_roster_keepalive_interval(mut self, interval: Duration) -> Self {
+        self.roster_keepalive_interval = interval;
         self
     }
 
@@ -6745,6 +6770,81 @@ impl ConnectionServiceImpl {
         })
     }
 
+    /// Serve a roster RPC on the daemon its `daemon_instance_id` names, when that is not this one.
+    ///
+    /// `Ok(None)` means the call is this daemon's own to serve — an empty id, or this daemon's id.
+    /// `rpc_name` is the proto method name, so a forwarded call lands on the same handler there.
+    ///
+    /// Called **before** the session is looked up, for the reason `ExecuteTool` does the same: a
+    /// split session's roster lives on the daemon holding the codebase, while the agent's tools
+    /// address the daemon running its loop. Resolved out of this daemon's own sessions there, the
+    /// session does not exist at all — the in-jail roster stays empty, every subagent call is
+    /// refused, and the main agent is told it has no such tool (PRD AC12, AC28).
+    async fn roster_rpc_served_by_peer<Req, Resp>(
+        &self,
+        rpc_name: &str,
+        requested_daemon: &str,
+        req: &Req,
+    ) -> Result<Option<Resp>, Status>
+    where
+        Req: prost::Message,
+        Resp: prost::Message + Default,
+    {
+        let PeerRoute::Forward { peer_instance_id } =
+            self.classify_exec_tool_route(rpc_name, requested_daemon)?
+        else {
+            return Ok(None);
+        };
+        let slot = self.common_room_slot(rpc_name)?;
+        let answered = crate::livekit_peer_discovery::forward_to_peer(
+            slot,
+            &peer_instance_id,
+            "connection.ConnectionService",
+            rpc_name,
+            req.encode_to_vec(),
+        )
+        .await?;
+        Resp::decode(answered.as_slice())
+            .map(Some)
+            .map_err(|e| Status::internal(format!("decode {rpc_name} response from peer: {e}")))
+    }
+
+    /// [`Self::roster_rpc_served_by_peer`] for a **server-streaming** roster RPC: the peer's frames
+    /// are relayed one by one, and a stream that stops without its end-of-stream marker terminates as
+    /// an error rather than as a short roster the caller would take for the whole one.
+    async fn roster_stream_served_by_peer<Req, Frame>(
+        &self,
+        rpc_name: &str,
+        requested_daemon: &str,
+        req: &Req,
+    ) -> Result<Option<tokio::sync::mpsc::UnboundedReceiver<Result<Frame, Status>>>, Status>
+    where
+        Req: prost::Message,
+        Frame: prost::Message + Default + Send + 'static,
+    {
+        let PeerRoute::Forward { peer_instance_id } =
+            self.classify_exec_tool_route(rpc_name, requested_daemon)?
+        else {
+            return Ok(None);
+        };
+        let slot = self.common_room_slot(rpc_name)?;
+        let decoding = rpc_name.to_string();
+        crate::livekit_peer_discovery::forward_server_stream_to_peer(
+            slot,
+            &peer_instance_id,
+            "connection.ConnectionService",
+            rpc_name,
+            req.encode_to_vec(),
+            move |bytes| {
+                Frame::decode(bytes.as_slice()).map_err(|e| {
+                    Status::internal(format!("decode {decoding} frame from peer: {e}"))
+                })
+            },
+        )
+        .await
+        .map(Some)
+    }
+
     /// Pre-creates `session_dir` when needed and materializes the request's attachments before spawn.
     async fn prepare_session_attachments(
         &self,
@@ -8562,6 +8662,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<SessionAgentRoster>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup so a split session's roster is written where it is kept.
+        if let Some(roster) = self
+            .roster_rpc_served_by_peer("AttachSessionAgent", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(roster));
+        }
+
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let mut record = self.roster_record_for_agent_id(&req.agent_id).await?;
         refuse_unenforceable_withdrawal(&req.session_id, &session_dir, &record)?;
@@ -8626,6 +8735,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<SessionAgentRoster>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup: a detach served here leaves the entry standing on the daemon
+        // whose roster actually holds it.
+        if let Some(roster) = self
+            .roster_rpc_served_by_peer("DetachSessionAgent", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(roster));
+        }
+
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let detached =
             self.session_agent_rosters
@@ -8693,6 +8812,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<SessionAgentRoster>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup: answered locally, a session that lives on another daemon reads
+        // as one with no agents — an answer about the wrong host, indistinguishable from the truth.
+        if let Some(roster) = self
+            .roster_rpc_served_by_peer("ListSessionAgents", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(roster));
+        }
+
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         Ok(Response::new(
             self.session_agent_rosters
@@ -8713,22 +8842,39 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<Self::StreamSessionAgentsStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup. This is the call a split session's in-jail `tddy-tools` makes
+        // first, and the daemon it addresses is not the one keeping the roster it subscribes to.
+        if let Some(rx) = self
+            .roster_stream_served_by_peer("StreamSessionAgents", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let (snapshot, mut published) = self
             .session_agent_rosters
             .subscribe(&req.session_id, &session_dir)?;
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // The roster this subscription has last sent, re-sent whenever the keepalive cadence elapses
+        // with nothing published. See [`ROSTER_KEEPALIVE_INTERVAL`] for why a quiet roster still has
+        // to talk. It tracks the last frame *sent* rather than the opening snapshot, so a subscriber
+        // that reads only a keepalive is never told a superseded roster is the current one.
+        let mut last_sent = snapshot.clone();
         if tx.send(Ok(snapshot)).is_err() {
             return Err(Status::internal(
                 "StreamSessionAgents: the subscriber went away before its first frame",
             ));
         }
         let session_id = req.session_id.clone();
+        let keepalive = self.roster_keepalive_interval;
         tokio::spawn(async move {
             loop {
-                match published.recv().await {
-                    Ok(roster) => {
+                match tokio::time::timeout(keepalive, published.recv()).await {
+                    Ok(Ok(roster)) => {
+                        last_sent = roster.clone();
                         if tx.send(Ok(roster)).is_err() {
                             break;
                         }
@@ -8736,13 +8882,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     // Every frame is a whole roster, so a subscriber that fell behind is brought
                     // fully current by the next one — the dropped frames carried nothing the
                     // survivor does not also carry.
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(missed))) => {
                         log::debug!(
                             "StreamSessionAgents: subscriber to session {session_id} fell {missed} \
                              snapshot(s) behind; the next one supersedes them"
                         );
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                    // Nothing changed for a whole cadence. Re-send, which also gives this task its
+                    // only chance to notice a subscriber that went away: without a frame to fail on,
+                    // it would park on a roster nobody changes for the life of the process.
+                    Err(_) => {
+                        if tx.send(Ok(last_sent.clone())).is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -8764,6 +8918,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<OpenAgentConversationResponse>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup: the conversation is opened against the roster, so it opens on
+        // the daemon holding it. Distinct from the forward further down, which follows the *agent's*
+        // owning daemon once the roster entry naming it has been read.
+        if let Some(opened) = self
+            .roster_rpc_served_by_peer("OpenAgentConversation", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(opened));
+        }
+
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         // Caller-chosen where offered, so an open that times out still leaves the caller able to
         // name — and therefore cancel — whatever this daemon built.
@@ -8846,6 +9011,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<Self::PromptAgentConversationStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup, and before the conversation map: a conversation opened on the
+        // daemon holding the roster is not one this daemon can prompt, so served here it would report
+        // "not open" for a conversation that is.
+        if let Some(rx) = self
+            .roster_stream_served_by_peer("PromptAgentConversation", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
         self.roster_session_dir(&req.session_token, &req.session_id)?;
 
         // Everything the turn needs is taken out of the map here, under one lock, and the guard is
@@ -8876,12 +9052,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             PromptRouting::Remote(daemon_instance_id) => {
                 let slot = self.common_room_slot("PromptAgentConversation")?;
                 self.refuse_departed_daemon(&daemon_instance_id).await?;
+                // Re-addressed to the agent's owning daemon, as the open was. Forwarded still naming
+                // the daemon holding the roster, the peer would route it back here on that axis and
+                // the two would hand the same turn to each other.
+                let forwarded = PromptAgentConversationRequest {
+                    daemon_instance_id: daemon_instance_id.clone(),
+                    ..req.clone()
+                };
                 let rx = crate::livekit_peer_discovery::forward_server_stream_to_peer(
                     slot,
                     &daemon_instance_id,
                     "connection.ConnectionService",
                     "PromptAgentConversation",
-                    req.encode_to_vec(),
+                    forwarded.encode_to_vec(),
                     |bytes| {
                         AgentConversationChunk::decode(bytes.as_slice()).map_err(|e| {
                             Status::internal(format!(
@@ -8951,6 +9134,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<CancelAgentConversationResponse>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Route BEFORE session lookup, and before the conversation map: a cancel that does not reach
+        // the daemon the turn is running on cancels nothing while reporting that it did.
+        if let Some(cancelled) = self
+            .roster_rpc_served_by_peer("CancelAgentConversation", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(cancelled));
+        }
+
         self.roster_session_dir(&req.session_token, &req.session_id)?;
         let removed = self
             .agent_conversations
@@ -8973,12 +9166,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 daemon_instance_id, ..
             }) => {
                 let slot = self.common_room_slot("CancelAgentConversation")?;
+                // Re-addressed to the agent's owning daemon, for the reason the prompt forward is: a
+                // request still naming the daemon holding the roster would be routed back here.
+                let forwarded = CancelAgentConversationRequest {
+                    daemon_instance_id: daemon_instance_id.clone(),
+                    ..req.clone()
+                };
                 crate::livekit_peer_discovery::forward_to_peer(
                     slot,
                     &daemon_instance_id,
                     "connection.ConnectionService",
                     "CancelAgentConversation",
-                    req.encode_to_vec(),
+                    forwarded.encode_to_vec(),
                 )
                 .await?;
                 Ok(Response::new(CancelAgentConversationResponse {}))

@@ -14,7 +14,9 @@
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::connection::{SessionAgentEntry, SessionAgentRoster};
-use tddy_tools::session_agents::{ConversationState, LiveAgentRoster, RosterError};
+use tddy_tools::session_agents::{
+    ConversationState, LiveAgentRoster, RosterError, RosterStreamOutcome,
+};
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -78,6 +80,17 @@ fn a_seeded_registry(seed: &[&str]) -> LiveAgentRoster {
         seed.iter().map(|n| a_seed_def(n)).collect(),
         "ws-01",
     )
+}
+
+/// One pass of the roster stream that applied `applied` snapshots and was then closed by the far end.
+fn a_pass_that_applied(applied: u64) -> RosterStreamOutcome {
+    RosterStreamOutcome::closed(applied)
+}
+
+/// One pass that applied `applied` snapshots and then ended in an error — a relay that gave up on a
+/// quiet stream, a daemon that went away mid-frame.
+fn a_pass_that_applied_and_then_broke(applied: u64, failure: &str) -> RosterStreamOutcome {
+    RosterStreamOutcome::broke(applied, failure.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +352,77 @@ fn serves_again_when_a_frame_arrives_that_is_too_old_to_apply() {
     registry
         .resolve(Some("explorer@ws-01"))
         .expect("a frame proving the stream is served must restore service at the applied rev");
+}
+
+// ---------------------------------------------------------------------------
+// AC17 — what one pass of the stream counts as
+// ---------------------------------------------------------------------------
+
+/// A pass that applied a snapshot proved the subscription was being served, so however it ended it
+/// is a reconnect rather than a broken setup — the rule the follower already applies when the far end
+/// closes cleanly, and the one that has to hold when it ends in an error instead. Counting an error
+/// against the budget is what turns three healthy passes into a roster declared unavailable, and with
+/// it every subagent call refused.
+#[test]
+fn does_not_count_a_pass_that_served_a_snapshot_before_breaking_against_the_reconnect_budget() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(2, "roster stream: the peer stopped answering");
+
+    // When / Then
+    assert!(
+        !pass.counts_as_a_failure(),
+        "a pass that applied a snapshot must not count against the reconnect budget"
+    );
+}
+
+/// A pass that produced nothing at all is the broken setup the budget exists for: nothing is serving
+/// this subscription, and retrying forever while answering from the spawn seed is the silent
+/// wrongness the whole design refuses.
+#[test]
+fn counts_a_pass_that_broke_before_any_snapshot_arrived_against_the_reconnect_budget() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+
+    // When / Then
+    assert!(
+        pass.counts_as_a_failure(),
+        "a pass that applied nothing must count against the reconnect budget"
+    );
+}
+
+/// The reason travels into the refusal the main agent reads, so it has to be the reason the stream
+/// actually gave. "The stream ended" is what a clean close looks like and diagnoses nothing.
+#[test]
+fn carries_the_reason_the_stream_broke_with_rather_than_a_clean_close() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+
+    // When / Then
+    assert_eq!(pass.reason(), "StreamSessionAgents call: unimplemented");
+}
+
+/// A pass the far end closed carries no error, so it says that instead of inventing one.
+#[test]
+fn reports_a_clean_close_as_the_stream_ending() {
+    // Given
+    let pass = a_pass_that_applied(4);
+
+    // When / Then
+    assert_eq!(pass.reason(), "the stream ended");
+}
+
+/// A close before anything arrived says so distinctly: "the stream ended" reads as a subscription
+/// that worked and then stopped, when in fact nothing ever served it.
+#[test]
+fn reports_a_close_before_the_first_snapshot_as_nothing_having_arrived() {
+    // Given
+    let pass = a_pass_that_applied(0);
+
+    // When / Then
+    assert_eq!(
+        pass.reason(),
+        "the stream ended before any snapshot arrived"
+    );
 }
 
 // ---------------------------------------------------------------------------

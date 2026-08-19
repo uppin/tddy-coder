@@ -408,6 +408,39 @@ impl LiveAgentRoster {
             .tool_list_changes
     }
 
+    /// Every exec tool the roster has taken away from the main agent right now, mapped to the agent
+    /// that serves it instead.
+    ///
+    /// The single source of the withdrawal decision: the catalog the server advertises and the check
+    /// a call goes through are read at different moments, and a disagreement between them is
+    /// invisible from either side — a tool advertised and then refused looks broken, and one withheld
+    /// but callable is a withdrawal that only appears to have happened. Both derive from here, so the
+    /// two cannot drift and the [`RosterCurrency`] gate governs both
+    /// (docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour).
+    ///
+    /// Empty while no frame ever arrived and the stream has given up
+    /// ([`RosterCurrency::enforces_withdrawal`]): there the replacement is unreachable too, so
+    /// withdrawing would take the tool away and offer nothing in its place.
+    ///
+    /// The agent named for a tool is the **first** attached one to claim it, so two agents replacing
+    /// the same tool send the main agent to the one attached earliest rather than to whichever the
+    /// iteration order happened to reach.
+    pub fn withdrawn_exec_tools(&self) -> HashMap<String, String> {
+        let state = self.state.lock().expect("session agent roster");
+        if !state.currency.enforces_withdrawal() {
+            return HashMap::new();
+        }
+        let mut withdrawn: HashMap<String, String> = HashMap::new();
+        for entry in &state.entries {
+            for tool in normalize_replaced_tools(&entry.replaces) {
+                withdrawn
+                    .entry(tool)
+                    .or_insert_with(|| entry.agent_id.clone());
+            }
+        }
+        withdrawn
+    }
+
     /// Refuse `tool` when an attached agent has taken it over from the main agent.
     ///
     /// This is what makes live attach enforceable at all: `--allowedTools` is fixed when `claude`
@@ -424,25 +457,18 @@ impl LiveAgentRoster {
     /// Not enforced when no frame ever arrived and the stream has given up
     /// ([`RosterCurrency::Unreachable`]): there the replacement is unreachable too, so enforcing
     /// would take the tool away and offer nothing in its place.
+    ///
+    /// Decided by [`Self::withdrawn_exec_tools`] rather than by walking the entries again, so the
+    /// tool list the server advertises and the refusal a call meets are the same decision.
     pub fn check_tool_available(&self, tool: &str) -> Result<(), RosterError> {
-        let canonical = normalize_replaced_tools(&[tool.to_string()]);
-        let Some(canonical) = canonical.first() else {
+        let Some(canonical) = normalize_replaced_tools(&[tool.to_string()]).pop() else {
             // Not an exec-catalog name, so no `replaces` list can name it.
             return Ok(());
         };
-        let state = self.state.lock().expect("session agent roster");
-        if !state.currency.enforces_withdrawal() {
-            return Ok(());
-        }
-        let replacing = state.entries.iter().find(|entry| {
-            normalize_replaced_tools(&entry.replaces)
-                .iter()
-                .any(|replaced| replaced == canonical)
-        });
-        match replacing {
-            Some(entry) => Err(RosterError::ToolWithdrawn {
-                tool: canonical.clone(),
-                agent_id: entry.agent_id.clone(),
+        match self.withdrawn_exec_tools().remove(&canonical) {
+            Some(agent_id) => Err(RosterError::ToolWithdrawn {
+                tool: canonical,
+                agent_id,
             }),
             None => Ok(()),
         }
@@ -613,6 +639,60 @@ const RECONNECT_BACKOFF_CEILING: Duration = Duration::from_secs(30);
 /// disagreeing with the daemon.
 const RECONNECT_ATTEMPTS_BEFORE_GIVING_UP: u32 = 3;
 
+/// What one pass of the roster stream achieved, and how it ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterStreamOutcome {
+    /// Snapshots applied before the pass ended — keepalives, which re-deliver the applied revision,
+    /// included.
+    applied: u64,
+    /// The error the pass ended with, when it did not end with the far end closing cleanly.
+    failure: Option<String>,
+}
+
+impl RosterStreamOutcome {
+    /// A pass the far end closed after `applied` snapshots.
+    pub fn closed(applied: u64) -> Self {
+        Self {
+            applied,
+            failure: None,
+        }
+    }
+
+    /// A pass that ended in an error after `applied` snapshots.
+    pub fn broke(applied: u64, failure: String) -> Self {
+        Self {
+            applied,
+            failure: Some(failure),
+        }
+    }
+
+    /// Snapshots applied before the pass ended.
+    pub fn applied(&self) -> u64 {
+        self.applied
+    }
+
+    /// Whether this pass counts against [`RECONNECT_ATTEMPTS_BEFORE_GIVING_UP`].
+    ///
+    /// A pass that applied a snapshot proved the subscription was being served, so however it ended
+    /// it is a reconnect — a daemon restart, a relay giving up on a stream that went quiet — and not
+    /// the broken setup the budget exists to declare. Only a pass that produced nothing counts, and
+    /// how it ended makes no difference to that: counting an error against the budget would let
+    /// three passes that each delivered a good roster add up to a registry that refuses every
+    /// subagent call.
+    pub fn counts_as_a_failure(&self) -> bool {
+        self.applied == 0
+    }
+
+    /// Why the pass ended, as the refusal spells it.
+    pub fn reason(&self) -> String {
+        match &self.failure {
+            Some(failure) => failure.clone(),
+            None if self.applied == 0 => "the stream ended before any snapshot arrived".to_string(),
+            None => "the stream ended".to_string(),
+        }
+    }
+}
+
 /// Follow the session's roster for the process lifetime, calling `on_change` once per applied
 /// revision.
 ///
@@ -669,40 +749,25 @@ async fn follow_roster(
     on_change: impl Fn() + Send + Sync,
 ) {
     let mut consecutive_failures: u32 = 0;
-    // Assigned by every arm below before it can be read — there is no "no failure yet" refusal to
-    // spell, because nothing refuses until an attempt has failed.
-    let mut last_failure;
     loop {
-        match stream_roster_once(&transport, roster, &on_change).await {
-            // The stream served frames and then ended — a daemon restart, not a broken setup, so
-            // the failure count starts over.
-            Ok(applied) if applied > 0 => {
-                consecutive_failures = 0;
-                last_failure = "the stream ended".to_string();
-                log::warn!(
-                    target: "tddy_tools::session_agents",
-                    "roster stream for session {} ended after {applied} snapshot(s); reconnecting",
-                    roster.session_id()
-                );
-            }
-            Ok(_) => {
-                consecutive_failures += 1;
-                last_failure = "the stream ended before any snapshot arrived".to_string();
-                log::warn!(
-                    target: "tddy_tools::session_agents",
-                    "roster stream for session {}: {last_failure}",
-                    roster.session_id()
-                );
-            }
-            Err(e) => {
-                consecutive_failures += 1;
-                last_failure = e;
-                log::warn!(
-                    target: "tddy_tools::session_agents",
-                    "roster stream for session {} failed: {last_failure}",
-                    roster.session_id()
-                );
-            }
+        let pass = stream_roster_once(&transport, roster, &on_change).await;
+        let last_failure = pass.reason();
+        if pass.counts_as_a_failure() {
+            consecutive_failures += 1;
+            log::warn!(
+                target: "tddy_tools::session_agents",
+                "roster stream for session {}: {last_failure}",
+                roster.session_id()
+            );
+        } else {
+            consecutive_failures = 0;
+            log::warn!(
+                target: "tddy_tools::session_agents",
+                "roster stream for session {} ended after {} snapshot(s) ({last_failure}); \
+                 reconnecting",
+                roster.session_id(),
+                pass.applied()
+            );
         }
         if consecutive_failures >= RECONNECT_ATTEMPTS_BEFORE_GIVING_UP {
             // The last failure is carried into the refusal, not just the log: the main agent reads
@@ -730,13 +795,92 @@ fn reconnect_backoff(consecutive_failures: u32) -> Duration {
         .min(RECONNECT_BACKOFF_CEILING)
 }
 
-/// Open the stream once and apply every snapshot it delivers, returning how many were applied when
-/// it ends.
+/// Open the stream once and apply every snapshot it delivers, reporting what the pass achieved and
+/// how it ended.
+///
+/// The applied count is carried out of *every* ending, the error ones included: a stream that served
+/// a roster and then broke is a reconnect, and [`RosterStreamOutcome::counts_as_a_failure`] can only
+/// tell that from a setup nothing is serving if it is told how much arrived.
 async fn stream_roster_once(
     transport: &SessionToolTransport,
     roster: &LiveAgentRoster,
     on_change: &(impl Fn() + Send + Sync),
-) -> Result<u64, String> {
+) -> RosterStreamOutcome {
+    // The client is held for as long as the frames are read: it owns the connection they ride, and
+    // dropping it would close the subscription it just opened.
+    let (_client, mut frames) = match open_roster_stream(transport).await {
+        Ok(opened) => opened,
+        // Nothing was opened, so nothing was applied.
+        Err(failure) => return RosterStreamOutcome::broke(0, failure),
+    };
+
+    let mut applied: u64 = 0;
+    loop {
+        // Only the first frame is waited for with a deadline: the daemon sends the current snapshot
+        // on subscribe, so nothing by now means nothing is serving this subscription. After that a
+        // silent stream is a roster nobody is changing — and one the daemon keeps alive by re-sending
+        // the applied revision, so silence for long enough is the connection, not the roster.
+        let frame = if applied == 0 {
+            match tokio::time::timeout(FIRST_FRAME_TIMEOUT, frames.recv()).await {
+                Ok(frame) => frame,
+                Err(_) => {
+                    return RosterStreamOutcome::broke(
+                        applied,
+                        format!(
+                            "no roster snapshot within {}s of subscribing",
+                            FIRST_FRAME_TIMEOUT.as_secs()
+                        ),
+                    )
+                }
+            }
+        } else {
+            frames.recv().await
+        };
+        let Some(frame) = frame else {
+            return RosterStreamOutcome::closed(applied);
+        };
+        let bytes = match frame {
+            Ok(bytes) => bytes,
+            Err(e) => return RosterStreamOutcome::broke(applied, format!("roster stream: {e}")),
+        };
+        let snapshot = match SessionAgentRoster::decode(bytes.as_slice()) {
+            Ok(snapshot) => snapshot,
+            Err(e) => {
+                return RosterStreamOutcome::broke(
+                    applied,
+                    format!("undecodable roster frame ({} bytes): {e}", bytes.len()),
+                )
+            }
+        };
+        let rev = snapshot.rev;
+        let announced_before = roster.tool_list_change_count();
+        roster.apply_snapshot(snapshot);
+        applied += 1;
+        // One notification per *applied* revision, so a re-delivered snapshot — a keepalive, or a
+        // reconnect's opening frame — does not make the main agent re-list for nothing.
+        if roster.tool_list_change_count() != announced_before {
+            log::debug!(
+                target: "tddy_tools::session_agents",
+                "roster rev {rev} applied for session {}",
+                roster.session_id()
+            );
+            on_change();
+        }
+    }
+}
+
+/// Open one `StreamSessionAgents` subscription over `transport`, returning the connection it rides
+/// alongside its frames.
+#[allow(clippy::type_complexity)]
+async fn open_roster_stream(
+    transport: &SessionToolTransport,
+) -> Result<
+    (
+        std::sync::Arc<dyn tddy_rpc::RpcClientTransport>,
+        tokio::sync::mpsc::Receiver<Result<Vec<u8>, tddy_rpc::Status>>,
+    ),
+    String,
+> {
     let (client, envelope) = connect_roster_stream(transport).await?;
     let request = StreamSessionAgentsRequest {
         session_token: envelope.session_token,
@@ -748,7 +892,7 @@ async fn stream_roster_once(
         "StreamSessionAgents",
         request.encode_to_vec(),
     );
-    let mut frames = tokio::time::timeout(STREAM_OPEN_TIMEOUT, call)
+    let frames = tokio::time::timeout(STREAM_OPEN_TIMEOUT, call)
         .await
         .map_err(|_| {
             format!(
@@ -757,45 +901,7 @@ async fn stream_roster_once(
             )
         })?
         .map_err(|e| format!("StreamSessionAgents call: {e}"))?;
-
-    let mut applied: u64 = 0;
-    loop {
-        // Only the first frame is waited for with a deadline: the daemon sends the current snapshot
-        // on subscribe, so nothing by now means nothing is serving this subscription. After that a
-        // silent stream is a roster nobody is changing.
-        let frame = if applied == 0 {
-            tokio::time::timeout(FIRST_FRAME_TIMEOUT, frames.recv())
-                .await
-                .map_err(|_| {
-                    format!(
-                        "no roster snapshot within {}s of subscribing",
-                        FIRST_FRAME_TIMEOUT.as_secs()
-                    )
-                })?
-        } else {
-            frames.recv().await
-        };
-        let Some(frame) = frame else {
-            return Ok(applied);
-        };
-        let bytes = frame.map_err(|e| format!("roster stream: {e}"))?;
-        let snapshot = SessionAgentRoster::decode(bytes.as_slice())
-            .map_err(|e| format!("undecodable roster frame ({} bytes): {e}", bytes.len()))?;
-        let rev = snapshot.rev;
-        let announced_before = roster.tool_list_change_count();
-        roster.apply_snapshot(snapshot);
-        applied += 1;
-        // One notification per *applied* revision, so a re-delivered snapshot after a reconnect
-        // does not make the main agent re-list for nothing.
-        if roster.tool_list_change_count() != announced_before {
-            log::debug!(
-                target: "tddy_tools::session_agents",
-                "roster rev {rev} applied for session {}",
-                roster.session_id()
-            );
-            on_change();
-        }
-    }
+    Ok((client, frames))
 }
 
 /// The connection the roster stream rides, and the identity its request carries.

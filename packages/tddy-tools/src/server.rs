@@ -346,19 +346,30 @@ impl PermissionServer {
     }
 
     /// The tools `tools/list` reports: everything in this server's router, minus the subagent
-    /// conversation tools while **no agent is attached**.
+    /// conversation tools while **no agent is attached**, and minus every exec tool an attached agent
+    /// has taken over.
     ///
     /// Computed per call rather than baked into the router at construction, because the roster is
-    /// live: an attach makes the tools appear and a detach makes them go, and each applied revision
-    /// sends `notifications/tools/list_changed` so the main agent re-lists and sees it
-    /// (docs/ft/daemon/session-agent-roster.md § The roster stream). Advertising them on an empty
-    /// roster would show the operator four tools that can only answer "no agents are attached".
+    /// live: an attach makes the conversation tools appear and takes the replaced exec tools away, a
+    /// detach does the reverse, and each applied revision sends `notifications/tools/list_changed` so
+    /// the main agent re-lists and sees it (docs/ft/daemon/session-agent-roster.md § The roster
+    /// stream). Advertising the conversation tools on an empty roster would show the operator four
+    /// tools that can only answer "no agents are attached"; advertising a replaced exec tool would
+    /// keep the main agent reaching for a tool the call-time check refuses mid-turn instead of
+    /// delegating to the agent that now serves it.
+    ///
+    /// The withheld set is the roster's, not the spawn seed's, so it cannot disagree with the refusal
+    /// a direct call meets — both are
+    /// [`LiveAgentRoster::withdrawn_exec_tools`](crate::session_agents::LiveAgentRoster::withdrawn_exec_tools).
     fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        let roster = crate::session_agents::session_agent_roster();
         let mut tools = self.tool_router.list_all();
-        if crate::session_agents::session_agent_roster().is_empty() {
+        if roster.is_empty() {
             let conversation_tools = subagent_tool_names();
             tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
         }
+        let withdrawn = roster.withdrawn_exec_tools();
+        tools.retain(|tool| !withdrawn.contains_key(tool.name.as_ref()));
         tools
     }
 
