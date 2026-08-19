@@ -8,12 +8,13 @@
  * where the branching lives: how an option is keyed and captioned, and which agent a host change
  * lands on. A component spec can only reach those one full mount at a time.
  *
- * Feature doc: docs/ft/web/1-WIP/PRD-2026-08-19-session-agent-host-fan-out.md
+ * Feature doc: docs/ft/web/session-agent-catalog-fan-out.md
  */
 
 import { describe, expect, it } from "bun:test";
 import {
   agentForHost,
+  hostRunningSession,
   selectableAgentText,
   selectableAgentValue,
   type SelectableAgent,
@@ -84,6 +85,36 @@ describe("selectableAgentText", () => {
 
     // Then
     expect(text).toBe("codex · server-2");
+  });
+});
+
+describe("hostRunningSession", () => {
+  it("keeps the host the form asked for", () => {
+    // Given — a session pinned to a named host, read from a browser connected to a different one
+    // When
+    const host = hostRunningSession(HOST_B, HOST_A);
+
+    // Then
+    expect(host).toBe(HOST_B);
+  });
+
+  it("names the connected daemon when the request names no host", () => {
+    // Given — the spelling a peer inherits from an orchestrator started without an explicit host:
+    // `daemon_instance_id: ""`, which the daemon serves on whichever host the request arrives at
+    // When
+    const host = hostRunningSession("", HOST_A);
+
+    // Then — the host the request reaches anyway, so the agents offered are the ones it can resolve
+    expect(host).toBe(HOST_A);
+  });
+
+  it("names no host when there is no daemon connection to name one from", () => {
+    // Given — no common room: nothing is advertised, and the fan-out stamps its rows the same way
+    // When
+    const host = hostRunningSession("", "");
+
+    // Then
+    expect(host).toBe("");
   });
 });
 

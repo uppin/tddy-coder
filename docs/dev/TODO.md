@@ -255,11 +255,21 @@ the host that offers it. These gaps were scoped out of that changeset deliberate
 
 - **No `timeoutMs` on any fan-out read.** A daemon whose LiveKit *RPC* participant (`daemon-{id}`) is
   absent while its *discovery* participant is present — observed for ~69 minutes — never answers and
-  never rejects. `useAvailableAgents` (`useAvailableAgents.ts:111`) then leaves that host as neither
-  an agent nor an error row (`if (!answer) continue`, `:162`), and the four `useModelRegistryFanOut`
-  reads pin themselves at "loading" forever. A caller-supplied `timeoutMs` is the only thing that
-  settles a LiveKit unary call the peer never answers; an absent destination identity does not reject
-  the publish. Wants fixing as a class, in all three hooks, with a pending/unreachable row.
+  never rejects. `useHostFanOut` (`src/rpc/useHostFanOut.ts`) then leaves that host as neither a row
+  nor an error row (`if (!answer) continue`), and the four `useModelRegistryFanOut` reads pin
+  themselves at "loading" forever. A caller-supplied `timeoutMs` is the only thing that settles a
+  LiveKit unary call the peer never answers; an absent destination identity does not reject the
+  publish. Now one fix for both agent fan-outs — `useHostFanOut` is where the read and the
+  pending/unreachable row belong — plus a second in `useModelRegistryFanOut`, which does not share
+  that hook.
+
+- **`CreateSessionPane.tsx` is 1351 lines.** Pre-existing (1279 before this feature, and the feature
+  put its fan-out, its option algebra and its Agent select in files of their own rather than in it),
+  but well past the 500-line guideline. It holds nine more controls, the branch loader, the attachment
+  uploader, the peer-mode freezing and the submit path. The Agent select shows the shape a split takes
+  — a presentational control with explicit props, the state staying in the pane — and 29 specs in
+  `CreateSessionPane.cy.tsx` alone make it a change to do deliberately, in its own changeset, not as a
+  rider on a feature.
 
 - **`ListAgents` advertises registry assistants that `ListAgentModels` refuses to enumerate.** The
   probe shells out to `tddy-tools list-models`, whose `build_backend`

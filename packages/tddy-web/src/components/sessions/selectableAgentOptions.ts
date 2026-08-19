@@ -6,7 +6,7 @@
  * how an option is keyed and captioned, and which agent a host change lands on. None of it needs
  * React, a transport or a mount to be exercised.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-08-19-session-agent-host-fan-out.md
+ * Feature: docs/ft/web/session-agent-catalog-fan-out.md
  */
 
 /** One agent as a host offers it, attributed to the host whose `ListAgents` answered. */
@@ -35,6 +35,24 @@ export function selectableAgentValue(agent: SelectableAgent, hostsAdvertised: bo
 export function selectableAgentText(agent: SelectableAgent, hostsAdvertised: boolean): string {
   const caption = agent.label || agent.id;
   return hostsAdvertised ? `${caption} · ${agent.daemonInstanceId}` : caption;
+}
+
+/**
+ * The host whose agents a session may be started as, given the host the form will *ask for* and the
+ * daemon the browser is connected to.
+ *
+ * The empty string is not the absence of a host. It is the protocol's other spelling for one:
+ * `StartSessionRequest.daemon_instance_id` is optional, and a daemon reads an empty one as "the
+ * daemon this request arrived on" — which, for this form, is the daemon the browser is connected to.
+ * The peer-spawn flow inherits that spelling from an orchestrator that was itself started without an
+ * explicit host.
+ *
+ * So this is a decode of two spellings of one decided host, not a substitute for one that is missing:
+ * there is no failure case to absorb, both arguments are always present, and the host named here is
+ * the same host the request reaches either way. `requestedHost` is what stays on the wire.
+ */
+export function hostRunningSession(requestedHost: string, connectedHost: string): string {
+  return requestedHost === "" ? connectedHost : requestedHost;
 }
 
 /**

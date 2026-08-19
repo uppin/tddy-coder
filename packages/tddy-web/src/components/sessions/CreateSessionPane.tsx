@@ -22,10 +22,12 @@ import {
 } from "../../hooks/useSessionAttachments";
 import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
+import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
+import { inputClass, labelClass } from "./createSessionFormStyles";
 import { useSelectableAgents } from "./useSelectableAgents";
 import {
   agentForHost,
-  selectableAgentText,
+  hostRunningSession,
   selectableAgentValue,
 } from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
@@ -122,15 +124,6 @@ export interface CreateSessionPaneProps {
    */
   peerMode?: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const inputClass =
-  "w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-const labelClass = "block text-sm mb-1 text-muted-foreground";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -258,23 +251,28 @@ export function CreateSessionPane({
     ? (initialValues?.daemonInstanceId ?? "")
     : daemonInstanceId;
 
+  /**
+   * The daemon the browser's RPC reaches: the host the fan-out reads as its home, and the host that
+   * serves a request naming none.
+   */
+  const connectedInstanceId = selectedInstanceId ?? "";
+
   // Every common-room daemon's agents — the thing a tool session is started *as*. `ListAgents`
   // answers for the responding daemon only, so without this fan-out an assistant created on another
   // host is absent from the form rather than merely hard to find.
-  const selectableAgents = useSelectableAgents(client, selectedInstanceId ?? "");
+  const selectableAgents = useSelectableAgents(client, connectedInstanceId);
 
   // Whether there is a host to name at all. The same condition the Host select is rendered on: with
   // no common room there is one host, so nothing to disambiguate and nothing to caption.
   const hostsAdvertised = daemons.length > 0;
 
   /**
-   * The host whose agents the session can actually be started as. An empty `daemon_instance_id`
-   * means "whichever daemon the browser is connected to" — the peer-spawn flow inherits that from an
-   * orchestrator started without an explicit host — and that daemon is the fan-out's home host, so
-   * that is what an empty id resolves to here. Only the scoping resolves it; the request keeps
-   * sending the empty id, which the daemon already reads the same way.
+   * The host whose agents the session can actually be started as — the host the form will ask for, in
+   * the spelling the fan-out stamps its rows with. See `hostRunningSession` for why the empty
+   * `daemon_instance_id` the peer flow can carry names a host rather than lacking one. The request is
+   * unaffected: it keeps sending `effectiveDaemonInstanceId` exactly as given.
    */
-  const agentHostInstanceId = effectiveDaemonInstanceId || selectedInstanceId || "";
+  const agentHostInstanceId = hostRunningSession(effectiveDaemonInstanceId, connectedInstanceId);
 
   /**
    * The agents this form may offer, and the hosts whose silence it may report: every host's in the
@@ -324,7 +322,7 @@ export function CreateSessionPane({
   // Every common-room daemon's specialized agents, each labelled with the host that offers it. A
   // host that cannot answer costs one error row rather than the whole picker — see
   // docs/ft/daemon/session-agent-roster.md § Web UI.
-  const availableAgents = useAvailableAgents(client, selectedInstanceId ?? "");
+  const availableAgents = useAvailableAgents(client, connectedInstanceId);
 
   const toggleAgent = (agentId: string) => {
     setSelectedAgentIds((prev) =>
@@ -819,63 +817,19 @@ export function CreateSessionPane({
       {/* Tool session fields */}
       {sessionType === "tool" && (
         <>
-          <div>
-            <label className={labelClass} htmlFor="create-session-agent">
-              Agent
-            </label>
-            {offeredHostFailures.map((failure) => (
-              <p
-                key={failure.daemonInstanceId}
-                data-testid={`create-session-agent-select-host-error-${safeTestIdPart(failure.daemonInstanceId)}`}
-                className="text-sm text-destructive"
-              >
-                {`${failure.daemonInstanceId}: ${failure.message}`}
-              </p>
-            ))}
-            <select
-              id="create-session-agent"
-              data-testid="create-session-agent-select"
-              className={inputClass}
-              value={selectedAgentValue}
-              onChange={(e) => {
-                // The picked row is looked up, never decoded: an agent id may itself contain an `@`,
-                // and the row already carries the host the option was built from.
-                const picked = offeredAgents.find(
-                  (a) => selectableAgentValue(a, hostsAdvertised) === e.target.value,
-                );
-                // A value with no row behind it can only come from a list that has since changed;
-                // keeping the current pair beats guessing which agent and host it meant.
-                if (!picked) return;
-                setAgent(picked.id);
-                // The session runs where its agent is resolvable, so picking one names its host. In
-                // peer mode every option already belongs to the frozen host, so this can only ever
-                // write that host back.
-                setDaemonInstanceId(picked.daemonInstanceId);
-              }}
-            >
-              {offeredAgents.length === 0 && offeredHostFailures.length === 0 ? (
-                <option value="" disabled data-testid="create-session-agent-empty-option">
-                  No agents available
-                </option>
-              ) : (
-                offeredAgents.map((a) => {
-                  const value = selectableAgentValue(a, hostsAdvertised);
-                  return (
-                    <option
-                      // Qualified whatever the value ends up being: the key identifies the
-                      // (agent, host) pair, and reusing the value's format keeps the two from
-                      // drifting apart.
-                      key={selectableAgentValue(a, true)}
-                      value={value}
-                      data-testid={`create-session-agent-select-option-${safeTestIdPart(value)}`}
-                    >
-                      {selectableAgentText(a, hostsAdvertised)}
-                    </option>
-                  );
-                })
-              )}
-            </select>
-          </div>
+          <CreateSessionAgentSelect
+            agents={offeredAgents}
+            failures={offeredHostFailures}
+            hostsAdvertised={hostsAdvertised}
+            selectedValue={selectedAgentValue}
+            onPick={(picked) => {
+              setAgent(picked.id);
+              // The session runs where its agent is resolvable, so picking one names its host. In
+              // peer mode every option already belongs to the frozen host, so this can only ever
+              // write that host back.
+              setDaemonInstanceId(picked.daemonInstanceId);
+            }}
+          />
 
           <div>
             <label className={labelClass} htmlFor="create-session-recipe">

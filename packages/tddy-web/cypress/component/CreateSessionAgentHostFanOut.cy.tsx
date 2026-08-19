@@ -4,7 +4,7 @@
  * sets the session's Host from the agent that was picked — except in the peer-agent spawn flow,
  * where the host is settled before the form opens and only that host's agents may be offered.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-08-19-session-agent-host-fan-out.md (AC1–AC12)
+ * Feature: docs/ft/web/session-agent-catalog-fan-out.md (AC1–AC12)
  *
  * `ListAgents` carries no routing field, so a daemon answers for its own config allowlist and its
  * own registry assistants only. Each host therefore answers from its **own** backend
