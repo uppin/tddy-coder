@@ -95,8 +95,8 @@ rest of `<tddyhome>/agents/` (or the builtin fastcontext def) from loading.
 ## Architecture
 
 ```
-<tddyhome>/agents/*.yaml  ──scan──►  daemon ListSubagents RPC ──►  Web CreateSessionPane
-   (SpecializedAgentDef)             (tddy-discovery::agent_def)   (collapsible + multi-select)
+<tddyhome>/agents/*.yaml + registry assistants ──►  daemon ListSubagents RPC ──►  Web agent picker
+   (SpecializedAgentDef; Models & Agents, per host)  (resolvable_agent_defs())      (fanned out per host)
         │                                                                  │
         │ resolve selected defs by name              StartSessionRequest  │ managed_codebase,
         ▼                                                (fields 17-18)   ▼ specialized_agents[]
@@ -190,8 +190,13 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 
 ### Daemon + Web UI
 
-16. `ListSubagents` RPC returns the resolved def set (builtin + `<tddyhome>/agents`) as
-    `{name, label, model}` rows.
+16. `ListSubagents` RPC returns the resolved def set — **every** source a name resolves against on
+    the serving daemon: `<tddyhome>/agents/*.yaml` **and** that daemon's registry assistants (Models
+    & Agents), a registry assistant winning a name tie. It answers from the same
+    `resolvable_agent_defs()` an attach resolves against, so what a picker is offered and what it can
+    attach cannot drift apart. Rows carry `{agent_id, name, label, model, daemon_instance_id,
+    replaces, tools}`, and no provider credential — a key is attached on the session-start path only.
+    See [session-agent-roster.md](../daemon/session-agent-roster.md).
 17. `StartSessionRequest.managed_codebase` (bool) and `.specialized_agents` (repeated string, subagent
     names) are accepted for `session_type == "claude-cli"` **or** `"cursor-cli"` sandboxed sessions; an unknown name in
     `specialized_agents` is a request error, not a silently-dropped agent.

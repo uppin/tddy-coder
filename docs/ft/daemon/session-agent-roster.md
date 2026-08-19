@@ -222,6 +222,27 @@ message SubagentInfo {
 }
 ```
 
+**What it advertises is every def source a name resolves against on the serving daemon** — its
+`<tddyhome>/agents/*.yaml` defs *and* its registry assistants (Models & Agents), a registry assistant
+winning a name tie. It is answered from the same `resolvable_agent_defs()` an attach resolves against,
+and that is the point: an id that is offered but not attachable sends an operator to an
+`INVALID_ARGUMENT`, and one that is attachable but not offered is simply invisible. The second is what
+happened while `ListSubagents` read only the agents directory — an assistant created in Models &
+Agents could be started *as*, and attached by typing its id, but appeared in no picker on any host,
+and because a peer's defs are resolved through the peer's `ListSubagents` (step 1 below) it was not
+attachable from another host at all.
+
+Two consequences worth stating:
+
+- **Each daemon advertises its own assistants only.** A picker sees another host's assistants because
+  it fans `ListSubagents` out, not because any daemon forwards. Both ends of a common room must be
+  running a build that advertises them.
+- **The response carries no credential.** A registry assistant's provider key is attached on the
+  session-start path alone (`agent_def_for_spawn`); `ListSubagents` is answered for every operator.
+  Reading the registry can fail, and then the RPC fails rather than answering with the YAML half — a
+  partial list is how this bug read as "no agents exist" instead of "one source is broken", and the
+  web renders a failing host as its own error row above the picker.
+
 ### What attach does
 
 1. **Resolve.** `agent_id` is split. If the daemon part names the facilitating daemon, the def is

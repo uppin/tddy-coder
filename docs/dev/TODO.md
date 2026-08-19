@@ -232,6 +232,36 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### The daemon's secret stores still truncate in place (source: atomic-session-file-writes changeset, 2026-08-16)
+`tddy_core::atomic_file` now carries every session- and daemon-state write, but three files were left
+out: `github_token_store.rs`, `vnc_vault.rs` and `screen_sharing_vault.rs`. They are the ones that are
+**correct about mode `0600` on creation**, and `write_atomic` only carries permission bits over from an
+*existing* target — so a first write through it would create the swap file at the process umask and
+publish a world-readable secret store.
+
+The fix is a mode-aware variant (`write_atomic_with_mode(path, contents, mode)`) that sets the swap
+file's mode before writing rather than copying it from the target, then converting the three call
+sites. Until then, a full disk can still empty a token store: an empty secrets file reads as "no
+credential", which surfaces as a re-auth prompt rather than as the write failure it is.
+
+### `docs/ft/coder/specialized-subagents.md` describes an interface the roster replaced (source: list-subagents-registry-assistants changeset, 2026-08-19)
+Found while correcting criterion 16 of that document. Only criterion 16 and the architecture diagram
+were in this changeset's scope; the rest of the file still describes the pre-roster world and is
+misleading to anyone reading it as current:
+
+- **Criteria 17–19 describe `StartSessionRequest.specialized_agents` and the "Managed codebase"
+  collapsible multi-select** as the way agents are chosen. The session-agent-roster changeset
+  (2026-08-18) replaced both: agents are attached to a live session as a revisioned roster of
+  `name@daemon_instance_id`, and `specialized_agents` is gone from the wire.
+- **The builtin `fastcontext` def is referenced as a live def source** in the load-time section
+  ("or the builtin fastcontext def") and in criterion 16's neighbours. Every hardcoded builtin was
+  deleted by the same changeset.
+- **`TDDY_SUBAGENT`** appears as a default the jail receives; it was removed too.
+
+Cheap to fix and worth doing as its own documentation pass, since a reader cannot tell which criteria
+in the file survived. Whoever does it should reconcile against
+[session-agent-roster.md](../ft/daemon/session-agent-roster.md), which is the current description.
+
 ### Session-creation agent catalog — the rest of the fan-out (source: session-agent-host-fan-out changeset, 2026-08-19)
 The Agent `<select>` now reads `ListAgents` from every common-room host and labels each option with
 the host that offers it. These gaps were scoped out of that changeset deliberately.

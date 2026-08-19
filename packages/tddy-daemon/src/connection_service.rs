@@ -8492,8 +8492,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(resp))
     }
 
-    /// Resolved specialized-agent defs (`<tddyhome>/agents/*.yaml` — see
-    /// docs/ft/coder/specialized-subagents.md) available to wire into a managed-codebase session.
+    /// Resolved specialized-agent defs available to wire into a managed-codebase session — every
+    /// source a name can resolve against here, so `<tddyhome>/agents/*.yaml` (see
+    /// docs/ft/coder/specialized-subagents.md) *and* this daemon's registry assistants.
+    ///
+    /// Answered from [`Self::resolvable_agent_defs`], which is also what an attach resolves the id
+    /// it is handed against: what a picker is offered and what it can then attach are one list, not
+    /// two that can drift. Advertising less than that is what made an assistant created in Models &
+    /// Agents invisible to the roster while being perfectly attachable by name.
     ///
     /// Every row is stamped with this daemon's instance id and the qualified `agent_id` it is
     /// attached by. A picker fans this call out across every common-room daemon, and two of them
@@ -8507,23 +8513,36 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         _request: Request<ListSubagentsRequest>,
     ) -> Result<Response<ListSubagentsResponse>, Status> {
-        log::debug!("list_subagents RPC: resolving <tddyhome>/agents defs");
+        log::debug!("list_subagents RPC: resolving agent defs");
         let daemon_instance_id = local_instance_id_for_config(&self.config);
-        let agents_dir = self.tddy_data_dir.join("agents");
-        let subagents: Vec<SubagentInfo> =
-            tddy_discovery::agent_def::resolve_agent_defs(&agents_dir)
-                .into_iter()
-                .filter_map(|def| match subagent_info(&def, &daemon_instance_id) {
-                    Ok(info) => Some(info),
-                    Err(e) => {
-                        log::warn!("list_subagents RPC: not advertising a def — {e}");
-                        None
-                    }
-                })
-                .collect();
+        let defs = self.resolvable_agent_defs().await?;
+        let resolved = defs.len();
+        let subagents: Vec<SubagentInfo> = defs
+            .into_iter()
+            .filter_map(|def| match subagent_info(&def, &daemon_instance_id) {
+                Ok(info) => Some(info),
+                Err(e) => {
+                    log::warn!("list_subagents RPC: not advertising a def — {e}");
+                    None
+                }
+            })
+            .collect();
+        // An empty answer has three very different causes — this daemon has no defs, its registry
+        // was never wired in, or a def was dropped on the way out — and "returning 0" told them
+        // apart in none of them. Naming the sources is what makes an empty picker diagnosable from
+        // the log alone, on a host whose filesystem is not to hand.
         log::info!(
-            "list_subagents RPC: returning {} subagent(s)",
-            subagents.len()
+            "list_subagents RPC: returning {} subagent(s) of {} resolved def(s) [agents dir {}, \
+             model registry {}]: {:?}",
+            subagents.len(),
+            resolved,
+            self.tddy_data_dir.join("agents").display(),
+            if self.model_registry.is_some() {
+                "attached"
+            } else {
+                "absent"
+            },
+            subagents.iter().map(|s| &s.agent_id).collect::<Vec<_>>()
         );
         Ok(Response::new(ListSubagentsResponse { subagents }))
     }

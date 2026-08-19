@@ -119,6 +119,47 @@ How a branch stands against its base — behind/ahead counts and whether taking 
 - **TddyLogger**: Implements `log::Log`. Routes records to the logger chosen by the first matching policy. Format templating: `{timestamp}`, `{level}`, `{target}`, `{module}`, `{message}`.
 - **Log rotation**: On startup, existing file outputs are renamed to `{stem}.{ISO-8601}.{ext}`; rotated files beyond `max_rotated` are pruned. `TDDY_QUIET` switches default output to buffer for TUI display.
 
+### Atomic file writes (`atomic_file.rs`)
+
+The single way session and daemon state reaches disk. `std::fs::write` opens the target with
+`O_TRUNC`, discarding the previous contents before the first replacement byte lands, so a write that
+fails part-way — `ENOSPC` mid-write, or at writeback after a short `write` — leaves a **truncated or
+empty** file where the state used to be. A 0-byte `.session.yaml` does not read as "write failed"; it
+reads as "not a session", so the daemon and `tddy-web` drop a session whose agent process is still
+running and healthy.
+
+- **write_atomic(path, contents)**: writes a **per-call** swap file beside the target
+  (`.<basename>.<pid>.<uuid>.swap`), `write_all` + `sync_all`, carries over an existing target's
+  permission bits, `rename`s over the target, then best-effort `fsync`s the directory. Any failure is
+  cleaned up and reported with the target untouched. The swap name is per-call because two concurrent
+  writers sharing one fixed scratch name can publish each other's half-written bytes — which two
+  hand-rolled temp-then-rename implementations (`.changeset.yaml.tmp`, `job.json.tmp`) did before
+  they were folded into this module.
+- **write_atomic_labelled(path, contents)**: the same, with the target path folded into the error
+  string, since a bare `ENOSPC` names no file.
+- Consumers: everything that persists session or daemon state — `session_metadata.rs`,
+  `changeset.rs`, `output/writer.rs`, `workflow/session.rs`, `workflow/action_cache.rs`,
+  `session_action_jobs/runner.rs`, `session_actions/runtime.rs`, `backend/{codex,cursor}.rs`,
+  `presenter/presenter_impl.rs`, plus `tddy-workflow-recipes`, `tddy-daemon`
+  (`project_storage.rs`, `worktrees.rs`, `telegram_github_link.rs`, `connection_service.rs`,
+  `cursor_cli_spawn.rs`), `tddy-sandbox-recipes` and `tddy-tools`.
+
+Deliberately **not** routed through it: `/proc`, `/sys` and cgroup control files (kernel interfaces
+where a rename is meaningless and a plain write is the contract); ready markers, empty completion
+markers and short-lived curl body files (nothing reads them after a failed write); `tddy-build`'s
+action cache (the crate is deliberately standalone — no `tddy-*` deps — and already writes a uniquely
+named temp file, syncs and renames); and `tddy-tool-engine`'s writes, which target arbitrary
+repository files where replacing a symlink with a regular file would be a behaviour change.
+
+Atomic replacement changes the file's **inode**. Nothing in the repo watches session files via
+`notify`/inotify — `usage_watcher.rs` documents polling as a deliberate choice — so no reader depends
+on the inode surviving. Swap files are dotfiles ending in `.swap`, so directory scans filtering on
+`.md` (`inject_cross_references`) or on hidden files never pick one up.
+
+Still truncating in place, and worth converting separately: the daemon's secret stores
+(`github_token_store.rs`, `vnc_vault.rs`, `screen_sharing_vault.rs`). They are correct about mode
+`0600` on creation, so converting them needs a mode-aware variant of `write_atomic`.
+
 ### Stdio safety (`stdio_safety.rs`)
 
 Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--stdio` (RPC over stdin/stdout via `tddy-stdio`), which has zero tolerance for stray bytes.
