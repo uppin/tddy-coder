@@ -4,7 +4,6 @@
  * deleting a checkout on another host.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md (AC49-AC53)
- * Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
  *
  * Not to be confused with `SessionAgentsSection.cy.tsx`, which covers peer child *sessions* — a
  * different concept that shares the word "agent".

@@ -4,7 +4,6 @@
  * degrades one unreachable host into one error row rather than an empty picker.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md (AC48, AC49)
- * Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
  *
  * Supersedes the single-daemon `listSubagents` stub in `CreateSessionManagedCodebase.cy.tsx`: that
  * picker asked one daemon and sent bare names, which cannot express an agent that lives elsewhere.

@@ -2,7 +2,6 @@
 //! routing and teardown.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC26-AC43)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! Two real daemons in a real common room, with a real git project. Nothing here is decidable on
 //! one host: every assertion is about *which host answered*, and a single-daemon fixture would

@@ -1,7 +1,6 @@
 //! Acceptance tests: the in-jail registry follows the session's live roster.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC13-AC18, AC20)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! `tddy-tools --mcp` used to build its `SubagentRegistry` from `TDDY_SUBAGENTS_JSON` — an env var
 //! fixed when the jail was spawned. An agent attached at minute forty was therefore uncallable

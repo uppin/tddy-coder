@@ -87,6 +87,21 @@ branch workflow: that workflow fetches `origin/<branch>` (impossible for a remot
 would name a branch in the operator's own repository that the mirror moves off two seconds later.
 It is still an ordinary listable, deletable `workspace` session.
 
+### Room admission
+
+The owning daemon does **not** self-mint its session-room token. The facilitating daemon
+mints a scoped, short-TTL (5 min) admission token in `provision_agent_clone`, records the
+owning daemon in a `SessionAdmissionRegistry`, and forwards the token inside
+`StartSessionRequest.agent_clone` (`AgentClonePlacement.first_admission_token`). The owning
+daemon joins `session-{session_id}` with that token.
+
+`run_clone_mirror` runs a **re-admit loop**: on room disconnect it calls
+`SessionAdmissionService.AdmitOwningDaemon` over the common room for a fresh token and
+rejoins, preserving `CloneMirror` state across the reconnect. A `FAILED_PRECONDITION`
+re-admit is the revocation signal — the facilitating daemon revokes the owning daemon on the
+last detach (`tear_down_agent_clone`) and on session delete (`revoke_all_for_session`), and
+the mirror stops cleanly rather than retrying a room it is no longer welcome in.
+
 ### The mirror
 
 `run_clone_mirror` runs the [session worktree sync](../../../docs/ft/daemon/session-worktree-sync.md)
@@ -125,6 +140,30 @@ checkout and report "not found" for a file that is merely not there yet.
 The handler authenticates `session_token` before recording anything: the
 (session, daemon, codebase_session_id) triple is published in the `session.agents` broadcast, so it
 identifies a clone but does not authorize a claim about it.
+
+## The sandbox-IPC bridge
+
+A managed-codebase session's agent runs in a jail, and its tool calls reach the
+facilitating daemon over the sandbox `SessionChannel`. The roster and conversation
+RPCs (`StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation`,
+`CancelAgentConversation`) ride that same channel rather than a second transport:
+
+- **`SessionFrame` carries two new payload variants** — `RpcRequest` (jail → host) and
+  `RpcStreamFrame` (host → jail), multiplexed by `request_id` the way tunnels already are, so a
+  lifetime-long roster stream does not occupy the positionally-paired request/response slot that
+  `ExecuteTool` uses.
+- **`tddy-sandbox-runner`** dispatches an inbound `RpcRequest` to an injected `HostRpcHandler`
+  (`run_host_relay_with_rpc`); a unary reply becomes one terminal `RpcStreamFrame`, a server-stream
+  reply becomes payload frames followed by a terminal marker, and a handler error becomes a
+  terminal frame carrying the message. `NullRpcHandler` refuses every call with `UNIMPLEMENTED`, so
+  a standalone app or test that wires no daemon stays honest.
+- **`tddy-daemon`** implements `HostRpcHandler` as `DaemonRpcHandler`, which recovers the
+  `Arc<ConnectionServiceImpl>` through a self-handle (`Arc<OnceLock<Weak<Self>>>` set once in
+  `main.rs`) so a `&self` tonic trait method can dispatch to the roster/conversation handlers
+  without the call site threading the Arc through.
+
+The in-jail `tddy-tools` roster stream client opens `StreamSessionAgents` over this bridge; it
+reconnects with backoff on drop, and a roster that never receives a frame (`RosterCurrency::Unreachable`) does not enforce tool withdrawal, while one that was current and went stale still does.
 
 ## Tests
 

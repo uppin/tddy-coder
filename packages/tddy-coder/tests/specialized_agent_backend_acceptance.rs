@@ -1,7 +1,6 @@
 //! Acceptance tests: `tddy-coder` carries no hardcoded agent.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC45, AC46)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! Replaces `fastcontext_backend_acceptance.rs`, which asserted the opposite: that the CLI accepted
 //! one hardcoded agent name and that `dev.daemon.yaml` listed it under `allowed_agents`.

@@ -2,7 +2,6 @@
 //! (`AttachSessionAgent`, `DetachSessionAgent`, `ListSessionAgents`, `StreamSessionAgents`).
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC1-AC12)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! One daemon, real YAML def sources, real session directories, no LiveKit and no peer. That is
 //! deliberate: everything about *arity, identity, revisioning and persistence* is decidable on one

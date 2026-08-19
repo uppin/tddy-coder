@@ -2,7 +2,7 @@
 //! both survive a restart.
 //!
 //! Product contract: docs/ft/daemon/session-agent-roster.md § The roster, § Attaching and
-//! detaching. Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md.
+//! detaching. Module docs: packages/tddy-daemon/docs/session-agent-roster.md.
 //!
 //! Three properties this type exists to hold, each of them a bug somewhere else if it slips:
 //!

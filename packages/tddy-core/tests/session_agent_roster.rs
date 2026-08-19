@@ -2,7 +2,6 @@
 //! (`tddy_core::session_agent`, `tddy_core::session_metadata`).
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC4, AC10, AC11)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! Two things are pinned here and nowhere else. First, that an agent's qualified id
 //! (`name@daemon_instance_id`) is a *round trip* — every consumer routes off the daemon part, so

@@ -2,7 +2,6 @@
 //! when they are detached.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC19, AC21-AC25)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! `replaces` used to carry per-tool meaning: replacing `Shell` made a def the session's "action
 //! author" and handed it `request_action`/`invoke_action`; replacing `Write` made it the "coder";

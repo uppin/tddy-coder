@@ -2,7 +2,6 @@
 //! (`tddy_discovery::agent_def`, `tddy_discovery::subagent`).
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC44, AC45)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! `resolve_agent_defs` used to seed itself from `builtin_agent_defs()`, so an empty
 //! `<tddyhome>/agents/` still yielded one agent — `fastcontext` — with a hardcoded model, a

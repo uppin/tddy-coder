@@ -2,7 +2,6 @@
 //! (`OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation`).
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (§ What detach does, § Prompting an agent)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! One daemon, one locally-owned agent, and a stub model the test drives: everything here is about
 //! what happens **while a turn is in flight**, which is decidable on one host and needs a model that

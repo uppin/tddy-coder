@@ -1,7 +1,6 @@
 //! Acceptance tests: the conversation tools the MCP server advertises follow the live roster.
 //!
 //! Feature: docs/ft/daemon/session-agent-roster.md (AC14, AC16)
-//! Changeset: docs/dev/1-WIP/2026-08-16-session-agent-roster.md
 //!
 //! `subagent_mcp_acceptance.rs` covers what a *spawn* looks like — a session started with an agent
 //! advertises the conversation tools, one started without does not — by starting a fresh process
