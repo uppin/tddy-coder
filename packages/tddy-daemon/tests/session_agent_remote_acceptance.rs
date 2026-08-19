@@ -287,8 +287,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let repos_base_a = tempfile::tempdir().expect("daemon A repos_base tempdir");
     let repos_base_path_a = repos_base_a.path().to_string_lossy().into_owned();
     repos_bases.push(repos_base_a);
-    let (cfg_dir_a, cfg_path_a) =
-        write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
+    let (cfg_dir_a, cfg_path_a) = write_daemon_yaml(&ws_url, None, &os_user, &repos_base_path_a);
     let config_a = DaemonConfig::load(&cfg_path_a).expect("daemon A config");
     configs.push(cfg_dir_a);
 
@@ -405,9 +404,9 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
             service: Arc::new(admission_server) as Arc<dyn RpcService>,
         },
     ]);
-    let instance_id_a = tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config_a);
-    let rpc_identity_a =
-        tddy_daemon::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
+    let instance_id_a =
+        tddy_daemon::livekit_peer_discovery::local_instance_id_for_config(&config_a);
+    let rpc_identity_a = tddy_daemon::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
     let rpc_token_a = livekit
         .generate_token(ROOM, &rpc_identity_a)
         .expect("A RPC participant token");

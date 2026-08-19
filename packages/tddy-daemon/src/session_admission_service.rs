@@ -22,7 +22,7 @@ use std::time::Duration;
 use tddy_livekit::TokenGenerator;
 use tddy_rpc::Status;
 use tddy_service::proto::session_admission::{
-    SessionAdmissionService, AdmitOwningDaemonRequest, AdmitOwningDaemonResponse,
+    AdmitOwningDaemonRequest, AdmitOwningDaemonResponse, SessionAdmissionService,
 };
 
 use crate::config::DaemonConfig;
@@ -94,9 +94,7 @@ impl SessionAdmissionRegistry {
     /// log can confirm the sweep matched the roster's host count).
     pub fn revoke_all_for_session(&self, session_id: &str) -> usize {
         let mut g = self.admitted.lock().expect("admission registry poisoned");
-        g.remove(session_id)
-            .map(|set| set.len())
-            .unwrap_or(0)
+        g.remove(session_id).map(|set| set.len()).unwrap_or(0)
     }
 }
 
@@ -198,8 +196,12 @@ impl SessionAdmissionService for SessionAdmissionServiceImpl {
         let room = session_room_name(session_id);
         let identity = daemon_rpc_identity(owning);
         // The livekit url/key/secret are deployment-wide; only the room name is per-session.
-        let (_common_room, url, api_key, api_secret) = livekit_common_room_connect_strings(&self.config)
-            .map_err(|e| Status::failed_precondition(format!("this daemon cannot admit an owning daemon: {e}")))?;
+        let (_common_room, url, api_key, api_secret) =
+            livekit_common_room_connect_strings(&self.config).map_err(|e| {
+                Status::failed_precondition(format!(
+                    "this daemon cannot admit an owning daemon: {e}"
+                ))
+            })?;
         let token = TokenGenerator::new(
             api_key,
             api_secret,

@@ -509,7 +509,11 @@ pub async fn run_clone_mirror(
         spec.codebase_session_id,
         spec.session_id,
         spec.worktree_path.display(),
-        if handshake_enabled { "on" } else { "off (self-mint fallback)" },
+        if handshake_enabled {
+            "on"
+        } else {
+            "off (self-mint fallback)"
+        },
         spec.facilitating_daemon_instance_id
     );
 
@@ -746,17 +750,13 @@ pub async fn run_clone_mirror(
 /// Ask the facilitating daemon for a fresh admission token over the common room (PRD § "What
 /// attach does" step 3 — the re-admit loop). Returns the token and the LiveKit server to rejoin
 /// on; an error carries the reason the mirror should stop with (revocation or unreachable).
-async fn re_admit(
-    spec: &CloneMirrorSpec,
-    _room_name: &str,
-) -> Result<(String, String), String> {
+async fn re_admit(spec: &CloneMirrorSpec, _room_name: &str) -> Result<(String, String), String> {
     use prost::Message as _;
     use tddy_service::proto::session_admission::AdmitOwningDaemonRequest;
 
-    let slot = spec
-        .common_room_slot
-        .clone()
-        .ok_or_else(|| "the common room is not connected on this daemon; cannot re-admit".to_string())?;
+    let slot = spec.common_room_slot.clone().ok_or_else(|| {
+        "the common room is not connected on this daemon; cannot re-admit".to_string()
+    })?;
     let body = AdmitOwningDaemonRequest {
         session_token: spec.session_token.clone(),
         session_id: spec.session_id.clone(),
@@ -785,7 +785,10 @@ async fn re_admit(
             e.code(),
             e.message()
         );
-        format!("re-admit RPC to the facilitating daemon failed: {}", e.message())
+        format!(
+            "re-admit RPC to the facilitating daemon failed: {}",
+            e.message()
+        )
     })?;
     let decoded = tddy_service::proto::session_admission::AdmitOwningDaemonResponse::decode(
         response.as_slice(),
@@ -964,13 +967,14 @@ impl CloneMirror {
     /// the ref it diffs against is the tick the tree was last filled from, so a delta applied in
     /// between is indistinguishable here from a second writer.
     async fn note_local_changes(&mut self) {
-        let Ok(output) = self.git_output(&[
-            "diff",
-            "--name-only",
-            tddy_session_sync::LOCAL_WIP_REF,
-            "--",
-        ])
-        .await
+        let Ok(output) = self
+            .git_output(&[
+                "diff",
+                "--name-only",
+                tddy_session_sync::LOCAL_WIP_REF,
+                "--",
+            ])
+            .await
         else {
             // No local WIP ref yet — this is the first restore, and there is nothing for the clone
             // to have diverged from.
@@ -1112,9 +1116,7 @@ impl CloneMirror {
 
     async fn git_output(&self, args: &[&str]) -> Result<String, String> {
         let mut command = tokio::process::Command::new("git");
-        command
-            .args(args)
-            .current_dir(&self.worktree_path);
+        command.args(args).current_dir(&self.worktree_path);
         // Carry the transport-shim env var so `git fetch origin` reaches the facilitating daemon's
         // `remote_git.RemoteGitService` over `tddy-remote-git-repo` (PRD AC37). Unset for a
         // shared-filesystem checkout, which fetches a local path.

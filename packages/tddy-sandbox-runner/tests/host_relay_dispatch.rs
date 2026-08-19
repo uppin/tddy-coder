@@ -181,9 +181,7 @@ impl HostRpcHandler for StubRpcHandler {
         _payload: &[u8],
     ) -> tddy_rpc::RpcResult {
         match (service, method) {
-            ("test.Service", "Unary") => {
-                tddy_rpc::RpcResult::Unary(Ok(self.unary_body.clone()))
-            }
+            ("test.Service", "Unary") => tddy_rpc::RpcResult::Unary(Ok(self.unary_body.clone())),
             ("test.Service", "Stream") => {
                 let (tx, rx) = tokio::sync::mpsc::channel(8);
                 let frames = self.stream_frames.clone();

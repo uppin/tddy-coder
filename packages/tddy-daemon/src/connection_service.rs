@@ -1038,8 +1038,7 @@ pub struct ConnectionServiceImpl {
     /// still recover the original `Arc`. Used by the sandbox-IPC RPC bridge: a sandboxed session's
     /// `dial_and_bridge` builds a `DaemonRpcHandler` from `self_arc()` so the in-jail `tddy-tools`
     /// can reach the roster and conversation RPCs on this daemon over the `SessionChannel`.
-    self_handle:
-        Arc<std::sync::OnceLock<std::sync::Weak<ConnectionServiceImpl>>>,
+    self_handle: Arc<std::sync::OnceLock<std::sync::Weak<ConnectionServiceImpl>>>,
 }
 
 /// One open conversation with a roster agent.
@@ -1279,7 +1278,9 @@ impl ConnectionServiceImpl {
         session_id: &str,
         owning_daemon_instance_id: &str,
     ) -> Option<(String, String, String, u64)> {
-        use crate::livekit_peer_discovery::{daemon_rpc_identity, livekit_common_room_connect_strings};
+        use crate::livekit_peer_discovery::{
+            daemon_rpc_identity, livekit_common_room_connect_strings,
+        };
         use crate::session_admission_service::ADMISSION_TOKEN_TTL;
         use crate::session_room::session_room_name;
         use tddy_livekit::TokenGenerator;
@@ -1306,7 +1307,6 @@ impl ConnectionServiceImpl {
         );
         Some((token, url, room, ADMISSION_TOKEN_TTL.as_secs()))
     }
-
 
     /// Share the daemon's session-room registry (builder) with everything else that opens or
     /// closes rooms — Telegram's Delete path holds the same `Arc`. Without it this service keeps
@@ -2995,7 +2995,10 @@ impl ConnectionServiceImpl {
                          url={facilitating_daemon_url:?})"
                     )));
                 }
-                Some((facilitating_instance_id.to_string(), facilitating_daemon_url.to_string()))
+                Some((
+                    facilitating_instance_id.to_string(),
+                    facilitating_daemon_url.to_string(),
+                ))
             }
             None => None,
         };
@@ -3984,7 +3987,11 @@ impl ConnectionServiceImpl {
             livekit_api_secret: api_secret,
             facilitating_daemon_url: if is_facilitator_clone {
                 let u = placement.facilitating_daemon_url.trim();
-                if u.is_empty() { None } else { Some(u.to_string()) }
+                if u.is_empty() {
+                    None
+                } else {
+                    Some(u.to_string())
+                }
             } else {
                 None
             },
@@ -8262,12 +8269,7 @@ struct DaemonRpcHandler {
 
 #[async_trait::async_trait]
 impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
-    async fn handle_rpc(
-        &self,
-        service: &str,
-        method: &str,
-        payload: &[u8],
-    ) -> tddy_rpc::RpcResult {
+    async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult {
         use prost::Message;
         use tddy_rpc::Request;
         // Only the four RPCs the runner forwards ride this bridge; anything else is a wiring bug
@@ -8278,9 +8280,11 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 let req = match StreamSessionAgentsRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
-                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
-                            format!("decode StreamSessionAgentsRequest: {e}"),
-                        )));
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode StreamSessionAgentsRequest: {e}"
+                            )),
+                        ));
                     }
                 };
                 match self.conn.stream_session_agents(Request::new(req)).await {
@@ -8306,15 +8310,15 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 let req = match OpenAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
-                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
-                            format!("decode OpenAgentConversationRequest: {e}"),
-                        )));
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode OpenAgentConversationRequest: {e}"
+                            )),
+                        ));
                     }
                 };
                 match self.conn.open_agent_conversation(Request::new(req)).await {
-                    Ok(resp) => {
-                        tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec()))
-                    }
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
@@ -8322,9 +8326,11 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 let req = match PromptAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
-                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
-                            format!("decode PromptAgentConversationRequest: {e}"),
-                        )));
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode PromptAgentConversationRequest: {e}"
+                            )),
+                        ));
                     }
                 };
                 match self.conn.prompt_agent_conversation(Request::new(req)).await {
@@ -8348,15 +8354,15 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 let req = match CancelAgentConversationRequest::decode(payload) {
                     Ok(r) => r,
                     Err(e) => {
-                        return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::invalid_argument(
-                            format!("decode CancelAgentConversationRequest: {e}"),
-                        )));
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode CancelAgentConversationRequest: {e}"
+                            )),
+                        ));
                     }
                 };
                 match self.conn.cancel_agent_conversation(Request::new(req)).await {
-                    Ok(resp) => {
-                        tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec()))
-                    }
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
@@ -9910,9 +9916,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // this is the session-wide sweep that catches admissions whose clones were already gone.)
         let revoked = self.session_admissions.revoke_all_for_session(session_id);
         if revoked > 0 {
-            log::info!(
-                "revoked {revoked} admission(s) for session {session_id} on session delete"
-            );
+            log::info!("revoked {revoked} admission(s) for session {session_id} on session delete");
         }
         // The other direction: this daemon may be *holding* a clone, whose workspace session is the
         // one being deleted. Forgetting it before the directory goes is what stops a tool call

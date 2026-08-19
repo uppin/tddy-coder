@@ -314,7 +314,13 @@ pub async fn clone_repo_via_supervisor_with_env(
         git.display()
     );
     let spawned = client
-        .spawn_session(clone_request_with_env(os_user, &git, git_url, destination, env))
+        .spawn_session(clone_request_with_env(
+            os_user,
+            &git,
+            git_url,
+            destination,
+            env,
+        ))
         .await
         .map_err(|e| anyhow::anyhow!("tddy-supervisor refused to clone the repository: {e}"))?;
 

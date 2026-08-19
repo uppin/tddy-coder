@@ -195,12 +195,7 @@ pub trait HostRpcHandler: Send + Sync + 'static {
     /// Dispatch `service`/`method` with the encoded request `payload`, returning either a single
     /// encoded response body or a server stream of them. A `Unary` error or a `ServerStream` error
     /// is carried back to the in-jail caller as a single terminal `RpcStreamFrame` with `error` set.
-    async fn handle_rpc(
-        &self,
-        service: &str,
-        method: &str,
-        payload: &[u8],
-    ) -> tddy_rpc::RpcResult;
+    async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult;
 }
 
 /// An RPC handler that refuses every call with `UNIMPLEMENTED`. The correct handler for a session
@@ -348,7 +343,10 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
                         // single `awaiting_tool` slot the poll path uses.
                         let request_id = req.request_id;
                         let tx = host_tx_reader.clone();
-                        match rpc_handler.handle_rpc(&req.service, &req.method, &req.payload).await {
+                        match rpc_handler
+                            .handle_rpc(&req.service, &req.method, &req.payload)
+                            .await
+                        {
                             tddy_rpc::RpcResult::Unary(Ok(body)) => {
                                 let _ = tx
                                     .send(SessionFrame {
@@ -382,10 +380,7 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
                                     while let Some(frame) = rx.recv().await {
                                         let (payload, error) = match frame {
                                             Ok(bytes) => (bytes, String::new()),
-                                            Err(status) => (
-                                                Vec::new(),
-                                                status.message,
-                                            ),
+                                            Err(status) => (Vec::new(), status.message),
                                         };
                                         let is_end = !error.is_empty();
                                         if tx

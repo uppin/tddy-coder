@@ -90,12 +90,19 @@ impl tddy_rpc::RpcService for ToolExecService {
             ("connection.ConnectionService", "PromptAgentConversation"),
             ("connection.ConnectionService", "CancelAgentConversation"),
         ];
-        if !FORWARDED_RPCS.iter().any(|(s, m)| (*s == service) && (*m == method)) {
+        if !FORWARDED_RPCS
+            .iter()
+            .any(|(s, m)| (*s == service) && (*m == method))
+        {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "unknown {service}/{method}"
             ))));
         }
-        let Some((request_id, mut rx)) = self.relay.call_rpc(service, method, message.payload.to_vec()).await else {
+        let Some((request_id, mut rx)) = self
+            .relay
+            .call_rpc(service, method, message.payload.to_vec())
+            .await
+        else {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::unavailable(
                 "the sandbox session channel is not connected to the host daemon yet",
             )));
@@ -346,6 +353,10 @@ struct PendingEgressCall {
 
 type OutboundSender = tokio::sync::mpsc::UnboundedSender<Result<SessionFrame, Status>>;
 
+/// Sender feeding encoded RPC stream frames (or a terminal `Status`) back to the in-jail
+/// `tddy-tools` caller that opened the stream. One per in-flight `request_id`.
+type RpcStreamSender = tokio::sync::mpsc::UnboundedSender<Result<Vec<u8>, tddy_rpc::Status>>;
+
 /// Host-poll session relay: MCP tool calls and egress requests queue until the host sends `HostPoll`.
 #[derive(Default)]
 struct SandboxSessionRelay {
@@ -375,7 +386,7 @@ struct SandboxSessionRelay {
     /// are routed to the matching sender; a frame with `end_of_stream` or `error` drops the entry.
     /// This is the multiplexing the poll-gated `awaiting_tool` slot cannot do: a lifetime-long
     /// `StreamSessionAgents` lives here alongside the tool calls behind it without blocking them.
-    rpc_streams: Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Result<Vec<u8>, tddy_rpc::Status>>>>,
+    rpc_streams: Mutex<HashMap<String, RpcStreamSender>>,
 }
 
 impl SandboxSessionRelay {
