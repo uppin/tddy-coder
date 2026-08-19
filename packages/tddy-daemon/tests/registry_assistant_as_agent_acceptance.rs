@@ -16,7 +16,8 @@ use tddy_daemon::model_registry::{ModelRegistryStore, NewAssistant, NewProvider}
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, ListSubagentsRequest, StartSessionRequest,
+    SubagentInfo,
 };
 use tddy_service::proto::models::ProviderKind;
 
@@ -36,8 +37,11 @@ const THE_OPERATOR: &str = "testuser";
 
 /// The daemon config every test here runs against: one mapped user and a non-empty
 /// `allowed_agents`, which is the configuration under which a registry assistant used to be
-/// rejected outright.
+/// rejected outright. Its instance id is pinned to `THIS_DAEMON` — the id the registry store is
+/// opened under, as in production — so the qualified ids the daemon mints do not depend on the
+/// hostname of whatever machine runs the suite.
 const DAEMON_YAML: &str = r#"
+daemon_instance_id: "workstation-1"
 users:
   - github_user: "testuser"
     os_user: "testdev"
@@ -105,6 +109,17 @@ impl Harness {
             )
             .await
             .expect("the assistant must be created");
+    }
+
+    /// What this daemon advertises as attachable to a session — the rows the web's agent picker and
+    /// a peer's remote-id resolution both read.
+    async fn when_listing_the_subagents_it_offers(&self) -> Vec<SubagentInfo> {
+        self.service
+            .list_subagents(Request::new(ListSubagentsRequest {}))
+            .await
+            .expect("ListSubagents must succeed")
+            .into_inner()
+            .subagents
     }
 
     /// Start a session as `agent` against a project that does not exist, so the outcome reports
@@ -339,4 +354,88 @@ async fn start_session_still_rejects_an_agent_that_is_neither_allowlisted_nor_an
         "the refusal must name the agent that was asked for; got: {}",
         status.message
     );
+}
+
+/// The row for `name`, or a panic naming what the daemon offered instead.
+fn subagent_named(subagents: &[SubagentInfo], name: &str) -> SubagentInfo {
+    subagents
+        .iter()
+        .find(|s| s.name == name)
+        .unwrap_or_else(|| {
+            panic!(
+                "'{name}' is not offered as a subagent; the daemon offered: {:?}",
+                subagents.iter().map(|s| &s.name).collect::<Vec<_>>()
+            )
+        })
+        .clone()
+}
+
+#[tokio::test]
+async fn the_subagents_offered_include_a_registry_assistant() {
+    // Given an assistant and no `<tddyhome>/agents` directory at all
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_named("repo-explorer", &["Read"])
+        .await;
+
+    // When
+    let offered = harness.when_listing_the_subagents_it_offers().await;
+
+    // Then it is offered under its qualified id — the id an attach names it by
+    let row = subagent_named(&offered, "repo-explorer");
+    assert_eq!(row.agent_id, format!("repo-explorer@{THIS_DAEMON}"));
+    assert_eq!(row.daemon_instance_id, THIS_DAEMON);
+    assert_eq!(row.label, "Repo explorer");
+    assert_eq!(row.model, "qwen3:32b");
+    assert_eq!(row.tools, vec!["Read".to_string()]);
+    // An assistant stands in for no main-agent tool, so attaching it withdraws nothing.
+    assert!(
+        row.replaces.is_empty(),
+        "an assistant replaces nothing; got: {:?}",
+        row.replaces
+    );
+}
+
+#[tokio::test]
+async fn the_subagents_offered_include_both_def_sources() {
+    // Given one def from each source
+    let harness = a_daemon_with_a_registry().await;
+    harness.given_an_agent_def_named("yaml-explorer");
+    harness
+        .given_an_assistant_named("repo-explorer", &["Read"])
+        .await;
+
+    // When
+    let offered = harness.when_listing_the_subagents_it_offers().await;
+
+    // Then the picker sees the whole of what this daemon can attach, from both sources
+    let mut names: Vec<&str> = offered.iter().map(|s| s.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["repo-explorer", "yaml-explorer"]);
+}
+
+#[tokio::test]
+async fn what_is_offered_is_exactly_what_can_be_attached() {
+    // Given an assistant, which `roster_record_for_agent_id` resolves against the same def source
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_named("repo-explorer", &["Read"])
+        .await;
+
+    // When
+    let offered = harness.when_listing_the_subagents_it_offers().await;
+    let resolvable = harness
+        .service
+        .resolvable_agent_defs()
+        .await
+        .expect("the daemon must resolve its agent defs");
+
+    // Then the advertisement and the resolution cannot disagree: a row offered but unattachable
+    // sends an operator to an INVALID_ARGUMENT, and one attachable but unoffered is invisible —
+    // which is the bug this pins.
+    let mut offered_names: Vec<&str> = offered.iter().map(|s| s.name.as_str()).collect();
+    let mut resolvable_names: Vec<&str> = resolvable.iter().map(|d| d.name.as_str()).collect();
+    offered_names.sort_unstable();
+    resolvable_names.sort_unstable();
+    assert_eq!(offered_names, resolvable_names);
 }

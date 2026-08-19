@@ -2,6 +2,13 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-19 — An assistant you can start as is an assistant you can attach
+
+- **`ListSubagents` advertises every def source the serving daemon resolves against** — its `<tddyhome>/agents/*.yaml` defs *and* its registry assistants (Models & Agents) — answered from the same `resolvable_agent_defs()` an attach resolves the id it is handed against. It read the agents directory alone, so an assistant created in Models & Agents could be started *as* and attached by typing its id, but appeared in no roster or specialized-agent opt-in picker on any host. See [session-agent-roster.md](session-agent-roster.md).
+- **A cross-host assistant is now attachable at all.** A peer's defs are resolved through the peer's `ListSubagents`, so an assistant on another host was unresolvable rather than merely unlisted — a qualified id did not help.
+- **Each daemon advertises its own assistants only**; a picker sees another host's because it fans the call out, not because any daemon forwards. Both ends of a common room must run a build that advertises them.
+- **The listing stays keyless and now fails rather than half-answers.** A provider credential is attached on the session-start path alone. If reading the registry fails so does the RPC — no fallback to the YAML half, because a partial list is precisely how this read as "no agents exist" instead of "one source is broken"; the web renders a failing host as its own error row above the picker.
+
 ## 2026-08-18 — Session agent roster — attach any number of agents, from any daemon
 
 - **A session's specialized agents are a revisioned roster mutated on a live session, addressable as `name@daemon_instance_id`**, replacing a fixed list of names frozen at spawn. The roster is the single source of truth on the wire (`SessionAgentRoster`, revisioned), at rest (`.session.yaml` `agents`/`agents_rev`), and in the in-jail registry (rebuilt from `StreamSessionAgents`). Every hardcoded builtin agent (`fastcontext`), `--fastcontext-*` flag, `TDDY_SUBAGENT` default, and action-author/coder `replaces` role is deleted. See [session-agent-roster.md](session-agent-roster.md).
