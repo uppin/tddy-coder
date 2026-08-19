@@ -1,11 +1,8 @@
 //! Unit tests: `SubagentRegistry::from_defs` — a subagent session built from a YAML-defined
-//! `SpecializedAgentDef` rather than the single hardcoded `"fastcontext"` factory.
+//! `SpecializedAgentDef`, which is the only way there is to build one.
 //!
 //! Feature: docs/ft/coder/specialized-subagents.md (criteria 5-8)
 //! Changeset: docs/dev/1-WIP/specialized-subagents.md
-//!
-//! `subagent_session_red.rs` covers the existing `SubagentRegistry::new()` / `"fastcontext"`
-//! factory path (unchanged by this generalization); this file covers the new `from_defs` path.
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::subagent::{CodebaseAccess, StopReason, SubagentConfig, SubagentRegistry};
@@ -71,17 +68,13 @@ fn a_def(name: &str, base_url: &str) -> SpecializedAgentDef {
 
 fn empty_access_config() -> SubagentConfig {
     SubagentConfig {
-        base_url: String::new(),
-        api_key: None,
-        model: String::new(),
-        max_turns: 0,
         access: CodebaseAccess::Local,
     }
 }
 
 /// `SubagentRegistry::from_defs` resolves a session for each registered def by name, sending
 /// requests to *that* def's `base_url`/`model` — proving multiple specialized agents can be
-/// registered and addressed independently, not just the single hardcoded fastcontext factory.
+/// registered and addressed independently.
 #[tokio::test]
 async fn registry_from_defs_creates_a_session_using_the_matching_defs_model_and_base_url() {
     // Given — two defs pointing at two different mock servers
@@ -158,9 +151,7 @@ async fn a_defs_api_key_authenticates_every_call_the_session_makes() {
     );
 }
 
-/// A def's `system_prompt` (when set) seeds the conversation's first message — today's
-/// `FastContextSession` (the `new()` / `"fastcontext"` factory path) starts with no system message
-/// at all.
+/// A def's `system_prompt` (when set) seeds the conversation's first message.
 #[tokio::test]
 async fn a_defs_system_prompt_seeds_the_first_message_of_the_conversation() {
     // Given
@@ -293,10 +284,10 @@ async fn a_model_issued_call_to_an_unbound_tool_is_rejected_not_silently_ignored
     );
 }
 
-/// A prompt turn that yields no tool call and no `<final_answer>` (plain prose, e.g. from an
-/// agent without FastContext's citation convention) terminates `StopReason::EndTurn` with the
-/// assistant's text as content — today only `<final_answer>` terminates `EndTurn`; without this, a
-/// plain-prose agent loops until `max_turns` on every single-turn answer.
+/// A prompt turn that yields no tool call and no `<final_answer>` (plain prose, from an agent
+/// that follows no citation convention) terminates `StopReason::EndTurn` with the assistant's text
+/// as content — without this, a plain-prose agent loops until `max_turns` on every single-turn
+/// answer.
 #[tokio::test]
 async fn a_prose_only_turn_with_no_tool_call_and_no_final_answer_terminates_end_turn() {
     // Given — the model answers in plain prose, no tool call, no <final_answer> block
@@ -340,29 +331,25 @@ async fn a_prose_only_turn_with_no_tool_call_and_no_final_answer_terminates_end_
     );
 }
 
-/// API boundary: a registry built via `from_defs` does **not** inherit the legacy hardcoded
-/// `"fastcontext"` factory from `SubagentRegistry::new()` — the two construction paths are
-/// independent. Requesting a name that is in neither the (empty) legacy factories map nor the
-/// (empty) `defs` list is a normal "unknown subagent" error, not a panic — this exercises the
-/// registry's fallback branch without touching the still-unimplemented def-resolution path.
+/// API boundary: a name no def defines is a normal "unknown subagent" error naming it — never a
+/// panic, and never a session built from something the binary supplied instead.
 #[test]
-fn from_defs_does_not_fall_back_to_the_legacy_hardcoded_fastcontext_factory() {
-    // Given — a registry built via from_defs with no matching "fastcontext" def registered
+fn a_name_no_def_defines_is_an_error_naming_it() {
+    // Given — a registry with no defs at all
     let registry = SubagentRegistry::from_defs(vec![]);
     let config = empty_access_config();
 
     // When
-    let result = registry.create("fastcontext", config);
+    let result = registry.create("explorer", config);
 
-    // Then — a normal typed error, not a panic and not a session built from the legacy factory
+    // Then
     assert!(
         result.is_err(),
-        "from_defs must not silently fall back to the legacy 'fastcontext' factory when no \
-         matching def is registered"
+        "an undefined agent must not resolve to a session"
     );
     let message = result.err().unwrap().to_string();
     assert!(
-        message.contains("fastcontext"),
+        message.contains("explorer"),
         "error message must name the unresolved subagent; got: {message:?}"
     );
 }

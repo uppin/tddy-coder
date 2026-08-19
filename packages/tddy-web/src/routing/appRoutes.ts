@@ -193,6 +193,7 @@ export function parseSessionsDrawerSessionId(pathname: string): string | null {
 export const INSPECTOR_TAB_NAMES = [
   "details",
   "tools",
+  "agents",
   "usage",
   "worktree",
   "files",

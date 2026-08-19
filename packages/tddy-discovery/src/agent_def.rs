@@ -2,7 +2,7 @@
 //! docs/ft/coder/specialized-subagents.md). A `SpecializedAgentDef` is the single source of truth
 //! consumed by the MCP subagent registry (`crate::subagent::SubagentRegistry::from_defs`), the
 //! standalone `tddy-sandbox-app` CLI, and the `tddy-coder` workflow backend (`create_backend`) —
-//! replacing three independent FastContext-specific config surfaces with one.
+//! one config surface rather than one per agent-shaped feature.
 
 use std::path::{Path, PathBuf};
 
@@ -89,10 +89,6 @@ impl SubagentTool {
     }
 }
 
-fn default_base_url() -> String {
-    "http://localhost:30000".to_string()
-}
-
 fn default_tools() -> Vec<SubagentTool> {
     vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep]
 }
@@ -115,7 +111,9 @@ pub struct SpecializedAgentDef {
     #[serde(default)]
     pub label: Option<String>,
     pub model: String,
-    #[serde(default = "default_base_url")]
+    /// The OpenAI-compatible endpoint every call this agent makes is sent to. Required: a default
+    /// would be one host's port surviving in every operator's def, so a file that omits it fails to
+    /// load naming the field rather than quietly pointing at an endpoint nobody is serving.
     pub base_url: String,
     /// Bearer token for the endpoint `base_url` names, for a provider that requires one. A local
     /// endpoint (Ollama, vLLM) needs none, and `None` sends no `Authorization` header at all.
@@ -163,31 +161,6 @@ impl std::fmt::Debug for SpecializedAgentDef {
     }
 }
 
-/// The always-available default: identical to today's shipped FastContext defaults
-/// (`packages/tddy-discovery/src/backend.rs`, `packages/tddy-coder/src/run.rs::create_backend`).
-/// Present even with an empty (or absent) `<tddyhome>/agents/` directory.
-pub fn builtin_fastcontext_def() -> SpecializedAgentDef {
-    SpecializedAgentDef {
-        name: "fastcontext".to_string(),
-        label: None,
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
-        base_url: default_base_url(),
-        api_key: None,
-        system_prompt: None,
-        system_prompt_path: None,
-        tools: default_tools(),
-        max_turns: default_max_turns(),
-        replaces: vec!["Grep".to_string(), "Glob".to_string()],
-    }
-}
-
-/// Every builtin specialized-agent def, always available regardless of `<tddyhome>/agents/`'s
-/// contents. `v1` ships exactly one (`fastcontext`); a future builtin is one more entry here, not a
-/// schema rework.
-pub fn builtin_agent_defs() -> Vec<SpecializedAgentDef> {
-    vec![builtin_fastcontext_def()]
-}
-
 /// Parse every `*.yaml` file in `dir` into a [`SpecializedAgentDef`]. A malformed file (invalid
 /// YAML, missing required fields, or an unrecognized `tools` entry) is skipped — logged, not a
 /// panic and not a silent empty result for the whole directory. A missing `dir` yields an empty
@@ -221,16 +194,10 @@ pub fn load_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
     defs
 }
 
-/// The full resolved set of specialized agent defs: [`builtin_fastcontext_def`] plus every def
-/// found in `dir`, with a user-defined def overriding the builtin of the same name (user config
-/// always wins over the shipped default).
+/// The full resolved set of specialized agent defs: exactly what `dir` holds, and nothing else.
+/// There is no builtin to merge with — every agent comes from a def source an operator wrote (see
+/// docs/ft/daemon/session-agent-roster.md § Removing the hardcoded agents), so a host with no defs
+/// offers no agents rather than one nobody configured.
 pub fn resolve_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
-    let mut defs = builtin_agent_defs();
-    for loaded in load_agent_defs(dir) {
-        match defs.iter_mut().find(|d| d.name == loaded.name) {
-            Some(existing) => *existing = loaded,
-            None => defs.push(loaded),
-        }
-    }
-    defs
+    load_agent_defs(dir)
 }

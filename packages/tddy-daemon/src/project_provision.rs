@@ -13,6 +13,39 @@ use tddy_rpc::Status;
 
 use crate::project_storage::{self, ProjectData};
 
+/// Resolve the `tddy-remote-git-repo` binary the facilitator-provisioning clone drives as its
+/// `GIT_SSH_COMMAND`.
+///
+/// Priority: `CARGO_BIN_EXE_tddy-remote-git-repo` (cargo test) → sibling of `current_exe()` (handles
+/// integration tests living in `target/debug/deps/`) → `"tddy-remote-git-repo"` (PATH lookup at
+/// runtime; `./install` ships it to `/usr/bin/tddy-remote-git-repo`). Mirrors
+/// [`crate::sandbox_session::resolve_tddy_tools_path`].
+pub fn resolve_remote_git_repo_path() -> String {
+    if let Ok(bin) = std::env::var("CARGO_BIN_EXE_tddy-remote-git-repo") {
+        if !bin.trim().is_empty() {
+            return bin;
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(mut bin_dir) = exe.parent().map(|p| p.to_path_buf()) {
+            if bin_dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
+                bin_dir.pop();
+            }
+            let candidate = bin_dir.join("tddy-remote-git-repo");
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+        if let Some(parent) = exe.parent() {
+            let sibling = parent.join("tddy-remote-git-repo");
+            if sibling.is_file() {
+                return sibling.to_string_lossy().into_owned();
+            }
+        }
+    }
+    "tddy-remote-git-repo".to_string()
+}
+
 /// Ensure the working copy for `project_id` exists locally, cloning it when missing.
 ///
 /// Resolution:
@@ -84,6 +117,75 @@ where
 {
     cloner(git_url, dest)
         .map_err(|e| Status::internal(format!("clone {git_url} into {}: {e}", dest.display())))
+}
+
+/// Ensure the working copy for `project_id` exists locally, cloning it from a facilitating
+/// daemon's `remote_git.RemoteGitService` when it is not registered here — the path an owning
+/// daemon that has never seen the project takes (PRD AC37).
+///
+/// Resolution mirrors [`ensure_project_available_locally`] for the registered-locally cases
+/// (1–2): a project already on this host is returned or re-cloned from its stored `git_url`. The
+/// unregistered case (3) is the difference: rather than fanning out `ListProjects` across the
+/// common room and cloning from a peer-discovered forge URL — which fails for a peer that keeps
+/// no room of its own and for a project whose `git_url` names a forge the peer cannot reach — the
+/// clone is fetched from the facilitating daemon directly, via `git clone
+/// {facilitating_remote_url}` with `GIT_SSH_COMMAND=tddy-remote-git-repo`. The facilitating
+/// daemon is the authority on this project (it commissioned the clone), and it already serves
+/// `remote_git.RemoteGitService` on its common room, so the clone reaches it by daemon identity
+/// rather than by forge URL.
+///
+/// `facilitating_remote_url` is `{facilitating_instance_id}:{project_ref}` — the form
+/// `tddy-remote-git-repo`'s ssh-argv parser expects, where `project_ref` is what the facilitating
+/// daemon's `RemoteGitService` resolves (the project's `name` or `project_id`). The registered
+/// row stores this as `git_url`, so the clone's `origin` remote points at the facilitating daemon
+/// and the WIP-ref fetch a [`crate::session_agent_clone::CloneMirror`] performs later follows for
+/// free.
+///
+/// `cloner(git_url, dest)` performs the clone; it must set the `GIT_SSH_COMMAND` and
+/// `tddy-remote-git-repo` env vars the transport needs. `repos_base_dir` is required only for the
+/// facilitator-provisioned clone; a locally-registered project never consults it.
+pub fn ensure_project_available_from_facilitator<C>(
+    projects_dir: &Path,
+    project_id: &str,
+    repos_base_dir: Option<&Path>,
+    facilitating_remote_url: &str,
+    cloner: C,
+) -> Result<ProjectData, Status>
+where
+    C: Fn(&str, &Path) -> Result<(), String>,
+{
+    if let Some(project) = project_storage::find_project(projects_dir, project_id)
+        .map_err(|e| Status::internal(format!("read project registry: {e}")))?
+    {
+        let dest = PathBuf::from(&project.main_repo_path);
+        if dest.exists() {
+            return Ok(project);
+        }
+        clone_into(&cloner, &project.git_url, &dest)?;
+        return Ok(project);
+    }
+
+    let repos_base_dir =
+        repos_base_dir.ok_or_else(|| Status::internal("could not resolve repos base path"))?;
+    // The project_id is a safe single path segment (validated wherever a session is created), so it
+    // is the directory name — there is no project name to derive one from without a peer fan-out,
+    // and inventing a second name would just be a label nobody reads.
+    let dest = repos_base_dir.join(project_id);
+    clone_into(&cloner, facilitating_remote_url, &dest)?;
+    let (project, _created) = project_storage::add_or_get_project(
+        projects_dir,
+        ProjectData {
+            project_id: project_id.to_string(),
+            name: project_id.to_string(),
+            git_url: facilitating_remote_url.to_string(),
+            main_repo_path: dest.to_string_lossy().to_string(),
+            main_branch_ref: None,
+            remote_name: None,
+            host_repo_paths: HashMap::new(),
+        },
+    )
+    .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
+    Ok(project)
 }
 
 #[cfg(test)]

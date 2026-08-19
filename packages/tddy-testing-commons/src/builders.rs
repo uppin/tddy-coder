@@ -6,7 +6,7 @@
 
 use tddy_core::backend::{InvokeRequest, InvokeResponse};
 use tddy_core::changeset::{Changeset, ChangesetWorkflow};
-use tddy_core::SessionMetadata;
+use tddy_core::{SessionAgentRecord, SessionMetadata};
 
 // ─── InvokeResponse ─────────────────────────────────────────────────────────
 
@@ -129,7 +129,8 @@ pub struct SessionMetadataBuilder {
     activity_status: Option<String>,
     hook_token: Option<String>,
     sandbox: Option<bool>,
-    specialized_agents: Vec<String>,
+    agents: Vec<SessionAgentRecord>,
+    agents_rev: u64,
 }
 
 /// Start building a [`SessionMetadata`] with sensible defaults.
@@ -153,7 +154,8 @@ pub fn a_session_metadata() -> SessionMetadataBuilder {
         activity_status: None,
         hook_token: None,
         sandbox: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
     }
 }
 
@@ -208,11 +210,15 @@ impl SessionMetadataBuilder {
         self
     }
 
-    pub fn with_specialized_agents(
+    /// The session's agent roster, at the revision that produced it. A roster and its revision are
+    /// one fact — a roster at rev 0 is a roster nothing published — so they are set together.
+    pub fn with_agents(
         mut self,
-        names: impl IntoIterator<Item = impl Into<String>>,
+        agents_rev: u64,
+        agents: impl IntoIterator<Item = SessionAgentRecord>,
     ) -> Self {
-        self.specialized_agents = names.into_iter().map(Into::into).collect();
+        self.agents = agents.into_iter().collect();
+        self.agents_rev = agents_rev;
         self
     }
 
@@ -237,7 +243,9 @@ impl SessionMetadataBuilder {
             sandbox: self.sandbox,
             agent: None,
             recipe: None,
-            specialized_agents: self.specialized_agents,
+            agents: self.agents,
+            agents_rev: self.agents_rev,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         }

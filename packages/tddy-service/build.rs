@@ -111,6 +111,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/remote_git.proto"], &["proto"])?;
 
+    // Session admission service (async trait + RpcService server for LiveKit/tddy-rpc). The
+    // facilitating daemon admits an owning daemon to a session room with a scoped short-TTL
+    // token (PRD § "What attach does" step 3 — the room-admission handshake). Served on the
+    // common-room `daemon-{A}` participant so an owning daemon not yet in the session room can
+    // still reach A. No tonic pass — admission is never served over gRPC.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+        }))
+        .compile_protos(&["proto/session_admission.proto"], &["proto"])?;
+
     // Token service (async trait + RpcService server + tonic adapter)
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)
@@ -362,6 +376,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/auth.proto",
                 "proto/connection.proto",
                 "proto/remote_git.proto",
+                "proto/session_admission.proto",
                 "proto/loopback_tunnel.proto",
                 "proto/vm.proto",
                 "proto/tasks.proto",

@@ -37,7 +37,38 @@ message SessionFrame {
     // stream drop, so the in-jail gRPC server can finish its graceful shutdown and the sandboxed
     // process can exit (see run_generic_pty_thread / run_host_relay).
     SessionEnded session_ended = 13;
+    // Sandbox → host: an RPC the in-jail agent asked the host to dispatch to its `ConnectionService`
+    // (the roster and conversation RPCs a managed session's `tddy-tools` needs, which live on the
+    // daemon, not the runner). Multiplexed by `request_id` so a lifetime-long `StreamSessionAgents`
+    // shares the channel with the tool calls behind it instead of occupying the single
+    // `awaiting_tool` slot. Sent directly on the outbound stream (not poll-gated) like tunnel frames.
+    RpcRequest rpc_request = 14;
+    // Host → sandbox: one frame of an RPC response stream, addressed back to the in-jail caller by
+    // `request_id`. A unary RPC is a single frame with `end_of_stream = true`; a server stream is
+    // many frames followed by `end_of_stream = true`, or a single frame with `error` set, which ends
+    // the stream the same way.
+    RpcStreamFrame rpc_stream_frame = 15;
   }
+}
+
+/// An RPC the in-jail agent asked the host to dispatch to its `ConnectionService`. The host is the
+/// only thing the jail can reach, and the roster/conversation RPCs live on the daemon's
+/// `ConnectionServiceImpl` — so the runner forwards them over the `SessionChannel` the same way it
+/// forwards tool calls, but multiplexed by `request_id` so a lifetime-long `StreamSessionAgents`
+/// can share the channel with the tool calls behind it.
+message RpcRequest {
+  string request_id = 1;
+  string service = 2;
+  string method = 3;
+  bytes payload = 4;
+}
+
+/// One frame of an RPC response stream, addressed back to the in-jail caller by `request_id`.
+message RpcStreamFrame {
+  string request_id = 1;
+  bytes payload = 2;
+  bool end_of_stream = 3;
+  string error = 4;
 }
 
 message HostPoll {}

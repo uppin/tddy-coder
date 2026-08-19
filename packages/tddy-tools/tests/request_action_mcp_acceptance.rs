@@ -1,7 +1,13 @@
-//! Acceptance tests: no-bash mode session-action tools (`request_action`, `list_actions`,
-//! `invoke_action`) exposed over the real `tddy-tools --mcp` stdio wire.
+//! Acceptance tests: the session-action tools (`request_action`, `list_actions`, `invoke_action`)
+//! exposed over the real `tddy-tools --mcp` stdio wire.
 //!
-//! Feature: docs/ft/coder/no-bash-mode.md
+//! Feature: docs/ft/coder/no-bash-mode.md,
+//! docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour
+//!
+//! What the suite pins twice over: the three tools are advertised because the session has a host
+//! tool surface to round-trip to, and a manifest is written by the agent the call names. Neither
+//! answer is read off any def's `replaces` — a `replaces` list withdraws the tools it names from
+//! the main agent and does nothing else.
 //!
 //! Mirrors `subagent_mcp_acceptance.rs`: spawn the actual compiled `tddy-tools` binary and speak
 //! the real newline-delimited JSON-RPC wire. The action-author model is a wiremock
@@ -9,6 +15,7 @@
 //! `connection.ConnectionService/ExecuteTool` service hosted on a Unix socket in this test
 //! process (the same protocol `dispatch_via_sandbox_ipc` speaks to the sandbox runner relay).
 
+use std::collections::BTreeSet;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -35,12 +42,27 @@ command: [cargo, test, -p, tddy-core]
 
 // ─── MCP wire harness (same shape as subagent_mcp_acceptance.rs) ───────────────
 
+/// Every variable that would give the server a session-tool transport. Cleared before each spawn so
+/// a test states its own transport: one leaked from the developer's shell decides what `tools/list`
+/// advertises.
+const TRANSPORT_ENV_KEYS: [&str; 5] = [
+    "TDDY_SANDBOX_TOOL_IPC",
+    "TDDY_REMOTE_LIVEKIT_URL",
+    "TDDY_REMOTE_LIVEKIT_ROOM",
+    "TDDY_REMOTE_LIVEKIT_TOKEN",
+    "TDDY_REMOTE_SESSION_ID",
+];
+
 fn spawn_mcp_server(env: &[(&str, &str)]) -> Child {
     let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_tddy-tools"));
     cmd.arg("--mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    for key in TRANSPORT_ENV_KEYS {
+        cmd.env_remove(key);
+    }
+    cmd.env_remove("TDDY_SUBAGENTS_JSON");
     for (key, value) in env {
         cmd.env(key, value);
     }
@@ -136,6 +158,17 @@ async fn tools_list_names(
         .collect()
 }
 
+/// Everything one server spawned with `env` advertises, as a set: spawn, initialize, list, stop.
+async fn advertised_tool_names(env: &[(&str, &str)]) -> BTreeSet<String> {
+    let mut child = spawn_mcp_server(env);
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    initialize_mcp_session(&mut stdin, &mut stdout).await;
+    let names = tools_list_names(&mut stdin, &mut stdout).await;
+    let _ = child.kill().await;
+    names.into_iter().collect()
+}
+
 // ─── Fake host-side ExecuteTool service on a Unix socket ───────────────────────
 
 type RecordedDispatches = Arc<Mutex<Vec<(String, String)>>>;
@@ -206,14 +239,22 @@ fn start_fake_host_relay(dir: &std::path::Path) -> (std::path::PathBuf, Recorded
     (socket_path, recorded)
 }
 
-fn author_def_json(base_url: &str) -> String {
+/// `TDDY_SUBAGENTS_JSON` for a single attached agent. `replaces` is spelled out at every call site
+/// because it is the field these tests are about.
+fn agent_defs_json(name: &str, base_url: &str, replaces: &[&str]) -> String {
     json!([{
-        "name": "action-author",
+        "name": name,
         "model": "gemma4:e4b-mlx",
         "base_url": base_url,
-        "replaces": ["Shell"],
+        "replaces": replaces,
     }])
     .to_string()
+}
+
+/// The author agent used by the `request_action` flow tests: it replaces nothing at all, so every
+/// manifest it writes was written because the call named it.
+fn author_def_json(base_url: &str) -> String {
+    agent_defs_json("action-author", base_url, &[])
 }
 
 fn final_answer_response(answer: &str) -> Value {
@@ -230,49 +271,12 @@ fn final_answer_response(answer: &str) -> Value {
 
 // ─── tools/list gating ──────────────────────────────────────────────────────────
 
-/// With a def replacing `Shell` and a session-tool transport, `tools/list` advertises the three
-/// session-action tools and NOT `Shell` — replacing Shell IS the opt-in; no mode flag exists.
+/// The three tools are advertised to a session that has a host tool surface, with no agent attached
+/// and nothing replaced: the tools are host round-trips, and having somewhere to round-trip to is
+/// what they need.
 #[tokio::test]
-async fn a_shell_replacing_def_swaps_shell_for_the_action_tools() {
+async fn a_session_with_a_host_tool_surface_advertises_the_action_tools() {
     // Given — a transport is configured (the socket needn't answer for tools/list)
-    let dir = tempfile::tempdir().unwrap();
-    let socket = dir.path().join("unused.sock");
-    let defs = author_def_json("http://127.0.0.1:1");
-    let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENTS_JSON", &defs),
-        ("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap()),
-    ]);
-    let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
-    initialize_mcp_session(&mut stdin, &mut stdout).await;
-
-    // When
-    let names = tools_list_names(&mut stdin, &mut stdout).await;
-    let _ = child.kill().await;
-
-    // Then
-    for tool in ["request_action", "list_actions", "invoke_action"] {
-        assert!(
-            names.contains(&tool.to_string()),
-            "no-bash tools/list must advertise '{tool}'; got: {names:?}"
-        );
-    }
-    assert!(
-        !names.contains(&"Shell".to_string()),
-        "no-bash tools/list must NOT advertise Shell; got: {names:?}"
-    );
-    for kept in ["Read", "Write", "Grep", "Glob"] {
-        assert!(
-            names.contains(&kept.to_string()),
-            "no-bash must keep '{kept}'; got: {names:?}"
-        );
-    }
-}
-
-/// Without a Shell-replacing def, the action tools are absent and `Shell` is advertised as today.
-#[tokio::test]
-async fn default_tools_list_keeps_shell_and_omits_the_action_tools() {
-    // Given
     let dir = tempfile::tempdir().unwrap();
     let socket = dir.path().join("unused.sock");
     let mut child = spawn_mcp_server(&[("TDDY_SANDBOX_TOOL_IPC", socket.to_str().unwrap())]);
@@ -285,13 +289,76 @@ async fn default_tools_list_keeps_shell_and_omits_the_action_tools() {
     let _ = child.kill().await;
 
     // Then
-    assert!(names.contains(&"Shell".to_string()));
+    for tool in ["request_action", "list_actions", "invoke_action"] {
+        assert!(
+            names.contains(&tool.to_string()),
+            "a session with a host tool surface must advertise '{tool}'; got: {names:?}"
+        );
+    }
+    assert!(
+        names.contains(&"Shell".to_string()),
+        "nothing was replaced, so Shell must still be advertised; got: {names:?}"
+    );
+}
+
+/// Without a transport there is no host to establish, list or invoke an action against, so none of
+/// the three is advertised — the same condition that withholds the exec-tool catalog.
+#[tokio::test]
+async fn a_session_without_a_host_tool_surface_advertises_no_action_tools() {
+    // Given — no transport, and an agent attached, so nothing but the missing host is in play
+    let defs = agent_defs_json("action-author", "http://127.0.0.1:1", &[]);
+    let mut child = spawn_mcp_server(&[("TDDY_SUBAGENTS_JSON", &defs)]);
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    initialize_mcp_session(&mut stdin, &mut stdout).await;
+
+    // When
+    let names = tools_list_names(&mut stdin, &mut stdout).await;
+    let _ = child.kill().await;
+
+    // Then
     for tool in ["request_action", "list_actions", "invoke_action"] {
         assert!(
             !names.contains(&tool.to_string()),
-            "default tools/list must NOT advertise '{tool}'; got: {names:?}"
+            "a session with no host tool surface must not advertise '{tool}'; got: {names:?}"
         );
     }
+}
+
+/// The regression guard for the removed role: two identical agents, one replacing `Shell` and one
+/// replacing nothing, differ in the advertised catalog by exactly `Shell`. Replacing a tool
+/// withdraws that tool and grants nothing — no action surface, no anything else.
+#[tokio::test]
+async fn replacing_shell_withdraws_shell_and_changes_nothing_else() {
+    // Given — the same agent twice, differing only in its `replaces` list
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("unused.sock");
+    let socket = socket.to_str().unwrap();
+    let replaces_nothing = agent_defs_json("runner", "http://127.0.0.1:1", &[]);
+    let replaces_shell = agent_defs_json("runner", "http://127.0.0.1:1", &["Shell"]);
+
+    // When
+    let baseline = advertised_tool_names(&[
+        ("TDDY_SUBAGENTS_JSON", &replaces_nothing),
+        ("TDDY_SANDBOX_TOOL_IPC", socket),
+    ])
+    .await;
+    let with_shell_replaced = advertised_tool_names(&[
+        ("TDDY_SUBAGENTS_JSON", &replaces_shell),
+        ("TDDY_SANDBOX_TOOL_IPC", socket),
+    ])
+    .await;
+
+    // Then
+    let mut expected = baseline.clone();
+    assert!(
+        expected.remove("Shell"),
+        "the baseline session must advertise Shell to have it withdrawn; got: {baseline:?}"
+    );
+    assert_eq!(
+        with_shell_replaced, expected,
+        "replacing Shell must withdraw Shell and nothing more"
+    );
 }
 
 /// A def replacing the write tools removes them from the catalog while `Shell` stays — every
@@ -338,11 +405,11 @@ async fn a_write_replacing_def_drops_mutation_tools_but_keeps_shell() {
 
 // ─── request_action flow ────────────────────────────────────────────────────────
 
-/// The full no-bash authoring loop: `request_action` prompts the configured author model, the
-/// authored manifest passes pre-validation, and an `EstablishAction` dispatch carries the YAML
-/// to the host relay — whose summary JSON becomes the tool result.
+/// The full authoring loop: `request_action` prompts the agent the call names — one that replaces
+/// no tool at all — the authored manifest passes pre-validation, and an `EstablishAction` dispatch
+/// carries the YAML to the host relay, whose summary JSON becomes the tool result.
 #[tokio::test]
-async fn request_action_establishes_an_authored_manifest_via_the_host_relay() {
+async fn request_action_establishes_a_manifest_written_by_the_named_agent() {
     // Given — an author model that answers with a valid manifest, and a fake host relay
     let author_server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -372,7 +439,11 @@ async fn request_action_establishes_an_authored_manifest_via_the_host_relay() {
         &mut stdout,
         1,
         "request_action",
-        json!({"description": "run the tddy-core test suite", "suggested_id": "run-core-tests"}),
+        json!({
+            "agent": "action-author",
+            "description": "run the tddy-core test suite",
+            "suggested_id": "run-core-tests",
+        }),
     )
     .await;
     let _ = child.kill().await;
@@ -442,7 +513,7 @@ async fn request_action_retries_after_an_invalid_manifest_and_then_establishes()
         &mut stdout,
         1,
         "request_action",
-        json!({"description": "run the tddy-core test suite"}),
+        json!({"agent": "action-author", "description": "run the tddy-core test suite"}),
     )
     .await;
     let _ = child.kill().await;
@@ -468,21 +539,15 @@ async fn request_action_retries_after_an_invalid_manifest_and_then_establishes()
     );
 }
 
-/// Without a Shell-replacing def, `request_action` is not registered at all — calling it fails
-/// at the JSON-RPC layer and nothing is dispatched to the host. Replacing `Shell` is the sole
-/// opt-in for the session-action surface.
+/// A `request_action` naming no agent is refused, listing the agents it could have named — the same
+/// refusal `subagent_new_session` gives, and for the same reason: with any number of agents
+/// attachable, picking one would make the choice depend on attach order. Nothing reaches the host.
 #[tokio::test]
-async fn request_action_without_a_shell_replacing_def_is_not_available() {
-    // Given — subagents configured, but none replaces Shell
+async fn request_action_naming_no_agent_is_refused_listing_the_attached_agents() {
+    // Given — one attached agent, whose `replaces` names neither Shell nor anything else relevant
     let dir = tempfile::tempdir().unwrap();
     let (socket_path, recorded) = start_fake_host_relay(dir.path());
-    let defs = json!([{
-        "name": "fastcontext",
-        "model": "m",
-        "base_url": "http://127.0.0.1:1",
-        "replaces": ["Grep", "Glob"],
-    }])
-    .to_string();
+    let defs = agent_defs_json("fastcontext", "http://127.0.0.1:1", &["Grep", "Glob"]);
     let mut child = spawn_mcp_server(&[
         ("TDDY_SUBAGENTS_JSON", &defs),
         ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
@@ -491,8 +556,7 @@ async fn request_action_without_a_shell_replacing_def_is_not_available() {
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
     initialize_mcp_session(&mut stdin, &mut stdout).await;
 
-    // When — not advertised, and a direct call fails at the JSON-RPC layer
-    let names = tools_list_names(&mut stdin, &mut stdout).await;
+    // When
     let response = call_tool(
         &mut stdin,
         &mut stdout,
@@ -504,16 +568,54 @@ async fn request_action_without_a_shell_replacing_def_is_not_available() {
     let _ = child.kill().await;
 
     // Then
+    let body = tool_result_json(&response);
+    let error = body["error"].as_str().unwrap_or_default();
     assert!(
-        !names.contains(&"request_action".to_string()),
-        "request_action must not be advertised without a Shell replacer; got: {names:?}"
-    );
-    assert!(
-        response.get("error").is_some() || response["result"]["isError"].as_bool() == Some(true),
-        "calling the unregistered tool must fail; got: {response}"
+        error.contains("'agent' is required") && error.contains("fastcontext"),
+        "the refusal must name the missing field and the agents there are; got: {body}"
     );
     assert!(
         recorded.lock().unwrap().is_empty(),
-        "nothing must be dispatched without an author"
+        "an unaddressed request must reach the host with nothing"
+    );
+}
+
+/// An agent id no roster entry bears is refused naming it, rather than falling back to some other
+/// attached agent.
+#[tokio::test]
+async fn request_action_naming_an_unattached_agent_is_refused() {
+    // Given
+    let dir = tempfile::tempdir().unwrap();
+    let (socket_path, recorded) = start_fake_host_relay(dir.path());
+    let defs = agent_defs_json("action-author", "http://127.0.0.1:1", &[]);
+    let mut child = spawn_mcp_server(&[
+        ("TDDY_SUBAGENTS_JSON", &defs),
+        ("TDDY_SANDBOX_TOOL_IPC", socket_path.to_str().unwrap()),
+    ]);
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    initialize_mcp_session(&mut stdin, &mut stdout).await;
+
+    // When
+    let response = call_tool(
+        &mut stdin,
+        &mut stdout,
+        2,
+        "request_action",
+        json!({"agent": "nobody", "description": "run tests"}),
+    )
+    .await;
+    let _ = child.kill().await;
+
+    // Then
+    let body = tool_result_json(&response);
+    assert_eq!(
+        body["error"].as_str(),
+        Some("agent 'nobody' is not attached to this session"),
+        "got: {body}"
+    );
+    assert!(
+        recorded.lock().unwrap().is_empty(),
+        "a request addressed to nobody must reach the host with nothing"
     );
 }

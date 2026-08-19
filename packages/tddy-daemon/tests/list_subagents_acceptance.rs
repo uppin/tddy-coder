@@ -1,5 +1,5 @@
-//! Acceptance tests: `ListSubagents` RPC — resolved specialized-agent defs (builtin +
-//! `<tddyhome>/agents/*.yaml`) exposed to the web new-session picker.
+//! Acceptance tests: `ListSubagents` RPC — resolved specialized-agent defs
+//! (`<tddyhome>/agents/*.yaml` and registry assistants) exposed to the web new-session picker.
 //!
 //! Feature: docs/ft/coder/specialized-subagents.md (criterion 16)
 //! Changeset: docs/dev/1-WIP/specialized-subagents.md
@@ -59,10 +59,11 @@ users:
     DaemonConfig::load(&path).unwrap()
 }
 
-/// With no `<tddyhome>/agents` directory at all (a fresh install), `ListSubagents` still returns
-/// the builtin `fastcontext` def — zero-config behavior must not regress.
+/// With no `<tddyhome>/agents` directory at all (a fresh install), `ListSubagents` succeeds and
+/// offers nothing. A host with no def sources has no agents to offer — there is no builtin to
+/// surface, and a fresh install is not an error case.
 #[tokio::test]
-async fn list_subagents_returns_the_builtin_fastcontext_def_with_no_user_agents_dir() {
+async fn list_subagents_offers_nothing_with_no_user_agents_dir() {
     // Given — a fresh tddy_data_dir with no agents/ subdirectory at all
     let tddy_home = tempfile::tempdir().unwrap();
     let service = service_with_config(minimal_daemon_config(), tddy_home.path().to_path_buf());
@@ -76,14 +77,13 @@ async fn list_subagents_returns_the_builtin_fastcontext_def_with_no_user_agents_
     // Then
     let subagents = response.into_inner().subagents;
     assert!(
-        subagents.iter().any(|s| s.name == "fastcontext"),
-        "ListSubagents must always include the builtin fastcontext def; got: {subagents:?}"
+        subagents.is_empty(),
+        "a host with no def sources must offer no subagents; got: {subagents:?}"
     );
 }
 
 /// A YAML file written into `<tddyhome>/agents/` must appear in the `ListSubagents` response,
-/// carrying its own `label`/`model` — proving the RPC actually reads the user's agents directory,
-/// not just the builtin def.
+/// carrying its own `label`/`model` — proving the RPC actually reads the user's agents directory.
 #[tokio::test]
 async fn list_subagents_includes_a_def_written_to_tddyhome_agents_dir() {
     // Given — a <tddyhome>/agents/my-explorer.yaml def
@@ -92,7 +92,7 @@ async fn list_subagents_includes_a_def_written_to_tddyhome_agents_dir() {
     std::fs::create_dir_all(&agents_dir).unwrap();
     std::fs::write(
         agents_dir.join("my-explorer.yaml"),
-        "name: my-explorer\nlabel: \"My Explorer\"\nmodel: qwen2.5-coder:7b\n",
+        "name: my-explorer\nlabel: \"My Explorer\"\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
     )
     .unwrap();
     let service = service_with_config(minimal_daemon_config(), tddy_home.path().to_path_buf());

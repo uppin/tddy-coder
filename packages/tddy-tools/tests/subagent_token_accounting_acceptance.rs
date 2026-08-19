@@ -19,7 +19,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// A final-answer response that also reports token usage, as both FastContext endpoints and Ollama
+/// A final-answer response that also reports token usage, as both hosted endpoints and Ollama
 /// do on `/v1/chat/completions`.
 fn final_answer_with_usage(answer: &str, prompt_tokens: u64, completion_tokens: u64) -> Value {
     json!({
@@ -131,6 +131,20 @@ fn conversation<'a>(body: &'a Value, id: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no conversation with id {id:?} in payload; got: {body}"))
 }
 
+/// `TDDY_SUBAGENTS_JSON` holding one def named `explorer` — the def is the only source of the
+/// endpoint and model a conversation reports.
+fn explorer_def_json(base_url: &str, model: &str) -> String {
+    json!([{
+        "name": "explorer",
+        "model": model,
+        "base_url": base_url,
+        "tools": ["READ", "GLOB", "GREP"],
+        "max_turns": 6,
+        "replaces": []
+    }])
+    .to_string()
+}
+
 async fn open_and_prompt(
     stdin: &mut ChildStdin,
     stdout: &mut BufReader<ChildStdout>,
@@ -143,7 +157,7 @@ async fn open_and_prompt(
         stdout,
         base_id,
         "subagent_new_session",
-        json!({"sessionId": session_id}),
+        json!({"agent": "explorer", "sessionId": session_id}),
     )
     .await;
     for (i, text) in prompts.iter().enumerate() {
@@ -178,10 +192,10 @@ async fn subagent_list_reports_each_open_conversation_with_its_cumulative_token_
         .mount(&server)
         .await;
 
+    let defs_json = explorer_def_json(&server.uri(), "test-model");
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", server.uri().as_str()),
-        ("TDDY_SUBAGENT_FASTCONTEXT_MODEL", "test-model"),
+        ("TDDY_SUBAGENT", "explorer"),
+        ("TDDY_SUBAGENTS_JSON", &defs_json),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -201,7 +215,7 @@ async fn subagent_list_reports_each_open_conversation_with_its_cumulative_token_
     let a = conversation(&body, "conv-a");
     assert_eq!(
         a["agent"].as_str(),
-        Some("fastcontext"),
+        Some("explorer"),
         "conv-a agent; got: {a}"
     );
     assert_eq!(
@@ -247,6 +261,75 @@ async fn subagent_list_reports_each_open_conversation_with_its_cumulative_token_
 
 // ─── per-turn usage on the prompt result ───────────────────────────────────────
 
+/// A conversation that ended keeps its accounting. The tokens were spent by this session, and the
+/// accounting file is rewritten wholesale from the live table — so a conversation dropped before
+/// that rewrite reports as never having cost anything.
+#[tokio::test]
+async fn keeps_a_cancelled_conversations_token_totals_in_the_accounting_file() {
+    // Given — one conversation, prompted once for 100 + 40 tokens
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_with_usage(
+                "src/a.rs:1-1",
+                100,
+                40,
+            )),
+        )
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let accounting_path = dir.path().join("accounting.json");
+    let accounting_str = accounting_path.to_str().expect("utf-8 path");
+    let defs_json = explorer_def_json(&server.uri(), "test-model");
+    let mut child = spawn_mcp_server(&[
+        ("TDDY_SUBAGENT", "explorer"),
+        ("TDDY_SUBAGENTS_JSON", &defs_json),
+        ("TDDY_TOOLS_ACCOUNTING_FILE", accounting_str),
+    ]);
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    initialize_mcp_session(&mut stdin, &mut stdout).await;
+    open_and_prompt(
+        &mut stdin,
+        &mut stdout,
+        1,
+        "conv-ended",
+        &["Where is auth?"],
+    )
+    .await;
+
+    // When
+    call_tool(
+        &mut stdin,
+        &mut stdout,
+        10,
+        "subagent_cancel",
+        json!({"sessionId": "conv-ended"}),
+    )
+    .await;
+    let _ = child.kill().await;
+
+    // Then
+    let contents = std::fs::read_to_string(&accounting_path)
+        .unwrap_or_else(|e| panic!("accounting file {accounting_str} must exist: {e}"));
+    let body: Value = serde_json::from_str(&contents).unwrap_or_else(|e| {
+        panic!("accounting file must be valid JSON: {e}; contents: {contents}")
+    });
+    let c = conversation(&body, "conv-ended");
+    assert_eq!(
+        c["totalTokens"].as_u64(),
+        Some(140),
+        "an ended conversation's tokens must survive its cancellation; got: {c}"
+    );
+    assert_eq!(
+        c["turns"].as_u64(),
+        Some(1),
+        "conv-ended turns in accounting file; got: {c}"
+    );
+}
+
 /// A `subagent_prompt` result carries the token usage of the turn it just ran.
 #[tokio::test]
 async fn subagent_prompt_result_includes_the_turns_token_usage() {
@@ -263,10 +346,10 @@ async fn subagent_prompt_result_includes_the_turns_token_usage() {
         )
         .mount(&server)
         .await;
+    let defs_json = explorer_def_json(&server.uri(), "test-model");
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", server.uri().as_str()),
-        ("TDDY_SUBAGENT_FASTCONTEXT_MODEL", "test-model"),
+        ("TDDY_SUBAGENT", "explorer"),
+        ("TDDY_SUBAGENTS_JSON", &defs_json),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
@@ -276,7 +359,7 @@ async fn subagent_prompt_result_includes_the_turns_token_usage() {
         &mut stdout,
         1,
         "subagent_new_session",
-        json!({"sessionId": "conv-x"}),
+        json!({"agent": "explorer", "sessionId": "conv-x"}),
     )
     .await;
 
@@ -334,10 +417,10 @@ async fn writes_the_accounting_file_with_all_conversations_when_the_env_var_is_s
     let accounting_path = dir.path().join("accounting.json");
     let accounting_str = accounting_path.to_str().expect("utf-8 path");
 
+    let defs_json = explorer_def_json(&server.uri(), "test-model");
     let mut child = spawn_mcp_server(&[
-        ("TDDY_SUBAGENT", "fastcontext"),
-        ("TDDY_SUBAGENT_FASTCONTEXT_URL", server.uri().as_str()),
-        ("TDDY_SUBAGENT_FASTCONTEXT_MODEL", "test-model"),
+        ("TDDY_SUBAGENT", "explorer"),
+        ("TDDY_SUBAGENTS_JSON", &defs_json),
         ("TDDY_TOOLS_ACCOUNTING_FILE", accounting_str),
     ]);
     let mut stdin = child.stdin.take().expect("child stdin");

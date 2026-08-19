@@ -4,11 +4,12 @@
 //! Feature: docs/ft/coder/session-token-accounting.md (requirements 1-2)
 //! Changeset: docs/dev/1-WIP/2026-07-11-changeset-session-token-accounting.md
 //!
-//! Both FastContext-style endpoints and local models served by Ollama report a `usage` object on
+//! Both hosted endpoints and local models served by Ollama report a `usage` object on
 //! `/v1/chat/completions` (`prompt_tokens` / `completion_tokens`). These tests pin that the client
 //! surfaces it, that an omitted `usage` is treated as zero rather than an error, and that a
 //! subagent session sums each turn's usage into a per-conversation running total.
 
+use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::openai::{ChatCompletionRequest, ChatMessage, OpenAiClient, TokenUsage};
 use tddy_discovery::subagent::{CodebaseAccess, SubagentConfig, SubagentRegistry};
 use wiremock::matchers::{method, path};
@@ -35,12 +36,24 @@ fn final_answer_with_usage(
     })
 }
 
-fn a_local_config(base_url: &str) -> SubagentConfig {
-    SubagentConfig {
+/// An agent def pointing at `base_url` — the only way a session is configured.
+fn a_def(base_url: &str) -> SpecializedAgentDef {
+    SpecializedAgentDef {
+        name: "explorer".to_string(),
+        label: None,
+        model: "qwen2.5-coder:7b".to_string(),
         base_url: base_url.to_string(),
         api_key: None,
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+        system_prompt: None,
+        system_prompt_path: None,
+        tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
         max_turns: 6,
+        replaces: Vec::new(),
+    }
+}
+
+fn a_local_config() -> SubagentConfig {
+    SubagentConfig {
         access: CodebaseAccess::Local,
     }
 }
@@ -64,7 +77,7 @@ async fn openai_client_parses_prompt_and_completion_token_usage_from_a_response(
     mount_always(&server, final_answer_with_usage("src/a.rs:1-1", 120, 45)).await;
     let client = OpenAiClient::new(server.uri());
     let request = ChatCompletionRequest {
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+        model: "qwen2.5-coder:7b".to_string(),
         messages: vec![ChatMessage::user("Find the entry point")],
         tools: vec![],
         tool_choice: serde_json::json!("auto"),
@@ -105,7 +118,7 @@ async fn openai_client_reports_no_usage_when_the_response_omits_it() {
     .await;
     let client = OpenAiClient::new(server.uri());
     let request = ChatCompletionRequest {
-        model: "microsoft/FastContext-1.0-4B-RL".to_string(),
+        model: "qwen2.5-coder:7b".to_string(),
         messages: vec![ChatMessage::user("hello")],
         tools: vec![],
         tool_choice: serde_json::json!("auto"),
@@ -131,9 +144,9 @@ async fn subagent_session_accumulates_token_usage_across_two_prompts() {
     // Given — every turn returns a final answer reporting 100 prompt + 40 completion tokens.
     let server = MockServer::start().await;
     mount_always(&server, final_answer_with_usage("src/a.rs:1-1", 100, 40)).await;
-    let mut session = SubagentRegistry::new()
-        .create("fastcontext", a_local_config(&server.uri()))
-        .expect("fastcontext must be registered");
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri())])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     session
@@ -162,9 +175,9 @@ async fn subagent_prompt_reports_the_turns_token_usage_on_the_outcome() {
     // Given
     let server = MockServer::start().await;
     mount_always(&server, final_answer_with_usage("src/a.rs:1-1", 100, 40)).await;
-    let mut session = SubagentRegistry::new()
-        .create("fastcontext", a_local_config(&server.uri()))
-        .expect("fastcontext must be registered");
+    let mut session = SubagentRegistry::from_defs(vec![a_def(&server.uri())])
+        .create("explorer", a_local_config())
+        .expect("the def must resolve");
 
     // When
     let outcome = session

@@ -44,11 +44,18 @@ impl AppToolHandler {
     /// Defense in depth for a replaced `Shell`: reject `Shell`/`Await` dispatches at the host
     /// boundary too (they are already absent from Claude's lists and the MCP catalog, but a
     /// raw-IPC dispatch from a compromised jail must fail as well). Deliberately limited to the
-    /// shell surface: other replaced tools (`Grep` for fastcontext, `Write`/`StrReplace`/
+    /// shell surface: other replaced tools (`Grep` for an explorer, `Write`/`StrReplace`/
     /// `Delete` for a coder) are dispatched *by the replacing subagent itself* through this same
     /// relay, so they cannot be rejected here — Claude-side disallow + catalog filtering remain
-    /// their enforcement layers. No subagent dispatches `Shell` (command execution runs through
-    /// `InvokeAction` against established manifests), so this rejection breaks nothing.
+    /// their enforcement layers.
+    ///
+    /// The rejection is blanket because a dispatch carries no caller: `HostToolHandler::execute`
+    /// receives a session id, a tool name and args, so an agent's own `SHELL` call is
+    /// indistinguishable from the main agent's. A def that both replaces `Shell` and binds `SHELL`
+    /// would therefore have its own calls rejected here — which is why that pairing is refused
+    /// where the session is configured (`config::resolve_session_agents`) rather than left to fail
+    /// one call at a time. Given that, every dispatch reaching this point is one the withdrawal
+    /// meant to stop.
     fn policy_rejects(&self, tool_name: &str) -> bool {
         matches!(tool_name, "Shell" | "Await") && self.replaced_tools.iter().any(|t| t == "Shell")
     }

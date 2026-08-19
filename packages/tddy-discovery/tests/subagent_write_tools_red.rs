@@ -42,6 +42,7 @@ fn a_def_yaml_binds_the_mutation_tools_by_their_model_facing_names() {
         "\
 name: coder
 model: some-coder-model
+base_url: http://127.0.0.1:1
 tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]
 ",
     )
@@ -66,7 +67,8 @@ tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]
 fn a_def_without_a_tools_list_stays_read_only() {
     // Given / When
     let def: SpecializedAgentDef =
-        serde_yaml::from_str("name: reader\nmodel: m\n").expect("a minimal def must parse");
+        serde_yaml::from_str("name: reader\nmodel: m\nbase_url: http://127.0.0.1:1\n")
+            .expect("a minimal def must parse");
 
     // Then
     assert!(
@@ -219,13 +221,7 @@ fn a_def_with_tools(name: &str, base_url: &str, tools: Vec<SubagentTool>) -> Spe
 }
 
 fn managed_config(access: CodebaseAccess) -> SubagentConfig {
-    SubagentConfig {
-        base_url: String::new(),
-        api_key: None,
-        model: String::new(),
-        max_turns: 0,
-        access,
-    }
+    SubagentConfig { access }
 }
 
 /// A coder def that binds WRITE executes a model-issued WRITE through the managed dispatch fn —

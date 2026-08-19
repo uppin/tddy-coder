@@ -1,12 +1,15 @@
-//! Session-action MCP tools for a session whose `Shell` is replaced by a subagent (see
-//! docs/ft/coder/no-bash-mode.md).
+//! Session-action MCP tools: the declarative command surface of a managed session (see
+//! docs/ft/coder/no-bash-mode.md, docs/ft/coder/session-actions.md).
 //!
-//! With `Shell` hard-disabled, the sandboxed agent runs commands only through declarative
-//! session actions (`tddy_core::session_actions`): it *requests* a new action in natural
-//! language (`request_action`), the Shell-replacing author subagent (the def in
-//! `TDDY_SUBAGENTS_JSON` with `replaces: [Shell]`, e.g. a local gemma via Ollama) writes the
-//! YAML manifest, and — once it validates — the action is auto-established under
-//! `<session_dir>/actions/` and invocable via `invoke_action`.
+//! The main agent *requests* a new action in natural language (`request_action`) and names the
+//! attached agent that writes the YAML manifest for it; once the manifest validates, the action is
+//! auto-established under `<session_dir>/actions/` and invocable via `invoke_action`.
+//!
+//! Which agent authors a manifest is the caller's choice, named per call — not a role an agent
+//! acquires by listing a particular tool in its `replaces`
+//! (docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour). A session whose
+//! `Shell` *is* withdrawn is the case these tools were built for, since then there is no other way
+//! to run a command, but they are neither granted by that withdrawal nor limited to it.
 //!
 //! Trust model: this module runs in the jail, so its validation is a cheap retry loop for the
 //! author, never the authority. The manifest is re-validated and written host-side by the
@@ -16,11 +19,9 @@
 use tddy_core::session_actions::{
     parse_action_manifest_yaml, validate_authored_manifest, ActionManifest,
 };
-use tddy_discovery::subagent::SubagentRegistry;
 
 use crate::server::{
-    schema_object, shell_replacing_author, subagent_config_from_env, subagent_error_json,
-    subagent_route, subagents_from_env, PermissionServer,
+    open_roster_agent_session, schema_object, subagent_error_json, subagent_route, PermissionServer,
 };
 
 /// Bounded correction loop with the author model: initial attempt + this many retries carrying
@@ -95,8 +96,8 @@ fn prevalidate_manifest_yaml(yaml: &str) -> Result<ActionManifest, String> {
     Ok(manifest)
 }
 
-/// `request_action`: describe a needed command; the configured author subagent writes the
-/// manifest; on successful validation it is established host-side and immediately invocable.
+/// `request_action`: describe a needed command; the agent the call names writes the manifest; on
+/// successful validation it is established host-side and immediately invocable.
 async fn request_action_tool(args: serde_json::Value) -> String {
     let Some(description) = args
         .get("description")
@@ -107,17 +108,15 @@ async fn request_action_tool(args: serde_json::Value) -> String {
     };
     let suggested_id = args.get("suggested_id").and_then(|v| v.as_str());
 
-    let defs = subagents_from_env();
-    let Some(author) = shell_replacing_author(&defs) else {
-        return subagent_error_json(
-            "no action author configured: session actions require a subagent whose `replaces` \
-             covers Shell (add `replaces: [Shell]` to its def in the sandbox config)",
-        );
-    };
-    let registry = SubagentRegistry::from_defs(defs);
-    let mut session = match registry.create(&author, subagent_config_from_env()) {
-        Ok(session) => session,
-        Err(e) => return subagent_error_json(format!("action author '{author}': {e}")),
+    // Addressed by id, like every other call on an attached agent: a call naming none is refused
+    // listing the ids there are, rather than settled by a rule about what an agent replaces.
+    let agent_id = args
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let (author, mut session) = match open_roster_agent_session(agent_id) {
+        Ok(opened) => opened,
+        Err(e) => return subagent_error_json(e),
     };
 
     let mut prompt = author_prompt(description, suggested_id);
@@ -174,8 +173,8 @@ async fn invoke_action_tool(args: serde_json::Value) -> String {
 }
 
 /// Build the `ToolRouter` for the three session-action tools. Merged into
-/// `PermissionServer::new()`'s router only when a configured def replaces `Shell`
-/// (`shell_replacing_author`).
+/// `PermissionServer::new()`'s router whenever a session-tool transport is configured — the host
+/// surface all three round-trip to.
 pub(crate) fn action_tool_router(
 ) -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
     use rmcp::handler::server::router::tool::ToolRouter;
@@ -184,13 +183,18 @@ pub(crate) fn action_tool_router(
 
     let request_tool = rmcp::model::Tool::new(
         "request_action",
-        "Request a new session action: describe the command you need in natural language; the \
-         configured action-author agent writes a bounded manifest for it. Once established, run \
-         it with invoke_action. Returns {id, summary, path, has_input_schema}.",
+        "Request a new session action: describe the command you need in natural language and name \
+         the attached agent that should write it; that agent writes a bounded manifest for it. \
+         Once established, run it with invoke_action. Returns {id, summary, path, \
+         has_input_schema}.",
         schema_object(serde_json::json!({
             "type": "object",
-            "required": ["description"],
+            "required": ["agent", "description"],
             "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Id of the attached agent that writes the manifest (the same ids subagent_new_session takes)."
+                },
                 "description": {
                     "type": "string",
                     "description": "What the action should do, e.g. 'run the tddy-core test suite'."

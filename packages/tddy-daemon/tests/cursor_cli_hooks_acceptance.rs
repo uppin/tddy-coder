@@ -76,7 +76,9 @@ fn write_cursor_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };
@@ -165,7 +167,9 @@ async fn cursor_cli_report_session_status_rejects_tool_session_type() {
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

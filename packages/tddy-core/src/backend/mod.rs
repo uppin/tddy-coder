@@ -1182,7 +1182,7 @@ mod gather_session_usage_tests {
             egress.join("accounting.json"),
             serde_json::json!({
                 "conversations": [{
-                    "agent": "fastcontext",
+                    "agent": "explorer",
                     "id": "fc-1",
                     "model": "ollama",
                     "inputTokens": 5,
@@ -1241,7 +1241,7 @@ mod gather_session_usage_tests {
                     turns: 1,
                 },
                 ConversationRecord {
-                    agent: "fastcontext".to_string(),
+                    agent: "explorer".to_string(),
                     id: "fc-1".to_string(),
                     model: "ollama".to_string(),
                     input_tokens: 5,
@@ -1276,7 +1276,7 @@ mod gather_session_usage_tests {
         assert_eq!(
             records,
             vec![ConversationRecord {
-                agent: "fastcontext".to_string(),
+                agent: "explorer".to_string(),
                 id: "fc-1".to_string(),
                 model: "ollama".to_string(),
                 input_tokens: 5,

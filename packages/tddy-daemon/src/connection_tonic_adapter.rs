@@ -33,41 +33,44 @@ use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
     AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
     AddProjectToHostResponse, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    AgentActivityRecord, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
-    ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
-    CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse, CreateProjectRequest,
-    CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse, ExecuteToolChunk,
-    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
-    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
-    GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest,
-    GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, HostStatsEvent,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    AgentActivityRecord, AgentConversationChunk, AttachSessionAgentRequest,
+    CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
+    CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
+    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
+    DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
+    GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
+    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
+    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse,
+    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
-    MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    MintLocalTokenResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,
+    PromptAgentConversationRequest, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
     QueryBranchRequest, QueryBranchResponse, ReadSessionWorkflowFileRequest,
     ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
     RemoveWorktreeRequest, RemoveWorktreeResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionTerminalInput,
-    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
-    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
-    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamSessionActivityRequest,
-    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
-    TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    WatchTerminalControlRequest, WorktreeFileChunk, WorktreeStatsEvent,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
+    SessionTerminalInput, SessionTerminalOutput, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopDemoVmRequest,
+    StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest,
+    StreamSessionActivityRequest, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
+    StreamWorktreeStatsRequest, TerminalControlEvent, TerminalHistoryChunk,
+    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
+    WorktreeFileChunk, WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
@@ -180,6 +183,8 @@ where
     T::WatchTerminalControlStream: 'static,
     T::StreamSessionActivityStream: 'static,
     T::StreamAcpReplayStream: 'static,
+    T::StreamSessionAgentsStream: 'static,
+    T::PromptAgentConversationStream: 'static,
 {
     async fn list_tools(
         &self,
@@ -225,6 +230,129 @@ where
         request: tonic::Request<ListSubagentsRequest>,
     ) -> Result<tonic::Response<ListSubagentsResponse>, tonic::Status> {
         let resp = RpcConnectionService::list_subagents(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    // ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ─────────────────────────
+
+    async fn attach_session_agent(
+        &self,
+        request: tonic::Request<AttachSessionAgentRequest>,
+    ) -> Result<tonic::Response<SessionAgentRoster>, tonic::Status> {
+        let resp = RpcConnectionService::attach_session_agent(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn detach_session_agent(
+        &self,
+        request: tonic::Request<DetachSessionAgentRequest>,
+    ) -> Result<tonic::Response<SessionAgentRoster>, tonic::Status> {
+        let resp = RpcConnectionService::detach_session_agent(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn list_session_agents(
+        &self,
+        request: tonic::Request<ListSessionAgentsRequest>,
+    ) -> Result<tonic::Response<SessionAgentRoster>, tonic::Status> {
+        let resp = RpcConnectionService::list_session_agents(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    /// Server streaming: the roster, snapshot-first then one frame per revision.
+    type StreamSessionAgentsStream =
+        Pin<Box<dyn Stream<Item = Result<SessionAgentRoster, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_session_agents(
+        &self,
+        request: tonic::Request<StreamSessionAgentsRequest>,
+    ) -> Result<tonic::Response<Self::StreamSessionAgentsStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_session_agents(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn open_agent_conversation(
+        &self,
+        request: tonic::Request<OpenAgentConversationRequest>,
+    ) -> Result<tonic::Response<OpenAgentConversationResponse>, tonic::Status> {
+        let resp = RpcConnectionService::open_agent_conversation(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    /// Server streaming: one agent's answer, in frames bounded below the transport's budget.
+    type PromptAgentConversationStream =
+        Pin<Box<dyn Stream<Item = Result<AgentConversationChunk, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn prompt_agent_conversation(
+        &self,
+        request: tonic::Request<PromptAgentConversationRequest>,
+    ) -> Result<tonic::Response<Self::PromptAgentConversationStream>, tonic::Status> {
+        let resp = RpcConnectionService::prompt_agent_conversation(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn cancel_agent_conversation(
+        &self,
+        request: tonic::Request<CancelAgentConversationRequest>,
+    ) -> Result<tonic::Response<CancelAgentConversationResponse>, tonic::Status> {
+        let resp = RpcConnectionService::cancel_agent_conversation(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn report_agent_clone_state(
+        &self,
+        request: tonic::Request<tddy_service::proto::connection::ReportAgentCloneStateRequest>,
+    ) -> Result<
+        tonic::Response<tddy_service::proto::connection::ReportAgentCloneStateResponse>,
+        tonic::Status,
+    > {
+        let resp = RpcConnectionService::report_agent_clone_state(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

@@ -67,6 +67,7 @@ import {
   DEFAULT_CLAUDE_CLI_MODELS,
 } from "./responses";
 import { acpReplayHandlers, type AcpReplayScenario } from "./acpReplay";
+import { aSessionAgentRosterFake, type RosterScenario } from "./sessionAgentRosterBackend";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -241,6 +242,10 @@ export interface ConnectionServiceScenario {
    *  `GetAcpToolCallDetail` for the tool bodies). Backs the Agent Activity overlay and the inactive
    *  session's Activities view. Default: unimplemented — omit it unless the spec reads a transcript. */
   acpReplay?: AcpReplayScenario;
+  /** The session's agent roster, served by `StreamSessionAgents` (+ attach/detach and the picker's
+   *  `ListSubagents`) — what the inspector's Agents tab shows. Default: unimplemented, so a screen
+   *  that never opens that tab is unaffected. */
+  sessionAgents?: RosterScenario;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -383,6 +388,10 @@ export function aConnectionServiceBackend(
       // The session's recorded ACP transcript. Spread (rather than re-implemented) so the two-phase
       // replay protocol has one definition shared with `aReplayBackend` — see `./acpReplay`.
       ...(scenario.acpReplay ? acpReplayHandlers(scenario.acpReplay) : {}),
+      // The session's agent roster. Spread for the same reason as the replay handlers: one
+      // `.implement(ConnectionService, …)` per backend, since Connect's router fills every omitted
+      // method of a registered service with an `Unimplemented` handler.
+      ...(scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents).handlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"

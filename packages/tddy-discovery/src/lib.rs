@@ -1,4 +1,4 @@
-//! FastContext Discovery agent — OpenAI-compatible multi-turn codebase exploration.
+//! Discovery agent — OpenAI-compatible multi-turn codebase exploration.
 
 pub mod agent_def;
 pub mod backend;

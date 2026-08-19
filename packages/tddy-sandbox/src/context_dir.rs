@@ -293,13 +293,13 @@ mod tests {
     fn appendix_single_agent_names_the_agent_and_its_tools() {
         // When
         let rendered = sandbox_remote_appendix(&[SubagentReplacement {
-            name: "fastcontext",
+            name: "explorer",
             replaced: &["Grep", "Glob"],
         }]);
 
         // Then
         assert!(
-            rendered.contains("fastcontext"),
+            rendered.contains("explorer"),
             "appendix must name the replacing subagent: {rendered}"
         );
         assert!(
@@ -319,7 +319,7 @@ mod tests {
         // When
         let rendered = sandbox_remote_appendix(&[
             SubagentReplacement {
-                name: "fastcontext",
+                name: "explorer",
                 replaced: &["Grep", "Glob"],
             },
             SubagentReplacement {
@@ -330,7 +330,7 @@ mod tests {
 
         // Then
         assert!(
-            rendered.contains("fastcontext") && rendered.contains("my-linter"),
+            rendered.contains("explorer") && rendered.contains("my-linter"),
             "appendix must name both agents: {rendered}"
         );
         assert!(
@@ -405,7 +405,7 @@ mod tests {
     fn appendix_with_replaced_tools_still_lists_the_remaining_tools() {
         // When
         let rendered = sandbox_remote_appendix(&[SubagentReplacement {
-            name: "fastcontext",
+            name: "explorer",
             replaced: &["Grep", "Glob"],
         }]);
 
@@ -429,7 +429,7 @@ mod tests {
         let ctx = SandboxContextDir::create_with_subagent(
             source_dir.path(),
             &[SubagentReplacement {
-                name: "fastcontext",
+                name: "explorer",
                 replaced: &["Grep", "Glob"],
             }],
         )
@@ -440,7 +440,7 @@ mod tests {
             let content = std::fs::read_to_string(ctx.path().join(filename))
                 .unwrap_or_else(|_| panic!("{filename} must exist"));
             assert!(
-                content.contains("fastcontext"),
+                content.contains("explorer"),
                 "{filename} must mention the replacing subagent: {content}"
             );
         }

@@ -301,7 +301,70 @@ pub fn delete_session_directory(
         "delete_session_directory: removed session directory for {}",
         session_id
     );
+
+    // A checkout that lived *inside* the session directory has just gone with it, but its
+    // registration is in the project's repository and would survive as a stale `git worktree list`
+    // row naming a directory that no longer exists — and, worse, holding the name so a later
+    // checkout cannot reuse it.
+    //
+    // An agent clone's checkout is exactly that shape (docs/ft/daemon/session-agent-roster.md
+    // § Clones). It is a one-way mirror, so it always carries the uncommitted work it exists to
+    // hold, and `git worktree remove` refuses any checkout with modified or untracked files — the
+    // git-aware removal above declines every time. `prune` is the operation for a checkout that is
+    // already gone, and it does nothing for every other session, whose worktree lives outside the
+    // session directory and is either removed above or deliberately left intact.
+    if let Some(worktree) = session_worktree
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|w| w.starts_with(&session_dir) && !w.exists())
+    {
+        prune_worktree_registration(projects_dir, metadata.as_ref(), &worktree, session_id);
+    }
     Ok(())
+}
+
+/// Drop the project repository's registration of a checkout that no longer exists.
+///
+/// Best-effort and logged rather than returned: the session is already gone by the time this runs,
+/// and a stale registration is a tidiness problem an operator can clear with `git worktree prune`,
+/// not a reason to report a deletion that succeeded as a failure.
+fn prune_worktree_registration(
+    projects_dir: Option<&Path>,
+    metadata: Option<&tddy_core::SessionMetadata>,
+    worktree: &Path,
+    session_id: &str,
+) {
+    let (Some(projects_dir), Some(project_id)) =
+        (projects_dir, metadata.map(|m| m.project_id.as_str()))
+    else {
+        return;
+    };
+    let Ok(Some(project)) = project_storage::find_project(projects_dir, project_id) else {
+        return;
+    };
+    match std::process::Command::new("git")
+        .current_dir(&project.main_repo_path)
+        .args(["worktree", "prune"])
+        .output()
+    {
+        Ok(out) if out.status.success() => log::info!(
+            "delete_session_directory: pruned the registration of {:?} for {}",
+            worktree,
+            session_id
+        ),
+        Ok(out) => log::warn!(
+            "delete_session_directory: `git worktree prune` in {} left {:?} registered for {}: {}",
+            project.main_repo_path,
+            worktree,
+            session_id,
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        ),
+        Err(e) => log::warn!(
+            "delete_session_directory: could not run `git worktree prune` in {} for {}: {e}",
+            project.main_repo_path,
+            session_id
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -331,7 +394,9 @@ mod tests {
             sandbox: None,
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };
@@ -463,7 +528,9 @@ mod tests {
             sandbox: Some(true),
             agent: None,
             recipe: None,
-            specialized_agents: Vec::new(),
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
         };

@@ -138,7 +138,9 @@ pub async fn start_workspace_session(
         sandbox: None,
         agent: None,
         recipe: None,
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };
@@ -162,6 +164,137 @@ pub async fn start_workspace_session(
         livekit_room,
         livekit_url,
         livekit_server_identity,
+        branch_conflict: None,
+    }))
+}
+
+/// Create the checkout an **agent clone** reads: a detached worktree at the project's current
+/// `HEAD`, under the session directory (`docs/ft/daemon/session-agent-roster.md` § Clones).
+///
+/// Still a `workspace` session — listable, deletable, and provisioned from the same project registry
+/// as any other — but deliberately **not** built by [`start_workspace_session`]'s branch workflow,
+/// for three reasons:
+///
+/// - **A mirror has no branch of its own.** The sync resets it onto the facilitating session's
+///   `HEAD` and fills it from that session's WIP tree on its first tick, so a branch cut here would
+///   be moved off moments later — and a *named* one would show up in `git branch` of a repository
+///   the operator shares with their own work.
+/// - **A clone needs no remote.** The branch workflow fetches a remote-tracking integration base
+///   (`origin/main`) before it can cut anything; everything a mirror will ever hold comes from the
+///   session's WIP ref instead, so requiring a remote would refuse a perfectly mirrorable project.
+/// - **It belongs under the sessions base, not under the project.** The checkout goes inside the
+///   session directory so it is removed with the session, and so an operator looking at their
+///   project does not find another agent's checkout beside their own.
+pub async fn start_agent_clone_session(
+    os_user: &str,
+    session_id: &str,
+    sessions_base: PathBuf,
+    project_id: &str,
+    tddy_data_dir: &Path,
+    request_timeout: std::time::Duration,
+) -> Result<Response<StartSessionResponse>, Status> {
+    let project_id = project_id.trim();
+    if project_id.is_empty() {
+        return Err(Status::invalid_argument(
+            "project_id is required for an agent clone",
+        ));
+    }
+    let projects_dir = projects_path_for_user(os_user, Some(tddy_data_dir))
+        .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+    let project = project_storage::find_project(&projects_dir, project_id)
+        .map_err(|e| Status::internal(e.to_string()))?
+        .ok_or_else(|| Status::not_found("project not found"))?;
+    let repo_root = PathBuf::from(&project.main_repo_path);
+    if !repo_root.exists() {
+        return Err(Status::invalid_argument(
+            "project main repo path does not exist",
+        ));
+    }
+
+    let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
+    std::fs::create_dir_all(&session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    // Named after the session rather than a fixed `clone`, because git names a worktree by its
+    // final path component and refuses a second one under a name it already holds — two sessions
+    // mirrored from the same project on this host would collide on the first.
+    let worktree_path = session_dir.join(format!("clone-{session_id}"));
+
+    let repo_root_for_git = repo_root.clone();
+    let worktree_for_git = worktree_path.clone();
+    tokio::time::timeout(
+        request_timeout,
+        tokio::task::spawn_blocking(move || {
+            // Detached: see the type's note. `HEAD` is the project's own tip, which is only a
+            // starting point — the mirror's first restore moves it to the session's.
+            let output = std::process::Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "--detach",
+                    &worktree_for_git.to_string_lossy(),
+                    "HEAD",
+                ])
+                .current_dir(&repo_root_for_git)
+                .output()
+                .map_err(|e| format!("could not run git worktree add: {e}"))?;
+            match output.status.success() {
+                true => Ok(()),
+                false => Err(format!(
+                    "git worktree add failed in {}: {}",
+                    repo_root_for_git.display(),
+                    String::from_utf8_lossy(&output.stderr).trim_end()
+                )),
+            }
+        }),
+    )
+    .await
+    .map_err(|_| Status::deadline_exceeded("start_agent_clone_session: create worktree timed out"))?
+    .map_err(|join_err| Status::internal(join_err.to_string()))?
+    .map_err(Status::internal)?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let meta = tddy_core::SessionMetadata {
+        session_id: session_id.to_string(),
+        project_id: project_id.to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+        status: "active".to_string(),
+        repo_path: Some(worktree_path.to_string_lossy().to_string()),
+        pid: None,
+        tool: None,
+        livekit_room: None,
+        pending_elicitation: false,
+        previous_session_id: None,
+        session_type: Some("workspace".to_string()),
+        model: None,
+        cursor_chat_id: None,
+        activity_status: None,
+        hook_token: None,
+        sandbox: None,
+        agent: None,
+        recipe: None,
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
+        codebase_daemon_instance_id: None,
+        codebase_session_id: None,
+    };
+    tddy_core::write_session_metadata(&session_dir, &meta)
+        .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
+
+    log::info!(
+        target: "tddy_daemon::workspace_session",
+        "started agent clone session {} worktree={} user={}",
+        session_id,
+        worktree_path.display(),
+        os_user
+    );
+
+    Ok(Response::new(StartSessionResponse {
+        session_id: session_id.to_string(),
+        livekit_room: String::new(),
+        livekit_url: String::new(),
+        livekit_server_identity: String::new(),
         branch_conflict: None,
     }))
 }

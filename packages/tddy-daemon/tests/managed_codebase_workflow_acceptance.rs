@@ -350,7 +350,9 @@ async fn resuming_a_managed_claude_cli_session_re_wires_orchestration_and_socket
         sandbox: None,
         agent: None,
         recipe: Some("tdd".to_string()),
-        specialized_agents: Vec::new(),
+        agents: Vec::new(),
+        agents_rev: 0,
+        legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
     };

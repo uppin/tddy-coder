@@ -15,6 +15,37 @@ service ConnectionService {
   // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
   // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
   rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
+  // A session's agent roster (docs/ft/daemon/session-agent-roster.md) — the agents attached to a
+  // LIVE session, mutated while it runs. Every call is served by the facilitating daemon, which
+  // owns the roster; an agent owned by another daemon is resolved from that daemon and routed to it
+  // off the qualified `agent_id` the entry stores.
+  //
+  // Attach is idempotent on (session, agent_id): re-attaching an already attached agent returns the
+  // roster unchanged and does not bump `rev`. Detaching an agent that is not attached is NOT_FOUND,
+  // not a silent success — a roster nobody can trust is worse than an error.
+  rpc AttachSessionAgent(AttachSessionAgentRequest) returns (SessionAgentRoster);
+  rpc DetachSessionAgent(DetachSessionAgentRequest) returns (SessionAgentRoster);
+  rpc ListSessionAgents(ListSessionAgentsRequest) returns (SessionAgentRoster);
+  // The roster, now and on every change. The first frame is always the current snapshot, so a late
+  // subscriber needs no separate priming read, and a no-op attach emits nothing.
+  rpc StreamSessionAgents(StreamSessionAgentsRequest) returns (stream SessionAgentRoster);
+  // Conversation routing — the in-jail `tddy-tools` calls these on its facilitating daemon for
+  // every roster agent, local or remote, so the main agent cannot tell which host answered. The
+  // daemon runs a local entry in-process and forwards a remote entry to its owning daemon in the
+  // session room.
+  rpc OpenAgentConversation(OpenAgentConversationRequest) returns (OpenAgentConversationResponse);
+  // Server-streaming for the same reason StreamExecuteTool is: an agent's answer has no useful
+  // upper bound, and a payload over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed,
+  // where one lost frame wedges the call with no error rather than failing it. Frames are bounded
+  // below that budget instead.
+  rpc PromptAgentConversation(PromptAgentConversationRequest) returns (stream AgentConversationChunk);
+  rpc CancelAgentConversation(CancelAgentConversationRequest) returns (CancelAgentConversationResponse);
+  // The owning daemon tells the facilitating daemon how its clone is doing: whether it is ready to
+  // serve reads, where the checkout landed, and every reconcile it had to perform. The facilitating
+  // daemon owns the roster and answers every read of it, but only the daemon holding the checkout
+  // can say any of this — so it is pushed rather than polled, and a reconcile is reported rather
+  // than absorbed (docs/ft/daemon/session-agent-roster.md § Kept current from the room).
+  rpc ReportAgentCloneState(ReportAgentCloneStateRequest) returns (ReportAgentCloneStateResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -268,7 +299,196 @@ message SubagentInfo {
   string name = 1;
   string label = 2;
   string model = 3;
+  // Stamped by the daemon that resolved this def. A picker fans ListSubagents out across every
+  // common-room daemon, and two of them routinely answer with a def called "explorer" — without the
+  // stamp the merged list cannot say which host offers which row.
+  string daemon_instance_id = 4;
+  // "name@daemon_instance_id", ready to hand to AttachSessionAgent. Carried rather than assembled
+  // by the caller so the id a picker sends is the one the serving daemon minted, character for
+  // character.
+  string agent_id = 5;
+  // Exec-catalog tools this agent would take over from the main agent, so a picker can warn what
+  // the main agent loses before the operator attaches it.
+  repeated string replaces = 6;
+  // Exec-catalog tools the agent's own loop may call.
+  repeated string tools = 7;
 }
+
+// ── Session agent roster (docs/ft/daemon/session-agent-roster.md) ──────────────────────────────
+
+// Every roster read is a WHOLE snapshot. A consumer rebuilds its registry from it and never applies
+// a delta, so a missed frame costs staleness until the next one rather than a registry that
+// silently disagrees with the daemon's — which is the failure that matters here, because a
+// disagreeing registry answers `subagent_new_session` for a detached agent and refuses an attached
+// one. `rev` exists to detect staleness, not to reconstruct state.
+message SessionAgentRoster {
+  string session_id = 1;
+  // Bumped on every attach and every detach that changed something. Starts at 1 for a session
+  // started with a non-empty seed, 0 for one started with none.
+  uint64 rev = 2;
+  // In attach order. Detaching one leaves the rest where they were.
+  repeated SessionAgentEntry agents = 3;
+}
+
+message SessionAgentEntry {
+  // "explorer@ws-01" — the id the main agent addresses and the entry's identity.
+  string agent_id = 1;
+  string name = 2;
+  string daemon_instance_id = 3;
+  // Display only; from the def.
+  string label = 4;
+  // Display only; from the def.
+  string model = 5;
+  // Exec-catalog tools this agent takes over from the main agent, snapshotted at attach rather than
+  // re-read from the def — otherwise editing a YAML def would silently change what a running
+  // session's main agent may call. The union across the roster is what the main agent loses.
+  repeated string replaces = 6;
+  // Exec-catalog tools the agent's own loop may call. Snapshotted at attach for the same reason.
+  repeated string tools = 7;
+  // The `workspace` session on `daemon_instance_id` holding that daemon's clone. Empty when the
+  // owning daemon is the facilitating daemon — a local agent works the real worktree.
+  string codebase_session_id = 8;
+  // An agent is attachable before its clone finishes provisioning; a prompt sent meanwhile is
+  // refused naming this state, never queued and never served from an empty checkout.
+  AgentCloneState clone_state = 9;
+  // Why the clone failed, when `clone_state` is ERROR. Empty otherwise.
+  string clone_error = 10;
+}
+
+enum AgentCloneState {
+  AGENT_CLONE_STATE_UNSPECIFIED = 0;
+  // The owning daemon is the facilitating daemon: there is no clone, and there is nothing to wait
+  // for. A distinct value from READY so a UI can say "local" rather than implying a checkout exists.
+  AGENT_CLONE_STATE_LOCAL = 1;
+  AGENT_CLONE_STATE_PROVISIONING = 2;
+  AGENT_CLONE_STATE_READY = 3;
+  AGENT_CLONE_STATE_ERROR = 4;
+}
+
+message AttachSessionAgentRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  // "name@daemon_instance_id" — required, and required to be qualified. An id with no `@` is
+  // INVALID_ARGUMENT; there is no "assume the local daemon" reading, because that reading silently
+  // picks the wrong host once two daemons offer the same name.
+  string agent_id = 4;
+}
+
+message DetachSessionAgentRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string agent_id = 4;
+}
+
+message ListSessionAgentsRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message StreamSessionAgentsRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+}
+
+message OpenAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // The roster entry to talk to. Resolved against the LIVE roster, so an id that was valid at spawn
+  // and has since been detached is refused rather than served from a stale registry.
+  string agent_id = 4;
+  // Caller-chosen conversation id, so an open that times out still leaves the caller able to name —
+  // and therefore cancel — whatever the daemon built. Empty = the daemon mints one.
+  string conversation_id = 5;
+}
+
+message OpenAgentConversationResponse {
+  string conversation_id = 1;
+}
+
+message PromptAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+  string prompt = 5;
+}
+
+message AgentConversationChunk {
+  // Next slice of the agent's answer. An empty answer still yields exactly one frame, so a consumer
+  // never has to distinguish "said nothing" from "nothing arrived".
+  string content_chunk = 1;
+  // Why the agent's turn ended ("EndTurn", "MaxTurns", …), carried on the final frame only.
+  string stop_reason = 2;
+  // Final-frame marker. A stream that ends without it was truncated, not completed — a partial
+  // answer returned as if complete is exactly what a wedged chunk-framed payload looks like.
+  bool last = 3;
+}
+
+message CancelAgentConversationRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  string conversation_id = 4;
+}
+
+message CancelAgentConversationResponse {}
+
+// What makes a `workspace` session an agent clone. See StartSessionRequest.agent_clone.
+message AgentClonePlacement {
+  // The session on the facilitating daemon this checkout mirrors. Names the room to join
+  // (`session-{session_id}`) and the WIP ref to restore from.
+  string session_id = 1;
+  // The facilitating daemon, as it is addressed in that room (`daemon-{instance_id}`). Every
+  // mutating tool call a roster agent on this host makes is proxied there — a mutation applied to
+  // the clone would be overwritten by the next sync tick and would never reach the branch.
+  string facilitating_daemon_instance_id = 2;
+  // The facilitating daemon's Connect-HTTP root — the only address a peer that has never seen the
+  // project can clone it from. `tddy-remote-git-repo` calls `auth.LiveKitTokenService/MintLiveKitToken`
+  // against this URL to mint a common-room LiveKit token, then drives `remote_git.RemoteGitService/Serve`
+  // over that room. Empty only when the owning daemon is the facilitating daemon itself, in which
+  // case there is no clone to provision (PRD AC37).
+  string facilitating_daemon_url = 3;
+  // The first admission token — a scoped, short-TTL LiveKit token the facilitating daemon mints for
+  // the owning daemon as part of the room-admission handshake (PRD § "What attach does" step 3). The
+  // owning daemon joins `session-{session_id}` with this token and nothing else, then runs the
+  // re-admit loop against `session_admission.SessionAdmissionService/AdmitOwningDaemon` over the
+  // common room before it expires. Empty only when the facilitating daemon cannot mint (LiveKit not
+  // configured), in which case the owning daemon falls back to self-minting — a recorded deviation,
+  // never a silent one.
+  string first_admission_token = 4;
+  // The LiveKit server the admission token is valid against, and the session room it grants —
+  // returned alongside `first_admission_token` so the owning daemon joins the right room on the
+  // right server without re-deriving either. Empty when `first_admission_token` is empty.
+  string first_admission_url = 5;
+  string first_admission_room = 6;
+}
+
+message ReportAgentCloneStateRequest {
+  string session_token = 1;
+  // The facilitating daemon's session whose roster this clone serves.
+  string session_id = 2;
+  // The owning daemon reporting — the one holding the checkout.
+  string daemon_instance_id = 3;
+  // The `workspace` session on it that holds the checkout.
+  string codebase_session_id = 4;
+  AgentCloneState clone_state = 5;
+  string clone_error = 6;
+  // Where the checkout is, on the owning daemon's filesystem. The facilitating daemon never opens
+  // it — it holds it so an operator (and the roster pane) can be told where a clone actually landed.
+  string worktree_path = 7;
+  // Reconciles performed since the previous report. Appended rather than replacing what the
+  // facilitating daemon already holds: a mirror that repairs itself without saying so hides a real
+  // fault, and a report that overwrote the history would hide it one report later instead.
+  repeated string divergences = 8;
+}
+
+message ReportAgentCloneStateResponse {}
 
 message ListSessionsRequest {
   string session_token = 1;
@@ -531,6 +751,17 @@ message StartSessionRequest {
   // serving daemon. Empty = the serving daemon generates one, as before.
   // See docs/ft/daemon/remote-managed-worktree.md § Failure is atomic.
   string requested_session_id = 33;
+  // Set when this `workspace` session is an **agent clone** — the independent checkout an owning
+  // daemon reads its roster agents' files from (docs/ft/daemon/session-agent-roster.md § Clones).
+  // Absent for every other workspace session, including the codebase half of a split placement.
+  //
+  // It carries the two facts the owning daemon cannot derive from the request: which session on the
+  // facilitating daemon this checkout mirrors, and which daemon that is. Both are needed before a
+  // single byte is synced — the first names the room to join and the WIP ref to restore from, the
+  // second names the participant every mutating tool call is proxied back to. Deriving either from
+  // the clone's own id would encode control flow in a string, which is exactly the kind of coupling
+  // that breaks silently when an id format changes.
+  AgentClonePlacement agent_clone = 34;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

@@ -362,6 +362,7 @@ pub async fn dial_and_bridge(
     session_env: Arc<Vec<(String, String)>>,
     session_dir: PathBuf,
     agent_activity_hub: Arc<crate::connection_service::AgentActivityHub>,
+    rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
 ) -> Result<(), String> {
     log::info!(
         target: "tddy_daemon::sandbox_session",
@@ -390,9 +391,10 @@ pub async fn dial_and_bridge(
         session_dir,
         agent_activity_hub,
     };
-    tddy_sandbox_runner::run_host_relay(
+    tddy_sandbox_runner::run_host_relay_with_rpc(
         stdio_client,
         handler,
+        rpc_handler,
         tddy_sandbox_runner::HostRelayConfig::new(session_id, term_tx),
         stdin_rx,
     )
@@ -972,6 +974,7 @@ mod tests {
                 Arc::new(Vec::new()),
                 tmp.path().join("session"),
                 Arc::new(crate::connection_service::AgentActivityHub::default()),
+                Arc::new(tddy_sandbox_runner::NullRpcHandler),
             ),
         )
         .await

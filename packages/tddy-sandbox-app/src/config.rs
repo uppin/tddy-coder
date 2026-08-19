@@ -3,8 +3,8 @@
 //!
 //! Every config field is optional and a CLI flag always overrides its config counterpart (see
 //! `main.rs`). `subagents` carries full inline [`SpecializedAgentDef`]s — the same schema as
-//! `<tddyhome>/agents/*.yaml` — so a whole session's subagent wiring (e.g. pointing the
-//! `fastcontext` role at a local Ollama server) can live in one file with no separate agents dir.
+//! `<tddyhome>/agents/*.yaml` — so a whole session's subagent wiring (e.g. pointing an explorer
+//! agent at a local Ollama server) can live in one file with no separate agents dir.
 
 use std::path::{Path, PathBuf};
 
@@ -41,13 +41,13 @@ pub struct SandboxAppConfig {
     pub cwd: Option<PathBuf>,
     #[serde(default)]
     pub agents_dir: Option<PathBuf>,
-    /// Named specialized agents resolved against the builtins + `agents_dir` (same as repeating
+    /// Named specialized agents resolved against `agents_dir` (same as repeating
     /// `--specialized-agent`).
     #[serde(default)]
     pub specialized_agents: Vec<String>,
     /// Full inline specialized-agent defs. Each entry both **defines** and **activates** its
-    /// agent, and overrides a builtin or `agents_dir` def of the same `name` — so `fastcontext`
-    /// can be re-pointed at Ollama without a separate agents-dir file.
+    /// agent, and overrides an `agents_dir` def of the same `name` — so an agent can be
+    /// re-pointed at another endpoint without a separate agents-dir file.
     #[serde(default)]
     pub subagents: Vec<SpecializedAgentDef>,
     /// Extra args forwarded verbatim to the in-jail `claude` (before any `-- <args>` given on the
@@ -74,7 +74,7 @@ impl SandboxAppConfig {
 
 /// Resolve the final active specialized-agent def set for a session.
 ///
-/// The pool is `builtins + agents_dir/*.yaml`, then each inline def overlaid by `name` (inline
+/// The pool is `agents_dir/*.yaml`, then each inline def overlaid by `name` (inline
 /// wins). The active set is every inline def (declaring an inline subagent activates it) plus each
 /// `named` agent, de-duplicated with first-seen order preserved. A `named` agent that resolves
 /// against nothing in the pool is a hard error — not a silently-dropped entry.
@@ -115,71 +115,40 @@ pub fn resolve_session_agents(
     for name in &active {
         let def = pool.iter().find(|d| &d.name == name).ok_or_else(|| {
             anyhow::anyhow!(
-                "specialized agent '{name}' not found (not a builtin, not inline, and not present \
-                 under {})",
+                "specialized agent '{name}' not found (not inline, and not present under {})",
                 agents_dir.display()
             )
         })?;
         out.push(def.clone());
     }
+    if let Some(def) = out.iter().find(|def| shell_is_taken_and_bound(def)) {
+        anyhow::bail!(
+            "specialized agent '{}' both replaces Shell and binds SHELL, which this host cannot \
+             serve: every Shell dispatch is rejected at the host boundary (see \
+             `bridge::AppToolHandler::policy_rejects`), including the ones this agent makes for \
+             itself — so the tool would be withdrawn from the main agent and unusable by its \
+             replacement. Drop SHELL from its `tools:`, or Shell from its `replaces:`",
+            def.name
+        );
+    }
     Ok(out)
 }
 
-/// Model-facing subagent tool that must be bound to serve a replaced mutation tool. Read-side
-/// replacements (`Grep`/`Glob`/`SemanticSearch`) are deliberately unmapped: the default
-/// READ/GLOB/GREP loop serves those (fastcontext replaces `SemanticSearch` without a same-named
-/// internal tool today).
-fn required_binding_for(replaced: &str) -> Option<tddy_discovery::agent_def::SubagentTool> {
-    use tddy_discovery::agent_def::SubagentTool;
-    match replaced {
-        "Write" => Some(SubagentTool::Write),
-        "StrReplace" => Some(SubagentTool::StrReplace),
-        "Delete" => Some(SubagentTool::Delete),
-        _ => None,
-    }
-}
-
-/// Validate the session's tool replacements before spawn — every restriction is declared on the
-/// agent defs themselves (`replaces:`), not on mode flags (docs/ft/coder/no-bash-mode.md):
+/// Whether `def` takes `Shell` over from the main agent **and** binds `SHELL` for its own loop.
 ///
-/// - At most one def may replace `Shell` (that def becomes the session's action author).
-/// - A def replacing a mutation tool (`Write`/`StrReplace`/`Delete`) must bind the matching
-///   internal tool (`WRITE`/`STR_REPLACE`/`DELETE`) — otherwise the session could never perform
-///   that operation at all, which must fail here rather than at the first delegated edit.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn validate_tool_replacements(defs: &[SpecializedAgentDef]) -> Result<()> {
-    let shell_replacers: Vec<&str> = defs
+/// The host relay carries no caller identity — `HostToolHandler::execute` is handed a session id, a
+/// tool name and args — so a `Shell` dispatch made by this agent is indistinguishable from one made
+/// by the main agent, and the host rejects both. Refusing the pairing here is the honest half of
+/// that: the combination cannot work, so it is named at config time rather than failing per call.
+fn shell_is_taken_and_bound(def: &SpecializedAgentDef) -> bool {
+    let takes_shell = tddy_discovery::subagent::normalize_replaced_tools(&def.replaces)
         .iter()
-        .filter(|def| {
-            tddy_discovery::subagent::normalize_replaced_tools(&def.replaces)
-                .iter()
-                .any(|t| t == "Shell")
-        })
-        .map(|def| def.name.as_str())
-        .collect();
-    if shell_replacers.len() > 1 {
-        anyhow::bail!(
-            "only one subagent may replace Shell (it becomes the session's action author); got: {}",
-            shell_replacers.join(", ")
-        );
-    }
-
-    for def in defs {
-        for replaced in tddy_discovery::subagent::normalize_replaced_tools(&def.replaces) {
-            let Some(required) = required_binding_for(&replaced) else {
-                continue;
-            };
-            if !def.tools.contains(&required) {
-                anyhow::bail!(
-                    "subagent '{}' replaces {replaced} but does not bind the matching internal \
-                     tool — add `tools: [READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]` (or at \
-                     least {replaced:?}'s counterpart) to its def",
-                    def.name
-                );
-            }
-        }
-    }
-    Ok(())
+        .any(|tool| tool == "Shell");
+    let binds_shell = def
+        .tools
+        .iter()
+        .any(|tool| matches!(tool, tddy_discovery::agent_def::SubagentTool::Shell));
+    takes_shell && binds_shell
 }
 
 #[cfg(test)]
@@ -188,13 +157,13 @@ mod tests {
 
     const NO_AGENTS_DIR: &str = "/nonexistent-agents-dir-for-tests";
 
-    fn ollama_fastcontext_yaml() -> &'static str {
+    fn an_inline_explorer_yaml() -> &'static str {
         "\
 model: claude-opus-4-8
 codebase_mode: managed
 subagents:
-  - name: fastcontext
-    model: hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M
+  - name: explorer
+    model: qwen2.5-coder:7b
     base_url: http://localhost:11434
     replaces: [Grep, Glob]
 claude_args:
@@ -203,24 +172,20 @@ claude_args:
 "
     }
 
-    /// The documented ollama-fastcontext config parses into the expected fields, including the
-    /// inline subagent def re-pointed at the local Ollama server.
+    /// A config carrying an inline subagent def parses into the expected fields, the def included.
     #[test]
-    fn parses_the_ollama_fastcontext_config() {
+    fn parses_a_config_with_an_inline_subagent_def() {
         // Given / When
         let cfg: SandboxAppConfig =
-            serde_yaml::from_str(ollama_fastcontext_yaml()).expect("config must parse");
+            serde_yaml::from_str(an_inline_explorer_yaml()).expect("config must parse");
 
         // Then
         assert_eq!(cfg.model.as_deref(), Some("claude-opus-4-8"));
         assert_eq!(cfg.codebase_mode.as_deref(), Some("managed"));
         assert_eq!(cfg.subagents.len(), 1);
-        assert_eq!(cfg.subagents[0].name, "fastcontext");
+        assert_eq!(cfg.subagents[0].name, "explorer");
         assert_eq!(cfg.subagents[0].base_url, "http://localhost:11434");
-        assert_eq!(
-            cfg.subagents[0].model,
-            "hf.co/mitkox/FastContext-1.0-4B-SFT-Q4_K_M-GGUF:Q4_K_M"
-        );
+        assert_eq!(cfg.subagents[0].model, "qwen2.5-coder:7b");
         assert_eq!(cfg.claude_args, vec!["--add-dir", "/extra"]);
     }
 
@@ -244,13 +209,13 @@ claude_args:
         assert_eq!(cfg, SandboxAppConfig::default());
     }
 
-    /// An inline subagent def both defines and activates its agent, overriding the same-named
-    /// builtin — so `fastcontext` comes back pointed at Ollama with no `--specialized-agent` flag.
+    /// An inline subagent def both defines and activates its agent — it is usable with no
+    /// `--specialized-agent` flag naming it, and with nothing under `agents_dir`.
     #[test]
-    fn inline_subagent_def_activates_and_overrides_builtin() {
+    fn inline_subagent_def_activates_the_agent_it_defines() {
         // Given
         let cfg: SandboxAppConfig =
-            serde_yaml::from_str(ollama_fastcontext_yaml()).expect("config must parse");
+            serde_yaml::from_str(an_inline_explorer_yaml()).expect("config must parse");
 
         // When
         let defs = resolve_session_agents(
@@ -261,33 +226,105 @@ claude_args:
         .expect("inline def must resolve");
 
         // Then
-        assert_eq!(defs.len(), 1, "the inline fastcontext must be active");
-        assert_eq!(defs[0].name, "fastcontext");
-        assert_eq!(
-            defs[0].base_url, "http://localhost:11434",
-            "the inline Ollama base_url must override the builtin default"
-        );
+        assert_eq!(defs.len(), 1, "the inline explorer must be active");
+        assert_eq!(defs[0].name, "explorer");
+        assert_eq!(defs[0].base_url, "http://localhost:11434");
     }
 
-    /// A named builtin (no inline def) resolves via the builtin pool, unchanged.
+    /// A named agent (no inline def) resolves from the agents directory — the only pool there is,
+    /// now that no def is compiled in.
     #[test]
-    fn named_builtin_resolves_without_inline_def() {
-        // Given / When
-        let defs =
-            resolve_session_agents(&["fastcontext".to_string()], &[], Path::new(NO_AGENTS_DIR))
-                .expect("the builtin must resolve by name");
+    fn a_named_agent_resolves_from_the_agents_directory() {
+        // Given
+        let agents_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            agents_dir.path().join("explorer.yaml"),
+            "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
+        )
+        .expect("write agent def");
+
+        // When
+        let defs = resolve_session_agents(&["explorer".to_string()], &[], agents_dir.path())
+            .expect("a def in the agents dir must resolve by name");
 
         // Then
         assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].name, "fastcontext");
-        assert_eq!(
-            defs[0].base_url, "http://localhost:30000",
-            "an unmodified builtin keeps its shipped base_url"
+        assert_eq!(defs[0].name, "explorer");
+        assert_eq!(defs[0].base_url, "http://localhost:11434");
+    }
+
+    /// An agent that takes `Shell` over from the main agent **and** binds `SHELL` for itself cannot
+    /// be served: the host rejects every `Shell` dispatch, including the ones that agent makes, so
+    /// the tool would be withdrawn from the main agent and unusable by its replacement. The pairing
+    /// is refused where the session is configured, naming the def.
+    #[test]
+    fn refuses_an_agent_that_both_replaces_shell_and_binds_it() {
+        // Given
+        let agents_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            agents_dir.path().join("commander.yaml"),
+            "name: commander\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n\
+             tools: [SHELL]\nreplaces: [Shell]\n",
+        )
+        .expect("write agent def");
+
+        // When
+        let result = resolve_session_agents(&["commander".to_string()], &[], agents_dir.path());
+
+        // Then
+        let err = result.expect_err("an agent that replaces Shell and binds it must be refused");
+        assert!(
+            err.to_string().contains("commander"),
+            "the error must name the def that cannot be served; got: {err}"
         );
     }
 
-    /// A named agent that resolves against neither builtins, inline defs, nor `agents_dir` is a
-    /// hard error that names the offending agent.
+    /// Replacing `Shell` without binding it is the ordinary no-bash-mode agent: it authors session
+    /// actions instead of running commands, and it resolves.
+    #[test]
+    fn resolves_an_agent_that_replaces_shell_without_binding_it() {
+        // Given
+        let agents_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            agents_dir.path().join("author.yaml"),
+            "name: author\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n\
+             tools: [READ]\nreplaces: [Shell]\n",
+        )
+        .expect("write agent def");
+
+        // When
+        let defs = resolve_session_agents(&["author".to_string()], &[], agents_dir.path())
+            .expect("replacing Shell without binding it must resolve");
+
+        // Then
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "author");
+    }
+
+    /// Binding `SHELL` without replacing it is equally fine: the agent runs commands through the
+    /// same relay the main agent does, and nothing is withdrawn.
+    #[test]
+    fn resolves_an_agent_that_binds_shell_without_replacing_it() {
+        // Given
+        let agents_dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            agents_dir.path().join("builder.yaml"),
+            "name: builder\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n\
+             tools: [SHELL]\n",
+        )
+        .expect("write agent def");
+
+        // When
+        let defs = resolve_session_agents(&["builder".to_string()], &[], agents_dir.path())
+            .expect("binding SHELL without replacing it must resolve");
+
+        // Then
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "builder");
+    }
+
+    /// A named agent that resolves against neither the inline defs nor `agents_dir` is a hard
+    /// error that names the offending agent.
     #[test]
     fn unknown_named_agent_is_an_error() {
         // Given / When
@@ -313,18 +350,12 @@ claude_args:
         assert!(defs.is_empty());
     }
 
-    // ─── tool-replacement validation (agent-driven no-bash / no-write) ───────────
+    // ─── tool replacement ────────────────────────────────────────────────────────
     //
-    // Feature: docs/ft/coder/no-bash-mode.md — every restriction is declared on the defs
-    // themselves via `replaces:`; there are no mode flags.
-
-    fn def_with(name: &str, replaces: &str, tools: Option<&str>) -> SpecializedAgentDef {
-        let tools_line = tools.map(|t| format!("tools: {t}\n")).unwrap_or_default();
-        serde_yaml::from_str(&format!(
-            "name: {name}\nmodel: m\nbase_url: http://localhost:11434\nreplaces: {replaces}\n{tools_line}"
-        ))
-        .expect("def must parse")
-    }
+    // A def's `replaces:` is withdrawn from the main agent and nothing else happens — no def is
+    // the session's "action author" or "coder", and nothing validates that a replaced tool is
+    // backed by a matching binding (docs/ft/daemon/session-agent-roster.md § Tool replacement,
+    // without behaviour). What is left to check here is that the declaration parses.
 
     /// The documented agent-driven config parses: a gemma def replacing Shell is the whole
     /// no-bash opt-in — no dedicated flag fields exist (unknown keys are rejected).
@@ -350,60 +381,5 @@ subagents:
             flag_style.is_err(),
             "the retired flag field must be rejected as an unknown key"
         );
-    }
-
-    /// A single Shell replacer (the action author) validates.
-    #[test]
-    fn a_single_shell_replacer_is_accepted() {
-        let defs = vec![def_with("action-author", "[Shell]", None)];
-        validate_tool_replacements(&defs).expect("one Shell replacer must be accepted");
-    }
-
-    /// Two defs both replacing Shell is ambiguous — which one authors actions? — and rejected
-    /// before spawn with both names in the error.
-    #[test]
-    fn two_shell_replacers_are_rejected() {
-        let defs = vec![
-            def_with("author-a", "[Shell]", None),
-            def_with("author-b", "[Shell]", None),
-        ];
-        let err =
-            validate_tool_replacements(&defs).expect_err("two Shell replacers must be rejected");
-        assert!(
-            err.to_string().contains("author-a") && err.to_string().contains("author-b"),
-            "the error must name both defs; got: {err}"
-        );
-    }
-
-    /// A def replacing `Write` without binding the internal WRITE tool would leave the session
-    /// unable to edit anything — rejected before spawn, with the fix in the error.
-    #[test]
-    fn a_write_replacer_without_a_write_binding_is_rejected() {
-        let defs = vec![def_with("coder", "[Write, StrReplace, Delete]", None)];
-        let err = validate_tool_replacements(&defs)
-            .expect_err("a write replacer without WRITE must be rejected");
-        assert!(
-            err.to_string().contains("WRITE"),
-            "the error must show the tools to add; got: {err}"
-        );
-    }
-
-    /// A write-capable coder def replacing the mutation tools validates.
-    #[test]
-    fn a_write_capable_coder_replacing_mutation_tools_is_accepted() {
-        let defs = vec![def_with(
-            "coder",
-            "[Write, StrReplace, Delete]",
-            Some("[READ, GLOB, GREP, WRITE, STR_REPLACE, DELETE]"),
-        )];
-        validate_tool_replacements(&defs).expect("a write-capable coder must be accepted");
-    }
-
-    /// Read-side replacements need no matching internal binding — the builtin fastcontext
-    /// (replaces Grep/Glob/SemanticSearch with a READ/GLOB/GREP loop) must keep validating.
-    #[test]
-    fn read_side_replacements_need_no_matching_binding() {
-        let defs = vec![tddy_discovery::agent_def::builtin_fastcontext_def()];
-        validate_tool_replacements(&defs).expect("fastcontext must keep validating");
     }
 }

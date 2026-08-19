@@ -10,7 +10,13 @@ import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-t
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { createSessionPage } from "../support/pages/createSessionPage";
-import { TEST_IDS, byTestId, createSessionSubagentCheckbox } from "../support/testIds";
+import { TEST_IDS, byTestId, createSessionAgentOption } from "../support/testIds";
+
+/** The daemon serving this form. Agents are offered — and submitted — as `<name>@<host>`
+ *  (docs/ft/daemon/session-agent-roster.md § Web UI). */
+const HOST = "local";
+
+const FASTCONTEXT = `fastcontext@${HOST}`;
 
 const CURSOR_CLI_MODELS = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
@@ -22,8 +28,20 @@ function aBackendForCursorCliSession() {
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(ConnectionService.method.listSubagents, () => ({
       subagents: [
-        { name: "fastcontext", label: "Fast Context", model: "microsoft/FastContext-1.0-4B-RL" },
-        { name: "my-explorer", label: "Explorer", model: "qwen2.5-coder:7b" },
+        {
+          name: "fastcontext",
+          label: "Fast Context",
+          model: "microsoft/FastContext-1.0-4B-RL",
+          daemonInstanceId: HOST,
+          agentId: FASTCONTEXT,
+        },
+        {
+          name: "my-explorer",
+          label: "Explorer",
+          model: "qwen2.5-coder:7b",
+          daemonInstanceId: HOST,
+          agentId: `my-explorer@${HOST}`,
+        },
       ],
     }))
     .onUnary(ConnectionService.method.listProjects, () => ({
@@ -129,7 +147,7 @@ describe("CreateSessionPane — cursor-cli session type", () => {
     createSessionPage.selectProject("proj-cursor");
     byTestId(TEST_IDS.createSessionSandboxToggle).click();
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
-    byTestId(createSessionSubagentCheckbox("fastcontext")).click();
+    byTestId(createSessionAgentOption(FASTCONTEXT)).click();
     createSessionPage.submit();
 
     // Then
@@ -139,7 +157,7 @@ describe("CreateSessionPane — cursor-cli session type", () => {
       expect(calls[0].sessionType).to.eq("cursor-cli");
       expect(calls[0].sandbox).to.eq(true);
       expect(calls[0].managedCodebase).to.eq(true);
-      expect(calls[0].specializedAgents).to.deep.eq(["fastcontext"]);
+      expect(calls[0].specializedAgents).to.deep.eq([FASTCONTEXT]);
     });
   });
 });

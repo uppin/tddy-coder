@@ -110,7 +110,7 @@ local:
 # Per-session LiveKit rooms (session-<session_id>). The daemon running a session's agent hosts one,
 # joins it before the agent is spawned, serves its file-access RPCs there, broadcasts git activity on
 # the `worktree.activity` topic, and keeps the room's metadata as the current working-tree summary.
-# Additional agents (fastcontext, discovery) join the same room. See docs/ft/daemon/session-room.md.
+# Additional agents join the same room. See docs/ft/daemon/session-room.md.
 #
 # When the session's repo lives on another daemon, the room still belongs to the daemon running the
 # agent: it measures the checkout and serves files by forwarding to that codebase daemon, so

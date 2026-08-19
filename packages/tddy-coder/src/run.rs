@@ -213,9 +213,10 @@ fn resolve_tddy_data_dir(args: &Args) -> PathBuf {
         })
 }
 
-/// Resolve the specialized-agent def set for `create_backend` — the builtins,
-/// `<tddyhome>/agents/*.yaml`, and the def the spawning daemon resolved for us
-/// (`--agent-def-path`), in that precedence order. See docs/ft/coder/specialized-subagents.md.
+/// Resolve the specialized-agent def set for `create_backend` — `<tddyhome>/agents/*.yaml`, then
+/// the def the spawning daemon resolved for us (`--agent-def-path`), which wins on a name
+/// collision. There is no compiled-in def: every agent comes from a def source someone wrote (see
+/// docs/ft/daemon/session-agent-roster.md § Removing the hardcoded agents).
 ///
 /// An unreadable or malformed `--agent-def-path` fails the run: dropping it would start the session
 /// as a different agent than the daemon validated, which is precisely what carrying the def exists
@@ -227,9 +228,9 @@ fn resolve_specialized_agent_defs(
         tddy_discovery::agent_def::resolve_agent_defs(&resolve_tddy_data_dir(args).join("agents"));
     if let Some(path) = args.agent_def_path.as_deref() {
         // The def carries the provider credential, which is why it arrives in a `0600` file rather
-        // than on argv (`/proc/<pid>/cmdline` is world-readable). The path never appears in the
-        // error text of a parse failure for the same reason the JSON no longer appears on argv:
-        // this message reaches logs, and the file's contents are a secret.
+        // than on argv (`/proc/<pid>/cmdline` is world-readable). A parse failure names the path
+        // and never the file's contents, for the same reason the JSON no longer appears on argv:
+        // this message reaches logs, and the contents are a secret.
         let json = std::fs::read_to_string(path)
             .with_context(|| format!("--agent-def-path could not be read: {}", path.display()))?;
         let def: tddy_discovery::agent_def::SpecializedAgentDef = serde_json::from_str(&json)
@@ -550,17 +551,6 @@ pub struct Args {
     /// node, entering the `orchestrate` operator loop instead of the planning phase. A failed seed
     /// fails session start — see [`seed_stack_and_enter_orchestrate`].
     pub stack_seed_base_session: Option<String>,
-
-    /// Base URL for the FastContext OpenAI-compatible endpoint (e.g. http://localhost:30000).
-    /// Used when `--agent fastcontext` is selected.
-    pub fastcontext_url: Option<String>,
-
-    /// Maximum number of model turns in the FastContext multi-turn loop (default: 10).
-    pub fastcontext_max_turns: Option<u32>,
-
-    /// Model id sent to the FastContext endpoint (default: `microsoft/FastContext-1.0-4B-RL`).
-    /// Set to a locally-served model tag (e.g. an Ollama model) to run against it.
-    pub fastcontext_model: Option<String>,
 }
 
 /// CLI args for tddy-coder binary: agent is claude or cursor.
@@ -604,7 +594,7 @@ pub struct CoderArgs {
     #[arg(long, value_name = "LEVEL", value_parser = ["off", "error", "warn", "info", "debug", "trace"])]
     pub log_level: Option<String>,
 
-    /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, fastcontext, stub, or the name
+    /// Agent backend: claude, claude-acp, cursor, codex, codex-acp, stub, or the name
     /// of a specialized agent def (`<tddyhome>/agents/*.yaml`, `--agent-def-path`). Omit to choose
     /// interactively at startup.
     ///
@@ -784,19 +774,6 @@ pub struct CoderArgs {
     /// node. The session then starts in the `orchestrate` operator loop; a failed seed fails start.
     #[arg(long, value_name = "id")]
     pub stack_seed_base_session: Option<String>,
-
-    /// Base URL for the FastContext OpenAI-compatible endpoint. Required when `--agent fastcontext`.
-    #[arg(long)]
-    pub fastcontext_url: Option<String>,
-
-    /// Maximum model turns for the FastContext multi-turn loop (default: 10).
-    #[arg(long)]
-    pub fastcontext_max_turns: Option<u32>,
-
-    /// Model id for the FastContext endpoint (default `microsoft/FastContext-1.0-4B-RL`).
-    /// Set to your locally-served model tag (e.g. an Ollama model) to run against it.
-    #[arg(long)]
-    pub fastcontext_model: Option<String>,
 }
 
 /// CLI args for tddy-demo binary: agent is stub only.
@@ -1036,9 +1013,6 @@ impl From<CoderArgs> for Args {
             stack_parent: a.stack_parent,
             stack_base: a.stack_base,
             stack_seed_base_session: a.stack_seed_base_session,
-            fastcontext_url: a.fastcontext_url,
-            fastcontext_max_turns: a.fastcontext_max_turns,
-            fastcontext_model: a.fastcontext_model,
         }
     }
 }
@@ -1095,9 +1069,6 @@ impl From<DemoArgs> for Args {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         }
     }
 }
@@ -1306,9 +1277,6 @@ pub fn run_with_args(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<(
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
-        args.fastcontext_url.as_deref(),
-        args.fastcontext_max_turns,
-        args.fastcontext_model.as_deref(),
         &resolve_specialized_agent_defs(args)?,
     )?;
 
@@ -1533,9 +1501,6 @@ fn run_acp_agent(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
-        args.fastcontext_url.as_deref(),
-        args.fastcontext_max_turns,
-        args.fastcontext_model.as_deref(),
         &resolve_specialized_agent_defs(args)?,
     )?;
     let recipe = recipe_arc_for_args(args)?;
@@ -1730,9 +1695,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
-        args.fastcontext_url.as_deref(),
-        args.fastcontext_max_turns,
-        args.fastcontext_model.as_deref(),
         &resolve_specialized_agent_defs(args)?,
     )?;
     let has_token = args.livekit_token.is_some();
@@ -2588,46 +2550,25 @@ fn create_backend(
     codex_acp_cli_path: Option<&Path>,
     _socket_path: Option<&Path>,
     _working_dir: Option<&Path>,
-    fastcontext_url: Option<&str>,
-    fastcontext_max_turns: Option<u32>,
-    fastcontext_model: Option<&str>,
-    // Resolved specialized-agent defs (builtin + <tddyhome>/agents/*.yaml — see
+    // Resolved specialized-agent defs (<tddyhome>/agents/*.yaml, `--agent-def-path` — see
     // docs/ft/coder/specialized-subagents.md).
     specialized_agent_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
 ) -> anyhow::Result<SharedBackend> {
     log::info!("[tddy-coder] using agent: {}", agent);
     if let Some(def) = specialized_agent_defs.iter().find(|d| d.name == agent) {
-        // Explicit CLI overrides still win over a resolved def's values.
-        let base_url = fastcontext_url
-            .map(str::to_string)
-            .unwrap_or_else(|| def.base_url.clone());
-        let max_turns = fastcontext_max_turns.unwrap_or(def.max_turns);
-        let model = fastcontext_model
-            .map(str::to_string)
-            .unwrap_or_else(|| def.model.clone());
+        // The def is the whole configuration — endpoint, model, turn budget and credential. No
+        // flag can override it: one that could would run the session against a model the operator
+        // never configured while still reporting the def's name
+        // (docs/ft/daemon/session-agent-roster.md AC46).
         log::info!(
-            "[tddy-coder] FastContext backend (from resolved def '{}'): url={base_url} model={model} max_turns={max_turns}",
-            def.name
+            "[tddy-coder] specialized agent backend '{}': url={} model={} max_turns={}",
+            def.name,
+            def.base_url,
+            def.model,
+            def.max_turns
         );
-        // The def's credential travels with it: an assistant built on a cloud provider answers 401
-        // to every turn without one, while a local endpoint gets `None` and no header at all.
-        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns)
-            .api_key(def.api_key.clone());
-        return Ok(SharedBackend::from_arc(Arc::new(fc)));
-    }
-    if agent == "fastcontext" {
-        let base_url = fastcontext_url
-            .unwrap_or("http://localhost:30000")
-            .to_string();
-        let max_turns = fastcontext_max_turns.unwrap_or(10);
-        let model = fastcontext_model
-            .unwrap_or("microsoft/FastContext-1.0-4B-RL")
-            .to_string();
-        log::info!(
-            "[tddy-coder] FastContext backend: url={base_url} model={model} max_turns={max_turns}"
-        );
-        let fc = tddy_discovery::backend::FastContextBackend::new(base_url, model, max_turns);
-        return Ok(SharedBackend::from_arc(Arc::new(fc)));
+        let backend = tddy_discovery::backend::SpecializedAgentBackend::from_def(def);
+        return Ok(SharedBackend::from_arc(Arc::new(backend)));
     }
     let backend: AnyBackend = match agent {
         "cursor" => {
@@ -2686,20 +2627,19 @@ pub const BUILTIN_BACKEND_AGENT_IDS: &[&str] = &[
     "cursor",
     "codex",
     "codex-acp",
-    "fastcontext",
     "stub",
 ];
 
 #[cfg(test)]
 mod create_backend_specialized_agent_tests {
-    //! Unit tests: `create_backend("fastcontext", ...)` migrating to a resolved
-    //! `SpecializedAgentDef` instead of hardcoded literals / explicit CLI-only overrides.
+    //! Unit tests: `create_backend` building a backend from a resolved `SpecializedAgentDef` —
+    //! the def being the whole configuration, with no literal and no flag able to override it.
     //!
     //! Feature: docs/ft/coder/specialized-subagents.md (criteria 13-14)
     //! Changeset: docs/dev/1-WIP/specialized-subagents.md
     //!
     //! No mocking crate is added for this: a minimal raw-socket one-shot HTTP responder is
-    //! sufficient to observe which endpoint `FastContextBackend` actually called.
+    //! sufficient to observe which endpoint the backend actually called.
 
     use super::create_backend;
     use std::io::{Read, Write};
@@ -2708,7 +2648,7 @@ mod create_backend_specialized_agent_tests {
     use tddy_discovery::agent_def::SpecializedAgentDef;
 
     /// Binds an ephemeral local port, accepts exactly one HTTP request, and replies with a
-    /// FastContext-shaped `<final_answer>` completion. Returns the `http://127.0.0.1:PORT` base
+    /// `<final_answer>`-shaped completion. Returns the `http://127.0.0.1:PORT` base
     /// url to hand to the backend under test.
     fn spawn_one_shot_final_answer_server(answer: &str) -> String {
         spawn_one_shot_final_answer_server_recording_its_request(answer).0
@@ -2751,17 +2691,15 @@ mod create_backend_specialized_agent_tests {
         (format!("http://127.0.0.1:{port}"), received)
     }
 
-    /// With no explicit `--fastcontext-url`/`--fastcontext-model` CLI override, `create_backend`
-    /// must build its `FastContextBackend` from a resolved `SpecializedAgentDef` named
-    /// `"fastcontext"` — not the hardcoded `http://localhost:30000` default. Today it always uses
-    /// the hardcoded default, so invoking against the def's endpoint fails to connect there and
-    /// the call never reaches the mock server below.
+    /// `create_backend` builds its backend from the resolved `SpecializedAgentDef` — the endpoint
+    /// it dials is the def's own. A hardcoded default here would mean a session talking to an
+    /// endpoint the operator never named while reporting the def's name.
     #[tokio::test]
-    async fn create_backend_builds_fastcontext_backend_from_the_resolved_defs_model_and_base_url() {
-        // Given — a resolved "fastcontext" def pointing at a local mock server, no CLI overrides
+    async fn create_backend_builds_a_backend_from_the_resolved_defs_model_and_base_url() {
+        // Given — a resolved def pointing at a local mock server
         let base_url = spawn_one_shot_final_answer_server("src/lib.rs:1-1");
         let def = SpecializedAgentDef {
-            name: "fastcontext".to_string(),
+            name: "explorer".to_string(),
             label: None,
             model: "a-locally-served-model".to_string(),
             base_url: base_url.clone(),
@@ -2775,15 +2713,12 @@ mod create_backend_specialized_agent_tests {
 
         // When
         let backend = create_backend(
-            "fastcontext",
+            "explorer",
             None,
             None,
             None,
             None,
             None,
-            None, // no --fastcontext-url override
-            None, // no --fastcontext-max-turns override
-            None, // no --fastcontext-model override
             std::slice::from_ref(&def),
         )
         .expect("the resolved def must build a backend");
@@ -2797,8 +2732,7 @@ mod create_backend_specialized_agent_tests {
         // Then — the backend reached the resolved def's endpoint and returned its citation
         assert!(
             result.is_ok(),
-            "create_backend must route to the resolved fastcontext def's base_url, not the \
-             hardcoded http://localhost:30000 default; got: {:?}",
+            "create_backend must route to the resolved def's own base_url; got: {:?}",
             result.err()
         );
         assert_eq!(result.unwrap().output, "src/lib.rs:1-1");
@@ -2833,9 +2767,6 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
-            None,
-            None,
-            None,
             std::slice::from_ref(&def),
         )
         .expect("the resolved def must build a backend")
@@ -2856,13 +2787,12 @@ mod create_backend_specialized_agent_tests {
         );
     }
 
-    /// AC14: `--agent <name>` must accept any name present in the resolved specialized-agent def
-    /// set, not only the literal `"fastcontext"`. Today, a custom-named def (e.g. `my-explorer`)
-    /// is not recognized at all — `create_backend` falls through to the default Claude backend
-    /// instead of building a `FastContextBackend` from that def.
+    /// `--agent <name>` accepts any name present in the resolved specialized-agent def set, and
+    /// the backend it builds reports *that def's* name — not a literal every specialized agent
+    /// would share, and not a silent fall-through to the default Claude backend.
     #[tokio::test]
-    async fn create_backend_recognizes_any_resolved_specialized_agent_name_not_only_fastcontext() {
-        // Given — a def named "my-explorer" (not "fastcontext")
+    async fn create_backend_builds_any_resolved_agent_and_reports_its_own_name() {
+        // Given — an operator-defined def
         let def = SpecializedAgentDef {
             name: "my-explorer".to_string(),
             label: None,
@@ -2884,22 +2814,15 @@ mod create_backend_specialized_agent_tests {
             None,
             None,
             None,
-            None,
-            None,
-            None,
             std::slice::from_ref(&def),
         )
         .expect("a resolved def name must build a backend");
 
-        // Then — a specialized agent def name must build a fastcontext-shaped backend, not
-        // silently fall back to the default Claude backend
+        // Then
         assert_eq!(
             backend.name(),
-            "fastcontext",
-            "create_backend must recognize 'my-explorer' as a resolved specialized-agent def and \
-             build a FastContextBackend from it, not silently fall back to the default Claude \
-             backend (got backend name: {:?})",
-            backend.name()
+            "my-explorer",
+            "create_backend must build the named def's own backend, reporting that def's name"
         );
     }
 }
@@ -2939,7 +2862,8 @@ mod agent_def_handover_tests {
         path
     }
 
-    /// Args naming an empty `<tddyhome>` (so only the builtins resolve) plus `--agent-def-path`.
+    /// Args naming an empty `<tddyhome>` (so only the carried def resolves) plus
+    /// `--agent-def-path`.
     fn args_carrying(
         agent_def_path: Option<std::path::PathBuf>,
         tddy_data_dir: &std::path::Path,
@@ -2976,9 +2900,9 @@ mod agent_def_handover_tests {
         // Then
         assert_eq!(
             defs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
-            vec!["fastcontext", "repo-explorer"]
+            vec!["repo-explorer"]
         );
-        assert_eq!(defs[1], def);
+        assert_eq!(defs[0], def);
     }
 
     #[test]
@@ -2995,7 +2919,7 @@ mod agent_def_handover_tests {
         let defs = resolve_specialized_agent_defs(&args).expect("the carried def must resolve");
 
         // Then
-        assert_eq!(defs[1].api_key.as_deref(), Some("fw-live-secret"));
+        assert_eq!(defs[0].api_key.as_deref(), Some("fw-live-secret"));
     }
 
     #[test]
@@ -3065,26 +2989,15 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let error = create_backend(
-            "repo-explorer",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            &defs,
-        )
-        .expect_err("an unresolvable agent must not silently become Claude");
+        let error = create_backend("repo-explorer", None, None, None, None, None, &defs)
+            .expect_err("an unresolvable agent must not silently become Claude");
 
         // Then
         assert_eq!(
             error.to_string(),
             "unknown agent \"repo-explorer\": it is neither a coding backend nor a resolved \
              specialized agent def. Known agents: claude, claude-acp, cursor, codex, codex-acp, \
-             fastcontext, stub"
+             stub"
         );
     }
 
@@ -3094,10 +3007,8 @@ mod agent_def_handover_tests {
         let defs: Vec<SpecializedAgentDef> = Vec::new();
 
         // When
-        let backend = create_backend(
-            "claude", None, None, None, None, None, None, None, None, &defs,
-        )
-        .expect("'claude' names a coding backend");
+        let backend = create_backend("claude", None, None, None, None, None, &defs)
+            .expect("'claude' names a coding backend");
 
         // Then
         assert_eq!(backend.name(), "claude");
@@ -3424,9 +3335,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
         let cursor_path_for_factory = args.cursor_agent_path.clone();
         let codex_path_for_factory = args.codex_cli_path.clone();
         let codex_acp_path_for_factory = args.codex_acp_cli_path.clone();
-        let fastcontext_url_for_factory = args.fastcontext_url.clone();
-        let fastcontext_max_turns_for_factory = args.fastcontext_max_turns;
-        let fastcontext_model_for_factory = args.fastcontext_model.clone();
         let specialized_agent_defs_for_factory = resolve_specialized_agent_defs(args)?;
         let mut p = presenter.lock().unwrap();
         p.configure_deferred_workflow_start(
@@ -3439,9 +3347,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
                     codex_acp_path_for_factory.as_deref(),
                     socket_path_for_factory.as_deref(),
                     None,
-                    fastcontext_url_for_factory.as_deref(),
-                    fastcontext_max_turns_for_factory,
-                    fastcontext_model_for_factory.as_deref(),
                     &specialized_agent_defs_for_factory,
                 )
                 .map_err(|e| e.to_string())
@@ -3469,9 +3374,6 @@ fn run_full_workflow_tui(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Resu
             args.codex_acp_cli_path.as_deref(),
             socket_path.as_deref(),
             None,
-            args.fastcontext_url.as_deref(),
-            args.fastcontext_max_turns,
-            args.fastcontext_model.as_deref(),
             &resolve_specialized_agent_defs(args)?,
         )?;
         presenter.lock().unwrap().start_workflow(
@@ -3903,9 +3805,6 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
         args.codex_acp_cli_path.as_deref(),
         None,
         None,
-        args.fastcontext_url.as_deref(),
-        args.fastcontext_max_turns,
-        args.fastcontext_model.as_deref(),
         &resolve_specialized_agent_defs(args)?,
     )?;
 
@@ -4474,9 +4373,6 @@ mod resume_session_config_tests {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         };
 
         merge_session_coder_config_for_resume(&mut args, &tmp).expect("merge");
@@ -4549,9 +4445,6 @@ mod resume_session_identity_tests {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         };
 
         assign_default_session_id(&mut args);
@@ -4625,9 +4518,6 @@ mod session_dir_sync_tests {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         };
 
         sync_session_dir_from_args(&mut args, &tmp).expect("apply");
@@ -4717,9 +4607,6 @@ mod changeset_agent_resume_tests {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         };
 
         apply_agent_from_changeset_if_needed(&mut args).expect("apply");
@@ -4826,9 +4713,6 @@ mod post_tui_workflow_exit_tests {
             stack_parent: None,
             stack_base: None,
             stack_seed_base_session: None,
-            fastcontext_url: None,
-            fastcontext_max_turns: None,
-            fastcontext_model: None,
         }
     }
 

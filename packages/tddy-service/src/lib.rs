@@ -17,6 +17,7 @@ pub mod reflection_service;
 pub mod service;
 pub mod service_acp;
 pub mod session_activity;
+pub mod session_agents;
 pub mod terminal_service;
 pub mod token_service;
 pub mod worktree_activity;
@@ -40,6 +41,7 @@ pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
+pub use proto::session_admission::SessionAdmissionServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
@@ -84,6 +86,13 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod remote_git {
         include!(concat!(env!("OUT_DIR"), "/remote_git.rs"));
+    }
+    /// `SessionAdmissionService` — the facilitating daemon admits an owning daemon to a session
+    /// room with a scoped short-TTL token (PRD § "What attach does" step 3, the room-admission
+    /// handshake). See `docs/ft/daemon/session-agent-roster.md`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_admission {
+        include!(concat!(env!("OUT_DIR"), "/session_admission.rs"));
     }
     #[allow(unused_imports, unused_variables)]
     pub mod bsp {

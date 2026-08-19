@@ -16,10 +16,10 @@ permission_mode: auto
 codebase_mode: managed
 
 # Specialized subagents wired into the session. Each entry is a full agent def (same schema as
-# <tddyhome>/agents/*.yaml). Declaring one here both DEFINES and ACTIVATES it, and overrides a
-# builtin of the same name — no --specialized-agent flag or agents dir needed.
+# <tddyhome>/agents/*.yaml). Declaring one here both DEFINES and ACTIVATES it, and overrides an
+# agents-dir def of the same name — no --specialized-agent flag or agents dir needed.
 #
-# This points the built-in `fastcontext` role at a local Ollama server (OpenAI-compatible API,
+# This defines an agent named `fastcontext` on a local Ollama server (OpenAI-compatible API,
 # reached at {base_url}/v1/chat/completions). In managed mode the subagent's HTTP to localhost is
 # relayed to the host by the egress shim, so it reaches the Ollama server running on your machine.
 #

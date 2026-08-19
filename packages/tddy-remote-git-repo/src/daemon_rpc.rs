@@ -9,6 +9,7 @@
 //! daemon signs session tokens with, so a client that minted its own room JWT would be holding a
 //! credential that can impersonate any GitHub user on the fleet.
 
+use std::error::Error;
 use std::time::Duration;
 
 use tddy_service::proto::auth::{
@@ -158,7 +159,7 @@ impl DaemonRpc {
             .await
             .map_err(|e| DaemonRpcError::Unreachable {
                 url: url.clone(),
-                reason: e.to_string(),
+                reason: error_chain(&e),
             })?;
 
         let status = response.status();
@@ -197,4 +198,19 @@ fn connect_error(method: &'static str, status: reqwest::StatusCode, body: &[u8])
         message: field("message")
             .unwrap_or_else(|| String::from_utf8_lossy(body).trim().to_string()),
     }
+}
+
+/// Walk an error's `source` chain so a transport failure names its root cause (timeout, connect
+/// refused, TLS, …) instead of stopping at reqwest's generic "error sending request for url".
+fn error_chain(err: &reqwest::Error) -> String {
+    let mut parts: Vec<String> = vec![err.to_string()];
+    let mut current: Option<&dyn std::error::Error> = err.source();
+    while let Some(source) = current {
+        let msg = source.to_string();
+        if !parts.iter().any(|p| p == &msg) {
+            parts.push(msg);
+        }
+        current = source.source();
+    }
+    parts.join(": caused by ")
 }

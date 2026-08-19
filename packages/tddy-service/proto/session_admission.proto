@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package session_admission;
+
+// SessionAdmissionService: the facilitating daemon (A) admits an owning daemon (B) to a session
+// room it controls, minting a scoped, short-TTL LiveKit token for B and recording the admission
+// in a per-session registry. This is the room-admission handshake the PRD § "What attach does"
+// step 3 specifies: B no longer self-mints a 24 h token from the shared `livekit.api_secret`;
+// A is the authority on who may join `session-{session_id}`, and revokes B's admission when the
+// last agent B owns in that session detaches (see § "What detach does").
+//
+// Served on the facilitating daemon's common-room `daemon-{A}` participant, so an owning daemon
+// that has never held the project — and so is not yet in the session room — can still reach A over
+// the common room every daemon already joined.
+service SessionAdmissionService {
+  // Mint a scoped LiveKit token admitting `owning_daemon_instance_id` to `session-{session_id}` as
+  // `daemon-{owning_daemon_instance_id}`, and record the admission. Idempotent: re-admitting the
+  // same (session, owning) pair refreshes the token and keeps the registry entry alive — that is
+  // the re-admit loop an owning daemon runs before its current token expires.
+  //
+  // Returns `NOT_FOUND` when the session is unknown to this daemon, `PERMISSION_DENIED` when the
+  // caller's `session_token` is not valid, and `FAILED_PRECONDITION` when the owning daemon has
+  // been revoked (the last agent it owned detached) and admission is no longer granted.
+  rpc AdmitOwningDaemon(AdmitOwningDaemonRequest) returns (AdmitOwningDaemonResponse);
+}
+
+message AdmitOwningDaemonRequest {
+  // Daemon access token, verified exactly as on every other token-gated RPC. A refresh-kind or
+  // expired token is rejected.
+  string session_token = 1;
+  // The session whose room the owning daemon is being admitted to. The facilitating daemon is
+  // the authority on this session; an unknown id is `NOT_FOUND`.
+  string session_id = 2;
+  // The owning daemon's own instance id — the identity the minted token carries, and the key the
+  // admission registry tracks. Must be non-empty.
+  string owning_daemon_instance_id = 3;
+}
+
+message AdmitOwningDaemonResponse {
+  // Short-lived LiveKit JWT scoped to `session-{session_id}` as
+  // `daemon-{owning_daemon_instance_id}`. The owning daemon joins the session room with this and
+  // nothing else.
+  string token = 1;
+  // The LiveKit server the token is valid against.
+  string url = 2;
+  // The session room the token grants — `session-{session_id}`.
+  string room = 3;
+  // Seconds until the token expires. The owning daemon must re-call `AdmitOwningDaemon` before
+  // this elapses to stay in the room; a revoked daemon's re-call returns `FAILED_PRECONDITION`.
+  uint64 ttl_seconds = 4;
+}

@@ -15,7 +15,8 @@ use futures_util::StreamExt;
 use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
-    EchoRequest, EchoResponse, EchoStreamFrame, SessionFrame, TunnelOpen, TunnelOpenAck,
+    EchoRequest, EchoResponse, EchoStreamFrame, RpcStreamFrame, SessionFrame, TunnelOpen,
+    TunnelOpenAck,
 };
 use tddy_service::tonic_sandbox::sandbox_service_server::{SandboxService, SandboxServiceServer};
 use tokio::net::{TcpListener, UnixListener};
@@ -32,6 +33,14 @@ pub enum Mode {
     PushToolRequest { tool_name: String },
     /// Push one `TunnelOpen` for `host:port`.
     PushTunnelOpen { host: String, port: u16 },
+    /// Push one `RpcRequest` for `service`/`method` with `payload`, so the host-relay RPC bridge
+    /// dispatches it to the injected `HostRpcHandler` and replies with `RpcStreamFrame`s.
+    PushRpcRequest {
+        request_id: String,
+        service: String,
+        method: String,
+        payload: Vec<u8>,
+    },
 }
 
 /// Frames the host sent back to the fake.
@@ -39,6 +48,7 @@ pub enum Mode {
 pub struct Captured {
     pub tool_responses: Vec<ExecuteToolResponse>,
     pub tunnel_acks: Vec<TunnelOpenAck>,
+    pub rpc_stream_frames: Vec<RpcStreamFrame>,
 }
 
 pub struct FakeSandboxService {
@@ -97,6 +107,25 @@ impl SandboxService for FakeSandboxService {
                         }))
                         .await;
                 }
+                Mode::PushRpcRequest {
+                    request_id,
+                    service,
+                    method,
+                    payload,
+                } => {
+                    let _ = tx
+                        .send(Ok(SessionFrame {
+                            payload: Some(SessionPayload::RpcRequest(
+                                tddy_service::proto::sandbox::RpcRequest {
+                                    request_id: request_id.clone(),
+                                    service: service.clone(),
+                                    method: method.clone(),
+                                    payload: payload.clone(),
+                                },
+                            )),
+                        }))
+                        .await;
+                }
                 Mode::EchoOnly => {}
             }
 
@@ -107,6 +136,9 @@ impl SandboxService for FakeSandboxService {
                     }
                     Some(SessionPayload::TunnelOpenAck(ack)) => {
                         captured.lock().unwrap().tunnel_acks.push(ack);
+                    }
+                    Some(SessionPayload::RpcStreamFrame(frame)) => {
+                        captured.lock().unwrap().rpc_stream_frames.push(frame);
                     }
                     _ => {}
                 }

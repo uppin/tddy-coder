@@ -1,6 +1,7 @@
 //! Citation line parser → `DiscoveryData` mapping.
 //!
-//! FastContext's `<final_answer>` block contains `path:line-start-line-end` citation lines.
+//! A discovery agent's `<final_answer>` block contains `path:line-start-line-end` citation
+//! lines.
 //! This module parses them into `RelevantCode{path, reason}` entries for `DiscoveryData`.
 //! Malformed lines are excluded (no panic, no fallback that includes garbage).
 //!
@@ -64,7 +65,6 @@ mod tests {
     //! Unit tests: citation line parsing → `DiscoveryData` mapping.
     //!
     //! Feature: docs/ft/coder/discovery-agent.md (Phase C criterion 12)
-    //! Changeset: docs/dev/1-WIP/2026-06-24-changeset-fastcontext-discovery.md
 
     use super::*;
 

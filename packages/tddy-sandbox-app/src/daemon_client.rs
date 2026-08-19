@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn forwards_specialized_agent_names_for_the_daemon_to_resolve() {
         // Given
-        let agents = vec!["fastcontext".to_string(), "my-linter".to_string()];
+        let agents = vec!["explorer".to_string(), "my-linter".to_string()];
 
         // When
         let req = start_session_request_from(
@@ -376,7 +376,7 @@ mod tests {
         // Then
         assert_eq!(
             req.specialized_agents,
-            vec!["fastcontext".to_string(), "my-linter".to_string()]
+            vec!["explorer".to_string(), "my-linter".to_string()]
         );
     }
 
