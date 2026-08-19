@@ -5,7 +5,8 @@ import { safeTestIdPart } from "../../lib/testId";
 import { useDaemonClientFor } from "../../rpc/selectedDaemon";
 import type { AssistantRow } from "../../utils/mergeRegistryEntries";
 import { ModelsDialogShell } from "./ModelsDialogShell";
-import { errorTextOf, noConnectionTo } from "./useModelRegistryFanOut";
+import { noConnectionTo } from "../../rpc/useHostFanOut";
+import { errorTextOf } from "./useModelRegistryFanOut";
 
 /**
  * Where a tool-bearing assistant's tools may run, chosen before its chat opens.

@@ -42,6 +42,12 @@ const DAEMON_HOSTS: DaemonHost[] = [
   { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)", maxAttachmentBytes: EIGHT_MIB },
 ];
 
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises them, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
+
 interface StartRecorder {
   requests: StartSessionRequest[];
 }
@@ -147,7 +153,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
 
 function fillRequiredFields() {
   createSessionPage.selectProject("proj-1");
-  createSessionPage.selectAgent("claude");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
 }
 
 /** The one source the form sent, asserted to be a host-document reference. */

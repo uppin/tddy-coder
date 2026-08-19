@@ -12,7 +12,7 @@
 
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { ConnectionService, type SessionEntry } from "../../src/gen/connection_pb";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
@@ -26,6 +26,12 @@ import { branchConflictDialogPage } from "../support/pages/branchConflictDialogP
 
 const PROJECT_ID = "proj-branch-conflict";
 const AGENT_ID = "claude";
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises one, so the bare id names no option.
+ */
+const AGENT_OPTION = `${AGENT_ID}@${DEFAULT_TEST_DAEMON.instanceId}`;
 /** The branch the operator asks for, already owned by OWNER_SESSION_ID. */
 const OWNED_BRANCH = "feat/auth";
 /** The name the daemon suggests instead — what the legacy suffixing path would have created. */
@@ -99,7 +105,7 @@ function aBackendRefusing(refusals: number) {
 function createSessionOnBranch(branch: string) {
   sessionsDrawerPage.newSessionBtn().click();
   createSessionPage.selectProject(PROJECT_ID);
-  createSessionPage.selectAgent(AGENT_ID);
+  createSessionPage.selectAgent(AGENT_OPTION);
   createSessionPage.typeNewBranchName(branch);
   sessionsDrawerPage.createSessionSubmitBtn().should("not.be.disabled").click();
 }

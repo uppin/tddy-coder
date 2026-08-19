@@ -10,7 +10,7 @@ import React from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
@@ -38,6 +38,12 @@ const CONNECTED_SESSION = {
 };
 
 const NEW_SESSION_ID = "new-session-bbbb-0000-0000-0000-000000000001";
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises one, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${DEFAULT_TEST_DAEMON.instanceId}`;
 
 /** Fixture returned by the second listSessions call after creation. */
 const NEW_SESSION_FIXTURE = {
@@ -305,7 +311,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
 
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
@@ -334,7 +340,7 @@ describe("CreateSession acceptance — button, form, and post-create navigation"
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
 
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
 
     byTestId(TEST_IDS.createSessionSubmitBtn).click();
 
@@ -387,7 +393,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
     // Creation auto-collapses the drawer so the new terminal is unobstructed; re-open it
@@ -427,7 +433,7 @@ describe("CreateSession acceptance — post-creation list refresh", () => {
 
     byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
     byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+    byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
     byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 
     // Then — empty placeholder is gone

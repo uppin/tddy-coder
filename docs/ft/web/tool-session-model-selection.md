@@ -134,6 +134,9 @@ Constructs the backend for `<agent>` (same binary-resolution rules as `tddy-code
 
 - Model list reflects what the selected backend actually supports; for `cursor` this includes the
   operator's full account catalog (auto, gpt-5.2, composer-2.5, claude-sonnet-5-*, …).
+- The **Agent** list itself is fanned out across every connected host — see
+  [session-agent-catalog-fan-out.md](session-agent-catalog-fan-out.md), which also states what this
+  single-host model probe gets wrong for a peer host's agent.
 - Changing the Agent re-fetches and repopulates the model options and resets the selection to that
   backend's `default_model`.
 - Submitting a tool session sends the selected `model`; the daemon spawns `tddy-coder --model

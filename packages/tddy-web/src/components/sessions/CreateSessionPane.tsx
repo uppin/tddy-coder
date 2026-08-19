@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import type { Client } from "@connectrpc/connect";
-import type { AgentInfo, BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
+import type { BranchConflict, ConnectionService, ProjectEntry, SessionEntry, ToolInfo } from "../../gen/connection_pb";
 import { localBranchName } from "../../lib/branchNames";
 import { projectSelectOptions } from "../../lib/projectSelectOptions";
 import { safeTestIdPart } from "../../lib/testId";
@@ -22,6 +22,14 @@ import {
 } from "../../hooks/useSessionAttachments";
 import { Button } from "../ui/button";
 import { useAvailableAgents } from "./useAvailableAgents";
+import { CreateSessionAgentSelect } from "./CreateSessionAgentSelect";
+import { inputClass, labelClass } from "./createSessionFormStyles";
+import { useSelectableAgents } from "./useSelectableAgents";
+import {
+  agentForHost,
+  hostRunningSession,
+  selectableAgentValue,
+} from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
 import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
@@ -118,15 +126,6 @@ export interface CreateSessionPaneProps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const inputClass =
-  "w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
-const labelClass = "block text-sm mb-1 text-muted-foreground";
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -143,6 +142,9 @@ export function CreateSessionPane({
 
   const [sessionType, setSessionType] = useState<SessionType>(initialValues?.sessionType ?? "tool");
   const [projectId, setProjectId] = useState(initialValues?.projectId ?? "");
+  // The *name* of the agent the operator picked (`claude`, an assistant's name). Which host offers it
+  // is `daemonInstanceId`, and the pair is resolved against the fleet's catalog by `selectedAgent`
+  // below — so a Host change re-points the same name rather than invalidating the selection.
   const [agent, setAgent] = useState("");
   const [recipe, setRecipe] = useState(initialValues?.recipe ?? "tdd");
   const [stackParent, setStackParent] = useState(initialValues?.stackParent ?? "");
@@ -182,7 +184,6 @@ export function CreateSessionPane({
   );
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   // The qualified ids (`name@daemon_instance_id`) of the agents to attach at start. Qualified rather
   // than bare names because the picker lists every host's agents and two hosts routinely offer a def
@@ -241,6 +242,67 @@ export function CreateSessionPane({
   // The orchestrators this session can be stack-parented to.
   const stackParentOptions = useMemo(() => prStackOrchestrators(sessions), [sessions]);
 
+  // In peer mode the project and host are locked to the orchestrating session (the pane reuses its
+  // worktree via `repo_path`), so the Project/Host selectors are hidden and submit must send the
+  // frozen `initialValues` values — not the live form state, which the mount-time auto-select could
+  // have overridden with a different single project.
+  const effectiveProjectId = peerMode ? (initialValues?.projectId ?? "") : projectId;
+  const effectiveDaemonInstanceId = peerMode
+    ? (initialValues?.daemonInstanceId ?? "")
+    : daemonInstanceId;
+
+  /**
+   * The daemon the browser's RPC reaches: the host the fan-out reads as its home, and the host that
+   * serves a request naming none.
+   */
+  const connectedInstanceId = selectedInstanceId ?? "";
+
+  // Every common-room daemon's agents — the thing a tool session is started *as*. `ListAgents`
+  // answers for the responding daemon only, so without this fan-out an assistant created on another
+  // host is absent from the form rather than merely hard to find.
+  const selectableAgents = useSelectableAgents(client, connectedInstanceId);
+
+  // Whether there is a host to name at all. The same condition the Host select is rendered on: with
+  // no common room there is one host, so nothing to disambiguate and nothing to caption.
+  const hostsAdvertised = daemons.length > 0;
+
+  /**
+   * The host whose agents the session can actually be started as — the host the form will ask for, in
+   * the spelling the fan-out stamps its rows with. See `hostRunningSession` for why the empty
+   * `daemon_instance_id` the peer flow can carry names a host rather than lacking one. The request is
+   * unaffected: it keeps sending `effectiveDaemonInstanceId` exactly as given.
+   */
+  const agentHostInstanceId = hostRunningSession(effectiveDaemonInstanceId, connectedInstanceId);
+
+  /**
+   * The agents this form may offer, and the hosts whose silence it may report: every host's in the
+   * standalone flow, and **only the session's host** in peer mode. A peer joins an orchestrator's
+   * worktree, so its host is settled before the form opens and the request carries
+   * `effectiveDaemonInstanceId` whatever the select shows — offering another host's agent there would
+   * compose a pair the host cannot resolve, and another host's outage is not this session's problem.
+   */
+  const offeredAgents = peerMode
+    ? selectableAgents.agents.filter((a) => a.daemonInstanceId === agentHostInstanceId)
+    : selectableAgents.agents;
+  const offeredHostFailures = peerMode
+    ? selectableAgents.failures.filter((f) => f.daemonInstanceId === agentHostInstanceId)
+    : selectableAgents.failures;
+
+  /**
+   * The agent the session will actually start as: the picked name, as the host taking the session
+   * offers it. Derived from `(agent, agentHostInstanceId)` rather than stored beside them, so neither
+   * the control nor the request can carry a pair the host does not have — that is what makes a Host
+   * change re-point the selection (same name on the new host, else that host's first, else none) and
+   * what makes the opening selection the home host's first agent without any effect correcting state
+   * after the fact.
+   *
+   * `agent` therefore holds the *name* the operator last picked, kept across host changes.
+   */
+  const selectedAgent = agentForHost(offeredAgents, agentHostInstanceId, agent);
+  const selectedAgentId = selectedAgent?.id ?? "";
+  const selectedAgentValue =
+    selectedAgent === null ? "" : selectableAgentValue(selectedAgent, hostsAdvertised);
+
   // The model catalog is enumerated per selected backend: the chosen agent for tool sessions, and
   // the "claude-cli" pseudo-agent for the Claude CLI session type.
   const modelAgentKey =
@@ -248,7 +310,7 @@ export function CreateSessionPane({
       ? CLAUDE_CLI_AGENT
       : sessionType === "cursor-cli"
         ? CURSOR_CLI_AGENT
-        : agent;
+        : selectedAgentId;
   const agentModels = useAgentModels(client, sessionToken, modelAgentKey, daemonInstanceId);
 
   // Reset the model selection to the backend's advertised default whenever the catalog changes
@@ -260,7 +322,7 @@ export function CreateSessionPane({
   // Every common-room daemon's specialized agents, each labelled with the host that offers it. A
   // host that cannot answer costs one error row rather than the whole picker — see
   // docs/ft/daemon/session-agent-roster.md § Web UI.
-  const availableAgents = useAvailableAgents(client, selectedInstanceId ?? "");
+  const availableAgents = useAvailableAgents(client, connectedInstanceId);
 
   const toggleAgent = (agentId: string) => {
     setSelectedAgentIds((prev) =>
@@ -284,26 +346,19 @@ export function CreateSessionPane({
         // stack-base pickers with nothing to offer.
       });
 
-    Promise.all([
-      client.listProjects({ sessionToken }),
-      client.listAgents({}),
-      client.listTools({}),
-    ])
-      .then(([projectsResp, agentsResp, toolsResp]) => {
+    // Agents are not read here: they are fanned out across every host by `useSelectableAgents`,
+    // since one daemon's answer speaks only for itself.
+    Promise.all([client.listProjects({ sessionToken }), client.listTools({})])
+      .then(([projectsResp, toolsResp]) => {
         if (cancelled) return;
 
         const loadedProjects = projectsResp.projects as ProjectEntry[];
-        const loadedAgents = agentsResp.agents as AgentInfo[];
         const loadedTools = toolsResp.tools as ToolInfo[];
 
         setProjects(loadedProjects);
-        setAgents(loadedAgents);
         setTools(loadedTools);
 
-        // Auto-select agent and toolPath.
-        if (loadedAgents.length > 0) {
-          setAgent(loadedAgents[0]!.id);
-        }
+        // Auto-select toolPath.
         if (loadedTools.length > 0) {
           setToolPath(loadedTools[0]!.path);
         }
@@ -361,15 +416,6 @@ export function CreateSessionPane({
     };
   }, [client, sessionToken, projectId, branchIntent, daemonInstanceId, preFilledBranchToWorkOn]);
 
-  // In peer mode the project and host are locked to the orchestrating session (the pane reuses its
-  // worktree via `repo_path`), so the Project/Host selectors are hidden and submit must send the
-  // frozen `initialValues` values — not the live form state, which the mount-time auto-select could
-  // have overridden with a different single project.
-  const effectiveProjectId = peerMode ? (initialValues?.projectId ?? "") : projectId;
-  const effectiveDaemonInstanceId = peerMode
-    ? (initialValues?.daemonInstanceId ?? "")
-    : daemonInstanceId;
-
   // The sessions whose branch can seed this orchestrator's stack — scoped to the project and host
   // the form will actually create it on, because a base session in another repository (or on another
   // daemon's checkout) owns a branch this stack cannot base anything off. Derived here rather than
@@ -423,7 +469,7 @@ export function CreateSessionPane({
     // A model is always required and comes from the daemon-advertised catalog; a failed/loading
     // probe leaves `model` empty, which disables Create (no fallback).
     if (sessionType === "tool") {
-      return Boolean(effectiveProjectId && agent && toolPath && model);
+      return Boolean(effectiveProjectId && selectedAgentId && toolPath && model);
     }
     return Boolean(effectiveProjectId && model);
   })();
@@ -464,7 +510,9 @@ export function CreateSessionPane({
       return {
         ...commonParams,
         toolPath,
-        agent,
+        // The bare id the host knows it by — the option's value is qualified for the select's sake
+        // only, and `daemonInstanceId` already carries the host beside it.
+        agent: selectedAgentId,
         recipe,
         stackParent,
         // Only the tool branch can create an orchestrator, so only it can name a session to seed the
@@ -769,24 +817,19 @@ export function CreateSessionPane({
       {/* Tool session fields */}
       {sessionType === "tool" && (
         <>
-          <div>
-            <label className={labelClass} htmlFor="create-session-agent">
-              Agent
-            </label>
-            <select
-              id="create-session-agent"
-              data-testid="create-session-agent-select"
-              className={inputClass}
-              value={agent}
-              onChange={(e) => setAgent(e.target.value)}
-            >
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label || a.id}
-                </option>
-              ))}
-            </select>
-          </div>
+          <CreateSessionAgentSelect
+            agents={offeredAgents}
+            failures={offeredHostFailures}
+            hostsAdvertised={hostsAdvertised}
+            selectedValue={selectedAgentValue}
+            onPick={(picked) => {
+              setAgent(picked.id);
+              // The session runs where its agent is resolvable, so picking one names its host. In
+              // peer mode every option already belongs to the frozen host, so this can only ever
+              // write that host back.
+              setDaemonInstanceId(picked.daemonInstanceId);
+            }}
+          />
 
           <div>
             <label className={labelClass} htmlFor="create-session-recipe">

@@ -38,6 +38,8 @@ import { useAuthContext } from "../../hooks/authProvider";
 import { daemonRpcIdentity } from "../../lib/participantRole";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
+// The same wording every fleet-wide read reports an unreachable host with.
+import { noConnectionTo } from "../../rpc/useHostFanOut";
 import {
   assistantRowKey,
   describeReadFailures,
@@ -184,11 +186,6 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
     systemPrompt: entry.systemPrompt,
     tools: entry.tools,
   };
-}
-
-/** What a caller is told when the common room holds no connection to the daemon it addressed. */
-export function noConnectionTo(daemonInstanceId: string): string {
-  return `no connection to daemon ${daemonInstanceId}`;
 }
 
 /**

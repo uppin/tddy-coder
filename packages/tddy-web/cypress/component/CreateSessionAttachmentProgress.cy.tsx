@@ -33,6 +33,12 @@ const DAEMON_HOSTS: DaemonHost[] = [
   { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" },
 ];
 
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises them, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
+
 function aFilePick(fileName: string, contents: string): Cypress.FileReferenceObject {
   return { contents: Cypress.Buffer.from(contents), fileName, mimeType: "text/plain" };
 }
@@ -130,7 +136,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
 
 function submitWithOneAttachment() {
   createSessionPage.selectProject("proj-1");
-  createSessionPage.selectAgent("claude");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
   createSessionPage.pickFiles([aFilePick("spec.md", "# spec body")]);
   createSessionPage.submit();
 }
@@ -228,7 +234,7 @@ it("starts a session with no attachments over the unary RPC, leaving that path u
 
   // When the session is created without attaching anything
   createSessionPage.selectProject("proj-1");
-  createSessionPage.selectAgent("claude");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
   createSessionPage.submit();
 
   // Then the unary RPC created it
