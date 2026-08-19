@@ -20,6 +20,7 @@ import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPa
 import { ConnectionService } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { createSessionPage } from "../support/pages/createSessionPage";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,12 @@ const DAEMON_HOSTS: DaemonHost[] = [
   { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)" },
   { instanceId: REMOTE_HOST, label: "server-2 (this daemon)" },
 ];
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises two, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
 
 /** A backend seeded with every RPC CreateSessionPane issues, plus StartSession + branch listing. */
 function aCreateSessionBackend(): InMemoryRpcBackend {
@@ -56,7 +63,10 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
-  cy.mount(
+  // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
+  // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
+  // asked offers no agent for a session moved onto it.
+  mountWithRecordingLiveKitRpc(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
@@ -65,6 +75,7 @@ function mountCreatePane(backend: InMemoryRpcBackend) {
         onCreated={cy.stub()}
       />
     </SelectedDaemonProvider>,
+    backend,
   );
 }
 
@@ -96,7 +107,7 @@ it("starts the session on the chosen host", () => {
 
   // When — pick the remote host, fill the required fields, and create
   createSessionPage.selectProject("proj-1");
-  createSessionPage.selectAgent("claude");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
   createSessionPage.selectHost(REMOTE_HOST);
   createSessionPage.submit();
 

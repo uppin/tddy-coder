@@ -11,7 +11,7 @@
  */
 import React from "react";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { DEFAULT_TEST_DAEMON, withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
@@ -22,6 +22,12 @@ import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 // ---------------------------------------------------------------------------
 
 const NEW_SESSION_ID = "autoclose-session-bbbb-0000-0000-0000-000000000001";
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises one, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${DEFAULT_TEST_DAEMON.instanceId}`;
 
 /** Fixture returned by the second listSessions call after creation. */
 const NEW_SESSION_FIXTURE = {
@@ -61,7 +67,7 @@ function backendThatCreates() {
 function createSession() {
   byTestId(TEST_IDS.sessionsDrawerNewBtn).click();
   byTestId(TEST_IDS.createSessionProjectSelect).select("proj-1");
-  byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
+  byTestId(TEST_IDS.createSessionAgentSelect).select(CLAUDE_OPTION);
   byTestId(TEST_IDS.createSessionSubmitBtn).should("not.be.disabled").click();
 }
 

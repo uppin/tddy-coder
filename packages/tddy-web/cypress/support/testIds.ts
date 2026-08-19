@@ -244,6 +244,7 @@ export const TEST_IDS = {
   createSessionTypeCursorCliBtn: "create-session-type-cursor-cli",
   createSessionProjectSelect: "create-session-project-select",
   createSessionAgentSelect: "create-session-agent-select",
+  createSessionAgentEmptyOption: "create-session-agent-empty-option",
   createSessionRecipeInput: "create-session-recipe-input",
   /** Replaces the free-text recipe input for tool sessions — a <select> with all 7 recipe options. */
   createSessionRecipeSelect: "create-session-recipe-select",
@@ -1419,3 +1420,15 @@ export const createSessionAgentOptionHost = (agentId: string) =>
 /** One error row for a host that could not answer the create-session picker's fan-out. */
 export const createSessionAgentHostError = (daemonInstanceId: string) =>
   `create-session-agent-host-error-${safeTestIdPart(daemonInstanceId)}`;
+
+/**
+ * One `<option>` in the create-session form's **primary** Agent `<select>` — the agent a session is
+ * started *as*, distinct from the specialized-agent multi-select above. Keyed by the option's own
+ * value: `{id}@{daemonInstanceId}` while the common room advertises daemons, the bare id otherwise.
+ */
+export const createSessionAgentSelectOption = (optionValue: string) =>
+  `create-session-agent-select-option-${safeTestIdPart(optionValue)}`;
+
+/** One error row for a host whose agent catalog (`ListAgents`) could not be read. */
+export const createSessionAgentSelectHostError = (daemonInstanceId: string) =>
+  `create-session-agent-select-host-error-${safeTestIdPart(daemonInstanceId)}`;

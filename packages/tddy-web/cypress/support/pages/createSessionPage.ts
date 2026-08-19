@@ -29,6 +29,45 @@ export const createSessionPage = {
   },
 
   // ---------------------------------------------------------------------------
+  // Agent selector — the agent a tool session is started as, fanned out across hosts
+  // ---------------------------------------------------------------------------
+
+  /** The "Agent" `<select>`. Rendered for tool sessions only. */
+  agentSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionAgentSelect, { timeout: 5000, ...options }),
+
+  /**
+   * One offered agent, keyed by its option value — `{id}@{daemonInstanceId}` while the common room
+   * advertises daemons, the bare id otherwise.
+   */
+  agentOption: (optionValue: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.createSessionAgentSelectOption(optionValue), options),
+
+  /** Start the session as the agent carrying `optionValue`. */
+  selectAgent(optionValue: string) {
+    byTestId(TEST_IDS.createSessionAgentSelect).select(optionValue);
+  },
+
+  /** The option values the Agent `<select>` offers, in option order. */
+  agentOptionValues: (): Cypress.Chainable<string[]> =>
+    createSessionPage
+      .agentSelect()
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The currently selected agent's option value. */
+  selectedAgentValue: (): Cypress.Chainable<string> =>
+    createSessionPage.agentSelect().then(($sel) => ($sel[0] as HTMLSelectElement).value),
+
+  /** The placeholder shown when no host offered an agent. */
+  agentEmptyOption: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionAgentEmptyOption, options),
+
+  /** One error row for a host whose agent catalog could not be read. */
+  agentHostError: (daemonInstanceId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.createSessionAgentSelectHostError(daemonInstanceId), options),
+
+  // ---------------------------------------------------------------------------
   // Codebase host — which daemon holds the worktree (docs/ft/daemon/remote-managed-worktree.md)
   // ---------------------------------------------------------------------------
 

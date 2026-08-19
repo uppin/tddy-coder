@@ -24,6 +24,7 @@ import {
 } from "../../src/gen/connection_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
+import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import { branchConflictDialogPage } from "../support/pages/branchConflictDialogPage";
 import { dragOverWith, dropFilesOnto, aFile } from "../support/util/fileDrop";
@@ -46,6 +47,12 @@ const DAEMON_HOSTS: DaemonHost[] = [
   { instanceId: LOCAL_HOST, label: "workstation-1 (this daemon)", maxAttachmentBytes: EIGHT_MIB },
   { instanceId: REMOTE_HOST, label: "server-2 (this daemon)", maxAttachmentBytes: EIGHT_MIB },
 ];
+
+/**
+ * The Agent select's option value. Qualified by the host that offers the agent while the common room
+ * advertises daemons — this fixture advertises them, so the bare id names no option.
+ */
+const CLAUDE_OPTION = `claude@${LOCAL_HOST}`;
 
 function aFilePick(fileName: string, contents: string): Cypress.FileReferenceObject {
   return { contents: Cypress.Buffer.from(contents), fileName, mimeType: "text/plain" };
@@ -169,7 +176,10 @@ function aBackendRefusingTheFirstStartAsABranchConflict(
 
 function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("onCreated")) {
   const client = createClient(ConnectionService, backend.transport());
-  cy.mount(
+  // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
+  // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
+  // asked offers no agent for a session moved onto it.
+  mountWithRecordingLiveKitRpc(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
@@ -178,13 +188,14 @@ function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("
         onCreated={onCreated}
       />
     </SelectedDaemonProvider>,
+    backend,
   );
 }
 
 /** Fill the fields a tool session needs so Create is enabled. */
 function fillRequiredFields() {
   createSessionPage.selectProject("proj-1");
-  createSessionPage.selectAgent("claude");
+  createSessionPage.selectAgent(CLAUDE_OPTION);
 }
 
 /** The single streamed start request the form sent. */
