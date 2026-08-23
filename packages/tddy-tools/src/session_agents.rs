@@ -674,7 +674,14 @@ const RECONNECT_BACKOFF_CEILING: Duration = Duration::from_secs(30);
 ///
 /// Comfortably longer than the two deadlines a fruitless pass can burn ([`STREAM_OPEN_TIMEOUT`],
 /// [`FIRST_FRAME_TIMEOUT`]), so a pass that spent its life waiting never reads as service.
-const PASS_LONG_ENOUGH_TO_BE_SERVICE: Duration = Duration::from_secs(30);
+///
+/// Public because it is also bounded from above, by a constant in another crate: a relay tears a
+/// forwarded stream down after its own idle deadline, and such a teardown must read as service —
+/// a keepalive path that goes quiet costs one reconnect per deadline, which is service, whereas
+/// classifying it as churn would park a working cross-host subscription at the ceiling below. The
+/// relation is asserted where both constants are visible, in `tddy-daemon`'s
+/// `livekit_peer_discovery`.
+pub const PASS_LONG_ENOUGH_TO_BE_SERVICE: Duration = Duration::from_secs(30);
 
 /// Consecutive failures before the roster is declared unavailable and subagent calls are refused.
 ///
@@ -779,6 +786,19 @@ impl ReconnectPacing {
     pub fn unserved(&self) -> u32 {
         self.unserved
     }
+
+    /// Whether the reconnect delay has escalated all the way to [`RECONNECT_BACKOFF_CEILING`].
+    ///
+    /// Throttling that far is right — a run of subscriptions that each die as soon as they are
+    /// served is a hot loop, and every attempt costs the daemon a fresh subscription — but being
+    /// throttled *and* authoritative is not. A served pass leaves the roster
+    /// `RosterCurrency::Current`, so without this the registry would answer every `resolve` from a
+    /// snapshot as much as a whole ceiling old while the stream that should be refreshing it is
+    /// deliberately asleep. Withdrawal keeps being enforced across it, because a roster that went
+    /// stale still lists agents that demonstrably existed.
+    pub fn throttled_to_the_ceiling(&self) -> bool {
+        reconnect_backoff(self.churn) >= RECONNECT_BACKOFF_CEILING
+    }
 }
 
 /// Follow the session's roster for the process lifetime, calling `on_change` once per applied
@@ -868,6 +888,19 @@ async fn follow_roster(
             log::error!(
                 target: "tddy_tools::session_agents",
                 "{reason}; every subagent call for session {} is refused until it recovers",
+                roster.session_id()
+            );
+            roster.mark_unavailable(&reason);
+        } else if pacing.throttled_to_the_ceiling() {
+            // Served, so not unavailable — but the next frame is a whole ceiling away, and until it
+            // arrives this process cannot claim to know the roster.
+            let reason = format!(
+                "roster stream keeps ending as soon as it has been served, so reconnects are \
+                 throttled to {backoff:?} ({last_failure})"
+            );
+            log::error!(
+                target: "tddy_tools::session_agents",
+                "{reason}; every subagent call for session {} is refused until a frame arrives",
                 roster.session_id()
             );
             roster.mark_unavailable(&reason);

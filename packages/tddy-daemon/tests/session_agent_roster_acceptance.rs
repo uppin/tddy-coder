@@ -575,6 +575,33 @@ async fn re_sends_the_change_it_last_published_rather_than_the_snapshot_it_opene
         .assert_rev(2);
 }
 
+/// The relay deadline and the subscriber's service threshold are one design decision held in two
+/// crates. A subscriber classifies a roster pass by how long it lasted: a pass the relay's idle
+/// deadline killed lasted at least that deadline (its connect time is on top), so while the
+/// deadline is the longer of the two, a keepalive path that goes quiet costs one prompt reconnect
+/// per deadline — service. Make the deadline the shorter one and every such teardown reads as
+/// churn instead, throttling the roster to its reconnect ceiling and, from there, refusing every
+/// subagent call for a session whose stream is in fact being served. Pinned by a test rather than a
+/// `const` assert because `tddy-tools` is only a dev-dependency of this crate, so the lib cannot
+/// name the threshold.
+#[test]
+fn tears_a_forwarded_stream_down_no_faster_than_a_pass_needs_to_last_to_count_as_service() {
+    // Given
+    let relay_gives_up_after =
+        tddy_daemon::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT;
+
+    // When
+    let a_pass_counts_as_service_after = tddy_tools::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE;
+
+    // Then
+    assert!(
+        relay_gives_up_after >= a_pass_counts_as_service_after,
+        "a relay that gives up after {relay_gives_up_after:?} tears down every forwarded roster \
+         stream before the {a_pass_counts_as_service_after:?} that makes a pass count as service, \
+         so a cross-host roster would throttle to its ceiling and refuse calls it can serve"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // AC10-AC11 — persistence
 // ---------------------------------------------------------------------------

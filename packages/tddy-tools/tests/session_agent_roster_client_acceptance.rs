@@ -570,6 +570,68 @@ fn a_served_pass_clears_the_unserved_run_it_interrupts() {
     );
 }
 
+/// Throttling and authority are the same decision seen from two sides. Once the reconnects are
+/// spaced a whole ceiling apart, the next frame is that far away — so answering `resolve` from the
+/// last one as if it were current is exactly the silent staleness the roster exists to prevent.
+#[test]
+fn stops_claiming_the_roster_is_current_once_the_reconnects_are_throttled_to_the_ceiling() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+
+    // When
+    for _ in 0..12 {
+        follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    }
+
+    // Then
+    assert!(
+        follower.throttled_to_the_ceiling(),
+        "a run of passes that each die as soon as they are served must reach the ceiling"
+    );
+}
+
+/// The refusal has to lift by itself. A throttled follower whose stream finally holds must go back
+/// to answering calls, or one rough patch mutes the session's agents for the rest of the run.
+#[test]
+fn claims_the_roster_again_once_a_pass_lasts_long_enough_to_be_service() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+    for _ in 0..12 {
+        follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    }
+
+    // When
+    follower.record(&a_pass_that_applied(9), a_whole_working_subscription());
+
+    // Then
+    assert!(
+        !follower.throttled_to_the_ceiling(),
+        "a working subscription must lift the throttle, not just slow its growth"
+    );
+}
+
+/// A brisk reconnect is not a staleness claim. The follower that reconnects in half a second is
+/// following the roster as closely as it ever does, so it must keep answering.
+#[test]
+fn keeps_claiming_the_roster_while_the_reconnects_are_still_prompt() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+
+    // When
+    let after_one_short_pass = follower.record(
+        &a_pass_that_applied_and_then_broke(1, "the peer stopped answering"),
+        no_longer_than_it_took_to_be_served(),
+    );
+
+    // Then
+    assert!(
+        !follower.throttled_to_the_ceiling(),
+        "one short pass waits {after_one_short_pass:?} and must not cost the session its roster"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // AC18 — there is no default agent
 // ---------------------------------------------------------------------------

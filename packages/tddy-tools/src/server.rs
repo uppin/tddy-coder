@@ -386,6 +386,13 @@ impl PermissionServer {
     /// attached. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
     /// web Inspector → Tools panel. Does NOT include the Bash CLI subcommands (submit/ask/…); the
     /// `list-tools` command appends those.
+    ///
+    /// Not the same set as [`Self::advertised_tools`], despite the name: this one answers "what
+    /// tools does this build have" and so lists the exec catalog whole, withdrawn entries included,
+    /// while that one answers "what may this session's agent call right now" and filters them out.
+    /// The single-revision guarantee documented there is that method's, not this file's — an
+    /// operator reading the Inspector wants the build's inventory, and an agent must never be
+    /// offered a tool an operator withdrew.
     pub fn advertised_tool_defs() -> Vec<RemoteToolDef> {
         fn map_tool(t: rmcp::model::Tool) -> RemoteToolDef {
             RemoteToolDef {

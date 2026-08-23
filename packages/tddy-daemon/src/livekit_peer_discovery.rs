@@ -1111,6 +1111,12 @@ pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 /// A stream that stops producing must never look like a stream that ended: the consumer would
 /// write a truncated document as if it were whole (see `docs/ft/coder/rpc-multi-transport.md` —
 /// a single lost chunk frame wedges a call with no error).
+/// Also bounded from below, by `tddy_tools::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE`: a
+/// subscriber classifies a roster pass by how long it lasted, so tearing a forwarded stream down
+/// faster than that threshold would make every relay-idle teardown read as churn and park a
+/// cross-host roster at its reconnect ceiling. `tddy-tools` is only a dev-dependency here, so that
+/// relation is pinned by a test rather than a `const` assert — see
+/// `tests/session_agent_roster_acceptance.rs`.
 pub const PEER_FORWARD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn peer_forward_deadline_status(
