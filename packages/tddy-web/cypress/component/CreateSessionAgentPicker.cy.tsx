@@ -97,6 +97,16 @@ function openTheAgentPicker() {
   byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
 }
 
+/** Close the Managed codebase section, which withdraws the agent picker along with it. */
+function closeTheManagedCodebaseSection() {
+  byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
+}
+
+/** Open it again, on a form that has already had it open once. */
+function reopenTheManagedCodebaseSection() {
+  byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
+}
+
 /** The `specialized_agents` lists carried by every `StartSession` host A received. */
 function startedSessionAgentLists(hostA: InMemoryRpcBackend): string[][] {
   return recordedFields(hostA.callsTo(ConnectionService.method.startSession)).map(
@@ -162,6 +172,45 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     byTestId(TEST_IDS.createSessionSubmitBtn).click();
 
     // Then
+    cy.wrap(null).should(() => {
+      expect(startedSessionAgentLists(hostA)).to.deep.equal([[]]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // A selection the operator cannot see is a selection the form does not hold
+  // -------------------------------------------------------------------------
+
+  it("forgets a picked agent once the managed-codebase section is closed", () => {
+    // Given an agent picked while the section was open
+    mountPicker(aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]));
+    openTheAgentPicker();
+    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
+
+    // When the section that offered it is closed and opened again
+    closeTheManagedCodebaseSection();
+    reopenTheManagedCodebaseSection();
+
+    // Then the picker offers it unpicked — closing the section is the operator's last sight of the
+    // selection, so it cannot survive out of view
+    byTestId(createSessionAgentOption(EXPLORER_ON_A)).should("not.be.checked");
+  });
+
+  it("sends no agent picked before the managed-codebase section was closed", () => {
+    // Given an agent picked, then withdrawn from view by closing the section
+    const hostA = mountPicker(
+      aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]),
+    );
+    openTheAgentPicker();
+    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
+    closeTheManagedCodebaseSection();
+
+    // When the section is reopened and the session started without picking again
+    reopenTheManagedCodebaseSection();
+    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+
+    // Then the request carries what the reopened picker shows, which is nothing — the request is
+    // never rewritten on the way out
     cy.wrap(null).should(() => {
       expect(startedSessionAgentLists(hostA)).to.deep.equal([[]]);
     });

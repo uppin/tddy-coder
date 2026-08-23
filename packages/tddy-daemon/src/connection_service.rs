@@ -1105,6 +1105,16 @@ struct ClaimedAgentClone {
     commissioned: bool,
 }
 
+/// One agent a start has already put on a session's roster, as its unwind needs to name it.
+///
+/// The clone is carried rather than looked up again: only the entry that *commissioned* a checkout
+/// may delete it, and that fact lives nowhere but in the claim this seed made.
+struct SeededAgent {
+    agent_id: String,
+    daemon_instance_id: String,
+    clone: Option<ClaimedAgentClone>,
+}
+
 /// What one open conversation hands a prompt, taken out of the map so the map's lock can be
 /// released before the turn is awaited.
 enum PromptRouting {
@@ -2416,46 +2426,60 @@ fn started_agent_id(
     }
 }
 
-/// The `.session.yaml` roster a session start records, from the defs its request resolved to.
+/// The `workspace` start a split placement forwards to the daemon holding the codebase.
 ///
-/// Order is the request's, which is the order the roster keeps and the main agent sees.
-fn started_roster(
-    defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
-    local_instance_id: &str,
-) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
-    defs.iter()
-        .map(|def| {
-            roster_record(def, local_instance_id)
-                .map_err(|e| Status::invalid_argument(format!("specialized_agents: {e}")))
-        })
-        .collect()
+/// Pure, and named rather than inlined at the forward, because this is where every "the operator
+/// asked for this, and that host is the one that can do it" decision lands:
+///
+/// - `session_type` becomes `workspace`, and both placement fields are cleared. The peer runs this
+///   locally and holds the codebase for it, so it must not route the request onward — a codebase
+///   host of its own would make it split the session again.
+/// - `requested_session_id` is the id this daemon minted, so a forward that never answers still
+///   leaves a name to tear the peer's worktree down under.
+/// - `attachments` stay behind. They are read by the agent and by the browser's Docs listing, both
+///   of which act against *this* session on *this* daemon; sending them on would put a second copy
+///   on a host with no reader for it, and pay the transfer inside the forward's deadline.
+/// - `split_agent` points the workspace session back at the agent. Named here rather than left for
+///   the peer to infer: the workspace session persists it, and it is what tells that host — which
+///   runs no agent of its own — that a withdrawal attached to this checkout is enforced against an
+///   agent somewhere, and where.
+/// - `specialized_agents` are **qualified with the agent host's instance id**. The peer reads a bare
+///   name as its own daemon's agent, so forwarding `fastcontext` verbatim would seed a *different*
+///   agent of the same name — the substitution qualified ids exist to prevent — while
+///   `fastcontext@{agent_instance_id}` keeps meaning the agent the operator picked.
+///
+/// Everything else rides along, `semantic_index` included: the index is built where the worktree is,
+/// and on a split placement that is the host this request is going to.
+fn workspace_start_request(
+    req: &StartSessionRequest,
+    agent_instance_id: &str,
+    agent_session_id: &str,
+    codebase_session_id: &str,
+) -> Result<StartSessionRequest, Status> {
+    let specialized_agents = req
+        .specialized_agents
+        .iter()
+        .map(|reference| started_agent_id(reference, agent_instance_id).map(|id| id.qualified()))
+        .collect::<Result<Vec<String>, Status>>()?;
+    Ok(StartSessionRequest {
+        session_type: "workspace".to_string(),
+        daemon_instance_id: String::new(),
+        codebase_daemon_instance_id: String::new(),
+        requested_session_id: codebase_session_id.to_string(),
+        attachments: Vec::new(),
+        specialized_agents,
+        split_agent: Some(SplitAgentPlacement {
+            session_id: agent_session_id.to_string(),
+            agent_daemon_instance_id: agent_instance_id.to_string(),
+        }),
+        ..req.clone()
+    })
 }
 
 /// The revision a freshly started session's roster is at: 1 when it was seeded with agents, 0
 /// when it was started with none (PRD § Revision, not diff).
 pub(crate) fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u64 {
     u64::from(!agents.is_empty())
-}
-
-/// The refusal an agent owned by another daemon gets in a session's **start** request.
-///
-/// Attaching one to a live session is supported (see [`ConnectionServiceImpl::roster_record_for`]);
-/// seeding one at start is not, and the difference is not arbitrary. A remote agent needs the
-/// session's room to exist so its owning daemon can be admitted to it, and the room is opened by the
-/// spawn this request has not reached yet — so a seed resolved here would name a clone that could
-/// not be provisioned until after the agent process it was meant to configure had started.
-///
-/// TODO(session-agent-roster): seed a remote agent by attaching it immediately after the spawn has
-/// opened the room, so `specialized_agents` and `AttachSessionAgent` accept the same ids
-/// (docs/ft/daemon/session-agent-roster.md § Remote agents). Refused, never read as local: a local
-/// def of the same name is a *different* agent, and running it would answer from the wrong host
-/// without saying so — which is the exact failure qualified ids exist to prevent.
-fn remote_agent_at_start_unsupported(agent_id: &str, owning_daemon: &str) -> Status {
-    Status::unimplemented(format!(
-        "agent '{agent_id}' is owned by daemon '{owning_daemon}'; a session cannot be *started* \
-         with an agent from a peer, because that peer is admitted to the session's room and given \
-         its clone only once the room exists. Start the session and attach the agent to it."
-    ))
 }
 
 /// The exec tools a roster agent's own loop serves from the checkout it reads.
@@ -3278,11 +3302,21 @@ impl ConnectionServiceImpl {
         }
     }
 
-    /// Resolve `specialized_agents` references against [`Self::resolvable_agent_defs`] into their
-    /// full defs (see docs/ft/coder/specialized-subagents.md). Each entry is either a qualified
+    /// Resolve the `specialized_agents` references that name **this** daemon against
+    /// [`Self::resolvable_agent_defs`], into their full defs (see
+    /// docs/ft/coder/specialized-subagents.md). Each entry is either a qualified
     /// `name@daemon_instance_id` or a bare name read as this daemon's (see [`started_agent_id`]).
-    /// An unresolvable reference is a request error — the session is never started with a
-    /// silently-dropped subagent. An empty input resolves to an empty output, not an error.
+    /// An unresolvable reference *of this daemon's* is a request error — the session is never
+    /// started with a silently-dropped subagent. An empty input resolves to an empty output, not an
+    /// error.
+    ///
+    /// A reference naming a **peer** resolves to no def here, and is skipped rather than refused: a
+    /// def describes an agent on one host, and this list exists to build the
+    /// `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env, which can only carry defs this host holds.
+    /// That is not a silent drop — a peer-owned agent is recorded on the session's roster by
+    /// [`Self::seeded_roster_records`] and reaches the main agent through the live roster
+    /// `tddy-tools` reads, exactly as an agent attached after the start does
+    /// (docs/ft/daemon/session-agent-roster.md § Remote agents).
     async fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],
@@ -3296,10 +3330,7 @@ impl ConnectionServiceImpl {
         for reference in specialized_agents {
             let id = started_agent_id(reference, &local_instance_id)?;
             if id.daemon_instance_id != local_instance_id {
-                return Err(remote_agent_at_start_unsupported(
-                    reference,
-                    &id.daemon_instance_id,
-                ));
+                continue;
             }
             let def = resolved.iter().find(|d| d.name == id.name).ok_or_else(|| {
                 Status::invalid_argument(format!(
@@ -3310,6 +3341,37 @@ impl ConnectionServiceImpl {
             selected.push(def.clone());
         }
         Ok(selected)
+    }
+
+    /// The roster a session's `specialized_agents` seed resolves to, before anything has been
+    /// started for it.
+    ///
+    /// Resolved into **records** rather than defs, and by the same resolver an attach uses
+    /// ([`Self::roster_record_for`]): an agent is placeable on any host, so what a seed names is an
+    /// entry carrying a placement (`daemon_instance_id`) and a withdrawal (`replaces`), which a def
+    /// — describing an agent on one host — cannot express. A reference naming a peer is answered
+    /// from that peer's own `ListSubagents`, never from a local def of the same name, which is a
+    /// different agent.
+    ///
+    /// A bare name is read as this daemon's (see [`started_agent_id`]). A reference that resolves
+    /// to nothing fails the whole seed with `INVALID_ARGUMENT` naming it: a session started with a
+    /// silently-dropped agent keeps the tools that agent was meant to take away and says nothing.
+    /// An empty seed resolves to an empty roster, not an error.
+    ///
+    /// The records name no clone yet — `codebase_session_id` is filled in by
+    /// [`Self::seed_session_agent_roster`], which is the only place that knows which session they
+    /// are being recorded on.
+    async fn seeded_roster_records(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let mut records = Vec::with_capacity(specialized_agents.len());
+        for reference in specialized_agents {
+            let id = started_agent_id(reference, &local_instance_id)?;
+            records.push(self.roster_record_for(&id, reference).await?);
+        }
+        Ok(records)
     }
 
     /// The session directory a roster call addresses, resolved **only after** its caller has been.
@@ -3527,6 +3589,208 @@ impl ConnectionServiceImpl {
             session_token,
         )
         .await;
+    }
+
+    /// The seed a start whose codebase is on **this** daemon records.
+    ///
+    /// The same resolution as [`Self::seeded_roster_records`], minus the one placement this path
+    /// cannot serve yet: an agent owned by a peer. Such an agent reads a clone, and a clone is
+    /// provisioned against the session's `.session.yaml` — which a co-located start writes *after*
+    /// the agent process the roster was meant to configure has been spawned. The split path has no
+    /// such ordering problem: the session holding its roster is fully created by the forward before
+    /// any agent is spawned, which is why a seed of any placement is admissible there.
+    ///
+    /// Refused rather than dropped, and never read as this host's agent of the same name: a local
+    /// def of the same name is a *different* agent, and running it would answer from the wrong host
+    /// without saying so. `AttachSessionAgent` takes the same id on the same session once it is
+    /// running.
+    ///
+    /// TODO(seeded-agents-on-any-placement): write a co-located session's `.session.yaml` before its
+    /// agent is spawned, so this path can claim clones where the split path already does and the
+    /// refusal can go (docs/ft/daemon/session-agent-roster.md § Remote agents, AC1).
+    async fn co_located_seeded_roster_records(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
+        let records = self.seeded_roster_records(specialized_agents).await?;
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        match records
+            .iter()
+            .find(|record| record.daemon_instance_id != local_instance_id)
+        {
+            None => Ok(records),
+            Some(remote) => Err(Status::unimplemented(format!(
+                "agent '{}' is owned by daemon '{}', and a session whose codebase is on this \
+                 daemon cannot yet be *started* with one: its roster is written after the agent is \
+                 spawned, so the clone that agent reads could not be built in time. Start the \
+                 session and attach the agent to it.",
+                remote.agent_id, remote.daemon_instance_id
+            ))),
+        }
+    }
+
+    /// Build the semantic index for a `workspace` session's worktree.
+    ///
+    /// The index indexes a worktree, and the worktree that counts is this daemon's: for the codebase
+    /// half of a split session, the agent runs on another host with no repository on disk, so this is
+    /// the only host that has anything to index (docs/ft/coder/semantic-index.md).
+    ///
+    /// Blocking, and a failure fails the start — no unindexed fallback, exactly as on the co-located
+    /// paths: a session that came up without the index it asked for looks like the session that was
+    /// asked for.
+    ///
+    /// TODO(seeded-agents-on-any-placement): export `TDDY_SEMANTIC_INDEX_DB` on this daemon's
+    /// exec-tool surface, so a split session's `mcp__tddy-tools__SemanticSearch` reaches the index
+    /// this built rather than reporting it unset. `tool_engine::execute_tool` takes no env pairs on
+    /// the daemon's own surface, and the query side is unwired regardless
+    /// (`packages/tddy-tool-engine/src/lib.rs` — "index query not yet wired").
+    async fn index_workspace_worktree(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        let worktree_path =
+            workspace_session::resolve_worktree_root_for_session(sessions_base, session_id)?;
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let embedder =
+            tddy_semantic_index::production_embedder(&self.tddy_data_dir).map_err(|e| {
+                Status::failed_precondition(format!(
+                    "semantic index requested but no embedder is available: {e}"
+                ))
+            })?;
+        crate::semantic_index::run_semantic_index_blocking(
+            &worktree_path,
+            &session_dir,
+            embedder,
+            &self.task_registry,
+            session_id,
+        )
+        .await
+        .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
+        log::info!(
+            "StartSession: indexed workspace session {session_id}'s worktree at {}",
+            worktree_path.display()
+        );
+        Ok(())
+    }
+
+    /// Record a session's seeded roster, giving every agent that is not co-located with this
+    /// daemon's worktree the clone it reads.
+    ///
+    /// The seed's counterpart to [`Self::attach_session_agent`], step for step and by the same
+    /// calls: a withdrawal this session could not enforce is refused, a clone is claimed for an
+    /// agent owned by a peer — which is also what opens the session's room — and only then is the
+    /// entry written. Called **before** the agent is spawned, because the spawn fixes its tool
+    /// allowlist at launch: a roster written afterwards would leave the seed's `replaces`
+    /// unenforced until the first resume (docs/dev/1-WIP/2026-08-23-seeded-agents-on-any-placement.md
+    /// § Decisions).
+    ///
+    /// Atomic across the whole seed, not per entry: a refusal on the third agent takes the first
+    /// two back out — entry, clone and room membership — so the caller never has to reason about a
+    /// half-seeded roster it cannot see. The order within the unwind is the detach path's, for the
+    /// same reason: the entry goes first, so nothing is left naming a checkout that is being
+    /// deleted.
+    async fn seed_session_agent_roster(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        session_token: &str,
+        records: Vec<tddy_core::SessionAgentRecord>,
+    ) -> Result<(), Status> {
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let mut seeded: Vec<SeededAgent> = Vec::with_capacity(records.len());
+        for mut record in records {
+            if let Err(status) = refuse_unenforceable_withdrawal(session_id, session_dir, &record) {
+                self.unwind_seeded_roster(session_id, session_dir, session_token, seeded)
+                    .await;
+                return Err(status);
+            }
+            let seeded_daemon = record.daemon_instance_id.clone();
+            let mut clone = None;
+            if record.daemon_instance_id != local_instance_id {
+                match self
+                    .claim_agent_clone(
+                        session_id,
+                        session_dir,
+                        &record.daemon_instance_id,
+                        session_token,
+                    )
+                    .await
+                {
+                    Ok(claimed) => {
+                        record.codebase_session_id = Some(claimed.codebase_session_id.clone());
+                        clone = Some(claimed);
+                    }
+                    Err(status) => {
+                        self.unwind_seeded_roster(session_id, session_dir, session_token, seeded)
+                            .await;
+                        return Err(status);
+                    }
+                }
+            }
+            let agent_id = record.agent_id.clone();
+            let written = self
+                .session_agent_rosters
+                .attach(session_id, session_dir, record);
+            // Recorded as seeded before the write is inspected: the clone claimed a moment ago is
+            // the half of this entry a peer has already been told to build, so a failed write must
+            // still be able to take it away.
+            seeded.push(SeededAgent {
+                agent_id: agent_id.clone(),
+                daemon_instance_id: seeded_daemon,
+                clone,
+            });
+            match written {
+                Ok(roster) => log::info!(
+                    "StartSession: session {session_id} seeded agent '{agent_id}' at rev {}",
+                    roster.rev
+                ),
+                Err(status) => {
+                    self.unwind_seeded_roster(session_id, session_dir, session_token, seeded)
+                        .await;
+                    return Err(status);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Take a partially seeded roster back out, so a failed start leaves no entry, no half-built
+    /// clone and no room membership on any host.
+    ///
+    /// Every failure is logged and none is propagated: the caller is already returning the refusal
+    /// that brought it here, and replacing that with "the unwind also failed" would send an
+    /// operator after the wrong problem. The last agent in `seeded` may never have reached the
+    /// roster, which is why a detach that finds nothing is not treated as an error either.
+    async fn unwind_seeded_roster(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        session_token: &str,
+        seeded: Vec<SeededAgent>,
+    ) {
+        for agent in seeded.into_iter().rev() {
+            if let Err(status) =
+                self.session_agent_rosters
+                    .detach(session_id, session_dir, &agent.agent_id)
+            {
+                log::warn!(
+                    "StartSession: could not take seeded agent '{}' back out of session \
+                     {session_id}'s roster: {}",
+                    agent.agent_id,
+                    status.message()
+                );
+            }
+            if let Some(clone) = &agent.clone {
+                self.unwind_agent_clone_claim(
+                    session_id,
+                    &agent.daemon_instance_id,
+                    clone,
+                    session_token,
+                )
+                .await;
+            }
+        }
     }
 
     /// Ask `daemon_instance_id` for the checkout this session's agents on it will read.
@@ -4629,6 +4893,15 @@ impl ConnectionServiceImpl {
         }
         let project_id = project_id.trim();
         let repo_path = repo_path.trim();
+        // The roster this session starts with, resolved before anything is created for it: it is
+        // what the withdrawal is computed from and what `.session.yaml` persists, and a reference
+        // naming no agent must fail the start rather than leave the main agent holding tools it was
+        // told it had given away.
+        let started_agents = self
+            .co_located_seeded_roster_records(specialized_agents)
+            .await?;
+        // The defs behind those records, which the jail env can only carry for agents this host
+        // holds — the records above are what carries the rest.
         let specialized_defs = self
             .resolve_specialized_agent_defs(specialized_agents)
             .await?;
@@ -4818,13 +5091,6 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        // The roster the session starts with, built before the jail rather than at the metadata
-        // write below: it is what the withdrawal is computed from, and a request naming a def whose
-        // id cannot be minted must fail before a jail exists rather than after.
-        let started_agents = started_roster(
-            &specialized_defs,
-            &local_instance_id_for_config(&self.config),
-        )?;
         let replacement_pairs = roster_replacement_pairs(&started_agents);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
@@ -5174,6 +5440,11 @@ impl ConnectionServiceImpl {
                 "project_id is required for cursor-cli sessions",
             ));
         }
+        // As on the sandboxed claude-cli path: the roster is resolved before anything is created,
+        // and the defs it holds locally are what the jail env can carry.
+        let started_agents = self
+            .co_located_seeded_roster_records(specialized_agents)
+            .await?;
         let specialized_defs = self
             .resolve_specialized_agent_defs(specialized_agents)
             .await?;
@@ -5292,12 +5563,6 @@ impl ConnectionServiceImpl {
         let scratch_tmp = scratch_dir.join("tmp");
         let context_dir = sandbox_root.join("context");
 
-        // As on the sandboxed claude-cli path: the roster the session starts with is what the
-        // withdrawal is computed from, and it is minted before the jail exists.
-        let started_agents = started_roster(
-            &specialized_defs,
-            &local_instance_id_for_config(&self.config),
-        )?;
         let replacement_pairs = roster_replacement_pairs(&started_agents);
         let replacement_refs: Vec<Vec<&str>> = replacement_pairs
             .iter()
@@ -7334,17 +7599,14 @@ impl ConnectionServiceImpl {
         req: &StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        // These three ask for work that only exists where the repository is. Refused rather than
-        // silently dropped, because a session that came up without its recipe (or its index) looks
-        // like the session that was asked for.
+        // These two ask for work that only exists on the daemon running the *agent*, which a split
+        // session has no repository on. A recipe's tooling runs that host's own `transition`, and a
+        // sandboxed spawn jails that host's filesystem; neither is a read another host could serve.
+        // Refused rather than silently dropped, because a session that came up without its recipe
+        // looks exactly like the session that was asked for.
         if !req.recipe.trim().is_empty() {
             return Err(Status::invalid_argument(
                 "a workflow recipe needs a repository on the daemon running the agent; it cannot be combined with codebase_daemon_instance_id",
-            ));
-        }
-        if req.semantic_index {
-            return Err(Status::invalid_argument(
-                "semantic_index indexes a worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
             ));
         }
         if req.sandbox {
@@ -7352,30 +7614,20 @@ impl ConnectionServiceImpl {
                 "sandbox sessions resolve their worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
             ));
         }
-        // Refused for a different reason, and the same one that refuses a peer's agent on an
-        // ordinary start (see `remote_agent_at_start_unsupported`): a split session's roster does
-        // not live here. It lives beside the codebase, on the `workspace` session the forward below
-        // creates, and every one of its agents is provisioned a clone through the session's room —
-        // which is opened by the spawn this request has not reached yet. A seed resolved here would
-        // therefore name agents against this host's defs, record them on a session that is not the
-        // one holding the roster, and ask for clones in a room nobody has opened.
+        // `specialized_agents` and `semantic_index` are *not* refused: neither depends on where the
+        // codebase lives. An index indexes a worktree, and the one that counts is the codebase
+        // host's, so that host builds it. An agent is placeable on any host — co-located with the
+        // authoritative worktree it reads that worktree directly, anywhere else it reads a clone the
+        // session worktree sync keeps current — so a split placement only decides which host the
+        // roster and the clones end up on, which is the codebase host either way.
         //
-        // Dropped silently, this reads as the worst kind of success: the session comes up, the main
-        // agent keeps the tools the seeded agent was meant to take away from it, and nothing says
-        // so — the operator has to notice an absent roster to find out.
-        //
-        // TODO(session-agent-roster): honour the seed by attaching each agent once the spawn has
-        // opened the room, so `specialized_agents` and `AttachSessionAgent` accept the same ids on
-        // a split session too (docs/ft/daemon/session-agent-roster.md § Remote agents).
-        if !req.specialized_agents.is_empty() {
-            return Err(Status::invalid_argument(format!(
-                "a session whose codebase is on another daemon keeps its agent roster beside that \
-                 codebase, and each agent is admitted to it through the session's room, which the \
-                 spawn opens; specialized_agents ({}) cannot be seeded at start. Start the session \
-                 and attach the agents to it.",
-                req.specialized_agents.join(", ")
-            )));
-        }
+        // Resolved here for the references naming *this* daemon, before the peer is asked for
+        // anything: those are a request error only this host can see, and refusing one after the
+        // codebase host had cut a worktree would mean tearing one down to report a typo. References
+        // naming another host are resolved by the daemon that holds the roster, from that host's own
+        // view of the common room.
+        self.resolve_specialized_agent_defs(&req.specialized_agents)
+            .await?;
 
         let slot = self.common_room_slot("StartSession")?.clone();
 
@@ -7400,28 +7652,12 @@ impl ConnectionServiceImpl {
             crate::session_room::session_room_name(&session_id),
         )?;
 
-        // The peer runs this locally and holds the codebase for it, so it must not route the request
-        // onward: `daemon_instance_id` named *this* host, and a codebase host of its own would make
-        // it split the session again.
-        // Attachments belong beside the agent, which is here: they are read by the agent and by the
-        // browser's Docs listing, both of which act against *this* session on *this* daemon. Sending
-        // them on would put a second copy on a host with no reader for it, and pay the transfer
-        // inside the forward's deadline to do so.
-        // Named in the request rather than left for the peer to infer: the workspace session
-        // persists it, and it is what tells that host — which runs no agent of its own — that a
-        // withdrawal attached to this checkout is enforced against an agent somewhere, and where.
-        let workspace_req = StartSessionRequest {
-            session_type: "workspace".to_string(),
-            daemon_instance_id: String::new(),
-            codebase_daemon_instance_id: String::new(),
-            requested_session_id: codebase_session_id.clone(),
-            attachments: Vec::new(),
-            split_agent: Some(SplitAgentPlacement {
-                session_id: session_id.clone(),
-                agent_daemon_instance_id: local_instance_id_for_config(&self.config),
-            }),
-            ..req.clone()
-        };
+        let workspace_req = workspace_start_request(
+            req,
+            &local_instance_id_for_config(&self.config),
+            &session_id,
+            &codebase_session_id,
+        )?;
         let forwarded = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
             &slot,
             codebase_instance_id,
@@ -7585,16 +7821,33 @@ impl ConnectionServiceImpl {
             ),
         }
 
-        // No agents yet, and none possible: a split session's roster lives on the codebase daemon,
-        // in the workspace session this very call created moments ago, so there is nothing on it
-        // for an operator to have attached. Agents arrive later through `AttachSessionAgent`, and
-        // the resume path re-reads the roster from that host before relaunching
-        // (`resume_split_wiring`).
-        let context_dir = crate::split_session::build_split_context_dir(&session_dir, &[])?;
+        // A split session's roster lives on the codebase daemon, in the workspace session the
+        // forward created moments ago — which is where this start's seed was recorded, before that
+        // call answered. So the withdrawals are read back from the host that holds them, exactly as
+        // the resume path reads them (`resume_split_wiring`): `--allowedTools` is fixed at launch,
+        // and a seeded agent whose `replaces` reached the spawn as an empty list would leave the
+        // main agent holding the tools it gave away until the first resume.
+        //
+        // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
+        // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
+        // relaunches the agent against the roster it just changed.
+        let withdrawals = match req.specialized_agents.is_empty() {
+            true => Vec::new(),
+            false => {
+                self.split_withdrawals_from_codebase_host(
+                    &req.session_token,
+                    codebase_session_id,
+                    codebase_instance_id,
+                )
+                .await?
+            }
+        };
+        let context_dir =
+            crate::split_session::build_split_context_dir(&session_dir, &withdrawals)?;
         let extra_args = crate::split_session::split_claude_extra_args(
             &session_dir,
             &tddy_tools_path.to_string_lossy(),
-            &[],
+            &withdrawals,
         )?;
 
         // Claude Code reads `.claude/settings.local.json` from its working directory, which for a
@@ -8070,10 +8323,17 @@ impl ConnectionServiceImpl {
             // daemon's session room and keeps itself equal to that session's worktree. Readiness is
             // reported from there, because only this daemon can say when the mirror has caught up.
             let Some(placement) = req.agent_clone.clone() else {
-                return workspace_session::start_workspace_session(
+                // Resolved before the worktree is cut: an agent reference that names nothing is a
+                // request error, and refusing one after the checkout existed would mean tearing a
+                // worktree down to report a typo. This is also the host that must resolve them —
+                // for the codebase half of a split session the roster lives here, so "co-located"
+                // means "owned by this daemon" and an agent of any other host is the one that needs
+                // a clone (docs/ft/daemon/session-agent-roster.md § Remote agents).
+                let seed = self.seeded_roster_records(&req.specialized_agents).await?;
+                let started = workspace_session::start_workspace_session(
                     os_user,
                     &session_id,
-                    sessions_base,
+                    sessions_base.clone(),
                     req.project_id.trim(),
                     &workspace_session::WorkspaceBranchIntent {
                         branch_worktree_intent: req.branch_worktree_intent.trim(),
@@ -8085,7 +8345,25 @@ impl ConnectionServiceImpl {
                     &self.tddy_data_dir,
                     timeout,
                 )
-                .await;
+                .await?;
+                // Written before this call answers, because the answer is what releases the agent
+                // host to spawn its agent — and that spawn fixes the tool allowlist at launch. A
+                // roster written afterwards would leave a seeded agent's `replaces` unenforced until
+                // the first resume. The seed takes its own artifacts back out on failure; the
+                // session it was recorded on is the caller's to reclaim, which is what the split
+                // start's teardown does with the id it minted.
+                self.seed_session_agent_roster(
+                    &session_id,
+                    &unified_session_dir_path(&sessions_base, &session_id),
+                    &req.session_token,
+                    seed,
+                )
+                .await?;
+                if req.semantic_index {
+                    self.index_workspace_worktree(&sessions_base, &session_id)
+                        .await?;
+                }
+                return Ok(started);
             };
             let started = workspace_session::start_agent_clone_session(
                 os_user,
@@ -8248,12 +8526,9 @@ impl ConnectionServiceImpl {
             // Resolved before the spawn, not after: an agent the request names and this daemon
             // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
             // than persisting a roster entry that resolves to nothing on the next resume.
-            let started_agents = started_roster(
-                &self
-                    .resolve_specialized_agent_defs(&req.specialized_agents)
-                    .await?,
-                &local_instance_id_for_config(&self.config),
-            )?;
+            let started_agents = self
+                .co_located_seeded_roster_records(&req.specialized_agents)
+                .await?;
             return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
                 &self.config,
                 &self.tddy_data_dir,
@@ -16890,6 +17165,181 @@ mod specialized_subagent_env_unit_tests {
 }
 
 #[cfg(test)]
+mod seeded_roster_records_unit_tests {
+    //! Unit tests: `ConnectionServiceImpl::seeded_roster_records` — what a session's
+    //! `specialized_agents` seed resolves to, before anything is started for it.
+    //!
+    //! Feature: docs/ft/daemon/session-agent-roster.md § Remote agents.
+    //! Changeset: docs/dev/1-WIP/2026-08-23-seeded-agents-on-any-placement.md.
+    //!
+    //! A seed resolves to the same thing an attach does — roster records, not defs — because an
+    //! agent is placeable on any host and a def can only describe one. The record is what carries
+    //! the placement (`daemon_instance_id`) and the withdrawal (`replaces`) into the spawn, so a
+    //! reference that cannot be turned into one has to fail the start rather than be dropped.
+
+    use super::*;
+
+    /// A daemon with no peers: the whole common room is this host, so a reference naming any other
+    /// daemon is one nothing here can resolve.
+    fn a_daemon_with_no_peers(tddy_data_dir: std::path::PathBuf) -> ConnectionServiceImpl {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::DaemonConfig::load(&path).unwrap();
+        let base = tddy_data_dir.clone();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|_| Some("u".to_string()));
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            tddy_data_dir,
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        )
+    }
+
+    /// An agent def under `<tddyhome>/agents` that takes `Grep` away from the main agent.
+    fn an_agent_def_replacing_grep(tddy_data_dir: &std::path::Path, name: &str) {
+        let agents = tddy_data_dir.join("agents");
+        std::fs::create_dir_all(&agents).expect("create agents dir");
+        std::fs::write(
+            agents.join(format!("{name}.yaml")),
+            format!(
+                "name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://127.0.0.1:11434/v1\nreplaces:\n  - Grep\n"
+            ),
+        )
+        .expect("write agent def");
+    }
+
+    #[tokio::test]
+    async fn an_empty_seed_resolves_to_an_empty_roster() {
+        // Given a daemon asked to start a session with no agents
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+
+        // When
+        let records = service.seeded_roster_records(&[]).await;
+
+        // Then — an empty seed is the ordinary case, not a request error
+        assert_eq!(
+            records.expect("an empty seed must resolve, not fail"),
+            Vec::<tddy_core::SessionAgentRecord>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bare_seed_reference_resolves_to_this_daemons_own_agent() {
+        // Given a def this host holds, named without a daemon qualifier
+        let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def_replacing_grep(tddy_home.path(), "explorer");
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+        let local = local_instance_id_for_config(&service.config);
+
+        // When
+        let records = service
+            .seeded_roster_records(&["explorer".to_string()])
+            .await
+            .expect("a def this host holds must resolve");
+
+        // Then — a bare name means the daemon the start was addressed to, and an agent placed there
+        // reads the authoritative worktree itself, so it names no clone
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].agent_id, format!("explorer@{local}"));
+        assert_eq!(records[0].daemon_instance_id, local);
+        assert_eq!(records[0].codebase_session_id, None);
+    }
+
+    #[tokio::test]
+    async fn a_seeded_record_carries_the_tools_its_def_takes_from_the_main_agent() {
+        // Given a def that replaces `Grep`
+        let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def_replacing_grep(tddy_home.path(), "explorer");
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+
+        // When
+        let records = service
+            .seeded_roster_records(&["explorer".to_string()])
+            .await
+            .expect("a def this host holds must resolve");
+
+        // Then — the record is what the spawn derives its allowlist from, so the withdrawal has to
+        // be on it: a record without it launches the agent still holding the tool it gave away
+        assert_eq!(records[0].replaces, vec!["Grep".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_seed_reference_that_resolves_to_no_def_is_a_request_error_naming_it() {
+        // Given one reference this host holds and one nothing does
+        let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def_replacing_grep(tddy_home.path(), "explorer");
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+
+        // When
+        let error = service
+            .seeded_roster_records(&["explorer".to_string(), "ghost-agent".to_string()])
+            .await
+            .expect_err("an unresolvable reference must fail the whole seed");
+
+        // Then — the whole seed fails, and the message names the reference the operator typed
+        assert_eq!(error.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            error.message().contains("ghost-agent"),
+            "the refusal must name the reference it could not resolve; got: {}",
+            error.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_seed_reference_naming_a_daemon_this_host_cannot_see_is_a_request_error_naming_it() {
+        // Given a reference qualified with a daemon that is in no common room this host can see
+        let tddy_home = tempfile::tempdir().unwrap();
+        an_agent_def_replacing_grep(tddy_home.path(), "explorer");
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+
+        // When
+        let error = service
+            .seeded_roster_records(&["explorer@workstation-b".to_string()])
+            .await
+            .expect_err("a daemon this host cannot reach must fail the seed");
+
+        // Then — a bad request naming the daemon, decided from the eligible list rather than by
+        // waiting out a forward. Never read as the local `explorer`: a def of the same name on
+        // another host is a different agent, which is what qualified ids exist to keep apart
+        assert_eq!(error.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            error.message().contains("workstation-b"),
+            "the refusal must name the daemon it could not reach; got: {}",
+            error.message()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_seed_reference_naming_two_daemons_is_a_request_error_naming_the_field() {
+        // Given a reference that splits into no single pair
+        let tddy_home = tempfile::tempdir().unwrap();
+        let service = a_daemon_with_no_peers(tddy_home.path().to_path_buf());
+
+        // When
+        let error = service
+            .seeded_roster_records(&["explorer@a@b".to_string()])
+            .await
+            .expect_err("a reference naming no single daemon must fail the seed");
+
+        // Then — refused for its shape, before any def source is consulted
+        assert_eq!(error.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            error.message().contains("specialized_agents"),
+            "the refusal must name the field it read; got: {}",
+            error.message()
+        );
+    }
+}
+
+#[cfg(test)]
 mod add_planned_pr_unit_tests {
     //! Unit tests: `ConnectionServiceImpl::add_planned_pr` — the recipe guard rejecting a
     //! non-"pr-stack" session before its `Changeset.stack` is touched.
@@ -18088,5 +18538,223 @@ mod remote_branch_push_gating_tests {
             !after.remote_pushed,
             "remote_pushed must stay false when the flag is off"
         );
+    }
+}
+
+#[cfg(test)]
+mod workspace_start_request_unit_tests {
+    use super::*;
+
+    const AGENT_INSTANCE_ID: &str = "laptop-a";
+    const AGENT_SESSION_ID: &str = "agent-session-1";
+    const CODEBASE_SESSION_ID: &str = "codebase-session-1";
+
+    /// The split start an operator sends: a managed-codebase claude-cli session whose codebase the
+    /// operator placed on another host.
+    fn a_split_start_request() -> StartSessionRequest {
+        StartSessionRequest {
+            session_type: "claude-cli".to_string(),
+            model: "claude-opus-4-8".to_string(),
+            project_id: "proj-1".to_string(),
+            managed_codebase: true,
+            sandbox: true,
+            codebase_daemon_instance_id: "workstation-b".to_string(),
+            daemon_instance_id: AGENT_INSTANCE_ID.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn forwarded(req: &StartSessionRequest) -> StartSessionRequest {
+        workspace_start_request(
+            req,
+            AGENT_INSTANCE_ID,
+            AGENT_SESSION_ID,
+            CODEBASE_SESSION_ID,
+        )
+        .expect("a well-formed split start must build a workspace request")
+    }
+
+    /// A bare name means "the agent host's agent". The codebase host would read it as its own, so it
+    /// travels qualified.
+    #[test]
+    fn a_bare_agent_reference_is_qualified_with_the_agent_hosts_instance_id() {
+        // Given
+        let req = StartSessionRequest {
+            specialized_agents: vec!["fastcontext".to_string()],
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(
+            forwarded.specialized_agents,
+            vec!["fastcontext@laptop-a".to_string()]
+        );
+    }
+
+    /// An agent the operator placed on a third host keeps that host: qualification names the default
+    /// owner, it does not move an agent that already has one.
+    #[test]
+    fn an_already_qualified_agent_reference_keeps_the_host_it_names() {
+        // Given
+        let req = StartSessionRequest {
+            specialized_agents: vec!["explorer@workstation-c".to_string()],
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(
+            forwarded.specialized_agents,
+            vec!["explorer@workstation-c".to_string()]
+        );
+    }
+
+    /// Order is the operator's, and it is the order the roster keeps.
+    #[test]
+    fn agent_references_are_forwarded_in_the_order_they_were_asked_for() {
+        // Given
+        let req = StartSessionRequest {
+            specialized_agents: vec![
+                "explorer@workstation-c".to_string(),
+                "fastcontext".to_string(),
+            ],
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(
+            forwarded.specialized_agents,
+            vec![
+                "explorer@workstation-c".to_string(),
+                "fastcontext@laptop-a".to_string(),
+            ]
+        );
+    }
+
+    /// A reference no host can be read out of is a request error here, before a worktree exists on
+    /// the peer — not a string forwarded for the peer to choke on.
+    #[test]
+    fn an_ambiguous_agent_reference_is_refused_as_a_request_error() {
+        // Given
+        let req = StartSessionRequest {
+            specialized_agents: vec!["explorer@a@b".to_string()],
+            ..a_split_start_request()
+        };
+
+        // When
+        let result = workspace_start_request(
+            &req,
+            AGENT_INSTANCE_ID,
+            AGENT_SESSION_ID,
+            CODEBASE_SESSION_ID,
+        );
+
+        // Then
+        let status = result.expect_err("an ambiguous reference must be refused");
+        assert_eq!(status.code(), tddy_rpc::Code::InvalidArgument);
+        assert!(
+            status.message().contains("explorer@a@b"),
+            "the refusal must name the reference it refused: {}",
+            status.message()
+        );
+    }
+
+    /// The peer runs this session itself. Both placement fields are cleared, so it cannot route the
+    /// request onward and split the session again.
+    #[test]
+    fn the_forwarded_request_names_no_placement_of_its_own() {
+        // Given
+        let req = a_split_start_request();
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(forwarded.session_type, "workspace".to_string());
+        assert_eq!(forwarded.daemon_instance_id, String::new());
+        assert_eq!(forwarded.codebase_daemon_instance_id, String::new());
+    }
+
+    /// The id this daemon minted travels with the request, so the worktree can be torn down by name
+    /// even when the forward never answers.
+    #[test]
+    fn the_forwarded_request_carries_the_session_id_this_daemon_minted() {
+        // Given
+        let req = a_split_start_request();
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(
+            forwarded.requested_session_id,
+            CODEBASE_SESSION_ID.to_string()
+        );
+    }
+
+    /// The workspace session persists the back-pointer: it is what tells a host running no agent of
+    /// its own which agent, on which daemon, a withdrawal on this checkout is enforced against.
+    #[test]
+    fn the_forwarded_request_points_the_workspace_session_back_at_the_agent() {
+        // Given
+        let req = a_split_start_request();
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(
+            forwarded.split_agent,
+            Some(SplitAgentPlacement {
+                session_id: AGENT_SESSION_ID.to_string(),
+                agent_daemon_instance_id: AGENT_INSTANCE_ID.to_string(),
+            })
+        );
+    }
+
+    /// Attachments are read by the agent and by the browser's Docs listing, both of which act on the
+    /// agent half. Sending them on would put an unread copy on the codebase host, inside the
+    /// forward's deadline.
+    #[test]
+    fn attachments_stay_on_the_agent_half() {
+        // Given
+        let req = StartSessionRequest {
+            attachments: vec![SessionAttachment {
+                basename: "brief.md".to_string(),
+                ..Default::default()
+            }],
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert_eq!(forwarded.attachments, Vec::new());
+    }
+
+    /// The index indexes a worktree, and on a split placement the worktree is on the host this
+    /// request is going to — so the flag travels with it.
+    #[test]
+    fn a_requested_semantic_index_is_asked_of_the_host_holding_the_worktree() {
+        // Given
+        let req = StartSessionRequest {
+            semantic_index: true,
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert!(forwarded.semantic_index);
     }
 }
