@@ -144,11 +144,34 @@ impl RosterCurrency {
 /// See [`LiveAgentRoster::catalog_visibility`] for why they are answered together.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CatalogVisibility {
-    /// Whether the session has an agent to address — what decides if the conversation tools are
-    /// advertised at all.
-    pub has_an_agent_to_address: bool,
+    /// Every agent the session can address, in roster order. Empty is what decides that the
+    /// conversation tools are not advertised at all; non-empty is also what those tools *offer*,
+    /// since an id the schema does not name is one the main agent cannot reach.
+    pub addressable_agents: Vec<AddressableAgent>,
     /// The exec tools attached agents have taken over from the main agent.
     pub withdrawn_exec_tools: WithdrawnExecTools,
+}
+
+impl CatalogVisibility {
+    /// Whether the session has an agent to address at all.
+    pub fn has_an_agent_to_address(&self) -> bool {
+        !self.addressable_agents.is_empty()
+    }
+}
+
+/// One agent the main agent may address, as the tool catalog needs to name it.
+///
+/// `agent_id` is the only spelling that resolves — [`LiveAgentRoster::resolve`] matches the whole
+/// id, deliberately, so an agent attached after spawn that shares a seeded agent's bare name is a
+/// different agent. Anything offering a choice of agents must therefore offer *these* strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddressableAgent {
+    /// The qualified id a call must name.
+    pub agent_id: String,
+    /// The human label the def carried, empty when it carried none.
+    pub label: String,
+    /// The daemon that owns the agent — where its turn loop runs.
+    pub daemon_instance_id: String,
 }
 
 /// One exec tool an attached agent serves in the main agent's place.
@@ -483,7 +506,15 @@ impl LiveAgentRoster {
     pub fn catalog_visibility(&self) -> CatalogVisibility {
         let state = self.state.lock().expect("session agent roster");
         CatalogVisibility {
-            has_an_agent_to_address: !state.entries.is_empty(),
+            addressable_agents: state
+                .entries
+                .iter()
+                .map(|entry| AddressableAgent {
+                    agent_id: entry.agent_id.clone(),
+                    label: entry.label.clone(),
+                    daemon_instance_id: entry.daemon_instance_id.clone(),
+                })
+                .collect(),
             withdrawn_exec_tools: Self::withdrawn_exec_tools_in(&state),
         }
     }

@@ -319,6 +319,39 @@ tddy-tools` — 46 targets, all green (64 lib tests); `cargo clippy -p tddy-tool
 warnings` clean. Observing it needs the new `tddy-tools` **on the agent host**: `sudo ./install
 --systemd --build`.
 
+### And the defect that one uncovered
+
+With both hosts on the fix, session `01a03066` shows the client doing its half —
+`"Received tools/list_changed notification, refreshing tools"` one second after `roster rev 1
+applied`, followed by a successful `subagent_list` call, a tool that exists only while the roster is
+non-empty. The catalog is live.
+
+The agent still reported no agents, and correctly: `subagent_list` answers with open *conversations*
+(`{"conversations":[]}`), and nothing enumerated the roster. `subagent_new_session`'s `agent`
+parameter was a free-text string described as "the name of the subagent attached to this session",
+with no list — so `fastcontext@mac` was on the roster, addressable, and unnameable. The only place
+the ids were ever spelled out was the *error* from calling the tool with no `agent`, which a schema
+marking it required makes unreachable in practice.
+
+| File | Change |
+|---|---|
+| `packages/tddy-tools/src/session_agents/registry.rs` | `CatalogVisibility` carries `addressable_agents: Vec<AddressableAgent>` (id, label, owning daemon) instead of a bare `has_an_agent_to_address` flag, still read under the one lock; the flag becomes a method over it |
+| `packages/tddy-tools/src/server.rs` | `subagent_new_session_schema(&[AddressableAgent])` builds that tool's schema from the roster — the resolving ids as an `enum`, and named in the description; `advertised_tools` rebuilds it per `tools/list`, which the client now re-reads on every revision |
+
+Three acceptance tests in `packages/tddy-tools/tests/subagent_tool_advertisement_acceptance.rs`
+(offers every attached id, names each by label and host, stops offering a detached one). Whole
+package green: 46 targets, `cargo clippy -p tddy-tools --all-targets -- -D warnings` clean,
+`cargo check --workspace --all-targets` clean.
+
+**Separately, and not fixed here:** the same session's log shows `list_actions` and `invoke_action`
+answering `{"error":"unknown tool: ListActions"}`. `tddy-tools` advertises the three action tools
+whenever a session-tool transport exists (`server.rs:313`), but a daemon-hosted `claude-cli` session
+dispatches into `tddy-tool-engine::execute_tool_with_env` (`lib.rs:217-234`), which has no arm for
+them — only the sandbox bridge and the `tddy-coder`-hosted listener implement them. Advertised and
+unimplemented, and it actively misleads: told to invoke an agent, the main agent reached for
+`invoke_action` and concluded from its failure that the agent was not registered. Logged in
+`docs/dev/TODO.md`.
+
 ## Decisions & Trade-offs
 
 - **Seed through the roster rather than keeping the env-baked path for local agents.** Two mechanisms

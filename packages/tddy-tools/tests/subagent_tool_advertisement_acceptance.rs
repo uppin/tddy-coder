@@ -129,6 +129,17 @@ fn exec_tools_refused_on_a_direct_call() -> Vec<String> {
     refused
 }
 
+/// The `agent` parameter of the advertised `subagent_new_session` tool, as `tools/list` reports it.
+fn the_advertised_agent_parameter() -> serde_json::Value {
+    let advertised = PermissionServer::new().advertised_tools();
+    let tool = advertised
+        .into_iter()
+        .find(|tool| tool.name == "subagent_new_session")
+        .expect("subagent_new_session must be advertised while an agent is attached");
+    let schema = serde_json::Value::Object((*tool.input_schema).clone());
+    schema["properties"]["agent"].clone()
+}
+
 // ---------------------------------------------------------------------------
 // AC14/AC16 — advertisement follows the roster, in-process
 // ---------------------------------------------------------------------------
@@ -239,5 +250,73 @@ async fn withholds_from_the_catalog_exactly_what_a_direct_call_is_refused() {
         withheld,
         exec_tools_refused_on_a_direct_call(),
         "the catalog and the call-time check must withhold the same set"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Addressing an attached agent — the roster the main agent can actually read
+// ---------------------------------------------------------------------------
+
+/// The catalog following the roster is only half of reachable: an id is matched whole, and
+/// `subagent_list` reports open *conversations*, so an attached agent the schema does not name is
+/// one the main agent cannot address however correctly the tools appeared.
+#[tokio::test]
+#[serial]
+async fn offers_every_attached_agents_id_as_a_choice_of_the_agent_parameter() {
+    // Given
+    publish(vec![]);
+
+    // When
+    publish(vec![
+        an_entry("fastcontext@ws-01"),
+        an_entry("librarian@ws-02"),
+    ]);
+
+    // Then
+    assert_eq!(
+        the_advertised_agent_parameter()["enum"],
+        serde_json::json!(["fastcontext@ws-01", "librarian@ws-02"])
+    );
+}
+
+/// The ids are spelled out in the description too, so a client that renders a schema without its
+/// `enum` still shows the main agent what there is to address.
+#[tokio::test]
+#[serial]
+async fn names_each_attached_agent_by_id_label_and_host_in_the_description() {
+    // Given
+    publish(vec![]);
+
+    // When
+    publish(vec![an_entry("fastcontext@ws-01")]);
+
+    // Then
+    assert_eq!(
+        the_advertised_agent_parameter()["description"],
+        serde_json::json!(
+            "Required. One of the agents attached to this session: \
+             fastcontext@ws-01 (fastcontext (local), on ws-01)."
+        )
+    );
+}
+
+/// And it moves with the roster: an agent the latest frame dropped must stop being offered, or the
+/// main agent keeps addressing someone who left.
+#[tokio::test]
+#[serial]
+async fn stops_offering_an_agent_the_latest_frame_detached() {
+    // Given
+    publish(vec![
+        an_entry("fastcontext@ws-01"),
+        an_entry("librarian@ws-02"),
+    ]);
+
+    // When
+    publish(vec![an_entry("librarian@ws-02")]);
+
+    // Then
+    assert_eq!(
+        the_advertised_agent_parameter()["enum"],
+        serde_json::json!(["librarian@ws-02"])
     );
 }

@@ -31,7 +31,7 @@ mod seed;
 mod stream;
 
 pub use registry::{
-    CatalogVisibility, ConversationState, LiveAgentRoster, RosterError, Takeover,
+    AddressableAgent, CatalogVisibility, ConversationState, LiveAgentRoster, RosterError, Takeover,
     WithdrawnExecTools,
 };
 pub use seed::session_agent_roster;

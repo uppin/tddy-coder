@@ -365,10 +365,10 @@ impl PermissionServer {
     /// The withheld set is the roster's, not the spawn seed's, so it cannot disagree with the refusal
     /// a direct call meets — both are
     /// [`LiveAgentRoster::withdrawn_exec_tools`](crate::session_agents::LiveAgentRoster::withdrawn_exec_tools).
-    fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+    pub fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
         let visible = crate::session_agents::session_agent_roster().catalog_visibility();
         let mut tools = self.tool_router.list_all();
-        if !visible.has_an_agent_to_address {
+        if !visible.has_an_agent_to_address() {
             let conversation_tools = subagent_tool_names();
             tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
         }
@@ -378,6 +378,13 @@ impl PermissionServer {
                 .taken_over_by(tool.name.as_ref())
                 .is_none()
         });
+        // The one tool whose *schema* is roster-dependent: its `agent` parameter offers the ids
+        // that resolve right now, which is how the main agent learns there is anyone to address.
+        for tool in &mut tools {
+            if tool.name == SUBAGENT_NEW_SESSION {
+                tool.input_schema = subagent_new_session_schema(&visible.addressable_agents);
+            }
+        }
         tools
     }
 
@@ -1674,6 +1681,9 @@ pub fn dynamic_tool_router(
 
 /// The names of the ACP-shaped conversation tools, read off the router that defines them so the
 /// advertisement filter cannot drift from the set it filters.
+/// The conversation tool whose `agent` parameter is answered from the live roster.
+const SUBAGENT_NEW_SESSION: &str = "subagent_new_session";
+
 fn subagent_tool_names() -> Vec<String> {
     subagent_tool_router()
         .list_all()
@@ -2041,6 +2051,69 @@ async fn subagent_list_tool(_args: serde_json::Value) -> String {
     serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
 }
 
+/// The `subagent_new_session` input schema for a session whose roster holds `agents`.
+///
+/// The `agent` choices are the whole reason this is a function of the roster rather than a constant.
+/// An id is matched whole (`LiveAgentRoster::resolve`), `subagent_list` reports open *conversations*
+/// rather than attached agents, and nothing else enumerates the roster — so an attached agent this
+/// schema does not name is one the main agent cannot address, however faithfully the catalog
+/// followed the roster. Rebuilt per `tools/list` from
+/// [`PermissionServer::advertised_tools`], which the client re-reads on every applied revision.
+pub(crate) fn subagent_new_session_schema(
+    agents: &[crate::session_agents::AddressableAgent],
+) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    let mut agent = serde_json::json!({
+        "type": "string",
+        "description": agent_parameter_description(agents),
+    });
+    if !agents.is_empty() {
+        agent["enum"] = agents
+            .iter()
+            .map(|agent| agent.agent_id.clone())
+            .collect::<Vec<_>>()
+            .into();
+    }
+    schema_object(serde_json::json!({
+        "type": "object",
+        "properties": {
+            "agent": agent,
+            "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
+            "cwd": {"type": "string", "description": "Optional working directory hint."}
+        }
+    }))
+}
+
+/// What the `agent` parameter says it takes: the ids that resolve, spelled out.
+///
+/// Spelled out in prose as well as in the `enum` because a client that renders a schema without its
+/// `enum` would otherwise show a free-text field and no way to learn what goes in it.
+fn agent_parameter_description(agents: &[crate::session_agents::AddressableAgent]) -> String {
+    if agents.is_empty() {
+        return "Required. The qualified id of a specialized agent attached to this session."
+            .to_string();
+    }
+    let choices: Vec<String> = agents
+        .iter()
+        .map(|agent| {
+            let mut about = Vec::new();
+            if !agent.label.is_empty() {
+                about.push(agent.label.clone());
+            }
+            if !agent.daemon_instance_id.is_empty() {
+                about.push(format!("on {}", agent.daemon_instance_id));
+            }
+            match about.is_empty() {
+                true => agent.agent_id.clone(),
+                false => format!("{} ({})", agent.agent_id, about.join(", ")),
+            }
+        })
+        .collect();
+    format!(
+        "Required. One of the agents attached to this session: {}.",
+        choices.join("; ")
+    )
+}
+
 pub(crate) fn schema_object(
     json: serde_json::Value,
 ) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
@@ -2082,14 +2155,9 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         "subagent_new_session",
         "Open a new conversation with a discovery subagent (ACP session/new-shaped). \
          Returns {sessionId}.",
-        schema_object(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent": {"type": "string", "description": "Required. The name of the subagent attached to this session to open a conversation with."},
-                "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
-                "cwd": {"type": "string", "description": "Optional working directory hint."}
-            }
-        })),
+        // No agents here: the router is built once, and this copy of the schema is only ever read
+        // where the roster is empty — where `advertised_tools` withholds the tool entirely.
+        subagent_new_session_schema(&[]),
     );
     router.add_route(subagent_route(new_session_tool, |args| {
         Box::pin(subagent_new_session_tool(args))
