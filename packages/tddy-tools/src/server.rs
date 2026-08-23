@@ -1441,7 +1441,18 @@ fn refresh_internal_statuses(
 #[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for PermissionServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+        // `enable_tool_list_changed` is what makes the roster's live catalog reach the client at
+        // all: a client that was not told the list can change may ignore
+        // `notifications/tools/list_changed`, and Claude Code does — so without this declaration an
+        // agent attached after the handshake never appears in the tool list the client read once,
+        // and the exec tools it replaced are never taken away.
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_instructions(
             "Permission prompt tool for tddy-coder. Denies unexpected tool requests. \
              When **GITHUB_TOKEN** or **GH_TOKEN** is set, this server also exposes GitHub PR tools: \
              **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
@@ -2152,6 +2163,24 @@ mod tests {
     use tddy_workflow_recipes::orchestrate_pr_stack::github::{
         CheckRun, PrFile, PrIssueComment, PrReview,
     };
+
+    #[test]
+    fn mcp_server_declares_that_its_tool_list_can_change() {
+        // Given a server whose advertised set follows the live roster rather than the router
+        let server = PermissionServer::new();
+
+        // When the client reads the tools capability the handshake declares
+        let tools = server
+            .get_info()
+            .capabilities
+            .tools
+            .expect("the server must declare a tools capability");
+
+        // Then it says the list can change: a client never told that is entitled to ignore
+        // `notifications/tools/list_changed`, so an agent attached after the handshake would never
+        // reach the catalog the client already read.
+        assert_eq!(tools.list_changed, Some(true));
+    }
 
     #[test]
     fn mcp_server_get_info_mentions_github_pr_tools() {

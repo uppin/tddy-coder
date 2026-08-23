@@ -294,11 +294,30 @@ Verified independently of the implementers' reports, on 2026-08-23.
 No test file was modified during implementation: both test diffs are the red phase's, assertions and
 fixtures unchanged.
 
-**Not yet reflected on this host.** `/usr/local/bin/tddy-daemon` and `tddy-tools` were installed at
-18:00 from `d461774d`, so a session started now still meets the old gate — a split session started at
-18:08 logged `spawn seed carries 0 specialized agent def(s)` and `roster rev 0 applied`, and tddy-tools
-correctly withheld the subagent conversation tools. `sudo ./install --systemd --build` is what makes
-the change observable.
+### Live validation, and the one defect it found
+
+Session `01a02ff0` (split: agent on this host, codebase on `mac`) exercised the whole path for the
+first time. The seed worked: the codebase host resolved `fastcontext@mac`, wrote the record, and this
+host's in-jail `tddy-tools` logged `roster rev 1 applied for session 01a02ff0-…-8d9e045699c8` — the
+*codebase* session id, which is the roster it must follow. `spawn seed carries 0 specialized agent
+def(s)` on the agent host is expected and not a symptom: the env jail can only carry local defs, so a
+peer-owned agent travels by the roster instead.
+
+The agent still saw no `subagent_*` tools and still saw `Grep`. The cause was not in the roster at
+all — `PermissionServer::get_info` declared `tools` **without** `listChanged`, so the
+`notifications/tools/list_changed` sent on every applied revision was one the client was entitled to
+ignore, and Claude Code does ignore it (the same client log shows it skipping another undeclared
+capability by name). The live catalog `advertised_tools` computes was therefore unreachable: the
+client read `tools/list` once, at 18:44:53, one second before the first revision arrived.
+
+| File | Change |
+|---|---|
+| `packages/tddy-tools/src/server.rs` | `get_info` adds `.enable_tool_list_changed()`, so the client honours the notification the roster stream already sent |
+
+Pinned by `server::tests::mcp_server_declares_that_its_tool_list_can_change`. `cargo test -p
+tddy-tools` — 46 targets, all green (64 lib tests); `cargo clippy -p tddy-tools --all-targets -- -D
+warnings` clean. Observing it needs the new `tddy-tools` **on the agent host**: `sudo ./install
+--systemd --build`.
 
 ## Decisions & Trade-offs
 
