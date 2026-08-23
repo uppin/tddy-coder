@@ -477,14 +477,25 @@ pub fn verify_tcp_listen_port_free(port: u16) -> std::io::Result<()> {
     Ok(())
 }
 
-fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
-    for i in 0..GRPC_LISTEN_PORT_SEARCH_LEN {
-        let p = u32::from(DEFAULT_TDDY_CODER_GRPC_PORT).saturating_add(i);
+/// The first of `span` successive ports from `base` that `probe` accepts.
+///
+/// The search is separated from the probe so that what belongs to this code — which port is tried
+/// first, which failure is a reason to keep looking, where the walk stops, and what an exhausted
+/// range reports — can be decided without asking the host anything. A probe that really binds can
+/// only be asked whether one port happens to be free at this instant, which is a fact about the
+/// whole machine and not about this function.
+fn first_port_a_probe_accepts(
+    base: u16,
+    span: u32,
+    probe: impl Fn(u16) -> std::io::Result<()>,
+) -> std::io::Result<u16> {
+    for i in 0..span {
+        let p = u32::from(base).saturating_add(i);
         if p > u32::from(u16::MAX) {
             break;
         }
         let port = p as u16;
-        match verify_tcp_listen_port_free(port) {
+        match probe(port) {
             Ok(()) => return Ok(port),
             Err(e) if e.kind() == ErrorKind::AddrInUse => continue,
             Err(e) => return Err(e),
@@ -494,6 +505,14 @@ fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
         ErrorKind::AddrNotAvailable,
         "no free TCP port for tddy-coder gRPC in search range",
     ))
+}
+
+fn allocate_verified_grpc_listen_port() -> std::io::Result<u16> {
+    first_port_a_probe_accepts(
+        DEFAULT_TDDY_CODER_GRPC_PORT,
+        GRPC_LISTEN_PORT_SEARCH_LEN,
+        verify_tcp_listen_port_free,
+    )
 }
 
 /// How long a freshly started session is watched to prove it did not exit on startup, and how
@@ -1550,58 +1569,120 @@ default:
 
 #[cfg(test)]
 mod grpc_listen_port_tests {
+    //! What the daemon has to get right when it picks the port it will hand a child: it must skip a
+    //! port something already holds, stop at a refusal it cannot walk past, and say so rather than
+    //! run off the end of the port range.
+    //!
+    //! All three are asserted against a scripted probe. The one thing a real bind can be asked
+    //! deterministically — "does a port a listener is holding read as in use?" — is asserted against
+    //! the kernel below. Its mirror image cannot be: "this port is free" is a claim about the whole
+    //! host, which any other process on it can invalidate between the release and the assertion, so
+    //! asserting it reported a machine under load as a defect in code that had not changed. That the
+    //! probe leaves the port bindable is what the spawn path itself depends on — a probe that held on
+    //! to the port would show up as the child failing to bind the port it was given.
+
     use std::io::ErrorKind;
     use std::net::TcpListener;
 
-    use super::verify_tcp_listen_port_free;
+    use super::{first_port_a_probe_accepts, verify_tcp_listen_port_free};
 
-    /// A **held** listener on a port outside the range the kernel hands out on its own.
-    ///
-    /// Two things make a port fixture race, and this returns the listener rather than the number to
-    /// close the second one:
-    ///
-    /// - Binding `:0` draws from the ephemeral range (49152+ on macOS, 32768+ on Linux) — the very
-    ///   range the kernel re-issues to any other test binding `:0` at the same moment. Searching a
-    ///   fixed band below that range removes the kernel as a competitor; the pid-derived start
-    ///   offset keeps two concurrent test binaries from probing the same port first.
-    /// - Probing a port, releasing it, and handing back the *number* leaves a window in which
-    ///   anything at all can take it before the caller binds — which is how this fixture failed once
-    ///   in three loaded workspace runs, reported as `AddrInUse` on the caller's own bind. Ownership
-    ///   is never released here, so the caller binds exactly once: it inherits the listener.
-    fn a_listener_on_a_port_no_one_else_is_using() -> TcpListener {
-        const SEARCH_BASE: u16 = 20_000;
-        const SEARCH_SPAN: u16 = 8_000;
-        let start = (std::process::id() as u16) % SEARCH_SPAN;
-        for offset in 0..SEARCH_SPAN {
-            let port = SEARCH_BASE + (start + offset) % SEARCH_SPAN;
-            if let Ok(listener) = TcpListener::bind(("0.0.0.0", port)) {
-                return listener;
-            }
+    /// The base and span of a search, standing in for the gRPC defaults — the numbers themselves are
+    /// the caller's, so the tests name their own rather than reading production's.
+    const SEARCH_BASE: u16 = 41_000;
+    const SEARCH_SPAN: u32 = 4;
+
+    /// A probe that reports every port in `held` as taken and every other port as free.
+    fn a_probe_that_finds_held(held: &[u16]) -> impl Fn(u16) -> std::io::Result<()> + '_ {
+        move |port| match held.contains(&port) {
+            true => Err(std::io::Error::from(ErrorKind::AddrInUse)),
+            false => Ok(()),
         }
-        panic!(
-            "no free TCP port in {SEARCH_BASE}..{}",
-            SEARCH_BASE + SEARCH_SPAN
+    }
+
+    /// A probe that cannot answer at all — a bind refused for a reason walking to the next port would
+    /// not fix.
+    fn a_probe_that_is_not_allowed_to_bind() -> impl Fn(u16) -> std::io::Result<()> {
+        |_port| Err(std::io::Error::from(ErrorKind::PermissionDenied))
+    }
+
+    #[test]
+    fn the_search_takes_the_first_port_nothing_holds() {
+        // Given — a host where nothing in the range is taken
+        let probe = a_probe_that_finds_held(&[]);
+
+        // When
+        let port = first_port_a_probe_accepts(SEARCH_BASE, SEARCH_SPAN, probe);
+
+        // Then — the base itself, so a child gets the documented default whenever it is available
+        assert_eq!(port.expect("a free port"), SEARCH_BASE);
+    }
+
+    #[test]
+    fn the_search_steps_past_the_ports_something_already_holds() {
+        // Given — the base and the port after it are both taken
+        let probe = a_probe_that_finds_held(&[SEARCH_BASE, SEARCH_BASE + 1]);
+
+        // When
+        let port = first_port_a_probe_accepts(SEARCH_BASE, SEARCH_SPAN, probe);
+
+        // Then
+        assert_eq!(
+            port.expect("a free port past the taken ones"),
+            SEARCH_BASE + 2
         );
     }
 
     #[test]
-    fn verify_tcp_listen_port_free_ok_after_listener_dropped() {
-        // Given — a listener holding a port nothing else is competing for
-        let listener = a_listener_on_a_port_no_one_else_is_using();
-        let port = listener.local_addr().expect("the bound address").port();
+    fn a_range_with_nothing_free_left_in_it_reports_no_address_available() {
+        // Given — every port the search may try is taken
+        let all_of_them: Vec<u16> = (0..SEARCH_SPAN as u16).map(|i| SEARCH_BASE + i).collect();
+        let probe = a_probe_that_finds_held(&all_of_them);
 
-        // When — the listener goes away
-        drop(listener);
+        // When
+        let outcome = first_port_a_probe_accepts(SEARCH_BASE, SEARCH_SPAN, probe);
 
-        // Then — the port reads as free again
-        verify_tcp_listen_port_free(port).expect("port free after drop");
+        // Then — a distinct kind from the taken-port one, because the caller cannot retry its way out
+        let err = outcome.expect_err("an exhausted range is not a port");
+        assert_eq!(err.kind(), ErrorKind::AddrNotAvailable);
     }
 
     #[test]
-    fn verify_tcp_listen_port_free_err_addr_in_use() {
+    fn a_refusal_that_is_not_a_taken_port_stops_the_search() {
+        // Given — a bind refused for a reason the next port would be refused for too
+        let probe = a_probe_that_is_not_allowed_to_bind();
+
+        // When
+        let outcome = first_port_a_probe_accepts(SEARCH_BASE, SEARCH_SPAN, probe);
+
+        // Then — reported as itself, not retried into an exhausted-range error that hides the cause
+        let err = outcome.expect_err("a refusal is not a port");
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn the_search_stops_at_the_top_of_the_port_range() {
+        // Given — a base so high that the span runs past the last port that exists
+        let probe = a_probe_that_finds_held(&[u16::MAX]);
+
+        // When
+        let outcome = first_port_a_probe_accepts(u16::MAX, SEARCH_SPAN, probe);
+
+        // Then — the walk ends at the range's end rather than wrapping to a port it never verified
+        let err = outcome.expect_err("there is no port above the last one");
+        assert_eq!(err.kind(), ErrorKind::AddrNotAvailable);
+    }
+
+    #[test]
+    fn a_port_a_listener_still_holds_reads_as_in_use() {
+        // Given — a port held for as long as this test runs
         let holder = TcpListener::bind("0.0.0.0:0").expect("bind holder");
         let port = holder.local_addr().expect("addr").port();
-        let err = verify_tcp_listen_port_free(port).expect_err("second bind should fail");
+
+        // When
+        let outcome = verify_tcp_listen_port_free(port);
+
+        // Then — the one error kind the search is allowed to walk past
+        let err = outcome.expect_err("a held port is not free");
         assert_eq!(err.kind(), ErrorKind::AddrInUse);
     }
 }
