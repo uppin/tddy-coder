@@ -372,6 +372,27 @@ sees, so live withdrawal there is advisory until relaunch. Attaching an agent wi
 `replaces` to a non-managed session is therefore **refused**, rather than accepted and quietly
 unenforced.
 
+Three session shapes enforce a withdrawal, and it is worth being exact about the third, because the
+attach for a split session is routed to it:
+
+| Shape | Why the tool is refused on the path the call already takes |
+|---|---|
+| **Managed codebase** | The jail is what puts the agent's file tools at `mcp__tddy-tools__*`. |
+| **A split session's agent half** | No jail, but no codebase either: the spawn hard-disables every native filesystem tool, so the proxy is the only route it has. |
+| **A split session's codebase half** | The `workspace` session keeps the roster and receives the attach. It runs no agent loop; the withdrawal is enforced on the agent host, which the session names. |
+
+The third row turns on the **pairing**, not the session type. A `workspace` session is also what an
+operator's standalone checkout is, and what an agent clone's mirror is; neither has an agent anywhere
+whose tools a roster could take away. So the check reads the persisted back-pointer
+(`agent_daemon_instance_id` / `agent_session_id`, see
+[remote-managed-worktree.md](remote-managed-worktree.md) § `SessionMetadata`) and refuses a
+tool-replacing agent on a `workspace` session no agent works in — the same refusal a non-managed
+session gets, for the same reason.
+
+A `workspace` session created before that back-pointer existed carries none, so an agent that
+replaces tools is refused on it until the split session is restarted. Guessing the pairing from the
+session type is exactly the unenforced acceptance this refusal exists to prevent.
+
 ## Clones
 
 ### One clone per (session, remote daemon)

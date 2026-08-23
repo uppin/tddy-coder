@@ -132,6 +132,8 @@ mod tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 

@@ -282,6 +282,8 @@ fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgen
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         },
     )
     .expect("write session metadata");

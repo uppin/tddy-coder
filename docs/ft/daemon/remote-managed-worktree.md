@@ -134,6 +134,25 @@ This exists so a split start can name the B-side session **before** contacting B
 forward that times out leaves A knowing a session may have been created but not what it is called,
 and the teardown cannot run — see § Teardown.
 
+```proto
+// The agent half of a split placement: which session, on which daemon, works in the worktree the
+// `workspace` session being created holds. Honoured only for session_type "workspace" — and never
+// alongside `agent_clone`, since a checkout cannot be both a clone's mirror and a split session's
+// working tree. Both fields or neither: a daemon named with no session on it names a host but
+// nothing that works in the checkout.
+message SplitAgentPlacement {
+  string session_id = 1;
+  string agent_daemon_instance_id = 2;
+}
+SplitAgentPlacement split_agent = 35;
+```
+
+B cannot derive this from anything else in the request, and it needs it: B runs no agent, so
+"is a withdrawal attached to this checkout enforced anywhere, and where" is answerable only from
+what A tells it. The `workspace` session persists it, which is what makes the pairing readable from
+**either** half — the agent half already records the codebase half. See
+[session-agent-roster.md](session-agent-roster.md) § Enforced at two layers.
+
 ### `SessionEntry` (connection.proto)
 
 ```proto
@@ -155,7 +174,18 @@ string codebase_session_id = 30;
 pub codebase_daemon_instance_id: Option<String>,
 /// The paired `workspace` session id on that daemon. Absent for co-located sessions.
 pub codebase_session_id: Option<String>,
+/// The other direction, written on the B-side `workspace` session: the daemon running the agent
+/// that works in *this* worktree, and the session on it. Absent for every session but the codebase
+/// half of a split placement — a standalone workspace session and an agent clone's mirror included.
+pub agent_daemon_instance_id: Option<String>,
+pub agent_session_id: Option<String>,
 ```
+
+The back-pointer is load-bearing rather than informational. A tool the roster withdraws from a split
+session's main agent is refused inside the jail the **agent** half runs, and the attach that
+withdraws it is routed to the **codebase** half, where it reads that session's metadata. Without the
+pairing, a `workspace` session no agent works in is indistinguishable from one that is, and a
+tool-replacing agent is accepted onto it while nothing enforces the withdrawal.
 
 For a split session, host A's `.session.yaml` has **`repo_path: None`** — there is no repository on
 A. Every consumer that reads `repo_path` to reach a worktree must treat a split session as

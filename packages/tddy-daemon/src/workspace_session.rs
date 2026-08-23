@@ -27,6 +27,19 @@ pub struct WorkspaceBranchIntent<'a> {
     pub selected_branch_to_work_on: &'a str,
 }
 
+/// The agent session, on another daemon, that a `workspace` session is being created to hold the
+/// worktree for.
+///
+/// Persisted with the session because it is what makes a tool withdrawal on this checkout
+/// enforceable: the tool is refused inside the jail the *agent* half runs, so a checkout no agent
+/// works in can enforce nothing (`crate::split_session::paired_agent`). `None` for a standalone
+/// workspace session and for an agent clone's mirror, neither of which has an agent anywhere.
+#[derive(Debug, Clone)]
+pub struct PairedAgentSession {
+    pub daemon_instance_id: String,
+    pub session_id: String,
+}
+
 /// Create a workspace session: resolve the project, create a git worktree, write `.session.yaml`.
 ///
 /// **No room is opened here.** A session room belongs to the daemon running a session's *agent*
@@ -41,6 +54,7 @@ pub async fn start_workspace_session(
     sessions_base: PathBuf,
     project_id: &str,
     branch: &WorkspaceBranchIntent<'_>,
+    paired_agent: Option<&PairedAgentSession>,
     tddy_data_dir: &Path,
     request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
@@ -143,6 +157,11 @@ pub async fn start_workspace_session(
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        // The back-pointer is written with the session, not stamped on later: an attach that lands
+        // between the worktree being cut and a second write would read a session no agent is paired
+        // with and refuse the very withdrawal this placement exists to enforce.
+        agent_daemon_instance_id: paired_agent.map(|a| a.daemon_instance_id.clone()),
+        agent_session_id: paired_agent.map(|a| a.session_id.clone()),
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -278,6 +297,8 @@ pub async fn start_agent_clone_session(
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

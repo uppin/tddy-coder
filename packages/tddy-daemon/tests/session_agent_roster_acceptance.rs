@@ -204,6 +204,8 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     }
 }
 

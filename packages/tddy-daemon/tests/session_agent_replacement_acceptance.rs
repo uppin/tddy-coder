@@ -153,6 +153,25 @@ fn a_split_sessions_codebase_half_with_agents_available(
             // No jail on this host, and none needed: nothing runs an agent loop against this
             // checkout except the peer's tool calls, which arrive as `mcp__tddy-tools__*` already.
             sandbox: None,
+            // The agent half, recorded when this checkout was cut for it. It is what makes this a
+            // split session's codebase half rather than any other `workspace` session — see
+            // `a_workspace_session_no_agent_works_in` below.
+            agent_daemon_instance_id: Some("workstation-b".to_string()),
+            agent_session_id: Some("1780828020299-agent".to_string()),
+            ..a_session(session_id, "claude-cli", false)
+        },
+        agents,
+    )
+}
+
+/// A `workspace` session **no agent works in**: an operator's standalone checkout, or the mirror an
+/// agent clone reads. Structurally identical to the codebase half above but for the pairing, which
+/// is the point — the session type alone cannot tell them apart.
+fn a_workspace_session_no_agent_works_in(agents: &[(&str, &str)]) -> RosteredSession {
+    a_rostered_session(
+        |session_id| SessionMetadata {
+            session_type: Some("workspace".to_string()),
+            sandbox: None,
             ..a_session(session_id, "claude-cli", false)
         },
         agents,
@@ -241,6 +260,8 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     }
 }
 
@@ -470,6 +491,30 @@ async fn refuses_a_replacing_agent_on_a_session_whose_tools_it_cannot_reach() {
 
     // Then
     let status = result.expect_err("a replacing agent must be refused on a non-managed session");
+    assert_eq!(status.code(), Code::FailedPrecondition);
+    assert!(
+        status.message().contains("Grep"),
+        "the refusal must name the tool it could not withdraw, was: {}",
+        status.message()
+    );
+}
+
+/// The `workspace` session that is *not* a split session's codebase half. It looks like one — same
+/// session type, same absent jail — and the only thing separating them is the recorded pairing. With
+/// no agent anywhere, there is no main agent to take `Grep` from: accepting the attach would report
+/// an enforcement no process performs, which is the failure AC24 exists to prevent.
+#[tokio::test]
+async fn refuses_a_replacing_agent_on_a_workspace_session_no_agent_works_in() {
+    // Given
+    let session = a_workspace_session_no_agent_works_in(&[("explorer", "Grep")]);
+    let explorer = session.agent_id_for("explorer").await;
+
+    // When
+    let result = session.attach(&explorer).await;
+
+    // Then
+    let status =
+        result.expect_err("a replacing agent must be refused on a workspace nobody works in");
     assert_eq!(status.code(), Code::FailedPrecondition);
     assert!(
         status.message().contains("Grep"),

@@ -373,9 +373,10 @@ impl PermissionServer {
             tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
         }
         tools.retain(|tool| {
-            !visible
+            visible
                 .withdrawn_exec_tools
-                .contains_key(tool.name.as_ref())
+                .taken_over_by(tool.name.as_ref())
+                .is_none()
         });
         tools
     }

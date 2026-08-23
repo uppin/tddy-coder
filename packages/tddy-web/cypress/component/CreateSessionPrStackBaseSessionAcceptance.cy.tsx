@@ -210,9 +210,7 @@ it("lists only sessions that own a branch as stack-base options", () => {
 
   // Then only the branch-owning session is offered, behind the empty default — a branchless base
   // would fail the spawn gate for every descendant
-  createSessionPage
-    .prStackBaseSessionOptionValues()
-    .should("deep.equal", ["", SESSION_ON_BRANCH]);
+  createSessionPage.expectPrStackBaseSessionOptionValues(["", SESSION_ON_BRANCH]);
 });
 
 /**
@@ -240,7 +238,7 @@ it("offers no session from another project as a stack base", () => {
   mountPane(backend);
 
   // Then only the branch in this project is offered
-  createSessionPage.prStackBaseSessionOptionValues().should("deep.equal", ["", SESSION_ON_BRANCH]);
+  createSessionPage.expectPrStackBaseSessionOptionValues(["", SESSION_ON_BRANCH]);
 });
 
 it("offers no session from another host as a stack base", () => {
@@ -256,7 +254,7 @@ it("offers no session from another host as a stack base", () => {
   mountPane(backend);
 
   // Then only the branch on the host this orchestrator will run on is offered
-  createSessionPage.prStackBaseSessionOptionValues().should("deep.equal", ["", SESSION_ON_BRANCH]);
+  createSessionPage.expectPrStackBaseSessionOptionValues(["", SESSION_ON_BRANCH]);
 });
 
 it("offers no session that another orchestrator's stack already owns", () => {
@@ -274,7 +272,7 @@ it("offers no session that another orchestrator's stack already owns", () => {
   mountPane(backend);
 
   // Then only the unowned branch is offered
-  createSessionPage.prStackBaseSessionOptionValues().should("deep.equal", ["", SESSION_ON_BRANCH]);
+  createSessionPage.expectPrStackBaseSessionOptionValues(["", SESSION_ON_BRANCH]);
 });
 
 it("labels each stack-base option with the branch it would seed", () => {
@@ -286,12 +284,10 @@ it("labels each stack-base option with the branch it would seed", () => {
 
   // Then the operator picks by the branch, which is what the node is bound to — behind a default that
   // names what leaving it alone does
-  createSessionPage
-    .prStackBaseSessionOptionLabels()
-    .should("deep.equal", [
-      "None (agent plans the stack)",
-      `${SESSION_ON_BRANCH} — ${BRANCH_ON_IT}`,
-    ]);
+  createSessionPage.expectPrStackBaseSessionOptionLabels([
+    "None (agent plans the stack)",
+    `${SESSION_ON_BRANCH} — ${BRANCH_ON_IT}`,
+  ]);
 });
 
 // ---------------------------------------------------------------------------

@@ -285,6 +285,8 @@ fn a_stopped_split_session() -> SessionMetadata {
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: Some(CODEBASE_INSTANCE_ID.to_string()),
         codebase_session_id: Some(CODEBASE_SESSION_ID.to_string()),
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     }
 }
 

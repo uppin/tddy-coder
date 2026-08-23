@@ -14,6 +14,11 @@
 //! 3. **The project's configured default branch is honoured**, exactly as the claude-cli path
 //!    honours it, so a split session's worktree is not cut from a different base than a co-located
 //!    one would have been.
+//! 4. **The session records which agent works in the worktree.** A `workspace` session is also what
+//!    a standalone checkout and an agent clone's mirror are, and only the half of a split placement
+//!    has an agent whose tools a roster could take away — so the pairing is persisted rather than
+//!    inferred from the session type (§ Enforced at two layers in
+//!    docs/ft/daemon/session-agent-roster.md).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,7 +26,7 @@ use std::process::Command;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, SplitAgentPlacement, StartSessionRequest,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a38";
@@ -114,6 +119,27 @@ fn worktree_path_of(sessions_base: &Path, session_id: &str) -> PathBuf {
             .repo_path
             .expect("a workspace session must record the worktree it created"),
     )
+}
+
+/// The agent half a daemon names when it asks this host to hold a split session's worktree.
+fn an_agent_on_another_daemon() -> SplitAgentPlacement {
+    SplitAgentPlacement {
+        session_id: "019d105b-ac0f-78d3-9a89-409731145b01".to_string(),
+        agent_daemon_instance_id: "workstation-b".to_string(),
+    }
+}
+
+/// The agent session a workspace session recorded as working in its worktree, as
+/// `(daemon_instance_id, session_id)`, or `None` when it recorded none.
+fn paired_agent_of(sessions_base: &Path, session_id: &str) -> Option<(String, String)> {
+    let session_dir =
+        tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
+    let metadata =
+        tddy_core::read_session_metadata(&session_dir).expect("session metadata must be readable");
+    Some((
+        metadata.agent_daemon_instance_id?,
+        metadata.agent_session_id?,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -382,5 +408,132 @@ async fn a_workspace_session_cuts_its_new_branch_from_the_projects_configured_de
         git_stdout(&worktree, &["rev-parse", "HEAD"]),
         release_head,
         "the worktree must start from the project's configured default branch"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The agent the workspace is paired with
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_workspace_session_records_the_agent_session_it_holds_the_worktree_for() {
+    // Given
+    let repo = a_git_repo_with_two_branches();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(sessions_tmp.path(), repo.path(), None);
+    let service = test_service(sessions_tmp.path().to_path_buf());
+    let agent = an_agent_on_another_daemon();
+
+    // When the daemon placing a split session's worktree here names the agent half
+    let started = service
+        .start_session(Request::new(StartSessionRequest {
+            split_agent: Some(agent.clone()),
+            ..a_workspace_request()
+        }))
+        .await
+        .expect("a workspace session naming its agent half must start")
+        .into_inner();
+
+    // Then — persisted with the session, so the host that runs no agent of its own can still tell
+    // that a withdrawal attached to this checkout is enforced somewhere, and where
+    assert_eq!(
+        paired_agent_of(sessions_tmp.path(), &started.session_id),
+        Some((agent.agent_daemon_instance_id, agent.session_id)),
+        "the workspace session must record the agent working in its worktree"
+    );
+}
+
+#[tokio::test]
+async fn a_workspace_session_nobody_named_an_agent_for_is_paired_with_none() {
+    // Given
+    let repo = a_git_repo_with_two_branches();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(sessions_tmp.path(), repo.path(), None);
+    let service = test_service(sessions_tmp.path().to_path_buf());
+
+    // When a checkout is asked for with no agent half named, as an operator's own workspace is
+    let started = service
+        .start_session(Request::new(a_workspace_request()))
+        .await
+        .expect("a standalone workspace session must start")
+        .into_inner();
+
+    // Then — absent rather than guessed: there is no agent anywhere whose tools a roster attached
+    // here could take away, and a withdrawal accepted on it would be enforced by nothing
+    assert_eq!(
+        paired_agent_of(sessions_tmp.path(), &started.session_id),
+        None,
+        "a workspace session with no agent named must record no pairing"
+    );
+}
+
+#[tokio::test]
+async fn a_split_agent_placement_is_refused_for_a_session_type_that_does_not_support_it() {
+    // Given
+    let repo = a_git_repo_with_two_branches();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(sessions_tmp.path(), repo.path(), None);
+    let service = test_service(sessions_tmp.path().to_path_buf());
+
+    // When a claude-cli session claims an agent works in its worktree
+    let status = service
+        .start_session(Request::new(StartSessionRequest {
+            session_type: "claude-cli".to_string(),
+            model: "claude-opus-5".to_string(),
+            split_agent: Some(an_agent_on_another_daemon()),
+            ..a_workspace_request()
+        }))
+        .await
+        .expect_err("only workspace sessions hold a worktree for an agent elsewhere");
+
+    // Then — refused rather than dropped: a caller that believed the pairing was recorded would
+    // attach agents this session turns out not to enforce
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("split_agent"),
+        "the refusal must name the field; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn a_split_agent_placement_naming_a_daemon_but_no_session_is_refused() {
+    // Given
+    let repo = a_git_repo_with_two_branches();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(sessions_tmp.path(), repo.path(), None);
+    let service = test_service(sessions_tmp.path().to_path_buf());
+
+    // When the placement names a host but nothing on it
+    let status = service
+        .start_session(Request::new(StartSessionRequest {
+            split_agent: Some(SplitAgentPlacement {
+                session_id: String::new(),
+                ..an_agent_on_another_daemon()
+            }),
+            ..a_workspace_request()
+        }))
+        .await
+        .expect_err("half a pairing names nothing that works in the checkout");
+
+    // Then — refused rather than half-recorded, so the pairing the enforcement check reads back is
+    // never one nothing answers to
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("split_agent"),
+        "the refusal must name the field; got '{}'",
+        status.message()
     );
 }

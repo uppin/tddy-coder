@@ -46,14 +46,15 @@ use tddy_service::proto::connection::{
     ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
     SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
     SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
-    SignalSessionRequest, SignalSessionResponse, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
-    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
-    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
-    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
+    SignalSessionRequest, SignalSessionResponse, SplitAgentPlacement, StartSessionRequest,
+    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamSessionAgentsRequest,
+    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent,
+    TerminalHistoryChunk, TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest, WorkflowFileEntry,
+    WorktreeDirEntry, WorktreeRow, WorktreeSizeStatus as ProtoWorktreeSizeStatus,
+    WorktreeStatsEvent,
 };
 use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
@@ -2548,15 +2549,22 @@ fn refuse_unenforceable_withdrawal(
 /// - **A split session.** No jail here, but no codebase either: it spawns with every native
 ///   filesystem tool in `--disallowedTools`
 ///   ([`crate::split_session::split_claude_extra_args`]), so the proxy is the only route it has.
-/// - **A `workspace` session.** The codebase half of a split session, which is where that
-///   session's roster lives and where its attaches are routed — so this is the metadata the
-///   refusal above actually reads for a split session. It runs no agent loop of its own: the
-///   withdrawal is enforced by the agent host, and a split placement is only ever granted to a
-///   `claude-cli` session (`classify_codebase_placement`), which is the shape above.
+/// - **A `workspace` session an agent is paired with.** The codebase half of a split session, which
+///   is where that session's roster lives and where its attaches are routed — so this is the
+///   metadata the refusal above actually reads for a split session. It runs no agent loop of its
+///   own: the withdrawal is enforced by the agent host, and a split placement is only ever granted
+///   to a `claude-cli` session (`classify_codebase_placement`), which is the shape above.
+///
+/// The pairing is the whole of what that last arm turns on, not the session type. A `workspace`
+/// session is also what an operator's standalone checkout is, and what an agent clone's mirror is —
+/// neither has an agent anywhere whose tools could be taken away, so accepting a withdrawal on one
+/// would report an enforcement no process performs, which is the exact failure this refusal exists
+/// to prevent. Only a split placement records the back-pointer
+/// ([`crate::split_session::paired_agent`]), so only the half that has an agent qualifies.
 fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -> bool {
     meta.sandbox == Some(true)
         || crate::split_session::split_pairing(meta).is_some()
-        || meta.session_type.as_deref() == Some("workspace")
+        || crate::split_session::paired_agent(meta).is_some()
 }
 
 /// The qualified ids a persisted roster holds, for the resume paths that re-resolve each agent
@@ -2877,6 +2885,8 @@ async fn spawn_claude_cli_session_inner(
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -5108,6 +5118,8 @@ impl ConnectionServiceImpl {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -5542,6 +5554,8 @@ impl ConnectionServiceImpl {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -6638,6 +6652,57 @@ fn peer_has_no_such_session(status: &Status) -> bool {
     )
 }
 
+/// Validate `StartSessionRequest.split_agent`: the agent session, on another daemon, that a
+/// `workspace` session is being created to hold the worktree for.
+///
+/// Only `workspace` sessions accept one, for the same reason `requested_session_id` is restricted
+/// that way — it records a fact about a checkout, and no other session type has one to record. A
+/// caller sending it with any other type is refused rather than having it dropped: the field is what
+/// makes a withdrawal enforceable on that session, so silently ignoring it would accept a pairing
+/// that never got written and refuse the operator's agents later, on a session that looks paired
+/// from the caller's side.
+///
+/// An agent clone is refused the same way. Both fields describe what a `workspace` checkout is
+/// *for*, and a checkout cannot be both a clone's mirror and a split session's working tree.
+///
+/// Both halves of the placement are required. A daemon named with no session on it names a host but
+/// nothing that works in the checkout — see [`crate::split_session::paired_agent`], which reads back
+/// what this writes and applies the same rule.
+fn resolve_split_agent_placement(
+    split_agent: Option<&SplitAgentPlacement>,
+    session_type: &str,
+    is_agent_clone: bool,
+) -> Result<Option<workspace_session::PairedAgentSession>, Status> {
+    let Some(placement) = split_agent else {
+        return Ok(None);
+    };
+    let session_type = session_type.trim();
+    if session_type != "workspace" {
+        return Err(Status::invalid_argument(format!(
+            "split_agent is only supported for session_type \"workspace\", not {session_type:?}"
+        )));
+    }
+    if is_agent_clone {
+        return Err(Status::invalid_argument(
+            "split_agent and agent_clone describe what a workspace checkout is for, and a checkout \
+             cannot be both an agent clone's mirror and a split session's working tree",
+        ));
+    }
+    let agent_session_id = placement.session_id.trim();
+    let agent_daemon_instance_id = placement.agent_daemon_instance_id.trim();
+    if agent_session_id.is_empty() || agent_daemon_instance_id.is_empty() {
+        return Err(Status::invalid_argument(format!(
+            "split_agent placement is incomplete: session_id and agent_daemon_instance_id are both \
+             required to record which agent works in this workspace's worktree (got \
+             session_id={agent_session_id:?}, agent_daemon_instance_id={agent_daemon_instance_id:?})"
+        )));
+    }
+    Ok(Some(workspace_session::PairedAgentSession {
+        daemon_instance_id: agent_daemon_instance_id.to_string(),
+        session_id: agent_session_id.to_string(),
+    }))
+}
+
 /// Validate `StartSessionRequest.requested_session_id`: the id a caller asks the session to be
 /// created under instead of one this daemon generates.
 ///
@@ -6701,13 +6766,18 @@ impl ConnectionServiceImpl {
         })
     }
 
-    /// Route an exec-tool RPC by its requested `daemon_instance_id`, before any session lookup — a
-    /// relay holds no sessions of its own and must still be able to forward.
+    /// Route a session-scoped RPC by the daemon its `daemon_instance_id` addresses, before any
+    /// session lookup — a relay holds no sessions of its own and must still be able to forward.
+    ///
+    /// An unaddressed request (empty id) is this daemon's to serve: that is the protocol's other
+    /// spelling for "the daemon this call arrived on".
     ///
     /// Unlike [`Self::classify_daemon_route`], an unroutable id is `InvalidArgument`: the caller
     /// named a daemon that cannot serve the call, which is a bad request rather than a deployment
-    /// that is not ready. Shared by the unary and streaming handlers so they cannot diverge.
-    fn classify_exec_tool_route(
+    /// that is not ready. Shared by every handler that routes this way — the exec tools, the
+    /// worktree snapshot and the roster RPCs — so they cannot diverge over which daemon owns a
+    /// session's files or its roster.
+    fn classify_addressed_daemon_route(
         &self,
         rpc_name: &str,
         requested_daemon: &str,
@@ -6856,17 +6926,19 @@ impl ConnectionServiceImpl {
         })
     }
 
-    /// Serve a roster RPC on the daemon its `daemon_instance_id` names, when that is not this one.
+    /// Serve a unary RPC on the daemon its `daemon_instance_id` names, when that is not this one.
     ///
     /// `Ok(None)` means the call is this daemon's own to serve — an empty id, or this daemon's id.
     /// `rpc_name` is the proto method name, so a forwarded call lands on the same handler there.
     ///
-    /// Called **before** the session is looked up, for the reason `ExecuteTool` does the same: a
-    /// split session's roster lives on the daemon holding the codebase, while the agent's tools
-    /// address the daemon running its loop. Resolved out of this daemon's own sessions there, the
-    /// session does not exist at all — the in-jail roster stays empty, every subagent call is
-    /// refused, and the main agent is told it has no such tool (PRD AC12, AC28).
-    async fn roster_rpc_served_by_peer<Req, Resp>(
+    /// Called **before** the session is looked up, and before the caller is authenticated: a relay
+    /// holds neither the session nor, necessarily, an answer about its caller, and the daemon that
+    /// serves the call checks the token itself. A split session's roster and files live on the
+    /// daemon holding the codebase while the agent's tools address the daemon running its loop, so
+    /// resolved out of this daemon's own sessions the session does not exist at all — the in-jail
+    /// roster stays empty, every subagent call is refused, and the main agent is told it has no such
+    /// tool (PRD AC12, AC28).
+    async fn rpc_served_by_peer<Req, Resp>(
         &self,
         rpc_name: &str,
         requested_daemon: &str,
@@ -6877,7 +6949,7 @@ impl ConnectionServiceImpl {
         Resp: prost::Message + Default,
     {
         let PeerRoute::Forward { peer_instance_id } =
-            self.classify_exec_tool_route(rpc_name, requested_daemon)?
+            self.classify_addressed_daemon_route(rpc_name, requested_daemon)?
         else {
             return Ok(None);
         };
@@ -6895,10 +6967,10 @@ impl ConnectionServiceImpl {
             .map_err(|e| Status::internal(format!("decode {rpc_name} response from peer: {e}")))
     }
 
-    /// [`Self::roster_rpc_served_by_peer`] for a **server-streaming** roster RPC: the peer's frames
-    /// are relayed one by one, and a stream that stops without its end-of-stream marker terminates as
-    /// an error rather than as a short roster the caller would take for the whole one.
-    async fn roster_stream_served_by_peer<Req, Frame>(
+    /// [`Self::rpc_served_by_peer`] for a **server-streaming** RPC: the peer's frames are relayed
+    /// one by one, and a stream that stops without its end-of-stream marker terminates as an error
+    /// rather than as a short roster the caller would take for the whole one.
+    async fn stream_served_by_peer<Req, Frame>(
         &self,
         rpc_name: &str,
         requested_daemon: &str,
@@ -6909,7 +6981,7 @@ impl ConnectionServiceImpl {
         Frame: prost::Message + Default + Send + 'static,
     {
         let PeerRoute::Forward { peer_instance_id } =
-            self.classify_exec_tool_route(rpc_name, requested_daemon)?
+            self.classify_addressed_daemon_route(rpc_name, requested_daemon)?
         else {
             return Ok(None);
         };
@@ -7335,12 +7407,19 @@ impl ConnectionServiceImpl {
         // browser's Docs listing, both of which act against *this* session on *this* daemon. Sending
         // them on would put a second copy on a host with no reader for it, and pay the transfer
         // inside the forward's deadline to do so.
+        // Named in the request rather than left for the peer to infer: the workspace session
+        // persists it, and it is what tells that host — which runs no agent of its own — that a
+        // withdrawal attached to this checkout is enforced against an agent somewhere, and where.
         let workspace_req = StartSessionRequest {
             session_type: "workspace".to_string(),
             daemon_instance_id: String::new(),
             codebase_daemon_instance_id: String::new(),
             requested_session_id: codebase_session_id.clone(),
             attachments: Vec::new(),
+            split_agent: Some(SplitAgentPlacement {
+                session_id: session_id.clone(),
+                agent_daemon_instance_id: local_instance_id_for_config(&self.config),
+            }),
             ..req.clone()
         };
         let forwarded = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
@@ -7579,6 +7658,8 @@ impl ConnectionServiceImpl {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
             codebase_session_id: Some(codebase_session_id.to_string()),
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -7842,6 +7923,11 @@ impl ConnectionServiceImpl {
         // and leaving the caller pointing at a session that does not exist.
         let caller_chosen_session_id =
             resolve_caller_chosen_session_id(&req.requested_session_id, req.session_type.trim())?;
+        let paired_agent = resolve_split_agent_placement(
+            req.split_agent.as_ref(),
+            req.session_type.trim(),
+            req.agent_clone.is_some(),
+        )?;
 
         // Validate cheap, session-type-specific inputs before the (potentially expensive) project
         // auto-provision below: claude-cli always requires a model, so reject an empty one up front
@@ -7995,6 +8081,7 @@ impl ConnectionServiceImpl {
                         selected_integration_base_ref: req.selected_integration_base_ref.trim(),
                         selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
                     },
+                    paired_agent.as_ref(),
                     &self.tddy_data_dir,
                     timeout,
                 )
@@ -8781,7 +8868,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // Route BEFORE session lookup so a split session's roster is written where it is kept.
         if let Some(roster) = self
-            .roster_rpc_served_by_peer("AttachSessionAgent", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer("AttachSessionAgent", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -8855,7 +8942,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Route BEFORE session lookup: a detach served here leaves the entry standing on the daemon
         // whose roster actually holds it.
         if let Some(roster) = self
-            .roster_rpc_served_by_peer("DetachSessionAgent", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer("DetachSessionAgent", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -8932,7 +9019,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Route BEFORE session lookup: answered locally, a session that lives on another daemon reads
         // as one with no agents — an answer about the wrong host, indistinguishable from the truth.
         if let Some(roster) = self
-            .roster_rpc_served_by_peer("ListSessionAgents", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer("ListSessionAgents", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(roster));
@@ -8962,7 +9049,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Route BEFORE session lookup. This is the call a split session's in-jail `tddy-tools` makes
         // first, and the daemon it addresses is not the one keeping the roster it subscribes to.
         if let Some(rx) = self
-            .roster_stream_served_by_peer("StreamSessionAgents", &req.daemon_instance_id, &req)
+            .stream_served_by_peer("StreamSessionAgents", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(MpscResultStream { rx }));
@@ -9039,7 +9126,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // the daemon holding it. Distinct from the forward further down, which follows the *agent's*
         // owning daemon once the roster entry naming it has been read.
         if let Some(opened) = self
-            .roster_rpc_served_by_peer("OpenAgentConversation", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer("OpenAgentConversation", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(opened));
@@ -9132,7 +9219,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // daemon holding the roster is not one this daemon can prompt, so served here it would report
         // "not open" for a conversation that is.
         if let Some(rx) = self
-            .roster_stream_served_by_peer("PromptAgentConversation", &req.daemon_instance_id, &req)
+            .stream_served_by_peer("PromptAgentConversation", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(MpscResultStream { rx }));
@@ -9254,7 +9341,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Route BEFORE session lookup, and before the conversation map: a cancel that does not reach
         // the daemon the turn is running on cancels nothing while reporting that it did.
         if let Some(cancelled) = self
-            .roster_rpc_served_by_peer("CancelAgentConversation", &req.daemon_instance_id, &req)
+            .rpc_served_by_peer("CancelAgentConversation", &req.daemon_instance_id, &req)
             .await?
         {
             return Ok(Response::new(cancelled));
@@ -11481,21 +11568,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
 
         // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
-        if let PeerRoute::Forward { peer_instance_id } =
-            self.classify_exec_tool_route("ExecuteTool", &req.daemon_instance_id)?
+        if let Some(answered) = self
+            .rpc_served_by_peer("ExecuteTool", &req.daemon_instance_id, &req)
+            .await?
         {
-            let slot = self.common_room_slot("ExecuteTool")?;
-            let out = crate::livekit_peer_discovery::forward_to_peer(
-                slot,
-                &peer_instance_id,
-                "connection.ConnectionService",
-                "ExecuteTool",
-                req.encode_to_vec(),
-            )
-            .await?;
-            let inner = ExecuteToolResponse::decode(out.as_slice())
-                .map_err(|e| Status::internal(format!("decode ExecuteToolResponse: {e}")))?;
-            return Ok(Response::new(inner));
+            return Ok(Response::new(answered));
         }
 
         // Auth before *any* worktree is chosen, because the hosted-clone branch below chooses one
@@ -11540,7 +11617,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
 
         if let PeerRoute::Forward { peer_instance_id } =
-            self.classify_exec_tool_route("StreamExecuteTool", &req.daemon_instance_id)?
+            self.classify_addressed_daemon_route("StreamExecuteTool", &req.daemon_instance_id)?
         {
             let slot = self.common_room_slot("StreamExecuteTool")?;
             // A forwarded stream that stalls terminates as an *error*, so a truncated tool result
@@ -12777,24 +12854,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         // Routed exactly like ExecuteTool, and for the same reason: the caller names the daemon it
         // believes holds the checkout, and a session room on the agent's daemon polls a remote
-        // checkout by addressing the codebase daemon. Reusing that classifier keeps one answer to
-        // "which daemon owns this session's files".
-        match self.classify_exec_tool_route("GetWorktreeSnapshot", &req.daemon_instance_id)? {
-            PeerRoute::Local => {}
-            PeerRoute::Forward { peer_instance_id } => {
-                let slot = self.common_room_slot("GetWorktreeSnapshot")?;
-                let out = crate::livekit_peer_discovery::forward_to_peer(
-                    slot,
-                    &peer_instance_id,
-                    "connection.ConnectionService",
-                    "GetWorktreeSnapshot",
-                    req.encode_to_vec(),
-                )
-                .await?;
-                let inner = GetWorktreeSnapshotResponse::decode(out.as_slice())
-                    .map_err(|e| Status::internal(format!("decoding peer snapshot: {e}")))?;
-                return Ok(Response::new(inner));
-            }
+        // checkout by addressing the codebase daemon. Sharing the classifier and the forward keeps
+        // one answer to "which daemon owns this session's files".
+        if let Some(answered) = self
+            .rpc_served_by_peer("GetWorktreeSnapshot", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
         }
 
         // The measurement is assembled here, where the files are, and shells out to git — so it
@@ -14644,6 +14710,8 @@ mod signal_session_unit_tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -15073,6 +15141,8 @@ mod list_sessions_unit_tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -15172,6 +15242,8 @@ mod report_session_status_unit_tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }
@@ -15276,6 +15348,8 @@ mod report_session_status_unit_tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -15400,6 +15474,8 @@ mod agent_activity_unit_tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(session_dir, &metadata).unwrap();
     }

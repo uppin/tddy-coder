@@ -232,23 +232,36 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect).should("not.exist");
   },
 
-  /** The session ids offered as stack bases, in option order. The default option's value is "". */
-  prStackBaseSessionOptionValues: (): Cypress.Chainable<string[]> =>
+  /**
+   * The session ids offered as stack bases, in option order — the default option's value is "".
+   *
+   * Asserted rather than yielded, because the options are drawn from `ListSessions`: until that
+   * answer lands the picker holds its default alone, and reading the options into a plain array
+   * settles on whichever list happened to be mounted first instead of retrying until the offered one
+   * is there.
+   */
+  expectPrStackBaseSessionOptionValues(sessionIds: string[]) {
     createSessionPage
       .prStackBaseSessionSelect()
       .find("option")
-      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+      .should(($opts) => {
+        expect([...$opts].map((el) => (el as HTMLOptionElement).value)).to.deep.equal(sessionIds);
+      });
+  },
 
   /**
    * The stack-base options' visible labels, in option order — what the operator actually reads when
-   * picking a base. Yields a plain array so a test states the whole offered list, and its order, in
-   * one assertion.
+   * picking a base. States the whole offered list, and its order, in one assertion, and retries for
+   * the same reason as {@link expectPrStackBaseSessionOptionValues}.
    */
-  prStackBaseSessionOptionLabels: (): Cypress.Chainable<string[]> =>
+  expectPrStackBaseSessionOptionLabels(labels: string[]) {
     createSessionPage
       .prStackBaseSessionSelect()
       .find("option")
-      .then(($opts) => [...$opts].map((el) => el.textContent ?? "")),
+      .should(($opts) => {
+        expect([...$opts].map((el) => el.textContent ?? "")).to.deep.equal(labels);
+      });
+  },
 
   /** Choose the existing session whose branch seeds the new orchestrator's stack. */
   selectPrStackBaseSession(sessionId: string) {

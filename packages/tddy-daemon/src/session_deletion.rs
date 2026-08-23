@@ -399,6 +399,8 @@ mod tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(dir, &metadata).unwrap();
     }
@@ -533,6 +535,8 @@ mod tests {
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&dir, &metadata).unwrap();
 

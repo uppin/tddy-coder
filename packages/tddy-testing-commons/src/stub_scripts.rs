@@ -225,6 +225,24 @@ mod tests {
         tempfile::tempdir().expect("temp dir")
     }
 
+    /// Held for the whole of any test that writes a stub and then executes it.
+    ///
+    /// `fork` hands the child every descriptor the process has open, and `O_CLOEXEC` only closes
+    /// them at `execve` — so while one test is between forking and exec'ing, its child still holds
+    /// another test's in-flight write handle to *that* test's stub, and Linux answers the second
+    /// test's `execve` with `ETXTBSY`. Which pair loses the race varies per run, which is why this
+    /// suite failed on a different test each time. Serialising the forks removes the overlap
+    /// outright; the whole set runs in well under a second, so there is nothing to reclaim by
+    /// letting them interleave.
+    fn only_one_test_at_a_time_may_fork() -> std::sync::MutexGuard<'static, ()> {
+        static NO_OVERLAPPING_FORKS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // A panicking test poisons the lock; taking the value anyway keeps that test the only
+        // failure instead of turning it into a cascade of poison errors.
+        NO_OVERLAPPING_FORKS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn run(script: &Path, args: &[&str]) {
         let status = Command::new(script)
             .args(args)
@@ -235,6 +253,7 @@ mod tests {
 
     #[test]
     fn a_recording_stub_reports_the_argv_it_was_invoked_with() {
+        let _no_overlapping_forks = only_one_test_at_a_time_may_fork();
         // Given
         let dir = a_temp_dir();
         let argv_file = dir.path().join("argv.txt");
@@ -258,6 +277,7 @@ mod tests {
 
     #[test]
     fn a_recording_stub_leaves_no_temp_file_behind() {
+        let _no_overlapping_forks = only_one_test_at_a_time_may_fork();
         // Given — the temp file is an implementation detail of the atomic write; a reader
         // globbing the directory must not trip over it
         let dir = a_temp_dir();
@@ -280,6 +300,7 @@ mod tests {
 
     #[test]
     fn an_appending_stub_keeps_one_whole_line_per_invocation() {
+        let _no_overlapping_forks = only_one_test_at_a_time_may_fork();
         // Given
         let dir = a_temp_dir();
         let argv_log = dir.path().join("argv.log");
@@ -301,6 +322,7 @@ mod tests {
 
     #[test]
     fn an_appending_stub_writes_each_invocation_in_a_single_append() {
+        let _no_overlapping_forks = only_one_test_at_a_time_may_fork();
         // Given — the property that makes a partially-observed argv impossible. A torn record
         // would show up as more lines than invocations, which is exactly the failure this
         // module exists to prevent.
@@ -321,6 +343,7 @@ mod tests {
 
     #[test]
     fn a_prelude_runs_before_the_argv_is_recorded() {
+        let _no_overlapping_forks = only_one_test_at_a_time_may_fork();
         // Given — a stub that answers a subcommand and exits without recording, the shape the
         // cursor-agent stub needs for `create-chat`
         let dir = a_temp_dir();
