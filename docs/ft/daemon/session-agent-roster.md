@@ -533,6 +533,12 @@ one every non-managed session already is.
 the value threaded into `specializedAgents` is the qualified `agent_id`. One daemon failing to answer
 costs one error row, never the picker.
 
+The picker is **withdrawn** once the codebase is placed on another host: a split session's roster is
+not seeded at start, and the daemon refuses `specialized_agents` by name
+(remote-managed-worktree.md § What a split session cannot also ask for). Its agents are attached
+after the session starts, from the Agent roster pane. Bringing the codebase back to the session's
+own host restores the picker — the withdrawal is a property of the split, not a one-way door.
+
 ### Agent roster pane (new)
 
 An **Agent roster** section in the session inspector — distinct from the existing "Session agents"
@@ -604,6 +610,10 @@ peer-session section, which is about child sessions and is untouched.
     the reason.
 25. `build_claude_allowlist` / `build_claude_disallowlist` are computed from the **persisted roster**
     at spawn and at resume, so a session resumed after an attach launches with the tool withdrawn.
+    For a **split** session the persisted roster lives on the codebase daemon, so the resume reads
+    it from there and is **refused** when that host cannot be reached — an empty roster read from an
+    unreachable peer is indistinguishable from no agents, and would relaunch the main agent holding
+    the tool the operator gave away (remote-managed-worktree.md § Resume).
 
 ### Remote agents
 

@@ -107,19 +107,85 @@ pub fn split_context_dir(session_dir: &Path) -> PathBuf {
 /// context dir, it is not made read-only: there the jail mounts it read-only, while here what keeps
 /// the agent out of it is the tool disallowlist, and `claude` still needs a writable cwd.
 ///
+/// `withdrawals` names each roster agent beside the tools it took over, so the notice says where a
+/// withdrawn tool went. Without it the main agent is left to discover mid-turn that a tool it can
+/// see is refused, with nothing telling it which agent to ask instead. An empty slice renders the
+/// plain notice, byte for byte — the ordinary split session, which has no agents.
+///
 /// TODO(remote-managed-worktree): sync the codebase host's `CLAUDE.md` / `AGENTS.md` / skills into
 /// this directory. Until then a split session's agent sees the notice but not the project's own
 /// guidance, which the co-located managed-codebase path does copy from the worktree.
-pub fn build_split_context_dir(session_dir: &Path) -> Result<PathBuf, Status> {
+pub fn build_split_context_dir(
+    session_dir: &Path,
+    withdrawals: &[(String, Vec<String>)],
+) -> Result<PathBuf, Status> {
     let context_dir = split_context_dir(session_dir);
     std::fs::create_dir_all(&context_dir)
         .map_err(|e| Status::internal(format!("failed to create split context dir: {e}")))?;
+    let borrowed = borrowed_withdrawals(withdrawals);
+    let replacements = subagent_replacements(withdrawals, &borrowed);
     std::fs::write(
         context_dir.join("CLAUDE.md"),
-        tddy_sandbox::SANDBOX_REMOTE_APPENDIX.trim_start(),
+        tddy_sandbox::sandbox_remote_appendix(&replacements).trim_start(),
     )
     .map_err(|e| Status::internal(format!("failed to write split context CLAUDE.md: {e}")))?;
     Ok(context_dir)
+}
+
+/// The `(agent, withdrawn tools)` pairs a session's roster imposes, from the roster as the daemon
+/// holding it serves it over the wire.
+///
+/// A split session's roster lives on the daemon holding its codebase, so the host running the agent
+/// only ever sees it as wire entries — never as the `.session.yaml` records
+/// [`crate::connection_service::roster_replacement_pairs`] reads on the co-located paths. Same rule
+/// and the same normalizer as those: each entry's own snapshot of `replaces`, spelled as the exec
+/// catalog spells it, or the allowlist this feeds would filter on a name that is not in it and drop
+/// nothing.
+pub fn wire_roster_withdrawals(
+    agents: &[tddy_service::proto::connection::SessionAgentEntry],
+) -> Vec<(String, Vec<String>)> {
+    agents
+        .iter()
+        .map(|agent| {
+            (
+                agent.name.clone(),
+                tddy_discovery::subagent::normalize_replaced_tools(&agent.replaces),
+            )
+        })
+        .collect()
+}
+
+/// Every tool the roster withdraws from the main agent, once each: the union across its agents,
+/// which is the rule (PRD § Tool replacement, AC19).
+fn withdrawn_tools(withdrawals: &[(String, Vec<String>)]) -> Vec<String> {
+    tddy_discovery::subagent::normalize_replaced_tools(
+        &withdrawals
+            .iter()
+            .flat_map(|(_, tools)| tools.clone())
+            .collect::<Vec<String>>(),
+    )
+}
+
+/// The withdrawn tool names as borrowed slices, one `Vec` per agent — the storage
+/// [`subagent_replacements`] borrows from, kept separate because
+/// [`tddy_sandbox::SubagentReplacement`] holds `&[&str]`.
+fn borrowed_withdrawals(withdrawals: &[(String, Vec<String>)]) -> Vec<Vec<&str>> {
+    withdrawals
+        .iter()
+        .map(|(_, tools)| tools.iter().map(String::as_str).collect())
+        .collect()
+}
+
+/// The per-agent breakdown the appendix renders, over storage from [`borrowed_withdrawals`].
+fn subagent_replacements<'a>(
+    withdrawals: &'a [(String, Vec<String>)],
+    borrowed: &'a [Vec<&'a str>],
+) -> Vec<tddy_sandbox::SubagentReplacement<'a>> {
+    withdrawals
+        .iter()
+        .zip(borrowed.iter())
+        .map(|((name, _), replaced)| tddy_sandbox::SubagentReplacement { name, replaced })
+        .collect()
 }
 
 /// Filename of the MCP server's log, under the session directory.
@@ -146,9 +212,17 @@ pub fn split_mcp_log_path(session_dir: &Path) -> PathBuf {
 ///
 /// The MCP config is written under `session_dir` rather than the context directory so the agent's
 /// cwd holds only guidance.
+///
+/// `withdrawals` is what this session's roster takes away from the main agent — `(agent, tools)`
+/// pairs, from [`wire_roster_withdrawals`] over the roster its codebase daemon serves. It is the
+/// first of the two layers a withdrawal is enforced at (PRD § Enforced at two layers): the second
+/// is `tddy-tools`, which stops advertising a withdrawn tool and refuses a call to one. Both are
+/// needed. Without this layer the withdrawn tool stays *pre-approved*, so the main agent is invited
+/// to reach for it and meets the second layer's refusal mid-turn, every turn.
 pub fn split_claude_extra_args(
     session_dir: &Path,
     tddy_tools_path: &str,
+    withdrawals: &[(String, Vec<String>)],
 ) -> Result<Vec<String>, Status> {
     // Every tool call a split session makes crosses LiveKit to the codebase daemon, and every way
     // that can fail is reported by `tddy-tools` itself. Claude Code captures an MCP server's stderr,
@@ -171,16 +245,42 @@ pub fn split_claude_extra_args(
     )
     .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
 
+    let withdrawn = withdrawn_tools(withdrawals);
+    let withdrawn_refs: Vec<&str> = withdrawn.iter().map(String::as_str).collect();
+
     let mut args = Vec::new();
-    // Nothing is replaced by a subagent here: the exec tools are all reachable, they simply execute
-    // on the codebase daemon.
-    for tool in tddy_sandbox_recipes::build_claude_allowlist(false, &[]) {
+    // Every exec tool the roster leaves alone is pre-approved: they are all reachable, they simply
+    // execute on the codebase daemon. The subagent tools are pre-approved whether or not this
+    // session has agents *yet* — unlike the jail, which reads a seed fixed at spawn, a split
+    // session's roster is live and an operator may attach an agent at minute forty, while Claude's
+    // own lists are fixed for the life of the process they were passed to. Nothing is granted by
+    // pre-approving them on a session with no agents: `tddy-tools` advertises them only while the
+    // roster has someone to address, so the flag names a tool the model is never offered.
+    let subagent_tools_are_pre_approved = true;
+    for tool in tddy_sandbox_recipes::build_claude_allowlist(
+        subagent_tools_are_pre_approved,
+        &withdrawn_refs,
+    ) {
         args.push("--allowedTools".to_string());
         args.push(tool);
     }
-    for tool in NATIVE_FILESYSTEM_TOOLS {
+    // Dropping a tool from `--allowedTools` only un-pre-approves it. A split session's *native*
+    // routes are already hard-disabled below, but a withdrawn tool's proxied `mcp__tddy-tools__`
+    // form is the route this agent actually had, and it stays callable through the permission
+    // prompt until `--disallowedTools` names it (`PermissionServer::decide` allows every
+    // `mcp__tddy-tools__*` call it is asked about).
+    let mut disallowed: Vec<String> = NATIVE_FILESYSTEM_TOOLS
+        .iter()
+        .map(|tool| (*tool).to_string())
+        .collect();
+    for tool in tddy_sandbox_recipes::build_claude_disallowlist(&withdrawn_refs) {
+        if !disallowed.contains(&tool) {
+            disallowed.push(tool);
+        }
+    }
+    for tool in disallowed {
         args.push("--disallowedTools".to_string());
-        args.push((*tool).to_string());
+        args.push(tool);
     }
     args.push("--permission-prompt-tool".to_string());
     args.push(PERMISSION_PROMPT_TOOL.to_string());
@@ -393,16 +493,43 @@ impl SplitLiveKitRoom {
     }
 }
 
+/// Which session is being spawned, and the checkout on a peer it is paired with.
+///
+/// Grouped rather than passed loose because all four are `&str` and three of them are ids: the
+/// session's own, the peer's, and the session's on that peer. Positional arguments of one type are
+/// exactly what a rename or an inserted parameter silently transposes, and transposing these two
+/// session ids wires an agent to the wrong checkout — which the caller cannot see, because the
+/// wiring it gets back looks the same either way.
+pub struct SplitSpawnTarget<'a> {
+    /// The split session's own id, on the daemon running the agent.
+    pub session_id: &'a str,
+    /// The peer holding the codebase, worktree and roster.
+    pub codebase_instance_id: &'a str,
+    /// This session's id *on that peer* — the `workspace` session that owns the worktree.
+    pub codebase_session_id: &'a str,
+    /// The caller's credential, from which the agent's own is minted. Never forwarded as-is.
+    pub session_token: &'a str,
+}
+
 /// Assemble everything the agent spawn needs, minting a fresh join token.
+///
+/// `withdrawals` is the session's roster as [`wire_roster_withdrawals`] renders it — read from the
+/// codebase daemon, since that is the host that holds it. It reaches both halves of the spawn: the
+/// context dir's appendix names the agent each tool went to, and Claude's own tool flags stop
+/// pre-approving the tools the roster took away.
 pub fn prepare_split_agent_wiring(
     config: &crate::config::DaemonConfig,
     session_dir: &Path,
     tddy_tools_path: &str,
-    session_id: &str,
-    codebase_instance_id: &str,
-    codebase_session_id: &str,
-    session_token: &str,
+    target: &SplitSpawnTarget<'_>,
+    withdrawals: &[(String, Vec<String>)],
 ) -> Result<SplitAgentWiring, Status> {
+    let SplitSpawnTarget {
+        session_id,
+        codebase_instance_id,
+        codebase_session_id,
+        session_token,
+    } = *target;
     // This session's own room, hosted by this daemon — the one running the agent, and therefore the
     // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
     // codebase daemon hosts no room, so a room named after its session would be one nobody is in.
@@ -417,8 +544,8 @@ pub fn prepare_split_agent_wiring(
         session_token,
     )?;
     Ok(SplitAgentWiring {
-        context_dir: build_split_context_dir(session_dir)?,
-        extra_args: split_claude_extra_args(session_dir, tddy_tools_path)?,
+        context_dir: build_split_context_dir(session_dir, withdrawals)?,
+        extra_args: split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
         env: remote.env_pairs(),
     })
 }
@@ -701,7 +828,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // When
-        let args = split_claude_extra_args(tmp.path(), "/usr/bin/tddy-tools").expect("extra args");
+        let args = split_args_with_no_agents(tmp.path());
 
         // Then — dropping a tool from --allowedTools only un-pre-approves it; --disallowedTools is
         // what makes a native Read or Bash impossible rather than merely discouraged
@@ -734,7 +861,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // When
-        let args = split_claude_extra_args(tmp.path(), "/usr/bin/tddy-tools").expect("extra args");
+        let args = split_args_with_no_agents(tmp.path());
 
         // Then — without this, Claude Code merges the user-scoped MCP configuration on top of ours,
         // and a filesystem or shell server configured there would run beside tddy-tools, outside
@@ -821,7 +948,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // When
-        let args = split_claude_extra_args(tmp.path(), "/usr/bin/tddy-tools").expect("extra args");
+        let args = split_args_with_no_agents(tmp.path());
 
         // Then — every remote tool call's failures (room connect, peer absent, truncated stream)
         // are reported by tddy-tools, and Claude Code captures an MCP server's stderr: without a
@@ -860,13 +987,189 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // When
-        let context = build_split_context_dir(tmp.path()).expect("context dir");
+        let context = build_split_context_dir(tmp.path(), &[]).expect("context dir");
 
         // Then — an agent that opened its cwd expecting a repository learns why it is empty
         let claude_md = std::fs::read_to_string(context.join("CLAUDE.md")).expect("CLAUDE.md");
         assert!(
             claude_md.contains("mcp__tddy-tools__"),
             "the notice must name the tools that reach the real codebase; got:\n{claude_md}"
+        );
+    }
+
+    // ─── the roster's withdrawal, at the flag layer ──────────────────────────────
+
+    /// One roster entry as the codebase daemon serves it over the wire — a name and what it takes
+    /// over from the main agent is all a spawn reads off an entry.
+    fn an_agent_on_the_roster(
+        name: &str,
+        replaces: &[&str],
+    ) -> tddy_service::proto::connection::SessionAgentEntry {
+        tddy_service::proto::connection::SessionAgentEntry {
+            agent_id: format!("{name}@codebase-host"),
+            name: name.to_string(),
+            daemon_instance_id: "codebase-host".to_string(),
+            label: format!("{name} (codebase-host)"),
+            model: "qwen2.5-coder:7b".to_string(),
+            replaces: replaces.iter().map(|t| (*t).to_string()).collect(),
+            tools: vec!["Read".to_string(), "Glob".to_string(), "Grep".to_string()],
+            codebase_session_id: String::new(),
+            clone_state: 0,
+            clone_error: String::new(),
+        }
+    }
+
+    /// The flags a split session spawns with while nothing is attached to it.
+    fn split_args_with_no_agents(session_dir: &Path) -> Vec<String> {
+        split_claude_extra_args(session_dir, "/usr/bin/tddy-tools", &[]).expect("extra args")
+    }
+
+    /// The flags a split session spawns with, given the roster its codebase daemon holds.
+    fn split_args_for_roster(
+        session_dir: &Path,
+        agents: &[tddy_service::proto::connection::SessionAgentEntry],
+    ) -> Vec<String> {
+        split_claude_extra_args(
+            session_dir,
+            "/usr/bin/tddy-tools",
+            &wire_roster_withdrawals(agents),
+        )
+        .expect("extra args")
+    }
+
+    /// The values of every occurrence of `flag`, in the order the argv carries them.
+    fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+        args.windows(2)
+            .filter(|w| w[0] == flag)
+            .map(|w| w[1].as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_replaced_tool_is_no_longer_pre_approved() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When — an agent on this session's roster has taken Grep over
+        let args =
+            split_args_for_roster(tmp.path(), &[an_agent_on_the_roster("explorer", &["Grep"])]);
+
+        // Then — the proxied Grep is gone from the pre-approved set, and the rest of the catalog
+        // is untouched: the withdrawal is one tool, not the session's whole codebase access
+        let allowed = flag_values(&args, "--allowedTools");
+        assert!(
+            !allowed.contains(&"mcp__tddy-tools__Grep"),
+            "a withdrawn tool must not be pre-approved; got {allowed:?}"
+        );
+        assert!(
+            allowed.contains(&"mcp__tddy-tools__Read"),
+            "the tools nobody replaced must stay pre-approved; got {allowed:?}"
+        );
+    }
+
+    #[test]
+    fn a_replaced_tool_is_hard_disabled_in_its_proxied_form() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let args =
+            split_args_for_roster(tmp.path(), &[an_agent_on_the_roster("explorer", &["Grep"])]);
+
+        // Then — the *proxied* form is the one that matters here. A split session's native Grep is
+        // already impossible ([`NATIVE_FILESYSTEM_TOOLS`]), so `mcp__tddy-tools__Grep` is the only
+        // route its agent ever had: leaving it merely un-pre-approved leaves it callable through
+        // the permission prompt, and withdraws nothing.
+        let disallowed = flag_values(&args, "--disallowedTools");
+        assert!(
+            disallowed.contains(&"mcp__tddy-tools__Grep"),
+            "the proxied form of a withdrawn tool must be disallowed; got {disallowed:?}"
+        );
+    }
+
+    #[test]
+    fn the_subagent_tools_are_pre_approved_before_any_agent_is_attached() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When — a session nobody has attached anything to yet
+        let args = split_args_with_no_agents(tmp.path());
+
+        // Then — Claude's own lists are fixed for the life of the process they were passed to,
+        // while the roster is live: an operator attaches an agent at minute forty and the main
+        // agent must be able to address it without the session being relaunched first. The tools
+        // are advertised by `tddy-tools` only while the roster has someone to address, so
+        // pre-approving them here grants nothing on a session that has no agents.
+        let allowed = flag_values(&args, "--allowedTools");
+        for tool in [
+            "mcp__tddy-tools__subagent_new_session",
+            "mcp__tddy-tools__subagent_prompt",
+            "mcp__tddy-tools__subagent_cancel",
+        ] {
+            assert!(
+                allowed.contains(&tool),
+                "{tool} must be pre-approved; got {allowed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_roster_withdraws_nothing() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let args = split_args_with_no_agents(tmp.path());
+
+        // Then — the ordinary split session, which must not lose anything to the roster machinery
+        let allowed = flag_values(&args, "--allowedTools");
+        for tool in [
+            "mcp__tddy-tools__Read",
+            "mcp__tddy-tools__Grep",
+            "mcp__tddy-tools__Shell",
+        ] {
+            assert!(
+                allowed.contains(&tool),
+                "{tool} must stay pre-approved; got {allowed:?}"
+            );
+        }
+        let disallowed = flag_values(&args, "--disallowedTools");
+        assert!(
+            !disallowed.contains(&"mcp__tddy-tools__Read"),
+            "nothing proxied may be disallowed while the roster is empty; got {disallowed:?}"
+        );
+    }
+
+    #[test]
+    fn a_replaced_tool_is_spelled_as_the_catalog_spells_it() {
+        // When — a def wrote its replacement in the casing a human types
+        let withdrawals = wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["grep"])]);
+
+        // Then — normalized to the exec-catalog name, or the allowlist it feeds would drop nothing
+        assert_eq!(
+            withdrawals,
+            vec![("explorer".to_string(), vec!["Grep".to_string()])]
+        );
+    }
+
+    #[test]
+    fn the_context_dir_names_the_agent_a_withdrawn_tool_went_to() {
+        // Given
+        let tmp = tempfile::tempdir().unwrap();
+
+        // When
+        let context = build_split_context_dir(
+            tmp.path(),
+            &wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["Grep"])]),
+        )
+        .expect("context dir");
+
+        // Then — a main agent that finds `Grep` refused mid-turn is told where it went, rather
+        // than being left to discover a tool it was offered is not callable
+        let claude_md = std::fs::read_to_string(context.join("CLAUDE.md")).expect("CLAUDE.md");
+        assert!(
+            claude_md.contains("Grep") && claude_md.contains("explorer"),
+            "the notice must name the withdrawn tool and the agent serving it; got:\n{claude_md}"
         );
     }
 }

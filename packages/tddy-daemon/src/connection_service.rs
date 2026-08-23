@@ -726,6 +726,16 @@ const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 /// end the subscription.
 pub const ROSTER_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(8);
 
+// The "two of them fit inside the deadline" above is the whole reason this cadence is safe, and it
+// is a relation between two constants in two modules — exactly the kind that is edited on one side.
+// Checked here rather than in a test so raising either one cannot compile.
+const _: () = assert!(
+    ROSTER_KEEPALIVE_INTERVAL.as_millis() * 2
+        < crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT.as_millis(),
+    "two roster keepalives must fit inside a relay's idle deadline, or one lost frame ends a \
+     forwarded subscription"
+);
+
 /// Stream adapter backed by an mpsc channel for [`LiveKitRoomsEvent`] server-streaming.
 ///
 /// Carries results rather than events: a roster read that fails ends the stream with that error,
@@ -2516,7 +2526,7 @@ fn refuse_unenforceable_withdrawal(
             session_dir.display()
         ))
     })?;
-    if meta.sandbox == Some(true) {
+    if session_enforces_a_withdrawal(&meta) {
         return Ok(());
     }
     Err(Status::failed_precondition(format!(
@@ -2527,6 +2537,26 @@ fn refuse_unenforceable_withdrawal(
         record.agent_id,
         record.replaces.join(", ")
     )))
+}
+
+/// Whether a withdrawal attached to this session is actually enforced against its main agent.
+///
+/// Three shapes qualify, for one reason: the main agent's file tools are `mcp__tddy-tools__*`, so
+/// the tool the roster took away is refused on the path the call already takes.
+///
+/// - **A managed codebase.** The jail is what puts the tools there.
+/// - **A split session.** No jail here, but no codebase either: it spawns with every native
+///   filesystem tool in `--disallowedTools`
+///   ([`crate::split_session::split_claude_extra_args`]), so the proxy is the only route it has.
+/// - **A `workspace` session.** The codebase half of a split session, which is where that
+///   session's roster lives and where its attaches are routed — so this is the metadata the
+///   refusal above actually reads for a split session. It runs no agent loop of its own: the
+///   withdrawal is enforced by the agent host, and a split placement is only ever granted to a
+///   `claude-cli` session (`classify_codebase_placement`), which is the shape above.
+fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -> bool {
+    meta.sandbox == Some(true)
+        || crate::split_session::split_pairing(meta).is_some()
+        || meta.session_type.as_deref() == Some("workspace")
 }
 
 /// The qualified ids a persisted roster holds, for the resume paths that re-resolve each agent
@@ -5553,7 +5583,9 @@ impl ConnectionServiceImpl {
         // spawn time, so both are re-derived from the persisted pairing — including a **fresh** join
         // token, since the original is scoped to a lifetime that may well have elapsed while the
         // session was stopped.
-        let split = self.resume_split_wiring(&meta, &session_dir, session_id, session_token)?;
+        let split = self
+            .resume_split_wiring(&meta, &session_dir, session_id, session_token)
+            .await?;
         let worktree_path = split
             .as_ref()
             .map(|w| w.context_dir.clone())
@@ -5650,7 +5682,14 @@ impl ConnectionServiceImpl {
     /// process that has exited, and the join token it carried is scoped to a TTL that may have
     /// elapsed. Both are minted afresh here from the persisted pairing, which is the only part that
     /// is durable.
-    fn resume_split_wiring(
+    ///
+    /// The roster is re-read too, from the daemon that holds it — this session's own
+    /// `.session.yaml` has none, because a split session's roster lives beside its codebase, and
+    /// the agent attached at minute forty is recorded only there. Reading it is what makes the
+    /// relaunch honour a withdrawal (PRD AC25): the flags Claude is spawned with are fixed for the
+    /// life of the process, so a relaunch that assumed an empty roster would hand the main agent
+    /// back, pre-approved, exactly the tools the operator took away from it.
+    async fn resume_split_wiring(
         &self,
         meta: &tddy_core::SessionMetadata,
         session_dir: &Path,
@@ -5662,19 +5701,66 @@ impl ConnectionServiceImpl {
             return Ok(None);
         };
 
+        let withdrawals = self
+            .split_withdrawals_from_codebase_host(session_token, codebase_session, codebase_daemon)
+            .await?;
+
         let wiring = crate::split_session::prepare_split_agent_wiring(
             &self.config,
             session_dir,
             &self.resolve_tddy_tools_path().to_string_lossy(),
-            session_id,
-            codebase_daemon,
-            codebase_session,
-            session_token,
+            &crate::split_session::SplitSpawnTarget {
+                session_id,
+                codebase_instance_id: codebase_daemon,
+                codebase_session_id: codebase_session,
+                session_token,
+            },
+            &withdrawals,
         )?;
         log::info!(
             "ResumeSession: re-wired split session {session_id} to workspace session {codebase_session} on daemon {codebase_daemon}"
         );
         Ok(Some(wiring))
+    }
+
+    /// The tool withdrawals a resumed split agent must launch with, read from the daemon that holds
+    /// the session's roster.
+    ///
+    /// Routed through this daemon's own handler, exactly as the in-jail `tddy-tools` registry's
+    /// reads are routed. A failure is a **refusal**, never an empty roster: "the codebase host is
+    /// unreachable" and "nothing is attached" produce the same value, and reading the second from
+    /// the first is how a relaunch silently restores a withdrawn tool. A split session whose
+    /// codebase host cannot be reached has no working tool call anyway.
+    ///
+    /// The peer's status is re-worded rather than propagated, keeping its code: the transport's own
+    /// refusal ("the common room is not connected") names neither the host nor the session, and this
+    /// is the one path where the operator has to know *which* pairing they cannot resume.
+    async fn split_withdrawals_from_codebase_host(
+        &self,
+        session_token: &str,
+        codebase_session: &str,
+        codebase_daemon: &str,
+    ) -> Result<Vec<(String, Vec<String>)>, Status> {
+        let roster = self
+            .list_session_agents(Request::new(ListSessionAgentsRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session.to_string(),
+                daemon_instance_id: codebase_daemon.to_string(),
+            }))
+            .await
+            .map_err(|status| Status {
+                code: status.code(),
+                message: format!(
+                    "cannot resume a split session without the agent roster held beside its \
+                     codebase: reading session {codebase_session} on daemon {codebase_daemon} \
+                     failed: {}",
+                    status.message()
+                ),
+            })?
+            .into_inner();
+        Ok(crate::split_session::wire_roster_withdrawals(
+            &roster.agents,
+        ))
     }
 
     /// Re-spawn and re-dial a sandboxed claude-cli session.
@@ -7194,6 +7280,30 @@ impl ConnectionServiceImpl {
                 "sandbox sessions resolve their worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
             ));
         }
+        // Refused for a different reason, and the same one that refuses a peer's agent on an
+        // ordinary start (see `remote_agent_at_start_unsupported`): a split session's roster does
+        // not live here. It lives beside the codebase, on the `workspace` session the forward below
+        // creates, and every one of its agents is provisioned a clone through the session's room —
+        // which is opened by the spawn this request has not reached yet. A seed resolved here would
+        // therefore name agents against this host's defs, record them on a session that is not the
+        // one holding the roster, and ask for clones in a room nobody has opened.
+        //
+        // Dropped silently, this reads as the worst kind of success: the session comes up, the main
+        // agent keeps the tools the seeded agent was meant to take away from it, and nothing says
+        // so — the operator has to notice an absent roster to find out.
+        //
+        // TODO(session-agent-roster): honour the seed by attaching each agent once the spawn has
+        // opened the room, so `specialized_agents` and `AttachSessionAgent` accept the same ids on
+        // a split session too (docs/ft/daemon/session-agent-roster.md § Remote agents).
+        if !req.specialized_agents.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "a session whose codebase is on another daemon keeps its agent roster beside that \
+                 codebase, and each agent is admitted to it through the session's room, which the \
+                 spawn opens; specialized_agents ({}) cannot be seeded at start. Start the session \
+                 and attach the agents to it.",
+                req.specialized_agents.join(", ")
+            )));
+        }
 
         let slot = self.common_room_slot("StartSession")?.clone();
 
@@ -7396,10 +7506,16 @@ impl ConnectionServiceImpl {
             ),
         }
 
-        let context_dir = crate::split_session::build_split_context_dir(&session_dir)?;
+        // No agents yet, and none possible: a split session's roster lives on the codebase daemon,
+        // in the workspace session this very call created moments ago, so there is nothing on it
+        // for an operator to have attached. Agents arrive later through `AttachSessionAgent`, and
+        // the resume path re-reads the roster from that host before relaunching
+        // (`resume_split_wiring`).
+        let context_dir = crate::split_session::build_split_context_dir(&session_dir, &[])?;
         let extra_args = crate::split_session::split_claude_extra_args(
             &session_dir,
             &tddy_tools_path.to_string_lossy(),
+            &[],
         )?;
 
         // Claude Code reads `.claude/settings.local.json` from its working directory, which for a

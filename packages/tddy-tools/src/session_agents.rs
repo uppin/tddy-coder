@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use prost::Message;
 use tddy_core::session_agent::AgentId;
@@ -162,6 +162,18 @@ impl RosterCurrency {
 }
 
 /// Everything a frame replaces, plus what survives one.
+/// One consistent answer to the two questions the tool catalog asks the roster.
+///
+/// See [`LiveAgentRoster::catalog_visibility`] for why they are answered together.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogVisibility {
+    /// Whether the session has an agent to address — what decides if the conversation tools are
+    /// advertised at all.
+    pub has_an_agent_to_address: bool,
+    /// Exec tool name → the agent id that has taken it over.
+    pub withdrawn_exec_tools: HashMap<String, String>,
+}
+
 struct RosterState {
     /// The current roster, in attach order. Replaced wholesale by every applied frame.
     entries: Vec<SessionAgentEntry>,
@@ -427,6 +439,26 @@ impl LiveAgentRoster {
     /// iteration order happened to reach.
     pub fn withdrawn_exec_tools(&self) -> HashMap<String, String> {
         let state = self.state.lock().expect("session agent roster");
+        Self::withdrawn_exec_tools_in(&state)
+    }
+
+    /// Everything the tool catalog needs from the roster, read under **one** lock.
+    ///
+    /// Both halves describe the same revision, which is the point. Asking
+    /// [`Self::is_empty`] and [`Self::withdrawn_exec_tools`] separately lets a revision land between
+    /// the two calls and publishes a catalog that never existed: the conversation tools of an empty
+    /// roster together with the withdrawals of a populated one, or the reverse — conversation tools
+    /// advertised for agents whose exec tools are still on offer. `tools/list` is re-answered on
+    /// every applied revision, so the interleaving is not hypothetical.
+    pub fn catalog_visibility(&self) -> CatalogVisibility {
+        let state = self.state.lock().expect("session agent roster");
+        CatalogVisibility {
+            has_an_agent_to_address: !state.entries.is_empty(),
+            withdrawn_exec_tools: Self::withdrawn_exec_tools_in(&state),
+        }
+    }
+
+    fn withdrawn_exec_tools_in(state: &RosterState) -> HashMap<String, String> {
         if !state.currency.enforces_withdrawal() {
             return HashMap::new();
         }
@@ -632,6 +664,18 @@ const RECONNECT_BACKOFF_START: Duration = Duration::from_millis(500);
 /// the session being restarted.
 const RECONNECT_BACKOFF_CEILING: Duration = Duration::from_secs(30);
 
+/// How long a pass must last to count as service rather than churn.
+///
+/// This is what the backoff escalates on, and it is deliberately not the same question as the
+/// unavailability budget below. A stream that delivers its opening snapshot and dies immediately,
+/// every time, *is* being served — so it must not declare the roster unavailable — but it is still a
+/// hot reconnect loop, and every attempt opens a fresh subscription on the daemon. A pass that ran
+/// longer than this was a working subscription that something ended; anything shorter is churn.
+///
+/// Comfortably longer than the two deadlines a fruitless pass can burn ([`STREAM_OPEN_TIMEOUT`],
+/// [`FIRST_FRAME_TIMEOUT`]), so a pass that spent its life waiting never reads as service.
+const PASS_LONG_ENOUGH_TO_BE_SERVICE: Duration = Duration::from_secs(30);
+
 /// Consecutive failures before the roster is declared unavailable and subagent calls are refused.
 ///
 /// More than one, because a daemon restart drops the stream and is recovered from in well under a
@@ -693,6 +737,50 @@ impl RosterStreamOutcome {
     }
 }
 
+/// How the reconnect loop paces itself: two independent questions that one counter used to answer.
+///
+/// **Is the roster unavailable?** Only when nothing is being served — a pass that applied a snapshot
+/// proves the subscription worked, so however it ended it is a reconnect and not the broken setup
+/// the budget exists to declare.
+///
+/// **How long before trying again?** That is about the *rate* of reconnects, not about whether they
+/// were served. Answering it from the same predicate pinned the delay at
+/// [`RECONNECT_BACKOFF_START`] for any failure mode that reliably delivers a frame first — which,
+/// since the daemon sends the current roster on subscribe and keeps it alive, is every failure mode
+/// that gets as far as a subscription.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ReconnectPacing {
+    unserved: u32,
+    churn: u32,
+}
+
+impl ReconnectPacing {
+    /// Record a pass that ran for `lasted`, and report how long to wait before reconnecting.
+    pub fn record(&mut self, pass: &RosterStreamOutcome, lasted: Duration) -> Duration {
+        if pass.counts_as_a_failure() {
+            self.unserved = self.unserved.saturating_add(1);
+        } else {
+            self.unserved = 0;
+        }
+        if lasted >= PASS_LONG_ENOUGH_TO_BE_SERVICE {
+            self.churn = 0;
+        } else {
+            self.churn = self.churn.saturating_add(1);
+        }
+        reconnect_backoff(self.churn)
+    }
+
+    /// Whether the roster should be declared unavailable and subagent calls refused.
+    pub fn roster_is_unavailable(&self) -> bool {
+        self.unserved >= RECONNECT_ATTEMPTS_BEFORE_GIVING_UP
+    }
+
+    /// Consecutive passes that served nothing — the count the refusal quotes.
+    pub fn unserved(&self) -> u32 {
+        self.unserved
+    }
+}
+
 /// Follow the session's roster for the process lifetime, calling `on_change` once per applied
 /// revision.
 ///
@@ -748,34 +836,34 @@ async fn follow_roster(
     roster: &'static LiveAgentRoster,
     on_change: impl Fn() + Send + Sync,
 ) {
-    let mut consecutive_failures: u32 = 0;
+    let mut pacing = ReconnectPacing::default();
     loop {
+        let opened_at = Instant::now();
         let pass = stream_roster_once(&transport, roster, &on_change).await;
         let last_failure = pass.reason();
+        let backoff = pacing.record(&pass, opened_at.elapsed());
         if pass.counts_as_a_failure() {
-            consecutive_failures += 1;
             log::warn!(
                 target: "tddy_tools::session_agents",
                 "roster stream for session {}: {last_failure}",
                 roster.session_id()
             );
         } else {
-            consecutive_failures = 0;
             log::warn!(
                 target: "tddy_tools::session_agents",
                 "roster stream for session {} ended after {} snapshot(s) ({last_failure}); \
-                 reconnecting",
+                 reconnecting in {backoff:?}",
                 roster.session_id(),
                 pass.applied()
             );
         }
-        if consecutive_failures >= RECONNECT_ATTEMPTS_BEFORE_GIVING_UP {
+        if pacing.roster_is_unavailable() {
             // The last failure is carried into the refusal, not just the log: the main agent reads
             // the refusal and an operator reads it in the transcript, and "the roster went away" is
             // not diagnosable without the reason the connection gave.
             let reason = format!(
-                "roster stream closed after {consecutive_failures} reconnect attempts \
-                 ({last_failure})"
+                "roster stream closed after {} reconnect attempts ({last_failure})",
+                pacing.unserved()
             );
             log::error!(
                 target: "tddy_tools::session_agents",
@@ -784,7 +872,7 @@ async fn follow_roster(
             );
             roster.mark_unavailable(&reason);
         }
-        tokio::time::sleep(reconnect_backoff(consecutive_failures)).await;
+        tokio::time::sleep(backoff).await;
     }
 }
 

@@ -516,12 +516,11 @@ async fn re_sends_the_roster_it_last_sent_when_nothing_changes() {
     let mut stream = roster_stream(&session).await;
     next_frame(&mut stream).await.assert_rev(1);
 
-    // When — the cadence elapses with nothing attached or detached
-    tokio::time::sleep(A_BRISK_KEEPALIVE * 2).await;
+    // When — the next frame arrives with nothing attached or detached in between
+    let after_the_cadence = next_frame(&mut stream).await;
 
     // Then
-    next_frame(&mut stream)
-        .await
+    after_the_cadence
         .assert_agent_ids(&[&explorer])
         .assert_rev(1);
 }
@@ -537,15 +536,14 @@ async fn keeps_re_sending_the_roster_for_as_long_as_the_subscription_lives() {
     let mut stream = roster_stream(&session).await;
     next_frame(&mut stream).await.assert_rev(1);
 
-    // When — several cadences elapse with nothing attached or detached
-    tokio::time::sleep(A_BRISK_KEEPALIVE * 4).await;
-
-    // Then
+    // When — three more frames arrive with nothing attached or detached in between
     let revs = vec![
         next_frame(&mut stream).await.rev,
         next_frame(&mut stream).await.rev,
         next_frame(&mut stream).await.rev,
     ];
+
+    // Then
     assert_eq!(
         revs,
         vec![1, 1, 1],

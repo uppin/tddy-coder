@@ -402,6 +402,44 @@ async fn start_session_with_an_unknown_codebase_daemon_is_refused() {
 }
 
 #[tokio::test]
+async fn start_session_seeding_an_agent_on_a_split_placement_is_refused() {
+    // Given a valid split request that also asks for an agent on the roster from the outset
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        specialized_agents: vec!["fastcontext".to_string()],
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("a split start seeding an agent must be refused, not served without it");
+
+    // Then — refused as a bad request, and refused *before* the peer is looked for: no room is
+    // connected in this fixture, so a FailedPrecondition here would mean the start had already got
+    // as far as the common room with an agent it was never going to honour
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("specialized_agents"),
+        "the refusal must name the field it refused; got '{}'",
+        status.message()
+    );
+    assert!(
+        status.message().contains("attach"),
+        "the refusal must name the remedy, which is to attach the agent after the start; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
 async fn start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_precondition() {
     // Given a valid split request whose peer is eligible but unreachable — no room is connected
     let sessions_tmp = tempfile::tempdir().unwrap();

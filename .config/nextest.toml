@@ -71,5 +71,5 @@ path = "junit.xml"
 docker = { max-threads = 1 }
 
 [[profile.ci.overrides]]
-filter = "package(tddy-livekit) or package(tddy-livekit-testkit) or (package(tddy-daemon) and binary(forward_to_peer_shared_registry))"
+filter = "package(tddy-livekit) or package(tddy-livekit-testkit) or (package(tddy-daemon) and binary(forward_to_peer_shared_registry)) or (package(tddy-daemon) and binary(split_session_resume_acceptance))"
 test-group = "docker"

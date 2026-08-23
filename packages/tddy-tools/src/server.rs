@@ -358,18 +358,25 @@ impl PermissionServer {
     /// keep the main agent reaching for a tool the call-time check refuses mid-turn instead of
     /// delegating to the agent that now serves it.
     ///
+    /// Both halves of the answer come from one read of the roster
+    /// ([`LiveAgentRoster::catalog_visibility`](crate::session_agents::LiveAgentRoster::catalog_visibility)),
+    /// so the advertised set always describes a single revision.
+    ///
     /// The withheld set is the roster's, not the spawn seed's, so it cannot disagree with the refusal
     /// a direct call meets — both are
     /// [`LiveAgentRoster::withdrawn_exec_tools`](crate::session_agents::LiveAgentRoster::withdrawn_exec_tools).
     fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
-        let roster = crate::session_agents::session_agent_roster();
+        let visible = crate::session_agents::session_agent_roster().catalog_visibility();
         let mut tools = self.tool_router.list_all();
-        if roster.is_empty() {
+        if !visible.has_an_agent_to_address {
             let conversation_tools = subagent_tool_names();
             tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
         }
-        let withdrawn = roster.withdrawn_exec_tools();
-        tools.retain(|tool| !withdrawn.contains_key(tool.name.as_ref()));
+        tools.retain(|tool| {
+            !visible
+                .withdrawn_exec_tools
+                .contains_key(tool.name.as_ref())
+        });
         tools
     }
 

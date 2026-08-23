@@ -565,9 +565,11 @@ export function CreateSessionPane({
       initialPrompt,
       sandbox: isSplitCodebase ? false : sandbox,
       managedCodebase,
-      // Only send agents when managed codebase is enabled — the picker is hidden otherwise,
-      // so a selection made before unchecking the toggle must not leak into the request.
-      specializedAgents: managedCodebase ? selectedAgentIds : [],
+      // Only send agents when managed codebase is enabled *and* the codebase is co-located — the
+      // picker is hidden in either other state, so a selection made before the toggle or the host
+      // changed must not leak into the request. A split session's roster is not seeded at start:
+      // it lives beside the codebase and the daemon refuses the combination by name.
+      specializedAgents: managedCodebase && !isSplitCodebase ? selectedAgentIds : [],
       semanticIndex: managedCodebase && !isSplitCodebase ? semanticIndex : false,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
@@ -1114,7 +1116,12 @@ export function CreateSessionPane({
                     </select>
                   </div>
                 )}
-                {agentPickerSection}
+                {/* A split session's agents are attached *after* it starts, from the session's
+                    Agent roster pane: the roster lives beside the codebase on the other host, and
+                    each agent is admitted to it through the session's room, which the spawn opens
+                    once the placement is settled. The daemon refuses a seed by name, so offering
+                    the picker here would only collect a selection it would then reject. */}
+                {!isSplitCodebase && agentPickerSection}
                 {/* Indexing runs against a worktree on this daemon before launch, which a split
                     session does not have — refused by the daemon, so not offered here. */}
                 {!isSplitCodebase && (

@@ -6,6 +6,7 @@ import {
   type SessionAgentEntry,
 } from "../../gen/connection_pb";
 import { safeTestIdPart } from "../../lib/testId";
+import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
 import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
@@ -99,6 +100,10 @@ export function SessionAgentRosterPane({
   // every other session-scoped call in the inspector is routed (see `ExecuteTool`'s
   // `daemon_instance_id`) — the roster is served by the daemon that owns the session.
   const client = useHttpClient(ConnectionService);
+  // Which host the pane's own client reaches: the origin, i.e. the daemon that served this bundle.
+  // Not the same idea as `selectedInstanceId`, which an operator can point at a peer host without
+  // changing where this HTTP transport lands.
+  const { servingInstanceId } = useSelectedDaemon();
   const { agents, hasSnapshot, error } = useSessionAgentRoster({
     client,
     sessionToken,
@@ -106,7 +111,13 @@ export function SessionAgentRosterPane({
     daemonInstanceId,
     enabled: daemonConnected,
   });
-  const available = useAvailableAgents(client, daemonInstanceId);
+  // The catalog is a fan-out, and its home is the host behind the client it is handed — not the host
+  // that owns the session. `ListSubagents` carries no routing field and a daemon never forwards it,
+  // so the fan-out reads its home host through `client` and addresses every *other* common-room
+  // daemon over LiveKit RPC. Naming the facilitating daemon here would invert both halves of that
+  // for a split session — the codebase host asked over an HTTP route that does not reach it, the
+  // connected host addressed as a peer — which is why such a session showed an empty catalog.
+  const available = useAvailableAgents(client, servingInstanceId ?? "");
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickedAgent, setPickedAgent] = useState<AvailableAgent | null>(null);

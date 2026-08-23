@@ -87,6 +87,34 @@ export function withSelectedDaemon(
 }
 
 /**
+ * Variant of {@link withSelectedDaemon} that also names the daemon that served the web bundle
+ * (`/api/config`'s `daemon_instance_id`) — the one host the browser's own HTTP transport reaches,
+ * and therefore the only host a surface holding an HTTP client can read without going through the
+ * common room.
+ *
+ * Pass it first in `daemons` too, as a real deployment does: the selection resolves to the serving
+ * daemon anyway, so a cross-host test states one "this is the host we are connected to" rather than
+ * leaving the two ideas free to disagree over something the test is not about.
+ */
+export function withSelectedDaemonServedBy(
+  children: React.ReactNode,
+  daemons: DaemonHost[],
+  servingInstanceId: string,
+): React.ReactElement {
+  return (
+    <AuthProvider>
+      <SelectedDaemonProvider
+        room={new Room()}
+        daemons={daemons}
+        servingInstanceId={servingInstanceId}
+      >
+        {children}
+      </SelectedDaemonProvider>
+    </AuthProvider>
+  );
+}
+
+/**
  * Variant of {@link withSelectedDaemon} that takes a pre-built common-room `Room` (e.g. one from
  * `aFakeCommonRoomWithMetadata`) so a test can seed participant metadata for presence-driven
  * rendering assertions.

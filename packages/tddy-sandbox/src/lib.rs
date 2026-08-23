@@ -19,8 +19,8 @@ pub use builder::{
     SymlinkSpec,
 };
 pub use context_dir::{
-    copy_context_from_repo, copy_tree, copy_tree_within_root, SandboxContextDir,
-    SubagentReplacement, SANDBOX_REMOTE_APPENDIX,
+    copy_context_from_repo, copy_tree, copy_tree_within_root, sandbox_remote_appendix,
+    SandboxContextDir, SubagentReplacement, SANDBOX_REMOTE_APPENDIX,
 };
 pub use error::SandboxError;
 pub use exec_reads::{

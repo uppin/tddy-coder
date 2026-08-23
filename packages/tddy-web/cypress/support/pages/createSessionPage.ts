@@ -43,11 +43,6 @@ export const createSessionPage = {
   agentOption: (optionValue: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(ids.createSessionAgentSelectOption(optionValue), options),
 
-  /** Start the session as the agent carrying `optionValue`. */
-  selectAgent(optionValue: string) {
-    byTestId(TEST_IDS.createSessionAgentSelect).select(optionValue);
-  },
-
   /** The option values the Agent `<select>` offers, in option order. */
   agentOptionValues: (): Cypress.Chainable<string[]> =>
     createSessionPage
@@ -107,6 +102,23 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
   },
 
+  /**
+   * One specialized-agent checkbox inside an open Managed codebase section, keyed by the qualified
+   * id (`<name>@<host>`) the form submits.
+   */
+  specializedAgentOption: (agentId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.createSessionAgentOption(agentId), options),
+
+  /** Attach a specialized agent to the session being created. */
+  selectSpecializedAgent(agentId: string) {
+    byTestId(ids.createSessionAgentOption(agentId)).click();
+  },
+
+  /** No specialized agent can be attached in the current form state. */
+  expectNoSpecializedAgentPicker() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
+  },
+
   /** Close the "Managed codebase" section. */
   disableManagedCodebase() {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).uncheck();
@@ -156,9 +168,12 @@ export const createSessionPage = {
       .find("option:not([disabled])")
       .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
 
-  /** Choose the agent (tool sessions). */
-  selectAgent(agentId: string) {
-    byTestId(TEST_IDS.createSessionAgentSelect).select(agentId);
+  /**
+   * Start the session as the agent carrying `optionValue` — `{id}@{daemonInstanceId}` while the
+   * common room advertises daemons, the bare id otherwise.
+   */
+  selectAgent(optionValue: string) {
+    byTestId(TEST_IDS.createSessionAgentSelect).select(optionValue);
   },
 
   /** Choose the workflow recipe (tool sessions). */

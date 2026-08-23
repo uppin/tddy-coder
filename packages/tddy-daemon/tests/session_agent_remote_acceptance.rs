@@ -30,8 +30,9 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
 use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
-    DetachSessionAgentRequest, ExecuteToolRequest, ListSessionAgentsRequest, ListSessionsRequest,
+    AttachSessionAgentRequest, CancelAgentConversationRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, DetachSessionAgentRequest,
+    ExecuteToolRequest, ListSessionAgentsRequest, ListSessionsRequest,
     OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentRoster,
 };
 use tddy_service::{
@@ -932,20 +933,7 @@ async fn answers_a_prompt_to_a_remote_agent_the_way_a_local_one_answers() {
     fleet.await_clone_ready(&explorer).await;
 
     // When
-    let conversation = fleet
-        .a
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
-            session_token: TEST_TOKEN.to_string(),
-            session_id: fleet.session_id.clone(),
-            daemon_instance_id: String::new(),
-            agent_id: explorer.clone(),
-            conversation_id: String::new(),
-        }))
-        .await
-        .expect("opening a conversation with a remote agent must succeed")
-        .into_inner()
-        .conversation_id;
-
+    let conversation = open_conversation_with(&fleet, &explorer).await;
     let answer = collect_prompt(&fleet, &conversation, "where is main?").await;
 
     // Then
@@ -957,9 +945,73 @@ async fn answers_a_prompt_to_a_remote_agent_the_way_a_local_one_answers() {
     );
 }
 
+/// A cancel has to reach the daemon the turn is *running* on, which is not the daemon holding the
+/// roster. The forward is re-addressed to the conversation's owning daemon for that reason: one that
+/// still named the roster host would arrive at the peer, be classified as belonging elsewhere, and be
+/// routed straight back — the two daemons handing the same cancel to each other while the turn runs
+/// on regardless. Nothing about that is visible to the caller, which is told the turn was cancelled.
+#[tokio::test]
+#[serial]
+async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
+    // Given
+    let model = a_stub_model()
+        .saying("<final_answer>src/main.rs</final_answer>")
+        .start()
+        .await;
+    let fleet = a_fleet_with_peers(&[(DAEMON_B, &["explorer"])], model.base_url()).await;
+    let explorer = format!("explorer@{DAEMON_B}");
+    fleet.attach(&explorer).await.expect("attach remote agent");
+    fleet.await_clone_ready(&explorer).await;
+    let conversation = open_conversation_with(&fleet, &explorer).await;
+
+    // When
+    fleet
+        .a
+        .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            conversation_id: conversation.clone(),
+        }))
+        .await
+        .expect("cancelling a remote conversation must reach the daemon running the turn");
+
+    // Then — the id is gone on both sides, so a later prompt is refused rather than answered by a
+    // conversation the caller was told was cancelled
+    let status = fleet
+        .a
+        .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            conversation_id: conversation.clone(),
+            prompt: "where is main?".to_string(),
+        }))
+        .await
+        .expect_err("a cancelled conversation must not be promptable");
+    assert_eq!(status.code(), Code::NotFound);
+}
+
 struct PromptAnswer {
     stop_reason: String,
     content: String,
+}
+
+/// Open a conversation with `agent_id` through daemon A, the way the main agent does.
+async fn open_conversation_with(fleet: &Fleet, agent_id: &str) -> String {
+    fleet
+        .a
+        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            agent_id: agent_id.to_string(),
+            conversation_id: String::new(),
+        }))
+        .await
+        .expect("opening a conversation with a remote agent must succeed")
+        .into_inner()
+        .conversation_id
 }
 
 async fn collect_prompt(fleet: &Fleet, conversation_id: &str, prompt: &str) -> PromptAnswer {

@@ -90,6 +90,12 @@ export interface RosterScenario {
    * so an option or an error row attributed to that host is proof of routing, not of a fixture.
    */
   offers?: ReturnType<typeof anAvailableAgent>[];
+  /**
+   * When set, this daemon serves the roster but cannot answer the picker's fan-out — the case where
+   * the host holding the browser's own transport is the one that failed, and the error row must name
+   * it rather than whichever host the session belongs to.
+   */
+  offersUnavailable?: string;
 }
 
 /** The controls a spec drives the roster fake with, whichever backend serves it. */
@@ -124,6 +130,9 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
 
   const handlers: Partial<ServiceImpl<typeof ConnectionService>> = {
     async listSubagents() {
+      if (scenario.offersUnavailable !== undefined) {
+        throw new ConnectError(scenario.offersUnavailable, Code.Unavailable);
+      }
       return create(ListSubagentsResponseSchema, { subagents: scenario.offers ?? [] });
     },
     async *streamSessionAgents() {

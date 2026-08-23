@@ -60,25 +60,36 @@ that still has native filesystem tools has nothing to proxy through. A split pla
 
 ### What a split session cannot also ask for
 
-Three otherwise-valid options need a repository on the daemon running the agent, which a split
-session does not have. Each is **refused** with `invalid_argument` naming the field, rather than
-silently dropped — a session that came up without its recipe looks exactly like the session that
-was asked for.
+Four otherwise-valid options cannot be served on a split placement. Each is **refused** with
+`invalid_argument` naming the field, rather than silently dropped — a session that came up without
+its recipe looks exactly like the session that was asked for.
 
-| Field | Why it needs a local repository |
+| Field | Why it cannot be served here |
 |---|---|
 | `recipe` | A workflow recipe's tooling resolves `TDDY_REPO_DIR` on the agent's host |
 | `semantic_index` | Indexes a worktree on this daemon before launch |
 | `sandbox` | The sandboxed spawn resolves its worktree on this daemon |
+| `specialized_agents` | The roster lives beside the codebase, and each agent is admitted through the session's room — which the spawn has not opened yet |
 
-This mirrors the v1 restriction the original remote-codebase mode already carries (recipes other
-than `free-prompting` were out of scope there too).
+The first three need a repository on the daemon running the agent, which a split session does not
+have. This mirrors the v1 restriction the original remote-codebase mode already carries (recipes
+other than `free-prompting` were out of scope there too).
+
+`specialized_agents` is refused for a different reason, and the same one that refuses a peer's agent
+on an ordinary start: a seed resolved on the agent host would name agents against *that* host's
+defs, record them on a session that is not the one holding the roster, and ask for clones in a room
+nobody has opened. Dropped silently it would read as the worst kind of success — the session comes
+up, the main agent keeps the tools the seeded agent was meant to take away from it, and only an
+absent roster says so. The roster itself is fully supported for split sessions: attach the agents
+after the session starts, from its Agent roster pane.
 
 **The UI must not offer them.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends it
 whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
 selector could produce is a request the daemon rejects. The form therefore withdraws the Recipe
 control once a codebase host is chosen, and sends an empty `recipe`. Putting the codebase back on
-the session's own host restores it: the withdrawal is a property of the split, not a one-way door.
+the session's own host restores it: the withdrawal is a property of the split, not a one-way door. The
+specialized-agent picker is withdrawn on the same terms and for the same reason: leaving it visible
+would offer a choice whose only effect is to turn a valid placement into a refusal.
 
 ### Why claude-cli only
 
@@ -315,6 +326,20 @@ reuse the original, which is scoped to a lifetime that may have elapsed.
 `resume_claude_cli_session` currently rebuilds `env_extra` only from the persisted recipe and takes
 its worktree from `meta.repo_path`. A split session resumed through it today would lose its tool
 transport entirely and fail on the missing worktree.
+
+**Resume reads the roster from the codebase daemon.** A split session's own `.session.yaml` never
+holds a roster — its agents are recorded beside the codebase, on the workspace session the pairing
+names — so the tools a resumed agent may call cannot be derived locally. Resume therefore issues a
+routed `ListSessionAgents` against `codebase_daemon_instance_id` and builds the spawn's
+`--allowedTools` / `--disallowedTools` from what comes back. Claude's flags are fixed for the life
+of the process, so this is the only moment a withdrawal can be imposed
+(session-agent-roster.md AC25).
+
+**An unreachable codebase daemon fails the resume.** "The peer is unreachable" and "nothing is
+attached" produce the same empty roster, and reading the second from the first is how a relaunch
+silently restores a tool the operator gave away. A split session whose codebase host cannot be
+reached has no working tool call in any case, so the resume is refused with a message naming the
+host — the same rule Teardown applies below.
 
 ### Teardown
 

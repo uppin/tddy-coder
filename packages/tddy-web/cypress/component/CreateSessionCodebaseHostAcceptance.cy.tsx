@@ -40,7 +40,35 @@ const DAEMON_HOSTS: DaemonHost[] = [
 /** "Same as host" — the co-located default, sent as an empty `codebaseDaemonInstanceId`. */
 const SAME_AS_HOST = "";
 
-function aCreateSessionBackend(): InMemoryRpcBackend {
+/** The specialized agent a host offers, under the qualified id the picker submits. */
+const FASTCONTEXT = `fastcontext@${AGENT_HOST}`;
+
+/** One agent as `ListSubagents` returns it. */
+interface OfferedAgent {
+  name: string;
+  label: string;
+  model: string;
+  daemonInstanceId: string;
+  agentId: string;
+}
+
+/**
+ * The backend with one specialized agent on offer. Separate from the default because most of these
+ * tests are about a placement, not a roster — but the ones that are need something to select.
+ */
+function aCreateSessionBackendOfferingAnAgent(): InMemoryRpcBackend {
+  return aCreateSessionBackend([
+    {
+      name: "fastcontext",
+      label: "FastContext",
+      model: "microsoft/FastContext-1.0-4B-RL",
+      daemonInstanceId: AGENT_HOST,
+      agentId: FASTCONTEXT,
+    },
+  ]);
+}
+
+function aCreateSessionBackend(offeredAgents: OfferedAgent[] = []): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(ConnectionService.method.listAgentModels, () => ({
@@ -56,7 +84,7 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
     .onUnary(ConnectionService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: offeredAgents }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
@@ -345,6 +373,68 @@ it("sends neither sandbox nor semantic index for a split session", () => {
     expect(request.sandbox).to.equal(false);
     expect(request.semanticIndex).to.equal(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — a split session cannot be seeded with a specialized agent
+// ---------------------------------------------------------------------------
+//
+// Agents are supported on split sessions; seeding one *at start* is not. The roster lives beside the
+// codebase, on the `workspace` session the daemon creates on the other host, and each agent is
+// admitted to it through the session's room — which the spawn opens after the placement is settled.
+// The daemon refuses the combination by name, so the form must not offer it; the session's Agent
+// roster pane attaches an agent once the session is running.
+
+it("stops offering specialized agents once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session with an agent on offer while the codebase is co-located
+  mountCreatePane(aCreateSessionBackendOfferingAnAgent());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.specializedAgentOption(FASTCONTEXT).should("be.visible");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then the picker is withdrawn rather than offering a selection the daemon refuses
+  createSessionPage.expectNoSpecializedAgentPicker();
+});
+
+it("sends no specialized agents for a split session", () => {
+  // Given an agent picked while the codebase was still co-located
+  const backend = aCreateSessionBackendOfferingAnAgent();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectSpecializedAgent(FASTCONTEXT);
+
+  // When the operator then places the codebase on another host and creates the session
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.submit();
+
+  // Then the earlier selection does not ride along and turn a valid placement into a refusal
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.specializedAgents).to.deep.equal([]);
+  });
+});
+
+it("restores the specialized-agent picker when the codebase comes back to the session host", () => {
+  // Given a split placement, with the picker withdrawn
+  mountCreatePane(aCreateSessionBackendOfferingAnAgent());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.expectNoSpecializedAgentPicker();
+
+  // When the operator puts the codebase back on the session's own host
+  createSessionPage.selectCodebaseHost(SAME_AS_HOST);
+
+  // Then the agent is on offer again — withdrawing it is a property of the split, not a one-way door
+  createSessionPage.specializedAgentOption(FASTCONTEXT).should("be.visible");
 });
 
 it("stops offering to skip permissions once the codebase is placed on another host", () => {

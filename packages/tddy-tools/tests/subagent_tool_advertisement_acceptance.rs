@@ -229,8 +229,15 @@ async fn withholds_from_the_catalog_exactly_what_a_direct_call_is_refused() {
     ]);
 
     // Then
+    let withheld = exec_tools_withheld_from_the_main_agent();
     assert_eq!(
-        exec_tools_withheld_from_the_main_agent(),
-        exec_tools_refused_on_a_direct_call()
+        withheld,
+        vec!["Glob".to_string(), "Grep".to_string(), "Read".to_string()],
+        "the union of what both agents replace is what leaves the catalog"
+    );
+    assert_eq!(
+        withheld,
+        exec_tools_refused_on_a_direct_call(),
+        "the catalog and the call-time check must withhold the same set"
     );
 }

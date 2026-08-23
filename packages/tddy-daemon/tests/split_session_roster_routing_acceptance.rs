@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::SessionMetadata;
+use tddy_core::{SessionAgentRecord, SessionMetadata};
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::{
@@ -45,6 +45,10 @@ const CODEBASE_HOST: &str = "codebase-host";
 const STRANGER_HOST: &str = "stranger-host";
 /// The session id the codebase host keys the roster by — the one a split session's tools name.
 const SESSION_ON_THE_CODEBASE_HOST: &str = "1780828020298-codebase";
+
+/// Attached to the session the local-serve case reads, so an answer of "no agents" cannot pass for
+/// a correct local resolution.
+const AGENT_ON_THE_LOCAL_SESSION: &str = "explorer@agent-host";
 
 /// What a forwarded **unary** call reports when this daemon has no common-room connection.
 const UNARY_WENT_TO_THE_PEER: &str =
@@ -220,15 +224,35 @@ fn an_agent_host_whose_codebase_lives_on_a_peer() -> ADaemonInTheCommonRoom {
     a_daemon_in_the_common_room(tempfile::tempdir().expect("sessions tempdir"))
 }
 
-/// A daemon holding the session itself — the ordinary single-host case.
+/// A daemon holding the session itself — the ordinary single-host case. The session carries one
+/// attached agent, so the local read has to resolve *this* session to answer correctly: an empty
+/// roster is what reading the wrong session, or no session, would return.
 fn a_daemon_holding_the_session_itself() -> ADaemonInTheCommonRoom {
     let sessions = tempfile::tempdir().expect("sessions tempdir");
-    write_session(sessions.path(), SESSION_ON_THE_CODEBASE_HOST);
+    write_session(
+        sessions.path(),
+        SESSION_ON_THE_CODEBASE_HOST,
+        vec![an_attached_explorer()],
+    );
     a_daemon_in_the_common_room(sessions)
 }
 
-/// A managed claude-cli session on disk under `sessions_base`.
-fn write_session(sessions_base: &Path, session_id: &str) {
+/// An agent this daemon owns, attached to the session it holds.
+fn an_attached_explorer() -> SessionAgentRecord {
+    SessionAgentRecord {
+        agent_id: AGENT_ON_THE_LOCAL_SESSION.to_string(),
+        name: "explorer".to_string(),
+        daemon_instance_id: AGENT_HOST.to_string(),
+        label: Some("Explorer".to_string()),
+        model: "anthropic/claude-haiku-4-5".to_string(),
+        replaces: Vec::new(),
+        tools: Vec::new(),
+        codebase_session_id: None,
+    }
+}
+
+/// A managed claude-cli session on disk under `sessions_base`, holding `agents`.
+fn write_session(sessions_base: &Path, session_id: &str, agents: Vec<SessionAgentRecord>) {
     let session_dir = unified_session_dir_path(sessions_base, session_id);
     std::fs::create_dir_all(&session_dir).expect("create session dir");
     tddy_core::write_session_metadata(
@@ -253,8 +277,8 @@ fn write_session(sessions_base: &Path, session_id: &str) {
             sandbox: Some(true),
             agent: None,
             recipe: None,
-            agents: Vec::new(),
-            agents_rev: 0,
+            agents_rev: agents.len() as u64,
+            agents,
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
@@ -435,36 +459,14 @@ async fn a_roster_naming_this_daemon_is_served_locally() {
     // When
     let roster = daemon.list_roster_from(AGENT_HOST).await;
 
-    // Then
+    // Then — the roster this daemon holds, not the empty one a missing session answers with
+    let served = roster.expect("a session on this daemon must be answered here");
     assert_eq!(
-        roster
-            .expect("a session on this daemon must be answered here")
-            .agents,
-        Vec::new()
-    );
-}
-
-// ---------------------------------------------------------------------------
-// The forwarded subscription outlives the relay's idle deadline
-// ---------------------------------------------------------------------------
-
-/// A forwarded roster subscription is the one stream in this feature that nobody may let go quiet.
-/// The relay carrying it terminates a stream that stops producing — deliberately, so a truncated
-/// forward can never read as a complete one — and a roster nobody changes produces nothing for
-/// hours. The keepalive is what reconciles the two, so its cadence has to leave room for a lost
-/// frame rather than merely beating the deadline once.
-#[tokio::test]
-async fn re_sends_the_roster_well_inside_the_deadline_a_relay_gives_a_forwarded_stream() {
-    // Given
-    let deadline = tddy_daemon::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT;
-
-    // When
-    let cadence = tddy_daemon::connection_service::ROSTER_KEEPALIVE_INTERVAL;
-
-    // Then — two keepalives fit, so one lost frame does not end the subscription
-    assert!(
-        cadence * 2 < deadline,
-        "the roster keepalive ({cadence:?}) must fit twice inside the relay's idle deadline \
-         ({deadline:?})"
+        served
+            .agents
+            .iter()
+            .map(|agent| agent.agent_id.clone())
+            .collect::<Vec<_>>(),
+        vec![AGENT_ON_THE_LOCAL_SESSION.to_string()]
     );
 }
