@@ -7,7 +7,9 @@ use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::connection_service::{SeedCodebase, SeededAgentClones, SeededCloneGuard};
+use tddy_daemon::connection_service::{
+    SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent,
+};
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 use tddy_daemon::session_room::{OpenedSessionRoom, SessionRoomHost};
 use tddy_rpc::{Code, Request, Response, Status};
@@ -740,7 +742,7 @@ impl ACursorCliDaemon {
             "",
             "",
             "",
-            None,
+            SpawnStackParent::NoParent,
             "",
             false,
             &mut [],
