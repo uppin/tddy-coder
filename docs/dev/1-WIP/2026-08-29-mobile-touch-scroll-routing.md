@@ -38,15 +38,24 @@ same intent reaches the TUI and it scrolls its own transcript.
 ## Change
 
 The drag effect samples `hasMouseTracking()` and the wasm terminal's `isAlternateScreen()` once, at
-`touchstart` (so a gesture is never split between routes), and picks:
+`touchstart` (so a gesture is never split between routes), and picks, per line of finger travel
+(capped at `TOUCH_SCROLL_MAX_NOTCHES_PER_MOVE` per `touchmove` so a fling cannot flood the TUI):
 
-- **`tui`** — tracking **or** alternate screen: for each line of finger travel, dispatch one
-  `wheel` event on the grid canvas at the touch point (`deltaY = ±cellHeight`, capped at
-  `TOUCH_WHEEL_MAX_NOTCHES_PER_MOVE` per `touchmove`). Dispatching on the canvas is what a desktop
-  wheel over the terminal does, so every existing handler applies unchanged and in the same order:
-  ghostty-web's own wheel handling, the SGR forwarding on this container, and the capture-phase
-  gate on the panes above it. No new routing logic, and no second copy of the gate to drift.
+- **`tui-mouse`** — the TUI tracks the mouse: one SGR wheel report (button 64 up / 65 down) at the
+  touch point, through the new component-scope `sendWheelSgrAt` that the `sendWheelSgr` handle
+  method (the desktop wheel path) now also calls — one implementation, two callers.
+- **`tui-keys`** — alternate screen without tracking: the arrow key ghostty-web emulates the wheel
+  with there (`\x1b[A` / `\x1b[B`).
 - **`viewport`** — everything else: `term.scrollLines(-lines)`, exactly as before.
+
+**First attempt, and why it is not this one.** The drag originally re-dispatched a synthetic `wheel`
+on the grid canvas and left the routing to the handlers that already gate the desktop wheel
+(ghostty-web's own, the SGR forwarding on the container, `GhosttyTerminalGrpc`'s capture-phase
+gate) — no second copy of the gate to drift. CI showed the event reached none of them: the
+mouse-tracking spec saw only the tap's press/release (`\x1b[<0;28;5M` … `13m`) and the pager spec
+saw nothing at all, while the normal-screen spec passed — so the drag handler was running and the
+canvas rect was measurable (the tap coordinates come from the same rect), and it was the dispatch
+that landed nowhere. Sending to the application directly is what the two specs can actually pin.
 
 ## Tests
 
@@ -61,10 +70,11 @@ The drag effect samples `hasMouseTracking()` and the wasm terminal's `isAlternat
 
 ## Open
 
-- ⚠️ **Unverified**: this workspace has no `bun`/`node_modules`/nix shell, so
-  `bun run cypress:component` and `tsc --noEmit` have not been run. Both must pass before wrap,
-  together with the existing touch specs (`GhosttyTerminal.cy.tsx` drag test,
-  `TerminalTapMouseClickAcceptance.cy.tsx`).
+- ⚠️ **Verified only in CI**: this workspace has no `bun`/`node_modules`/nix shell, so
+  `bun run cypress:component` and `tsc --noEmit` cannot be run here. The first CI run failed both
+  alt-screen specs (see "First attempt" above) and passed the normal-screen one; the second run is
+  the check on the rewrite, together with the existing touch specs (`GhosttyTerminal.cy.tsx` drag
+  test, `TerminalTapMouseClickAcceptance.cy.tsx`).
 - **Not addressed** (separate defect, deliberately out of this change): with mouse tracking on, the
   capture-phase tap handlers still report an SGR **press** at `touchstart` and a **release** at
   `touchend` for a gesture that turns out to be a scroll — a stray click at the point the swipe

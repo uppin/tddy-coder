@@ -46,8 +46,8 @@ const PINCH_FONT_STEP_SPAN_PX = 22;
  *  The scroll effect measures it vertically; the tap detector measures total travel. */
 const TOUCH_SCROLL_START_THRESHOLD_PX = 8;
 
-/** Wheel notches one `touchmove` may hand to the terminal — a flung finger must not flood the TUI. */
-const TOUCH_WHEEL_MAX_NOTCHES_PER_MOVE = 8;
+/** Scroll notches one `touchmove` may hand to the TUI — a flung finger must not flood it. */
+const TOUCH_SCROLL_MAX_NOTCHES_PER_MOVE = 8;
 
 /** Canvas/CSS width of the rendered grid (not the full-width xterm root). Used for X-axis font fit. */
 function measureTerminalCanvasCssWidth(term: Terminal): number {
@@ -656,24 +656,46 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       applyFontSizePx,
     ]);
 
+    /** Report one wheel notch at a viewport point to the TUI as an SGR mouse event (button 64 up /
+     *  65 down). False when the point is off the grid or nothing can receive it. Shared by the
+     *  `sendWheelSgr` handle method (desktop wheel) and the touch drag route below, so both report
+     *  a scroll the same way. */
+    const sendWheelSgrAt = useCallback((clientX: number, clientY: number, up: boolean): boolean => {
+      const t = termRef.current;
+      const send = onDataRef.current;
+      if (!t || !send) return false;
+      const canvas = t.element?.querySelector("canvas");
+      if (!canvas) return false;
+      const r = canvas.getBoundingClientRect();
+      const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
+      const coords = clientPointToTerminalCell(clientX, clientY, grid, t.cols, t.rows);
+      if (!coords) return false;
+      send(`\x1b[<${up ? 64 : 65};${coords.col};${coords.row}M`);
+      return true;
+    }, []);
+
     // Single-finger vertical drag → scroll. Mobile has no mouse wheel, so a swipe is the
     // only scroll gesture there. Natural, content-following direction: dragging the finger
     // down pulls older output into view.
     //
-    // Who owns the gesture depends on what is on screen, exactly as the wheel does on desktop
-    // (the three-way gate in `GhosttyTerminalGrpc` plus ghostty-web's own wheel handling):
+    // Who owns the gesture depends on what is on screen, the same three ways the wheel is gated on
+    // desktop (`GhosttyTerminalGrpc`'s capture-phase listener plus ghostty-web's own wheel
+    // handling). Each line of finger travel is one notch of that gesture:
     //
-    // - **A full-screen TUI** — the alternate screen (DEC 1049), with or without mouse tracking:
-    //   the application scrolls its own content, so the drag is handed to the terminal as wheel
-    //   notches at the touch point and the existing wheel handlers route them (SGR wheel report
-    //   when the TUI tracks the mouse, as the Claude CLI does; ghostty-web's native Up/Down
-    //   emulation for a pager like `less` when it does not). Scrolling this pane's scrollback
-    //   instead would fight the TUI's repaints, and on the live pane of the history double buffer
-    //   (`scrollback: 0`) it does nothing at all.
-    // - **Everything else** — the normal screen: the emulator's own scrollback is the thing being
-    //   scrolled, so the viewport moves directly.
+    // - **`tui-mouse`** — the TUI tracks the mouse (the Claude CLI does): report the notch as an
+    //   SGR wheel event (button 64 up / 65 down), what the desktop wheel sends it.
+    // - **`tui-keys`** — the alternate screen (DEC 1049) without mouse tracking, a pager like
+    //   `less`: send the arrow key ghostty-web emulates the wheel with there.
+    // - **`viewport`** — the normal screen: the emulator's own scrollback is the thing being
+    //   scrolled, so move the viewport directly.
     //
-    // The route is sampled once, at `touchstart`, so one gesture is never split between the two.
+    // The two `tui` routes are sent straight to the application rather than replayed as a synthetic
+    // `wheel` for the desktop handlers to pick up: dispatching an event and hoping it lands in
+    // ghostty-web's canvas listener is plumbing no test can pin, and it silently reached nobody.
+    // In a full-screen TUI the pane's own scrollback is the wrong target anyway — repaints fight
+    // it, and on the live pane of the history double buffer (`scrollback: 0`) there is none.
+    //
+    // The route is sampled once, at `touchstart`, so one gesture is never split between routes.
     //
     // Listeners attach as soon as the container exists (not gated on `ready`) so a
     // drag arriving right after the canvas mounts is not missed; `termRef` is read
@@ -699,8 +721,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       let lastY = 0;
       let pixelAccum = 0;
       let moveCount = 0;
-      /** Who scrolls: the terminal application (`tui`) or this pane's scrollback (`viewport`). */
-      let route: "tui" | "viewport" = "viewport";
+      /** Who scrolls, and how it is told — see the routing note above. */
+      let route: "tui-mouse" | "tui-keys" | "viewport" = "viewport";
 
       const cellHeightPx = (): number => {
         const term = termRef.current;
@@ -728,7 +750,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const alternateScreen =
           (term as unknown as { wasmTerm?: { isAlternateScreen?: () => boolean } } | null)?.wasmTerm
             ?.isAlternateScreen?.() ?? false;
-        route = tracking || alternateScreen ? "tui" : "viewport";
+        route = tracking ? "tui-mouse" : alternateScreen ? "tui-keys" : "viewport";
         logScroll(
           "touchstart startY=%d cellPx=%.2f rows=%o route=%s tracking=%o altScreen=%o",
           startY,
@@ -740,32 +762,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         );
       };
 
-      /** Hand `lines` of finger travel to the terminal as wheel notches at the touch point — one
-       *  `wheel` per line, so the gesture reaches the wheel handlers (SGR reporting here, the
-       *  gate in `GhosttyTerminalGrpc`, ghostty-web's own arrow emulation) as a desktop scroll. */
-      const dispatchWheelNotches = (touch: Touch, lines: number, cell: number) => {
-        const notches = Math.min(Math.abs(lines), TOUCH_WHEEL_MAX_NOTCHES_PER_MOVE);
-        // Finger down (`lines > 0`) reveals older output — a wheel-up (negative `deltaY`).
-        const deltaY = lines > 0 ? -cell : cell;
-        // Dispatch on the grid canvas — where a wheel over the terminal lands on desktop — so
-        // ghostty-web's own handler sees it and it still bubbles out through this container
-        // (SGR reporting) and the panes above it (the double-buffer gate).
-        const target: EventTarget =
-          termRef.current?.element?.querySelector("canvas") ?? touch.target;
+      /** Hand `lines` of finger travel to the application as scroll notches at the touch point —
+       *  one per line, so the TUI scrolls with the finger rather than by a wheel's fixed step. */
+      const scrollTheTui = (touch: Touch, lines: number) => {
+        const notches = Math.min(Math.abs(lines), TOUCH_SCROLL_MAX_NOTCHES_PER_MOVE);
+        // Finger down (`lines > 0`) reveals older output — scroll up.
+        const up = lines > 0;
         for (let i = 0; i < notches; i++) {
-          target.dispatchEvent(
-            new WheelEvent("wheel", {
-              bubbles: true,
-              cancelable: true,
-              view: window,
-              clientX: touch.clientX,
-              clientY: touch.clientY,
-              deltaY,
-              deltaMode: 0,
-            }),
-          );
+          if (route === "tui-mouse") {
+            sendWheelSgrAt(touch.clientX, touch.clientY, up);
+          } else {
+            onDataRef.current?.(up ? "\x1b[A" : "\x1b[B");
+          }
         }
-        logMouse("touch-scroll routed to TUI notches=%d deltaY=%.2f", notches, deltaY);
+        logMouse("touch-scroll routed to the TUI route=%s notches=%d up=%o", route, notches, up);
       };
 
       const onTouchMove = (e: TouchEvent) => {
@@ -800,9 +810,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const vyBefore = term.getViewportY?.();
         if (lines !== 0) {
           pixelAccum -= lines * cell;
-          if (route === "tui") {
+          if (route !== "viewport") {
             // A full-screen application owns its own scrolling — give it the gesture.
-            dispatchWheelNotches(touch, lines, cell);
+            scrollTheTui(touch, lines);
           } else {
             // Finger down (positive delta) reveals older output. `scrollLines` moves the
             // viewport by `viewportY - amount`, so a negative amount increases getViewportY
@@ -1204,17 +1214,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         },
         sendWheelSgr(e: WheelEvent) {
           if (e.ctrlKey) return;
-          const t = termRef.current;
-          const send = onDataRef.current;
-          if (!t || !send) return;
-          const canvas = t.element?.querySelector("canvas");
-          if (!canvas) return;
-          const r = canvas.getBoundingClientRect();
-          const grid = { left: r.left, top: r.top, width: r.width, height: r.height };
-          const coords = clientPointToTerminalCell(e.clientX, e.clientY, grid, t.cols, t.rows);
-          if (!coords) return;
-          const pb = e.deltaY < 0 ? 64 : 65;
-          send(`\x1b[<${pb};${coords.col};${coords.row}M`);
+          sendWheelSgrAt(e.clientX, e.clientY, e.deltaY < 0);
         },
         sendKeystroke(data: string) {
           const t = termRef.current as unknown as {
@@ -1311,7 +1311,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
       },
       }),
-      [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose]
+      [applyFontSizePx, minFontSize, maxFontSize, zoomVerbose, sendWheelSgrAt]
     );
 
     return (
