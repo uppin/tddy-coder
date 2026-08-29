@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/write-stack-plan",
+  "title": "WriteStackPlanOutput",
+  "type": "object",
+  "required": ["goal", "version", "prs"],
+  "properties": {
+    "goal": { "const": "write-stack-plan" },
+    "version": { "type": "integer" },
+    "exploration": {
+      "type": "string",
+      "description": "Markdown code-discovery map with path:line references, persisted to artifacts/exploration.md."
+    },
+    "prs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "title"],
+        "properties": {
+          "node_id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "branch_suggestion": { "type": "string" },
+          "parents": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "child_recipe": { "type": "string" }
+        }
+      }
+    }
+  }
+}

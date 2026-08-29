@@ -238,16 +238,14 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
         e
     })?;
 
-    let goal = data
-        .get("goal")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown")
-        .to_string();
+    let goal = resolve_submit_goal(
+        args.goal.as_deref(),
+        data.get("goal").and_then(|v| v.as_str()),
+    );
 
-    let validation_goal = args.goal.as_deref().unwrap_or(&goal);
-    if schema::get_schema(validation_goal).is_some() {
-        if let Err(errors) = schema::validate_output(validation_goal, &json_str) {
-            let tip = schema::validation_error_tip(validation_goal);
+    if schema::get_schema(&goal).is_some() {
+        if let Err(errors) = schema::validate_output(&goal, &json_str) {
+            let tip = schema::validation_error_tip(&goal);
             output_validation_error_with_tip(&errors, &tip);
             std::process::exit(3);
         }
@@ -270,6 +268,37 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolve the goal a submission is routed on: `--goal` when given, otherwise the payload's own
+/// `goal` field. Both are authoritative, so a disagreement is a usage error rather than a silent
+/// pick, and a submission that names no goal anywhere has no task to deliver to — the workflow
+/// goals without a registered schema (`assess`, `orchestrate`, `grill`, …) carry no `goal` field,
+/// so `--goal` is their only routing signal.
+///
+/// Exits the process (code 2) rather than returning on either error, matching `run_get_schema`.
+fn resolve_submit_goal(goal_flag: Option<&str>, payload_goal: Option<&str>) -> String {
+    match (goal_flag, payload_goal) {
+        (Some(flag), Some(payload)) if flag != payload => {
+            output_error(
+                &format!(
+                    "goal mismatch: --goal {flag} but the payload's \"goal\" field is {payload}. \
+                     A submission belongs to one task — resubmit under the goal you are answering."
+                ),
+                2,
+            );
+            unreachable!("output_error exits")
+        }
+        (Some(goal), _) | (None, Some(goal)) => goal.to_string(),
+        (None, None) => {
+            output_error(
+                "no goal to submit to: pass --goal <goal>, or carry a \"goal\" field in the \
+                 payload. Run `tddy-tools list-schemas` to see the registered goals.",
+                2,
+            );
+            unreachable!("output_error exits")
+        }
+    }
 }
 
 fn read_input(data_arg: &Option<String>, data_stdin: bool) -> Result<String> {

@@ -14,6 +14,9 @@ use tddy_core::workflow::{clear_sinks, set_sinks};
 use super::prompt;
 use super::{validate_stack_plan, StackPlanOutput, PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME};
 
+/// Workflow name the shared planning prompts announce to the agent.
+const RECIPE_NAME: &str = "plan-pr-stack";
+
 pub struct PlanPrStackHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
 }
@@ -93,7 +96,10 @@ impl RunnerHooks for PlanPrStackHooks {
 
         match task_id {
             "analyze-stack" => {
-                context.set_sync("system_prompt", prompt::analyze_stack_system_prompt());
+                context.set_sync(
+                    "system_prompt",
+                    prompt::analyze_stack_system_prompt(RECIPE_NAME),
+                );
                 let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
                 let answers: Option<String> = context.get_sync("answers");
                 let user_prompt = if let Some(a) = answers.filter(|s| !s.trim().is_empty()) {
@@ -110,7 +116,10 @@ impl RunnerHooks for PlanPrStackHooks {
                 }
             }
             "write-stack-plan" => {
-                context.set_sync("system_prompt", prompt::write_stack_plan_system_prompt());
+                context.set_sync(
+                    "system_prompt",
+                    prompt::write_stack_plan_system_prompt(RECIPE_NAME),
+                );
                 let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
                 let analysis_output: String = context.get_sync("output").unwrap_or_default();
                 let answers: Option<String> = context.get_sync("answers");
@@ -299,5 +308,69 @@ mod tests {
         let cs = read_changeset(&dir).unwrap();
         assert_eq!(cs.state.current, WorkflowState::new("Failed"));
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod write_stack_plan_submit_instruction_tests {
+    use tddy_core::workflow::context::Context;
+
+    use super::*;
+
+    /// The instruction has to reach the agent through the seeded `system_prompt`, so the test
+    /// drives the real `before_task` seam rather than reading the prompt constant.
+    fn seeded_write_stack_plan_prompt() -> String {
+        let ctx = Context::new();
+        PlanPrStackHooks::new(None)
+            .before_task("write-stack-plan", &ctx)
+            .expect("before_task must seed the write-stack-plan prompts");
+        ctx.get_sync::<String>("system_prompt")
+            .expect("hook must seed a system_prompt")
+    }
+
+    /// This recipe is superseded, but a stale prompt is a trap for whoever revives or greps it:
+    /// two copies of the same instruction drift, and the copy naming a tool that does not exist is
+    /// the one that cost a live session its planning phase. Both recipes must state the same
+    /// contract.
+    #[test]
+    fn write_stack_plan_prompt_names_the_submit_command_an_agent_can_actually_run() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("tddy-tools submit --goal write-stack-plan"),
+            "prompt must name the exact CLI invocation; got: {prompt}"
+        );
+    }
+
+    /// `advertised_tools` excludes the CLI subcommands, so a `submit` tool has never been callable.
+    #[test]
+    fn write_stack_plan_prompt_never_names_a_submit_tool_absent_from_the_catalog() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            !prompt.contains("`submit` tool"),
+            "prompt must not advertise a `submit` tool; got: {prompt}"
+        );
+        assert!(
+            !prompt.contains("key `stack-plan`"),
+            "prompt must not describe a `key` parameter; got: {prompt}"
+        );
+    }
+
+    /// Nothing reads `stack-plan-md` — the markdown is derived from the plan by `after_task`.
+    #[test]
+    fn write_stack_plan_prompt_drops_the_stack_plan_md_submission_nothing_consumes() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            !prompt.contains("stack-plan-md"),
+            "prompt must not request a second submission no code consumes; got: {prompt}"
+        );
     }
 }
