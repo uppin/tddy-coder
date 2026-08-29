@@ -255,6 +255,36 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Mobile terminal touch — two gaps left open (source: mobile-touch-scroll-routing changeset, 2026-08-29)
+
+- **A scroll gesture still reports a stray click to a mouse-tracking TUI.** The capture-phase tap
+  handlers send an SGR **press** at `touchstart` and a **release** at `touchend` for every
+  single-finger gesture, including one that turns out to be a drag — so a swipe that starts on a
+  clickable affordance in the Claude CLI's TUI presses it. The desktop wheel sends no press at all.
+  Fixing it means deferring the press until the gesture is known to be a tap (the threshold the
+  tap-synthesis effect already measures), which changes when a genuine tap is reported and needs the
+  existing `expectSgrPressAndReleaseReportedOnce` contract re-pinned rather than assumed.
+- **The lazy-history forward fill has no touch trigger in the normal screen.** Desktop starts it
+  with a wheel-up at the tip; mobile reaches older output only through the "Load earlier output"
+  affordance. Giving the drag the same trigger would complete the parity — deliberately left out of
+  the routing fix, which was about a full-screen TUI owning its own scrolling.
+
+### Session worktree sync — call attribution across a tick boundary (source: activity-log-cut-before-measurement changeset, 2026-08-29)
+
+- **A tick boundary between a write and the record describing it still mis-attributes that call.**
+  The write is measured by tick N, the row is cut by tick N+1, and N+1's diff no longer names the
+  path, so the call's `DELTA_SCOPE_CALL` patch is empty and its bytes reach clients only as tick N's
+  residual. The window is now the microseconds between a tool's write and its log append (it was a
+  large fraction of every poll interval). Closing it means attributing a record to the most recent
+  retained tick whose patch **names one of its declared paths**, falling back to the current tick for
+  a call that genuinely changed nothing — which changes what `activity_seq` means on the wire and is
+  the feature owner's call.
+- **The per-tick ordering is not reachable from a test.** Reproducing the window means appending to
+  the activity log *during* a measurement, and the poll loop cannot be built from outside the crate:
+  `SessionRoomRegistry::register` is private and a `BroadcastPublisher` cannot be constructed there
+  (the wall `session_room_livekit_acceptance.rs`'s module note describes). Extracting the per-tick
+  body into a function that takes its measurement and its log cut would make the ordering pinnable
+  without LiveKit, a checkout or a timer — the same move that made `tick_activity` testable.
 ### `subagent_status` cannot wait for a turn to end (source: subagent-status-wait changeset, 2026-08-29)
 `subagent_status { waitFor: "ready" }` covers the case it was asked for — parking until an agent
 whose checkout is still provisioning becomes promptable. The symmetric want is `waitFor: "idle"`:

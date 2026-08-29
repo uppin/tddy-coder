@@ -395,6 +395,15 @@ fn head_commit_of(root: &Path) -> String {
 /// A real `git apply` in a directory that is not the session's checkout, because that is what a
 /// mirror is: a patch that only applies where it was cut from would be no use to one.
 fn applying(patch: &[u8], path: &str, before: &str) -> String {
+    // Named before `git apply` gets it, because `git apply` answers an empty patch with
+    // "No valid patches in input" — which reads as a malformed patch when what it means is that the
+    // call was attributed to a tick that did not carry its change, and the scoped slice came out
+    // empty. That is the failure this suite is most likely to see; it should say so itself.
+    assert!(
+        !patch.is_empty(),
+        "the delta for a call that edited {path} is an empty patch: the call was attributed to a \
+         tick whose diff does not name {path}"
+    );
     let mirror = tempfile::tempdir().expect("tempdir");
     std::fs::write(mirror.path().join(path), before).expect("seed the file the patch applies onto");
     let mut git = Command::new("git")

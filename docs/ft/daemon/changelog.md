@@ -2,6 +2,11 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — A tick attributes only the calls its measurement could have seen
+
+- **A session room's poll tick now cuts the activity log before it measures the checkout.** Reading it afterwards admitted rows the measurement could not have seen: a tool writes its file and then records the completed call, so a call appended during the measure-and-announce span was stamped with the seq of a delta cut before its write existed.
+- **The effect was an empty `DELTA_SCOPE_CALL` patch, permanently** — the bytes surfaced in the tick's residual instead, so nothing was lost on the wire, but a client that trusts a call's own delta never saw that edit (AC6). It showed up as an intermittent `git apply` failure in `session_room_livekit_acceptance`, because `git apply` answers an empty patch with `No valid patches in input`.
+- **Rows appended after the cut wait for the next tick**, whose measurement is later than the write they describe. A tick boundary falling *between* a write and its record still mis-attributes that one call — microseconds against a 2 s poll, where the closed window was a large fraction of every interval; see [TODO](../../dev/TODO.md). Feature: [Session worktree sync](session-worktree-sync.md).
 ## 2026-08-29 — Waiting for an agent, instead of asking again
 
 - **The main agent can now ask to be told when an agent is ready**, rather than checking and checking again. Attaching an agent returns before it can be used — its checkout may still be building — so the first prompt was often refused for a reason nobody could have anticipated. Asking repeatedly costs a full turn of the agent's own thinking each time, which made the cheapest question in the system one of the most expensive.

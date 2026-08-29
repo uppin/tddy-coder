@@ -2286,6 +2286,18 @@ impl SessionRoomPoll {
                 );
                 return;
             }
+            // The activity log is cut **before** the measurement, and only the rows in that cut are
+            // attributed to this tick.
+            //
+            // A call is stamped with the seq of a delta, and that delta has to be able to hold the
+            // call's change. Reading the log *after* measuring admitted rows the measurement could
+            // not possibly have seen: a tool writes its file and then records the completed call, so
+            // a call appended during the measure-and-announce span — a git shell-out and a metadata
+            // write, a large fraction of a poll interval — was stamped with a delta cut before its
+            // write existed. Its `DELTA_SCOPE_CALL` patch is then empty forever, and the bytes it
+            // declared show up in the residual instead. Cutting first leaves those rows for the next
+            // tick, whose measurement is later than the write they describe.
+            let log = self.read_activity_log().await;
             let measured = match self.source.measure().await {
                 Measurement::Taken(measured) => measured,
                 // Costs the whole tick, the activity log included: a call attributed to a window
@@ -2338,7 +2350,7 @@ impl SessionRoomPoll {
                     failed_metadata_writes = failed_metadata_writes.saturating_add(1);
                 }
             }
-            self.broadcast_new_activity(recorded_delta_seq, &head_commit)
+            self.broadcast_new_activity(log, recorded_delta_seq, &head_commit)
                 .await;
         }
     }
@@ -2585,19 +2597,22 @@ impl SessionRoomPoll {
     /// every `session_room.poll_interval_ms`, and it carries the full input and full output of every
     /// tool call, so a long session pays its own size twice a second for as long as its room is
     /// open.
-    async fn broadcast_new_activity(&mut self, recorded_delta_seq: Option<u64>, head_commit: &str) {
+    /// The session's activity log as of now, or `None` when it could not be read — in which case
+    /// this tick attributes nothing and the next one reads the log whole again, so nothing is lost.
+    ///
+    /// Called before the measurement, not after: see the note at the call site.
+    async fn read_activity_log(&self) -> Option<Vec<AgentActivityRecord>> {
         // Blocking file I/O, on the blocking pool for the same reason the tick's git work is: this
         // runs on the runtime that serves every room's RPC.
         let session_dir = self.session_dir.clone();
-        let log = match tokio::task::spawn_blocking(move || read_agent_activity(&session_dir)).await
-        {
-            Ok(Ok(log)) => log,
+        match tokio::task::spawn_blocking(move || read_agent_activity(&session_dir)).await {
+            Ok(Ok(log)) => Some(log),
             Ok(Err(e)) => {
                 warn!(
                     "session_room: {} could not read its session's activity log; this tick attributed nothing: {e}",
                     self.room_name
                 );
-                return;
+                None
             }
             Err(join_error) => {
                 // A panic while reading the log is a bug, not a slow filesystem — and it must not
@@ -2606,8 +2621,19 @@ impl SessionRoomPoll {
                     "session_room: {} could not read its session's activity log: {join_error}",
                     self.room_name
                 );
-                return;
+                None
             }
+        }
+    }
+
+    async fn broadcast_new_activity(
+        &mut self,
+        log: Option<Vec<AgentActivityRecord>>,
+        recorded_delta_seq: Option<u64>,
+        head_commit: &str,
+    ) {
+        let Some(log) = log else {
+            return;
         };
 
         let target = self.attribution_target(recorded_delta_seq, head_commit);
