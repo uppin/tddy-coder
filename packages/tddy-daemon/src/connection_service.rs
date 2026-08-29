@@ -2631,9 +2631,9 @@ fn started_agent_id(
 ///   runs no agent of its own — that a withdrawal attached to this checkout is enforced against an
 ///   agent somewhere, and where.
 /// - `specialized_agents` are **qualified with the agent host's instance id**. The peer reads a bare
-///   name as its own daemon's agent, so forwarding `fastcontext` verbatim would seed a *different*
+///   name as its own daemon's agent, so forwarding `reviewer` verbatim would seed a *different*
 ///   agent of the same name — the substitution qualified ids exist to prevent — while
-///   `fastcontext@{agent_instance_id}` keeps meaning the agent the operator picked.
+///   `reviewer@{agent_instance_id}` keeps meaning the agent the operator picked.
 ///
 /// Everything else rides along, `semantic_index` included: the index is built where the worktree is,
 /// and on a split placement that is the host this request is going to.
@@ -18831,7 +18831,7 @@ mod workspace_start_request_unit_tests {
     fn a_bare_agent_reference_is_qualified_with_the_agent_hosts_instance_id() {
         // Given
         let req = StartSessionRequest {
-            specialized_agents: vec!["fastcontext".to_string()],
+            specialized_agents: vec!["reviewer".to_string()],
             ..a_split_start_request()
         };
 
@@ -18841,7 +18841,7 @@ mod workspace_start_request_unit_tests {
         // Then
         assert_eq!(
             forwarded.specialized_agents,
-            vec!["fastcontext@laptop-a".to_string()]
+            vec!["reviewer@laptop-a".to_string()]
         );
     }
 
@@ -18870,10 +18870,7 @@ mod workspace_start_request_unit_tests {
     fn agent_references_are_forwarded_in_the_order_they_were_asked_for() {
         // Given
         let req = StartSessionRequest {
-            specialized_agents: vec![
-                "explorer@workstation-c".to_string(),
-                "fastcontext".to_string(),
-            ],
+            specialized_agents: vec!["explorer@workstation-c".to_string(), "reviewer".to_string()],
             ..a_split_start_request()
         };
 
@@ -18885,7 +18882,7 @@ mod workspace_start_request_unit_tests {
             forwarded.specialized_agents,
             vec![
                 "explorer@workstation-c".to_string(),
-                "fastcontext@laptop-a".to_string(),
+                "reviewer@laptop-a".to_string(),
             ]
         );
     }
