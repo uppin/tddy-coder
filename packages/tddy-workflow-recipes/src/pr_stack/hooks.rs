@@ -21,10 +21,13 @@ use tddy_core::workflow::{clear_sinks, set_sinks};
 
 use crate::orchestrate_pr_stack::{STACK_STATUS_JSON_BASENAME, STACK_STATUS_MD_BASENAME};
 use crate::plan_pr_stack::{
-    analyze_stack_user_prompt, write_stack_plan_user_prompt, StackPlanOutput,
-    PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME,
+    analyze_stack_system_prompt, analyze_stack_user_prompt, write_stack_plan_system_prompt,
+    write_stack_plan_user_prompt, StackPlanOutput, PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME,
 };
 use crate::SessionArtifactManifest;
+
+/// Workflow name the shared planning prompts announce to the agent.
+const RECIPE_NAME: &str = "pr-stack";
 
 pub struct PrStackHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
@@ -58,98 +61,6 @@ fn set_changeset_state(session_dir: &Path, state: WorkflowState) {
             log::warn!("[pr-stack hooks] could not persist state: {e}");
         }
     }
-}
-
-fn analyze_stack_system_prompt() -> String {
-    "You are assisting with the **pr-stack** workflow **analyze-stack** step.\n\n\
-     ## Task: Analyze PR stack decomposition\n\n\
-     Analyze the feature request and determine how to decompose it into a stack of pull requests. \
-     Consider dependencies between PRs and identify which can be built in parallel (DAG structure).\n\n\
-     This is a **read-only** analysis phase — do not write code or create files. \
-     Focus on understanding the feature scope and identifying the optimal PR decomposition strategy, \
-     noting which PRs depend on others and which can be developed concurrently.\n\n\
-     ## Scoping rules: every PR is self-contained\n\n\
-     Each PR must stand on its own — a reviewer can judge it, and it can merge, without waiting for \
-     a later node in the stack. That means one node ships the **API/schema change, the code that \
-     implements it, and its tests, together**.\n\n\
-     **Do not split by layer.** These are the same node, never two:\n\
-     - a schema/proto/interface change and the behavior behind it\n\
-     - a backend endpoint and the handler that serves it\n\
-     - a data model and the migration or persistence that uses it\n\
-     - a function signature and its body; a type and its consumers\n\n\
-     A node that only declares surface — new RPCs that return `unimplemented`, a field nothing \
-     reads, a trait with stub impls — is **not** a valid PR. It cannot be reviewed for correctness \
-     (there is no behavior to check), it cannot be tested beyond compiling, and it strands a \
-     contract in the codebase that lies about what the system does.\n\n\
-     **When a vertical slice feels too large, split by capability, not by layer.** Cut along \
-     user-visible increments where each part is still end-to-end: one source variant instead of \
-     all of them, one scope/enum case instead of the full set, one screen or one entry point, the \
-     happy path before the edge cases. Each such PR ships its own contract plus behavior plus \
-     tests, and the next one extends it.\n\n\
-     **The only exceptions** — a node may omit implementation when it is:\n\
-     - a purely mechanical rename, move, or extraction with no behavior change, or\n\
-     - regenerating already-committed generated code, exposing no new surface.\n\n\
-     If you believe a case warrants a third exception, put the reasoning in the PR's description \
-     and let a human decide — do not invent one silently.\n\n\
-     For each proposed PR, identify:\n\
-     1. A stable slug (`node_id`, e.g. `auth-store`, `api-client`)\n\
-     2. A concise title\n\
-     3. A description of what it implements\n\
-     4. Its dependencies (which other PRs must merge first)\n\
-     5. A branch name suggestion grouped under one shared stack namespace, \
-     `feature/<stack-slug>/<node>` (e.g. `feature/auth/token-store`), so the stack's branches \
-     group together\n\
-     6. The child recipe to use (default: `tdd`)\n"
-        .to_string()
-}
-
-fn write_stack_plan_system_prompt() -> String {
-    "You are assisting with the **pr-stack** workflow **write-stack-plan** step.\n\n\
-     ## Task: Emit structured PR stack plan\n\n\
-     Based on the prior analysis, emit a structured PR stack plan using the `submit` tool \
-     with key `stack-plan`. The YAML must conform to this contract:\n\n\
-     ```yaml\n\
-     version: 1\n\
-     prs:\n\
-       - node_id: n1          # stable slug, no spaces\n\
-         title: \"Auth token store\"\n\
-         description: \"Store tokens securely in the keyring\"\n\
-         branch_suggestion: \"feature/auth/token-store\"\n\
-         parents: []          # empty = root PR, off the stack base branch\n\
-         child_recipe: tdd    # optional; default is tdd\n\
-       - node_id: n2\n\
-         title: \"Auth middleware\"\n\
-         description: \"Validate tokens on each request\"\n\
-         branch_suggestion: \"feature/auth/middleware\"\n\
-         parents: [n1]        # depends on n1; use node_ids, not branch names\n\
-     ```\n\n\
-     **Validation rules** (the hook enforces these):\n\
-     - `node_id` values must be unique\n\
-     - All `parents` entries must reference an existing `node_id`\n\
-     - The dependency graph must be acyclic (no cycles)\n\
-     - Every `branch_suggestion` must be in `feature/<stack-slug>/<node>` form, and all PRs must \
-     share the same `<stack-slug>` so the stack's branches group under one namespace \
-     (e.g. `feature/auth/token-store`, `feature/auth/middleware`)\n\n\
-     **Scoping rules** (your judgment — the hook cannot check these, so they are on you):\n\
-     - Every PR is **self-contained**: the API/schema change, the code implementing it, and its \
-     tests are one node. A node whose `description` promises only surface — new endpoints that \
-     return `unimplemented`, a field nothing reads, stub impls — is not a valid PR.\n\
-     - **Never split by layer** (schema then behavior, endpoint then handler, signature then body). \
-     When a slice is too large, split by **capability**: one source variant, one enum case, one \
-     screen, happy path before edge cases — each part still end-to-end.\n\
-     - Sole exceptions: a mechanical rename/move with no behavior change, or regenerating \
-     already-committed generated code with no new surface. Anything else, say so in the \
-     `description` and let a human decide.\n\n\
-     This may be the first time this plan is written, or a chat-driven refinement of an \
-     already-written plan — in both cases, re-emit the full plan **and re-apply the scoping rules \
-     above**: a refinement request must not talk you into a layer-split stack.\n\n\
-     You may also include an optional top-level `exploration` field: a short markdown \
-     code-discovery map of the key files you inspected, each with a `path:line` reference \
-     (e.g. `- src/auth/store.rs:42 — token persistence`). When present it is persisted to \
-     `artifacts/exploration.md` and surfaced as context to the orchestrate phase. Omit it if \
-     there is nothing worth recording.\n\n\
-     Also submit a human-readable plan summary using key `stack-plan-md`.\n"
-        .to_string()
 }
 
 fn generate_pr_stack_plan_md(plan: &StackPlanOutput) -> String {
@@ -259,7 +170,7 @@ fn refresh_stack_status_best_effort(context: &Context) {
 
 /// `before_task` for `analyze-stack`: seed the system/user prompt and mark the state.
 fn before_analyze_stack(context: &Context, session_dir: Option<&Path>) {
-    context.set_sync("system_prompt", analyze_stack_system_prompt());
+    context.set_sync("system_prompt", analyze_stack_system_prompt(RECIPE_NAME));
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
     let answers: Option<String> = context.get_sync("answers");
     let user_prompt = if let Some(a) = answers.filter(|s| !s.trim().is_empty()) {
@@ -278,7 +189,7 @@ fn before_analyze_stack(context: &Context, session_dir: Option<&Path>) {
 
 /// `before_task` for `write-stack-plan`: seed the system/user prompt and mark the state.
 fn before_write_stack_plan(context: &Context, session_dir: Option<&Path>) {
-    context.set_sync("system_prompt", write_stack_plan_system_prompt());
+    context.set_sync("system_prompt", write_stack_plan_system_prompt(RECIPE_NAME));
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
     let analysis_output: String = context.get_sync("output").unwrap_or_default();
     let answers: Option<String> = context.get_sync("answers");
@@ -641,6 +552,123 @@ prs:
         assert!(
             !prompt.contains("<context-reminder>"),
             "no context-reminder header should be injected when no docs exist; got:\n{prompt}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod write_stack_plan_submit_instruction_tests {
+    use super::*;
+
+    /// The instruction has to reach the agent through the seeded `system_prompt`, not merely exist
+    /// as a string constant — so each case drives the real `before_task` seam.
+    fn seeded_write_stack_plan_prompt() -> String {
+        let ctx = Context::new();
+        before_write_stack_plan(&ctx, None);
+        ctx.get_sync::<String>("system_prompt")
+            .expect("hook must seed a system_prompt")
+    }
+
+    /// Session `01a04d4b-84f8-7fc0-b020-19ae73981175`: this prompt told the agent to submit "using
+    /// the `submit` tool", which is not in the catalog — `advertised_tools` deliberately excludes
+    /// the CLI subcommands. The agent searched every namespace for `submit`, got no matches, and
+    /// guessed `tddy-tools-approval_prompt` before falling back to the shell. Every other recipe
+    /// (bugfix analyze, tdd update-docs, tdd_small red) spells the command out instead.
+    #[test]
+    fn write_stack_plan_prompt_names_the_submit_command_an_agent_can_actually_run() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("tddy-tools submit --goal write-stack-plan"),
+            "prompt must name the exact CLI invocation, as the tdd and bugfix prompts do; \
+             got: {prompt}"
+        );
+    }
+
+    /// The prompt body is shared with the superseded plan-pr-stack recipe and carries a `{recipe}`
+    /// placeholder, so a wrong constant or a missed substitution would ship the placeholder itself
+    /// to a live agent — the one failure this sharing could introduce that the shared text cannot.
+    #[test]
+    fn write_stack_plan_prompt_announces_the_pr_stack_recipe_by_name() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("**pr-stack** workflow"),
+            "prompt must announce the live recipe by name; got: {prompt}"
+        );
+        assert!(
+            !prompt.contains("{recipe}"),
+            "the recipe placeholder must be substituted, not shipped; got: {prompt}"
+        );
+    }
+
+    /// Only `Bash(tddy-tools *)` is auto-approved, so an agent that builds the JSON with `python3`
+    /// or `cat` first — as the incident agent did — is one permission prompt away from stalling.
+    /// The heredoc form also sidesteps shell escaping on a payload this size.
+    #[test]
+    fn write_stack_plan_prompt_tells_the_agent_to_pass_the_payload_on_stdin() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("--data-stdin"),
+            "prompt must ask for the heredoc/stdin form, not inline --data; got: {prompt}"
+        );
+    }
+
+    /// Naming a tool that does not exist costs more than saying nothing: the agent trusts the name
+    /// and burns its turns hunting for it. Neither the tool nor its invented `key` parameter is real.
+    #[test]
+    fn write_stack_plan_prompt_never_names_a_submit_tool_absent_from_the_catalog() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            !prompt.contains("`submit` tool"),
+            "prompt must not advertise a `submit` tool; the CLI subcommands are not in the MCP \
+             catalog (tddy-tools server.rs advertised_tools); got: {prompt}"
+        );
+        assert!(
+            !prompt.contains("key `stack-plan`"),
+            "prompt must not describe a `key` parameter; submit takes a goal and a JSON body; \
+             got: {prompt}"
+        );
+    }
+
+    /// "Also submit a human-readable plan summary using key `stack-plan-md`" asks for a turn that
+    /// can never do anything: nothing reads `stack-plan-md`, and `after_write_stack_plan` generates
+    /// the markdown itself via `generate_pr_stack_plan_md`.
+    #[test]
+    fn write_stack_plan_prompt_drops_the_stack_plan_md_submission_nothing_consumes() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            !prompt.contains("stack-plan-md"),
+            "prompt must not request a second submission no code consumes; the hook derives the \
+             markdown from the plan; got: {prompt}"
+        );
+    }
+
+    /// The incident agent looked for its output in the repo's `artifacts/`, found nothing, and
+    /// concluded the submit had failed. The plan and `exploration.md` land under the session dir,
+    /// which only `$TDDY_SESSION_DIR` names.
+    #[test]
+    fn write_stack_plan_prompt_points_at_the_session_dir_where_the_plan_lands() {
+        // Given / When
+        let prompt = seeded_write_stack_plan_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("TDDY_SESSION_DIR"),
+            "prompt must name the env var that locates the written artifacts; got: {prompt}"
         );
     }
 }

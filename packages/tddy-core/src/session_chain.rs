@@ -183,6 +183,57 @@ pub fn resolve_chain_base_ref(
         .map_err(|e| format!("could not resolve stack parent branch: {e}"))
 }
 
+/// Which host resolves a spawn's PR-stack parent.
+///
+/// The variants are the three answers to one question — whose disk holds the parent's
+/// `changeset.yaml` — and nothing else. What a caller does with each is its own business: the
+/// daemon serves the first two itself and forwards the third.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StackParentRoute {
+    /// There is no stack parent, so nothing is resolved and no host is asked.
+    NoParent,
+    /// This host's own sessions tree holds the parent.
+    Local,
+    /// Another daemon holds it; only that daemon can answer.
+    OwnedByPeer { daemon_instance_id: String },
+}
+
+/// Decide which host resolves `stack_parent`, given the daemon that owns it.
+///
+/// Every resolver behind a `stack_parent` reads
+/// `unified_session_dir_path(sessions_base, parent_session_id)` on the **local** filesystem, so a
+/// parent that lives on another daemon is not "not yet planned" but simply absent — and the spawn
+/// is refused over a session that exists perfectly well, one host over. The owning host has to be
+/// named for the question to reach it, and this is the rule that reads that name.
+///
+/// A blank owning host is *not* an error and does not mean "nowhere": it is what every caller
+/// predating the field sends, and what every single-host deployment sends, so it means this host —
+/// today's behaviour, unchanged. A host id equal to this one's means the same thing, which matters
+/// because a daemon that forwarded to itself would deadlock on its own RPC rather than answer.
+///
+/// A blank `stack_parent` is [`StackParentRoute::NoParent`] whatever host is named: an empty id
+/// names no session, so there is nothing for any host to resolve.
+///
+/// Deliberately a function over three strings — the rule about which host owns a parent is worth
+/// asserting without a live daemon, a common room or a LiveKit connection behind it.
+pub fn classify_stack_parent_route(
+    local_daemon_instance_id: &str,
+    stack_parent: Option<&str>,
+    stack_parent_daemon_instance_id: &str,
+) -> StackParentRoute {
+    let names_a_parent = stack_parent.is_some_and(|p| !p.trim().is_empty());
+    if !names_a_parent {
+        return StackParentRoute::NoParent;
+    }
+    let owner = stack_parent_daemon_instance_id.trim();
+    if owner.is_empty() || owner == local_daemon_instance_id.trim() {
+        return StackParentRoute::Local;
+    }
+    StackParentRoute::OwnedByPeer {
+        daemon_instance_id: owner.to_string(),
+    }
+}
+
 /// Select the worktree base ref for a session spawn: an explicit, non-empty operator-chosen
 /// `selected_integration_base_ref` (sent from the web Start-session dialog's "Base branch"
 /// selector) wins over the stack-parent-resolved chain base; an empty/whitespace override falls

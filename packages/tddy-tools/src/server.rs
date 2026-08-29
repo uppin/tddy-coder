@@ -2009,6 +2009,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     let registry = SubagentRegistry::from_defs(vec![def]);
     match registry.create(&agent_name, subagent_config_from_env()) {
         Ok(session) => {
+            let agent_id = entry.agent_id.clone();
             subagent_sessions().lock().await.open.insert(
                 session_id.clone(),
                 SubagentConversation {
@@ -2018,6 +2019,14 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
                     remote: None,
                 },
             );
+            // The daemon is never asked to open this one, so this is the first and only moment its
+            // roster row can stop reporting UNSPECIFIED.
+            report_local_conversation_state(
+                &agent_id,
+                tddy_service::proto::connection::SessionAgentStatus::Idle,
+                "conversation opened",
+            )
+            .await;
             serde_json::json!({ "sessionId": session_id }).to_string()
         }
         Err(e) => {
@@ -2077,15 +2086,84 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     let Some(conv) = sessions.open.get_mut(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
+    // Only a loop running here is reported on; one the daemon runs it already sees.
+    let reported_agent = conv.remote.is_none().then(|| conv.agent.clone());
+    if let Some(agent_id) = reported_agent.as_deref() {
+        report_local_conversation_state(
+            agent_id,
+            tddy_service::proto::connection::SessionAgentStatus::Running,
+            &format!("prompted: {prompt_text}"),
+        )
+        .await;
+    }
     let response = match conv.session.prompt(&prompt_text).await {
         Ok(outcome) => {
             conv.turns += 1;
+            let answered = outcome
+                .content
+                .iter()
+                .map(|block| block.text.chars().count())
+                .sum::<usize>();
+            if let Some(agent_id) = reported_agent.as_deref() {
+                report_local_conversation_state(
+                    agent_id,
+                    tddy_service::proto::connection::SessionAgentStatus::Idle,
+                    &format!("answered ({answered} chars)"),
+                )
+                .await;
+            }
             prompt_outcome_json(outcome)
         }
-        Err(e) => return subagent_error_json(e),
+        Err(e) => {
+            // Idle, not ERROR: the agent is still attached and still promptable, and ERROR on a
+            // roster row means the checkout is broken. The summary is what says what happened.
+            if let Some(agent_id) = reported_agent.as_deref() {
+                report_local_conversation_state(
+                    agent_id,
+                    tddy_service::proto::connection::SessionAgentStatus::Idle,
+                    &format!("turn failed: {e}"),
+                )
+                .await;
+            }
+            return subagent_error_json(e);
+        }
     };
     write_accounting_file(&sessions);
     response
+}
+
+/// Tell the facilitating daemon what a conversation **this process** runs is doing.
+///
+/// Only for a loop that runs here. A conversation the daemon runs is one the daemon already sees —
+/// it serves the open and the prompt itself — and a second account of it from this side would race
+/// the daemon's own, which is how a row gets parked at RUNNING after the turn it describes has
+/// finished.
+///
+/// Best-effort throughout, including the connect: a status is a display signal, and failing a turn
+/// because a badge could not be updated would trade a stale badge for a broken conversation. Logged
+/// at `debug` rather than `error` for the same reason — a session with no daemon in the loop at all
+/// (`tddy-sandbox-app`) reaches this on every turn, and it is not a fault there.
+async fn report_local_conversation_state(
+    agent_id: &str,
+    status: tddy_service::proto::connection::SessionAgentStatus,
+    summary: &str,
+) {
+    let link = match crate::session_agents::AgentConversationLink::connect().await {
+        Ok(link) => link,
+        Err(e) => {
+            log::debug!(
+                target: "tddy_tools::session_agents",
+                "not reporting '{agent_id}' as {status:?}: {e}"
+            );
+            return;
+        }
+    };
+    if let Err(e) = link.report_state(agent_id, status, summary).await {
+        log::debug!(
+            target: "tddy_tools::session_agents",
+            "could not report '{agent_id}' as {status:?}: {e}"
+        );
+    }
 }
 
 /// Close a conversation on the daemon running its turn loop, when it runs on one.
@@ -2121,6 +2199,13 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
         .open
         .get(session_id)
         .and_then(|conv| conv.remote.clone());
+    // The agent behind a loop running *here*, read before the retire consumes the conversation. A
+    // remote one needs no report: cancelling it goes through the daemon, which records it itself.
+    let reported_agent = sessions
+        .open
+        .get(session_id)
+        .filter(|conv| conv.remote.is_none())
+        .map(|conv| conv.agent.clone());
     // Retired rather than forgotten: a cancelled conversation's tokens were spent by this session,
     // and the accounting file below is rewritten from this table wholesale.
     let cancelled = sessions.retire(session_id);
@@ -2130,6 +2215,16 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     write_accounting_file(&sessions);
     drop(sessions);
     cancel_remote_conversation(remote).await;
+    if let Some(agent_id) = reported_agent.as_deref() {
+        // Idle rather than left mid-turn: the conversation is gone, so a row still reporting a turn
+        // in flight would be one nothing can ever finish.
+        report_local_conversation_state(
+            agent_id,
+            tddy_service::proto::connection::SessionAgentStatus::Idle,
+            "conversation cancelled",
+        )
+        .await;
+    }
     serde_json::json!({ "cancelled": cancelled }).to_string()
 }
 
@@ -2138,6 +2233,106 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
 async fn subagent_list_tool(_args: serde_json::Value) -> String {
     let sessions = subagent_sessions().lock().await;
     serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
+}
+
+/// A roster status as the word the tool reports, and the `data-` value a UI would key on.
+///
+/// UNSPECIFIED is reported as `"unknown"` rather than `"idle"`, and the distinction is the whole
+/// reason this tool exists: an agent nothing has been observed of is not an agent that is free, and
+/// telling the main agent it is idle would have it dispatch work to a row the daemon cannot
+/// currently account for.
+fn agent_status_word(status: i32) -> &'static str {
+    use tddy_service::proto::connection::SessionAgentStatus;
+    match SessionAgentStatus::try_from(status) {
+        Ok(SessionAgentStatus::Idle) => "idle",
+        Ok(SessionAgentStatus::Running) => "running",
+        Ok(SessionAgentStatus::ExecutingTool) => "executing_tool",
+        Ok(SessionAgentStatus::WaitingForInput) => "waiting_for_input",
+        Ok(SessionAgentStatus::Connecting) => "connecting",
+        Ok(SessionAgentStatus::Error) => "error",
+        Ok(SessionAgentStatus::Unspecified) | Err(_) => "unknown",
+    }
+}
+
+/// The clone state as a word. `local` is a state of its own, not a synonym for `ready`: there is no
+/// checkout behind a local agent, so saying "ready" would imply one exists.
+fn clone_state_word(state: i32) -> &'static str {
+    use tddy_service::proto::connection::AgentCloneState;
+    match AgentCloneState::try_from(state) {
+        Ok(AgentCloneState::Local) => "local",
+        Ok(AgentCloneState::Provisioning) => "provisioning",
+        Ok(AgentCloneState::Ready) => "ready",
+        Ok(AgentCloneState::Error) => "error",
+        Ok(AgentCloneState::Unspecified) | Err(_) => "unknown",
+    }
+}
+
+/// One roster row as the JSON `subagent_status` reports.
+fn agent_status_json(agent: &crate::session_agents::AgentStatus) -> serde_json::Value {
+    let entry = &agent.entry;
+    let mut row = serde_json::json!({
+        "agentId": entry.agent_id,
+        "label": entry.label,
+        "model": entry.model,
+        "daemonInstanceId": entry.daemon_instance_id,
+        "status": agent_status_word(entry.status),
+        "cloneState": clone_state_word(entry.clone_state),
+        "replaces": entry.replaces,
+        "conversations": agent
+            .conversations
+            .iter()
+            .map(|c| match &c.cancelled_reason {
+                None => serde_json::json!({ "id": c.conversation_id, "state": "open" }),
+                Some(reason) => serde_json::json!({
+                    "id": c.conversation_id,
+                    "state": "cancelled",
+                    "reason": reason,
+                }),
+            })
+            .collect::<Vec<_>>(),
+    });
+    // Absent rather than empty when nothing has been observed: `"lastActivity": {}` reads as an
+    // agent that did something unnameable, which is a different claim from "nothing yet".
+    if let Some(activity) = &entry.last_activity {
+        row["lastActivity"] = serde_json::json!({
+            "atUnixMs": activity.at_unix_ms,
+            "summary": activity.summary,
+        });
+    }
+    // Only when there is one — an empty string on every healthy row is noise the main agent has to
+    // read past on every call.
+    if !entry.clone_error.is_empty() {
+        row["cloneError"] = entry.clone_error.clone().into();
+    }
+    row
+}
+
+/// `subagent_status`: what every attached agent is doing right now.
+///
+/// Distinct from `subagent_list`, which enumerates this process's *conversations* and their token
+/// cost. This reports the **roster**: agents the main agent could address but has never opened a
+/// conversation with appear here and nowhere else, which is what makes it answerable before any
+/// work has been dispatched.
+///
+/// A roster that has gone stale still answers, carrying `refusal`: the rows it last knew about plus
+/// the reason none of them can be addressed is strictly more useful than an error, which would
+/// answer "what are my agents doing?" with nothing at all.
+async fn subagent_status_tool(_args: serde_json::Value) -> String {
+    let report = crate::session_agents::session_agent_roster().status_report();
+    let mut payload = serde_json::json!({
+        "sessionId": report.session_id,
+        "agents": report.agents.iter().map(agent_status_json).collect::<Vec<_>>(),
+    });
+    // `null` rather than omitted: "no frame has ever arrived" is a state the caller should be able
+    // to read off the field, not infer from its absence.
+    payload["appliedRev"] = match report.applied_rev {
+        Some(rev) => rev.into(),
+        None => serde_json::Value::Null,
+    };
+    if let Some(refusal) = report.refusal {
+        payload["refusal"] = refusal.into();
+    }
+    payload.to_string()
 }
 
 /// The `subagent_new_session` input schema for a session whose roster holds `agents`.
@@ -2306,6 +2501,22 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     );
     router.add_route(subagent_route(list_tool, |args| {
         Box::pin(subagent_list_tool(args))
+    }));
+
+    let status_tool = rmcp::model::Tool::new(
+        "subagent_status",
+        "What every agent attached to this session is doing right now, from the session's live \
+         roster. Returns {sessionId, appliedRev, agents:[{agentId, label, model, \
+         daemonInstanceId, status, cloneState, replaces, conversations, lastActivity?}]}. \
+         `status` is one of idle | running | executing_tool | waiting_for_input | connecting | \
+         error | unknown; `unknown` means nothing has been observed, NOT that the agent is free.",
+        schema_object(serde_json::json!({
+            "type": "object",
+            "properties": {}
+        })),
+    );
+    router.add_route(subagent_route(status_tool, |args| {
+        Box::pin(subagent_status_tool(args))
     }));
 
     router

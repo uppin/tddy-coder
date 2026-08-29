@@ -59,18 +59,19 @@ use tddy_service::proto::connection::{
     RemoveWorktreeRequest, RemoveWorktreeResponse, ReorderPlannedPrRequest,
     ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
-    SessionTerminalInput, SessionTerminalOutput, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopDemoVmRequest,
-    StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest,
-    StreamSessionActivityRequest, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
-    StreamWorktreeStatsRequest, TerminalControlEvent, TerminalHistoryChunk,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, WatchTerminalControlRequest,
-    WorktreeFileChunk, WorktreeStatsEvent,
+    ReportSessionStatusResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
+    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster, SessionTerminalInput,
+    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
+    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
+    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamSessionActivityRequest,
+    StreamSessionAgentsRequest, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
+    TerminalControlEvent, TerminalHistoryChunk, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, WatchTerminalControlRequest, WorktreeFileChunk,
+    WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
@@ -353,6 +354,24 @@ where
         tonic::Status,
     > {
         let resp = RpcConnectionService::report_agent_clone_state(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn report_agent_conversation_state(
+        &self,
+        request: tonic::Request<
+            tddy_service::proto::connection::ReportAgentConversationStateRequest,
+        >,
+    ) -> Result<
+        tonic::Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
+        tonic::Status,
+    > {
+        let resp = RpcConnectionService::report_agent_conversation_state(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )
@@ -1027,6 +1046,19 @@ where
         request: tonic::Request<QueryBranchRequest>,
     ) -> Result<tonic::Response<QueryBranchResponse>, tonic::Status> {
         let resp = RpcConnectionService::query_branch(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn resolve_stack_base(
+        &self,
+        request: tonic::Request<ResolveStackBaseRequest>,
+    ) -> Result<tonic::Response<ResolveStackBaseResponse>, tonic::Status> {
+        let resp = RpcConnectionService::resolve_stack_base(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

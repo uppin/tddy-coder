@@ -162,6 +162,10 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
             Arc::new(Vec::new()),
             tmp.path().join("session"),
             Arc::new(tddy_daemon::connection_service::AgentActivityHub::default()),
+            // This test drives the terminal bridge and the tool relay, neither of which reaches a
+            // host RPC — the roster and conversation calls the daemon's own handler serves are not
+            // exercised here, so refusing them all is the accurate handler, not a stub.
+            Arc::new(tddy_sandbox_runner::NullRpcHandler),
         ),
     )
     .await

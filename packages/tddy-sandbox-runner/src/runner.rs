@@ -42,7 +42,8 @@ const MAIN_TERMINAL_ID: &str = "main";
 /// protocol (which silently truncated payloads that didn't arrive in one syscall).
 ///
 /// Also forwards the roster and conversation RPCs — `StreamSessionAgents`,
-/// `OpenAgentConversation`, `PromptAgentConversation` and `CancelAgentConversation` — to the
+/// `OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation` and
+/// `ReportAgentConversationState` — to the
 /// facilitating daemon over the `SessionChannel`, multiplexed by `request_id` so a
 /// lifetime-long `StreamSessionAgents` shares the channel with the tool calls behind it. The
 /// host side (`run_host_relay_with_rpc`) dispatches them to its `HostRpcHandler`, which the
@@ -89,6 +90,10 @@ impl tddy_rpc::RpcService for ToolExecService {
             ("connection.ConnectionService", "OpenAgentConversation"),
             ("connection.ConnectionService", "PromptAgentConversation"),
             ("connection.ConnectionService", "CancelAgentConversation"),
+            (
+                "connection.ConnectionService",
+                "ReportAgentConversationState",
+            ),
         ];
         if !FORWARDED_RPCS
             .iter()

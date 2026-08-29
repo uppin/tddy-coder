@@ -102,9 +102,10 @@ use tddy_service::proto::connection::{
     PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
     ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
     RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode,
-    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
+    ResolveStackBaseRequest, ResolveStackBaseResponse, StartDemoVmRequest, StartDemoVmResponse,
+    StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest,
+    StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
+    ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -1184,6 +1185,119 @@ pub trait SeededAgentClones: Send + Sync {
     ) -> Result<SeededCloneGuard, Status>;
 }
 
+/// A spawn's PR-stack parent, as the daemon that resolves it needs to see it.
+///
+/// Carried as one value because the resolution needs facts from both sides of the routing decision
+/// and none can be derived from the others: `sessions_base` and `repo_root` are *this* daemon's,
+/// read when the parent turns out to be this daemon's own, while `session_token` and `project_id`
+/// are what a peer needs — the credential it verifies the question with, and the logical project id
+/// (stable across hosts, because `AddProjectToHost` reuses it) it resolves its own checkout from.
+pub struct StackBaseLookup<'a> {
+    /// Authenticates the question wherever it is answered. A peer verifies the same stateless token
+    /// with the `livekit.api_secret` both daemons share, so no second credential is minted.
+    pub session_token: &'a str,
+    /// The parent session id. `None` — or blank — is a spawn with no stack parent at all, which
+    /// resolves to no chain base without asking anyone.
+    pub stack_parent: Option<&'a str>,
+    /// The daemon whose sessions tree holds the parent. Empty = this one.
+    pub stack_parent_daemon_instance_id: &'a str,
+    /// The logical project the child is being started under.
+    pub project_id: &'a str,
+    /// This daemon's sessions tree.
+    pub sessions_base: &'a Path,
+    /// This daemon's checkout of `project_id`.
+    pub repo_root: &'a Path,
+    /// The branch the child spawn is about to create — how the planned node it belongs to is found.
+    pub new_branch_name: &'a str,
+}
+
+/// This daemon in its capacity as the resolver of a spawn's PR-stack parent.
+///
+/// A trait for the same reason [`SeededAgentClones`] is one: the co-located claude-cli and
+/// cursor-cli spawns are free functions, and reaching the daemon that owns a parent is the whole of
+/// `ConnectionService`'s peer-facing surface — naming that type there would drag it through every
+/// caller of a function that otherwise mentions nothing of the kind.
+#[async_trait::async_trait]
+pub trait StackParentHost: Send + Sync {
+    /// The ref the child's worktree is cut from, or `None` when the parent names no chain base and
+    /// the project default applies.
+    async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status>;
+}
+
+/// A spawn's PR-stack parent as the co-located spawn paths carry it: which session, whose sessions
+/// tree holds it, and the daemon that answers what the child's worktree bases off.
+///
+/// One value rather than four parameters because the four are meaningless apart — a parent session
+/// id without the host that owns it is exactly the bug this type exists to close — and an enum
+/// because a spawn with no stack parent names no host either. Nothing resolves it, so there is
+/// nothing for a caller to supply.
+pub enum SpawnStackParent<'a> {
+    /// The spawn is not part of a stack: no parent, and therefore no chain base. The child's
+    /// worktree is cut from the project default.
+    NoParent,
+    /// The spawn descends from `session_id`, held by `daemon_instance_id` (empty = this daemon).
+    OwnedBy {
+        /// The parent session id.
+        session_id: &'a str,
+        /// The daemon whose sessions tree holds it. Empty = this one.
+        daemon_instance_id: &'a str,
+        /// The credential a peer verifies the forwarded question with. Empty when the parent is
+        /// this daemon's own session — an agent-driven spawn is made by the orchestrator's own
+        /// process, has no caller token, and asks nothing of any peer.
+        session_token: &'a str,
+        /// The daemon that resolves the parent: this one, forwarding to the owner when it is not.
+        host: &'a dyn StackParentHost,
+    },
+}
+
+impl<'a> SpawnStackParent<'a> {
+    /// The parent this spawn records as its orchestrator, if any.
+    pub fn session_id(&self) -> Option<&'a str> {
+        match self {
+            Self::NoParent => None,
+            Self::OwnedBy { session_id, .. } => Some(session_id),
+        }
+    }
+
+    /// What the child's worktree is cut from, resolved by whichever daemon owns the parent, or
+    /// `None` when there is no parent — or the parent named no base for this branch, which leaves
+    /// the project default to apply.
+    pub async fn chain_base_ref(
+        &self,
+        project_id: &str,
+        sessions_base: &Path,
+        repo_root: &Path,
+        new_branch_name: &str,
+    ) -> Result<Option<String>, Status> {
+        let Self::OwnedBy {
+            session_id,
+            daemon_instance_id,
+            session_token,
+            host,
+        } = self
+        else {
+            return Ok(None);
+        };
+        host.chain_base_ref(&StackBaseLookup {
+            session_token,
+            stack_parent: Some(session_id),
+            stack_parent_daemon_instance_id: daemon_instance_id,
+            project_id,
+            sessions_base,
+            repo_root,
+            new_branch_name,
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl StackParentHost for ConnectionServiceImpl {
+    async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status> {
+        self.resolve_chain_base_ref_status(lookup).await
+    }
+}
+
 /// One agent a start has already put on a session's roster, as its unwind needs to name it.
 ///
 /// The clone is carried rather than looked up again: only the entry that *commissioned* a checkout
@@ -1298,6 +1412,14 @@ enum PromptRouting {
 }
 
 impl AgentConversation {
+    /// The roster agent this conversation is with, whichever daemon runs its loop.
+    fn agent_id(&self) -> &str {
+        match self {
+            AgentConversation::Local { agent_id, .. }
+            | AgentConversation::Remote { agent_id, .. } => agent_id,
+        }
+    }
+
     /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its loop.
     fn is_with(&self, session_id: &str, agent_id: &str) -> bool {
         let (open_session, open_agent) = match self {
@@ -1406,9 +1528,10 @@ impl ConnectionServiceImpl {
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
             model_registry: None,
             session_agent_rosters: Arc::new(
-                crate::session_agent_roster::SessionAgentRosterStore::new(Arc::clone(
-                    &session_agent_clones,
-                )),
+                crate::session_agent_roster::SessionAgentRosterStore::new(
+                    Arc::clone(&session_agent_clones),
+                    Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
+                ),
             ),
             session_agent_clones,
             hosted_agent_clones: Arc::new(crate::session_agent_clone::HostedAgentClones::new()),
@@ -1799,14 +1922,52 @@ impl ConnectionServiceImpl {
         })
     }
 
-    fn resolve_chain_base_ref_status(
-        sessions_base: &std::path::Path,
-        stack_parent: Option<&str>,
-        repo_root: &std::path::Path,
-        new_branch_name: &str,
+    /// Resolve what a spawn's worktree is cut from, on the daemon that owns its `stack_parent`.
+    ///
+    /// The parent's base is read out of the parent's own `changeset.yaml` — its stack, or its
+    /// branch — so only the daemon holding that session can produce it. A parent this daemon owns
+    /// (no host named, or its own) is resolved straight off its disk, exactly as before. A parent
+    /// another daemon owns travels as a `ResolveStackBase` call, taken through this daemon's own
+    /// handler so a forwarded resolution follows precisely the path a client's would, peer routing
+    /// and refusals included.
+    ///
+    /// An empty `base_ref` from the owner is `None`, not `Some("")`: it says the parent named no
+    /// chain base for this branch, and the caller then applies the project default. A refusal is a
+    /// refusal, reported with the owner's own message.
+    async fn resolve_chain_base_ref_status(
+        &self,
+        lookup: &StackBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
-        tddy_core::resolve_chain_base_ref(sessions_base, stack_parent, repo_root, new_branch_name)
-            .map_err(Status::failed_precondition)
+        match tddy_core::classify_stack_parent_route(
+            &local_instance_id_for_config(&self.config),
+            lookup.stack_parent,
+            lookup.stack_parent_daemon_instance_id,
+        ) {
+            tddy_core::StackParentRoute::NoParent => Ok(None),
+            tddy_core::StackParentRoute::Local => tddy_core::resolve_chain_base_ref(
+                lookup.sessions_base,
+                lookup.stack_parent,
+                lookup.repo_root,
+                lookup.new_branch_name,
+            )
+            .map_err(Status::failed_precondition),
+            tddy_core::StackParentRoute::OwnedByPeer { daemon_instance_id } => {
+                let base_ref = ConnectionServiceTrait::resolve_stack_base(
+                    self,
+                    Request::new(ResolveStackBaseRequest {
+                        session_token: lookup.session_token.to_string(),
+                        daemon_instance_id,
+                        stack_parent: lookup.stack_parent.unwrap_or_default().trim().to_string(),
+                        project_id: lookup.project_id.trim().to_string(),
+                        new_branch_name: lookup.new_branch_name.trim().to_string(),
+                    }),
+                )
+                .await?
+                .into_inner()
+                .base_ref;
+                Ok(Some(base_ref).filter(|b| !b.is_empty()))
+            }
+        }
     }
 
     /// Record on a pr-stack orchestrator's planned node the branch a child spawn just created, plus
@@ -1822,6 +1983,12 @@ impl ConnectionServiceImpl {
     /// condition `base_ref_for_spawn` gates descendants on. A new session claiming a branch a node
     /// already owns repoints the fallback to it (last writer wins): the branch is what the stack is
     /// built on, and sessions on it come and go (restart, re-attach) without changing that.
+    ///
+    /// TODO(cross-host-pr-stack): writes to *this* daemon's sessions tree only. A child spawned
+    /// under an orchestrator on another host now resolves its base there
+    /// ([`Self::resolve_chain_base_ref_status`]) but records nothing back on that host's node, so
+    /// the planned node keeps no branch and its own descendants stay unspawnable. Closing it means
+    /// an RPC to the owning daemon, the write half of `ResolveStackBase`.
     fn link_stack_node_to_spawned_branch(
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
@@ -2014,6 +2181,10 @@ impl ConnectionServiceImpl {
         permission_mode: &str,
         dangerously_skip_permissions: bool,
         stack_parent: Option<&str>,
+        // The daemon whose sessions tree holds `stack_parent` (empty = this one), and the caller's
+        // token, which is what that daemon verifies the forwarded question with.
+        stack_parent_daemon_instance_id: &str,
+        session_token: &str,
         // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
         // injected and its `transition` tool advances a per-session `WorkflowController`.
         managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
@@ -2032,6 +2203,7 @@ impl ConnectionServiceImpl {
                 let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
                 Some(Arc::new(StackChildSpawnHandler {
                     room_host: Arc::new(self.session_room_host()),
+                    stack_parent_host: Arc::new(self.clone()),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),
                     claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -2072,7 +2244,15 @@ impl ConnectionServiceImpl {
             initial_prompt,
             permission_mode,
             dangerously_skip_permissions,
-            stack_parent,
+            match stack_parent {
+                Some(session_id) => SpawnStackParent::OwnedBy {
+                    session_id,
+                    daemon_instance_id: stack_parent_daemon_instance_id,
+                    session_token,
+                    host: self,
+                },
+                None => SpawnStackParent::NoParent,
+            },
             managed_recipe,
             child_spawn_handler,
             conversation_spawn_handler,
@@ -2102,6 +2282,7 @@ impl ConnectionServiceImpl {
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
             room_host: Arc::new(self.session_room_host()),
+            stack_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -2149,6 +2330,7 @@ impl ConnectionServiceImpl {
         let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         let handler = Arc::new(GrillMeConversationSpawnHandler {
             room_host: Arc::new(self.session_room_host()),
+            stack_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -2799,7 +2981,7 @@ async fn spawn_claude_cli_session_inner(
     initial_prompt: &str,
     permission_mode: &str,
     dangerously_skip_permissions: bool,
-    stack_parent: Option<&str>,
+    stack_parent: SpawnStackParent<'_>,
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
@@ -2862,7 +3044,7 @@ async fn spawn_claude_cli_session_inner(
     )?;
     let mut cs = Changeset {
         workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.map(str::to_string),
+        orchestrator_session_id: stack_parent.session_id().map(str::to_string),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         ..Changeset::default()
     };
@@ -2877,12 +3059,9 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_changeset(&session_dir, &cs)
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-    let chain_base_ref = ConnectionServiceImpl::resolve_chain_base_ref_status(
-        &sessions_base,
-        stack_parent,
-        &repo_root,
-        new_branch_name,
-    )?;
+    let chain_base_ref = stack_parent
+        .chain_base_ref(project_id, &sessions_base, &repo_root, new_branch_name)
+        .await?;
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
 
@@ -2922,7 +3101,7 @@ async fn spawn_claude_cli_session_inner(
             .map_err(|e| Status::internal(e.to_string()))?;
     ConnectionServiceImpl::link_stack_node_to_spawned_branch(
         &sessions_base,
-        stack_parent,
+        stack_parent.session_id(),
         effective_spawn_branch(
             branch_worktree_intent,
             new_branch_name,
@@ -4626,6 +4805,7 @@ impl ConnectionServiceImpl {
     async fn open_local_agent_session(
         &self,
         session_id: &str,
+        session_dir: &Path,
         record: &tddy_core::SessionAgentRecord,
         session_token: &str,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
@@ -4649,7 +4829,12 @@ impl ConnectionServiceImpl {
                 def.model.clone(),
                 def.api_key.clone(),
                 def.max_turns,
-                self.local_agent_codebase_access(session_id, session_token),
+                self.local_agent_codebase_access(
+                    session_id,
+                    session_dir,
+                    &record.agent_id,
+                    session_token,
+                ),
                 def.system_prompt.clone(),
                 def.tools.clone(),
             ),
@@ -4727,24 +4912,39 @@ impl ConnectionServiceImpl {
     fn local_agent_codebase_access(
         &self,
         session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
         session_token: &str,
     ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let session_token = session_token.to_string();
         let session_id = session_id.to_string();
+        let session_dir = session_dir.to_path_buf();
+        let agent_id = agent_id.to_string();
         tddy_discovery::subagent::CodebaseAccess::managed(move |tool_name, args| {
             let service = service.clone();
             let session_token = session_token.clone();
             let session_id = session_id.clone();
+            let session_dir = session_dir.clone();
+            let agent_id = agent_id.clone();
             Box::pin(async move {
+                // This dispatch is the only place this daemon sees the agent's own loop enter a
+                // tool call, so it is the only place EXECUTING_TOOL can be told from RUNNING.
+                service.note_agent_activity(
+                    &session_id,
+                    &session_dir,
+                    &agent_id,
+                    crate::session_agent_status::ManagedAgentState::ExecutingTool,
+                    crate::session_agent_status::tool_call_summary(&tool_name, &args),
+                );
                 let request = ExecuteToolRequest {
                     session_token,
-                    session_id,
+                    session_id: session_id.clone(),
                     daemon_instance_id: String::new(),
                     tool_name,
                     args_json: args.to_string(),
                 };
-                match service.resolve_exec_tool_worktree(&request) {
+                let answer = match service.resolve_exec_tool_worktree(&request) {
                     Ok((sessions_base, worktree_root)) => dispatch_envelope(
                         service
                             .run_exec_tool_locally(&request, &sessions_base, &worktree_root)
@@ -4754,9 +4954,144 @@ impl ConnectionServiceImpl {
                         serde_json::json!({ "is_error": true, "error": status.message() })
                             .to_string()
                     }
-                }
+                };
+                // Back to RUNNING, not IDLE: the tool returned, but the turn that called it has
+                // not, and an idle badge on a turn still in flight is the one that misleads.
+                service.note_agent_activity(
+                    &session_id,
+                    &session_dir,
+                    &agent_id,
+                    crate::session_agent_status::ManagedAgentState::Prompting,
+                    format!("{} finished", request.tool_name),
+                );
+                answer
             })
         })
+    }
+
+    /// Record what a roster agent is doing, and push the roster that says so.
+    ///
+    /// Recorded and republished together, never separately. A status change does not move `rev` —
+    /// the roster itself did not change, only what one of its agents is doing — so a subscriber that
+    /// heard about `rev` changes alone would show the state an agent was in when it was attached
+    /// until the next attach, which may never come. This is the same reason
+    /// [`crate::session_agent_roster::SessionAgentRosterStore::republish`] exists for clone reports.
+    ///
+    /// A conversation opened for a *peer's* session records nothing: the roster naming that agent is
+    /// on the daemon facilitating it, and a status recorded against a session this daemon only holds
+    /// a clone for is one nothing will ever read.
+    fn note_agent_activity(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+        state: crate::session_agent_status::ManagedAgentState,
+        summary: impl AsRef<str>,
+    ) {
+        if self.hosted_clone_for(session_id).is_some() {
+            return;
+        }
+        self.session_agent_rosters
+            .activity()
+            .record(session_id, agent_id, state, summary);
+        self.republish_roster_quietly(session_id, session_dir, agent_id);
+    }
+
+    /// Push the roster after a status change, and never fail the call that caused it.
+    ///
+    /// Non-fatal on purpose: the status is a display signal, and failing the turn it decorates would
+    /// trade a stale badge for a broken conversation.
+    ///
+    /// `republish` alone, deliberately — not [`Self::publish_roster_change`], which also broadcasts
+    /// the snapshot into the session room. Both consumers that act on a status follow
+    /// `StreamSessionAgents`, which `republish` feeds: the roster pane and the in-jail registry. The
+    /// room broadcast exists for participants rebuilding a registry from whole snapshots, and a
+    /// status ticks on **every tool call** — putting a whole roster on the room for each one would
+    /// spend the room's bandwidth on a badge, and `rev` has not moved, so nothing those
+    /// participants act on has changed.
+    fn republish_roster_quietly(&self, session_id: &str, session_dir: &Path, agent_id: &str) {
+        if let Err(e) = self
+            .session_agent_rosters
+            .republish(session_id, session_dir)
+        {
+            log::debug!(
+                "could not republish the roster of session {session_id} after '{agent_id}' changed \
+                 status ({})",
+                e.message()
+            );
+        }
+    }
+
+    /// A callback that puts one agent back to IDLE, for the two places a turn can end.
+    ///
+    /// A callback rather than a second `note_agent_activity` call at each site, because both sites
+    /// end a turn from inside a spawned task that outlives the handler: whatever reports the end has
+    /// to own everything it names.
+    fn turn_end_reporter(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+    ) -> impl Fn(String) + Send + 'static {
+        let service = self.clone();
+        let session_id = session_id.to_string();
+        let session_dir = session_dir.to_path_buf();
+        let agent_id = agent_id.to_string();
+        move |summary| {
+            if service.hosted_clone_for(&session_id).is_some() {
+                return;
+            }
+            // Guarded rather than written outright: by the time a turn is observed to have ended, a
+            // cancel or a detach may already have moved this agent on, and an unconditional write
+            // would resurrect a conversation that is gone.
+            if service.session_agent_rosters.activity().record_turn_end(
+                &session_id,
+                &agent_id,
+                summary,
+            ) {
+                service.republish_roster_quietly(&session_id, &session_dir, &agent_id);
+            }
+        }
+    }
+
+    /// Pass a peer's answer through unchanged, noting when it ends.
+    ///
+    /// The turn loop of a remote agent runs on its owning daemon, but the roster that reports its
+    /// status is held *here* — so without this relay a forwarded turn would raise the badge to
+    /// RUNNING and never lower it. Frames and errors are forwarded verbatim and in order: the
+    /// caller must not be able to tell a relayed stream from a direct one, which is the same
+    /// property [`AgentConversation`]'s two variants exist to hold.
+    fn relay_watching_for_the_turn_to_end(
+        &self,
+        mut peer: tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>> {
+        let turn_ended = self.turn_end_reporter(session_id, session_dir, agent_id);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(frame) = peer.recv().await {
+                if tx.send(frame).is_err() {
+                    // The caller hung up. The turn is no longer being read, so it is over as far as
+                    // anything here can tell — and leaving the badge up would strand it.
+                    break;
+                }
+            }
+            turn_ended("answered".to_string());
+        });
+        rx
+    }
+
+    /// Forget an agent's activity — what a detach does.
+    ///
+    /// Forgotten rather than set to "no conversation": the agent is off the roster, and a record
+    /// left behind would have a re-attach show the previous attachment's last activity as this
+    /// one's.
+    fn forget_agent_activity(&self, session_id: &str, agent_id: &str) {
+        self.session_agent_rosters
+            .activity()
+            .forget(session_id, agent_id);
     }
 
     /// Close every open conversation with `agent_id`.
@@ -5055,6 +5390,8 @@ impl ConnectionServiceImpl {
         permission_mode: &str,
         dangerously_skip_permissions: bool,
         stack_parent: Option<&str>,
+        // The daemon whose sessions tree holds `stack_parent` (empty = this one).
+        stack_parent_daemon_instance_id: &str,
         // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
         // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
         // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
@@ -5171,12 +5508,17 @@ impl ConnectionServiceImpl {
                         "project main repo path does not exist",
                     ));
                 }
-                let chain_base_ref = Self::resolve_chain_base_ref_status(
-                    &sessions_base,
-                    stack_parent,
-                    &repo_root,
-                    new_branch_name,
-                )?;
+                let chain_base_ref = self
+                    .resolve_chain_base_ref_status(&StackBaseLookup {
+                        session_token,
+                        stack_parent,
+                        stack_parent_daemon_instance_id,
+                        project_id: &pid,
+                        sessions_base: &sessions_base,
+                        repo_root: &repo_root,
+                        new_branch_name,
+                    })
+                    .await?;
                 let worktree_base_ref = tddy_core::select_worktree_base_ref(
                     selected_integration_base_ref,
                     chain_base_ref,
@@ -5630,6 +5972,8 @@ impl ConnectionServiceImpl {
         selected_integration_base_ref: &str,
         selected_branch_to_work_on: &str,
         stack_parent: Option<&str>,
+        // The daemon whose sessions tree holds `stack_parent` (empty = this one).
+        stack_parent_daemon_instance_id: &str,
         initial_prompt: &str,
         _managed_codebase: bool,
         specialized_agents: &[String],
@@ -5714,12 +6058,17 @@ impl ConnectionServiceImpl {
         tddy_core::write_changeset(&session_dir, &cs)
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
-        let chain_base_ref = Self::resolve_chain_base_ref_status(
-            &sessions_base,
-            stack_parent,
-            &repo_root,
-            new_branch_name,
-        )?;
+        let chain_base_ref = self
+            .resolve_chain_base_ref_status(&StackBaseLookup {
+                session_token,
+                stack_parent,
+                stack_parent_daemon_instance_id,
+                project_id,
+                sessions_base: &sessions_base,
+                repo_root: &repo_root,
+                new_branch_name,
+            })
+            .await?;
         let worktree_base_ref =
             tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
         let repo_root_clone = repo_root.clone();
@@ -6713,6 +7062,11 @@ struct StackChildSpawnHandler {
     /// Opens the session room of each child agent this handler spawns — the children are
     /// agent sessions of this same daemon, so it facilitates their rooms too.
     room_host: Arc<dyn crate::session_room::SessionRoomHost>,
+    /// Resolves each child's base off the orchestrator's stack. Held for the same reason
+    /// `room_host` is: the orchestrator this handler spawns children of is a session of *this*
+    /// daemon, so the resolution never leaves the host — but it takes the one path every spawn
+    /// takes, rather than a second one that would drift from it.
+    stack_parent_host: Arc<dyn StackParentHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -6776,7 +7130,14 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             &initial_prompt,
             "auto",
             false,
-            Some(&self.orchestrator_session_id),
+            // The orchestrator is a session of this daemon, so its stack is resolved off this
+            // daemon's own disk and no credential travels anywhere.
+            SpawnStackParent::OwnedBy {
+                session_id: &self.orchestrator_session_id,
+                daemon_instance_id: &local_instance_id_for_config(&self.config),
+                session_token: "",
+                host: self.stack_parent_host.as_ref(),
+            },
             None,
             None,
             None,
@@ -6837,6 +7198,9 @@ struct GrillMeConversationSpawnHandler {
     /// Opens the session room of each child agent this handler spawns — the children are
     /// agent sessions of this same daemon, so it facilitates their rooms too.
     room_host: Arc<dyn crate::session_room::SessionRoomHost>,
+    /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
+    /// daemon. Held for the same reason [`StackChildSpawnHandler::stack_parent_host`] is.
+    stack_parent_host: Arc<dyn StackParentHost>,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -6900,7 +7264,14 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             prompt,
             "auto",
             false,
-            Some(&self.orchestrator_session_id),
+            // The orchestrator is a session of this daemon, so its stack is resolved off this
+            // daemon's own disk and no credential travels anywhere.
+            SpawnStackParent::OwnedBy {
+                session_id: &self.orchestrator_session_id,
+                daemon_instance_id: &local_instance_id_for_config(&self.config),
+                session_token: "",
+                host: self.stack_parent_host.as_ref(),
+            },
             None,
             None,
             None,
@@ -8692,6 +9063,7 @@ impl ConnectionServiceImpl {
                         req.permission_mode.trim(),
                         req.dangerously_skip_permissions,
                         stack_parent_for_claude_cli.as_deref(),
+                        req.stack_parent_daemon_instance_id.trim(),
                         req.managed_codebase,
                         &req.specialized_agents,
                         managed_recipe,
@@ -8715,6 +9087,8 @@ impl ConnectionServiceImpl {
                     req.permission_mode.trim(),
                     req.dangerously_skip_permissions,
                     stack_parent_for_claude_cli.as_deref(),
+                    req.stack_parent_daemon_instance_id.trim(),
+                    &req.session_token,
                     managed_recipe,
                     req.semantic_index,
                     req.create_remote_branch,
@@ -8764,6 +9138,7 @@ impl ConnectionServiceImpl {
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
                         Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
+                        req.stack_parent_daemon_instance_id.trim(),
                         req.initial_prompt.trim(),
                         req.managed_codebase,
                         &req.specialized_agents,
@@ -8793,7 +9168,15 @@ impl ConnectionServiceImpl {
                 req.selected_integration_base_ref.trim(),
                 req.selected_branch_to_work_on.trim(),
                 req.repo_path.trim(),
-                Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
+                match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
+                    Some(session_id) => SpawnStackParent::OwnedBy {
+                        session_id,
+                        daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
+                        session_token: &req.session_token,
+                        host: self,
+                    },
+                    None => SpawnStackParent::NoParent,
+                },
                 req.initial_prompt.trim(),
                 req.managed_codebase,
                 &mut started_agents,
@@ -9087,7 +9470,8 @@ async fn merge_listed_projects_with_peers(
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
 /// to this daemon's `ConnectionServiceImpl`. The runner's `ToolExecService` forwards
 /// `StreamSessionAgents` / `OpenAgentConversation` / `PromptAgentConversation` /
-/// `CancelAgentConversation`; this handler decodes each, calls the matching typed method on the
+/// `CancelAgentConversation` / `ReportAgentConversationState`; this handler decodes each, calls the
+/// matching typed method on the
 /// `Arc<ConnectionServiceImpl>` it holds, and returns the encoded response — unary for the two
 /// unary RPCs, a server stream of encoded frames for the two streaming ones. `tonic::Status`
 /// errors are carried back to the in-jail caller as a single terminal `RpcStreamFrame` with
@@ -9101,7 +9485,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
     async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult {
         use prost::Message;
         use tddy_rpc::Request;
-        // Only the four RPCs the runner forwards ride this bridge; anything else is a wiring bug
+        // Only the RPCs the runner forwards ride this bridge; anything else is a wiring bug
         // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
         // rather than reaching arbitrary `ConnectionService` surface from inside a jail.
         match (service, method) {
@@ -9191,6 +9575,26 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     }
                 };
                 match self.conn.cancel_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "ReportAgentConversationState") => {
+                let req = match tddy_service::proto::connection::ReportAgentConversationStateRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ReportAgentConversationStateRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                match self
+                    .conn
+                    .report_agent_conversation_state(Request::new(req))
+                    .await
+                {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
@@ -9484,6 +9888,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .detach(&req.session_id, &session_dir, &req.agent_id)?;
         self.cancel_conversations_with(&req.session_token, &req.session_id, &req.agent_id)
             .await;
+        self.forget_agent_activity(&req.session_id, &req.agent_id);
 
         // The clone survives while another agent on that host still reads it — two agents on one
         // host share one checkout, so the last one out is what removes it.
@@ -9697,6 +10102,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         session: Arc::new(tokio::sync::Mutex::new(
                             self.open_local_agent_session(
                                 &req.session_id,
+                                &session_dir,
                                 &record,
                                 &req.session_token,
                             )
@@ -9723,6 +10129,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .lock()
             .await
             .insert(conversation_id.clone(), conversation);
+        // Open, not running: the conversation exists and has been asked nothing. This is also the
+        // first moment an entry stops reporting UNSPECIFIED, which is what a reader needs to tell
+        // "attached and reachable" from "attached, and this daemon has never heard from it".
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &req.agent_id,
+            crate::session_agent_status::ManagedAgentState::Open,
+            "conversation opened",
+        );
         Ok(Response::new(OpenAgentConversationResponse {
             conversation_id,
         }))
@@ -9752,11 +10168,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscResultStream { rx }));
         }
 
-        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
 
         // Everything the turn needs is taken out of the map here, under one lock, and the guard is
-        // dropped before anything is awaited on it.
-        let routing = {
+        // dropped before anything is awaited on it. The agent id comes out with it: the request
+        // names a conversation, not an agent, and the status is recorded per agent.
+        let (routing, agent_id) = {
             let open = self.agent_conversations.lock().await;
             match open.get(&req.conversation_id) {
                 None => {
@@ -9766,16 +10183,37 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     )))
                 }
                 Some(AgentConversation::Local {
-                    session, closed, ..
-                }) => PromptRouting::Local {
-                    session: Arc::clone(session),
-                    closed: Arc::clone(closed),
-                },
+                    session,
+                    closed,
+                    agent_id,
+                    ..
+                }) => (
+                    PromptRouting::Local {
+                        session: Arc::clone(session),
+                        closed: Arc::clone(closed),
+                    },
+                    agent_id.clone(),
+                ),
                 Some(AgentConversation::Remote {
-                    daemon_instance_id, ..
-                }) => PromptRouting::Remote(daemon_instance_id.clone()),
+                    daemon_instance_id,
+                    agent_id,
+                    ..
+                }) => (
+                    PromptRouting::Remote(daemon_instance_id.clone()),
+                    agent_id.clone(),
+                ),
             }
         };
+
+        // Stamped before either branch runs, so the badge changes when the turn starts rather than
+        // when it is first observed to have started.
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &agent_id,
+            crate::session_agent_status::ManagedAgentState::Prompting,
+            format!("prompted: {}", req.prompt),
+        );
 
         let (session, closed) = match routing {
             PromptRouting::Local { session, closed } => (session, closed),
@@ -9804,7 +10242,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     },
                 )
                 .await?;
-                return Ok(Response::new(MpscResultStream { rx }));
+                // Relayed rather than handed straight back, for one reason: the roster this daemon
+                // holds is what reports the status, and the end of the peer's stream is the only
+                // moment this side learns the turn is over. Passed through unchanged — the caller
+                // sees the peer's frames in the peer's order, errors included.
+                return Ok(Response::new(MpscResultStream {
+                    rx: self.relay_watching_for_the_turn_to_end(
+                        rx,
+                        &req.session_id,
+                        &session_dir,
+                        &agent_id,
+                    ),
+                }));
             }
         };
 
@@ -9815,6 +10264,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let conversation_id = req.conversation_id.clone();
         let prompt = req.prompt.clone();
+        let turn_ended = self.turn_end_reporter(&req.session_id, &session_dir, &agent_id);
         tokio::spawn(async move {
             let outcome = tokio::select! {
                 // Biased so a conversation already closed is reported as closed rather than racing
@@ -9838,15 +10288,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         .map(|block| block.text.as_str())
                         .collect::<Vec<_>>()
                         .join("");
+                    // Reported after the frames are on the wire, not before: a badge that drops to
+                    // idle while the answer is still arriving is one a reader acts on too early.
+                    let answered = format!("answered ({} chars)", content.chars().count());
                     for frame in
                         agent_conversation_frames(&content, agent_stop_reason(outcome.stop_reason))
                     {
                         if tx.send(Ok(frame)).is_err() {
+                            // The caller hung up mid-answer. The turn is over either way, and a
+                            // badge left up would strand it.
+                            turn_ended(answered);
                             return;
                         }
                     }
+                    turn_ended(answered);
                 }
                 Err(e) => {
+                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
+                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
+                    turn_ended(format!("turn failed: {e}"));
                     let _ = tx.send(Err(Status::internal(format!(
                         "agent conversation '{conversation_id}' failed: {e}"
                     ))));
@@ -9874,12 +10334,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(cancelled));
         }
 
-        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let removed = self
             .agent_conversations
             .lock()
             .await
             .remove(&req.conversation_id);
+        if let Some(conversation) = removed.as_ref() {
+            // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
+            // an agent left reporting a turn in flight would be one nothing can ever finish.
+            self.note_agent_activity(
+                &req.session_id,
+                &session_dir,
+                conversation.agent_id(),
+                crate::session_agent_status::ManagedAgentState::NoConversation,
+                "conversation cancelled",
+            );
+        }
         match removed {
             None => Err(Status::not_found(format!(
                 "conversation '{}' is not open on session '{}'",
@@ -9975,6 +10446,80 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .await;
         Ok(Response::new(
             tddy_service::proto::connection::ReportAgentCloneStateResponse {},
+        ))
+    }
+
+    /// An agent whose turn loop runs in the jail, telling this daemon what that loop is doing.
+    ///
+    /// The daemon infers a status from the conversation RPCs for every agent whose loop it runs. An
+    /// agent the in-jail `tddy-tools` was *seeded* with runs its loop there instead, and this daemon
+    /// is never asked to open anything — so without this report the row would sit at UNSPECIFIED for
+    /// an agent that is demonstrably working.
+    ///
+    /// Three things are checked, and each is a way the roster could otherwise be made to lie:
+    ///
+    /// - **Routed first**, as the conversation RPCs are. The roster is on the facilitating daemon;
+    ///   a report served anywhere else records a status nothing publishes.
+    /// - **The agent must be attached.** An id the roster does not hold is `NOT_FOUND`, so an
+    ///   in-jail registry that has gone stale cannot put a row on a roster an operator emptied.
+    /// - **Only a conversation state is accepted.** `CONNECTING` and `ERROR` describe the checkout,
+    ///   which this daemon measures itself and which outranks the conversation at snapshot time; a
+    ///   reporter allowed to send them could hide a broken clone behind a cheerful conversation.
+    ///
+    /// Authenticated as `ReportAgentCloneState` is, and for the same reason: the (session, agent)
+    /// pair is published in the `session.agents` broadcast, so on the pair alone any participant
+    /// that saw a frame could park an agent at RUNNING for ever.
+    async fn report_agent_conversation_state(
+        &self,
+        request: Request<tddy_service::proto::connection::ReportAgentConversationStateRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
+        Status,
+    > {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(acknowledged) = self
+            .rpc_served_by_peer(
+                "ReportAgentConversationState",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(acknowledged));
+        }
+
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        if self
+            .session_agent_rosters
+            .entry(&req.session_id, &session_dir, &req.agent_id)?
+            .is_none()
+        {
+            return Err(Status::not_found(format!(
+                "agent '{}' is not attached to session '{}', so there is no row to report on",
+                req.agent_id, req.session_id
+            )));
+        }
+
+        let status = tddy_service::proto::connection::SessionAgentStatus::try_from(req.status)
+            .unwrap_or(tddy_service::proto::connection::SessionAgentStatus::Unspecified);
+        let state = crate::session_agent_status::reported_state(status).ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "{status:?} is not a conversation state: CONNECTING and ERROR describe the \
+                 checkout, which this daemon measures itself, and UNSPECIFIED claims nothing"
+            ))
+        })?;
+
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &req.agent_id,
+            state,
+            &req.summary,
+        );
+        Ok(Response::new(
+            tddy_service::proto::connection::ReportAgentConversationStateResponse {},
         ))
     }
 
@@ -13570,6 +14115,73 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 remote: Some(remote),
                 base_sync,
             }),
+        }))
+    }
+
+    /// What a child spawn's branch bases off, answered by the daemon that owns the stack parent.
+    ///
+    /// The whole point of the call is *where* it is served. A `stack_parent` is a bare session id
+    /// and the base is read out of that session's own `changeset.yaml`, so a daemon resolving one
+    /// it does not hold reads an absent file — not "this branch was not planned", but "no such
+    /// session", which refuses a spawn over an orchestrator that exists one host over. So the
+    /// question is routed to the named daemon first, and answered from local disk only when this
+    /// daemon is the one that owns it.
+    ///
+    /// Routed **before** the caller is authenticated, like the roster RPCs: a token is verified by
+    /// the daemon that serves the call, and a peer's user mapping is not this one's to judge.
+    async fn resolve_stack_base(
+        &self,
+        request: Request<ResolveStackBaseRequest>,
+    ) -> Result<Response<ResolveStackBaseResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(answered) = self
+            .rpc_served_by_peer("ResolveStackBase", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let stack_parent = req.stack_parent.trim();
+        if stack_parent.is_empty() {
+            return Err(Status::invalid_argument(
+                "stack_parent is required: ResolveStackBase resolves the base of a named parent session",
+            ));
+        }
+        let os_user = self.resolve_os_user(&req.session_token)?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let projects_dir = projects_path_for_user(&os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+        // This daemon's own checkout of the same logical project. The answer is a remote-tracking
+        // ref, so the asking daemon's checkout and this one need only share an origin — never a path.
+        let project = project_storage::find_project(&projects_dir, req.project_id.trim())
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("project not found"))?;
+        let repo_root = PathBuf::from(&project.main_repo_path);
+        if !repo_root.exists() {
+            return Err(Status::invalid_argument(
+                "project main repo path does not exist",
+            ));
+        }
+
+        let base_ref = tddy_core::resolve_chain_base_ref(
+            &sessions_base,
+            Some(stack_parent),
+            &repo_root,
+            req.new_branch_name.trim(),
+        )
+        .map_err(Status::failed_precondition)?;
+        log::info!(
+            "ResolveStackBase: parent {stack_parent} in project {} bases {} on {:?}",
+            req.project_id.trim(),
+            req.new_branch_name.trim(),
+            base_ref
+        );
+        Ok(Response::new(ResolveStackBaseResponse {
+            base_ref: base_ref.unwrap_or_default(),
         }))
     }
 

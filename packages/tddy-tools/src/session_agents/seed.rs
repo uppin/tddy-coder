@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 
 use tddy_core::session_agent::AgentId;
 use tddy_discovery::agent_def::SpecializedAgentDef;
-use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry};
+use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry, SessionAgentStatus};
 
 use crate::session_tool_client::{detect_session_tool_transport, SessionToolTransport};
 
@@ -54,6 +54,11 @@ pub(super) fn seed_entry(
         codebase_session_id: String::new(),
         clone_state: AgentCloneState::Local as i32,
         clone_error: String::new(),
+        // A seed says what the session was *started* with, not what any of it is doing: the status
+        // is the facilitating daemon's to fill in from a live conversation, and a seed claiming
+        // IDLE would have the registry show a reachable agent before anything had reached it.
+        status: SessionAgentStatus::Unspecified as i32,
+        last_activity: None,
     }
 }
 

@@ -130,7 +130,9 @@ pub async fn spawn_cursor_cli_session_inner(
     // worktree is created and it is never removed on session end). Empty → resolve from
     // `project_id` as before.
     repo_path: &str,
-    stack_parent: Option<&str>,
+    // The spawn's PR-stack parent, and the daemon that resolves what the child bases off — this one
+    // when it owns the parent, the daemon named in the request when it does not.
+    stack_parent: crate::connection_service::SpawnStackParent<'_>,
     initial_prompt: &str,
     managed_codebase: bool,
     // The session's starting agent roster, already resolved against the request's
@@ -184,7 +186,7 @@ pub async fn spawn_cursor_cli_session_inner(
     )?;
     let mut cs = Changeset {
         workflow: Some(cs_workflow),
-        orchestrator_session_id: stack_parent.map(str::to_string),
+        orchestrator_session_id: stack_parent.session_id().map(str::to_string),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         ..Changeset::default()
     };
@@ -216,13 +218,9 @@ pub async fn spawn_cursor_cli_session_inner(
                     "project main repo path does not exist",
                 ));
             }
-            let chain_base_ref = tddy_core::resolve_chain_base_ref(
-                &sessions_base,
-                stack_parent,
-                &repo_root,
-                new_branch_name,
-            )
-            .map_err(Status::failed_precondition)?;
+            let chain_base_ref = stack_parent
+                .chain_base_ref(&pid, &sessions_base, &repo_root, new_branch_name)
+                .await?;
             let worktree_base_ref =
                 tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
             let repo_root_clone = repo_root.clone();

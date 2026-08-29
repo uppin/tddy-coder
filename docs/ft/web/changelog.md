@@ -9,6 +9,12 @@ Release note history for the Web product area.
 - **A one-finger drag in a full-screen TUI now scrolls the TUI.** In the Claude CLI's terminal (alternate screen + mouse tracking) a drag used to scroll the live pane's scrollback, which is empty by design, so the gesture did nothing and the lazy-history double buffer was the only way back through the output.
 - **The gesture is routed the same three ways the wheel is on desktop**, decided once at `touchstart`, one notch per line of finger travel: a mouse-tracking TUI is sent an **SGR wheel report** (button 64 up / 65 down) at the touch point; the alternate screen without tracking — a pager such as `less` — is sent the **arrow key** ghostty-web emulates the wheel with; the **normal screen** scrolls the emulator's own scrollback, unchanged.
 - **Neither TUI route engages the history double buffer**, so a full-screen TUI on mobile behaves as it does on desktop. See [Web terminal § Mobile UX](web-terminal.md) and [Terminal replay — lazy scroll](terminal-replay-lazy-scroll.md).
+## 2026-08-29 — The Agent roster shows what each agent is doing
+
+- **Every row in the Agent roster now carries a status badge** — idle, running, executing tool, waiting for input, connecting or error — updated live, so a dispatched agent is distinguishable from an idle one without prompting it.
+- **An agent nothing is known about reads "unknown", never "idle".** "Idle" reads as "free, ready for work", which is a different claim from "nobody here knows" — and the badge is always shown, because a row with no badge and a row whose daemon has nothing to say look identical otherwise.
+- **Each row shows what the agent was last seen doing**, as "<what it did> · 4m ago", and only when there is something to show — a blank line reserved for an agent with no history reads as a row that lost one.
+- **That timestamp ages on its own**, ticking once a minute: an idle agent produces no updates, so a line that only aged when one arrived would read "just now" for the rest of the session.
 
 ## 2026-08-19 — Session agent catalog across hosts
 

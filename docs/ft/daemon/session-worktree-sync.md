@@ -431,3 +431,5 @@ room to an authorized caller, a client that must be in that room has to mint for
 - [Remote git repository over LiveKit](remote-git-repo.md) — the git transport this reuses
 - [Project concept](project-concept.md) — the registry the git leg resolves against
 - [Cross-daemon session authentication](session-auth.md) — the token model
+- [Session room module](../../../packages/tddy-daemon/docs/session-room.md) — how the WIP tree, the fetchable ref and the bounded delta ring are built
+- [Session worktree mirroring](../../../packages/tddy-session-sync/docs/mirroring.md) — how the client consumes them and keeps a destination equal

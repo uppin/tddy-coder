@@ -954,6 +954,8 @@ mod tests {
             label: None,
             model: "some-model".to_string(),
             base_url: "http://localhost:30000".to_string(),
+            // These tests cover tool replacement in the env overlay, which reads no credential.
+            api_key: None,
             system_prompt: None,
             system_prompt_path: None,
             tools: vec![tddy_discovery::agent_def::SubagentTool::Read],

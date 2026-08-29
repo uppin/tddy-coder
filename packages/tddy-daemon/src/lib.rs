@@ -40,6 +40,7 @@ pub mod server;
 pub mod session_admission_service;
 pub mod session_agent_clone;
 pub mod session_agent_roster;
+pub mod session_agent_status;
 pub mod session_attachment_staging;
 pub mod session_attachments;
 pub mod session_context_docs;

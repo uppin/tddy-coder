@@ -74,6 +74,11 @@
       "name": "merge-pr-analyze",
       "proto": "merge_pr_analyze.proto",
       "schema": "merge-pr-analyze.schema.json"
+    },
+    {
+      "name": "write-stack-plan",
+      "proto": "write_stack_plan.proto",
+      "schema": "write-stack-plan.schema.json"
     }
   ],
   "version": 1
