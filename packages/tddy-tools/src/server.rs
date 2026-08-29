@@ -455,6 +455,10 @@ impl PermissionServer {
             "github_update_pull_request" => {
                 self.github_update_pull_request(Parameters(parse(args)?))
             }
+            // Awaited rather than called like the `#[tool]` methods around it: this one is an
+            // `async fn`, and it is safe on the Inspector's invoke path because it is a pure read
+            // of process-local state under a deadline it caps itself.
+            "subagent_status" => subagent_status_tool(args).await,
             "pr_stack_status" => self.pr_stack_status(),
             "pr_merge" => self.pr_merge(Parameters(parse(args)?)),
             "pr_close" => self.pr_close(Parameters(parse(args)?)),
@@ -2307,18 +2311,48 @@ fn agent_status_json(agent: &crate::session_agents::AgentStatus) -> serde_json::
     row
 }
 
-/// `subagent_status`: what every attached agent is doing right now.
+/// The only condition `waitFor` accepts. An open-ended string would let the main agent ask to wait
+/// for something nothing produces, and spend its whole deadline learning nothing.
+const WAIT_FOR_READY: &str = "ready";
+
+/// How long `subagent_status { waitFor }` parks when the caller names no deadline.
+const SUBAGENT_STATUS_DEFAULT_WAIT_MS: u64 = 30_000;
+
+/// The longest it parks whatever the caller names. One tool call holding the main agent for ten
+/// minutes is worse than one returning "still connecting" and letting it decide.
+const SUBAGENT_STATUS_MAX_WAIT_MS: u64 = 120_000;
+
+/// Whether waiting on this status could still change anything.
 ///
-/// Distinct from `subagent_list`, which enumerates this process's *conversations* and their token
-/// cost. This reports the **roster**: agents the main agent could address but has never opened a
-/// conversation with appear here and nowhere else, which is what makes it answerable before any
-/// work has been dispatched.
+/// Promptable is `status ∉ { CONNECTING, ERROR }` — the two states in which a prompt is refused —
+/// but only one of them is worth waiting through, so this is the wait's condition rather than
+/// promptability itself.
+fn readiness_is_settled(status: i32) -> bool {
+    use tddy_service::proto::connection::SessionAgentStatus as Status;
+    match Status::try_from(status) {
+        // The one state a later frame is expected to move out of: the checkout behind the agent is
+        // still being built, which is precisely what the caller asked to be told about.
+        Ok(Status::Connecting) => false,
+        // A failed checkout is not something waiting will fix. The wait ends and reports the state,
+        // so the main agent can say why it gave up — rather than spending the whole deadline to
+        // report the same failure later, and as a timeout.
+        Ok(Status::Error) => true,
+        // Promptable. UNSPECIFIED counts, the unnamed discriminant of a newer daemon included: it is
+        // what a roster restored from `.session.yaml` honestly reports for an agent whose checkout
+        // is on disk and perfectly promptable, so treating it as not-ready would park every wait on
+        // a restarted daemon until its deadline.
+        _ => true,
+    }
+}
+
+/// The tool result for `report`, with `timedOut` only when a wait was actually asked for.
 ///
-/// A roster that has gone stale still answers, carrying `refusal`: the rows it last knew about plus
-/// the reason none of them can be addressed is strictly more useful than an error, which would
-/// answer "what are my agents doing?" with nothing at all.
-async fn subagent_status_tool(_args: serde_json::Value) -> String {
-    let report = crate::session_agents::session_agent_roster().status_report();
+/// A field that is always `false` on a call that could not time out reads as a guarantee about a
+/// wait that never happened, so a plain read carries no `timedOut` at all.
+fn status_report_json(
+    report: &crate::session_agents::RosterStatusReport,
+    timed_out: Option<bool>,
+) -> String {
     let mut payload = serde_json::json!({
         "sessionId": report.session_id,
         "agents": report.agents.iter().map(agent_status_json).collect::<Vec<_>>(),
@@ -2329,10 +2363,130 @@ async fn subagent_status_tool(_args: serde_json::Value) -> String {
         Some(rev) => rev.into(),
         None => serde_json::Value::Null,
     };
-    if let Some(refusal) = report.refusal {
-        payload["refusal"] = refusal.into();
+    if let Some(refusal) = &report.refusal {
+        payload["refusal"] = refusal.clone().into();
+    }
+    if let Some(timed_out) = timed_out {
+        payload["timedOut"] = timed_out.into();
     }
     payload.to_string()
+}
+
+/// `subagent_status`: what every attached agent is doing right now.
+///
+/// Distinct from `subagent_list`, which enumerates this process's *conversations* and their token
+/// cost. This reports the **roster**: agents the main agent could address but has never opened a
+/// conversation with appear here and nowhere else, which is what makes it answerable before any
+/// work has been dispatched.
+///
+/// A roster that has gone stale still answers, carrying `refusal`: the rows it last knew about plus
+/// the reason none of them can be addressed is strictly more useful than an error, which would
+/// answer "what are my agents doing?" with nothing at all.
+async fn subagent_status_tool(args: serde_json::Value) -> String {
+    let roster = crate::session_agents::session_agent_roster();
+    let agent = args
+        .get("agent")
+        .and_then(|value| value.as_str())
+        .filter(|agent| !agent.is_empty());
+    let wait_for = args
+        .get("waitFor")
+        .and_then(|value| value.as_str())
+        .filter(|condition| !condition.is_empty());
+
+    let Some(wait_for) = wait_for else {
+        return status_report_json(&roster.status_report(), None);
+    };
+    if wait_for != WAIT_FOR_READY {
+        return subagent_error_json(format!(
+            "'waitFor' takes only \"{WAIT_FOR_READY}\"; got '{wait_for}'"
+        ));
+    }
+    // Readiness across an unbounded roster is neither "all of them" nor "any of them" in a way the
+    // caller could have meant, and guessing either would make the answer depend on attach order —
+    // which the main agent cannot see. So it names the field it needs rather than picking one.
+    let Some(agent) = agent else {
+        return subagent_error_json(format!(
+            "'waitFor' requires 'agent': waiting for \"{WAIT_FOR_READY}\" across every attached \
+             agent is neither \"all of them\" nor \"any of them\", and either reading would make \
+             the answer depend on attach order"
+        ));
+    };
+    let wait = match args.get("timeoutMs") {
+        None | Some(serde_json::Value::Null) => SUBAGENT_STATUS_DEFAULT_WAIT_MS,
+        Some(value) => match value.as_u64() {
+            Some(timeout_ms) => timeout_ms.min(SUBAGENT_STATUS_MAX_WAIT_MS),
+            // Refused rather than quietly replaced by the default: a caller that asked for a
+            // deadline and silently got a different one reads the eventual timeout as its own.
+            None => {
+                return subagent_error_json(format!(
+                    "'timeoutMs' is a whole number of milliseconds; got {value}"
+                ))
+            }
+        },
+    };
+    wait_until_readiness_is_settled(agent, std::time::Duration::from_millis(wait)).await
+}
+
+/// Park until `agent` can be prompted, the deadline passes, or the roster stops listing it.
+///
+/// Every ending returns the **same report** a plain read returns, plus `timedOut`. Nothing here
+/// errors on the roster's account, which is the property `status_report` already holds: an agent
+/// detached mid-wait is simply absent from `agents`, and a roster gone dark carries `refusal` — in
+/// both cases the report says what happened better than an error naming it would, and still carries
+/// every other row.
+async fn wait_until_readiness_is_settled(agent: &str, wait: std::time::Duration) -> String {
+    let roster = crate::session_agents::session_agent_roster();
+    let deadline = tokio::time::Instant::now() + wait;
+    // Subscribed *before* the first read: a frame landing between a read and the park is already
+    // counted against this receiver's version, so the park returns at once rather than sleeping
+    // through the very transition it is waiting for.
+    let mut snapshots = roster.subscribe_to_snapshots();
+    let mut seen_on_the_roster = false;
+    loop {
+        let report = roster.status_report();
+        let listed = report
+            .agents
+            .iter()
+            .find(|candidate| candidate.entry.agent_id == agent);
+        // An id no row has *ever* borne is a caller error, not a roster state, and it is refused the
+        // way `subagent_new_session` refuses one — naming the ids there are. Settling it silently
+        // would answer a misspelled agent with `timedOut: false`, which reads as "it is ready".
+        // Once the id has been seen, the same absence means a detach: there the wait settles, since
+        // what it is waiting for cannot happen any more, and the report says so by not listing it.
+        if listed.is_none() && !seen_on_the_roster && report.refusal.is_none() {
+            return subagent_error_json(format!(
+                "agent '{agent}' is not attached to this session. Attached agents: [{}]",
+                report
+                    .agents
+                    .iter()
+                    .map(|candidate| candidate.entry.agent_id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        seen_on_the_roster |= listed.is_some();
+        let still_connecting =
+            listed.is_some_and(|candidate| !readiness_is_settled(candidate.entry.status));
+        if !still_connecting || report.refusal.is_some() {
+            return status_report_json(&report, Some(false));
+        }
+        tokio::select! {
+            woken = snapshots.changed() => {
+                if woken.is_err() {
+                    return subagent_error_json(format!(
+                        "the session's agent roster stopped publishing, so agent '{agent}' \
+                         becoming ready can no longer be observed"
+                    ));
+                }
+            }
+            // Expiry is not an error: the last known status is the actionable half of the answer,
+            // and an error throws it away — "still connecting" is something the main agent can act
+            // on, and it is exactly what the rows already say.
+            _ = tokio::time::sleep_until(deadline) => {
+                return status_report_json(&report, Some(true));
+            }
+        }
+    }
 }
 
 /// The `subagent_new_session` input schema for a session whose roster holds `agents`.
@@ -2509,10 +2663,32 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
          roster. Returns {sessionId, appliedRev, agents:[{agentId, label, model, \
          daemonInstanceId, status, cloneState, replaces, conversations, lastActivity?}]}. \
          `status` is one of idle | running | executing_tool | waiting_for_input | connecting | \
-         error | unknown; `unknown` means nothing has been observed, NOT that the agent is free.",
+         error | unknown; `unknown` means nothing has been observed, NOT that the agent is free. \
+         Pass {agent, waitFor:\"ready\"} to park until that agent can be prompted rather than \
+         polling; the result then also carries {timedOut}.",
         schema_object(serde_json::json!({
             "type": "object",
-            "properties": {}
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "The qualified id of the agent to wait for. Required with \
+                                    `waitFor`, ignored without it — a plain read always reports \
+                                    every attached agent."
+                },
+                "waitFor": {
+                    "type": "string",
+                    "enum": [WAIT_FOR_READY],
+                    "description": "Park until `agent` can be prompted: until it is no longer \
+                                    `connecting`. An agent whose clone failed settles the wait too \
+                                    — waiting will not fix it — and is reported as `error`."
+                },
+                "timeoutMs": {
+                    "type": "integer",
+                    "description": "How long to park, default 30000, capped at 120000. Reaching it \
+                                    is not an error: the current rows come back with \
+                                    `timedOut: true`."
+                }
+            }
         })),
     );
     router.add_route(subagent_route(status_tool, |args| {

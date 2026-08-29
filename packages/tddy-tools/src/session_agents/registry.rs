@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use tokio::sync::watch;
+
 use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::normalize_replaced_tools;
 use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry, SessionAgentRoster};
@@ -285,6 +287,10 @@ struct RosterState {
 pub struct LiveAgentRoster {
     session_id: String,
     state: Mutex<RosterState>,
+    /// Bumped once per **applied** frame — a republish at the revision already in force included,
+    /// since that is the frame a status change arrives on. What [`Self::subscribe_to_snapshots`]
+    /// hands out, and the only thing a parked wait wakes on.
+    snapshots: watch::Sender<u64>,
 }
 
 impl LiveAgentRoster {
@@ -327,6 +333,7 @@ impl LiveAgentRoster {
                 conversations: HashMap::new(),
                 tool_list_changes: 0,
             }),
+            snapshots: watch::channel(0).0,
         }
     }
 
@@ -360,6 +367,21 @@ impl LiveAgentRoster {
     /// refusing while frames keep arriving is a stream that reads as healthy to the follower and
     /// dead to every caller.
     pub fn apply_snapshot(&self, roster: SessionAgentRoster) {
+        if !self.replace_entries_with(roster) {
+            return;
+        }
+        // Bumped only after `replace_entries_with` has returned, which is what releases the lock: a
+        // wait woken by this counter reads the roster as its very first move, and waking it while
+        // the write lock is still held only makes it block on the mutex it was just sent to read.
+        self.snapshots.send_modify(|generation| *generation += 1);
+    }
+
+    /// Apply `roster` under the lock, reporting whether it changed what the registry holds.
+    ///
+    /// Split from [`Self::apply_snapshot`] for the ordering above, and because "was this frame
+    /// applied?" is the same question in all three arms — a frame too old to apply must not wake a
+    /// wait, since it changed nothing for that wait to see.
+    fn replace_entries_with(&self, roster: SessionAgentRoster) -> bool {
         let mut state = self.state.lock().expect("session agent roster");
         if let Some(applied) = state.currency.applied_rev() {
             if roster.rev < applied {
@@ -371,7 +393,7 @@ impl LiveAgentRoster {
                     self.session_id
                 );
                 state.currency = RosterCurrency::Current { rev: applied };
-                return;
+                return false;
             }
             if roster.rev == applied {
                 state.currency = RosterCurrency::Current { rev: applied };
@@ -380,7 +402,7 @@ impl LiveAgentRoster {
                 // and no tool list has changed — but what those agents are *doing* is exactly what
                 // this frame exists to deliver.
                 state.entries = roster.agents;
-                return;
+                return true;
             }
         }
         state.currency = RosterCurrency::Current { rev: roster.rev };
@@ -405,6 +427,7 @@ impl LiveAgentRoster {
                 ),
             };
         }
+        true
     }
 
     /// Record that the roster can no longer be kept current, and refuse every later resolution
@@ -605,6 +628,21 @@ impl LiveAgentRoster {
                 })
                 .collect(),
         }
+    }
+
+    /// A counter moved by every **applied** frame — what a bounded wait for an agent to become
+    /// promptable parks on.
+    ///
+    /// A [`watch`] rather than a `Notify` because the receiver carries the version it last saw: a
+    /// wait that reads the roster and *then* subscribes would sleep through the frame that landed
+    /// between the two, and that frame is usually the one it was waiting for. Subscribing first and
+    /// reading second is therefore safe, which is the only ordering a caller can get right.
+    ///
+    /// Moved by same-revision republishes too, since a status change is exactly what does **not**
+    /// move `rev` — a wait watching revisions alone would run to its deadline on the transition it
+    /// exists to catch.
+    pub fn subscribe_to_snapshots(&self) -> watch::Receiver<u64> {
+        self.snapshots.subscribe()
     }
 
     fn withdrawn_exec_tools_in(state: &RosterState) -> WithdrawnExecTools {
