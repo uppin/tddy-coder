@@ -94,7 +94,7 @@ are not enough".
 - [x] **Changeset**: this document
 - [x] **Package Documentation**: `packages/tddy-session-sync/docs/mirroring.md` (new), `packages/tddy-daemon/docs/session-room.md` § Reconstructing the checkout, and the client README's stale "not usable yet" status corrected
 - [x] **Implementation**: proto additions, poll-loop WIP tree + delta ring, two RPCs, broadcast, client crate
-- [ ] **Testing**: acceptance tests per package + one end-to-end suite over a real LiveKit server
+- [x] **Testing**: acceptance tests per package + one end-to-end suite over a real LiveKit server (`tddy-daemon/tests/session_sync_livekit_acceptance.rs`)
 - [x] **Integration**: cross-package — proto in tddy-service, producers in tddy-daemon/tddy-coder, consumer in tddy-session-sync
 - [x] **Technical Debt**: `StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope — recorded below as accepted, with the client's LiveKit secret
 - [x] **Code Quality**: `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
@@ -272,7 +272,12 @@ LiveKit, no daemon.
 ### Option 4: end to end (secondary)
 
 **Test level**: Production
-**Location**: `packages/tddy-session-sync/tests/session_sync_livekit_acceptance.rs` (new)
+**Location**: `packages/tddy-daemon/tests/session_sync_livekit_acceptance.rs` (new)
+
+Deliberately **not** in `tddy-session-sync`, where this originally said. `tddy-daemon` already
+depends on `tddy-session-sync` as a library (`Cargo.toml:69` — the agent clone runs the same
+mirror in-process), so the client is reachable from a daemon test; putting the suite the other
+way round would make the whole daemon a dev-dependency of the client, for no gain.
 
 **Scope**: AC30-35 against a real LiveKit server and a real daemon — Write, Edit, delete, binary,
 commit, and recovery from a hand-corrupted mirror.
@@ -282,8 +287,8 @@ as `remote_git_livekit_acceptance.rs` does.
 
 ### Coverage Requirements
 
-- [ ] **Happy path**: Write, Edit, delete, binary and commit all reach the mirror
-- [ ] **Error scenarios**: unknown `call_id`, aged-out delta, rejected patch, refused dest, oversized file
+- [x] **Happy path**: Write, Edit, delete, binary and commit all reach the mirror — AC31-35, end to end
+- [x] **Error scenarios**: unknown `call_id` and aged-out delta (`stream_agent_activity_delta_rpc_acceptance.rs`), rejected patch and refused dest (`mirror_acceptance.rs`), oversized file (`stream_read_worktree_file` guards)
 - [x] **Edge cases**: untracked-only change, rename, mode change, empty file, zero-length delta
 - [x] **Integration points**: daemon reads the activity log; daemon → room broadcast; room → client. (No coder → daemon report exists — see piece #4.)
 - [x] **Regression**: existing `agent-activity.jsonl` files still deserialize; `worktree.activity`
@@ -345,12 +350,12 @@ as `remote_git_livekit_acceptance.rs` does.
 - [x] **Integration**: `names_the_expected_and_actual_values_of_every_divergence` (AC29)
 - [x] **Integration**: `names_the_environment_variable_of_a_missing_credential` (AC21)
 - [x] **Integration**: `never_prints_the_value_of_a_token_it_found_in_the_environment` (AC20) — `tddy-session-sync/tests/cli_acceptance.rs`
-- [ ] **Production**: `mirrors_a_file_the_agent_wrote_without_a_commit` (AC31)
-- [ ] **Production**: `mirrors_an_edit_to_an_existing_file` (AC32)
-- [ ] **Production**: `removes_a_file_the_agent_deleted` (AC33)
-- [ ] **Production**: `mirrors_binary_content_byte_for_byte` (AC34)
-- [ ] **Production**: `follows_the_session_head_when_the_agent_commits` (AC35)
-- [ ] **Production**: `restores_a_mirror_that_was_corrupted_by_hand` (AC36)
+- [x] **Production**: `mirrors_a_file_the_agent_wrote_without_a_commit` (AC31)
+- [x] **Production**: `mirrors_an_edit_to_an_existing_file` (AC32)
+- [x] **Production**: `removes_a_file_the_agent_deleted` (AC33)
+- [x] **Production**: `mirrors_binary_content_byte_for_byte` (AC34)
+- [x] **Production**: `follows_the_session_head_when_the_agent_commits` (AC35)
+- [x] **Production**: `restores_a_mirror_that_was_corrupted_by_hand` (AC36)
 
 ## Technical Debt & Production Readiness
 
