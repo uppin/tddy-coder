@@ -167,6 +167,10 @@ const MCP_CONFIG_FILENAME: &str = "claude-mcp-config.json";
 const SUBAGENT_TOOLS: &[&str] = &[
     "mcp__tddy-tools__subagent_new_session",
     "mcp__tddy-tools__subagent_prompt",
+    // A prompt that outruns its grace period answers with a `responseId` rather than an outcome;
+    // an agent allowed to be handed one and not allowed to redeem it holds a receipt it can never
+    // cash (docs/ft/coder/managed-codebase-subagents.md criterion 33).
+    "mcp__tddy-tools__subagent_await",
     "mcp__tddy-tools__subagent_cancel",
 ];
 
@@ -381,6 +385,37 @@ mod tests {
                 "allowlist must contain {tool} when a subagent is enabled; got: {allowlist:?}"
             );
         }
+    }
+
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md (criterion 33)
+    ///
+    /// A prompt that outruns its grace period hands the agent a `responseId`, and `subagent_await`
+    /// is the only thing that redeems one. Offering the prompt without the await would hand a
+    /// sandboxed agent a receipt it can never cash.
+    #[test]
+    fn claude_allowlist_offers_subagent_await_exactly_where_it_offers_subagent_prompt() {
+        // Given the allowlist with a subagent wired in, and the one without
+        let with_subagent: HashSet<_> = build_claude_allowlist(true, &[]).into_iter().collect();
+        let without_subagent: HashSet<_> = build_claude_allowlist(false, &[]).into_iter().collect();
+
+        // Then the await tool travels with the prompt tool, in both directions
+        assert_eq!(
+            with_subagent.contains("mcp__tddy-tools__subagent_await"),
+            with_subagent.contains("mcp__tddy-tools__subagent_prompt"),
+            "subagent_await must be offered exactly where subagent_prompt is; got: \
+             {with_subagent:?}"
+        );
+        assert_eq!(
+            without_subagent.contains("mcp__tddy-tools__subagent_await"),
+            without_subagent.contains("mcp__tddy-tools__subagent_prompt"),
+            "subagent_await must be withheld exactly where subagent_prompt is; got: \
+             {without_subagent:?}"
+        );
+        assert!(
+            with_subagent.contains("mcp__tddy-tools__subagent_await"),
+            "a session with a subagent wired in must be able to collect a deferred turn; got: \
+             {with_subagent:?}"
+        );
     }
 
     /// The converse of the above: without a subagent wired in, none of the three subagent tools

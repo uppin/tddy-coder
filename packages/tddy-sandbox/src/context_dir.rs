@@ -69,7 +69,10 @@ pub fn sandbox_remote_appendix(replacements: &[SubagentReplacement<'_>]) -> Stri
 The following tools are NOT available as direct tools — they are handled by specialized \
 subagents instead: {}.\n\
 Use `mcp__tddy-tools__subagent_new_session`{} and `mcp__tddy-tools__subagent_prompt` to perform \
-those operations.\n",
+those operations.\n\
+A `subagent_prompt` that is still running after its grace period returns `{{responseId, pending: \
+true}}` instead of an answer — the turn is still going, and `mcp__tddy-tools__subagent_await` \
+collects its outcome under that `responseId`.\n",
             clauses.join("; "),
             agent_hint
         ));
