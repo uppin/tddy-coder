@@ -511,6 +511,8 @@ state:
             branch: String::new(),
             codebase_daemon_instance_id: String::new(),
             codebase_session_id: String::new(),
+            agent_status: 0,
+            last_activity: None,
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -874,6 +876,8 @@ sessions:
             branch: String::new(),
             codebase_daemon_instance_id: String::new(),
             codebase_session_id: String::new(),
+            agent_status: 0,
+            last_activity: None,
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

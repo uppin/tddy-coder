@@ -1021,6 +1021,11 @@ pub struct ConnectionServiceImpl {
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
     agent_activity_hub: Arc<AgentActivityHub>,
+    /// What each agent session's own conversation says its agent is doing
+    /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
+    /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
+    /// next one.
+    session_agent_inference: Arc<crate::session_agent_inference::SessionAgentInferenceStore>,
     /// GitHub access tokens retained at web login, keyed by GitHub login — the credential the
     /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
     /// status reads as *unavailable*, never as "no PR".
@@ -1523,6 +1528,9 @@ impl ConnectionServiceImpl {
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
+            session_agent_inference: Arc::new(
+                crate::session_agent_inference::SessionAgentInferenceStore::new(),
+            ),
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
@@ -11053,6 +11061,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
+        // Tailing a session reads its transcript once, on the listing that first sees it, so the
+        // seed is paid for on this blocking thread rather than on the reactor.
+        let session_agent_inference = Arc::clone(&self.session_agent_inference);
+        let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
         let entries =
             spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
@@ -11105,6 +11117,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         // daemon as its codebase host.
                         codebase_daemon_instance_id: s.codebase_daemon_instance_id,
                         codebase_session_id: s.codebase_session_id,
+                        // Inferred below from the session's own conversation
+                        // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
+                        // the honest value for a session nothing has been observed on, and stays the
+                        // value for every session type that runs no agent.
+                        agent_status:
+                            tddy_service::proto::connection::SessionAgentStatus::Unspecified as i32,
+                        last_activity: None,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -11116,6 +11135,27 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                             session_dir.display(),
                             e
                         );
+                    }
+                    // Only a session that runs an agent is tailed — the same gate
+                    // `report_session_status` applies, and for the same reason: those are the two
+                    // session types that write a conversation. A `workspace` session holds a clone
+                    // and would spend a subscription and a file read to conclude UNSPECIFIED.
+                    if matches!(entry.session_type.as_str(), "claude-cli" | "cursor-cli") {
+                        session_agent_inference.ensure_tailing(
+                            &agent_activity_hub,
+                            &entry.session_id,
+                            &session_dir,
+                        );
+                        let inferred = crate::session_agent_inference::inferred_activity(
+                            tddy_core::SessionActivityStatus::from_wire(&entry.activity_status),
+                            session_agent_inference.latest(&entry.session_id).as_ref(),
+                        );
+                        entry.agent_status =
+                            crate::session_agent_inference::session_agent_status(inferred.as_ref())
+                                as i32;
+                        entry.last_activity = inferred
+                            .as_ref()
+                            .and_then(crate::session_agent_status::AgentActivity::to_proto);
                     }
                     out.push(entry);
                 }
@@ -11928,6 +11968,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // one being deleted. Forgetting it before the directory goes is what stops a tool call
         // arriving a moment later from being served out of a checkout that no longer exists.
         self.hosted_agent_clones.forget_checkout(session_id);
+        // The conversation this daemon was tailing goes with the session: its consumer task exits on
+        // the next record rather than holding a subscription for the daemon's life, and a session id
+        // reused later starts from nothing observed instead of the deleted session's last call.
+        self.session_agent_inference.forget(session_id);
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }
