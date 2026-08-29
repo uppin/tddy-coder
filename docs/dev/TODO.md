@@ -334,42 +334,32 @@ the host that offers it. These gaps were scoped out of that changeset deliberate
 
 ### Session agent roster — the sandbox bridge, and other deliberate gaps (source: session-agent-roster changeset, 2026-08-17)
 
-- **⛔ BLOCKER — `subagent_*` is refused inside a managed jail, so the feature does not work in a
-  sandboxed session.** `tddy-tools` follows the session's roster over `StreamSessionAgents`, but
-  `tddy_sandbox_runner::ToolExecService` (`packages/tddy-sandbox-runner/src/runner.rs:56`) answers
-  `not_found` to every `service/method` pair except `connection.ConnectionService/ExecuteTool`. The
-  follower therefore retries three times and calls `mark_unavailable`, and — correctly, per the
-  PRD's no-fallback rule — every `subagent_new_session` / `subagent_prompt` / `subagent_cancel` in
-  that session then refuses with "cannot keep the roster current". Serving the stale seed instead
-  was rejected deliberately: a frozen registry answers for detached agents and refuses attached
-  ones, silently. Live attach consequently works from the web and the daemon, but not from inside a
-  jailed agent, which is the primary deployment mode.
-  ~~**The session does not merely fail to gain agents — it loses capability it had.**~~ **Closed**
-  for the capability half: `LiveAgentRoster` now distinguishes a roster that *was* current and went
-  stale (`RosterCurrency::Stale` — still enforces its `replaces` union, because those agents were
-  real) from one that never received a frame and whose stream gave up (`RosterCurrency::Unreachable`
-  — enforces nothing, because the replacement is unreachable too). A sandboxed session therefore
-  keeps `Grep`/`Glob` at the call site instead of losing search entirely. The withdrawal is still
-  applied at spawn through the allowlist/disallowlist, and `subagent_*` still refuses, so the
-  blocker above stands. Original note follows.
-  `LiveAgentRoster::check_tool_available` kept enforcing the last-known roster's `replaces` union
-  while the roster was `Unavailable`, and in a sandboxed session it is *permanently* unavailable. So
-  a managed session started with an agent declaring `replaces: [Grep, Glob]` lost `Grep`/`Glob` at
-  spawn (allowlist + disallowlist), had them refused again at call time, and ~45 s later had every
-  `subagent_*` call refused too: no search capability at all, and no recovery short of restarting
-  the session.
-  Three concrete blockers, and together they are a change to the channel's contract rather than
-  four more match arms:
-  1. `SandboxSessionRelay` holds a **single** `awaiting_tool` slot popped positionally, so a
+- ~~**⛔ BLOCKER — `subagent_*` is refused inside a managed jail, so the feature does not work in a
+  sandboxed session.**~~ **Closed 2026-08-29.** Both halves are built. The bridge:
+  `tddy_sandbox_runner::ToolExecService` (`packages/tddy-sandbox-runner/src/runner.rs`) now
+  forwards `StreamSessionAgents`, `OpenAgentConversation`, `PromptAgentConversation` and
+  `CancelAgentConversation` over the `SessionChannel` as multiplexed `RpcRequest` /
+  `RpcStreamFrame` frames carrying a `request_id`, alongside — not through — the poll-gated
+  `ToolRequest`/`ToolResponse` pair `ExecuteTool` still rides, so a lifetime-long roster stream no
+  longer occupies the channel. The client: `tddy-tools` calls the three conversation RPCs on the
+  facilitating daemon (`session_agents/conversation.rs`), so an agent whose def only its owning
+  daemon holds — a live attach, or a cross-daemon agent on a split session — is run by that daemon
+  instead of being refused. The three blockers below are the state before that, kept for the
+  record.
+  1. `SandboxSessionRelay` held a **single** `awaiting_tool` slot popped positionally, so a
      lifetime-long `StreamSessionAgents` would occupy the channel forever and block every tool
-     call. Multiplexing needs a request id on `SessionFrame` and an in-flight map on both sides.
-  2. `SessionFrame` carries one typed message per call, not a
+     call. Multiplexing needed a request id on `SessionFrame` and an in-flight map on both sides.
+  2. `SessionFrame` carried one typed message per call, not a
      `{request_id, service, method, payload}` + `end_of_stream` envelope.
-  3. The host side dispatches to `HostToolHandler::execute(session_id, tool_name, args_json)`,
+  3. The host side dispatched to `HostToolHandler::execute(session_id, tool_name, args_json)`,
      which deliberately does not carry the daemon's `ConnectionServiceImpl` — the conversation RPCs
      need it.
-  The daemon half is already in place: `TDDY_DAEMON_INSTANCE_ID` is exported into all three sandbox
-  spawn paths so a seeded agent id can be qualified once the bridge exists.
+  The capability half was closed earlier: `LiveAgentRoster` distinguishes a roster that *was*
+  current and went stale (`RosterCurrency::Stale` — still enforces its `replaces` union, because
+  those agents were real) from one that never received a frame and whose stream gave up
+  (`RosterCurrency::Unreachable` — enforces nothing, because the replacement is unreachable too),
+  so a session whose roster never arrived keeps `Grep`/`Glob` at the call site instead of losing
+  search entirely.
 - **The sandbox runner re-derives the replaced-tool set from the spawn seed, not from the roster.**
   `runner.rs` reads `TDDY_SUBAGENTS_JSON` and feeds `append_claude_mcp_args`, while the daemon's
   `roster_replacement_pairs` and the context appendix it feeds use the roster's snapshot of

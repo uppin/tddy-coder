@@ -1692,16 +1692,47 @@ fn subagent_tool_names() -> Vec<String> {
         .collect()
 }
 
-/// Why an attached agent cannot be run from here: its def lives on the daemon that owns it.
+/// Open a conversation with `entry` on the daemon that runs it, for an agent this process holds no
+/// def for.
 ///
-/// Shared by every tool that opens a turn loop, so the main agent reads one wording for one
-/// condition however it arrived at it.
-fn unreachable_agent_error(entry: &tddy_service::proto::connection::SessionAgentEntry) -> String {
-    format!(
-        "agent '{}' is attached but this session cannot reach it: its conversations are routed \
-         by daemon '{}', which this build does not yet ask",
-        entry.agent_id, entry.daemon_instance_id
-    )
+/// A roster entry carries no endpoint or credential — deliberately — so an agent owned by another
+/// daemon, and a local one attached after spawn, are run by asking the facilitating daemon to run
+/// them (docs/ft/daemon/session-agent-roster.md § Invoking an agent). The refusal names the agent
+/// and the daemon its conversations are routed by, so an operator reads which host to go and look
+/// at rather than "this session cannot reach it".
+async fn open_remote_agent_session(
+    entry: &tddy_service::proto::connection::SessionAgentEntry,
+    conversation_id: &str,
+) -> Result<OpenedAgent, String> {
+    let refused = |e: String| {
+        format!(
+            "agent '{}' is routed by daemon '{}': {e}",
+            entry.agent_id, entry.daemon_instance_id
+        )
+    };
+    let link = std::sync::Arc::new(
+        crate::session_agents::AgentConversationLink::connect()
+            .await
+            .map_err(refused)?,
+    );
+    let opened = link
+        .open(&entry.agent_id, conversation_id)
+        .await
+        .map_err(refused)?;
+    Ok(OpenedAgent {
+        agent_id: entry.agent_id.clone(),
+        session: Box::new(link.session(opened.clone(), &entry.model)),
+        remote: Some(link.handle(opened)),
+    })
+}
+
+/// An agent opened for one turn loop: what to prompt, and — when the loop runs on another daemon —
+/// what to close when the conversation ends.
+pub(crate) struct OpenedAgent {
+    pub(crate) agent_id: String,
+    pub(crate) session: Box<dyn SubagentSession>,
+    /// `None` for an agent this process runs itself: there is nothing on another host to close.
+    pub(crate) remote: Option<crate::session_agents::RemoteConversationHandle>,
 }
 
 /// Open a turn loop with the roster agent `agent_id`, for a tool that runs one bounded exchange of
@@ -1714,19 +1745,24 @@ fn unreachable_agent_error(entry: &tddy_service::proto::connection::SessionAgent
 ///
 /// No conversation is registered with the roster: the exchange opens and ends inside the call, so
 /// there is nothing a later `subagent_cancel` or a detach could address.
-pub(crate) fn open_roster_agent_session(
-    agent_id: &str,
-) -> Result<(String, Box<dyn SubagentSession>), String> {
+pub(crate) async fn open_roster_agent_session(agent_id: &str) -> Result<OpenedAgent, String> {
     let roster = crate::session_agents::session_agent_roster();
     let entry = roster.resolve(Some(agent_id)).map_err(|e| e.to_string())?;
-    let def = roster
-        .local_def_for(&entry)
-        .ok_or_else(|| unreachable_agent_error(&entry))?;
+    let Some(def) = roster.local_def_for(&entry) else {
+        // The daemon mints the conversation id here: nothing outside this call can name the
+        // exchange, so there is nothing a caller-chosen id would let it cancel. The caller closes
+        // it through the handle instead.
+        return open_remote_agent_session(&entry, "").await;
+    };
     let name = def.name.clone();
     let session = SubagentRegistry::from_defs(vec![def])
         .create(&name, subagent_config_from_env())
         .map_err(|e| format!("agent '{}': {e}", entry.agent_id))?;
-    Ok((entry.agent_id, session))
+    Ok(OpenedAgent {
+        agent_id: entry.agent_id,
+        session,
+        remote: None,
+    })
 }
 
 pub(crate) fn env_non_empty(key: &str) -> Option<String> {
@@ -1740,6 +1776,10 @@ struct SubagentConversation {
     agent: String,
     turns: u32,
     session: Box<dyn SubagentSession>,
+    /// The daemon-side conversation this one is a handle to, when the turn loop runs elsewhere.
+    /// Ending it here has to close it there too: the owning daemon otherwise keeps the loop, and
+    /// its own registration of it, for the life of its process.
+    remote: Option<crate::session_agents::RemoteConversationHandle>,
 }
 
 /// Every conversation this process has run: the ones still open, and the accounting of the ones
@@ -1942,15 +1982,28 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     };
     // A roster entry carries no endpoint, credential or turn budget — deliberately, so editing a def
     // cannot change what a running session may call. This process can therefore only run the loop of
-    // an agent it holds the def for.
-    //
-    // TODO(session-agent-roster): route the rest through the facilitating daemon's
-    // `OpenAgentConversation` / `PromptAgentConversation` / `CancelAgentConversation`, which is what
-    // makes a remote agent — and a local one attached after spawn — callable at all. Those handlers
-    // are the roster's daemon-side tranche.
+    // an agent it holds the def for; every other one is run by the facilitating daemon, over the
+    // same `session_id` the caller chose, so a `subagent_cancel` addresses the same conversation on
+    // both paths.
     let Some(def) = roster.local_def_for(&entry) else {
-        roster.close_conversation(&session_id);
-        return subagent_error_json(unreachable_agent_error(&entry));
+        return match open_remote_agent_session(&entry, &session_id).await {
+            Ok(opened) => {
+                subagent_sessions().lock().await.open.insert(
+                    session_id.clone(),
+                    SubagentConversation {
+                        agent: opened.agent_id,
+                        turns: 0,
+                        session: opened.session,
+                        remote: opened.remote,
+                    },
+                );
+                serde_json::json!({ "sessionId": session_id }).to_string()
+            }
+            Err(e) => {
+                roster.close_conversation(&session_id);
+                subagent_error_json(e)
+            }
+        };
     };
     let agent_name = def.name.clone();
     let registry = SubagentRegistry::from_defs(vec![def]);
@@ -1962,6 +2015,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
                     agent: entry.agent_id,
                     turns: 0,
                     session,
+                    remote: None,
                 },
             );
             serde_json::json!({ "sessionId": session_id }).to_string()
@@ -2005,12 +2059,18 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
             // history rather than leaving a session behind that can never be prompted again. Its
             // accounting is retired rather than dropped: those tokens were spent, and the file
             // below is rewritten wholesale.
+            let remote = sessions
+                .open
+                .get(session_id)
+                .and_then(|conv| conv.remote.clone());
             sessions.retire(session_id);
             // The roster tracked this conversation only so it could be cancelled; nothing will ask
             // about it again, and a cancelled entry nobody forgets is rescanned by every later
             // frame for the process lifetime.
             roster.close_conversation(session_id);
             write_accounting_file(&sessions);
+            drop(sessions);
+            cancel_remote_conversation(remote).await;
             return subagent_error_json(reason);
         }
     }
@@ -2028,12 +2088,39 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     response
 }
 
+/// Close a conversation on the daemon running its turn loop, when it runs on one.
+///
+/// Failure is logged rather than returned: the conversation is already gone on this side, so there
+/// is nothing the caller could do differently, and reporting a cancel as failed would tell the main
+/// agent a conversation it can no longer prompt is still open. Logged at `error` because a
+/// conversation left open on the owning daemon is a leak an operator has to be able to find.
+pub(crate) async fn cancel_remote_conversation(
+    remote: Option<crate::session_agents::RemoteConversationHandle>,
+) {
+    let Some(remote) = remote else {
+        return;
+    };
+    if let Err(e) = remote.cancel().await {
+        log::error!(
+            target: "tddy_tools::session_agents",
+            "conversation '{}' was closed here but not on the daemon running it: {e}",
+            remote.conversation_id()
+        );
+    }
+}
+
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
 async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
     let mut sessions = subagent_sessions().lock().await;
+    // Read before the retire consumes the conversation: closing it here has to close it on the
+    // daemon running the loop, or that daemon keeps the loop and its registration of it forever.
+    let remote = sessions
+        .open
+        .get(session_id)
+        .and_then(|conv| conv.remote.clone());
     // Retired rather than forgotten: a cancelled conversation's tokens were spent by this session,
     // and the accounting file below is rewritten from this table wholesale.
     let cancelled = sessions.retire(session_id);
@@ -2041,6 +2128,8 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     // a cancellation for something the main agent already closed.
     crate::session_agents::session_agent_roster().close_conversation(session_id);
     write_accounting_file(&sessions);
+    drop(sessions);
+    cancel_remote_conversation(remote).await;
     serde_json::json!({ "cancelled": cancelled }).to_string()
 }
 
