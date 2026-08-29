@@ -1,0 +1,154 @@
+name: Automerge
+
+# Comment on a pull request to merge it — squashed — without going back to the
+# GitHub UI. See docs/dev/guides/ci.md § Automerge.
+#
+#   #automerge         merge when the required checks pass
+#   #automerge-cancel  disarm it again
+#   #forcemerge        merge now, past red or still-running checks
+#
+# Two things this workflow depends on, both configured on the repo rather than
+# here: `Allow auto-merge` must be on, and the `master` ruleset must require the
+# four ci.yml checks. Native auto-merge is a *queue for a blocked PR* — with
+# nothing required, a PR is mergeable the instant it opens and GitHub rejects
+# the request with "Pull request is in clean status". `#forcemerge` additionally
+# needs the GitHub Actions app listed in that ruleset's `bypass_actors`;
+# GITHUB_TOKEN cannot skip a required check by default, and should not be able
+# to merge past one it is not explicitly trusted to skip.
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+# `issue_comment` fires on issues too, and the comment body is attacker-supplied
+# on a public repo. Both are filtered in the job's `if:` and by the write-access
+# check below; the token itself gets only what merging needs.
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  automerge:
+    name: Merge on comment
+    # `github.event.issue.pull_request` is null on plain issues.
+    if: >-
+      github.event.issue.pull_request &&
+      (contains(github.event.comment.body, '#automerge') ||
+       contains(github.event.comment.body, '#forcemerge'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The comment author is not necessarily a collaborator. `author_association`
+      # is not a permission — an org member with no access to this repo still
+      # reports MEMBER — so ask for the actual permission level.
+      #
+      # `#forcemerge` is held to the same bar rather than a higher one on
+      # purpose: the repo is owned by a different account than the people who
+      # work in it, so an admin-only force merge would be usable by nobody.
+      - name: Require write access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          level=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" \
+                    --jq .permission 2>/dev/null || echo none)
+          echo "$ACTOR has '$level' permission"
+          case "$level" in
+            admin|write|maintain) ;;
+            *) echo "::error::$ACTOR lacks write access; ignoring the merge request"
+               exit 1 ;;
+          esac
+
+      - name: Merge
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          COMMENT_URL: ${{ github.event.comment.html_url }}
+          # Via env, never inlined into the script — a comment body is untrusted
+          # input and `${{ }}` interpolation would splice it into the shell.
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          # Longest match first: '#automerge-cancel' contains '#automerge'.
+          if grep -qF -- '#automerge-cancel' <<<"$BODY"; then
+            mode=cancel
+          elif grep -qF -- '#forcemerge' <<<"$BODY"; then
+            mode=force
+          else
+            mode=auto
+          fi
+          echo "mode: $mode"
+
+          case "$mode" in
+            cancel)
+              gh pr merge "$PR" --repo "$REPO" --disable-auto
+              echo "reaction=eyes" >> "$GITHUB_OUTPUT"
+              echo "Auto-merge disabled for #$PR"
+              ;;
+
+            force)
+              # Merging past a gate is worth a trace that outlives the run log,
+              # so record who asked and what the checks actually said, on the PR
+              # itself, before doing it.
+              checks=$(gh pr checks "$PR" --repo "$REPO" 2>&1 || true)
+              gh pr comment "$PR" --repo "$REPO" --body "$(cat <<EOF
+          ⚠️ **Force-merged** by @$ACTOR via [\`#forcemerge\`]($COMMENT_URL), bypassing the required checks.
+
+          Check state at merge time:
+
+          \`\`\`
+          $checks
+          \`\`\`
+          EOF
+          )"
+              # --admin merges through the merge API instead of asking to queue.
+              # It succeeds only because the Actions app is a bypass actor on the
+              # ruleset; without that it fails here rather than merging quietly.
+              gh pr merge "$PR" --repo "$REPO" --squash --admin
+              echo "reaction=hooray" >> "$GITHUB_OUTPUT"
+              echo "Force-merged #$PR"
+              ;;
+
+            auto)
+              # Which merge to ask for is not a preference — auto-merge is a
+              # queue for a *blocked* PR, and asking to queue one that has
+              # nothing left to wait for is an error, not a no-op.
+              #
+              # The question is deliberately put to the checks API and not to
+              # `mergeStateStatus`. That field answers "is this blocked *for
+              # you*", and once the Actions app is a bypass actor the answer for
+              # this token stops being the answer for the ruleset — which would
+              # silently turn every `#automerge` into a force merge. `gh pr
+              # checks --required` reports the checks themselves: exit 0 when
+              # every required one has passed, non-zero while any is pending or
+              # failing.
+              if gh pr checks "$PR" --repo "$REPO" --required; then
+                gh pr merge "$PR" --repo "$REPO" --squash
+                echo "Merged #$PR — the required checks were already green"
+              else
+                gh pr merge "$PR" --repo "$REPO" --squash --auto
+                echo "Auto-merge armed for #$PR; it merges when the required checks pass"
+              fi
+              echo "reaction=rocket" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      # Acknowledge on the comment itself, so the requester can tell the
+      # difference between "done" and "the workflow never fired".
+      - name: React to the comment
+        if: always() && steps.merge.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REACTION: ${{ steps.merge.outputs.reaction || 'confused' }}
+        run: |
+          gh api --silent -X POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content="$REACTION"
