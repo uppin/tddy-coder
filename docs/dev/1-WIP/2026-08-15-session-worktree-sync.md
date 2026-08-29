@@ -73,8 +73,11 @@ room over a real server. One session type is still out of reach — see below.
 | ~~8~~ | ~~Client attach + sync loop~~ | ✅ done, 31 new tests |
 | ~~9~~ | ~~`./release`, `./install`, `./publish.sh` ship the binary~~ | ✅ done, pinned by `install_script.rs` |
 
-Test gaps track those exactly: AC1/AC4/AC5 (stamping, broadcast, report), AC20 (a CLI-level
-`--help` test) and AC31-36 (the end-to-end suite over a real LiveKit server).
+**Audited 2026-08-29 against the code.** Most of the boxes below were stale rather than
+outstanding: AC1, AC4 and AC20 all exist under different names (named inline where they are ticked),
+and AC5 is **obsolete** — it would test the coder→daemon transport that piece #4 deliberately
+replaced by tailing `agent-activity.jsonl`. What was genuinely missing was the package
+documentation, now written, and the end-to-end suite AC31-36.
 
 ## Background
 
@@ -89,11 +92,11 @@ are not enough".
 
 - [x] **PRD Documentation**: [docs/ft/daemon/session-worktree-sync.md](../ft/daemon/session-worktree-sync.md)
 - [x] **Changeset**: this document
-- [ ] **Package Documentation**: new `tddy-session-sync` docs; update `tddy-daemon/docs/session-room.md`
-- [ ] **Implementation**: proto additions, poll-loop WIP tree + delta ring, two RPCs, broadcast, client crate
+- [x] **Package Documentation**: `packages/tddy-session-sync/docs/mirroring.md` (new), `packages/tddy-daemon/docs/session-room.md` § Reconstructing the checkout, and the client README's stale "not usable yet" status corrected
+- [x] **Implementation**: proto additions, poll-loop WIP tree + delta ring, two RPCs, broadcast, client crate
 - [ ] **Testing**: acceptance tests per package + one end-to-end suite over a real LiveKit server
-- [ ] **Integration**: cross-package — proto in tddy-service, producers in tddy-daemon/tddy-coder, consumer in tddy-session-sync
-- [ ] **Technical Debt**: `StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope — recorded below
+- [x] **Integration**: cross-package — proto in tddy-service, producers in tddy-daemon/tddy-coder, consumer in tddy-session-sync
+- [x] **Technical Debt**: `StreamReadWorktreeFile` duplicates `StreamReadHostDocument`'s SESSION_WORKTREE scope — recorded below as accepted, with the client's LiveKit secret
 - [x] **Code Quality**: `clippy --workspace --all-targets -D warnings` + `fmt --check` clean
 
 ## Technical Changes
@@ -208,7 +211,7 @@ are not enough".
 - [x] `head_commit` / `changed_paths` stamping in the coder's presenter
 - [x] `head_commit` / `changed_paths` stamping at the two daemon producers
 - [x] `session.activity` broadcast from the daemon
-- [ ] `tddy-coder` reports activity to the daemon
+- [x] ~~`tddy-coder` reports activity to the daemon~~ — superseded: the poll loop tails `agent-activity.jsonl`, so no coder-side transport exists to build
 - [x] `StreamAgentActivityDelta` handler + tonic adapter
 - [x] `read_worktree_file_bytes`
 - [x] `StreamReadWorktreeFile` handler + tonic adapter
@@ -282,7 +285,7 @@ as `remote_git_livekit_acceptance.rs` does.
 - [ ] **Happy path**: Write, Edit, delete, binary and commit all reach the mirror
 - [ ] **Error scenarios**: unknown `call_id`, aged-out delta, rejected patch, refused dest, oversized file
 - [x] **Edge cases**: untracked-only change, rename, mode change, empty file, zero-length delta
-- [ ] **Integration points**: coder → daemon report; daemon → room broadcast; room → client
+- [x] **Integration points**: daemon reads the activity log; daemon → room broadcast; room → client. (No coder → daemon report exists — see piece #4.)
 - [x] **Regression**: existing `agent-activity.jsonl` files still deserialize; `worktree.activity`
       events unchanged; `ReadWorktreeFile` behaviour unchanged
 
@@ -314,8 +317,8 @@ as `remote_git_livekit_acceptance.rs` does.
 - [x] **Integration**: `produces_no_delta_when_the_working_tree_did_not_move` (tick wiring)
 - [x] **Integration**: `produces_no_delta_on_the_first_tick_because_there_is_nothing_to_diff_from` (tick wiring)
 - [x] **Integration**: `bases_a_delta_on_the_commit_the_tick_ended_at_when_the_agent_committed` (tick wiring)
-- [ ] **Integration**: `stamps_a_record_with_the_commit_it_ran_upon` (AC1)
-- [ ] **Integration**: `broadcasts_an_activity_record_on_the_session_activity_topic` (AC4)
+- [x] **Integration**: `stamps_a_recorded_call_with_the_worktrees_current_head_commit` (AC1) — `agent_activity_stamping_acceptance.rs`
+- [x] **Integration**: `a_recorded_call_is_broadcast_into_the_room_stamped_with_the_tick_it_ran_in` (AC4) — `session_room_livekit_acceptance.rs`
 - [x] **Integration**: `reads_a_png_byte_for_byte` (AC13)
 - [x] **Integration**: `reads_a_file_larger_than_the_unary_readers_one_megabyte_cap_without_truncating_it` (AC14)
 - [x] **Integration**: `refuses_a_file_over_the_cap_rather_than_shortening_it` (AC14)
@@ -331,7 +334,7 @@ as `remote_git_livekit_acceptance.rs` does.
 - [x] **Unit**: `credits_nothing_when_the_input_names_no_usable_file` (AC2)
 
 ### tddy-coder
-- [ ] **Integration**: `reports_its_own_activity_records_to_the_daemon` (AC5)
+- [x] ~~**Integration**: `reports_its_own_activity_records_to_the_daemon` (AC5)~~ — **obsolete**: this would test the coder→daemon transport that piece #4 deliberately did not build. The daemon reads `agent-activity.jsonl` instead, covered by `session_activity_attribution_acceptance.rs`
 
 ### tddy-session-sync
 - [x] **Integration**: `refuses_a_destination_it_does_not_own` (AC23)
@@ -341,7 +344,7 @@ as `remote_git_livekit_acceptance.rs` does.
 - [x] **Integration**: `reconciles_when_a_patch_does_not_apply` (AC28)
 - [x] **Integration**: `names_the_expected_and_actual_values_of_every_divergence` (AC29)
 - [x] **Integration**: `names_the_environment_variable_of_a_missing_credential` (AC21)
-- [ ] **Integration**: `never_prints_the_value_of_a_token_it_found_in_the_environment` (AC20)
+- [x] **Integration**: `never_prints_the_value_of_a_token_it_found_in_the_environment` (AC20) — `tddy-session-sync/tests/cli_acceptance.rs`
 - [ ] **Production**: `mirrors_a_file_the_agent_wrote_without_a_commit` (AC31)
 - [ ] **Production**: `mirrors_an_edit_to_an_existing_file` (AC32)
 - [ ] **Production**: `removes_a_file_the_agent_deleted` (AC33)
