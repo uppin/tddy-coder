@@ -26,7 +26,8 @@ plumbing, the room handle and the roster in one place.
 ## `session_agent_roster::SessionAgentRosterStore`
 
 ```rust
-pub fn new(clones: Arc<SessionAgentCloneStore>) -> Self
+pub fn new(clones: Arc<SessionAgentCloneStore>, activity: Arc<SessionAgentActivityStore>) -> Self
+pub fn activity(&self) -> &Arc<SessionAgentActivityStore>
 pub fn snapshot(&self, session_id, session_dir)      -> Result<SessionAgentRoster, Status>
 pub fn attach(&self, session_id, session_dir, record) -> Result<SessionAgentRoster, Status>
 pub fn detach(&self, session_id, session_dir, agent_id) -> Result<SessionAgentRoster, Status>
@@ -36,10 +37,14 @@ pub fn subscribe(&self, session_id, session_dir)     -> Result<(snapshot, Receiv
 pub fn republish(&self, session_id, session_dir)     -> Result<(), Status>
 ```
 
-It holds the clone store because a roster **entry** is a projection of two things: the persisted
-record, and the live clone state that only the clone store knows. `roster_entry` reads both, which
-is why an entry's `clone_state` is current without the roster having to be rewritten every time a
-clone advances.
+It holds **two** live stores because a roster entry is a projection of three things: the persisted
+record, the clone state only the clone store knows, and what the agent is doing, which only the
+activity store knows. `roster_entry` reads all three, which is why an entry's `clone_state` and
+`status` are current without the roster having to be rewritten every time either advances.
+
+The two live stores are passed together as `SnapshotSources { clones, activity }`, so neither can be
+consulted without the other — an entry carrying a fresh `clone_state` and a stale `status` is two
+different accounts of one agent.
 
 Four properties are load-bearing and each is pinned by a test in
 `tests/session_agent_roster_acceptance.rs`:
@@ -56,10 +61,88 @@ Four properties are load-bearing and each is pinned by a test in
   first use, so a restarted daemon does not restart at `rev: 1` — a subscriber holding `rev: 3`
   would read that as stale and never refresh.
 
+A fifth is pinned in `session_agent_status.rs` and in `roster_entry`'s own tests:
+
+- **A status is never persisted, and `UNSPECIFIED` is not `IDLE`.** Written to `.session.yaml` and
+  read back, a status would claim a turn is in flight in a process that never started one. So the
+  activity store is memory-only and a restarted daemon reports `UNSPECIFIED` — *"this daemon has
+  nothing to say"* — until a signal reaches it.
+
 `commit()` **persists then adopts**: a failed write leaves the in-memory store agreeing with the
 file it will be rebuilt from, so a restart never silently undoes an attach the operator was told
 succeeded. Persistence goes through `tddy_core::write_session_metadata` →
 `atomic_file::write_atomic_labelled`.
+
+## `session_agent_status`
+
+The status half of an entry: what an agent is doing, and the mapping that decides it.
+
+```rust
+pub enum ManagedAgentState { NoConversation, Open, Prompting, ExecutingTool, WaitingForInput }
+pub fn agent_status(clone_state: AgentCloneState, activity: Option<&AgentActivity>) -> SessionAgentStatus
+pub fn reported_state(status: SessionAgentStatus) -> Option<ManagedAgentState>
+pub fn tool_call_summary(tool_name: &str, args: &serde_json::Value) -> String
+
+pub struct SessionAgentActivityStore { /* keyed by (session_id, agent_id) */ }
+impl SessionAgentActivityStore {
+    pub fn record(&self, session_id, agent_id, state, summary)
+    pub fn record_turn_end(&self, session_id, agent_id, summary) -> bool
+    pub fn get(&self, session_id, agent_id) -> Option<AgentActivity>
+    pub fn forget(&self, session_id, agent_id)
+    pub fn forget_session(&self, session_id)
+}
+```
+
+Four decisions carry the module:
+
+- **`agent_status` reads the clone first, and it wins outright.** An agent whose checkout is still
+  provisioning refuses prompts, so `IDLE` would offer an operator an agent that cannot answer.
+  `AgentCloneState::Unspecified` maps to `CONNECTING` for the same reason `roster_entry` refuses to
+  call it `READY`.
+- **Keyed by the pair, never `agent_id` alone.** One def attached to two sessions is one `agent_id`;
+  keying on it would show a turn on one session as a turn on the other.
+- **`record_turn_end` is guarded.** A turn's end is observed from a spawned task that outlives the
+  handler, and by then a cancel or a detach may already have moved the agent on. An unconditional
+  write would resurrect a conversation that is gone. It applies only from `Prompting`/`ExecutingTool`
+  and returns whether anything changed, so the caller can skip republishing a roster that did not
+  move.
+- **`reported_state` clamps what a reporter may claim.** `ReportAgentConversationState` accepts only
+  the four conversation states: `CONNECTING`/`ERROR` are the checkout's, which this daemon measures
+  itself, and a reporter allowed to send them could hide a broken clone behind a cheerful
+  conversation.
+
+`tool_call_summary` carries a tool's name plus only the argument naming what it acted on, and
+`record` truncates every summary to 120 **characters** (a cut mid-codepoint panics) collapsed to one
+line. A `Write`'s `content` is the whole file, and a snapshot past `MAX_CHUNK_FRAME_BYTES` is
+chunk-framed, where one lost frame wedges the call with no error.
+
+### Who writes to it
+
+`connection_service.rs` — `note_agent_activity` records and republishes together, because a status
+change does not move `rev` and a subscriber that heard only about `rev` changes would show the state
+an agent was in when it was attached. It republishes through `republish` alone, **not**
+`publish_roster_change`: both consumers that act on a status follow `StreamSessionAgents`, and a
+status ticks on every tool call, so putting a whole roster on the session room for each one would
+spend the room's bandwidth on a badge.
+
+A conversation opened for a **peer's** session records nothing — the roster naming that agent is on
+the daemon facilitating it.
+
+| Site | State |
+|---|---|
+| `OpenAgentConversation` | `Open` |
+| `PromptAgentConversation`, before either branch | `Prompting` |
+| the managed-codebase dispatch | `ExecutingTool`, then back to `Prompting` |
+| a local turn resolving | `Open` (guarded) |
+| a forwarded turn's relayed stream ending | `Open` (guarded) |
+| `CancelAgentConversation` | `NoConversation` |
+| `DetachSessionAgent` | forgotten entirely |
+| `ReportAgentConversationState` | whatever the jail reported, clamped |
+
+`relay_watching_for_the_turn_to_end` exists for one reason: a remote agent's turn loop runs on its
+owning daemon, but the roster reporting its status is held here, so a forwarded turn would otherwise
+raise the badge to `RUNNING` and never lower it. It passes the peer's frames and errors through
+verbatim and in order — the caller must not be able to tell a relayed stream from a direct one.
 
 ### Known concurrency limitation
 
@@ -181,6 +264,8 @@ reconnects with backoff on drop, and a roster that never receives a frame (`Rost
 | `tests/session_agent_replacement_acceptance.rs` | what the roster withdraws, through `roster_replacement_pairs` — the function the spawn paths actually call |
 | `tests/session_agent_conversation_acceptance.rs` | cancelling a turn that is still in flight; conversation frame bounding |
 | `tests/session_agent_remote_acceptance.rs` | two real daemons in a LiveKit room: resolution, room membership, clone sharing, the read/write split driven through a real turn loop, teardown |
+| `src/session_agent_status.rs` (unit) | the status mapping, the reporter clamp, the guarded turn end, per-pair keying, summary truncation |
+| `src/session_agent_roster.rs` (unit) | `roster_entry` populating `status`/`last_activity`, and the clone outranking the conversation |
 
 The remote suite needs Docker. Run it with `--test-threads=1`, and prefer a shared testkit
 (`./run-livekit-testkit-server`, then `LIVEKIT_TESTKIT_WS_URL=…`) — per-test containers collide on

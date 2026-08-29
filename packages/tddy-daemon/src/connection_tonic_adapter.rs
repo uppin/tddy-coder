@@ -362,6 +362,24 @@ where
         Ok(tonic::Response::new(resp.into_inner()))
     }
 
+    async fn report_agent_conversation_state(
+        &self,
+        request: tonic::Request<
+            tddy_service::proto::connection::ReportAgentConversationStateRequest,
+        >,
+    ) -> Result<
+        tonic::Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
+        tonic::Status,
+    > {
+        let resp = RpcConnectionService::report_agent_conversation_state(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
     async fn list_sessions(
         &self,
         request: tonic::Request<ListSessionsRequest>,

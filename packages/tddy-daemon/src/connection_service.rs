@@ -1412,6 +1412,14 @@ enum PromptRouting {
 }
 
 impl AgentConversation {
+    /// The roster agent this conversation is with, whichever daemon runs its loop.
+    fn agent_id(&self) -> &str {
+        match self {
+            AgentConversation::Local { agent_id, .. }
+            | AgentConversation::Remote { agent_id, .. } => agent_id,
+        }
+    }
+
     /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its loop.
     fn is_with(&self, session_id: &str, agent_id: &str) -> bool {
         let (open_session, open_agent) = match self {
@@ -1520,9 +1528,10 @@ impl ConnectionServiceImpl {
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
             model_registry: None,
             session_agent_rosters: Arc::new(
-                crate::session_agent_roster::SessionAgentRosterStore::new(Arc::clone(
-                    &session_agent_clones,
-                )),
+                crate::session_agent_roster::SessionAgentRosterStore::new(
+                    Arc::clone(&session_agent_clones),
+                    Arc::new(crate::session_agent_status::SessionAgentActivityStore::new()),
+                ),
             ),
             session_agent_clones,
             hosted_agent_clones: Arc::new(crate::session_agent_clone::HostedAgentClones::new()),
@@ -4796,6 +4805,7 @@ impl ConnectionServiceImpl {
     async fn open_local_agent_session(
         &self,
         session_id: &str,
+        session_dir: &Path,
         record: &tddy_core::SessionAgentRecord,
         session_token: &str,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
@@ -4819,7 +4829,12 @@ impl ConnectionServiceImpl {
                 def.model.clone(),
                 def.api_key.clone(),
                 def.max_turns,
-                self.local_agent_codebase_access(session_id, session_token),
+                self.local_agent_codebase_access(
+                    session_id,
+                    session_dir,
+                    &record.agent_id,
+                    session_token,
+                ),
                 def.system_prompt.clone(),
                 def.tools.clone(),
             ),
@@ -4897,24 +4912,39 @@ impl ConnectionServiceImpl {
     fn local_agent_codebase_access(
         &self,
         session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
         session_token: &str,
     ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let session_token = session_token.to_string();
         let session_id = session_id.to_string();
+        let session_dir = session_dir.to_path_buf();
+        let agent_id = agent_id.to_string();
         tddy_discovery::subagent::CodebaseAccess::managed(move |tool_name, args| {
             let service = service.clone();
             let session_token = session_token.clone();
             let session_id = session_id.clone();
+            let session_dir = session_dir.clone();
+            let agent_id = agent_id.clone();
             Box::pin(async move {
+                // This dispatch is the only place this daemon sees the agent's own loop enter a
+                // tool call, so it is the only place EXECUTING_TOOL can be told from RUNNING.
+                service.note_agent_activity(
+                    &session_id,
+                    &session_dir,
+                    &agent_id,
+                    crate::session_agent_status::ManagedAgentState::ExecutingTool,
+                    crate::session_agent_status::tool_call_summary(&tool_name, &args),
+                );
                 let request = ExecuteToolRequest {
                     session_token,
-                    session_id,
+                    session_id: session_id.clone(),
                     daemon_instance_id: String::new(),
                     tool_name,
                     args_json: args.to_string(),
                 };
-                match service.resolve_exec_tool_worktree(&request) {
+                let answer = match service.resolve_exec_tool_worktree(&request) {
                     Ok((sessions_base, worktree_root)) => dispatch_envelope(
                         service
                             .run_exec_tool_locally(&request, &sessions_base, &worktree_root)
@@ -4924,9 +4954,144 @@ impl ConnectionServiceImpl {
                         serde_json::json!({ "is_error": true, "error": status.message() })
                             .to_string()
                     }
-                }
+                };
+                // Back to RUNNING, not IDLE: the tool returned, but the turn that called it has
+                // not, and an idle badge on a turn still in flight is the one that misleads.
+                service.note_agent_activity(
+                    &session_id,
+                    &session_dir,
+                    &agent_id,
+                    crate::session_agent_status::ManagedAgentState::Prompting,
+                    format!("{} finished", request.tool_name),
+                );
+                answer
             })
         })
+    }
+
+    /// Record what a roster agent is doing, and push the roster that says so.
+    ///
+    /// Recorded and republished together, never separately. A status change does not move `rev` —
+    /// the roster itself did not change, only what one of its agents is doing — so a subscriber that
+    /// heard about `rev` changes alone would show the state an agent was in when it was attached
+    /// until the next attach, which may never come. This is the same reason
+    /// [`crate::session_agent_roster::SessionAgentRosterStore::republish`] exists for clone reports.
+    ///
+    /// A conversation opened for a *peer's* session records nothing: the roster naming that agent is
+    /// on the daemon facilitating it, and a status recorded against a session this daemon only holds
+    /// a clone for is one nothing will ever read.
+    fn note_agent_activity(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+        state: crate::session_agent_status::ManagedAgentState,
+        summary: impl AsRef<str>,
+    ) {
+        if self.hosted_clone_for(session_id).is_some() {
+            return;
+        }
+        self.session_agent_rosters
+            .activity()
+            .record(session_id, agent_id, state, summary);
+        self.republish_roster_quietly(session_id, session_dir, agent_id);
+    }
+
+    /// Push the roster after a status change, and never fail the call that caused it.
+    ///
+    /// Non-fatal on purpose: the status is a display signal, and failing the turn it decorates would
+    /// trade a stale badge for a broken conversation.
+    ///
+    /// `republish` alone, deliberately — not [`Self::publish_roster_change`], which also broadcasts
+    /// the snapshot into the session room. Both consumers that act on a status follow
+    /// `StreamSessionAgents`, which `republish` feeds: the roster pane and the in-jail registry. The
+    /// room broadcast exists for participants rebuilding a registry from whole snapshots, and a
+    /// status ticks on **every tool call** — putting a whole roster on the room for each one would
+    /// spend the room's bandwidth on a badge, and `rev` has not moved, so nothing those
+    /// participants act on has changed.
+    fn republish_roster_quietly(&self, session_id: &str, session_dir: &Path, agent_id: &str) {
+        if let Err(e) = self
+            .session_agent_rosters
+            .republish(session_id, session_dir)
+        {
+            log::debug!(
+                "could not republish the roster of session {session_id} after '{agent_id}' changed \
+                 status ({})",
+                e.message()
+            );
+        }
+    }
+
+    /// A callback that puts one agent back to IDLE, for the two places a turn can end.
+    ///
+    /// A callback rather than a second `note_agent_activity` call at each site, because both sites
+    /// end a turn from inside a spawned task that outlives the handler: whatever reports the end has
+    /// to own everything it names.
+    fn turn_end_reporter(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+    ) -> impl Fn(String) + Send + 'static {
+        let service = self.clone();
+        let session_id = session_id.to_string();
+        let session_dir = session_dir.to_path_buf();
+        let agent_id = agent_id.to_string();
+        move |summary| {
+            if service.hosted_clone_for(&session_id).is_some() {
+                return;
+            }
+            // Guarded rather than written outright: by the time a turn is observed to have ended, a
+            // cancel or a detach may already have moved this agent on, and an unconditional write
+            // would resurrect a conversation that is gone.
+            if service.session_agent_rosters.activity().record_turn_end(
+                &session_id,
+                &agent_id,
+                summary,
+            ) {
+                service.republish_roster_quietly(&session_id, &session_dir, &agent_id);
+            }
+        }
+    }
+
+    /// Pass a peer's answer through unchanged, noting when it ends.
+    ///
+    /// The turn loop of a remote agent runs on its owning daemon, but the roster that reports its
+    /// status is held *here* — so without this relay a forwarded turn would raise the badge to
+    /// RUNNING and never lower it. Frames and errors are forwarded verbatim and in order: the
+    /// caller must not be able to tell a relayed stream from a direct one, which is the same
+    /// property [`AgentConversation`]'s two variants exist to hold.
+    fn relay_watching_for_the_turn_to_end(
+        &self,
+        mut peer: tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>> {
+        let turn_ended = self.turn_end_reporter(session_id, session_dir, agent_id);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(frame) = peer.recv().await {
+                if tx.send(frame).is_err() {
+                    // The caller hung up. The turn is no longer being read, so it is over as far as
+                    // anything here can tell — and leaving the badge up would strand it.
+                    break;
+                }
+            }
+            turn_ended("answered".to_string());
+        });
+        rx
+    }
+
+    /// Forget an agent's activity — what a detach does.
+    ///
+    /// Forgotten rather than set to "no conversation": the agent is off the roster, and a record
+    /// left behind would have a re-attach show the previous attachment's last activity as this
+    /// one's.
+    fn forget_agent_activity(&self, session_id: &str, agent_id: &str) {
+        self.session_agent_rosters
+            .activity()
+            .forget(session_id, agent_id);
     }
 
     /// Close every open conversation with `agent_id`.
@@ -9305,7 +9470,8 @@ async fn merge_listed_projects_with_peers(
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
 /// to this daemon's `ConnectionServiceImpl`. The runner's `ToolExecService` forwards
 /// `StreamSessionAgents` / `OpenAgentConversation` / `PromptAgentConversation` /
-/// `CancelAgentConversation`; this handler decodes each, calls the matching typed method on the
+/// `CancelAgentConversation` / `ReportAgentConversationState`; this handler decodes each, calls the
+/// matching typed method on the
 /// `Arc<ConnectionServiceImpl>` it holds, and returns the encoded response — unary for the two
 /// unary RPCs, a server stream of encoded frames for the two streaming ones. `tonic::Status`
 /// errors are carried back to the in-jail caller as a single terminal `RpcStreamFrame` with
@@ -9319,7 +9485,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
     async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult {
         use prost::Message;
         use tddy_rpc::Request;
-        // Only the four RPCs the runner forwards ride this bridge; anything else is a wiring bug
+        // Only the RPCs the runner forwards ride this bridge; anything else is a wiring bug
         // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
         // rather than reaching arbitrary `ConnectionService` surface from inside a jail.
         match (service, method) {
@@ -9409,6 +9575,26 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     }
                 };
                 match self.conn.cancel_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "ReportAgentConversationState") => {
+                let req = match tddy_service::proto::connection::ReportAgentConversationStateRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ReportAgentConversationStateRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                match self
+                    .conn
+                    .report_agent_conversation_state(Request::new(req))
+                    .await
+                {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
@@ -9702,6 +9888,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .detach(&req.session_id, &session_dir, &req.agent_id)?;
         self.cancel_conversations_with(&req.session_token, &req.session_id, &req.agent_id)
             .await;
+        self.forget_agent_activity(&req.session_id, &req.agent_id);
 
         // The clone survives while another agent on that host still reads it — two agents on one
         // host share one checkout, so the last one out is what removes it.
@@ -9915,6 +10102,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         session: Arc::new(tokio::sync::Mutex::new(
                             self.open_local_agent_session(
                                 &req.session_id,
+                                &session_dir,
                                 &record,
                                 &req.session_token,
                             )
@@ -9941,6 +10129,16 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .lock()
             .await
             .insert(conversation_id.clone(), conversation);
+        // Open, not running: the conversation exists and has been asked nothing. This is also the
+        // first moment an entry stops reporting UNSPECIFIED, which is what a reader needs to tell
+        // "attached and reachable" from "attached, and this daemon has never heard from it".
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &req.agent_id,
+            crate::session_agent_status::ManagedAgentState::Open,
+            "conversation opened",
+        );
         Ok(Response::new(OpenAgentConversationResponse {
             conversation_id,
         }))
@@ -9970,11 +10168,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscResultStream { rx }));
         }
 
-        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
 
         // Everything the turn needs is taken out of the map here, under one lock, and the guard is
-        // dropped before anything is awaited on it.
-        let routing = {
+        // dropped before anything is awaited on it. The agent id comes out with it: the request
+        // names a conversation, not an agent, and the status is recorded per agent.
+        let (routing, agent_id) = {
             let open = self.agent_conversations.lock().await;
             match open.get(&req.conversation_id) {
                 None => {
@@ -9984,16 +10183,37 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     )))
                 }
                 Some(AgentConversation::Local {
-                    session, closed, ..
-                }) => PromptRouting::Local {
-                    session: Arc::clone(session),
-                    closed: Arc::clone(closed),
-                },
+                    session,
+                    closed,
+                    agent_id,
+                    ..
+                }) => (
+                    PromptRouting::Local {
+                        session: Arc::clone(session),
+                        closed: Arc::clone(closed),
+                    },
+                    agent_id.clone(),
+                ),
                 Some(AgentConversation::Remote {
-                    daemon_instance_id, ..
-                }) => PromptRouting::Remote(daemon_instance_id.clone()),
+                    daemon_instance_id,
+                    agent_id,
+                    ..
+                }) => (
+                    PromptRouting::Remote(daemon_instance_id.clone()),
+                    agent_id.clone(),
+                ),
             }
         };
+
+        // Stamped before either branch runs, so the badge changes when the turn starts rather than
+        // when it is first observed to have started.
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &agent_id,
+            crate::session_agent_status::ManagedAgentState::Prompting,
+            format!("prompted: {}", req.prompt),
+        );
 
         let (session, closed) = match routing {
             PromptRouting::Local { session, closed } => (session, closed),
@@ -10022,7 +10242,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     },
                 )
                 .await?;
-                return Ok(Response::new(MpscResultStream { rx }));
+                // Relayed rather than handed straight back, for one reason: the roster this daemon
+                // holds is what reports the status, and the end of the peer's stream is the only
+                // moment this side learns the turn is over. Passed through unchanged — the caller
+                // sees the peer's frames in the peer's order, errors included.
+                return Ok(Response::new(MpscResultStream {
+                    rx: self.relay_watching_for_the_turn_to_end(
+                        rx,
+                        &req.session_id,
+                        &session_dir,
+                        &agent_id,
+                    ),
+                }));
             }
         };
 
@@ -10033,6 +10264,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let conversation_id = req.conversation_id.clone();
         let prompt = req.prompt.clone();
+        let turn_ended = self.turn_end_reporter(&req.session_id, &session_dir, &agent_id);
         tokio::spawn(async move {
             let outcome = tokio::select! {
                 // Biased so a conversation already closed is reported as closed rather than racing
@@ -10056,15 +10288,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         .map(|block| block.text.as_str())
                         .collect::<Vec<_>>()
                         .join("");
+                    // Reported after the frames are on the wire, not before: a badge that drops to
+                    // idle while the answer is still arriving is one a reader acts on too early.
+                    let answered = format!("answered ({} chars)", content.chars().count());
                     for frame in
                         agent_conversation_frames(&content, agent_stop_reason(outcome.stop_reason))
                     {
                         if tx.send(Ok(frame)).is_err() {
+                            // The caller hung up mid-answer. The turn is over either way, and a
+                            // badge left up would strand it.
+                            turn_ended(answered);
                             return;
                         }
                     }
+                    turn_ended(answered);
                 }
                 Err(e) => {
+                    // Idle, not ERROR: the agent is still attached and still promptable, and it is
+                    // the *clone* that ERROR is reserved for. The summary is what says what happened.
+                    turn_ended(format!("turn failed: {e}"));
                     let _ = tx.send(Err(Status::internal(format!(
                         "agent conversation '{conversation_id}' failed: {e}"
                     ))));
@@ -10092,12 +10334,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(cancelled));
         }
 
-        self.roster_session_dir(&req.session_token, &req.session_id)?;
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let removed = self
             .agent_conversations
             .lock()
             .await
             .remove(&req.conversation_id);
+        if let Some(conversation) = removed.as_ref() {
+            // Back to "asked nothing", whichever daemon ran the loop: the conversation is gone, so
+            // an agent left reporting a turn in flight would be one nothing can ever finish.
+            self.note_agent_activity(
+                &req.session_id,
+                &session_dir,
+                conversation.agent_id(),
+                crate::session_agent_status::ManagedAgentState::NoConversation,
+                "conversation cancelled",
+            );
+        }
         match removed {
             None => Err(Status::not_found(format!(
                 "conversation '{}' is not open on session '{}'",
@@ -10193,6 +10446,80 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .await;
         Ok(Response::new(
             tddy_service::proto::connection::ReportAgentCloneStateResponse {},
+        ))
+    }
+
+    /// An agent whose turn loop runs in the jail, telling this daemon what that loop is doing.
+    ///
+    /// The daemon infers a status from the conversation RPCs for every agent whose loop it runs. An
+    /// agent the in-jail `tddy-tools` was *seeded* with runs its loop there instead, and this daemon
+    /// is never asked to open anything — so without this report the row would sit at UNSPECIFIED for
+    /// an agent that is demonstrably working.
+    ///
+    /// Three things are checked, and each is a way the roster could otherwise be made to lie:
+    ///
+    /// - **Routed first**, as the conversation RPCs are. The roster is on the facilitating daemon;
+    ///   a report served anywhere else records a status nothing publishes.
+    /// - **The agent must be attached.** An id the roster does not hold is `NOT_FOUND`, so an
+    ///   in-jail registry that has gone stale cannot put a row on a roster an operator emptied.
+    /// - **Only a conversation state is accepted.** `CONNECTING` and `ERROR` describe the checkout,
+    ///   which this daemon measures itself and which outranks the conversation at snapshot time; a
+    ///   reporter allowed to send them could hide a broken clone behind a cheerful conversation.
+    ///
+    /// Authenticated as `ReportAgentCloneState` is, and for the same reason: the (session, agent)
+    /// pair is published in the `session.agents` broadcast, so on the pair alone any participant
+    /// that saw a frame could park an agent at RUNNING for ever.
+    async fn report_agent_conversation_state(
+        &self,
+        request: Request<tddy_service::proto::connection::ReportAgentConversationStateRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
+        Status,
+    > {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(acknowledged) = self
+            .rpc_served_by_peer(
+                "ReportAgentConversationState",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(acknowledged));
+        }
+
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        if self
+            .session_agent_rosters
+            .entry(&req.session_id, &session_dir, &req.agent_id)?
+            .is_none()
+        {
+            return Err(Status::not_found(format!(
+                "agent '{}' is not attached to session '{}', so there is no row to report on",
+                req.agent_id, req.session_id
+            )));
+        }
+
+        let status = tddy_service::proto::connection::SessionAgentStatus::try_from(req.status)
+            .unwrap_or(tddy_service::proto::connection::SessionAgentStatus::Unspecified);
+        let state = crate::session_agent_status::reported_state(status).ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "{status:?} is not a conversation state: CONNECTING and ERROR describe the \
+                 checkout, which this daemon measures itself, and UNSPECIFIED claims nothing"
+            ))
+        })?;
+
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &req.agent_id,
+            state,
+            &req.summary,
+        );
+        Ok(Response::new(
+            tddy_service::proto::connection::ReportAgentConversationStateResponse {},
         ))
     }
 

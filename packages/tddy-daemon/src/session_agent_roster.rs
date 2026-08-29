@@ -27,6 +27,7 @@ use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry, Sessio
 use tokio::sync::broadcast;
 
 use crate::session_agent_clone::SessionAgentCloneStore;
+use crate::session_agent_status::{agent_status, AgentActivity, SessionAgentActivityStore};
 
 /// How many published snapshots a subscriber may fall behind before the oldest are dropped.
 ///
@@ -48,6 +49,21 @@ pub struct SessionAgentRosterStore {
     /// prompt served from a checkout nothing has measured since the restart. So the record on disk
     /// names the clone, and its liveness is read from here at every snapshot.
     clones: Arc<SessionAgentCloneStore>,
+    /// What each of those agents was last observed doing.
+    ///
+    /// Read at every snapshot for the same reason `clones` is, and *not* persisted for a stronger
+    /// one: a status restored from disk would claim a turn is in flight in a process that never
+    /// started one, and the main agent would wait for an answer nothing is producing.
+    activity: Arc<SessionAgentActivityStore>,
+}
+
+/// The two live stores a snapshot reads an entry's state from, taken together so neither can be
+/// consulted without the other — an entry carrying a fresh `clone_state` and a stale `status` is
+/// two different accounts of one agent.
+#[derive(Clone, Copy)]
+pub struct SnapshotSources<'a> {
+    pub clones: &'a SessionAgentCloneStore,
+    pub activity: &'a SessionAgentActivityStore,
 }
 
 /// One session's roster, its revision, and the channel every subscriber reads it from.
@@ -61,14 +77,14 @@ struct SessionRoster {
 
 impl SessionRoster {
     /// This roster as the snapshot every read returns.
-    fn snapshot(&self, session_id: &str, clones: &SessionAgentCloneStore) -> SessionAgentRoster {
+    fn snapshot(&self, session_id: &str, sources: SnapshotSources<'_>) -> SessionAgentRoster {
         SessionAgentRoster {
             session_id: session_id.to_string(),
             rev: self.rev,
             agents: self
                 .agents
                 .iter()
-                .map(|record| roster_entry(record, session_id, clones))
+                .map(|record| roster_entry(record, session_id, sources))
                 .collect(),
         }
     }
@@ -76,11 +92,25 @@ impl SessionRoster {
 
 impl SessionAgentRosterStore {
     #[must_use]
-    pub fn new(clones: Arc<SessionAgentCloneStore>) -> Self {
+    pub fn new(
+        clones: Arc<SessionAgentCloneStore>,
+        activity: Arc<SessionAgentActivityStore>,
+    ) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             clones,
+            activity,
         }
+    }
+
+    /// The activity store every snapshot reads, for the handlers that write to it.
+    ///
+    /// Handed out rather than mirrored by the caller so a recorded turn and the snapshot that
+    /// reports it are the same map — a second store would publish a roster that disagreed with the
+    /// conversation the daemon is actually running.
+    #[must_use]
+    pub fn activity(&self) -> &Arc<SessionAgentActivityStore> {
+        &self.activity
     }
 
     /// Push the current snapshot to every subscriber without changing it.
@@ -91,8 +121,8 @@ impl SessionAgentRosterStore {
     /// come (PRD § What attach does, step 2: "the entry is published with `clone_ready: false` and
     /// republished at `clone_ready: true`").
     pub fn republish(&self, session_id: &str, session_dir: &Path) -> Result<(), Status> {
-        self.with_session(session_id, session_dir, |state, clones| {
-            let _ = state.publisher.send(state.snapshot(session_id, clones));
+        self.with_session(session_id, session_dir, |state, sources| {
+            let _ = state.publisher.send(state.snapshot(session_id, sources));
             Ok(())
         })
     }
@@ -104,8 +134,8 @@ impl SessionAgentRosterStore {
         session_id: &str,
         session_dir: &Path,
     ) -> Result<SessionAgentRoster, Status> {
-        self.with_session(session_id, session_dir, |state, clones| {
-            Ok(state.snapshot(session_id, clones))
+        self.with_session(session_id, session_dir, |state, sources| {
+            Ok(state.snapshot(session_id, sources))
         })
     }
 
@@ -119,13 +149,13 @@ impl SessionAgentRosterStore {
         session_dir: &Path,
         record: SessionAgentRecord,
     ) -> Result<SessionAgentRoster, Status> {
-        self.with_session(session_id, session_dir, |state, clones| {
+        self.with_session(session_id, session_dir, |state, sources| {
             if state.agents.iter().any(|a| a.agent_id == record.agent_id) {
-                return Ok(state.snapshot(session_id, clones));
+                return Ok(state.snapshot(session_id, sources));
             }
             let mut next = state.agents.clone();
             next.push(record);
-            state.commit(session_id, session_dir, next, clones)
+            state.commit(session_id, session_dir, next, sources)
         })
     }
 
@@ -138,7 +168,7 @@ impl SessionAgentRosterStore {
         session_dir: &Path,
         agent_id: &str,
     ) -> Result<SessionAgentRoster, Status> {
-        self.with_session(session_id, session_dir, |state, clones| {
+        self.with_session(session_id, session_dir, |state, sources| {
             if !state.agents.iter().any(|a| a.agent_id == agent_id) {
                 return Err(Status::not_found(format!(
                     "agent '{agent_id}' is not attached to session '{session_id}'"
@@ -150,7 +180,7 @@ impl SessionAgentRosterStore {
                 .filter(|a| a.agent_id != agent_id)
                 .cloned()
                 .collect();
-            state.commit(session_id, session_dir, next, clones)
+            state.commit(session_id, session_dir, next, sources)
         })
     }
 
@@ -204,9 +234,9 @@ impl SessionAgentRosterStore {
         session_id: &str,
         session_dir: &Path,
     ) -> Result<(SessionAgentRoster, broadcast::Receiver<SessionAgentRoster>), Status> {
-        self.with_session(session_id, session_dir, |state, clones| {
+        self.with_session(session_id, session_dir, |state, sources| {
             Ok((
-                state.snapshot(session_id, clones),
+                state.snapshot(session_id, sources),
                 state.publisher.subscribe(),
             ))
         })
@@ -217,7 +247,7 @@ impl SessionAgentRosterStore {
         &self,
         session_id: &str,
         session_dir: &Path,
-        f: impl FnOnce(&mut SessionRoster, &SessionAgentCloneStore) -> Result<T, Status>,
+        f: impl FnOnce(&mut SessionRoster, SnapshotSources<'_>) -> Result<T, Status>,
     ) -> Result<T, Status> {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         if !sessions.contains_key(session_id) {
@@ -229,7 +259,13 @@ impl SessionAgentRosterStore {
         let state = sessions
             .get_mut(session_id)
             .expect("the roster was just inserted under this id");
-        f(state, &self.clones)
+        f(
+            state,
+            SnapshotSources {
+                clones: &self.clones,
+                activity: &self.activity,
+            },
+        )
     }
 }
 
@@ -244,13 +280,13 @@ impl SessionRoster {
         session_id: &str,
         session_dir: &Path,
         next: Vec<SessionAgentRecord>,
-        clones: &SessionAgentCloneStore,
+        sources: SnapshotSources<'_>,
     ) -> Result<SessionAgentRoster, Status> {
         let next_rev = self.rev + 1;
         persist_roster(session_dir, &next, next_rev)?;
         self.agents = next;
         self.rev = next_rev;
-        let snapshot = self.snapshot(session_id, clones);
+        let snapshot = self.snapshot(session_id, sources);
         // A send with no subscribers is not a failure: a session whose `tddy-tools` has not opened
         // the stream yet is the ordinary state during start.
         let _ = self.publisher.send(snapshot.clone());
@@ -316,18 +352,26 @@ fn persist_roster(
 /// shape of a roster restored from `.session.yaml` after a restart, where the entry survived and the
 /// clone did not, and claiming a checkout is ready when nothing measured it is how a prompt gets
 /// served from an empty tree.
+///
+/// `status` and `last_activity` are read from the second live store on the same terms, and for the
+/// same reason: what an agent is doing is a fact about a running turn loop, so persisting it would
+/// have a restarted daemon claim a turn is in flight in a process that never started one. See
+/// [`crate::session_agent_status`] for the mapping.
 fn roster_entry(
     record: &SessionAgentRecord,
     session_id: &str,
-    clones: &SessionAgentCloneStore,
+    sources: SnapshotSources<'_>,
 ) -> SessionAgentEntry {
     let (clone_state, clone_error) = match record.codebase_session_id {
         None => (AgentCloneState::Local, String::new()),
-        Some(_) => match clones.get(session_id, &record.daemon_instance_id) {
+        Some(_) => match sources.clones.get(session_id, &record.daemon_instance_id) {
             Some(clone) => (clone.state, clone.error),
             None => (AgentCloneState::Unspecified, String::new()),
         },
     };
+    // Both live signals, read together: the checkout decides whether the agent can serve a prompt
+    // at all, and only once it can does what the conversation is doing mean anything.
+    let activity = sources.activity.get(session_id, &record.agent_id);
     SessionAgentEntry {
         agent_id: record.agent_id.clone(),
         name: record.name.clone(),
@@ -339,12 +383,19 @@ fn roster_entry(
         codebase_session_id: record.codebase_session_id.clone().unwrap_or_default(),
         clone_state: clone_state as i32,
         clone_error,
+        status: agent_status(clone_state, activity.as_ref()) as i32,
+        // The last activity survives a state change rather than being cleared with it: what an idle
+        // agent was last seen doing is the only useful thing to show on its row.
+        last_activity: activity.as_ref().and_then(AgentActivity::to_proto),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session_agent_status::ManagedAgentState;
+    use tddy_service::proto::connection::SessionAgentStatus;
+
     use tddy_core::session_metadata::{
         write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
     };
@@ -381,6 +432,22 @@ mod tests {
         }
     }
 
+    /// The live stores a snapshot reads, with nothing recorded in either — what a daemon that has
+    /// just restarted has.
+    fn nothing_observed_yet() -> (SessionAgentCloneStore, SessionAgentActivityStore) {
+        (
+            SessionAgentCloneStore::new(),
+            SessionAgentActivityStore::new(),
+        )
+    }
+
+    fn sources<'a>(
+        clones: &'a SessionAgentCloneStore,
+        activity: &'a SessionAgentActivityStore,
+    ) -> SnapshotSources<'a> {
+        SnapshotSources { clones, activity }
+    }
+
     /// A remote agent's record: it names the checkout serving it, which is what makes its
     /// `clone_state` a question about a peer rather than about this file.
     fn a_remote_record(agent_id: &str, codebase_session_id: &str) -> SessionAgentRecord {
@@ -392,9 +459,13 @@ mod tests {
 
     #[test]
     fn a_local_entry_reports_itself_as_needing_no_clone() {
-        let clones = SessionAgentCloneStore::new();
+        let (clones, activity) = nothing_observed_yet();
 
-        let entry = roster_entry(&a_record("explorer@ws-01"), "session-1", &clones);
+        let entry = roster_entry(
+            &a_record("explorer@ws-01"),
+            "session-1",
+            sources(&clones, &activity),
+        );
 
         assert_eq!(entry.clone_state, AgentCloneState::Local as i32);
         assert_eq!(entry.codebase_session_id, "");
@@ -404,13 +475,13 @@ mod tests {
     fn a_remote_entry_whose_clone_this_process_never_built_is_not_reported_ready() {
         // Given a roster restored from `.session.yaml` — the entry survived a restart, the clone
         // did not
-        let clones = SessionAgentCloneStore::new();
+        let (clones, activity) = nothing_observed_yet();
 
         // When
         let entry = roster_entry(
             &a_remote_record("explorer@ws-01", "clone-1"),
             "session-1",
-            &clones,
+            sources(&clones, &activity),
         );
 
         // Then — claiming READY for a checkout nothing has measured is how a prompt gets served
@@ -421,7 +492,7 @@ mod tests {
     #[test]
     fn a_remote_entry_reports_the_state_its_owning_daemon_last_gave() {
         // Given
-        let clones = SessionAgentCloneStore::new();
+        let (clones, activity) = nothing_observed_yet();
         clones.claim("session-1", "ws-01", || "clone-1".to_string());
         clones
             .record_report(&crate::session_agent_clone::AgentCloneReport {
@@ -439,24 +510,147 @@ mod tests {
         let entry = roster_entry(
             &a_remote_record("explorer@ws-01", "clone-1"),
             "session-1",
-            &clones,
+            sources(&clones, &activity),
         );
 
         // Then
         assert_eq!(entry.clone_state, AgentCloneState::Ready as i32);
     }
 
+    // ─── status and last activity ride the same snapshot ────────────────────────────────────────
+
+    #[test]
+    fn an_entry_nothing_has_been_observed_of_carries_no_status_and_no_activity() {
+        // Given the shape of a roster restored after a restart
+        let (clones, activity) = nothing_observed_yet();
+
+        // When
+        let entry = roster_entry(
+            &a_record("explorer@ws-01"),
+            "session-1",
+            sources(&clones, &activity),
+        );
+
+        // Then — UNSPECIFIED is "this daemon has nothing to say", not "idle"
+        assert_eq!(entry.status, SessionAgentStatus::Unspecified as i32);
+        assert_eq!(entry.last_activity, None);
+    }
+
+    #[test]
+    fn an_entry_carries_the_status_of_the_conversation_running_on_it() {
+        // Given a turn in flight with this agent
+        let (clones, activity) = nothing_observed_yet();
+        activity.record(
+            "session-1",
+            "explorer@ws-01",
+            ManagedAgentState::Prompting,
+            "prompted: summarise the diff",
+        );
+
+        // When
+        let entry = roster_entry(
+            &a_record("explorer@ws-01"),
+            "session-1",
+            sources(&clones, &activity),
+        );
+
+        // Then
+        assert_eq!(entry.status, SessionAgentStatus::Running as i32);
+        let last = entry.last_activity.expect("a turn was observed");
+        assert_eq!(last.summary, "prompted: summarise the diff");
+        assert!(last.at_unix_ms > 0, "a summary needs a time behind it");
+    }
+
+    #[test]
+    fn an_idle_entry_still_shows_what_it_was_last_seen_doing() {
+        // Given an agent that has answered everything asked
+        let (clones, activity) = nothing_observed_yet();
+        activity.record(
+            "session-1",
+            "explorer@ws-01",
+            ManagedAgentState::Open,
+            "answered: 3 callers in src/",
+        );
+
+        // When
+        let entry = roster_entry(
+            &a_record("explorer@ws-01"),
+            "session-1",
+            sources(&clones, &activity),
+        );
+
+        // Then — the last activity is the only useful thing on an idle row
+        assert_eq!(entry.status, SessionAgentStatus::Idle as i32);
+        assert_eq!(
+            entry.last_activity.map(|a| a.summary),
+            Some("answered: 3 callers in src/".to_string())
+        );
+    }
+
+    #[test]
+    fn a_remote_entry_whose_clone_is_still_building_is_connecting_even_with_an_open_conversation() {
+        // Given a clone mid-provision and a conversation that looks idle
+        let (clones, activity) = nothing_observed_yet();
+        clones.claim("session-1", "ws-01", || "clone-1".to_string());
+        activity.record(
+            "session-1",
+            "explorer@ws-01",
+            ManagedAgentState::Open,
+            "attached",
+        );
+
+        // When
+        let entry = roster_entry(
+            &a_remote_record("explorer@ws-01", "clone-1"),
+            "session-1",
+            sources(&clones, &activity),
+        );
+
+        // Then — an agent whose checkout is not ready refuses prompts, so IDLE would offer an agent
+        // that cannot answer
+        assert_eq!(entry.status, SessionAgentStatus::Connecting as i32);
+    }
+
+    #[test]
+    fn one_agents_turn_does_not_show_on_another_agents_row() {
+        // Given two agents on one session and a turn in flight with only one of them
+        let (clones, activity) = nothing_observed_yet();
+        activity.record(
+            "session-1",
+            "explorer@ws-01",
+            ManagedAgentState::Prompting,
+            "prompted",
+        );
+
+        // When
+        let other = roster_entry(
+            &a_record("reviewer@ws-01"),
+            "session-1",
+            sources(&clones, &activity),
+        );
+
+        // Then
+        assert_eq!(other.status, SessionAgentStatus::Unspecified as i32);
+        assert_eq!(other.last_activity, None);
+    }
+
     #[tokio::test]
     async fn a_second_store_over_the_same_directory_continues_the_revision() {
         // Given
         let (_parent, session_id, session_dir) = a_session_dir();
-        let store = SessionAgentRosterStore::new(Arc::new(SessionAgentCloneStore::new()));
+        let store = SessionAgentRosterStore::new(
+            Arc::new(SessionAgentCloneStore::new()),
+            Arc::new(SessionAgentActivityStore::new()),
+        );
         store
             .attach(&session_id, &session_dir, a_record("explorer@ws-01"))
             .expect("attach explorer");
 
         // When — a fresh store is what a restarted daemon has
-        let restarted = SessionAgentRosterStore::new(Arc::new(SessionAgentCloneStore::new()));
+        let restarted = SessionAgentRosterStore::new(
+            Arc::new(SessionAgentCloneStore::new()),
+            Arc::new(SessionAgentActivityStore::new()),
+        );
         let roster = restarted
             .snapshot(&session_id, &session_dir)
             .expect("snapshot after restart");
