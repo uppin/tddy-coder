@@ -210,6 +210,20 @@ impl SessionMetadataBuilder {
         self
     }
 
+    /// The kind of session this is — `claude-cli`, `cursor-cli`, `workspace`. Decides which code
+    /// paths treat it as an agent session at all.
+    pub fn with_session_type(mut self, session_type: impl Into<String>) -> Self {
+        self.session_type = Some(session_type.into());
+        self
+    }
+
+    /// The last hook word this session's worktree reported through `ReportSessionStatus`
+    /// (`Started`, `Running`, `ExecutingTool`, `WaitingForInput`, `Done`, `Ended`).
+    pub fn with_activity_status(mut self, status: impl Into<String>) -> Self {
+        self.activity_status = Some(status.into());
+        self
+    }
+
     /// The session's agent roster, at the revision that produced it. A roster and its revision are
     /// one fact — a roster at rev 0 is a roster nothing published — so they are set together.
     pub fn with_agents(
