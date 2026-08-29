@@ -2,6 +2,13 @@
 
 Release note history for the Coder product area.
 
+## 2026-08-29 — A submit that never routed still said ok
+
+- **`tddy-tools submit` honours `--goal`.** The routing goal was read only from the JSON body, defaulting to `unknown`, while `--goal` merely picked a validation schema — so `submit --goal write-stack-plan` relayed as `unknown` and delivered to nobody while printing `{"goal":"unknown","status":"ok"}`. `--goal` is now authoritative, with the payload's `goal` as fallback.
+- ⚠️ **Behaviour change: a submission naming no goal is refused** (exit 2) instead of acknowledged, as is a `--goal` that contradicts the payload's `goal` field. Goals with no registered schema (`assess`, `orchestrate`, `grill`, `interview`, `create-plan`, `prompting`, `reproduce`, `analyze-stack`, `evaluate`) are unaffected — `--goal` is their only routing signal and they still submit normally.
+- **`write-stack-plan` is a registered goal.** It had no schema, so a wrong-shaped plan passed validation that never ran; the payload is now checked and a bad one fails with the offending paths. `tddy-tools get-schema write-stack-plan` answers.
+- **The pr-stack planning prompt names a command that exists.** It told the agent to submit "using the `submit` tool with key `stack-plan`" — no such tool is advertised, since `advertised_tools` excludes the CLI subcommands. It now spells out the `--data-stdin` heredoc like every other recipe, points at `get-schema`, names `$TDDY_SESSION_DIR` where the artifacts land, and drops the `stack-plan-md` submission nothing consumed. See [pr-stacking.md](pr-stacking.md) and [workflow-json-schemas.md](workflow-json-schemas.md).
+
 ## 2026-08-29 — The semantic index is built where the worktree is
 
 - **A split-placement session may ask for a semantic index.** The field was refused outright on a split start; it is now carried to the **codebase host**, which builds the index against the worktree that actually exists there, for the session's `workspace` half. The agent host indexes nothing, having no checkout to index. See [semantic-index.md](semantic-index.md) and [remote-managed-worktree.md](../daemon/remote-managed-worktree.md).
