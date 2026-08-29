@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package tddy.workflow;
+
+// pr-stack write-stack-docs goal output. JSON Schema: write-stack-docs.schema.json.
+message WriteStackDocsOutput {
+  string goal = 1;
+  uint32 version = 2;
+  // One entry per planned node of the stack, and no other.
+  repeated NodeDocs docs = 3;
+}
+
+// The two documents one planned PR owns, persisted to artifacts/prs/<node_id>/.
+message NodeDocs {
+  // The planned node these documents belong to, as named in the stack plan.
+  string node_id = 1;
+  // PRD.md — markdown: what this PR delivers.
+  string prd = 2;
+  // changeset.md — markdown carrying the Responsibility, Boundaries, Dependencies and
+  // Draft PR contract sections as headings.
+  string changeset = 3;
+}

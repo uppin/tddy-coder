@@ -68,7 +68,7 @@ Verified in this branch, which has no diff against `master`.
 | `SESSION_ARTIFACT` already resolves **nested** relative paths | `host_documents.rs:211` joins the full path; `:40` permits separators; `:200-204` validates only the filename |
 | Attachment destinations are flat, one level | [session-attachments.md](../ft/coder/session-attachments.md); `artifact_paths.rs:31-47` |
 | Cross-host attachment materialization exists | `materialize_host_document_attachment`; `HostDocumentRef.daemon_instance_id`; 4 MiB cap at `host_documents.rs:30` |
-| Only `tdd` has generated goal schemas | `generated/` contains `proto_basenames.rs`, `schema-manifest.json`, `tdd/` |
+| ~~Only `tdd` has generated goal schemas~~ — **superseded by #411**, which registered `write-stack-plan` | `goals.json`, `proto/write_stack_plan.proto` |
 | `write-stack-plan` parses a raw YAML submit in its hook | `hooks.rs:319-322`, `serde_yaml::from_str::<StackPlanOutput>` |
 | `GithubPrApi::create_pr` has no `draft` parameter | `orchestrate_pr_stack/github.rs:97-103` |
 | Drafts are read correctly and recorded as `open` | `github.rs:68`; `pr_stack/mod.rs:1397-1399` |
@@ -172,6 +172,31 @@ mapping, and carries a doc comment saying so. The load-bearing half of the pair 
 Removing the catch-all to make it meaningful was considered and rejected: it is what lets a legacy
 persisted state (`assess`, `wait`, and the states of the removed auto-loop) resume into the operator
 loop instead of dead-ending.
+
+## Rebase onto #411 — a premise that died mid-flight
+
+This branch was written against a base where no pr-stack goal had a JSON schema and the planning
+prompt asked the agent for YAML. [#411](../changesets.md) (`d72bf006`, "stop submit acknowledging
+work it never routed") landed while the work was in progress and changed both:
+
+- **`--goal` is now authoritative** and a submission naming no goal is refused (exit 2). Goals with
+  no registered schema still submit normally, so `write-stack-docs` was never *refused* — but it was
+  the odd sibling, the only pr-stack submit whose payload nothing validated.
+- **`write-stack-plan` became a registered goal** with a proto and schema.
+- **The planning prompt was rewritten** to a `--data-stdin` heredoc emitting **JSON**, pointing at
+  `get-schema`, and the vestigial `stack-plan-md` key was dropped (an item this changeset had logged
+  to `docs/dev/TODO.md`, now removed as already fixed).
+- **The pr-stack system prompts moved** out of `pr_stack/hooks.rs` into `plan_pr_stack/prompt.rs`,
+  shared by both recipes behind a `recipe: &str` parameter.
+
+**The collision exposed a defect of this changeset's own.** `write_stack_docs_system_prompt` told the
+agent to submit YAML, while `tddy-tools submit` parses with `serde_json::from_str` and errors
+`"invalid JSON"` — at this branch's original base too, not only after #411. The nineteen M1
+acceptance tests never saw it: they call `after_task("write-stack-docs", ctx)` with a YAML string in
+`context["output"]`, so they exercise the hook and never the CLI. A green suite over a flow that
+could not work is a worse failure than a red one, and the fix is not only the prompt — it is a test
+that drives the real submit path, and pinning the prompt's own example against the registered schema
+so prompt and contract cannot drift apart again.
 
 ## Design decisions
 

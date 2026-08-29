@@ -7374,6 +7374,9 @@ mod stack_child_spawn_tests {
         fn child_spawn_handler(&self) -> StackChildSpawnHandler {
             StackChildSpawnHandler {
                 room_host: Arc::new(self.service.session_room_host()),
+                // Same clone production passes: the orchestrator is a session of this daemon, so
+                // resolving a child's base never leaves the host.
+                stack_parent_host: Arc::new(self.service.clone()),
                 service: self.service.clone(),
                 config: self.config.clone(),
                 tddy_data_dir: self.sessions_base().to_path_buf(),

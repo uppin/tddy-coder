@@ -21,8 +21,9 @@ use tddy_core::workflow::{clear_sinks, set_sinks};
 
 use crate::orchestrate_pr_stack::{STACK_STATUS_JSON_BASENAME, STACK_STATUS_MD_BASENAME};
 use crate::plan_pr_stack::{
-    analyze_stack_system_prompt, analyze_stack_user_prompt, write_stack_plan_system_prompt,
-    write_stack_plan_user_prompt, StackPlanOutput, PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME,
+    analyze_stack_system_prompt, analyze_stack_user_prompt, write_stack_docs_system_prompt,
+    write_stack_plan_system_prompt, write_stack_plan_user_prompt, StackPlanOutput,
+    PR_STACK_PLAN_MD_BASENAME, STACK_PLAN_BASENAME,
 };
 use crate::SessionArtifactManifest;
 
@@ -63,50 +64,6 @@ fn set_changeset_state(session_dir: &Path, state: WorkflowState) {
             log::warn!("[pr-stack hooks] could not persist state: {e}");
         }
     }
-}
-
-fn write_stack_docs_system_prompt() -> String {
-    "You are assisting with the **pr-stack** workflow **write-stack-docs** step.\n\n\
-     ## Task: Author the per-PR documents\n\n\
-     The plan is written. Every planned PR now needs two documents so the agent that builds it \
-     knows what it owns and, above all, where its PR stops and its neighbours' begin. Emit them \
-     with the `submit` tool using key `stack-docs`. The YAML must conform to this contract:\n\n\
-     ```yaml\n\
-     version: 1\n\
-     docs:\n\
-       - node_id: n1          # every planned node, and no other\n\
-         prd: |\n\
-           # n1 — Token store\n\
-           What this PR delivers: behaviour, API surface, acceptance criteria.\n\
-         changeset: |\n\
-           # Changeset: n1 — Token store\n\
-           ## Responsibility\n\
-           ## Boundaries\n\
-           ## Dependencies\n\
-           ## Draft PR contract\n\
-     ```\n\n\
-     This is a **read-only** step — do not write code or create files; the host persists the \
-     documents from your submit.\n\n\
-     **Validation rules** (the hook enforces these, and a rejected submit writes nothing):\n\
-     - Every node in the stack has exactly one entry, and no entry names a node outside the \
-     stack\n\
-     - `prd` and `changeset` are non-blank\n\
-     - Each `changeset` carries all four required sections as headings\n\n\
-     ## The four required sections\n\n\
-     - `## Responsibility` — what this PR owns.\n\
-     - `## Boundaries` — what it explicitly does **not** do, and which node does it instead.\n\
-     - `## Dependencies` — one entry per parent node, naming **what that PR delivers that this \
-     one consumes** (the trait, the endpoint, the table, the component it hands over). Two \
-     children building the same abstraction in parallel is the failure this section exists to \
-     prevent, so it is not enough to list the parent's id — say what it delivers and therefore \
-     what this PR must not create itself. A node with no parents says so.\n\
-     - `## Draft PR contract` — what lands first so dependents need not wait for the whole \
-     implementation: the **API surface plus its failing tests**, enough to open a draft PR \
-     against, so a dependent can branch off a real ref and code against a real signature while \
-     the implementation continues in the same PR.\n\n\
-     Write for the agent that will build the node, not for a reviewer of the plan: it reads \
-     nothing else about its neighbours.\n"
-        .to_string()
 }
 
 fn generate_pr_stack_plan_md(plan: &StackPlanOutput) -> String {
@@ -252,7 +209,7 @@ fn before_write_stack_plan(context: &Context, session_dir: Option<&Path>) {
 /// The user prompt names the planned nodes from the persisted stack, since the submit must cover
 /// every one of them by id and the agent has no other list to work from.
 fn before_write_stack_docs(context: &Context, session_dir: Option<&Path>) {
-    context.set_sync("system_prompt", write_stack_docs_system_prompt());
+    context.set_sync("system_prompt", write_stack_docs_system_prompt(RECIPE_NAME));
     let stack = session_dir
         .and_then(|dir| read_changeset(dir).ok())
         .and_then(|cs| cs.stack);
@@ -507,6 +464,49 @@ mod write_stack_docs_prompt_tests {
         assert!(
             lower.contains("failing test"),
             "the contract must be the API surface plus its failing tests; got:\n{prompt}"
+        );
+    }
+
+    /// The step is delivered by a CLI invocation, not by a tool: `advertised_tools` deliberately
+    /// excludes the `tddy-tools` subcommands, so an agent told to "use the `submit` tool with key
+    /// `stack-docs`" searches a catalog that has never held one. The prompt spells the command out
+    /// instead, as the plan prompt does.
+    #[test]
+    fn the_prompt_names_the_submit_command_an_agent_can_actually_run() {
+        // Given / When
+        let prompt = seeded_system_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("tddy-tools submit --goal write-stack-docs"),
+            "prompt must name the exact CLI invocation; got:\n{prompt}"
+        );
+        assert!(
+            prompt.contains("--data-stdin"),
+            "prompt must ask for the heredoc/stdin form, not inline --data; got:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("`submit` tool"),
+            "prompt must not advertise a `submit` tool absent from the catalog; got:\n{prompt}"
+        );
+    }
+
+    /// The prompt body is shared with its two planning siblings and carries a `{recipe}`
+    /// placeholder, so a missed substitution would ship the placeholder itself to a live agent —
+    /// the one failure the sharing introduces that the shared text cannot show.
+    #[test]
+    fn the_prompt_announces_the_pr_stack_recipe_by_name() {
+        // Given / When
+        let prompt = seeded_system_prompt();
+
+        // Then
+        assert!(
+            prompt.contains("**pr-stack** workflow"),
+            "prompt must announce the live recipe by name; got:\n{prompt}"
+        );
+        assert!(
+            !prompt.contains("{recipe}"),
+            "the recipe placeholder must be substituted, not shipped; got:\n{prompt}"
         );
     }
 

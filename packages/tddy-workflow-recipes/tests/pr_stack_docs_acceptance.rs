@@ -16,6 +16,7 @@ use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 use tddy_core::workflow::task::{NextAction, TaskResult};
+use tddy_workflow_recipes::plan_pr_stack::write_stack_docs_system_prompt;
 use tddy_workflow_recipes::pr_stack::{
     node_doc_paths, PrStackHooks, PrStackRecipe, STATE_STACK_DOCS_WRITTEN, STATE_STACK_PLANNED,
 };
@@ -83,6 +84,27 @@ fn a_docs_submit(node_ids: &[&str]) -> String {
     }
     yaml
 }
+
+/// The example payload the `write-stack-docs` system prompt shows the agent, lifted from the
+/// prompt's own fenced `json` block rather than restated here — so a prompt that starts describing
+/// a shape the hook refuses fails this suite instead of a live session.
+fn the_payload_the_prompt_shows() -> String {
+    let prompt = write_stack_docs_system_prompt("pr-stack");
+    let opening = "```json\n";
+    let body_start = prompt
+        .find(opening)
+        .expect("the write-stack-docs prompt must show a fenced json example")
+        + opening.len();
+    let body = &prompt[body_start..];
+    let body_end = body
+        .find("```")
+        .expect("the prompt's fenced json example must be closed");
+    body[..body_end].trim().to_string()
+}
+
+/// The node the prompt's example documents. The hook refuses a pass that misses a planned node, so
+/// the stack under test is the one that example is a complete pass over.
+const NODE_THE_PROMPT_EXAMPLE_DOCUMENTS: &str = "token-store";
 
 // ── Seams ───────────────────────────────────────────────────────────────────────────────────
 
@@ -316,4 +338,28 @@ prs:
 
     // Then — documents describing a superseded plan must be regenerated before driving resumes
     session.path().assert_state(STATE_STACK_PLANNED);
+}
+
+// ── The prompt's example is a payload the hook accepts ──────────────────────────────────────
+
+/// The agent copies this payload out of its system prompt; `tddy-tools submit` hands it to the hook
+/// as-is. A prompt whose own example the validator refuses teaches a shape that can never land, and
+/// no test that hand-writes its input can see that.
+#[test]
+fn the_payload_the_prompt_shows_is_persisted_as_a_document_pair() {
+    // Given — a stack planned with exactly the node the prompt's example documents
+    let session = an_orchestrator_with_stack(vec![a_planned_node(
+        NODE_THE_PROMPT_EXAMPLE_DOCUMENTS,
+        "Auth token store",
+    )]);
+
+    // When
+    write_stack_docs_completes(session.path(), the_payload_the_prompt_shows());
+
+    // Then — both documents land, and the changeset carries the section the boundaries rest on
+    session
+        .path()
+        .assert_documents_for(NODE_THE_PROMPT_EXAMPLE_DOCUMENTS)
+        .assert_changeset_for(NODE_THE_PROMPT_EXAMPLE_DOCUMENTS, "## Draft PR contract")
+        .assert_state(STATE_STACK_DOCS_WRITTEN);
 }

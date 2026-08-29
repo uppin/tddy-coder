@@ -92,24 +92,44 @@ stable. Sharing one submit would mean every "actually, split `n2` in two" rewrot
 the stack, and would put a plan the host can validate structurally behind a payload it cannot.
 
 - **`write-stack-docs`** — `PermissionHint::ReadOnly`, `goal_requires_tddy_tools_submit` returns
-  `true` for it. Like `write-stack-plan`, its submit is **raw YAML parsed by the hook**, with no
-  entry in `goals.json` and no generated JSON schema: `generated/` holds only `tdd/`, and the
-  pr-stack goals have never had schemas.
+  `true` for it. Like `write-stack-plan`, it is a **registered goal**: an entry in `goals.json`, a
+  proto, and a generated JSON schema, so a wrong-shaped payload fails with the offending paths
+  rather than at a parse error inside the hook, and `tddy-tools get-schema write-stack-docs`
+  answers.
+
+  *This was not the original design.* The goal was first built on the premise that pr-stack goals
+  carry no schemas — true when it was written, and made false by
+  [#411](../../dev/changesets.md), which registered `write-stack-plan` after finding that a submit
+  naming a goal with no schema was acknowledged without ever being routed. The prompt also told the
+  agent to submit **YAML**; `tddy-tools submit` parses JSON. Every test drove the hook directly with
+  a hand-written string, so the suite was green while the real flow could not work. Both are
+  corrected, and the prompt's own example is pinned against the registered schema so the two cannot
+  drift apart again.
 
 ### Submit payload
 
-```yaml
-version: 1
-docs:
-  - node_id: n1
-    prd: |
-      # n1 — Token store
-      ...
-    changeset: |
-      # Changeset: n1 — Token store
-      ## Responsibility
-      ...
+Delivered by `tddy-tools submit --goal write-stack-docs --data-stdin`, so the body is **JSON** —
+`prd` and `changeset` are JSON strings holding markdown, newlines escaped:
+
+```json
+{
+  "goal": "write-stack-docs",
+  "version": 1,
+  "docs": [
+    {
+      "node_id": "token-store",
+      "prd": "# token-store — Auth token store\n\nWhat this PR delivers.\n",
+      "changeset": "# Changeset: token-store\n\n## Responsibility\n...\n"
+    }
+  ]
+}
 ```
+
+The hook parses it with `serde_yaml`, as `write-stack-plan` does — JSON is a YAML subset, so one
+parser serves both, and the schema is what pins the shape. The example above is the one the system
+prompt shows, and it is submitted through the real CLI by
+`packages/tddy-tools/tests/stack_docs_submit_contract_acceptance.rs`: a prompt that starts
+describing a payload `submit` refuses fails that test rather than a live session.
 
 ### Validation (`validate_stack_docs`)
 

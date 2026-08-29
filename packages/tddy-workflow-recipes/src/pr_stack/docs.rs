@@ -56,8 +56,13 @@ pub struct NodeDocs {
     pub changeset: String,
 }
 
-/// The `write-stack-docs` submit payload. Raw YAML parsed by the hook, like `StackPlanOutput` — the
-/// pr-stack goals carry no generated JSON schema.
+/// The `write-stack-docs` submit payload, mirroring `StackPlanOutput`.
+///
+/// The goal is registered (`goals.json` → `write-stack-docs.schema.json`), so `tddy-tools submit`
+/// has already checked the shape — including the `goal` discriminator every registered payload
+/// carries — before the hook sees it. Neither struct declares `goal`: it names the task the
+/// submission is routed on, not part of the plan or the documents, and serde ignores it on the way
+/// in exactly as it does for the plan.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StackDocsOutput {
     #[serde(default)]
