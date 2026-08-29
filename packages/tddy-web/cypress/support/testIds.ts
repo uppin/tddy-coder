@@ -135,6 +135,7 @@ export const TEST_IDS = {
 
   // Session Inspector → Files tab (docs/ft/web/session-files-inspector.md)
   sessionInspectorTabFiles: "sessions-inspector-tab-files",
+  sessionInspectorTabAgents: "sessions-inspector-tab-agents",
   sessionFilesPanel: "session-files-panel",
   sessionFilesEmpty: "session-files-empty",
 
@@ -406,11 +407,20 @@ export const TEST_IDS = {
   modelsCreateAssistantSubmit: "models-create-assistant-submit",
   /** The tool fieldset of the create-assistant dialog; carries `data-tool-catalog-status`. */
   modelsCreateAssistantTools: "models-create-assistant-tools",
+  /**
+   * The takeover fieldset of the create-assistant dialog — the *main agent's* tools this assistant
+   * stands in for, which is a different question from the tools it may call itself.
+   */
+  modelsCreateAssistantReplacedTools: "models-create-assistant-replaced-tools",
   /** The edit-assistant dialog and its fields. */
   modelsEditAssistantDialog: "models-edit-assistant-dialog",
   modelsEditAssistantLabel: "models-edit-assistant-label",
   modelsEditAssistantSystemPrompt: "models-edit-assistant-system-prompt",
   modelsEditAssistantSubmit: "models-edit-assistant-submit",
+  /** The tool fieldset of the edit-assistant dialog; carries `data-tool-catalog-status`. */
+  modelsEditAssistantTools: "models-edit-assistant-tools",
+  /** The takeover fieldset of the edit-assistant dialog. */
+  modelsEditAssistantReplacedTools: "models-edit-assistant-replaced-tools",
   /** The ACP chat dialog opened from a model or assistant row. */
   modelsChatDialog: "models-chat-dialog",
   modelsChatInput: "models-chat-input",
@@ -1365,6 +1375,19 @@ export const modelsCreateAssistantTool = (toolName: string) =>
 /** One selectable tool checkbox in the edit-assistant dialog. */
 export const modelsEditAssistantTool = (toolName: string) =>
   `models-edit-assistant-tool-${toolName}`;
+
+/**
+ * One main-agent tool the create-assistant dialog offers to hand over to the assistant.
+ *
+ * Deliberately not a `models-create-assistant-tool-` id: the two pickers offer the same ten names,
+ * and a shared stem would make a prefix selector for one of them match both.
+ */
+export const modelsCreateAssistantReplacedTool = (toolName: string) =>
+  `models-create-assistant-replaced-tool-${toolName}`;
+
+/** One main-agent tool the edit-assistant dialog offers to hand over to the assistant. */
+export const modelsEditAssistantReplacedTool = (toolName: string) =>
+  `models-edit-assistant-replaced-tool-${toolName}`;
 
 /** One workspace the owning daemon offers a tool-bearing assistant; carries `data-workspace-path`. */
 export const modelsChatWorkspaceOption = (projectId: string) =>

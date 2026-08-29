@@ -20,6 +20,7 @@ use pretty_assertions::assert_eq;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::connection_service::{roster_replacement_pairs, ConnectionServiceImpl};
+use tddy_daemon::split_session::{split_claude_extra_args, wire_roster_withdrawals};
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_discovery::subagent::normalize_replaced_tools;
 use tddy_rpc::{Code, Request};
@@ -130,13 +131,85 @@ fn a_session_of_type_with_agents_available(
     managed: bool,
     agents: &[(&str, &str)],
 ) -> RosteredSession {
+    a_rostered_session(
+        |session_id| a_session(session_id, session_type, managed),
+        agents,
+    )
+}
+
+/// The **codebase half** of a split session: the `workspace` session holding the worktree and the
+/// roster for an agent process that runs on another daemon entirely, which is where a split
+/// session's roster lives and where its attaches are routed.
+///
+/// It runs no agent of its own, so there is no main agent here to withdraw a tool from — the
+/// withdrawal is enforced by the agent host, whose spawn hard-disables every native filesystem tool
+/// and leaves `mcp__tddy-tools__*` as the only route to this worktree.
+fn a_split_sessions_codebase_half_with_agents_available(
+    agents: &[(&str, &str)],
+) -> RosteredSession {
+    a_rostered_session(
+        |session_id| SessionMetadata {
+            session_type: Some("workspace".to_string()),
+            // No jail on this host, and none needed: nothing runs an agent loop against this
+            // checkout except the peer's tool calls, which arrive as `mcp__tddy-tools__*` already.
+            sandbox: None,
+            // The agent half, recorded when this checkout was cut for it. It is what makes this a
+            // split session's codebase half rather than any other `workspace` session — see
+            // `a_workspace_session_no_agent_works_in` below.
+            agent_daemon_instance_id: Some("workstation-b".to_string()),
+            agent_session_id: Some("1780828020299-agent".to_string()),
+            ..a_session(session_id, "claude-cli", false)
+        },
+        agents,
+    )
+}
+
+/// A `workspace` session **no agent works in**: an operator's standalone checkout, or the mirror an
+/// agent clone reads. Structurally identical to the codebase half above but for the pairing, which
+/// is the point — the session type alone cannot tell them apart.
+fn a_workspace_session_no_agent_works_in(agents: &[(&str, &str)]) -> RosteredSession {
+    a_rostered_session(
+        |session_id| SessionMetadata {
+            session_type: Some("workspace".to_string()),
+            sandbox: None,
+            ..a_session(session_id, "claude-cli", false)
+        },
+        agents,
+    )
+}
+
+/// The **agent half** of a split session: the `claude-cli` session that runs the agent process,
+/// pointing at the codebase and roster it keeps on another daemon.
+///
+/// Unjailed and holding no repo of its own, so neither of the other two shapes describes it — and it
+/// is the half that actually *has* a main agent to withdraw a tool from.
+fn a_split_sessions_agent_half_with_agents_available(agents: &[(&str, &str)]) -> RosteredSession {
+    a_rostered_session(
+        |session_id| SessionMetadata {
+            // The codebase lives on the peer, so this half has no worktree to point at.
+            repo_path: None,
+            sandbox: None,
+            codebase_daemon_instance_id: Some("workstation-b".to_string()),
+            codebase_session_id: Some("1780828020299-workspace".to_string()),
+            ..a_session(session_id, "claude-cli", false)
+        },
+        agents,
+    )
+}
+
+/// A session whose `.session.yaml` is what `meta` builds, on a daemon whose agents directory holds
+/// `agents` as `(name, replaces-csv)` pairs.
+fn a_rostered_session(
+    meta: impl FnOnce(&str) -> SessionMetadata,
+    agents: &[(&str, &str)],
+) -> RosteredSession {
     let sessions = tempfile::tempdir().expect("sessions tempdir");
     write_agent_defs(sessions.path(), agents);
 
     let session_id = "1780828020298-replacement".to_string();
     let session_dir = unified_session_dir_path(sessions.path(), &session_id);
     std::fs::create_dir_all(&session_dir).expect("create session dir");
-    tddy_core::write_session_metadata(&session_dir, &a_session(&session_id, session_type, managed))
+    tddy_core::write_session_metadata(&session_dir, &meta(&session_id))
         .expect("write session metadata");
 
     RosteredSession {
@@ -187,6 +260,8 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     }
 }
 
@@ -197,6 +272,14 @@ fn a_session(session_id: &str, session_type: &str, managed: bool) -> SessionMeta
 trait ToolListAssertions {
     fn assert_contains(&self, tool: &str) -> &Self;
     fn assert_omits(&self, tool: &str) -> &Self;
+}
+
+/// The values of every occurrence of `flag` in a spawn's argv, in the order it carries them.
+fn flag_values(args: &[String], flag: &str) -> Vec<String> {
+    args.windows(2)
+        .filter(|w| w[0] == flag)
+        .map(|w| w[1].clone())
+        .collect()
 }
 
 impl ToolListAssertions for Vec<String> {
@@ -416,6 +499,30 @@ async fn refuses_a_replacing_agent_on_a_session_whose_tools_it_cannot_reach() {
     );
 }
 
+/// The `workspace` session that is *not* a split session's codebase half. It looks like one — same
+/// session type, same absent jail — and the only thing separating them is the recorded pairing. With
+/// no agent anywhere, there is no main agent to take `Grep` from: accepting the attach would report
+/// an enforcement no process performs, which is the failure AC24 exists to prevent.
+#[tokio::test]
+async fn refuses_a_replacing_agent_on_a_workspace_session_no_agent_works_in() {
+    // Given
+    let session = a_workspace_session_no_agent_works_in(&[("explorer", "Grep")]);
+    let explorer = session.agent_id_for("explorer").await;
+
+    // When
+    let result = session.attach(&explorer).await;
+
+    // Then
+    let status =
+        result.expect_err("a replacing agent must be refused on a workspace nobody works in");
+    assert_eq!(status.code(), Code::FailedPrecondition);
+    assert!(
+        status.message().contains("Grep"),
+        "the refusal must name the tool it could not withdraw, was: {}",
+        status.message()
+    );
+}
+
 /// An agent that replaces nothing has nothing to enforce, so it attaches to a non-managed session
 /// perfectly well — the refusal above is about withdrawal, not about remote agents in general.
 #[tokio::test]
@@ -483,4 +590,85 @@ async fn launches_a_session_with_no_agents_holding_every_tool() {
         .assert_contains("mcp__tddy-tools__Grep")
         .assert_contains("mcp__tddy-tools__Glob")
         .assert_contains("mcp__tddy-tools__Shell");
+}
+
+// ---------------------------------------------------------------------------
+// AC24 / AC25 — a split session, whose roster lives on the host holding its codebase
+// ---------------------------------------------------------------------------
+
+/// A split session's attaches are routed to the daemon holding its codebase, so the session the
+/// refusal inspects is a `workspace` session with no jail and no agent of its own. Refusing there
+/// would deny every split session a withdrawal it does in fact enforce: its agent host spawns with
+/// every native filesystem tool hard-disabled, so that main agent's file tools *are*
+/// `mcp__tddy-tools__*`, and a withdrawn one is refused on the path the call already takes.
+#[tokio::test]
+async fn accepts_a_replacing_agent_on_a_split_sessions_codebase_half() {
+    // Given
+    let session = a_split_sessions_codebase_half_with_agents_available(&[("explorer", "Grep")]);
+    let explorer = session.agent_id_for("explorer").await;
+
+    // When
+    let roster = session
+        .attach(&explorer)
+        .await
+        .expect("a split session enforces the withdrawal, so it must be offered one");
+
+    // Then
+    assert_eq!(roster.agents.len(), 1);
+    assert_eq!(session.withdrawn_tools(), vec!["Grep".to_string()]);
+}
+
+/// The other half of the same pair, and the one the refusal's own wording is about: this session
+/// *does* run a main agent, it simply runs it against a codebase on another host. Its spawn
+/// hard-disables every native filesystem tool, so `mcp__tddy-tools__*` is the only route it has and
+/// a withdrawal is enforced on the path the call already takes. Reading only "managed codebase" and
+/// "workspace" would refuse the withdrawal precisely where it bites hardest — the session whose
+/// tools all cross a host boundary.
+#[tokio::test]
+async fn accepts_a_replacing_agent_on_a_split_sessions_agent_half() {
+    // Given
+    let session = a_split_sessions_agent_half_with_agents_available(&[("explorer", "Grep")]);
+    let explorer = session.agent_id_for("explorer").await;
+
+    // When
+    let roster = session
+        .attach(&explorer)
+        .await
+        .expect("a split agent half reaches its tools only through tddy-tools, so it enforces");
+
+    // Then
+    assert_eq!(roster.agents.len(), 1);
+    assert_eq!(session.withdrawn_tools(), vec!["Grep".to_string()]);
+}
+
+/// The flags the agent host spawns a split session with, over the roster the codebase host serves
+/// it. `mcp__tddy-tools__Grep` is the assertion that matters: a split session's *native* `Grep` is
+/// already impossible, so the proxied form is the only route its main agent ever had, and a
+/// withdrawal that leaves it callable through the permission prompt withdraws nothing.
+#[tokio::test]
+async fn launches_a_split_session_without_the_tools_its_roster_replaced() {
+    // Given — an agent attached after the session started, as every split-session attach is
+    let session =
+        a_split_sessions_codebase_half_with_agents_available(&[("explorer", "Grep, Glob")]);
+    let explorer = session.agent_id_for("explorer").await;
+    let roster = session.attach(&explorer).await.expect("attach explorer");
+
+    // When — the split spawn path is handed that roster, exactly as a resume hands it the one it
+    // read back from this host
+    let args = split_claude_extra_args(
+        &session.session_dir(),
+        "/usr/bin/tddy-tools",
+        &wire_roster_withdrawals(&roster.agents),
+    )
+    .expect("split spawn flags");
+
+    // Then
+    flag_values(&args, "--allowedTools")
+        .assert_omits("mcp__tddy-tools__Grep")
+        .assert_omits("mcp__tddy-tools__Glob")
+        .assert_contains("mcp__tddy-tools__Read")
+        .assert_contains("mcp__tddy-tools__subagent_prompt");
+    flag_values(&args, "--disallowedTools")
+        .assert_contains("mcp__tddy-tools__Grep")
+        .assert_contains("mcp__tddy-tools__Glob");
 }

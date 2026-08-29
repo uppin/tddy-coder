@@ -85,6 +85,7 @@ impl Harness {
                     model_id: "qwen3:32b".to_string(),
                     system_prompt: "You explore repositories.".to_string(),
                     tools: vec!["Read".to_string()],
+                    replaces: Vec::new(),
                 },
                 THE_OPERATOR,
             )
@@ -93,8 +94,15 @@ impl Harness {
             .to_string()
     }
 
-    /// Define an assistant on `qwen3:32b` with the given name and tool set.
+    /// Define an assistant on `qwen3:32b` with the given name and tool set, taking nothing over
+    /// from the main agent.
     async fn given_an_assistant_named(&self, name: &str, tools: &[&str]) {
+        self.given_an_assistant_taking_over(name, tools, &[]).await;
+    }
+
+    /// Define an assistant that stands in for `replaces` on the main agent's behalf — the tools a
+    /// session that attaches it stops being able to call itself.
+    async fn given_an_assistant_taking_over(&self, name: &str, tools: &[&str], replaces: &[&str]) {
         self.store
             .create_assistant(
                 NewAssistant {
@@ -104,6 +112,7 @@ impl Harness {
                     model_id: "qwen3:32b".to_string(),
                     system_prompt: "You explore repositories.".to_string(),
                     tools: tools.iter().map(|t| t.to_string()).collect(),
+                    replaces: replaces.iter().map(|t| t.to_string()).collect(),
                 },
                 THE_OPERATOR,
             )
@@ -233,6 +242,29 @@ async fn a_registry_assistant_resolves_as_an_agent_def_carrying_its_model_endpoi
     assert_eq!(
         explorer.system_prompt.as_deref(),
         Some("You explore repositories.")
+    );
+}
+
+#[tokio::test]
+async fn a_registry_assistant_resolves_as_a_def_that_withdraws_the_tools_it_takes_over() {
+    // Given an assistant defined to take over the main agent's search tools
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_taking_over("repo-explorer", &["Read"], &["Grep", "Glob"])
+        .await;
+
+    // When
+    let defs = harness
+        .service
+        .resolvable_agent_defs()
+        .await
+        .expect("the daemon must resolve its agent defs");
+
+    // Then the def a seeded roster is built from carries the takeover: without it the main agent
+    // keeps Grep and Glob, and nothing ever routes a search to this assistant
+    assert_eq!(
+        def_named(&defs, "repo-explorer").replaces,
+        vec!["Grep".to_string(), "Glob".to_string()]
     );
 }
 
@@ -388,12 +420,31 @@ async fn the_subagents_offered_include_a_registry_assistant() {
     assert_eq!(row.label, "Repo explorer");
     assert_eq!(row.model, "qwen3:32b");
     assert_eq!(row.tools, vec!["Read".to_string()]);
-    // An assistant stands in for no main-agent tool, so attaching it withdraws nothing.
+    // This one was defined with no takeover, so attaching it withdraws nothing — the operator who
+    // ticked no takeover box must not have one invented for them.
     assert!(
         row.replaces.is_empty(),
-        "an assistant replaces nothing; got: {:?}",
+        "an assistant defined with no takeover replaces nothing; got: {:?}",
         row.replaces
     );
+}
+
+#[tokio::test]
+async fn the_subagents_offered_carry_the_main_agent_tools_an_assistant_takes_over() {
+    // Given an assistant that stands in for two of the main agent's tools
+    let harness = a_daemon_with_a_registry().await;
+    harness
+        .given_an_assistant_taking_over("repo-explorer", &["Read"], &["Grep", "Glob"])
+        .await;
+
+    // When
+    let offered = harness.when_listing_the_subagents_it_offers().await;
+
+    // Then the offer names the takeover, which is what the picker shows the operator before they
+    // attach it and what `tddy-tools` withdraws once they have
+    let row = subagent_named(&offered, "repo-explorer");
+    assert_eq!(row.replaces, vec!["Grep".to_string(), "Glob".to_string()]);
+    assert_eq!(row.tools, vec!["Read".to_string()]);
 }
 
 #[tokio::test]

@@ -1,8 +1,12 @@
 import type { ToolCatalog } from "./useModelRegistryFanOut";
 
 /**
- * The tool choices for an assistant: the **daemon's** exec catalog as advertised by
+ * A set of tool choices for an assistant: the **daemon's** exec catalog as advertised by
  * `ListAssignableTools`, never a list the web keeps of its own.
+ *
+ * The dialogs render one of these per question they ask — the tools the assistant may call itself,
+ * and the main-agent tools it stands in for. Same ten names, two answers, so each instance is given
+ * its own `legend` and its own `idPrefix` and writes only its own field.
  *
  * The catalog is rendered as the three things it can be. A daemon that has not answered yet and a
  * daemon whose catalog could not be read both offer no tools, and neither is the claim "this daemon
@@ -24,14 +28,17 @@ function toolCatalogNote(catalog: ToolCatalog): string {
 
 export function AssistantToolPicker({
   idPrefix,
+  legend,
   catalog,
   selected,
   onToggle,
 }: {
-  /** Stem of the `data-testid`s this picker emits, so two dialogs can render one each. */
+  /** Stem of the `data-testid`s this picker emits, so two pickers never share a checkbox id. */
   idPrefix: string;
+  /** Which question this picker answers, in the operator's words. */
+  legend: string;
   catalog: ToolCatalog;
-  selected: string[];
+  selected: readonly string[];
   onToggle: (toolName: string, checked: boolean) => void;
 }) {
   return (
@@ -40,7 +47,7 @@ export function AssistantToolPicker({
       data-tool-catalog-status={catalog.status}
       className="flex flex-col gap-1"
     >
-      <legend className="text-xs text-muted-foreground">Tools</legend>
+      <legend className="text-xs text-muted-foreground">{legend}</legend>
       {catalog.status === "ready" ? (
         catalog.tools.map((tool) => (
           <label key={tool.name} className="flex items-center gap-2 text-xs">

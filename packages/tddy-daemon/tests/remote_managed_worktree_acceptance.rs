@@ -16,7 +16,7 @@
 //!
 //! PRD: docs/ft/daemon/remote-managed-worktree.md.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -174,6 +174,21 @@ fn a_split_claude_cli_request(codebase_daemon_instance_id: &str) -> StartSession
         codebase_daemon_instance_id: codebase_daemon_instance_id.to_string(),
         ..Default::default()
     }
+}
+
+/// An agent def under `<tddyhome>/agents`, the only place a YAML-defined agent resolves from. The
+/// fixture passes one temp dir as both the sessions base and the daemon's data dir, so this writes
+/// into the directory the service actually reads.
+fn an_agent_def_on_this_host(tddy_data_dir: &Path, name: &str) {
+    let agents = tddy_data_dir.join("agents");
+    std::fs::create_dir_all(&agents).expect("create agents dir");
+    std::fs::write(
+        agents.join(format!("{name}.yaml")),
+        format!(
+            "name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://127.0.0.1:11434/v1\nreplaces:\n  - Grep\n"
+        ),
+    )
+    .expect("write agent def");
 }
 
 // ---------------------------------------------------------------------------
@@ -397,6 +412,184 @@ async fn start_session_with_an_unknown_codebase_daemon_is_refused() {
     assert!(
         status.message().contains(UNKNOWN_PEER_ID),
         "the refusal must name the unreachable daemon; got '{}'",
+        status.message()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Seeding a split session's agent roster at start
+// ---------------------------------------------------------------------------
+//
+// An agent is placeable on any host. One co-located with the authoritative worktree reads that
+// worktree directly; one anywhere else reads a clone the session's worktree sync keeps current and
+// proxies its writes back. Neither of those depends on *where the codebase is*, so a split placement
+// withdraws nothing from `specialized_agents` — it only decides which host the roster and the clone
+// end up on.
+//
+// What a split placement still refuses is work with no host-independent meaning: a workflow recipe
+// and a sandbox both resolve a worktree on the daemon running the agent, which a split session does
+// not have.
+//
+// The fixture holds no LiveKit room, so the two codes say everything: `InvalidArgument` means the
+// daemon refused the combination outright, `FailedPrecondition` means it accepted it and got as far
+// as looking for the codebase host.
+
+#[tokio::test]
+async fn a_split_start_seeding_an_agent_of_this_host_is_not_refused_over_the_seed() {
+    // Given a split request seeding an agent this daemon defines
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    an_agent_def_on_this_host(sessions_tmp.path(), "fastcontext");
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        specialized_agents: vec!["fastcontext".to_string()],
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("no room is connected here, so even an admissible split start cannot complete");
+
+    // Then — the seed was admitted and the start went looking for the codebase host, which is the
+    // only thing that reaches this failure; a refusal of the combination would be InvalidArgument
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::FailedPrecondition,
+        "a seeded agent must not make a valid placement a bad request; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        !status.message().contains("fastcontext"),
+        "the start must fail over the missing room, not over the seed it named; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn a_split_start_seeding_an_agent_no_host_defines_is_refused_naming_that_agent() {
+    // Given a split request seeding a name nothing resolves — no def on this host, and no daemon
+    // qualifier pointing at one anywhere else
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        specialized_agents: vec!["ghost-agent".to_string()],
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("a seed that resolves to nothing must fail the start, not be dropped");
+
+    // Then — a bad request rather than a precondition failure, which is also what says the codebase
+    // host was never contacted: reaching it in this fixture is what produces FailedPrecondition
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("ghost-agent"),
+        "the refusal must name the agent it could not resolve; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn a_split_start_asking_for_a_semantic_index_is_not_refused_over_the_index() {
+    // Given a split request that also asks for a semantic index
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        semantic_index: true,
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("no room is connected here, so even an admissible split start cannot complete");
+
+    // Then — an index is built where the worktree is, and on a split session that host is the
+    // codebase host, so the request is admissible and the start goes looking for it
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::FailedPrecondition,
+        "a semantic index must not make a valid placement a bad request; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        !status.message().contains("semantic"),
+        "the start must fail over the missing room, not over the index it asked for; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn a_split_start_carrying_a_workflow_recipe_is_still_refused_naming_the_field() {
+    // Given a split request that also names a workflow recipe
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        recipe: "plan-tdd-one-shot".to_string(),
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("a recipe needs a repository beside the agent, which a split session lacks");
+
+    // Then
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("recipe"),
+        "the refusal must name the field it refused; got '{}'",
+        status.message()
+    );
+}
+
+#[tokio::test]
+async fn a_split_start_asking_for_a_sandbox_is_still_refused_naming_the_field() {
+    // Given a split request that also asks to be sandboxed
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
+    let request = StartSessionRequest {
+        sandbox: true,
+        ..a_split_claude_cli_request(CODEBASE_PEER_ID)
+    };
+
+    // When
+    let status = service
+        .start_session(Request::new(request))
+        .await
+        .expect_err("a sandbox resolves a worktree beside the agent, which a split session lacks");
+
+    // Then
+    assert_eq!(
+        status.code(),
+        tddy_rpc::Code::InvalidArgument,
+        "expected InvalidArgument; got {:?}: {}",
+        status.code(),
+        status.message()
+    );
+    assert!(
+        status.message().contains("sandbox"),
+        "the refusal must name the field it refused; got '{}'",
         status.message()
     );
 }

@@ -12,9 +12,13 @@
 //! where it is implemented; what is wrong-able *here* is what the registry does with a frame, and
 //! a real stream would only make that non-deterministic.
 
+use std::time::Duration;
+
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::connection::{SessionAgentEntry, SessionAgentRoster};
-use tddy_tools::session_agents::{ConversationState, LiveAgentRoster, RosterError};
+use tddy_tools::session_agents::{
+    ConversationState, LiveAgentRoster, ReconnectPacing, RosterError, RosterStreamOutcome,
+};
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -78,6 +82,32 @@ fn a_seeded_registry(seed: &[&str]) -> LiveAgentRoster {
         seed.iter().map(|n| a_seed_def(n)).collect(),
         "ws-01",
     )
+}
+
+/// One pass of the roster stream that applied `applied` snapshots and was then closed by the far end.
+fn a_pass_that_applied(applied: u64) -> RosterStreamOutcome {
+    RosterStreamOutcome::closed(applied)
+}
+
+/// One pass that applied `applied` snapshots and then ended in an error — a relay that gave up on a
+/// quiet stream, a daemon that went away mid-frame.
+fn a_pass_that_applied_and_then_broke(applied: u64, failure: &str) -> RosterStreamOutcome {
+    RosterStreamOutcome::broke(applied, failure.to_string())
+}
+
+/// A follower that has just started, with nothing yet recorded against it.
+fn a_follower_that_has_just_started() -> ReconnectPacing {
+    ReconnectPacing::default()
+}
+
+/// How long a pass lasts when it is served its snapshot and then dies straight away.
+fn no_longer_than_it_took_to_be_served() -> Duration {
+    Duration::from_millis(40)
+}
+
+/// How long a subscription that genuinely worked stays up before something ends it.
+fn a_whole_working_subscription() -> Duration {
+    Duration::from_secs(11 * 60)
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +369,272 @@ fn serves_again_when_a_frame_arrives_that_is_too_old_to_apply() {
     registry
         .resolve(Some("explorer@ws-01"))
         .expect("a frame proving the stream is served must restore service at the applied rev");
+}
+
+// ---------------------------------------------------------------------------
+// AC17 — what one pass of the stream counts as
+// ---------------------------------------------------------------------------
+
+/// A pass that applied a snapshot proved the subscription was being served, so however it ended it
+/// is a reconnect rather than a broken setup — the rule the follower already applies when the far end
+/// closes cleanly, and the one that has to hold when it ends in an error instead. Counting an error
+/// against the budget is what turns three healthy passes into a roster declared unavailable, and with
+/// it every subagent call refused.
+#[test]
+fn does_not_count_a_pass_that_served_a_snapshot_before_breaking_against_the_reconnect_budget() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(2, "roster stream: the peer stopped answering");
+
+    // When / Then
+    assert!(
+        !pass.counts_as_a_failure(),
+        "a pass that applied a snapshot must not count against the reconnect budget"
+    );
+}
+
+/// A pass that produced nothing at all is the broken setup the budget exists for: nothing is serving
+/// this subscription, and retrying forever while answering from the spawn seed is the silent
+/// wrongness the whole design refuses.
+#[test]
+fn counts_a_pass_that_broke_before_any_snapshot_arrived_against_the_reconnect_budget() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+
+    // When / Then
+    assert!(
+        pass.counts_as_a_failure(),
+        "a pass that applied nothing must count against the reconnect budget"
+    );
+}
+
+/// The reason travels into the refusal the main agent reads, so it has to be the reason the stream
+/// actually gave. "The stream ended" is what a clean close looks like and diagnoses nothing.
+#[test]
+fn carries_the_reason_the_stream_broke_with_rather_than_a_clean_close() {
+    // Given
+    let pass = a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+
+    // When / Then
+    assert_eq!(pass.reason(), "StreamSessionAgents call: unimplemented");
+}
+
+/// A pass the far end closed carries no error, so it says that instead of inventing one.
+#[test]
+fn reports_a_clean_close_as_the_stream_ending() {
+    // Given
+    let pass = a_pass_that_applied(4);
+
+    // When / Then
+    assert_eq!(pass.reason(), "the stream ended");
+}
+
+/// A close before anything arrived says so distinctly: "the stream ended" reads as a subscription
+/// that worked and then stopped, when in fact nothing ever served it.
+#[test]
+fn reports_a_close_before_the_first_snapshot_as_nothing_having_arrived() {
+    // Given
+    let pass = a_pass_that_applied(0);
+
+    // When / Then
+    assert_eq!(
+        pass.reason(),
+        "the stream ended before any snapshot arrived"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC17 — how the follower paces its reconnects
+// ---------------------------------------------------------------------------
+
+/// The two questions the follower asks after a pass are not the same question. "Was it served?"
+/// decides whether the roster is unavailable; "how fast are we churning?" decides the delay. Driving
+/// the delay off the first pinned it at the opening backoff for every failure mode that delivers a
+/// frame before dying — and since the daemon publishes the current roster on subscribe, that is
+/// every failure mode that gets as far as a subscription. The result was a hot loop opening a fresh
+/// subscription on the daemon twice a second, forever, with nothing in the logs saying so.
+#[test]
+fn escalates_the_backoff_when_each_pass_dies_as_soon_as_it_has_been_served() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+
+    // When
+    let first = follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    let second = follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    let third = follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+
+    // Then — doubling, not merely rising: a run of subscriptions that each die on arrival is a hot
+    // loop, and only a delay that grows as fast as the churn does gets out of it
+    assert_eq!(
+        (first, second, third),
+        (
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4)
+        ),
+        "a pass that dies as soon as it is served must still slow the reconnects down"
+    );
+}
+
+/// Escalation has to be undone by evidence, and the evidence is a pass that lasted. Otherwise a
+/// session that hit a rough patch hours ago is still waiting out the ceiling when its agent attaches.
+#[test]
+fn reconnects_promptly_again_after_a_pass_that_ran_long_enough_to_be_service() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let died_at_once = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+    follower.record(&died_at_once, no_longer_than_it_took_to_be_served());
+    follower.record(&died_at_once, no_longer_than_it_took_to_be_served());
+    follower.record(&died_at_once, no_longer_than_it_took_to_be_served());
+
+    let a_pass_that_worked = a_pass_that_applied(9);
+
+    // When
+    let after_a_working_subscription =
+        follower.record(&a_pass_that_worked, a_whole_working_subscription());
+
+    // Then
+    let what_a_healthy_follower_waits = a_follower_that_has_just_started()
+        .record(&a_pass_that_worked, a_whole_working_subscription());
+    assert_eq!(
+        after_a_working_subscription, what_a_healthy_follower_waits,
+        "a pass that ran long enough to be service must clear the churn the short ones built up"
+    );
+}
+
+/// Churn is not brokenness. A stream that keeps delivering the roster is answering every call
+/// correctly, so however fast it reconnects it must never make the registry refuse — refusing here
+/// would take out a working session on the strength of a flaky relay.
+#[test]
+fn never_declares_the_roster_unavailable_while_the_passes_are_being_served() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+
+    // When
+    for _ in 0..12 {
+        follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    }
+
+    // Then
+    assert!(
+        !follower.roster_is_unavailable(),
+        "a roster that keeps being delivered must stay callable however often the stream restarts"
+    );
+}
+
+/// The budget the refusal spends is passes that served nothing at all — the broken setup where
+/// answering from the spawn seed instead would be the silent wrongness the design refuses.
+#[test]
+fn declares_the_roster_unavailable_once_the_passes_stop_serving_anything() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_nothing =
+        a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+
+    // When
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+
+    // Then
+    assert!(
+        follower.roster_is_unavailable(),
+        "three passes that served nothing must declare the roster unavailable"
+    );
+    assert_eq!(
+        follower.unserved(),
+        3,
+        "the refusal quotes this count, so it must be the number of unserved passes"
+    );
+}
+
+/// A pass that served something breaks the unserved run, whatever its duration — the run has to
+/// mean "nothing is serving this subscription", not "the last few passes were unlucky".
+#[test]
+fn a_served_pass_clears_the_unserved_run_it_interrupts() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_nothing =
+        a_pass_that_applied_and_then_broke(0, "StreamSessionAgents call: unimplemented");
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+
+    // When
+    follower.record(
+        &a_pass_that_applied_and_then_broke(1, "the peer stopped answering"),
+        no_longer_than_it_took_to_be_served(),
+    );
+    follower.record(&served_nothing, no_longer_than_it_took_to_be_served());
+
+    // Then
+    assert!(
+        !follower.roster_is_unavailable(),
+        "one served pass must clear the unserved run, was {}",
+        follower.unserved()
+    );
+}
+
+/// Throttling and authority are the same decision seen from two sides. Once the reconnects are
+/// spaced a whole ceiling apart, the next frame is that far away — so answering `resolve` from the
+/// last one as if it were current is exactly the silent staleness the roster exists to prevent.
+#[test]
+fn stops_claiming_the_roster_is_current_once_the_reconnects_are_throttled_to_the_ceiling() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+
+    // When
+    for _ in 0..12 {
+        follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    }
+
+    // Then
+    assert!(
+        follower.throttled_to_the_ceiling(),
+        "a run of passes that each die as soon as they are served must reach the ceiling"
+    );
+}
+
+/// The refusal has to lift by itself. A throttled follower whose stream finally holds must go back
+/// to answering calls, or one rough patch mutes the session's agents for the rest of the run.
+#[test]
+fn claims_the_roster_again_once_a_pass_lasts_long_enough_to_be_service() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+    let served_then_died = a_pass_that_applied_and_then_broke(1, "the peer stopped answering");
+    for _ in 0..12 {
+        follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
+    }
+
+    // When
+    follower.record(&a_pass_that_applied(9), a_whole_working_subscription());
+
+    // Then
+    assert!(
+        !follower.throttled_to_the_ceiling(),
+        "a working subscription must lift the throttle, not just slow its growth"
+    );
+}
+
+/// A brisk reconnect is not a staleness claim. The follower that reconnects in half a second is
+/// following the roster as closely as it ever does, so it must keep answering.
+#[test]
+fn keeps_claiming_the_roster_while_the_reconnects_are_still_prompt() {
+    // Given
+    let mut follower = a_follower_that_has_just_started();
+
+    // When
+    let after_one_short_pass = follower.record(
+        &a_pass_that_applied_and_then_broke(1, "the peer stopped answering"),
+        no_longer_than_it_took_to_be_served(),
+    );
+
+    // Then
+    assert!(
+        !follower.throttled_to_the_ceiling(),
+        "one short pass waits {after_one_short_pass:?} and must not cost the session its roster"
+    );
 }
 
 // ---------------------------------------------------------------------------

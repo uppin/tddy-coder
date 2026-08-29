@@ -126,13 +126,18 @@ export interface ModelRegistryFanOut {
     modelId: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
-  /** Resolves to the error to show, or `""` when the assistant was updated. */
+  /**
+   * Resolves to the error to show, or `""` when the assistant was updated. Both tool sets are sent
+   * whole, so an operator who gives up a takeover is obeyed rather than left with the stored one.
+   */
   readonly updateAssistant: (input: {
     assistant: AssistantRow;
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
   /** Remove an assistant from the daemon that owns it. */
   readonly deleteAssistant: (assistant: AssistantRow) => Promise<void>;
@@ -185,6 +190,7 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
     modelId: entry.modelId,
     systemPrompt: entry.systemPrompt,
     tools: entry.tools,
+    replaces: entry.replaces,
   };
 }
 
@@ -483,7 +489,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   );
 
   const createAssistant = useCallback<ModelRegistryFanOut["createAssistant"]>(
-    async ({ daemonInstanceId, name, label, providerId, modelId, systemPrompt, tools }) => {
+    async ({ daemonInstanceId, name, label, providerId, modelId, systemPrompt, tools, replaces }) => {
       const client = clientFor(daemonInstanceId);
       if (!client) return noConnectionTo(daemonInstanceId);
       try {
@@ -495,6 +501,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
           modelId,
           systemPrompt,
           tools,
+          replaces,
         });
       } catch (err) {
         return errorTextOf(err);
@@ -506,7 +513,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   );
 
   const updateAssistant = useCallback<ModelRegistryFanOut["updateAssistant"]>(
-    async ({ assistant, label, systemPrompt, tools }) => {
+    async ({ assistant, label, systemPrompt, tools, replaces }) => {
       const client = clientFor(assistant.daemonInstanceId);
       if (!client) return noConnectionTo(assistant.daemonInstanceId);
       try {
@@ -516,6 +523,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
           label,
           systemPrompt,
           tools,
+          replaces,
         });
       } catch (err) {
         return errorTextOf(err);

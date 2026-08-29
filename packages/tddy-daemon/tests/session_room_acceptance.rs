@@ -680,10 +680,13 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
         &daemon.config,
         &session_dir,
         &true_bin(),
-        &started.session_id,
-        "some-other-codebase-host",
-        "0199bbbb-0000-7000-8000-00000000000b",
-        &a_caller_token_signed_with_the_deployment_secret(),
+        &tddy_daemon::split_session::SplitSpawnTarget {
+            session_id: &started.session_id,
+            codebase_instance_id: "some-other-codebase-host",
+            codebase_session_id: "0199bbbb-0000-7000-8000-00000000000b",
+            session_token: &a_caller_token_signed_with_the_deployment_secret(),
+        },
+        &[],
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
@@ -727,10 +730,13 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
         &daemon.config,
         &session_dir,
         &true_bin(),
-        &started.session_id,
-        "some-other-codebase-host",
-        "0199bbbb-0000-7000-8000-00000000000b",
-        &a_caller_token_signed_with_the_deployment_secret(),
+        &tddy_daemon::split_session::SplitSpawnTarget {
+            session_id: &started.session_id,
+            codebase_instance_id: "some-other-codebase-host",
+            codebase_session_id: "0199bbbb-0000-7000-8000-00000000000b",
+            session_token: &a_caller_token_signed_with_the_deployment_secret(),
+        },
+        &[],
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();

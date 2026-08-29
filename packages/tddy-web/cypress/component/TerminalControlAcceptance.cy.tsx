@@ -7,44 +7,13 @@
  * The overlay is pure presentation (`TerminalControlOverlay`); the lease state and steal-claim
  * action are owned per-session by `SessionRuntime` via `useTerminalControl` (see
  * `SessionParticipantRpcRouting.cy.tsx` for the end-to-end claim-routing contract). These tests
- * exercise the overlay's presentation contract directly.
+ * exercise the overlay's presentation contract directly, and mount nothing else — whether the pane
+ * puts an overlay on screen at all is `SessionMainPaneTerminalControl.cy.tsx`'s subject.
  */
 
 import React from "react";
-import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { TerminalControlOverlay } from "../../src/components/sessions/TerminalControlOverlay";
-import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
-import type { SessionEntry } from "../../src/gen/connection_pb";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
-
-// ---------------------------------------------------------------------------
-// Shared fixtures
-// ---------------------------------------------------------------------------
-
-const SESSION_ID = "control-test-session-1";
-
-const aSelectedSession: Partial<SessionEntry> = {
-  sessionId: SESSION_ID,
-  isActive: true,
-  status: "active",
-  repoPath: "/home/user/my-project",
-};
-
-const aConnectedGrpcAttachment: SessionAttachmentState = {
-  status: "connected-grpc",
-  sessionId: SESSION_ID,
-};
-
-const noopHandlers = {
-  inspectorState: "closed" as const,
-  onToggleInspector: () => undefined,
-  onInspectorClose: () => undefined,
-  onInspectorExpand: () => undefined,
-  onInspectorRestore: () => undefined,
-  onResume: () => undefined,
-  onDelete: () => undefined,
-  onTerminate: () => undefined,
-};
 
 // ---------------------------------------------------------------------------
 // AC1: When this screen is not the controller, the "Claim terminal" overlay is visible.
@@ -96,25 +65,4 @@ it("does not render the Claim terminal overlay when this screen holds the contro
   // Then
   page.terminalControlOverlay().should("not.exist");
   page.terminalClaimBtn().should("not.exist");
-});
-
-// ---------------------------------------------------------------------------
-// AC4: When no runtime is attached yet (session selected but not connected), no overlay renders.
-// ---------------------------------------------------------------------------
-
-it("does not render the Claim terminal overlay when no runtime is attached yet", () => {
-  // Given — session selected and connected, but the runtime layer has not registered a runtime yet
-  cy.mount(
-    <SessionMainPane
-      {...noopHandlers}
-      selectedSession={aSelectedSession as SessionEntry}
-      attachment={aConnectedGrpcAttachment}
-      runtimes={[]}
-      focusedRuntimeId={null}
-    />,
-  );
-
-  // Then — the transition placeholder container exists, but no control overlay is rendered
-  page.detailTerminalContainer().should("exist");
-  page.terminalControlOverlay().should("not.exist");
 });

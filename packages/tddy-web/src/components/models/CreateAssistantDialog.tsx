@@ -1,15 +1,22 @@
 import { useState } from "react";
+import { useAssistantToolSets } from "./useAssistantToolSets";
 import type { ModelRow } from "../../utils/mergeRegistryEntries";
 import { AssistantToolPicker } from "./AssistantToolPicker";
 import { ModelsDialogShell } from "./ModelsDialogShell";
 import type { ToolCatalog } from "./useModelRegistryFanOut";
 
 /**
- * Compose a model, a system prompt and a set of tools into an assistant — a `--agent <name>` the
+ * Compose a model, a system prompt and two tool sets into an assistant — a `--agent <name>` the
  * daemon can then run. The tool choices are the **daemon's** exec catalog as advertised by
  * `ListAssignableTools`; the web offers no tool list of its own, so a daemon that gains a tool
  * offers it here without a web release
  * (docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md § AC8).
+ *
+ * The two sets answer different questions. **Tools** is the assistant's own loop — what it may call
+ * while it works. **Replaces** is what it takes over from the *main* agent: the tools a session that
+ * attaches it stops being able to call itself, which is the only thing that makes that agent
+ * delegate rather than keep searching on its own. An assistant may grep for itself without taking
+ * Grep away from the session, so neither set is derivable from the other.
  *
  * Creating is refused until that catalog is known: an assistant is persisted with the tools it was
  * created with, so one composed from a catalog that never arrived is a permanently toolless agent
@@ -29,6 +36,7 @@ export interface CreateAssistantDialogProps {
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
   onClose: () => void;
 }
@@ -42,31 +50,23 @@ export function CreateAssistantDialog({
   const [name, setName] = useState("");
   const [label, setLabel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [selectedTools, setSelectedTools] = useState<string[]>([]);
+  const toolSets = useAssistantToolSets([], []);
   const [error, setError] = useState("");
   // A second click while the create is in flight mints a second assistant on the daemon, which the
   // operator then has to find and delete.
   const [submitting, setSubmitting] = useState(false);
 
-  const toggleTool = (toolName: string, checked: boolean) =>
-    setSelectedTools((current) =>
-      checked ? [...current, toolName] : current.filter((t) => t !== toolName),
-    );
-
   const submit = async () => {
     if (submitting || toolCatalog.status !== "ready") return;
-    // Send the tools in the daemon's catalog order, so the stored set does not depend on the order
-    // the operator happened to tick the boxes in.
-    const orderedTools = toolCatalog.tools
-      .map((t) => t.name)
-      .filter((t) => selectedTools.includes(t));
+    const sent = toolSets.inCatalogOrder(toolCatalog.tools);
     setSubmitting(true);
     try {
       const failure = await onSubmit({
         name: name.trim(),
         label: label.trim(),
         systemPrompt: systemPrompt.trim(),
-        tools: orderedTools,
+        tools: sent.tools,
+        replaces: sent.replaces,
       });
       setError(failure);
       if (failure === "") onClose();
@@ -110,9 +110,17 @@ export function CreateAssistantDialog({
       />
       <AssistantToolPicker
         idPrefix="models-create-assistant"
+        legend="Tools — what this assistant may call itself"
         catalog={toolCatalog}
-        selected={selectedTools}
-        onToggle={toggleTool}
+        selected={toolSets.tools}
+        onToggle={toolSets.toggleTool}
+      />
+      <AssistantToolPicker
+        idPrefix="models-create-assistant-replaced"
+        legend="Replaces — taken away from the main agent"
+        catalog={toolCatalog}
+        selected={toolSets.replaces}
+        onToggle={toolSets.toggleReplaced}
       />
       {error ? (
         <div data-testid="models-create-assistant-error" className="text-xs text-destructive">

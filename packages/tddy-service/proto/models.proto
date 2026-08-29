@@ -121,9 +121,14 @@ message AssistantEntry {
   string model_id = 5;
   string system_prompt = 6;
   // Exec-catalog tool names (Read, Write, StrReplace, Delete, Grep, Glob, Shell, Await,
-  // ReadLints, SemanticSearch).
+  // ReadLints, SemanticSearch) — the assistant's own tool loop, what it may call while it works.
   repeated string tools = 7;
   string daemon_instance_id = 8;
+  // The *main agent's* exec-catalog tools this assistant stands in for: what a session that
+  // attaches it stops being able to call itself. Same ten names as `tools`, a different question —
+  // an assistant may grep for itself without taking Grep away from the session that attached it.
+  // Empty = takes nothing over.
+  repeated string replaces = 9;
 }
 
 message AssignableTool {
@@ -213,6 +218,8 @@ message CreateAssistantRequest {
   string model_id = 5;
   string system_prompt = 6;
   repeated string tools = 7;
+  // Main-agent tools this assistant takes over; see `AssistantEntry.replaces`.
+  repeated string replaces = 8;
 }
 message CreateAssistantResponse {
   AssistantEntry assistant = 1;
@@ -224,6 +231,9 @@ message UpdateAssistantRequest {
   string label = 3;
   string system_prompt = 4;
   repeated string tools = 5;
+  // Carried whole, like `tools`: an update that omitted it would leave a takeover in place with
+  // nothing on screen saying so.
+  repeated string replaces = 6;
 }
 message UpdateAssistantResponse {
   AssistantEntry assistant = 1;

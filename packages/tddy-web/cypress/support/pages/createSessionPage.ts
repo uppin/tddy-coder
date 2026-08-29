@@ -43,11 +43,6 @@ export const createSessionPage = {
   agentOption: (optionValue: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(ids.createSessionAgentSelectOption(optionValue), options),
 
-  /** Start the session as the agent carrying `optionValue`. */
-  selectAgent(optionValue: string) {
-    byTestId(TEST_IDS.createSessionAgentSelect).select(optionValue);
-  },
-
   /** The option values the Agent `<select>` offers, in option order. */
   agentOptionValues: (): Cypress.Chainable<string[]> =>
     createSessionPage
@@ -107,6 +102,23 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).check();
   },
 
+  /**
+   * One specialized-agent checkbox inside an open Managed codebase section, keyed by the qualified
+   * id (`<name>@<host>`) the form submits.
+   */
+  specializedAgentOption: (agentId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(ids.createSessionAgentOption(agentId), options),
+
+  /** Attach a specialized agent to the session being created. */
+  selectSpecializedAgent(agentId: string) {
+    byTestId(ids.createSessionAgentOption(agentId)).click();
+  },
+
+  /** No specialized agent can be attached in the current form state. */
+  expectNoSpecializedAgentPicker() {
+    byTestId(TEST_IDS.createSessionManagedCodebaseSection).should("not.exist");
+  },
+
   /** Close the "Managed codebase" section. */
   disableManagedCodebase() {
     byTestId(TEST_IDS.createSessionManagedCodebaseToggle).uncheck();
@@ -156,9 +168,12 @@ export const createSessionPage = {
       .find("option:not([disabled])")
       .then(($opts) => [...$opts].map((el) => (el.textContent ?? "").trim())),
 
-  /** Choose the agent (tool sessions). */
-  selectAgent(agentId: string) {
-    byTestId(TEST_IDS.createSessionAgentSelect).select(agentId);
+  /**
+   * Start the session as the agent carrying `optionValue` — `{id}@{daemonInstanceId}` while the
+   * common room advertises daemons, the bare id otherwise.
+   */
+  selectAgent(optionValue: string) {
+    byTestId(TEST_IDS.createSessionAgentSelect).select(optionValue);
   },
 
   /** Choose the workflow recipe (tool sessions). */
@@ -217,23 +232,36 @@ export const createSessionPage = {
     byTestId(TEST_IDS.createSessionPrStackBaseSessionSelect).should("not.exist");
   },
 
-  /** The session ids offered as stack bases, in option order. The default option's value is "". */
-  prStackBaseSessionOptionValues: (): Cypress.Chainable<string[]> =>
+  /**
+   * The session ids offered as stack bases, in option order — the default option's value is "".
+   *
+   * Asserted rather than yielded, because the options are drawn from `ListSessions`: until that
+   * answer lands the picker holds its default alone, and reading the options into a plain array
+   * settles on whichever list happened to be mounted first instead of retrying until the offered one
+   * is there.
+   */
+  expectPrStackBaseSessionOptionValues(sessionIds: string[]) {
     createSessionPage
       .prStackBaseSessionSelect()
       .find("option")
-      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+      .should(($opts) => {
+        expect([...$opts].map((el) => (el as HTMLOptionElement).value)).to.deep.equal(sessionIds);
+      });
+  },
 
   /**
    * The stack-base options' visible labels, in option order — what the operator actually reads when
-   * picking a base. Yields a plain array so a test states the whole offered list, and its order, in
-   * one assertion.
+   * picking a base. States the whole offered list, and its order, in one assertion, and retries for
+   * the same reason as {@link expectPrStackBaseSessionOptionValues}.
    */
-  prStackBaseSessionOptionLabels: (): Cypress.Chainable<string[]> =>
+  expectPrStackBaseSessionOptionLabels(labels: string[]) {
     createSessionPage
       .prStackBaseSessionSelect()
       .find("option")
-      .then(($opts) => [...$opts].map((el) => el.textContent ?? "")),
+      .should(($opts) => {
+        expect([...$opts].map((el) => el.textContent ?? "")).to.deep.equal(labels);
+      });
+  },
 
   /** Choose the existing session whose branch seeds the new orchestrator's stack. */
   selectPrStackBaseSession(sessionId: string) {

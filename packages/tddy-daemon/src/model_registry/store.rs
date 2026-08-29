@@ -70,6 +70,10 @@ pub struct NewAssistant {
     pub system_prompt: String,
     /// Exec-catalog tool names. Every entry must resolve via [`SubagentTool::from_catalog_name`].
     pub tools: Vec<String>,
+    /// The *main agent's* exec-catalog tools this assistant stands in for — what a session that
+    /// attaches it stops being able to call itself. Same vocabulary as [`Self::tools`], a
+    /// different question, and validated the same way.
+    pub replaces: Vec<String>,
 }
 
 /// The registry of one daemon, backed by a SQLite file.
@@ -464,6 +468,7 @@ impl ModelRegistryStore {
         owner: &str,
     ) -> Result<AssistantEntry, ModelRegistryError> {
         let tools = validate_tools(&assistant.tools)?;
+        let replaces = validate_tools(&assistant.replaces)?;
         // The model id is what reaches the provider as `"model": …`. An empty one would produce an
         // agent def with no model at all, which fails at inference time with the provider's words
         // rather than ours. The id is *not* checked against the cached catalog: that cache is
@@ -495,8 +500,9 @@ impl ModelRegistryStore {
         let assistant_id = format!("asst-{}", uuid::Uuid::new_v4());
         sqlx::query(
             "INSERT INTO assistant
-                (assistant_id, name, label, provider_id, model_id, system_prompt, tools, owner)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (assistant_id, name, label, provider_id, model_id, system_prompt, tools, replaces,
+                 owner)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .bind(&assistant_id)
         .bind(&assistant.name)
@@ -505,6 +511,7 @@ impl ModelRegistryStore {
         .bind(&assistant.model_id)
         .bind(&assistant.system_prompt)
         .bind(encode_list(&tools))
+        .bind(encode_list(&replaces))
         .bind(owner)
         .execute(&mut *tx)
         .await
@@ -524,6 +531,7 @@ impl ModelRegistryStore {
             model_id: assistant.model_id,
             system_prompt: assistant.system_prompt,
             tools,
+            replaces,
             daemon_instance_id: self.daemon_instance_id.clone(),
         })
     }
@@ -531,7 +539,8 @@ impl ModelRegistryStore {
     /// Every assistant on this daemon, in creation order — every operator's, as with providers.
     pub async fn list_assistants(&self) -> Result<Vec<AssistantEntry>, ModelRegistryError> {
         let rows = sqlx::query(
-            "SELECT assistant_id, name, label, provider_id, model_id, system_prompt, tools
+            "SELECT assistant_id, name, label, provider_id, model_id, system_prompt, tools,
+                    replaces
              FROM assistant
              ORDER BY rowid",
         )
@@ -547,6 +556,7 @@ impl ModelRegistryStore {
                     model_id: row.get("model_id"),
                     system_prompt: row.get("system_prompt"),
                     tools: decode_list("assistant.tools", &row.get::<String, _>("tools"))?,
+                    replaces: decode_list("assistant.replaces", &row.get::<String, _>("replaces"))?,
                     daemon_instance_id: self.daemon_instance_id.clone(),
                 })
             })
@@ -575,9 +585,11 @@ impl ModelRegistryStore {
         label: &str,
         system_prompt: &str,
         tools: &[String],
+        replaces: &[String],
         caller: &str,
     ) -> Result<AssistantEntry, ModelRegistryError> {
         let tools = validate_tools(tools)?;
+        let replaces = validate_tools(replaces)?;
         // Bounded on update as well as on create: a limit only one of the two write paths enforces
         // is a limit an operator gets past by creating a small assistant and then editing it.
         reject_an_oversized_system_prompt(system_prompt)?;
@@ -588,13 +600,14 @@ impl ModelRegistryStore {
             &format!("assistant {assistant_id}"),
         )?;
         sqlx::query(
-            "UPDATE assistant SET label = ?2, system_prompt = ?3, tools = ?4
+            "UPDATE assistant SET label = ?2, system_prompt = ?3, tools = ?4, replaces = ?5
              WHERE assistant_id = ?1",
         )
         .bind(assistant_id)
         .bind(label)
         .bind(system_prompt)
         .bind(encode_list(&tools))
+        .bind(encode_list(&replaces))
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1050,6 +1063,7 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             model_id TEXT NOT NULL,
             system_prompt TEXT NOT NULL DEFAULT '',
             tools TEXT NOT NULL DEFAULT '[]',
+            replaces TEXT NOT NULL DEFAULT '[]',
             owner TEXT,
             FOREIGN KEY (provider_id) REFERENCES provider(provider_id)
         );",
@@ -1072,6 +1086,15 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // it stay `NULL` — unowned — rather than being attributed to whoever restarts the daemon.
     add_column_if_missing(pool, "provider", "owner", "owner TEXT").await?;
     add_column_if_missing(pool, "assistant", "owner", "owner TEXT").await?;
+    // Likewise for a database written before an assistant could stand in for a main-agent tool:
+    // its assistants take nothing over, which is what they did when they were created.
+    add_column_if_missing(
+        pool,
+        "assistant",
+        "replaces",
+        "replaces TEXT NOT NULL DEFAULT '[]'",
+    )
+    .await?;
     Ok(())
 }
 

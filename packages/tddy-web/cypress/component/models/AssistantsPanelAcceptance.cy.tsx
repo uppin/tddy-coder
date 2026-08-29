@@ -113,6 +113,7 @@ describe("AssistantsPanelAcceptance — composing a model and tools into an assi
       label: "Repo Reader",
       systemPrompt: "You read code and answer questions about it.",
       tools: ["Read", "Grep"],
+      replaces: [],
     });
 
     // Then — the model and provider of the originating row are carried into the assistant
@@ -126,6 +127,7 @@ describe("AssistantsPanelAcceptance — composing a model and tools into an assi
           modelId: "qwen3:32b",
           systemPrompt: "You read code and answer questions about it.",
           tools: ["Read", "Grep"],
+          replaces: [],
         },
       ]);
     });
@@ -153,6 +155,7 @@ describe("AssistantsPanelAcceptance — composing a model and tools into an assi
       label: "Cursor",
       systemPrompt: "You answer questions about the repository.",
       tools: ["Read"],
+      replaces: [],
     });
 
     // Then — the dialog assertion waits for the rejection to have been rendered, so the
@@ -183,6 +186,7 @@ describe("AssistantsPanelAcceptance — composing a model and tools into an assi
       label: "Repo Reader",
       systemPrompt: "You read code and answer questions about it.",
       tools: ["Read"],
+      replaces: [],
     });
     page.createAssistantSubmit().click();
     page.createAssistantSubmit().should("be.disabled");
@@ -231,6 +235,7 @@ describe("AssistantsPanelAcceptance — composing a model and tools into an assi
       label: "Repo Reader",
       systemPrompt: "You read code and answer questions about it.",
       tools: [],
+      replaces: [],
     });
 
     // Then — an assistant is stored with the tools it was created with, so one composed from a

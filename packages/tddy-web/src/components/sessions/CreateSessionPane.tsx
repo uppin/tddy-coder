@@ -212,9 +212,11 @@ export function CreateSessionPane({
    * The session's worktree lives on a daemon other than the one running its agent — see
    * docs/ft/daemon/remote-managed-worktree.md.
    *
-   * Governs everything a split cannot also ask for: the workflow recipe, the sandbox, the semantic
-   * index and the permission bypass all resolve a worktree on the daemon running the agent, which a
-   * split session does not have, and the daemon refuses each by name.
+   * Governs everything a split cannot also ask for: the workflow recipe, the sandbox and the
+   * permission bypass all resolve a worktree on the daemon running the agent, which a split session
+   * does not have, and the daemon refuses each by name. Specialized agents and the semantic index
+   * are not among them — an agent is placeable on any host, and the index is built wherever the
+   * worktree is, which on a split session is the codebase host.
    */
   const isSplitCodebase =
     canChooseCodebaseHost &&
@@ -540,8 +542,8 @@ export function CreateSessionPane({
         initialPrompt,
         sandbox,
         managedCodebase,
-        specializedAgents: managedCodebase ? selectedAgentIds : [],
-        semanticIndex: managedCodebase ? semanticIndex : false,
+        specializedAgents: selectedAgentIds,
+        semanticIndex,
         // cursor-agent has no tool allowlist, so a split codebase could only be suggested to it,
         // never enforced — the daemon refuses such a request. Both managed-codebase blocks share
         // state, so a host picked while the form was claude-cli must not survive the switch here.
@@ -552,10 +554,10 @@ export function CreateSessionPane({
       ...commonParams,
       toolPath: "",
       agent: "",
-      // A recipe, a sandbox and a semantic index all resolve a worktree on the daemon running the
-      // agent, which a split session does not have — the daemon refuses each by name. The form
-      // defaults `recipe` to a non-empty value and either toggle may already be on, so without this
-      // a split session would be created as a request that cannot succeed.
+      // A recipe's tooling runs against a repository on the daemon hosting the agent, which a
+      // split session does not have — the daemon refuses the combination. The form defaults
+      // `recipe` to a non-empty value, so without this a split session would be created as a
+      // request that cannot succeed.
       recipe: managedCodebase && !isSplitCodebase ? recipe : "",
       stackParent,
       sessionType: "claude-cli",
@@ -565,10 +567,12 @@ export function CreateSessionPane({
       initialPrompt,
       sandbox: isSplitCodebase ? false : sandbox,
       managedCodebase,
-      // Only send agents when managed codebase is enabled — the picker is hidden otherwise,
-      // so a selection made before unchecking the toggle must not leak into the request.
-      specializedAgents: managedCodebase ? selectedAgentIds : [],
-      semanticIndex: managedCodebase && !isSplitCodebase ? semanticIndex : false,
+      // Both ride along on any placement, split or not — an agent reads the codebase through its
+      // own placement, and the index is built wherever the worktree is. Only `managedCodebase`
+      // gates them: without a managed codebase there is nothing to index and no worktree to give
+      // an agent, and the picker and toggle are hidden, so neither value may leak into the request.
+      specializedAgents: selectedAgentIds,
+      semanticIndex,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
       // combination the daemon refuses. `isSplitCodebase` also covers peer mode, where the worktree
@@ -922,7 +926,14 @@ export function CreateSessionPane({
                 checked={managedCodebase}
                 onChange={(e) => {
                   setManagedCodebase(e.target.checked);
-                  if (!e.target.checked) setSemanticIndex(false);
+                  // Closing the section clears what only it could offer, rather than leaving the
+                  // values to be stripped at submit: a selection the operator can no longer see is
+                  // one the form must no longer hold, and a request that disagrees with the screen
+                  // is how a picked agent went missing without an error.
+                  if (!e.target.checked) {
+                    setSemanticIndex(false);
+                    setSelectedAgentIds([]);
+                  }
                 }}
               />
               Managed codebase
@@ -948,8 +959,6 @@ export function CreateSessionPane({
                   </select>
                 </div>
                 {agentPickerSection}
-                {/* No split guard here, unlike the claude-cli copy below: `isSplitCodebase` requires
-                    claude-cli, so inside this cursor-cli branch it is always false. */}
                 <div>
                   <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <input
@@ -1057,7 +1066,14 @@ export function CreateSessionPane({
                 checked={managedCodebase}
                 onChange={(e) => {
                   setManagedCodebase(e.target.checked);
-                  if (!e.target.checked) setSemanticIndex(false);
+                  // Closing the section clears what only it could offer, rather than leaving the
+                  // values to be stripped at submit: a selection the operator can no longer see is
+                  // one the form must no longer hold, and a request that disagrees with the screen
+                  // is how a picked agent went missing without an error.
+                  if (!e.target.checked) {
+                    setSemanticIndex(false);
+                    setSelectedAgentIds([]);
+                  }
                 }}
               />
               Managed codebase
@@ -1114,23 +1130,25 @@ export function CreateSessionPane({
                     </select>
                   </div>
                 )}
+                {/* No split guard: an agent is placeable on any host, and the placement only
+                    decides how it reads the codebase — an agent on the codebase host reads that
+                    worktree directly, one anywhere else reads a clone the session's worktree sync
+                    keeps current. So the picker offers the same roster either way. */}
                 {agentPickerSection}
-                {/* Indexing runs against a worktree on this daemon before launch, which a split
-                    session does not have — refused by the daemon, so not offered here. */}
-                {!isSplitCodebase && (
-                  <div>
-                    <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <input
-                        data-testid="create-session-semantic-index-toggle"
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-input"
-                        checked={semanticIndex}
-                        onChange={(e) => setSemanticIndex(e.target.checked)}
-                      />
-                      Semantic index
-                    </label>
-                  </div>
-                )}
+                {/* No split guard: the index is built wherever the worktree is, which on a split
+                    session is the codebase host. */}
+                <div>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      data-testid="create-session-semantic-index-toggle"
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-input"
+                      checked={semanticIndex}
+                      onChange={(e) => setSemanticIndex(e.target.checked)}
+                    />
+                    Semantic index
+                  </label>
+                </div>
               </div>
             )}
           </div>

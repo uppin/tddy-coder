@@ -88,6 +88,23 @@ pub struct SessionMetadata {
     /// for co-located sessions and legacy files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codebase_session_id: Option<String>,
+    /// Daemon instance running the agent that works in *this* session's worktree, when this session
+    /// is the `workspace` half of a split placement. The mirror image of
+    /// `codebase_daemon_instance_id`, which the agent half carries. Absent for every other session,
+    /// agent clones included, and for legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_daemon_instance_id: Option<String>,
+    /// The paired session on that daemon whose agent works in this worktree. Absent for every other
+    /// session, agent clones included, and for legacy files.
+    ///
+    /// Load-bearing rather than informational: a tool the roster withdraws from a split session's
+    /// main agent is refused inside the jail the *agent* half runs, and the attach that withdraws it
+    /// is routed here, to the half that keeps the roster. Without this field a `workspace` session
+    /// that no agent works in — a standalone checkout, an agent clone — is indistinguishable from
+    /// one that is, and a tool-replacing agent is accepted onto it while nothing enforces the
+    /// withdrawal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
 }
 
 /// Keeps `agents_rev: 0` out of the file, so a session with no roster writes no roster keys at all
@@ -169,9 +186,12 @@ pub fn write_initial_tool_session_metadata(
         agents_rev: 0,
         legacy_specialized_agents: Vec::new(),
         // Split placement is claude-cli only, and those sessions write their metadata directly —
-        // a session created here always works in a worktree on this host.
+        // a session created here always works in a worktree on this host, and no agent elsewhere
+        // works in it.
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     };
     write_session_metadata(session_dir, &metadata)
 }

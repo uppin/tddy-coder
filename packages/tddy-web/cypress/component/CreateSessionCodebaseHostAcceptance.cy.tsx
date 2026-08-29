@@ -40,7 +40,35 @@ const DAEMON_HOSTS: DaemonHost[] = [
 /** "Same as host" — the co-located default, sent as an empty `codebaseDaemonInstanceId`. */
 const SAME_AS_HOST = "";
 
-function aCreateSessionBackend(): InMemoryRpcBackend {
+/** The specialized agent a host offers, under the qualified id the picker submits. */
+const FASTCONTEXT = `fastcontext@${AGENT_HOST}`;
+
+/** One agent as `ListSubagents` returns it. */
+interface OfferedAgent {
+  name: string;
+  label: string;
+  model: string;
+  daemonInstanceId: string;
+  agentId: string;
+}
+
+/**
+ * The backend with one specialized agent on offer. Separate from the default because most of these
+ * tests are about a placement, not a roster — but the ones that are need something to select.
+ */
+function aCreateSessionBackendOfferingAnAgent(): InMemoryRpcBackend {
+  return aCreateSessionBackend([
+    {
+      name: "fastcontext",
+      label: "FastContext",
+      model: "microsoft/FastContext-1.0-4B-RL",
+      daemonInstanceId: AGENT_HOST,
+      agentId: FASTCONTEXT,
+    },
+  ]);
+}
+
+function aCreateSessionBackend(offeredAgents: OfferedAgent[] = []): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(ConnectionService.method.listSessions, () => ({ sessions: [] }))
     .onUnary(ConnectionService.method.listAgentModels, () => ({
@@ -56,7 +84,7 @@ function aCreateSessionBackend(): InMemoryRpcBackend {
     .onUnary(ConnectionService.method.listTools, () => ({
       tools: [{ path: "/usr/bin/tddy-coder", label: "tddy-coder" }],
     }))
-    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: [] }))
+    .onUnary(ConnectionService.method.listSubagents, () => ({ subagents: offeredAgents }))
     .onUnary(ConnectionService.method.listProjectBranches, () => ({
       branches: ["origin/main"],
       defaultRemote: "origin",
@@ -307,24 +335,37 @@ it("sends no workflow recipe for a split session", () => {
   });
 });
 
-it("stops offering sandbox and semantic index once the codebase is placed on another host", () => {
-  // Given a managed claude-cli session, which offers both while the codebase is co-located
+it("stops offering sandbox once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session, which offers the sandbox while the codebase is co-located
   mountCreatePane(aCreateSessionBackend());
   createSessionPage.switchToClaudeCliSession();
   createSessionPage.enableManagedCodebase();
   createSessionPage.sandboxToggle().should("exist");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then — a sandbox resolves a worktree on the daemon running the agent, which a split session
+  // does not have, so the daemon refuses it. Offering it would be the same trap the recipe had.
+  createSessionPage.sandboxToggle().should("not.exist");
+});
+
+it("keeps the semantic index on offer once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session with the index on offer while the codebase is co-located
+  mountCreatePane(aCreateSessionBackend());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.enableManagedCodebase();
   createSessionPage.semanticIndexToggle().should("exist");
 
   // When the codebase moves to another host
   createSessionPage.selectCodebaseHost(CODEBASE_HOST);
 
-  // Then — both resolve a worktree on the daemon running the agent, which a split session does not
-  // have, so the daemon refuses them. Offering them would be the same trap the recipe had.
-  createSessionPage.sandboxToggle().should("not.exist");
-  createSessionPage.semanticIndexToggle().should("not.exist");
+  // Then it stays on offer — the index is built wherever the worktree is, and a split session has
+  // one, on the codebase host. Withdrawing it here would hide a choice the daemon accepts.
+  createSessionPage.semanticIndexToggle().should("exist");
 });
 
-it("sends neither sandbox nor semantic index for a split session", () => {
+it("sends the chosen semantic index for a split session, and no sandbox", () => {
   // Given both switched on while the codebase was still co-located
   const backend = aCreateSessionBackend();
   mountCreatePane(backend);
@@ -338,12 +379,60 @@ it("sends neither sandbox nor semantic index for a split session", () => {
   createSessionPage.selectCodebaseHost(CODEBASE_HOST);
   createSessionPage.submit();
 
-  // Then — a value chosen before the placement must not survive into a request the daemon rejects
+  // Then the index rides along to the host that can build it, while the sandbox — which the daemon
+  // refuses on this placement — does not survive into the request
   cy.wrap(null).should(() => {
     const request = theStartSessionRequest(backend);
     expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
     expect(request.sandbox).to.equal(false);
-    expect(request.semanticIndex).to.equal(false);
+    expect(request.semanticIndex).to.equal(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests — a split session is seeded with a specialized agent like any other
+// ---------------------------------------------------------------------------
+//
+// An agent is placeable on any host, and the placement decides how it reads the codebase rather than
+// whether it may be picked: an agent on the codebase host reads that worktree directly, one anywhere
+// else reads a clone the session's worktree sync keeps current. So a split placement withdraws
+// nothing from the picker — the operator picks agents, and the daemon works out the plumbing.
+
+it("keeps the specialized-agent picker once the codebase is placed on another host", () => {
+  // Given a managed claude-cli session with an agent on offer while the codebase is co-located
+  mountCreatePane(aCreateSessionBackendOfferingAnAgent());
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.specializedAgentOption(FASTCONTEXT).should("be.visible");
+
+  // When the codebase moves to another host
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // Then the agent is still on offer — where the codebase sits is not a reason to withhold it
+  createSessionPage.specializedAgentOption(FASTCONTEXT).should("be.visible");
+});
+
+it("sends the chosen specialized agents for a split session", () => {
+  // Given an agent picked while the codebase was still co-located
+  const backend = aCreateSessionBackendOfferingAnAgent();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectSpecializedAgent(FASTCONTEXT);
+
+  // When the operator then places the codebase on another host and creates the session
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+  createSessionPage.submit();
+
+  // Then the selection rides along: the daemon seeds the roster beside the codebase and provisions
+  // whatever the agent's own placement needs, so dropping it here would silently start a different
+  // session than the one that was asked for
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.specializedAgents).to.deep.equal([FASTCONTEXT]);
   });
 });
 

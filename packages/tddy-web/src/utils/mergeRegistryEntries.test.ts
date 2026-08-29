@@ -62,6 +62,7 @@ function anAssistantRow(overrides: Partial<AssistantRow> = {}): AssistantRow {
     modelId: "qwen3:32b",
     systemPrompt: "You read code and answer questions about it.",
     tools: ["Read", "Grep"],
+    replaces: [],
     ...overrides,
   };
 }

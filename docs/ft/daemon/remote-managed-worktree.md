@@ -60,25 +60,41 @@ that still has native filesystem tools has nothing to proxy through. A split pla
 
 ### What a split session cannot also ask for
 
-Three otherwise-valid options need a repository on the daemon running the agent, which a split
-session does not have. Each is **refused** with `invalid_argument` naming the field, rather than
-silently dropped — a session that came up without its recipe looks exactly like the session that
-was asked for.
+Two otherwise-valid options cannot be served on a split placement. Each is **refused** with
+`invalid_argument` naming the field, rather than silently dropped — a session that came up without
+its recipe looks exactly like the session that was asked for.
 
-| Field | Why it needs a local repository |
+| Field | Why it cannot be served here |
 |---|---|
 | `recipe` | A workflow recipe's tooling resolves `TDDY_REPO_DIR` on the agent's host |
-| `semantic_index` | Indexes a worktree on this daemon before launch |
 | `sandbox` | The sandboxed spawn resolves its worktree on this daemon |
 
-This mirrors the v1 restriction the original remote-codebase mode already carries (recipes other
-than `free-prompting` were out of scope there too).
+Both need a repository on the daemon running the agent, which a split session does not have. This
+mirrors the v1 restriction the original remote-codebase mode already carries (recipes other than
+`free-prompting` were out of scope there too).
 
-**The UI must not offer them.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends it
-whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
+**`specialized_agents` and `semantic_index` are not among them.** Both were refused here once, on
+the premise that a peer's agent is admitted to the session's room only after the spawn opens it. The
+premise was false — claiming a clone opens that room itself — and both are answered by the rule the
+rest of this document is built on: *the work goes where the worktree is.*
+
+| Field | Where a split placement serves it |
+|---|---|
+| `specialized_agents` | On the codebase host, which is the host holding the roster. An agent owned by that host reads the authoritative worktree with no clone; an agent owned by any other host gets a clone, exactly as an attach gives it one |
+| `semantic_index` | On the codebase host, against the worktree that exists there — the index is built beside the code it indexes |
+
+Where an agent runs decides **how the session is split across hosts**, never whether it may be seeded
+([session-agent-roster.md](session-agent-roster.md) § Seeding at start). Nothing about the placement
+is a gate on the selection.
+
+**The UI must not offer what is refused.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends
+it whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
 selector could produce is a request the daemon rejects. The form therefore withdraws the Recipe
-control once a codebase host is chosen, and sends an empty `recipe`. Putting the codebase back on
-the session's own host restores it: the withdrawal is a property of the split, not a one-way door.
+control once a codebase host is chosen, and sends an empty `recipe`; the Sandbox control is withdrawn
+on the same terms. Putting the codebase back on the session's own host restores both: the withdrawal
+is a property of the split, not a one-way door. The specialized-agent picker and the Semantic index
+toggle are **not** withdrawn — on every placement they are served, so on every placement they are
+offered.
 
 ### Why claude-cli only
 
@@ -123,6 +139,25 @@ This exists so a split start can name the B-side session **before** contacting B
 forward that times out leaves A knowing a session may have been created but not what it is called,
 and the teardown cannot run — see § Teardown.
 
+```proto
+// The agent half of a split placement: which session, on which daemon, works in the worktree the
+// `workspace` session being created holds. Honoured only for session_type "workspace" — and never
+// alongside `agent_clone`, since a checkout cannot be both a clone's mirror and a split session's
+// working tree. Both fields or neither: a daemon named with no session on it names a host but
+// nothing that works in the checkout.
+message SplitAgentPlacement {
+  string session_id = 1;
+  string agent_daemon_instance_id = 2;
+}
+SplitAgentPlacement split_agent = 35;
+```
+
+B cannot derive this from anything else in the request, and it needs it: B runs no agent, so
+"is a withdrawal attached to this checkout enforced anywhere, and where" is answerable only from
+what A tells it. The `workspace` session persists it, which is what makes the pairing readable from
+**either** half — the agent half already records the codebase half. See
+[session-agent-roster.md](session-agent-roster.md) § Enforced at two layers.
+
 ### `SessionEntry` (connection.proto)
 
 ```proto
@@ -144,7 +179,18 @@ string codebase_session_id = 30;
 pub codebase_daemon_instance_id: Option<String>,
 /// The paired `workspace` session id on that daemon. Absent for co-located sessions.
 pub codebase_session_id: Option<String>,
+/// The other direction, written on the B-side `workspace` session: the daemon running the agent
+/// that works in *this* worktree, and the session on it. Absent for every session but the codebase
+/// half of a split placement — a standalone workspace session and an agent clone's mirror included.
+pub agent_daemon_instance_id: Option<String>,
+pub agent_session_id: Option<String>,
 ```
+
+The back-pointer is load-bearing rather than informational. A tool the roster withdraws from a split
+session's main agent is refused inside the jail the **agent** half runs, and the attach that
+withdraws it is routed to the **codebase** half, where it reads that session's metadata. Without the
+pairing, a `workspace` session no agent works in is indistinguishable from one that is, and a
+tool-replacing agent is accepted onto it while nothing enforces the withdrawal.
 
 For a split session, host A's `.session.yaml` has **`repo_path: None`** — there is no repository on
 A. Every consumer that reads `repo_path` to reach a worktree must treat a split session as
@@ -316,6 +362,20 @@ reuse the original, which is scoped to a lifetime that may have elapsed.
 its worktree from `meta.repo_path`. A split session resumed through it today would lose its tool
 transport entirely and fail on the missing worktree.
 
+**Resume reads the roster from the codebase daemon.** A split session's own `.session.yaml` never
+holds a roster — its agents are recorded beside the codebase, on the workspace session the pairing
+names — so the tools a resumed agent may call cannot be derived locally. Resume therefore issues a
+routed `ListSessionAgents` against `codebase_daemon_instance_id` and builds the spawn's
+`--allowedTools` / `--disallowedTools` from what comes back. Claude's flags are fixed for the life
+of the process, so this is the only moment a withdrawal can be imposed
+(session-agent-roster.md AC25).
+
+**An unreachable codebase daemon fails the resume.** "The peer is unreachable" and "nothing is
+attached" produce the same empty roster, and reading the second from the first is how a relaunch
+silently restores a tool the operator gave away. A split session whose codebase host cannot be
+reached has no working tool call in any case, so the resume is refused with a message naming the
+host — the same rule Teardown applies below.
+
 ### Teardown
 
 `DeleteSession` on A deletes the paired workspace session on B before removing A's own session
@@ -413,8 +473,10 @@ in the cursor-cli branch and once in the claude-cli branch — sharing the same 
 only**. Because both copies share state, the claude-cli branch must also send an empty
 `codebaseDaemonInstanceId` when the session type is cursor-cli, so a value chosen before switching
 type cannot leak into a request that would be refused. One predicate (`isSplitCodebase`) governs
-the selector's visibility, the recipe withdrawal, and what the request carries, so the three cannot
-drift apart.
+the selector's visibility, the Recipe, Sandbox and Dangerously-skip-permissions withdrawals, and what
+the request carries for those three fields, so they cannot drift apart. It governs nothing else — in particular it never touches the
+specialized-agent picker or the Semantic index toggle, which are offered and submitted on every
+placement.
 
 The sessions list renders a split session's placement as agent host and codebase host, sourced from
 the new `SessionEntry` fields rather than inferred from which daemon answered.

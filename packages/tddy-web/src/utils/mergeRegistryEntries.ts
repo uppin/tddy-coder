@@ -56,7 +56,10 @@ export interface AssistantRow {
   readonly providerId: string;
   readonly modelId: string;
   readonly systemPrompt: string;
+  /** What this assistant may call while it works. */
   readonly tools: readonly string[];
+  /** The main-agent tools it stands in for — what attaching it takes away from the session. */
+  readonly replaces: readonly string[];
 }
 
 /** A daemon whose registry could not be read, and why. */

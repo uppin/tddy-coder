@@ -9,8 +9,8 @@
  *   • **one client per host**, each peer addressed at its `daemon-{instanceId}` RPC identity over the
  *     shared common-room connection — the identity a daemon actually serves RPC on;
  *   • **isolated reads**, so one unreachable host costs one error row and never the list;
- *   • **one row per identity**, because a host reached twice (through its own client and through its
- *     common-room identity) must not double every row it offers.
+ *   • **one row per identity**, because two hosts can name the same row — a def created on one host
+ *     and known to another is one agent, and must be offered once.
  *
  * This hook owns those three and nothing else. What service to talk to, what a row is and what makes
  * two rows the same row are the caller's, passed in as a {@link HostReader}.
@@ -34,7 +34,7 @@ export interface HostReadFailure {
 }
 
 export interface HostFanOut<T> {
-  /** Every host's rows, in host order (home first), de-duplicated by the reader's key. */
+  /** Every host's rows, in the order the hosts are read, de-duplicated by the reader's key. */
   readonly rows: T[];
   readonly failures: HostReadFailure[];
 }
@@ -86,6 +86,14 @@ export function noConnectionTo(daemonInstanceId: string): string {
  * form is handed the selected daemon's client, and a session pane talks over the shared transport to
  * the daemon facilitating its session. `homeInstanceId` names the host behind it, both to attribute
  * its rows and so its failure gets an error row naming a host an operator can go and look at.
+ *
+ * An **unnamed** home host (`homeInstanceId === ""`) is therefore not read through `homeClient` while
+ * the common room advertises hosts: that read could attribute nothing and its failure could name no
+ * host to go and look at, and the host behind it is already in the advertised list under an id the
+ * room *can* name. Reading it there instead of through `homeClient` costs no host — every advertised
+ * one is still read, at its own identity, exactly once — where reading both spellings asked one
+ * daemon twice and could report a healthy host as unreachable off the second answer. With no host
+ * advertised there is nothing to name and nothing to disambiguate, so `homeClient` is the read.
  *
  * `reader` is held in a ref: the reads are restarted by the host list changing, never by the caller
  * re-describing the same service, so an inline reader cannot turn every render into a fresh round of
@@ -139,9 +147,20 @@ export function useHostFanOut<C, T>(
     .join("\n");
   const peerIds = useMemo(() => peerIdsKey.split("\n").filter((id) => id !== ""), [peerIdsKey]);
 
+  // Which hosts this fan-out is answering for, in the order they are rendered. `homeClient` is one
+  // of them only when it names its host, or when no host is advertised for it to be read as; see the
+  // doc comment. Deriving the effect and the assembly below from one list is what keeps an answer
+  // recorded before the room advertised anything from being rendered afterwards, when the same host
+  // is being read under its own name as well.
+  const readsHomeClient = homeInstanceId !== "" || peerIds.length === 0;
+  const hostsRead = useMemo(
+    () => (readsHomeClient ? [homeInstanceId, ...peerIds] : peerIds),
+    [readsHomeClient, homeInstanceId, peerIds],
+  );
+
   useEffect(() => {
     const reads = new AbortController();
-    void readHost(homeInstanceId, homeClient, reads.signal);
+    if (readsHomeClient) void readHost(homeInstanceId, homeClient, reads.signal);
     for (const instanceId of peerIds) {
       // Every peer is addressed over the shared common-room connection; without a room there is no
       // way to reach it, and saying so beats a list that quietly omits that host.
@@ -157,13 +176,13 @@ export function useHostFanOut<C, T>(
     // Unmounting — or moving on to a different host list — cancels the reads in flight, so no answer
     // to a question nobody is asking any more is waited for or written.
     return () => reads.abort();
-  }, [homeClient, homeInstanceId, peerIds, room, liveKitFactory, readHost]);
+  }, [homeClient, homeInstanceId, readsHomeClient, peerIds, room, liveKitFactory, readHost]);
 
   return useMemo(() => {
     const rows: T[] = [];
     const failures: HostReadFailure[] = [];
     const seen = new Set<string>();
-    for (const instanceId of [homeInstanceId, ...peerIds]) {
+    for (const instanceId of hostsRead) {
       const answer = answers.get(instanceId);
       if (!answer) continue;
       if (answer.error !== "") {
@@ -178,5 +197,5 @@ export function useHostFanOut<C, T>(
       }
     }
     return { rows, failures };
-  }, [answers, homeInstanceId, peerIds]);
+  }, [answers, hostsRead]);
 }

@@ -234,6 +234,7 @@ async fn a_repo_explorer_in(harness: &Harness) -> ModelSessionTarget {
                 model_id: "qwen3:32b".to_string(),
                 system_prompt: "You explore repositories.".to_string(),
                 tools: vec!["Read".to_string()],
+                replaces: Vec::new(),
             },
             THE_OPERATOR,
         )
@@ -607,6 +608,7 @@ async fn the_assistants_system_prompt_leads_its_conversation() {
                 model_id: "qwen3:32b".to_string(),
                 system_prompt: "You explore repositories.".to_string(),
                 tools: Vec::new(),
+                replaces: Vec::new(),
             },
             THE_OPERATOR,
         )

@@ -346,18 +346,44 @@ impl PermissionServer {
     }
 
     /// The tools `tools/list` reports: everything in this server's router, minus the subagent
-    /// conversation tools while **no agent is attached**.
+    /// conversation tools while **no agent is attached**, and minus every exec tool an attached agent
+    /// has taken over.
     ///
     /// Computed per call rather than baked into the router at construction, because the roster is
-    /// live: an attach makes the tools appear and a detach makes them go, and each applied revision
-    /// sends `notifications/tools/list_changed` so the main agent re-lists and sees it
-    /// (docs/ft/daemon/session-agent-roster.md § The roster stream). Advertising them on an empty
-    /// roster would show the operator four tools that can only answer "no agents are attached".
-    fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+    /// live: an attach makes the conversation tools appear and takes the replaced exec tools away, a
+    /// detach does the reverse, and each applied revision sends `notifications/tools/list_changed` so
+    /// the main agent re-lists and sees it (docs/ft/daemon/session-agent-roster.md § The roster
+    /// stream). Advertising the conversation tools on an empty roster would show the operator four
+    /// tools that can only answer "no agents are attached"; advertising a replaced exec tool would
+    /// keep the main agent reaching for a tool the call-time check refuses mid-turn instead of
+    /// delegating to the agent that now serves it.
+    ///
+    /// Both halves of the answer come from one read of the roster
+    /// ([`LiveAgentRoster::catalog_visibility`](crate::session_agents::LiveAgentRoster::catalog_visibility)),
+    /// so the advertised set always describes a single revision.
+    ///
+    /// The withheld set is the roster's, not the spawn seed's, so it cannot disagree with the refusal
+    /// a direct call meets — both are
+    /// [`LiveAgentRoster::withdrawn_exec_tools`](crate::session_agents::LiveAgentRoster::withdrawn_exec_tools).
+    pub fn advertised_tools(&self) -> Vec<rmcp::model::Tool> {
+        let visible = crate::session_agents::session_agent_roster().catalog_visibility();
         let mut tools = self.tool_router.list_all();
-        if crate::session_agents::session_agent_roster().is_empty() {
+        if !visible.has_an_agent_to_address() {
             let conversation_tools = subagent_tool_names();
             tools.retain(|tool| !conversation_tools.contains(&tool.name.to_string()));
+        }
+        tools.retain(|tool| {
+            visible
+                .withdrawn_exec_tools
+                .taken_over_by(tool.name.as_ref())
+                .is_none()
+        });
+        // The one tool whose *schema* is roster-dependent: its `agent` parameter offers the ids
+        // that resolve right now, which is how the main agent learns there is anyone to address.
+        for tool in &mut tools {
+            if tool.name == SUBAGENT_NEW_SESSION {
+                tool.input_schema = subagent_new_session_schema(&visible.addressable_agents);
+            }
         }
         tools
     }
@@ -368,6 +394,13 @@ impl PermissionServer {
     /// attached. Pure enumeration (no socket/session) for `tddy-tools list-tools`, which feeds the
     /// web Inspector → Tools panel. Does NOT include the Bash CLI subcommands (submit/ask/…); the
     /// `list-tools` command appends those.
+    ///
+    /// Not the same set as [`Self::advertised_tools`], despite the name: this one answers "what
+    /// tools does this build have" and so lists the exec catalog whole, withdrawn entries included,
+    /// while that one answers "what may this session's agent call right now" and filters them out.
+    /// The single-revision guarantee documented there is that method's, not this file's — an
+    /// operator reading the Inspector wants the build's inventory, and an agent must never be
+    /// offered a tool an operator withdrew.
     pub fn advertised_tool_defs() -> Vec<RemoteToolDef> {
         fn map_tool(t: rmcp::model::Tool) -> RemoteToolDef {
             RemoteToolDef {
@@ -1415,7 +1448,18 @@ fn refresh_internal_statuses(
 #[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for PermissionServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+        // `enable_tool_list_changed` is what makes the roster's live catalog reach the client at
+        // all: a client that was not told the list can change may ignore
+        // `notifications/tools/list_changed`, and Claude Code does — so without this declaration an
+        // agent attached after the handshake never appears in the tool list the client read once,
+        // and the exec tools it replaced are never taken away.
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
+        )
+        .with_instructions(
             "Permission prompt tool for tddy-coder. Denies unexpected tool requests. \
              When **GITHUB_TOKEN** or **GH_TOKEN** is set, this server also exposes GitHub PR tools: \
              **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
@@ -1637,6 +1681,9 @@ pub fn dynamic_tool_router(
 
 /// The names of the ACP-shaped conversation tools, read off the router that defines them so the
 /// advertisement filter cannot drift from the set it filters.
+/// The conversation tool whose `agent` parameter is answered from the live roster.
+const SUBAGENT_NEW_SESSION: &str = "subagent_new_session";
+
 fn subagent_tool_names() -> Vec<String> {
     subagent_tool_router()
         .list_all()
@@ -2004,6 +2051,69 @@ async fn subagent_list_tool(_args: serde_json::Value) -> String {
     serde_json::json!({ "conversations": conversation_records(&sessions) }).to_string()
 }
 
+/// The `subagent_new_session` input schema for a session whose roster holds `agents`.
+///
+/// The `agent` choices are the whole reason this is a function of the roster rather than a constant.
+/// An id is matched whole (`LiveAgentRoster::resolve`), `subagent_list` reports open *conversations*
+/// rather than attached agents, and nothing else enumerates the roster — so an attached agent this
+/// schema does not name is one the main agent cannot address, however faithfully the catalog
+/// followed the roster. Rebuilt per `tools/list` from
+/// [`PermissionServer::advertised_tools`], which the client re-reads on every applied revision.
+pub(crate) fn subagent_new_session_schema(
+    agents: &[crate::session_agents::AddressableAgent],
+) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    let mut agent = serde_json::json!({
+        "type": "string",
+        "description": agent_parameter_description(agents),
+    });
+    if !agents.is_empty() {
+        agent["enum"] = agents
+            .iter()
+            .map(|agent| agent.agent_id.clone())
+            .collect::<Vec<_>>()
+            .into();
+    }
+    schema_object(serde_json::json!({
+        "type": "object",
+        "properties": {
+            "agent": agent,
+            "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
+            "cwd": {"type": "string", "description": "Optional working directory hint."}
+        }
+    }))
+}
+
+/// What the `agent` parameter says it takes: the ids that resolve, spelled out.
+///
+/// Spelled out in prose as well as in the `enum` because a client that renders a schema without its
+/// `enum` would otherwise show a free-text field and no way to learn what goes in it.
+fn agent_parameter_description(agents: &[crate::session_agents::AddressableAgent]) -> String {
+    if agents.is_empty() {
+        return "Required. The qualified id of a specialized agent attached to this session."
+            .to_string();
+    }
+    let choices: Vec<String> = agents
+        .iter()
+        .map(|agent| {
+            let mut about = Vec::new();
+            if !agent.label.is_empty() {
+                about.push(agent.label.clone());
+            }
+            if !agent.daemon_instance_id.is_empty() {
+                about.push(format!("on {}", agent.daemon_instance_id));
+            }
+            match about.is_empty() {
+                true => agent.agent_id.clone(),
+                false => format!("{} ({})", agent.agent_id, about.join(", ")),
+            }
+        })
+        .collect();
+    format!(
+        "Required. One of the agents attached to this session: {}.",
+        choices.join("; ")
+    )
+}
+
 pub(crate) fn schema_object(
     json: serde_json::Value,
 ) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
@@ -2045,14 +2155,9 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         "subagent_new_session",
         "Open a new conversation with a discovery subagent (ACP session/new-shaped). \
          Returns {sessionId}.",
-        schema_object(serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent": {"type": "string", "description": "Required. The name of the subagent attached to this session to open a conversation with."},
-                "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
-                "cwd": {"type": "string", "description": "Optional working directory hint."}
-            }
-        })),
+        // No agents here: the router is built once, and this copy of the schema is only ever read
+        // where the roster is empty — where `advertised_tools` withholds the tool entirely.
+        subagent_new_session_schema(&[]),
     );
     router.add_route(subagent_route(new_session_tool, |args| {
         Box::pin(subagent_new_session_tool(args))
@@ -2126,6 +2231,24 @@ mod tests {
     use tddy_workflow_recipes::orchestrate_pr_stack::github::{
         CheckRun, PrFile, PrIssueComment, PrReview,
     };
+
+    #[test]
+    fn mcp_server_declares_that_its_tool_list_can_change() {
+        // Given a server whose advertised set follows the live roster rather than the router
+        let server = PermissionServer::new();
+
+        // When the client reads the tools capability the handshake declares
+        let tools = server
+            .get_info()
+            .capabilities
+            .tools
+            .expect("the server must declare a tools capability");
+
+        // Then it says the list can change: a client never told that is entitled to ignore
+        // `notifications/tools/list_changed`, so an agent attached after the handshake would never
+        // reach the catalog the client already read.
+        assert_eq!(tools.list_changed, Some(true));
+    }
 
     #[test]
     fn mcp_server_get_info_mentions_github_pr_tools() {

@@ -115,6 +115,9 @@ pub async fn spawn_cursor_cli_session_inner(
     cli_manager: &Arc<CliSessionManager>,
     os_user: &str,
     session_id: &str,
+    // Authorizes the `workspace` starts this session's seeded agents need on their own hosts; the
+    // peer sees the same token the client presented here.
+    session_token: &str,
     sessions_base: PathBuf,
     model: &str,
     project_id: &str,
@@ -134,7 +137,7 @@ pub async fn spawn_cursor_cli_session_inner(
     // `specialized_agents` by the caller (docs/ft/daemon/session-agent-roster.md). Resolved there
     // rather than here because qualifying an id needs this daemon's def sources *and* its registry
     // assistants, and this free function is handed neither.
-    agents: &[tddy_core::SessionAgentRecord],
+    agents: &mut [tddy_core::SessionAgentRecord],
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     // When true, index the worktree before launch (blocking; aborts on failure) and point the
     // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
@@ -147,6 +150,9 @@ pub async fn spawn_cursor_cli_session_inner(
     // the room's RPC surface is the whole `ConnectionService` — naming that type here would drag it
     // through every caller of a function that otherwise mentions nothing of the kind.
     room_host: &dyn crate::session_room::SessionRoomHost,
+    // This daemon in its capacity as the claimant of the clones the roster's peer-owned agents
+    // read. A parameter for the same reason `room_host` is one, and the same object in practice.
+    agent_clones: &dyn crate::connection_service::SeededAgentClones,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -266,6 +272,26 @@ pub async fn spawn_cursor_cli_session_inner(
         }
     };
 
+    // The clones this session's seeded agents read, claimed now: the worktree they mirror exists,
+    // and the peers that build them must be at work before the agent that prompts them is launched.
+    // Where an agent runs decides how the session is split across hosts, never whether it can be
+    // seeded — the same placements a split start takes, this one takes.
+    let seeded_clones = agent_clones
+        .claim_for_seed(
+            session_id,
+            &crate::connection_service::SeedCodebase::of_a_starting_session(
+                session_dir.clone(),
+                worktree_path.clone(),
+                project_id,
+                // Nothing stands between this agent and its own file tools: an unsandboxed
+                // co-located session enforces no withdrawal (`session_enforces_a_withdrawal`).
+                false,
+            ),
+            session_token,
+            agents,
+        )
+        .await?;
+
     let hook_token = install_cursor_hooks_in_worktree(config, &worktree_path, session_id, os_user);
 
     let binary_path = resolve_cursor_binary_path(config);
@@ -374,9 +400,14 @@ pub async fn spawn_cursor_cli_session_inner(
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
+    // The roster naming them is on disk now, so the clones belong to the session rather than to the
+    // start that claimed them.
+    seeded_clones.keep();
 
     log::info!(
         target: "tddy_daemon::connection_service",

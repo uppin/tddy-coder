@@ -15,10 +15,11 @@
 
 import React from "react";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AgentCloneState } from "../../src/gen/connection_pb";
+import { AgentCloneState, ConnectionService } from "../../src/gen/connection_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
 import {
+  aDaemonOfferingAgents,
   aDaemonThatCannotBeReached,
   aRemoteAttachedAgent,
   aSessionAgentRosterBackend,
@@ -87,6 +88,18 @@ function mountPaneAcrossHosts(roster: RosterBackend, hostB: InMemoryRpcBackend) 
     { [daemonRpcIdentity(HOST_B.instanceId)]: hostB },
     { httpBackend: roster.backend },
   );
+}
+
+/**
+ * How many times a backend was asked for its agent catalog.
+ *
+ * The pane's own client and the common room are two ways of naming *one* host, and `ListSubagents`
+ * is not free: it is what the picker's fan-out asks every host for. Counting the reads one backend
+ * received is the only way to state "asked once" — the answers of a host asked twice are identical,
+ * so nothing on screen distinguishes one read from two.
+ */
+function catalogReadsReceivedBy(roster: RosterBackend) {
+  return cy.then(() => roster.backend.callsTo(ConnectionService.method.listSubagents));
 }
 
 describe("Agent roster pane", () => {
@@ -257,6 +270,29 @@ describe("Agent roster pane", () => {
     page.pickerOption(EXPLORER_LOCAL).should("exist");
     page.pickerOptionHost(EXPLORER_LOCAL).should("have.text", HOST_A.instanceId);
     page.pickerHostError(HOST_B.instanceId).should("contain.text", "server-2 is not reachable");
+  });
+
+  it("asks the host behind its own client once, however many ways that host can be named", () => {
+    // Given — a two-host common room in which the bundle's own host is not named, so the id the room
+    // advertises for it is the only thing that can tell the pane's client apart from a peer
+    const roster = aSessionAgentRosterBackend({
+      sessionId: SESSION_ID,
+      initial: [],
+      rev: 0,
+      offers: [anAvailableAgent("explorer", HOST_A.instanceId, ["Grep"])],
+    });
+    mountPaneAcrossHosts(
+      roster,
+      aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId, ["Read"])]),
+    );
+
+    // When — the picker opens, which is what fans the catalog read out across the room
+    page.openPicker();
+
+    // Then — both hosts answered, and the session's host was asked for its catalog once
+    page.pickerOption(EXPLORER_LOCAL).should("exist");
+    page.pickerOption(LINTER_REMOTE).should("exist");
+    catalogReadsReceivedBy(roster).should("have.length", 1);
   });
 
   // -------------------------------------------------------------------------

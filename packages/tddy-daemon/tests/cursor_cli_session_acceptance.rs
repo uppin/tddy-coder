@@ -7,6 +7,7 @@ use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon::connection_service::{SeedCodebase, SeededAgentClones, SeededCloneGuard};
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 use tddy_daemon::session_room::{OpenedSessionRoom, SessionRoomHost};
 use tddy_rpc::{Code, Request, Response, Status};
@@ -21,6 +22,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 const VALID_TOKEN: &str = "valid-token";
 const TEST_MODEL: &str = "claude-4.6-sonnet-medium-thinking";
 const TEST_PROJECT_ID: &str = "test-project";
+const TEST_SESSION_TOKEN: &str = "test-session-token";
 
 /// The chat id the stub `cursor-agent` mints for `create-chat`.
 const STUB_CHAT_ID: &str = "f8db82db-e154-41d0-ae72-312bdf6d4d80";
@@ -347,6 +349,8 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     };
     tddy_core::write_session_metadata(&session_dir, &meta).unwrap();
 
@@ -648,6 +652,20 @@ impl RecordingRoomHost {
 }
 
 #[async_trait::async_trait]
+impl SeededAgentClones for RecordingRoomHost {
+    /// These starts name no agent, so there is no peer to claim a checkout from.
+    async fn claim_for_seed(
+        &self,
+        _session_id: &str,
+        _codebase: &SeedCodebase,
+        _session_token: &str,
+        _records: &mut [tddy_core::SessionAgentRecord],
+    ) -> Result<SeededCloneGuard, Status> {
+        Ok(SeededCloneGuard::nothing_claimed())
+    }
+}
+
+#[async_trait::async_trait]
 impl SessionRoomHost for RecordingRoomHost {
     async fn open_for(
         &self,
@@ -705,7 +723,7 @@ impl ACursorCliDaemon {
     async fn start_cursor_cli_session(
         &self,
         session_id: &str,
-        room_host: &dyn SessionRoomHost,
+        room_host: &RecordingRoomHost,
     ) -> Result<Response<StartSessionResponse>, Status> {
         spawn_cursor_cli_session_inner(
             &self.config,
@@ -713,6 +731,7 @@ impl ACursorCliDaemon {
             &self.agents,
             "testuser",
             session_id,
+            TEST_SESSION_TOKEN,
             self.sessions.path().to_path_buf(),
             TEST_MODEL,
             TEST_PROJECT_ID,
@@ -724,11 +743,12 @@ impl ACursorCliDaemon {
             None,
             "",
             false,
-            &[],
+            &mut [],
             None,
             false,
             false,
             &self.agents.task_registry(),
+            room_host,
             room_host,
         )
         .await

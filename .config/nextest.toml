@@ -70,6 +70,44 @@ path = "junit.xml"
 [test-groups]
 docker = { max-threads = 1 }
 
+# Every binary that brings up (or joins) a LiveKit server belongs here, not just the ones that have
+# been seen to flake. Two of them were listed and the other twenty-one leaned on `retries` instead —
+# which is a different mechanism for a different problem: a retry re-runs a test that lost a port
+# race, while this group stops the race from being run. A binary earns its place by using
+# `tddy-livekit-testkit`, so the list is derivable rather than a record of past failures; the
+# testkit's two own packages are covered wholesale.
 [[profile.ci.overrides]]
-filter = "package(tddy-livekit) or package(tddy-livekit-testkit) or (package(tddy-daemon) and binary(forward_to_peer_shared_registry))"
+filter = """
+(
+    package(tddy-livekit)
+    or package(tddy-livekit-testkit)
+    or (package(tddy-daemon) and (
+        binary(common_room_duplicate_identity_repro)
+        or binary(common_room_set_metadata_handshake_repro)
+        or binary(forward_to_peer_shared_registry)
+        or binary(livekit_peer_daemons_acceptance)
+        or binary(multi_host_acceptance)
+        or binary(relay_e2e_acceptance)
+        or binary(remote_git_livekit_acceptance)
+        or binary(remote_managed_worktree_cross_host_acceptance)
+        or binary(session_agent_remote_acceptance)
+        or binary(session_attach_cross_host_acceptance)
+        or binary(session_room_acceptance)
+        or binary(session_room_cross_host_acceptance)
+        or binary(session_room_livekit_acceptance)
+        or binary(split_session_resume_acceptance)
+        or binary(staging_forwarding_acceptance)
+    ))
+    or (package(tddy-coder) and (
+        binary(coder_publishes_session_metadata_to_participant)
+        or binary(coder_serves_connection_service_from_participant)
+    ))
+    or (package(tddy-e2e) and (
+        binary(livekit_terminal_rpc)
+        or binary(terminal_service_livekit)
+        or binary(token_generation_livekit)
+        or binary(token_service_livekit)
+    ))
+)
+"""
 test-group = "docker"

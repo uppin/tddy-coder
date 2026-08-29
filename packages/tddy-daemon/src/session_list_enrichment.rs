@@ -606,6 +606,8 @@ state:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         // Intentionally NO changeset.yaml — claude-cli sessions never have one.
@@ -668,6 +670,8 @@ state:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -715,6 +719,8 @@ state:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -762,6 +768,8 @@ state:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -829,6 +837,8 @@ sessions:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
 
@@ -904,6 +914,8 @@ sessions:
             legacy_specialized_agents: Vec::new(),
             codebase_daemon_instance_id: None,
             codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
         };
         tddy_core::write_session_metadata(&session_dir, &metadata).unwrap();
         assert!(

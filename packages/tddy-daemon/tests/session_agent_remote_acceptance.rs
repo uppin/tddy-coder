@@ -30,9 +30,11 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, MultiRpcService, Request, RpcBridge, RpcService, ServiceEntry};
 use tddy_service::proto::connection::{
-    AttachSessionAgentRequest, ConnectionService as ConnectionServiceTrait, DeleteSessionRequest,
-    DetachSessionAgentRequest, ExecuteToolRequest, ListSessionAgentsRequest, ListSessionsRequest,
+    AttachSessionAgentRequest, CancelAgentConversationRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, DetachSessionAgentRequest,
+    ExecuteToolRequest, ListSessionAgentsRequest, ListSessionsRequest,
     OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentRoster,
+    StartSessionRequest,
 };
 use tddy_service::{
     LiveKitTokenServiceServer, RemoteGitServiceServer, SessionAdmissionServiceServer,
@@ -63,8 +65,8 @@ struct Fleet {
     session_id: String,
     peers: Vec<PeerDaemon>,
     _livekit: LiveKitTestkit,
-    _sessions_a: tempfile::TempDir,
-    _project: tempfile::TempDir,
+    sessions_a: tempfile::TempDir,
+    project: tempfile::TempDir,
     _configs: Vec<tempfile::TempDir>,
     /// Per-daemon tempdirs used as `repos_base_path` so facilitator clones land in a tempdir that is
     /// cleaned up, not the operator's real home (PRD AC37). Held for the fleet's lifetime.
@@ -192,9 +194,17 @@ impl Fleet {
             .unwrap_or_else(|| panic!("no peer daemon '{instance_id}' in this fleet"))
     }
 
+    /// The roster daemon A persisted for one of its own sessions.
+    fn roster_of(&self, session_id: &str) -> Vec<tddy_core::SessionAgentRecord> {
+        let session_dir = unified_session_dir_path(self.sessions_a.path(), session_id);
+        tddy_core::read_session_metadata(&session_dir)
+            .expect("the started session has metadata on A")
+            .agents
+    }
+
     /// The main agent's own worktree on A — the one every mutation must land in.
     fn authoritative_worktree(&self) -> PathBuf {
-        self._project.path().to_path_buf()
+        self.project.path().to_path_buf()
     }
 }
 
@@ -438,8 +448,8 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         session_id,
         peers: running_peers,
         _livekit: livekit,
-        _sessions_a: sessions_a,
-        _project: project,
+        sessions_a,
+        project,
         _configs: configs,
         _repos_bases: repos_bases,
         _daemon_http_a: daemon_http_a,
@@ -482,6 +492,21 @@ impl Fleet {
     }
 }
 
+/// A stub `cursor-agent` that mints a chat id and then idles on stdin, so a cursor-cli start can
+/// reach its launch on a host where no real Cursor CLI is installed.
+fn write_stub_cursor_agent(dir: &Path) -> PathBuf {
+    let script_path = dir.join("stub_cursor_agent.sh");
+    std::fs::write(
+        &script_path,
+        "#!/bin/sh\nif [ \"$1\" = \"create-chat\" ]; then echo stub-chat-id; exit 0; fi\ncat\n",
+    )
+    .expect("write stub cursor-agent");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+        .expect("make the stub cursor-agent executable");
+    script_path
+}
+
 fn write_daemon_yaml(
     ws_url: &str,
     instance_id: Option<&str>,
@@ -490,6 +515,8 @@ fn write_daemon_yaml(
 ) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("config tempdir");
     let path = dir.path().join("daemon.yaml");
+    let cursor_binary = write_stub_cursor_agent(dir.path());
+    let cursor_binary = cursor_binary.display();
     let id_block = instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
@@ -509,6 +536,8 @@ repos_base_path: {repos_base_path}
 allowed_tools:
   - path: {true_path}
     label: t
+cursor_cli:
+  binary_path: {cursor_binary}
 livekit:
   url: {ws_url}
   api_key: {LK_API_KEY}
@@ -610,6 +639,26 @@ fn a_managed_session(session_id: &str, repo_path: &Path) -> SessionMetadata {
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
+    }
+}
+
+/// A start whose codebase is on the daemon it is addressed to — the ordinary shape, and the one a
+/// split start is the exception to. `cursor-cli` unsandboxed, because that is the co-located launch
+/// whose seed is resolved on the daemon's own start path rather than inside a jail helper.
+/// A start whose codebase is the daemon it is addressed to — no split, no `placement`, just this
+/// host's own checkout — naming one agent for its roster.
+fn a_co_located_start_seeding(agent_id: &str, repo_path: &Path) -> StartSessionRequest {
+    StartSessionRequest {
+        session_token: TEST_TOKEN.to_string(),
+        session_type: "cursor-cli".to_string(),
+        project_id: PROJECT_ID.to_string(),
+        repo_path: repo_path.to_string_lossy().into_owned(),
+        model: "stub-model".to_string(),
+        managed_codebase: true,
+        specialized_agents: vec![agent_id.to_string()],
+        ..Default::default()
     }
 }
 
@@ -856,6 +905,49 @@ async fn peer_session_ids(fleet: &Fleet, instance_id: &str) -> Vec<String> {
     ids
 }
 
+/// Where an agent runs decides how a session is split across hosts, never whether it can be named.
+/// A session whose codebase is on this daemon reaches a peer's agent the same way a split one does
+/// — over a synced clone — so the co-located start must take the seed rather than refuse it.
+#[tokio::test]
+#[serial]
+async fn seeds_a_peers_agent_onto_a_session_whose_codebase_is_here() {
+    // Given a peer that owns `explorer`, and an ordinary co-located start naming it
+    let model = a_stub_model().saying("ok").start().await;
+    let fleet = a_fleet_with_peers(&[(DAEMON_B, &["explorer"])], model.base_url()).await;
+    let explorer = format!("explorer@{DAEMON_B}");
+
+    // When
+    let started = fleet
+        .a
+        .start_session(Request::new(a_co_located_start_seeding(
+            &explorer,
+            &fleet.authoritative_worktree(),
+        )))
+        .await
+        .expect("a co-located start may name an agent another daemon owns")
+        .into_inner();
+
+    // Then the roster it persisted names the peer's agent, pointed at the clone that peer will
+    // build — the same entry a split start writes, for a session that was never split
+    let seeded = fleet.roster_of(&started.session_id);
+    assert_eq!(
+        seeded
+            .iter()
+            .map(|record| record.agent_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![explorer.as_str()],
+        "the start's roster should name the agent it was asked for"
+    );
+    assert_eq!(
+        seeded[0].daemon_instance_id, DAEMON_B,
+        "the agent runs where its def lives"
+    );
+    assert!(
+        seeded[0].codebase_session_id.is_some(),
+        "an agent on another host reads a clone of this checkout, and the roster is what names it"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // AC26-AC28 — a remote agent resolves, joins, and answers
 // ---------------------------------------------------------------------------
@@ -932,20 +1024,7 @@ async fn answers_a_prompt_to_a_remote_agent_the_way_a_local_one_answers() {
     fleet.await_clone_ready(&explorer).await;
 
     // When
-    let conversation = fleet
-        .a
-        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
-            session_token: TEST_TOKEN.to_string(),
-            session_id: fleet.session_id.clone(),
-            daemon_instance_id: String::new(),
-            agent_id: explorer.clone(),
-            conversation_id: String::new(),
-        }))
-        .await
-        .expect("opening a conversation with a remote agent must succeed")
-        .into_inner()
-        .conversation_id;
-
+    let conversation = open_conversation_with(&fleet, &explorer).await;
     let answer = collect_prompt(&fleet, &conversation, "where is main?").await;
 
     // Then
@@ -957,9 +1036,73 @@ async fn answers_a_prompt_to_a_remote_agent_the_way_a_local_one_answers() {
     );
 }
 
+/// A cancel has to reach the daemon the turn is *running* on, which is not the daemon holding the
+/// roster. The forward is re-addressed to the conversation's owning daemon for that reason: one that
+/// still named the roster host would arrive at the peer, be classified as belonging elsewhere, and be
+/// routed straight back — the two daemons handing the same cancel to each other while the turn runs
+/// on regardless. Nothing about that is visible to the caller, which is told the turn was cancelled.
+#[tokio::test]
+#[serial]
+async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
+    // Given
+    let model = a_stub_model()
+        .saying("<final_answer>src/main.rs</final_answer>")
+        .start()
+        .await;
+    let fleet = a_fleet_with_peers(&[(DAEMON_B, &["explorer"])], model.base_url()).await;
+    let explorer = format!("explorer@{DAEMON_B}");
+    fleet.attach(&explorer).await.expect("attach remote agent");
+    fleet.await_clone_ready(&explorer).await;
+    let conversation = open_conversation_with(&fleet, &explorer).await;
+
+    // When
+    fleet
+        .a
+        .cancel_agent_conversation(Request::new(CancelAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            conversation_id: conversation.clone(),
+        }))
+        .await
+        .expect("cancelling a remote conversation must reach the daemon running the turn");
+
+    // Then — the id is gone on both sides, so a later prompt is refused rather than answered by a
+    // conversation the caller was told was cancelled
+    let status = fleet
+        .a
+        .prompt_agent_conversation(Request::new(PromptAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            conversation_id: conversation.clone(),
+            prompt: "where is main?".to_string(),
+        }))
+        .await
+        .expect_err("a cancelled conversation must not be promptable");
+    assert_eq!(status.code(), Code::NotFound);
+}
+
 struct PromptAnswer {
     stop_reason: String,
     content: String,
+}
+
+/// Open a conversation with `agent_id` through daemon A, the way the main agent does.
+async fn open_conversation_with(fleet: &Fleet, agent_id: &str) -> String {
+    fleet
+        .a
+        .open_agent_conversation(Request::new(OpenAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: fleet.session_id.clone(),
+            daemon_instance_id: String::new(),
+            agent_id: agent_id.to_string(),
+            conversation_id: String::new(),
+        }))
+        .await
+        .expect("opening a conversation with a remote agent must succeed")
+        .into_inner()
+        .conversation_id
 }
 
 async fn collect_prompt(fleet: &Fleet, conversation_id: &str, prompt: &str) -> PromptAnswer {

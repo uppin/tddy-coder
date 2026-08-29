@@ -440,6 +440,19 @@ message CancelAgentConversationRequest {
 message CancelAgentConversationResponse {}
 
 // What makes a `workspace` session an agent clone. See StartSessionRequest.agent_clone.
+// The agent half of a split placement, as the codebase daemon is told about it when it is asked to
+// create the `workspace` session holding that agent's worktree
+// (docs/ft/daemon/remote-managed-worktree.md).
+//
+// Both fields or neither: a daemon named with no session on it names a host but nothing that works
+// in the checkout, which is exactly the claim the workspace session is persisting.
+message SplitAgentPlacement {
+  // The session whose agent works in the workspace session's worktree, reaching it only through
+  // mcp__tddy-tools__* over that session's room.
+  string session_id = 1;
+  // The daemon running that session, as it is addressed in the common room (`daemon-{instance_id}`).
+  string agent_daemon_instance_id = 2;
+}
 message AgentClonePlacement {
   // The session on the facilitating daemon this checkout mirrors. Names the room to join
   // (`session-{session_id}`) and the WIP ref to restore from.
@@ -762,6 +775,24 @@ message StartSessionRequest {
   // the clone's own id would encode control flow in a string, which is exactly the kind of coupling
   // that breaks silently when an id format changes.
   AgentClonePlacement agent_clone = 34;
+  // Set when this `workspace` session is the codebase half of a **split placement** — the worktree an
+  // agent session on another daemon works in, reaching it only through mcp__tddy-tools__*. Absent for
+  // every other workspace session, agent clones included, and refused outright for any other session
+  // type: a caller that believed it had recorded a pairing would go on to attach agents the session
+  // cannot enforce.
+  //
+  // It carries the one fact the codebase daemon cannot derive from the request — which session, on
+  // which daemon, works in the checkout it is about to cut — and the workspace session persists it.
+  // That is what makes the pairing readable from either half; the agent half already records the
+  // codebase half in `codebase_daemon_instance_id` / `codebase_session_id`.
+  //
+  // Enforcement depends on it. A tool the roster withdraws from a split session's main agent is
+  // refused inside the jail the *agent* half runs, and the attach that withdraws it is routed to this
+  // half, where it reads this session's metadata. A `workspace` session no agent is paired with —
+  // a standalone checkout, an agent clone — therefore enforces nothing, and an agent that replaces
+  // tools is refused on it rather than accepted unenforced. See
+  // docs/ft/daemon/session-agent-roster.md § Enforced at two layers.
+  SplitAgentPlacement split_agent = 35;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

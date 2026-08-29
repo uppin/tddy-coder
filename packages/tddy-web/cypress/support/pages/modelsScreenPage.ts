@@ -19,8 +19,10 @@ import {
   modelsChatMessage,
   modelsChatToolStatus,
   modelsChatWorkspaceOption,
+  modelsCreateAssistantReplacedTool,
   modelsCreateAssistantTool,
   modelsDaemonError,
+  modelsEditAssistantReplacedTool,
   modelsEditAssistantTool,
   modelsProviderActionError,
   modelsProviderCredential,
@@ -72,6 +74,20 @@ const rowId = (m: ModelRef) => modelsRow(m.daemonInstanceId, m.providerId, m.mod
 
 /** The `data-testid` stem every tool checkbox in the edit-assistant dialog shares. */
 const EDIT_ASSISTANT_TOOL_PREFIX = modelsEditAssistantTool("");
+
+/** The stem every *takeover* checkbox in the edit-assistant dialog shares. */
+const EDIT_ASSISTANT_REPLACED_TOOL_PREFIX = modelsEditAssistantReplacedTool("");
+
+/**
+ * Set every box under `prefix` from `wanted`, so a name left out of `wanted` is one the operator
+ * unticked rather than one this helper left as it found it.
+ */
+function setEveryBox(dialog: Cypress.Chainable<JQuery<HTMLElement>>, prefix: string, wanted: string[]) {
+  dialog.find(`[data-testid^='${prefix}']`).each(($box) => {
+    const tool = $box.attr("data-testid")!.replace(prefix, "");
+    cy.wrap($box).then(($el) => (wanted.includes(tool) ? cy.wrap($el).check() : cy.wrap($el).uncheck()));
+  });
+}
 
 /**
  * The value of an attribute the screen is expected to publish.
@@ -446,51 +462,76 @@ export const modelsScreenPage = {
   createAssistantSubmit: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.modelsCreateAssistantSubmit, { timeout: 5000, ...options }),
 
-  /** Fill the create-assistant dialog with the given tool selection, without submitting. */
+  /** The tool fieldset of the edit-assistant dialog. */
+  editAssistantTools: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsEditAssistantTools, { timeout: 5000, ...options }),
+
+  /** The takeover fieldset of the create-assistant dialog. */
+  createAssistantReplacedTools: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsCreateAssistantReplacedTools, { timeout: 5000, ...options }),
+
+  /** The takeover fieldset of the edit-assistant dialog. */
+  editAssistantReplacedTools: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.modelsEditAssistantReplacedTools, { timeout: 5000, ...options }),
+
+  /** One main-agent tool the edit-assistant dialog offers to hand over. */
+  editAssistantReplacedToolBox: (toolName: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsEditAssistantReplacedTool(toolName), { timeout: 5000, ...options }),
+
+  /** One main-agent tool the create-assistant dialog offers to hand over. */
+  createAssistantReplacedToolBox: (toolName: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(modelsCreateAssistantReplacedTool(toolName), { timeout: 5000, ...options }),
+
+  /**
+   * Fill the create-assistant dialog, without submitting. `tools` is what the assistant may call
+   * itself; `replaces` is what it takes over from the main agent — two separate pickers, so a spec
+   * naming one says nothing about the other.
+   */
   fillCreateAssistantForm(assistant: {
     name: string;
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) {
     byTestId(TEST_IDS.modelsCreateAssistantName).clear().type(assistant.name);
     byTestId(TEST_IDS.modelsCreateAssistantLabel).clear().type(assistant.label);
     byTestId(TEST_IDS.modelsCreateAssistantSystemPrompt).clear().type(assistant.systemPrompt);
     assistant.tools.forEach((tool) => byTestId(modelsCreateAssistantTool(tool)).check());
+    assistant.replaces.forEach((tool) => byTestId(modelsCreateAssistantReplacedTool(tool)).check());
   },
 
-  /** Fill and submit the create-assistant dialog with the given tool selection. */
+  /** Fill and submit the create-assistant dialog. */
   fillAndSubmitCreateAssistantForm(assistant: {
     name: string;
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) {
     modelsScreenPage.fillCreateAssistantForm(assistant);
     byTestId(TEST_IDS.modelsCreateAssistantSubmit).click();
   },
 
   /**
-   * Fill and submit the edit-assistant dialog. `tools` is the assistant's full tool set *after* the
-   * edit: every box the dialog offers is set from it, so a tool left out is one the operator
-   * unticked rather than one this helper quietly left as it found it.
+   * Fill and submit the edit-assistant dialog. `tools` and `replaces` are the assistant's full sets
+   * *after* the edit: every box each picker offers is set from them, so a tool left out is one the
+   * operator unticked rather than one this helper quietly left as it found it.
    */
   fillAndSubmitEditAssistantForm(assistant: {
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) {
     byTestId(TEST_IDS.modelsEditAssistantLabel).clear().type(assistant.label);
     byTestId(TEST_IDS.modelsEditAssistantSystemPrompt).clear().type(assistant.systemPrompt);
-    modelsScreenPage
-      .editAssistantDialog()
-      .find(`[data-testid^='${EDIT_ASSISTANT_TOOL_PREFIX}']`)
-      .each(($box) => {
-        const tool = $box.attr("data-testid")!.replace(EDIT_ASSISTANT_TOOL_PREFIX, "");
-        cy.wrap($box).then(($el) =>
-          assistant.tools.includes(tool) ? cy.wrap($el).check() : cy.wrap($el).uncheck(),
-        );
-      });
+    setEveryBox(modelsScreenPage.editAssistantTools(), EDIT_ASSISTANT_TOOL_PREFIX, assistant.tools);
+    setEveryBox(
+      modelsScreenPage.editAssistantReplacedTools(),
+      EDIT_ASSISTANT_REPLACED_TOOL_PREFIX,
+      assistant.replaces,
+    );
     byTestId(TEST_IDS.modelsEditAssistantSubmit).click();
   },
 

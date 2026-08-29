@@ -14,6 +14,7 @@
 //! stamped something else entirely.
 
 use std::path::Path;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
@@ -30,6 +31,12 @@ use tddy_service::proto::connection::{
 
 /// `AgentCloneState::READY`, as the proto numbers it.
 const CLONE_STATE_READY: i32 = 3;
+
+/// The keepalive cadence the keepalive tests run the service at.
+///
+/// Short enough to observe inside the integration budget, long enough that a scheduling hiccup on a
+/// loaded runner cannot land a keepalive between an attach and the frame it publishes.
+const A_BRISK_KEEPALIVE: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -137,6 +144,21 @@ fn a_session_with_agents_available(agents: &[(&str, &str)]) -> RosteredSession {
     }
 }
 
+/// The same session, on a daemon whose roster subscriptions re-send at `interval` instead of the
+/// production cadence — so a keepalive can be observed without waiting for it.
+fn a_session_whose_roster_keepalive_ticks_every(interval: Duration) -> RosteredSession {
+    let RosteredSession {
+        service,
+        session_id,
+        _sessions,
+    } = a_session_with_agents_available(&[("explorer", "Grep"), ("linter", "")]);
+    RosteredSession {
+        service: service.with_roster_keepalive_interval(interval),
+        session_id,
+        _sessions,
+    }
+}
+
 /// `<tddy-data-dir>/agents/<name>.yaml` for each named def. `test_service` uses the sessions base
 /// as the data dir, so this is the directory the daemon resolves against.
 fn write_agent_defs(tddy_data_dir: &Path, agents: &[(&str, &str)]) {
@@ -182,6 +204,8 @@ fn a_managed_session(session_id: &str) -> SessionMetadata {
         legacy_specialized_agents: Vec::new(),
         codebase_daemon_instance_id: None,
         codebase_session_id: None,
+        agent_daemon_instance_id: None,
+        agent_session_id: None,
     }
 }
 
@@ -474,6 +498,110 @@ async fn publishes_no_frame_for_an_attach_that_changed_nothing() {
     // Then — the next frame is the *linter* attach, so the no-op published nothing
     let next = next_frame(&mut stream).await;
     next.assert_agent_ids(&[&explorer, &linter]).assert_rev(2);
+}
+
+// ---------------------------------------------------------------------------
+// Keepalive — a subscription nobody changes still produces frames
+// ---------------------------------------------------------------------------
+
+/// A roster nobody is changing must still produce frames, because a silent stream and a dead one
+/// look identical to anything between the publisher and the subscriber. A split session's
+/// subscription is forwarded across a relay that terminates a stream which stops producing, and
+/// re-sending the roster already applied is the one thing that costs a subscriber nothing: applying
+/// the revision it holds is a defined no-op that announces no change.
+#[tokio::test]
+async fn re_sends_the_roster_it_last_sent_when_nothing_changes() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When — the next frame arrives with nothing attached or detached in between
+    let after_the_cadence = next_frame(&mut stream).await;
+
+    // Then
+    after_the_cadence
+        .assert_agent_ids(&[&explorer])
+        .assert_rev(1);
+}
+
+/// One frame would only move the deadline once. The subscription lives as long as the session, so
+/// the cadence has to as well.
+#[tokio::test]
+async fn keeps_re_sending_the_roster_for_as_long_as_the_subscription_lives() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When — three more frames arrive with nothing attached or detached in between
+    let revs = vec![
+        next_frame(&mut stream).await.rev,
+        next_frame(&mut stream).await.rev,
+        next_frame(&mut stream).await.rev,
+    ];
+
+    // Then
+    assert_eq!(
+        revs,
+        vec![1, 1, 1],
+        "every keepalive must carry the revision the subscriber already holds"
+    );
+}
+
+/// The keepalive carries the roster the subscription last *sent*, not the one it opened with. A
+/// reconnecting subscriber that missed the change and then reads a keepalive would otherwise be told
+/// the roster is the one from before it — a stale answer with a current-looking revision.
+#[tokio::test]
+async fn re_sends_the_change_it_last_published_rather_than_the_snapshot_it_opened_with() {
+    // Given
+    let session = a_session_whose_roster_keepalive_ticks_every(A_BRISK_KEEPALIVE);
+    let explorer = session.agent_id_for("explorer").await;
+    let linter = session.agent_id_for("linter").await;
+    session.attach(&explorer).await.expect("attach explorer");
+    let mut stream = roster_stream(&session).await;
+    next_frame(&mut stream).await.assert_rev(1);
+
+    // When
+    session.attach(&linter).await.expect("attach linter");
+    next_frame(&mut stream).await.assert_rev(2);
+
+    // Then
+    next_frame(&mut stream)
+        .await
+        .assert_agent_ids(&[&explorer, &linter])
+        .assert_rev(2);
+}
+
+/// The relay deadline and the subscriber's service threshold are one design decision held in two
+/// crates. A subscriber classifies a roster pass by how long it lasted: a pass the relay's idle
+/// deadline killed lasted at least that deadline (its connect time is on top), so while the
+/// deadline is the longer of the two, a keepalive path that goes quiet costs one prompt reconnect
+/// per deadline — service. Make the deadline the shorter one and every such teardown reads as
+/// churn instead, throttling the roster to its reconnect ceiling and, from there, refusing every
+/// subagent call for a session whose stream is in fact being served. Pinned by a test rather than a
+/// `const` assert because `tddy-tools` is only a dev-dependency of this crate, so the lib cannot
+/// name the threshold.
+#[test]
+fn tears_a_forwarded_stream_down_no_faster_than_a_pass_needs_to_last_to_count_as_service() {
+    // Given
+    let relay_gives_up_after =
+        tddy_daemon::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT;
+
+    // When
+    let a_pass_counts_as_service_after = tddy_tools::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE;
+
+    // Then
+    assert!(
+        relay_gives_up_after >= a_pass_counts_as_service_after,
+        "a relay that gives up after {relay_gives_up_after:?} tears down every forwarded roster \
+         stream before the {a_pass_counts_as_service_after:?} that makes a pass count as service, \
+         so a cross-host roster would throttle to its ceiling and refuse calls it can serve"
+    );
 }
 
 // ---------------------------------------------------------------------------
