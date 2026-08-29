@@ -142,6 +142,13 @@ user sees a single seamless terminal surface rather than a split pane.
 - **Mouse-tracking gating:** when the TUI has enabled mouse tracking (DEC 1006), the wheel is
   reported to the TUI (SGR button 64/65) and does **not** trigger the forward-fill — matching
   native ghostty's `isMouseReporting` gate.
+- **Touch (mobile) takes the same route.** A one-finger drag on a terminal in the **alternate
+  screen** (DEC 1049 — a full-screen TUI such as the Claude CLI) is handed to the terminal as
+  wheel notches at the touch point, so the same gate decides: SGR wheel report when the TUI tracks
+  the mouse, ghostty-web's native Up/Down emulation when it does not. Neither reaches the
+  forward-fill, so a full-screen TUI scrolls its own content on mobile exactly as it does on
+  desktop, rather than the drag being spent on the live pane's (empty) scrollback. Only in the
+  **normal screen** does a drag scroll the pane's own scrollback.
 - A **"Load earlier output" affordance** (`data-testid="load-earlier-history"`) renders on the
   live pane while older history is available and not yet filled. Activating it starts the
   background fill. After the first fill, the live pane shows a **"View history"** affordance

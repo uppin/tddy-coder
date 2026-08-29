@@ -484,6 +484,56 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
     },
 
     /**
+     * Wait until the terminal is in the alternate screen (DEC 1049) — the full-screen TUI mode —
+     * and the effects that read that state have committed. Same two-frame flush as
+     * `expectReportingMouseToTui`, for the same reason. Requires `withHandleCapture: true`.
+     */
+    expectInAlternateScreen() {
+      cy.wrap(handleRef).should((ref) => {
+        const handle = (ref as unknown as React.RefObject<GhosttyTerminalHandle>).current;
+        expect(
+          handle?.isAlternateScreen?.() ?? false,
+          "terminal should be in the alternate screen (DEC 1049)",
+        ).to.equal(true);
+      });
+      cy.wrap(null).then(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      return this;
+    },
+
+    /** Assert the bytes the terminal sent to the application (`@onData`) include `substr`. */
+    expectSentToApp(substr: string) {
+      cy.get("@onData", { timeout: 4000 }).should((subject) => {
+        const stub = subject as unknown as { getCalls: () => { args: unknown[] }[] };
+        const sent = stub
+          .getCalls()
+          .map((call) => call.args[0])
+          .filter((arg): arg is string => typeof arg === "string")
+          .join("");
+        expect(sent, "bytes sent to the application").to.include(substr);
+      });
+      return this;
+    },
+
+    /** Assert the bytes the terminal sent to the application (`@onData`) do NOT include `substr`. */
+    expectDidNotSendToApp(substr: string) {
+      cy.get("@onData", { timeout: 4000 }).should((subject) => {
+        const stub = subject as unknown as { getCalls: () => { args: unknown[] }[] };
+        const sent = stub
+          .getCalls()
+          .map((call) => call.args[0])
+          .filter((arg): arg is string => typeof arg === "string")
+          .join("");
+        expect(sent, "bytes sent to the application").to.not.include(substr);
+      });
+      return this;
+    },
+
+    /**
      * Raw access to the terminal Cypress chain for assertions not covered by
      * the driver methods.
      */
