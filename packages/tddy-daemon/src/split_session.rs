@@ -1037,6 +1037,8 @@ mod tests {
             codebase_session_id: String::new(),
             clone_state: 0,
             clone_error: String::new(),
+            status: 0,
+            last_activity: None,
         }
     }
 

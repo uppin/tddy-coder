@@ -20,6 +20,8 @@ import {
   ConnectionService,
   ListSubagentsResponseSchema,
   SessionAgentRosterSchema,
+  SessionAgentStatus,
+  type SessionAgentActivity,
   type SessionAgentEntry,
 } from "../../../src/gen/connection_pb";
 
@@ -40,8 +42,27 @@ export function anAttachedAgent(
     codebaseSessionId: "",
     cloneState: AgentCloneState.LOCAL,
     cloneError: "",
+    // UNSPECIFIED by default, because that is what the daemon sends for an agent nothing has been
+    // observed of — a default of IDLE would let a test pass while the pane read the wrong field.
+    status: SessionAgentStatus.UNSPECIFIED,
+    lastActivity: undefined,
     ...overrides,
   } as SessionAgentEntry;
+}
+
+/** The activity a roster entry carries when the daemon has seen the agent do something. */
+export function anActivity(summary: string, atUnixMs: number): SessionAgentActivity {
+  return { atUnixMs: BigInt(atUnixMs), summary } as SessionAgentActivity;
+}
+
+/** An agent the daemon reports as mid-turn, with the activity that says what it is doing. */
+export function anAgentDoing(
+  agentId: string,
+  status: SessionAgentStatus,
+  activity: SessionAgentActivity,
+  overrides: Partial<SessionAgentEntry> = {},
+): SessionAgentEntry {
+  return anAttachedAgent(agentId, { status, lastActivity: activity, ...overrides });
 }
 
 /** An agent served by a remote daemon, with a clone behind it. */

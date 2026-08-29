@@ -46,6 +46,15 @@ service ConnectionService {
   // can say any of this — so it is pushed rather than polled, and a reconcile is reported rather
   // than absorbed (docs/ft/daemon/session-agent-roster.md § Kept current from the room).
   rpc ReportAgentCloneState(ReportAgentCloneStateRequest) returns (ReportAgentCloneStateResponse);
+  // A conversation whose turn loop runs OUTSIDE the daemon telling it what that loop is doing.
+  //
+  // The daemon infers a roster agent's `status` from the conversation RPCs above, which works for
+  // every agent whose loop it runs. An agent the in-jail `tddy-tools` was *seeded* with runs its
+  // loop in the jail instead: the daemon is never asked to open anything, so it has nothing to
+  // infer from and the row would report UNSPECIFIED for an agent that is demonstrably working.
+  // This is that agent's own report, and the only possible source for it
+  // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
+  rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -353,6 +362,58 @@ message SessionAgentEntry {
   AgentCloneState clone_state = 9;
   // Why the clone failed, when `clone_state` is ERROR. Empty otherwise.
   string clone_error = 10;
+  // What the agent is doing right now, as the facilitating daemon sees it. Rides the whole-snapshot
+  // roster rather than a status RPC of its own: a reader that rebuilt its registry from a snapshot
+  // and then had to correlate a second stream to learn what each row was doing is a reader that can
+  // show a status for a row it no longer holds.
+  //
+  // UNSPECIFIED is not "idle" — it is "this daemon has nothing to say", which is what a roster
+  // restored from `.session.yaml` after a restart honestly reports. Nothing that keeps a status is
+  // persisted: what an agent is doing is a fact about a running loop, and a status restored from
+  // disk would claim a turn is in flight in a process that never started one.
+  SessionAgentStatus status = 11;
+  // The agent's most recent observed activity, or unset when this daemon has observed none. Carried
+  // beside `status` rather than folded into it because the two answer different questions: the
+  // status is what the agent is doing *now*, and this is the last thing it was seen doing — which is
+  // the only useful thing to show for an agent that is idle.
+  SessionAgentActivity last_activity = 12;
+}
+
+// What a roster agent is doing, in the vocabulary the session activity hooks already use
+// (tddy_core::session_activity::SessionActivityStatus), plus the two states only an agent whose
+// codebase lives on another host can be in.
+enum SessionAgentStatus {
+  // This daemon has nothing to say about the agent — not a claim that it is idle. The state of a
+  // roster read back from disk after a restart, and of any entry no signal has reached yet.
+  SESSION_AGENT_STATUS_UNSPECIFIED = 0;
+  // Attached and ready, with no turn in flight. An agent with no conversation open at all is IDLE
+  // too: from the operator's side "nobody has asked it anything" and "it has answered everything
+  // asked" are the same state, and splitting them would show a distinction nothing acts on.
+  SESSION_AGENT_STATUS_IDLE = 1;
+  // A turn is in flight: the agent has a prompt and has not produced its stop reason yet.
+  SESSION_AGENT_STATUS_RUNNING = 2;
+  // The agent's own loop is inside a tool call. A refinement of RUNNING, not a separate lifecycle:
+  // every EXECUTING_TOOL is also a turn in flight.
+  SESSION_AGENT_STATUS_EXECUTING_TOOL = 3;
+  // The agent is blocked on an answer only a human can give.
+  SESSION_AGENT_STATUS_WAITING_FOR_INPUT = 4;
+  // The agent cannot serve a prompt yet because the checkout behind it is still being built. Takes
+  // precedence over anything the conversation state would say: an agent whose clone is not ready
+  // refuses prompts, so reporting it IDLE would offer an agent that cannot answer.
+  SESSION_AGENT_STATUS_CONNECTING = 5;
+  // The agent cannot serve prompts at all. `clone_error` on the same entry says why.
+  SESSION_AGENT_STATUS_ERROR = 6;
+}
+
+// The last thing an agent was observed doing.
+message SessionAgentActivity {
+  // Unix milliseconds. Never 0 on a populated activity — a summary with no time behind it reads as
+  // current forever, which is exactly wrong for the row it is shown on.
+  uint64 at_unix_ms = 1;
+  // One short human-readable line, already truncated for display ("Read src/main.rs", "prompted:
+  // summarise the diff"). Not a structured record: the consumers are a roster pane and an MCP tool
+  // that both render it verbatim, and the structured account of a call is StreamSessionActivity's.
+  string summary = 2;
 }
 
 enum AgentCloneState {
@@ -502,6 +563,29 @@ message ReportAgentCloneStateRequest {
 }
 
 message ReportAgentCloneStateResponse {}
+
+// Authenticated exactly as the conversation RPCs are, and that is not ceremony: the (session,
+// agent) pair this names is published in the session's `session.agents` broadcast, so on the pair
+// alone any participant that saw a roster frame could park an agent at RUNNING for ever.
+message ReportAgentConversationStateRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  // The roster agent whose loop is being reported on. An id the roster does not hold is refused
+  // rather than recorded — a stale in-jail registry must not be able to invent a row.
+  string agent_id = 4;
+  // What that loop is doing. Only the four states a *conversation* can be in are accepted:
+  // CONNECTING and ERROR belong to the checkout, which the daemon measures itself, and a reporter
+  // allowed to send them could hide a broken clone behind a cheerful conversation.
+  SessionAgentStatus status = 5;
+  // One short line for `last_activity.summary`. Truncated by the daemon rather than trusted at the
+  // length it arrives: the summary rides a whole-roster broadcast, where an oversized frame is
+  // chunk-framed and one lost chunk wedges the call with no error.
+  string summary = 6;
+}
+
+message ReportAgentConversationStateResponse {}
 
 message ListSessionsRequest {
   string session_token = 1;

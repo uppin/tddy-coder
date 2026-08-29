@@ -148,6 +148,26 @@ message SessionAgentEntry {
   AgentCloneState clone_state = 9;
   // A human-readable message when `clone_state == ERROR`; empty otherwise.
   string clone_error         = 10;
+  // What the agent is doing right now (§ What an agent is doing). UNSPECIFIED is "this daemon has
+  // nothing to say", never "idle".
+  SessionAgentStatus status  = 11;
+  // The last thing it was observed doing; unset when nothing has been observed.
+  SessionAgentActivity last_activity = 12;
+}
+
+enum SessionAgentStatus {
+  SESSION_AGENT_STATUS_UNSPECIFIED       = 0;  // nothing has been observed — NOT "idle"
+  SESSION_AGENT_STATUS_IDLE              = 1;  // attached, no turn in flight
+  SESSION_AGENT_STATUS_RUNNING           = 2;  // prompted, no stop reason yet
+  SESSION_AGENT_STATUS_EXECUTING_TOOL    = 3;  // inside a tool call — a refinement of RUNNING
+  SESSION_AGENT_STATUS_WAITING_FOR_INPUT = 4;  // blocked on an answer only a human can give
+  SESSION_AGENT_STATUS_CONNECTING        = 5;  // the checkout behind it is still being built
+  SESSION_AGENT_STATUS_ERROR             = 6;  // it cannot serve prompts; `clone_error` says why
+}
+
+message SessionAgentActivity {
+  uint64 at_unix_ms = 1;   // never 0 on a populated activity
+  string summary    = 2;   // one short line, already truncated for display
 }
 
 enum AgentCloneState {
@@ -180,6 +200,56 @@ pub agents_rev: u64,
 No migration and no back-compat shim: per the repo's standing rule, the old field is removed
 outright and a `.session.yaml` carrying it loads with an empty roster. It is recorded in
 `docs/dev/changelog.md` as a breaking change to session files.
+
+### What an agent is doing
+
+`status` and `last_activity` say whether an attached agent is working. Without them an operator
+watching a session could not tell a dispatched agent from an idle one, and the only way to find out
+was to prompt it.
+
+**They ride the same whole snapshot.** There is no status *read* RPC, for the reason every roster
+read is already a snapshot: a reader that rebuilt its registry from one and then had to correlate a
+second stream to learn what each row was doing could show a status for a row it no longer holds.
+
+**`rev` does not move when a status does.** `rev` is the staleness signal for roster *membership* —
+an attach or a detach. A status changes on every turn and every tool call, so the daemon republishes
+the snapshot at the **same** `rev`. Consumers must therefore adopt a same-`rev` frame's entries.
+They must not treat it as a membership change: the addressable ids and the `replaces` union are
+fixed at a revision, so announcing an MCP tool-list change on each one would be a notification storm
+for a badge.
+
+**The checkout outranks the conversation.** An agent whose clone is still provisioning refuses
+prompts, so it reports `CONNECTING` however idle its conversation looks — reporting `IDLE` would
+offer an operator an agent that cannot answer. A clone this process has never measured (the shape of
+a roster restored from `.session.yaml`) is `CONNECTING` too, for the same reason it is not called
+`READY`. A failed clone is `ERROR`. Only once the checkout is usable does the conversation decide.
+
+**Nothing is persisted.** A status is a fact about a running turn loop; written to `.session.yaml`
+and read back it would claim a turn is in flight in a process that never started one. A restarted
+daemon reports `UNSPECIFIED` for every entry until a signal reaches it.
+
+**A failed turn is `IDLE`, not `ERROR`.** The agent is still attached and still promptable; `ERROR`
+is the checkout's. The summary is what says what happened.
+
+Where each signal comes from:
+
+| The loop runs… | How the daemon learns |
+|---|---|
+| in the daemon, for a local agent | it serves the open, the prompt and the managed tool dispatch itself — the only place `EXECUTING_TOOL` can be told from `RUNNING` |
+| on an owning daemon, for a remote agent | the facilitating daemon relays the forwarded turn's frames, so it sees the turn start and end (but not its tool calls) |
+| in the jail, for a seeded agent | `ReportAgentConversationState` — the daemon is never asked to open anything, so this is the only possible source |
+
+`ReportAgentConversationState` accepts only the four *conversation* states. `CONNECTING` and `ERROR`
+describe the checkout, which the daemon measures itself; a reporter allowed to send them could hide
+a broken clone behind a cheerful conversation. `UNSPECIFIED` is refused because a report is by
+definition a claim, and accepting it would let a reporter erase what it last said. An `agent_id` the
+roster does not hold is `NOT_FOUND`, so a stale in-jail registry cannot put a row on a roster an
+operator has emptied. It is authenticated exactly as `ReportAgentCloneState` is, and for the same
+reason: the (session, agent) pair is published in the roster broadcast.
+
+Summaries are truncated to 120 characters and collapsed to one line **by the daemon**, not trusted
+at the length they arrive. A snapshot past `MAX_CHUNK_FRAME_BYTES` is chunk-framed, and one lost
+chunk wedges the call with no error at all — so a `Write`'s `content` must never reach a summary.
 
 ## Attaching and detaching
 
@@ -539,6 +609,7 @@ Unchanged in shape, generalized in reach. The main agent uses the existing MCP s
 subagent_new_session { agent: "explorer@ws-01" }   → { sessionId }
 subagent_prompt      { sessionId, prompt: [...] }  → { stopReason, content }
 subagent_cancel      { sessionId }
+subagent_status      { }                           → { sessionId, appliedRev, agents:[…] }
 ```
 
 `tddy-tools` resolves `agent` against its **live roster**, not `TDDY_SUBAGENT`:
@@ -553,11 +624,39 @@ subagent_cancel      { sessionId }
 `agent` field is an error listing the roster's ids — with an unbounded roster there is no defensible
 default, and picking the first entry would make the main agent's choice depend on attach order.
 
+### `subagent_status`
+
+What every attached agent is doing right now, read off the live roster. Deliberately **not**
+`subagent_list`, which enumerates this process's *conversations* and their token cost: an agent the
+main agent could address but has never opened a conversation with appears in `subagent_status` and
+nowhere else, which is what makes it answerable *before* any work has been dispatched.
+
+Each row carries the entry's id, label, model, owning daemon, `replaces`, clone state and status,
+plus `lastActivity` when there is one and this process's conversations with that agent. `status` is
+reported as a word, and `UNSPECIFIED` becomes `"unknown"` — never `"idle"`, because telling the main
+agent an agent is idle would have it dispatch work to a row the daemon cannot currently account for.
+
+A roster that has gone **dark** still answers, carrying `refusal`: the rows it last knew about plus
+the reason none of them can be addressed is strictly more useful than an error, which would answer
+"what are my agents doing?" with nothing at all. `appliedRev` is `null` when no frame has ever
+arrived, which is a different state from a daemon that published an empty roster at rev 0.
+
+A jail-run conversation also **reports itself** through `ReportAgentConversationState` at open,
+prompt, turn end and cancel (§ What an agent is doing), so the row this tool reads is populated for
+a seeded agent the daemon never opened.
+
 ### The roster stream
 
 `tddy-tools --mcp` opens `StreamSessionAgents` at startup and holds it for the process lifetime.
-Every snapshot rebuilds `SubagentRegistry` and emits an MCP `notifications/tools/list_changed`, so
-the main agent's own tool listing reflects the roster without a restart.
+Every snapshot at a **new** `rev` rebuilds `SubagentRegistry` and emits an MCP
+`notifications/tools/list_changed`, so the main agent's own tool listing reflects the roster without
+a restart.
+
+A snapshot at the `rev` **already applied** is adopted for its entries and announces nothing. That
+is the frame carrying a status change (§ What an agent is doing): the agents are identical by
+construction, so nothing can newly need cancelling and no tool list has changed, but what those
+agents are *doing* is exactly what the frame exists to deliver. A frame *older* than the one in
+force stays ignored — applying it would resurrect a detached agent.
 
 `TDDY_SUBAGENTS_JSON` remains, demoted to a **seed**: it makes the roster usable in the window
 between spawn and the stream's first frame, and it is what `tddy-sandbox-app` — which has no daemon
@@ -619,6 +718,14 @@ peer-session section, which is about child sessions and is untouched.
   operator appears without a refresh.
 - Each row shows qualified id, label, model, owning daemon, the tools it replaces, and its clone
   state — `provisioning` / `ready` / `error`, never a blank.
+- Each row also shows **what the agent is doing** and **what it was last seen doing**. The status
+  badge is always rendered, `unknown` included: a row with no badge and a row whose daemon has
+  nothing to say look identical otherwise. `unknown` is never spelled "idle" — an operator reads
+  "idle" as "free, ready for work", which is a different claim from "nobody here knows".
+- The last-activity line reads "<summary> · 4m ago" and **ages on its own**, ticked once a minute:
+  an idle agent produces no frames, so a line that only aged on a frame would read "just now" for
+  the rest of the session. A stamp in the future reads "just now" rather than a negative age,
+  because two hosts' clocks disagree by seconds routinely.
 - **Add agent** opens the same fanned-out picker as the create pane, and warns which tools the main
   agent loses before confirming.
 - **Detach** is inline, and confirms when the entry is the last one owned by a remote daemon, because
