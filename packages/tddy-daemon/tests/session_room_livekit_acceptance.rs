@@ -231,6 +231,24 @@ impl AnOpenSessionRoom {
         .await;
     }
 
+    /// Resume at the start of a poll window, so everything the caller does next is measured by one
+    /// tick.
+    ///
+    /// A call is credited to whichever tick is running when its row lands in
+    /// `agent-activity.jsonl`. A tick falling between an edit and the row crediting it credits the
+    /// call to a window that does not carry the change, so the delta served for that call is
+    /// **empty** — which is exactly how this suite failed under CI load, where the scheduler can
+    /// part two adjacent statements by more than a 200 ms tick.
+    ///
+    /// Nudging the checkout guarantees the next tick has a change to record, so the ring is certain
+    /// to grow rather than the wait hanging on an idle tree. `eventually` observes that growth
+    /// within 25 ms, leaving most of `POLL_INTERVAL_MS` for the two file writes that follow.
+    async fn at_a_fresh_poll_window(&self) {
+        let held = self.delta_ring().lock().expect("the delta ring").len();
+        self.write_in_worktree(ANOTHER_SCRATCH_FILE, "nudge so this tick records a delta\n");
+        self.await_recorded_ticks(held + 1).await;
+    }
+
     /// The delta served for `call_id`, once the daemon has attributed that call to a tick.
     async fn await_delta_for(&self, call_id: &str) -> ActivityDelta {
         let ring = self.delta_ring();
@@ -494,9 +512,17 @@ async fn a_call_recorded_during_a_tick_is_served_the_patch_that_tick_produced() 
     room.write_in_worktree(A_SCRATCH_FILE, "scratch\n");
     room.await_wip_ref().await;
 
-    // When the agent records an `Edit` and makes it
-    room.record_activity(&an_edit_record(AN_EDIT_CALL, SEEDED_FILE, &room.head));
+    // ...and a tick boundary just behind us, so the edit and the row crediting it fall in one
+    // window rather than being parted by a tick
+    room.at_a_fresh_poll_window().await;
+
+    // When the agent makes an `Edit` and the hook records the completed call — that order, because
+    // it is the one a PostToolUse hook produces: the tool writes, then the row appears. The reverse
+    // is not merely unrealistic, it is the order whose race loses the change silently, since a call
+    // credited to a window before its write leaves the delta carrying that write announced by
+    // nothing; credited to a window after, the client sees a sequence gap and reconciles.
     room.write_in_worktree(SEEDED_FILE, EDITED_CONTENTS);
+    room.record_activity(&an_edit_record(AN_EDIT_CALL, SEEDED_FILE, &room.head));
 
     // Then the daemon can answer for that call by id — the whole point of the wiring, and the exact
     // thing that was missing when `attribute` had no caller and every lookup was `UnknownCall`
