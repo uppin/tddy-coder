@@ -15,7 +15,7 @@ The library embeds workflow JSON Schemas from **`tddy-workflow-recipes/generated
 
 | Subcommand | Behavior |
 |------------|----------|
-| `submit` | Optional `--goal`, `--data` / `--data-stdin`; validates when a known goal schema exists |
+| `submit` | `--goal` + `--data` / `--data-stdin`. `--goal` is **authoritative for routing**, falling back to the payload's `goal` field; validates when the resolved goal has a registered schema. A `--goal` disagreeing with the payload's `goal`, or a submission naming no goal in either place, is a **usage error (exit 2)** — never an `ok` acknowledgement under the goal `unknown` |
 | `get-schema <goal>` | Prints schema JSON; `-o` writes goal file and `common/` subtree |
 | `list-schemas` | Prints `{"goals":[...]}` |
 | `ask` | Clarification relay (separate JSON schema) |
