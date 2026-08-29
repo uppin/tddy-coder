@@ -240,53 +240,81 @@ time the first lands.
 
 Note that the ruleset applies to **direct pushes to `master`** as well, not just
 to PRs: a pushed commit has no check runs yet, so the push is rejected and every
-change has to arrive through a PR. That is the intended state — but if you want
-an escape hatch, add a bypass actor for the admin role:
+change has to arrive through a PR. That is the intended state.
 
-```json
-"bypass_actors": [
-  { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
-]
-```
-
-with the caveat in the next section.
+Resist adding a bypass actor for the **admin role** as an escape hatch. Beyond
+reopening the hole, it can break `#automerge` outright: if the PR author's own
+role may bypass the required checks, GitHub can consider that PR already clean
+and refuse to arm auto-merge on it. The one bypass actor the repo does grant is
+the GitHub Actions app, which is not a PR author — see the next section.
 
 ## Automerge
 
-Comment **`#automerge`** on a pull request and it merges itself — squashed — as
-soon as the four required checks pass. `#automerge-cancel` disarms it. Both are
-handled by `.github/workflows/automerge.yml`, which turns the comment into
-GitHub's own native auto-merge (`gh pr merge --squash --auto`) and reacts to the
-comment: 🚀 armed, 👀 disarmed, 😕 the request failed.
+Three comment triggers, handled by `.github/workflows/automerge.yml`:
 
-Only commenters with `write`, `maintain` or `admin` on the repo are obeyed. The
-workflow asks the API for the actual permission level rather than trusting the
-comment's `author_association`, which reports `MEMBER` for any org member
-regardless of whether they can touch this repo. An unauthorised comment gets no
-reaction at all — the run fails silently rather than confirming to a stranger
-that the trigger exists.
+| Comment | Effect | Reaction |
+|---------|--------|----------|
+| `#automerge` | Merge — squashed — as soon as the four required checks pass | 🚀 |
+| `#automerge-cancel` | Disarm it again | 👀 |
+| `#forcemerge` | Merge **now**, past red or still-running checks | 🎉 |
 
-The workflow reads the PR's merge state before deciding what to ask for. If the
-required checks are **already green** when the comment lands, it merges on the
-spot; only a genuinely blocked PR gets queued. That distinction is forced on it —
-see the second bullet.
+A request that fails gets 😕. Only commenters with `write`, `maintain` or
+`admin` are obeyed; the workflow asks the API for the actual permission level
+rather than trusting the comment's `author_association`, which reports `MEMBER`
+for any org member regardless of whether they can touch this repo. An
+unauthorised comment gets **no** reaction at all — the run fails silently rather
+than confirming to a stranger that the trigger exists.
 
-Three things to know about it:
+`#forcemerge` is held to the same `write` bar rather than a higher one on
+purpose. The repo is owned by a different account than the people working in it,
+so an admin-only force merge would be usable by nobody. It leaves a trace that
+outlives the run log: before merging, the workflow comments on the PR naming who
+asked, linking their comment, and quoting the full check state at that moment.
 
-- **`issue_comment` workflows always run from the default branch.** Editing this
-  workflow on a branch changes nothing until it is on `master`; the version that
-  runs for a PR's comments is master's, not the PR's. That is also what makes it
-  safe on a public repo — a fork cannot alter what the trigger executes.
-- **Native auto-merge only works on a PR that is blocked.** It is a queue, not a
-  merge button: with no required status checks, a PR is mergeable the moment it
-  opens and the API rejects the request with *"Pull request is in clean status"*.
-  So the ruleset above is not optional decoration, it is the mechanism. The repo
-  setting `Allow auto-merge` must also be on
-  (`gh api -X PATCH repos/uppin/tddy-coder -F allow_auto_merge=true`, admin only).
-- **A bypass actor can defeat it.** If the PR author's role is allowed to bypass
-  required checks, GitHub may already consider that PR clean and refuse to arm
-  auto-merge. If `#automerge` starts reporting "clean status" for admins, the
-  admin bypass in the ruleset is the reason — drop it.
+### What it depends on
+
+- **`Allow auto-merge` on the repo.**
+  `gh api -X PATCH repos/uppin/tddy-coder -F allow_auto_merge=true` (admin only).
+- **Required status checks on `master`** — the ruleset above. Native auto-merge
+  is a queue for a *blocked* PR, not a merge button: with nothing required, a PR
+  is mergeable the moment it opens and the API rejects the request with
+  *"Pull request is in clean status"*. The ruleset is the mechanism, not
+  decoration.
+- **The GitHub Actions app as a bypass actor**, for `#forcemerge` only.
+  `GITHUB_TOKEN` cannot skip a required check by default — a force merge fails
+  at `gh pr merge --admin` rather than merging quietly. Granting it:
+
+  ```bash
+  gh api -X PUT repos/uppin/tddy-coder/rulesets/21793758 --input - <<'JSON'
+  { "bypass_actors": [
+      { "actor_id": 15368, "actor_type": "Integration", "bypass_mode": "always" }
+  ] }
+  JSON
+  ```
+
+  The cost is real and worth stating: *every* workflow in the repo then holds a
+  token that can bypass required checks on `master`, `ci.yml` included. What
+  makes that acceptable is that a workflow can only be changed through a PR.
+
+### Two traps in the implementation
+
+**`issue_comment` workflows always run from the default branch.** Editing this
+workflow on a branch changes nothing until it is on `master`; the version that
+runs for a PR's comments is master's, not the PR's. That is also what makes the
+trigger safe on a public repo — a fork cannot alter what it executes. The
+corollary is that the PR introducing a change to it cannot test that change, and
+has to be merged by hand.
+
+**`#automerge` asks the checks API, not `mergeStateStatus`.** It has to decide
+between merging now and queueing, because queueing a PR with nothing left to
+wait for is an error rather than a no-op. The obvious source for that decision is
+`mergeStateStatus` — and it is the wrong one, because that field answers "is this
+blocked *for you*". Once the Actions app is a bypass actor, the answer for
+`GITHUB_TOKEN` stops being the answer for the ruleset, and `#automerge` would
+quietly become `#forcemerge`. So the workflow runs `gh pr checks --required`,
+which reports the checks themselves: exit 0 when every required one has passed,
+non-zero while any is pending or failing. It correctly reads requirements from
+the ruleset and excludes `VM boot control`.
 
 The merge itself uses the repo's squash defaults (`COMMIT_OR_PR_TITLE` /
 `COMMIT_MESSAGES`), which is what produces the `... (#406)` subjects in
