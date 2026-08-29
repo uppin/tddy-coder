@@ -24,7 +24,8 @@ use tddy_tools::server::{exec_tool_catalog, PermissionServer};
 use tddy_tools::session_agents::session_agent_roster;
 
 /// The ACP-shaped conversation tools, in the order `tools/list` reports them (by name).
-const CONVERSATION_TOOLS: [&str; 4] = [
+const CONVERSATION_TOOLS: [&str; 5] = [
+    "subagent_await",
     "subagent_cancel",
     "subagent_list",
     "subagent_new_session",
@@ -163,7 +164,7 @@ async fn advertises_the_conversation_tools_once_a_roster_frame_attaches_an_agent
 }
 
 /// And the other direction: with the last agent detached there is nobody to open a conversation
-/// with, so the tools go rather than staying as four that can only refuse.
+/// with, so the tools go rather than staying as a set that can only refuse.
 #[tokio::test]
 #[serial]
 async fn withdraws_the_conversation_tools_once_the_last_agent_is_detached() {
