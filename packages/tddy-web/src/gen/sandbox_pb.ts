@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file sandbox.proto.
  */
 export const file_sandbox: GenFile = /*@__PURE__*/
-  fileDesc("Cg1zYW5kYm94LnByb3RvEgdzYW5kYm94IqsFCgxTZXNzaW9uRnJhbWUSJgoJaG9zdF9wb2xsGAEgASgLMhEuc2FuZGJveC5Ib3N0UG9sbEgAEjgKEnN1YnNjcmliZV90ZXJtaW5hbBgCIAEoCzIaLnNhbmRib3guU3Vic2NyaWJlVGVybWluYWxIABIvCg50ZXJtaW5hbF9pbnB1dBgDIAEoCzIVLnNhbmRib3guU2FuZGJveElucHV0SAASOAoNdG9vbF9yZXNwb25zZRgEIAEoCzIfLmNvbm5lY3Rpb24uRXhlY3V0ZVRvb2xSZXNwb25zZUgAEjIKD2VncmVzc19yZXNwb25zZRgHIAEoCzIXLnNhbmRib3guRWdyZXNzUmVzcG9uc2VIABIxCg90dW5uZWxfb3Blbl9hY2sYCSABKAsyFi5zYW5kYm94LlR1bm5lbE9wZW5BY2tIABI2Cgx0b29sX3JlcXVlc3QYBSABKAsyHi5jb25uZWN0aW9uLkV4ZWN1dGVUb29sUmVxdWVzdEgAEjwKD3Rlcm1pbmFsX291dHB1dBgGIAEoCzIhLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0SAASMAoOZWdyZXNzX3JlcXVlc3QYCCABKAsyFi5zYW5kYm94LkVncmVzc1JlcXVlc3RIABIqCgt0dW5uZWxfb3BlbhgKIAEoCzITLnNhbmRib3guVHVubmVsT3BlbkgAEioKC3R1bm5lbF9kYXRhGAsgASgLMhMuc2FuZGJveC5UdW5uZWxEYXRhSAASLAoMdHVubmVsX2Nsb3NlGAwgASgLMhQuc2FuZGJveC5UdW5uZWxDbG9zZUgAEi4KDXNlc3Npb25fZW5kZWQYDSABKAsyFS5zYW5kYm94LlNlc3Npb25FbmRlZEgAQgkKB3BheWxvYWQiCgoISG9zdFBvbGwiaAoRU3Vic2NyaWJlVGVybWluYWwSEgoKc2Vzc2lvbl9pZBgBIAEoCRITCgt0ZXJtaW5hbF9pZBgCIAEoCRIUCgxpbml0aWFsX2NvbHMYAyABKA0SFAoMaW5pdGlhbF9yb3dzGAQgASgNIkUKDFNhbmRib3hJbnB1dBISCgpzZXNzaW9uX2lkGAEgASgJEhMKC3Rlcm1pbmFsX2lkGAIgASgJEgwKBGRhdGEYAyABKAwiHgoLRWNob1JlcXVlc3QSDwoHbWVzc2FnZRgBIAEoCSIfCgxFY2hvUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCSIiCg9FY2hvU3RyZWFtRnJhbWUSDwoHbWVzc2FnZRgBIAEoCSJ2Cg1FZ3Jlc3NSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSDgoGbWV0aG9kGAIgASgJEgsKA3VybBgDIAEoCRImCgdoZWFkZXJzGAQgAygLMhUuc2FuZGJveC5FZ3Jlc3NIZWFkZXISDAoEYm9keRgFIAEoDCKGAQoORWdyZXNzUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRITCgtzdGF0dXNfY29kZRgCIAEoDRImCgdoZWFkZXJzGAMgAygLMhUuc2FuZGJveC5FZ3Jlc3NIZWFkZXISDAoEYm9keRgEIAEoDBIVCg1lcnJvcl9tZXNzYWdlGAUgASgJIisKDEVncmVzc0hlYWRlchIMCgRuYW1lGAEgASgJEg0KBXZhbHVlGAIgASgJIjsKClR1bm5lbE9wZW4SEQoJdHVubmVsX2lkGAEgASgJEgwKBGhvc3QYAiABKAkSDAoEcG9ydBgDIAEoDSI9Cg1UdW5uZWxPcGVuQWNrEhEKCXR1bm5lbF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCSItCgpUdW5uZWxEYXRhEhEKCXR1bm5lbF9pZBgBIAEoCRIMCgRkYXRhGAIgASgMIi8KC1R1bm5lbENsb3NlEhEKCXR1bm5lbF9pZBgBIAEoCRINCgVlcnJvchgCIAEoCSIhCgxTZXNzaW9uRW5kZWQSEQoJZXhpdF9jb2RlGAEgASgFMs8BCg5TYW5kYm94U2VydmljZRJCCg5TZXNzaW9uQ2hhbm5lbBIVLnNhbmRib3guU2Vzc2lvbkZyYW1lGhUuc2FuZGJveC5TZXNzaW9uRnJhbWUoATABEjMKBEVjaG8SFC5zYW5kYm94LkVjaG9SZXF1ZXN0GhUuc2FuZGJveC5FY2hvUmVzcG9uc2USRAoKRWNob1N0cmVhbRIYLnNhbmRib3guRWNob1N0cmVhbUZyYW1lGhguc2FuZGJveC5FY2hvU3RyZWFtRnJhbWUoATABYgZwcm90bzM", [file_connection]);
+  fileDesc("Cg1zYW5kYm94LnByb3RvEgdzYW5kYm94IowGCgxTZXNzaW9uRnJhbWUSJgoJaG9zdF9wb2xsGAEgASgLMhEuc2FuZGJveC5Ib3N0UG9sbEgAEjgKEnN1YnNjcmliZV90ZXJtaW5hbBgCIAEoCzIaLnNhbmRib3guU3Vic2NyaWJlVGVybWluYWxIABIvCg50ZXJtaW5hbF9pbnB1dBgDIAEoCzIVLnNhbmRib3guU2FuZGJveElucHV0SAASOAoNdG9vbF9yZXNwb25zZRgEIAEoCzIfLmNvbm5lY3Rpb24uRXhlY3V0ZVRvb2xSZXNwb25zZUgAEjIKD2VncmVzc19yZXNwb25zZRgHIAEoCzIXLnNhbmRib3guRWdyZXNzUmVzcG9uc2VIABIxCg90dW5uZWxfb3Blbl9hY2sYCSABKAsyFi5zYW5kYm94LlR1bm5lbE9wZW5BY2tIABI2Cgx0b29sX3JlcXVlc3QYBSABKAsyHi5jb25uZWN0aW9uLkV4ZWN1dGVUb29sUmVxdWVzdEgAEjwKD3Rlcm1pbmFsX291dHB1dBgGIAEoCzIhLmNvbm5lY3Rpb24uU2Vzc2lvblRlcm1pbmFsT3V0cHV0SAASMAoOZWdyZXNzX3JlcXVlc3QYCCABKAsyFi5zYW5kYm94LkVncmVzc1JlcXVlc3RIABIqCgt0dW5uZWxfb3BlbhgKIAEoCzITLnNhbmRib3guVHVubmVsT3BlbkgAEioKC3R1bm5lbF9kYXRhGAsgASgLMhMuc2FuZGJveC5UdW5uZWxEYXRhSAASLAoMdHVubmVsX2Nsb3NlGAwgASgLMhQuc2FuZGJveC5UdW5uZWxDbG9zZUgAEi4KDXNlc3Npb25fZW5kZWQYDSABKAsyFS5zYW5kYm94LlNlc3Npb25FbmRlZEgAEioKC3JwY19yZXF1ZXN0GA4gASgLMhMuc2FuZGJveC5ScGNSZXF1ZXN0SAASMwoQcnBjX3N0cmVhbV9mcmFtZRgPIAEoCzIXLnNhbmRib3guUnBjU3RyZWFtRnJhbWVIAEIJCgdwYXlsb2FkIlIKClJwY1JlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdzZXJ2aWNlGAIgASgJEg4KBm1ldGhvZBgDIAEoCRIPCgdwYXlsb2FkGAQgASgMIlsKDlJwY1N0cmVhbUZyYW1lEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHcGF5bG9hZBgCIAEoDBIVCg1lbmRfb2Zfc3RyZWFtGAMgASgIEg0KBWVycm9yGAQgASgJIgoKCEhvc3RQb2xsImgKEVN1YnNjcmliZVRlcm1pbmFsEhIKCnNlc3Npb25faWQYASABKAkSEwoLdGVybWluYWxfaWQYAiABKAkSFAoMaW5pdGlhbF9jb2xzGAMgASgNEhQKDGluaXRpYWxfcm93cxgEIAEoDSJFCgxTYW5kYm94SW5wdXQSEgoKc2Vzc2lvbl9pZBgBIAEoCRITCgt0ZXJtaW5hbF9pZBgCIAEoCRIMCgRkYXRhGAMgASgMIh4KC0VjaG9SZXF1ZXN0Eg8KB21lc3NhZ2UYASABKAkiHwoMRWNob1Jlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkiIgoPRWNob1N0cmVhbUZyYW1lEg8KB21lc3NhZ2UYASABKAkidgoNRWdyZXNzUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBm1ldGhvZBgCIAEoCRILCgN1cmwYAyABKAkSJgoHaGVhZGVycxgEIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBSABKAwihgEKDkVncmVzc1Jlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSEwoLc3RhdHVzX2NvZGUYAiABKA0SJgoHaGVhZGVycxgDIAMoCzIVLnNhbmRib3guRWdyZXNzSGVhZGVyEgwKBGJvZHkYBCABKAwSFQoNZXJyb3JfbWVzc2FnZRgFIAEoCSIrCgxFZ3Jlc3NIZWFkZXISDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCSI7CgpUdW5uZWxPcGVuEhEKCXR1bm5lbF9pZBgBIAEoCRIMCgRob3N0GAIgASgJEgwKBHBvcnQYAyABKA0iPQoNVHVubmVsT3BlbkFjaxIRCgl0dW5uZWxfaWQYASABKAkSCgoCb2sYAiABKAgSDQoFZXJyb3IYAyABKAkiLQoKVHVubmVsRGF0YRIRCgl0dW5uZWxfaWQYASABKAkSDAoEZGF0YRgCIAEoDCIvCgtUdW5uZWxDbG9zZRIRCgl0dW5uZWxfaWQYASABKAkSDQoFZXJyb3IYAiABKAkiIQoMU2Vzc2lvbkVuZGVkEhEKCWV4aXRfY29kZRgBIAEoBTLPAQoOU2FuZGJveFNlcnZpY2USQgoOU2Vzc2lvbkNoYW5uZWwSFS5zYW5kYm94LlNlc3Npb25GcmFtZRoVLnNhbmRib3guU2Vzc2lvbkZyYW1lKAEwARIzCgRFY2hvEhQuc2FuZGJveC5FY2hvUmVxdWVzdBoVLnNhbmRib3guRWNob1Jlc3BvbnNlEkQKCkVjaG9TdHJlYW0SGC5zYW5kYm94LkVjaG9TdHJlYW1GcmFtZRoYLnNhbmRib3guRWNob1N0cmVhbUZyYW1lKAEwAWIGcHJvdG8z", [file_connection]);
 
 /**
  * @generated from message sandbox.SessionFrame
@@ -109,6 +109,29 @@ export type SessionFrame = Message<"sandbox.SessionFrame"> & {
      */
     value: SessionEnded;
     case: "sessionEnded";
+  } | {
+    /**
+     * Sandbox → host: an RPC the in-jail agent asked the host to dispatch to its `ConnectionService`
+     * (the roster and conversation RPCs a managed session's `tddy-tools` needs, which live on the
+     * daemon, not the runner). Multiplexed by `request_id` so a lifetime-long `StreamSessionAgents`
+     * shares the channel with the tool calls behind it instead of occupying the single
+     * `awaiting_tool` slot. Sent directly on the outbound stream (not poll-gated) like tunnel frames.
+     *
+     * @generated from field: sandbox.RpcRequest rpc_request = 14;
+     */
+    value: RpcRequest;
+    case: "rpcRequest";
+  } | {
+    /**
+     * Host → sandbox: one frame of an RPC response stream, addressed back to the in-jail caller by
+     * `request_id`. A unary RPC is a single frame with `end_of_stream = true`; a server stream is
+     * many frames followed by `end_of_stream = true`, or a single frame with `error` set, which ends
+     * the stream the same way.
+     *
+     * @generated from field: sandbox.RpcStreamFrame rpc_stream_frame = 15;
+     */
+    value: RpcStreamFrame;
+    case: "rpcStreamFrame";
   } | { case: undefined; value?: undefined };
 };
 
@@ -118,6 +141,78 @@ export type SessionFrame = Message<"sandbox.SessionFrame"> & {
  */
 export const SessionFrameSchema: GenMessage<SessionFrame> = /*@__PURE__*/
   messageDesc(file_sandbox, 0);
+
+/**
+ * / An RPC the in-jail agent asked the host to dispatch to its `ConnectionService`. The host is the
+ * / only thing the jail can reach, and the roster/conversation RPCs live on the daemon's
+ * / `ConnectionServiceImpl` — so the runner forwards them over the `SessionChannel` the same way it
+ * / forwards tool calls, but multiplexed by `request_id` so a lifetime-long `StreamSessionAgents`
+ * / can share the channel with the tool calls behind it.
+ *
+ * @generated from message sandbox.RpcRequest
+ */
+export type RpcRequest = Message<"sandbox.RpcRequest"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string service = 2;
+   */
+  service: string;
+
+  /**
+   * @generated from field: string method = 3;
+   */
+  method: string;
+
+  /**
+   * @generated from field: bytes payload = 4;
+   */
+  payload: Uint8Array;
+};
+
+/**
+ * Describes the message sandbox.RpcRequest.
+ * Use `create(RpcRequestSchema)` to create a new message.
+ */
+export const RpcRequestSchema: GenMessage<RpcRequest> = /*@__PURE__*/
+  messageDesc(file_sandbox, 1);
+
+/**
+ * / One frame of an RPC response stream, addressed back to the in-jail caller by `request_id`.
+ *
+ * @generated from message sandbox.RpcStreamFrame
+ */
+export type RpcStreamFrame = Message<"sandbox.RpcStreamFrame"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: bytes payload = 2;
+   */
+  payload: Uint8Array;
+
+  /**
+   * @generated from field: bool end_of_stream = 3;
+   */
+  endOfStream: boolean;
+
+  /**
+   * @generated from field: string error = 4;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message sandbox.RpcStreamFrame.
+ * Use `create(RpcStreamFrameSchema)` to create a new message.
+ */
+export const RpcStreamFrameSchema: GenMessage<RpcStreamFrame> = /*@__PURE__*/
+  messageDesc(file_sandbox, 2);
 
 /**
  * @generated from message sandbox.HostPoll
@@ -130,7 +225,7 @@ export type HostPoll = Message<"sandbox.HostPoll"> & {
  * Use `create(HostPollSchema)` to create a new message.
  */
 export const HostPollSchema: GenMessage<HostPoll> = /*@__PURE__*/
-  messageDesc(file_sandbox, 1);
+  messageDesc(file_sandbox, 3);
 
 /**
  * @generated from message sandbox.SubscribeTerminal
@@ -162,7 +257,7 @@ export type SubscribeTerminal = Message<"sandbox.SubscribeTerminal"> & {
  * Use `create(SubscribeTerminalSchema)` to create a new message.
  */
 export const SubscribeTerminalSchema: GenMessage<SubscribeTerminal> = /*@__PURE__*/
-  messageDesc(file_sandbox, 2);
+  messageDesc(file_sandbox, 4);
 
 /**
  * @generated from message sandbox.SandboxInput
@@ -189,7 +284,7 @@ export type SandboxInput = Message<"sandbox.SandboxInput"> & {
  * Use `create(SandboxInputSchema)` to create a new message.
  */
 export const SandboxInputSchema: GenMessage<SandboxInput> = /*@__PURE__*/
-  messageDesc(file_sandbox, 3);
+  messageDesc(file_sandbox, 5);
 
 /**
  * @generated from message sandbox.EchoRequest
@@ -206,7 +301,7 @@ export type EchoRequest = Message<"sandbox.EchoRequest"> & {
  * Use `create(EchoRequestSchema)` to create a new message.
  */
 export const EchoRequestSchema: GenMessage<EchoRequest> = /*@__PURE__*/
-  messageDesc(file_sandbox, 4);
+  messageDesc(file_sandbox, 6);
 
 /**
  * @generated from message sandbox.EchoResponse
@@ -223,7 +318,7 @@ export type EchoResponse = Message<"sandbox.EchoResponse"> & {
  * Use `create(EchoResponseSchema)` to create a new message.
  */
 export const EchoResponseSchema: GenMessage<EchoResponse> = /*@__PURE__*/
-  messageDesc(file_sandbox, 5);
+  messageDesc(file_sandbox, 7);
 
 /**
  * @generated from message sandbox.EchoStreamFrame
@@ -240,7 +335,7 @@ export type EchoStreamFrame = Message<"sandbox.EchoStreamFrame"> & {
  * Use `create(EchoStreamFrameSchema)` to create a new message.
  */
 export const EchoStreamFrameSchema: GenMessage<EchoStreamFrame> = /*@__PURE__*/
-  messageDesc(file_sandbox, 6);
+  messageDesc(file_sandbox, 8);
 
 /**
  * HTTP egress relay: sandbox → host (after HostPoll), host performs outbound fetch.
@@ -279,7 +374,7 @@ export type EgressRequest = Message<"sandbox.EgressRequest"> & {
  * Use `create(EgressRequestSchema)` to create a new message.
  */
 export const EgressRequestSchema: GenMessage<EgressRequest> = /*@__PURE__*/
-  messageDesc(file_sandbox, 7);
+  messageDesc(file_sandbox, 9);
 
 /**
  * @generated from message sandbox.EgressResponse
@@ -316,7 +411,7 @@ export type EgressResponse = Message<"sandbox.EgressResponse"> & {
  * Use `create(EgressResponseSchema)` to create a new message.
  */
 export const EgressResponseSchema: GenMessage<EgressResponse> = /*@__PURE__*/
-  messageDesc(file_sandbox, 8);
+  messageDesc(file_sandbox, 10);
 
 /**
  * @generated from message sandbox.EgressHeader
@@ -338,7 +433,7 @@ export type EgressHeader = Message<"sandbox.EgressHeader"> & {
  * Use `create(EgressHeaderSchema)` to create a new message.
  */
 export const EgressHeaderSchema: GenMessage<EgressHeader> = /*@__PURE__*/
-  messageDesc(file_sandbox, 9);
+  messageDesc(file_sandbox, 11);
 
 /**
  * Raw TCP CONNECT tunnel relayed over SessionChannel. The in-jail runner is the
@@ -370,7 +465,7 @@ export type TunnelOpen = Message<"sandbox.TunnelOpen"> & {
  * Use `create(TunnelOpenSchema)` to create a new message.
  */
 export const TunnelOpenSchema: GenMessage<TunnelOpen> = /*@__PURE__*/
-  messageDesc(file_sandbox, 10);
+  messageDesc(file_sandbox, 12);
 
 /**
  * @generated from message sandbox.TunnelOpenAck
@@ -397,7 +492,7 @@ export type TunnelOpenAck = Message<"sandbox.TunnelOpenAck"> & {
  * Use `create(TunnelOpenAckSchema)` to create a new message.
  */
 export const TunnelOpenAckSchema: GenMessage<TunnelOpenAck> = /*@__PURE__*/
-  messageDesc(file_sandbox, 11);
+  messageDesc(file_sandbox, 13);
 
 /**
  * @generated from message sandbox.TunnelData
@@ -419,7 +514,7 @@ export type TunnelData = Message<"sandbox.TunnelData"> & {
  * Use `create(TunnelDataSchema)` to create a new message.
  */
 export const TunnelDataSchema: GenMessage<TunnelData> = /*@__PURE__*/
-  messageDesc(file_sandbox, 12);
+  messageDesc(file_sandbox, 14);
 
 /**
  * @generated from message sandbox.TunnelClose
@@ -441,7 +536,7 @@ export type TunnelClose = Message<"sandbox.TunnelClose"> & {
  * Use `create(TunnelCloseSchema)` to create a new message.
  */
 export const TunnelCloseSchema: GenMessage<TunnelClose> = /*@__PURE__*/
-  messageDesc(file_sandbox, 13);
+  messageDesc(file_sandbox, 15);
 
 /**
  * @generated from message sandbox.SessionEnded
@@ -458,7 +553,7 @@ export type SessionEnded = Message<"sandbox.SessionEnded"> & {
  * Use `create(SessionEndedSchema)` to create a new message.
  */
 export const SessionEndedSchema: GenMessage<SessionEnded> = /*@__PURE__*/
-  messageDesc(file_sandbox, 14);
+  messageDesc(file_sandbox, 16);
 
 /**
  * gRPC service exposed INSIDE the darwin sandbox. The host daemon is the client.

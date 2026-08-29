@@ -106,6 +106,7 @@ describe("AssistantEditingAcceptance — editing and deleting a defined assistan
       label: "Repo Editor",
       systemPrompt: "You read code and make the edits you are asked for.",
       tools: ["Read", "Write", "Grep"],
+      replaces: [],
     });
 
     // Then — the whole tool set is carried, in the daemon's catalog order, and the row re-reads
@@ -117,6 +118,7 @@ describe("AssistantEditingAcceptance — editing and deleting a defined assistan
           label: "Repo Editor",
           systemPrompt: "You read code and make the edits you are asked for.",
           tools: ["Read", "Write", "Grep"],
+          replaces: [],
         },
       ]);
     });
@@ -176,6 +178,7 @@ describe("AssistantEditingAcceptance — editing and deleting a defined assistan
       label: "Repo Editor",
       systemPrompt: "You read code and make the edits you are asked for.",
       tools: ["Read", "Write"],
+      replaces: [],
     });
 
     // Then — the operator keeps the edit they made, alongside the daemon's reason for refusing it

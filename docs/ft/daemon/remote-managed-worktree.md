@@ -60,36 +60,41 @@ that still has native filesystem tools has nothing to proxy through. A split pla
 
 ### What a split session cannot also ask for
 
-Four otherwise-valid options cannot be served on a split placement. Each is **refused** with
+Two otherwise-valid options cannot be served on a split placement. Each is **refused** with
 `invalid_argument` naming the field, rather than silently dropped — a session that came up without
 its recipe looks exactly like the session that was asked for.
 
 | Field | Why it cannot be served here |
 |---|---|
 | `recipe` | A workflow recipe's tooling resolves `TDDY_REPO_DIR` on the agent's host |
-| `semantic_index` | Indexes a worktree on this daemon before launch |
 | `sandbox` | The sandboxed spawn resolves its worktree on this daemon |
-| `specialized_agents` | The roster lives beside the codebase, and each agent is admitted through the session's room — which the spawn has not opened yet |
 
-The first three need a repository on the daemon running the agent, which a split session does not
-have. This mirrors the v1 restriction the original remote-codebase mode already carries (recipes
-other than `free-prompting` were out of scope there too).
+Both need a repository on the daemon running the agent, which a split session does not have. This
+mirrors the v1 restriction the original remote-codebase mode already carries (recipes other than
+`free-prompting` were out of scope there too).
 
-`specialized_agents` is refused for a different reason, and the same one that refuses a peer's agent
-on an ordinary start: a seed resolved on the agent host would name agents against *that* host's
-defs, record them on a session that is not the one holding the roster, and ask for clones in a room
-nobody has opened. Dropped silently it would read as the worst kind of success — the session comes
-up, the main agent keeps the tools the seeded agent was meant to take away from it, and only an
-absent roster says so. The roster itself is fully supported for split sessions: attach the agents
-after the session starts, from its Agent roster pane.
+**`specialized_agents` and `semantic_index` are not among them.** Both were refused here once, on
+the premise that a peer's agent is admitted to the session's room only after the spawn opens it. The
+premise was false — claiming a clone opens that room itself — and both are answered by the rule the
+rest of this document is built on: *the work goes where the worktree is.*
 
-**The UI must not offer them.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends it
-whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
+| Field | Where a split placement serves it |
+|---|---|
+| `specialized_agents` | On the codebase host, which is the host holding the roster. An agent owned by that host reads the authoritative worktree with no clone; an agent owned by any other host gets a clone, exactly as an attach gives it one |
+| `semantic_index` | On the codebase host, against the worktree that exists there — the index is built beside the code it indexes |
+
+Where an agent runs decides **how the session is split across hosts**, never whether it may be seeded
+([session-agent-roster.md](session-agent-roster.md) § Seeding at start). Nothing about the placement
+is a gate on the selection.
+
+**The UI must not offer what is refused.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends
+it whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
 selector could produce is a request the daemon rejects. The form therefore withdraws the Recipe
-control once a codebase host is chosen, and sends an empty `recipe`. Putting the codebase back on
-the session's own host restores it: the withdrawal is a property of the split, not a one-way door. The
-specialized-agent picker is withdrawn on the same terms and for the same reason: leaving it visible
-would offer a choice whose only effect is to turn a valid placement into a refusal.
+control once a codebase host is chosen, and sends an empty `recipe`; the Sandbox control is withdrawn
+on the same terms. Putting the codebase back on the session's own host restores both: the withdrawal
+is a property of the split, not a one-way door. The specialized-agent picker and the Semantic index
+toggle are **not** withdrawn — on every placement they are served, so on every placement they are
+offered.
 
 ### Why claude-cli only
 
@@ -468,8 +473,10 @@ in the cursor-cli branch and once in the claude-cli branch — sharing the same 
 only**. Because both copies share state, the claude-cli branch must also send an empty
 `codebaseDaemonInstanceId` when the session type is cursor-cli, so a value chosen before switching
 type cannot leak into a request that would be refused. One predicate (`isSplitCodebase`) governs
-the selector's visibility, the recipe withdrawal, and what the request carries, so the three cannot
-drift apart.
+the selector's visibility, the Recipe, Sandbox and Dangerously-skip-permissions withdrawals, and what
+the request carries for those three fields, so they cannot drift apart. It governs nothing else — in particular it never touches the
+specialized-agent picker or the Semantic index toggle, which are offered and submitted on every
+placement.
 
 The sessions list renders a split session's placement as agent host and codebase host, sourced from
 the new `SessionEntry` fields rather than inferred from which daemon answered.

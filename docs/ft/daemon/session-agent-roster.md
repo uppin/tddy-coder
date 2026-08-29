@@ -313,6 +313,52 @@ clone, no room membership. A failed attach is a session that looks exactly as it
 Detaching an agent whose `replaces` set is not claimed by any other entry **restores** those tools
 to the main agent at the next enforcement point (§ Tool replacement).
 
+### Seeding at start
+
+`StartSessionRequest.specialized_agents[]` is the same operation as an attach, performed before the
+session's agent is spawned. It carries the same qualified ids, and each one is resolved, placed and
+clone-provisioned by the steps above — there is one seeding mechanism, not two.
+
+What a start adds is **ordering**, and that is the whole reason a seed cannot just be an attach the
+client sends a moment later: a spawn's `--allowedTools` / `--disallowedTools` are fixed at launch
+(§ Tool replacement), so an agent named at start must be on the roster *before* the agent process
+exists. The order is:
+
+1. Resolve the placement — which daemon holds the authoritative worktree.
+2. Resolve every seed reference into a roster record, from the daemon that owns it.
+3. Claim a clone for every seeded agent **not** co-located with that worktree.
+4. Spawn, with the withdrawn tool set derived from the roster just written.
+5. On any failure after step 3, release the clones — a start that does not come up leaves no clone,
+   no roster entry and no room membership, the same contract a failed attach keeps.
+
+**The placement is not a gate.** Which host an agent runs on is decided by comparing its owning
+daemon against the host holding the authoritative worktree — exactly the comparison an attach makes:
+
+| Where the agent is | What the start does |
+|---|---|
+| On the host holding the worktree | Records it; it reads that worktree directly, with no clone |
+| On any other host | Claims that host one clone for the session, and records the `codebase_session_id` serving it |
+
+For a **split** session the roster write is routed to the codebase host before the session is looked
+up, so "the local host" there already means the host holding the worktree: an agent owned by the
+codebase host is co-located and gets no clone, while an agent owned by the agent host — or by any
+third host — gets one. For a **co-located** session both hosts are the same daemon, and the same
+comparison gives the same answers. A peer's agent is admissible either way.
+
+A co-located start writes its `.session.yaml` only once the agent has a pid, so it persists the
+roster inline in that file and holds its claimed clones on the start's behalf until the file is on
+disk; a start that dies before then releases them. That is an ordering detail of one launch path, not
+a second rule.
+
+**A start never waits on the owning daemon.** Seeding an agent on a peer costs that peer's
+`workspace` `StartSession`, not a checkout: the clone is provisioned in the background, and a prompt
+sent while it is still `provisioning` is refused naming the state (AC33). Session start therefore
+never blocks on another host's model warm-up.
+
+An unresolvable reference still fails the start with `INVALID_ARGUMENT` naming it. A session is never
+started with a silently dropped agent — which would also be a session whose main agent kept the tools
+that agent was meant to take away from it, with only an absent roster to say so.
+
 ## Tool replacement, without behaviour
 
 A def's `replaces` is a list of exec-catalog tool names. The **union across the roster** is withdrawn
@@ -356,6 +402,10 @@ withdrawal is enforced twice:
 |---|---|---|
 | **Spawn allowlist** (existing) | Session start and every resume | The roster as it stands at launch. `build_claude_allowlist` / `build_claude_disallowlist` are computed from the persisted roster instead of the start request's names. |
 | **Runtime refusal** (new) | Every exec-tool call | The *live* roster. `tddy-tools` refuses a call to a currently-replaced tool with an error naming the agent that replaced it and the qualified id to address instead. |
+
+The first layer is what makes a **seed** real. The roster the allowlist is computed from is written
+before the spawn (§ Seeding at start), so an agent named at start withdraws its tools at launch
+rather than at the next resume — including one owned by another daemon.
 
 The second layer is what makes live attach real. In a managed-codebase session the main agent's file
 tools **are** `mcp__tddy-tools__*`, so the refusal happens on the path the call already takes — no
@@ -554,11 +604,11 @@ one every non-managed session already is.
 the value threaded into `specializedAgents` is the qualified `agent_id`. One daemon failing to answer
 costs one error row, never the picker.
 
-The picker is **withdrawn** once the codebase is placed on another host: a split session's roster is
-not seeded at start, and the daemon refuses `specialized_agents` by name
-(remote-managed-worktree.md § What a split session cannot also ask for). Its agents are attached
-after the session starts, from the Agent roster pane. Bringing the codebase back to the session's
-own host restores the picker — the withdrawal is a property of the split, not a one-way door.
+The picker is offered on **every** codebase placement, a split session included. Where an agent runs
+decides how the session is split across hosts, not whether it may be selected: a split session's seed
+is resolved and recorded on the codebase host, which is the host that holds the roster
+(§ Seeding at start). The Semantic index toggle beside it is offered on the same terms, and for the
+same reason (remote-managed-worktree.md § What a split session cannot also ask for).
 
 ### Agent roster pane (new)
 
@@ -692,6 +742,24 @@ peer-session section, which is about child sessions and is untouched.
 52. Detaching the last agent of a remote daemon asks for confirmation naming the host whose
     checkout will be deleted.
 53. Not-connected, loading, read-failed and empty are four distinct rendered states.
+
+### Seeding at start
+
+54. A session started with an agent owned by a **peer** succeeds, and the roster records that daemon
+    and the clone serving it — on a co-located placement as much as a split one.
+55. A **split** session started with an agent owned by the **codebase host** succeeds with **no
+    clone**: that agent reads the authoritative worktree directly.
+56. A split session started with two agents owned by the same third host gets **one** clone, and one
+    started with agents on two different hosts gets one clone each — the seed places an agent by the
+    same rule an attach does.
+57. A seeded agent's `replaces` is withdrawn from the main agent **at launch**, not at the first
+    resume: the spawn's tool set is derived from the roster written before it.
+58. A start that fails after clones were claimed leaves no clone, no roster entry and no room
+    membership on any host.
+59. An unresolvable seed reference fails the start with `INVALID_ARGUMENT` naming the reference, and
+    no session is created.
+60. Session start never blocks on the owning daemon's model; a prompt to a seeded agent whose clone
+    is still provisioning is refused naming the clone state (AC33).
 
 ## Design decisions
 

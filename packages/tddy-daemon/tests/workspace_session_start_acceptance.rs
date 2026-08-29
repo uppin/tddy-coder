@@ -26,7 +26,8 @@ use std::process::Command;
 use tddy_daemon::test_util::{test_service, TEST_TOKEN};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, SplitAgentPlacement, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, ListSessionAgentsRequest, SplitAgentPlacement,
+    StartSessionRequest,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a38";
@@ -121,6 +122,42 @@ fn worktree_path_of(sessions_base: &Path, session_id: &str) -> PathBuf {
     )
 }
 
+/// An agent this daemon defines, taking `Grep` away from whatever main agent it is attached to.
+///
+/// A seed naming it needs no clone and no peer: it is owned by the daemon under test, so seeding it
+/// is complete once the entry is written.
+fn an_agent_def_on_this_host(tddy_data_dir: &Path, name: &str) {
+    let agents = tddy_data_dir.join("agents");
+    std::fs::create_dir_all(&agents).expect("create agents dir");
+    std::fs::write(
+        agents.join(format!("{name}.yaml")),
+        format!(
+            "name: {name}\nmodel: qwen2.5-coder:7b\nbase_url: http://127.0.0.1:11434/v1\nreplaces:\n  - Grep\n"
+        ),
+    )
+    .expect("write agent def");
+}
+
+/// The agents a session lists, read the way an operator's Agents tab reads them.
+async fn agent_ids_on_the_roster_of(
+    service: &tddy_daemon::connection_service::ConnectionServiceImpl,
+    session_id: &str,
+) -> Vec<String> {
+    service
+        .list_session_agents(Request::new(ListSessionAgentsRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+            daemon_instance_id: String::new(),
+        }))
+        .await
+        .expect("listing a session's agents must succeed")
+        .into_inner()
+        .agents
+        .into_iter()
+        .map(|agent| agent.agent_id)
+        .collect()
+}
+
 /// The agent half a daemon names when it asks this host to hold a split session's worktree.
 fn an_agent_on_another_daemon() -> SplitAgentPlacement {
     SplitAgentPlacement {
@@ -130,16 +167,17 @@ fn an_agent_on_another_daemon() -> SplitAgentPlacement {
 }
 
 /// The agent session a workspace session recorded as working in its worktree, as
-/// `(daemon_instance_id, session_id)`, or `None` when it recorded none.
-fn paired_agent_of(sessions_base: &Path, session_id: &str) -> Option<(String, String)> {
+/// `(daemon_instance_id, session_id)`.
+///
+/// Each half is reported as it was found, rather than collapsed into one `Option`: a pairing is
+/// only usable when both are present, so a record carrying one and not the other must read as the
+/// distinct thing it is instead of as "no pairing".
+fn paired_agent_of(sessions_base: &Path, session_id: &str) -> (Option<String>, Option<String>) {
     let session_dir =
         tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
     let metadata =
         tddy_core::read_session_metadata(&session_dir).expect("session metadata must be readable");
-    Some((
-        metadata.agent_daemon_instance_id?,
-        metadata.agent_session_id?,
-    ))
+    (metadata.agent_daemon_instance_id, metadata.agent_session_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +476,7 @@ async fn a_workspace_session_records_the_agent_session_it_holds_the_worktree_for
     // that a withdrawal attached to this checkout is enforced somewhere, and where
     assert_eq!(
         paired_agent_of(sessions_tmp.path(), &started.session_id),
-        Some((agent.agent_daemon_instance_id, agent.session_id)),
+        (Some(agent.agent_daemon_instance_id), Some(agent.session_id)),
         "the workspace session must record the agent working in its worktree"
     );
 }
@@ -462,7 +500,7 @@ async fn a_workspace_session_nobody_named_an_agent_for_is_paired_with_none() {
     // here could take away, and a withdrawal accepted on it would be enforced by nothing
     assert_eq!(
         paired_agent_of(sessions_tmp.path(), &started.session_id),
-        None,
+        (None, None),
         "a workspace session with no agent named must record no pairing"
     );
 }
@@ -535,5 +573,44 @@ async fn a_split_agent_placement_naming_a_daemon_but_no_session_is_refused() {
         status.message().contains("split_agent"),
         "the refusal must name the field; got '{}'",
         status.message()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A start that fails after the roster was seeded
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_workspace_start_that_fails_after_seeding_leaves_no_agent_on_the_roster() {
+    // Given the codebase half of a split session — the shape that has a paired agent, so a
+    // withdrawal is enforceable and the seed goes through — asking for a semantic index the fixture
+    // has no embedder for: the seed succeeds, and the step after it is the one that fails
+    let repo = a_git_repo_with_two_branches();
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(sessions_tmp.path(), repo.path(), None);
+    an_agent_def_on_this_host(sessions_tmp.path(), "fastcontext");
+    let service = test_service(sessions_tmp.path().to_path_buf());
+    let chosen = "019d105b-ac0f-78d3-9a89-409731145abc";
+
+    // When the start is refused
+    service
+        .start_session(Request::new(StartSessionRequest {
+            requested_session_id: chosen.to_string(),
+            split_agent: Some(an_agent_on_another_daemon()),
+            specialized_agents: vec!["fastcontext".to_string()],
+            semantic_index: true,
+            ..a_workspace_request()
+        }))
+        .await
+        .expect_err("a start whose semantic index cannot be built must not report success");
+
+    // Then the roster is empty. A start that answered with an error but left its seed behind leaves
+    // an agent the operator can see on a session that never came up, holding a withdrawal against a
+    // main agent that was never spawned — and for a peer-owned seed, a claimed clone on that peer
+    // with nothing left to release it.
+    assert_eq!(
+        agent_ids_on_the_roster_of(&service, chosen).await,
+        Vec::<String>::new(),
+        "a failed start must take its seeded roster back out"
     );
 }

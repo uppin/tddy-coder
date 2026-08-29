@@ -1,16 +1,20 @@
 import { useState } from "react";
+import { useAssistantToolSets } from "./useAssistantToolSets";
 import type { AssistantRow } from "../../utils/mergeRegistryEntries";
 import { AssistantToolPicker } from "./AssistantToolPicker";
 import { ModelsDialogShell } from "./ModelsDialogShell";
 import type { ToolCatalog } from "./useModelRegistryFanOut";
 
 /**
- * Edit an assistant in place: its label, its system prompt and its tools — the three fields
- * `UpdateAssistant` accepts. The `--agent` name and the model it speaks as are its identity on the
- * daemon and are shown, not offered for editing.
+ * Edit an assistant in place: its label, its system prompt, the tools it may call and the main-agent
+ * tools it takes over — the four fields `UpdateAssistant` accepts. The `--agent` name and the model
+ * it speaks as are its identity on the daemon and are shown, not offered for editing.
+ *
+ * Both tool sets open on what the daemon holds and are sent whole, so giving up a takeover is
+ * expressible: an update that carried only what was ticked could never remove one.
  *
  * As in the create dialog, submitting is refused while the daemon's exec catalog is unknown: saving
- * then would replace the assistant's tool set with whatever a failed read left behind.
+ * then would replace the assistant's tool sets with whatever a failed read left behind.
  */
 
 const fieldClassName =
@@ -25,6 +29,7 @@ export interface EditAssistantDialogProps {
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
   onClose: () => void;
 }
@@ -37,26 +42,20 @@ export function EditAssistantDialog({
 }: EditAssistantDialogProps) {
   const [label, setLabel] = useState(assistant.label);
   const [systemPrompt, setSystemPrompt] = useState(assistant.systemPrompt);
-  const [selectedTools, setSelectedTools] = useState<string[]>([...assistant.tools]);
+  const toolSets = useAssistantToolSets(assistant.tools, assistant.replaces);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const toggleTool = (toolName: string, checked: boolean) =>
-    setSelectedTools((current) =>
-      checked ? [...current, toolName] : current.filter((t) => t !== toolName),
-    );
-
   const submit = async () => {
     if (submitting || toolCatalog.status !== "ready") return;
-    const orderedTools = toolCatalog.tools
-      .map((t) => t.name)
-      .filter((t) => selectedTools.includes(t));
+    const sent = toolSets.inCatalogOrder(toolCatalog.tools);
     setSubmitting(true);
     try {
       const failure = await onSubmit({
         label: label.trim(),
         systemPrompt: systemPrompt.trim(),
-        tools: orderedTools,
+        tools: sent.tools,
+        replaces: sent.replaces,
       });
       setError(failure);
       if (failure === "") onClose();
@@ -93,9 +92,17 @@ export function EditAssistantDialog({
       />
       <AssistantToolPicker
         idPrefix="models-edit-assistant"
+        legend="Tools — what this assistant may call itself"
         catalog={toolCatalog}
-        selected={selectedTools}
-        onToggle={toggleTool}
+        selected={toolSets.tools}
+        onToggle={toolSets.toggleTool}
+      />
+      <AssistantToolPicker
+        idPrefix="models-edit-assistant-replaced"
+        legend="Replaces — taken away from the main agent"
+        catalog={toolCatalog}
+        selected={toolSets.replaces}
+        onToggle={toolSets.toggleReplaced}
       />
       {error ? (
         <div data-testid="models-edit-assistant-error" className="text-xs text-destructive">

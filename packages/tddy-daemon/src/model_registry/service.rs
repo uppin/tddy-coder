@@ -271,6 +271,7 @@ impl ModelRegistryService for ModelRegistryServiceImpl {
                     model_id: req.model_id,
                     system_prompt: req.system_prompt,
                     tools: req.tools,
+                    replaces: req.replaces,
                 },
                 &caller,
             )
@@ -293,6 +294,7 @@ impl ModelRegistryService for ModelRegistryServiceImpl {
                 &req.label,
                 &req.system_prompt,
                 &req.tools,
+                &req.replaces,
                 &caller,
             )
             .await?;

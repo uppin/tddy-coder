@@ -17,6 +17,17 @@ a **local embedding model**, and the vectors are stored in a per-session SQLite 
 **`sqlite-vec`** extension. `SemanticSearch` embeds the query with the same model and returns the
 nearest chunks by vector similarity.
 
+**The index is built where the worktree is.** For an ordinary co-located session that is the daemon
+the session was started on. For a [split placement](../daemon/remote-managed-worktree.md) — agent on
+one host, codebase on another — it is the **codebase host**, which builds the index for its
+`workspace` session against the checkout that exists there. Requesting an index is never refused over
+the placement; there is exactly one worktree that counts, and the index is built beside it.
+
+> ⚠️ **Not yet answerable.** `SemanticSearch` cannot serve a query on **any** session shape yet:
+> `tool_semantic_search` (`packages/tddy-tool-engine/src/lib.rs`) returns *"index query not yet
+> wired"* because the query-side embedder is not wired into the tool engine. What is delivered today
+> is the index being **built**, on the correct host; the query path below is still the target state.
+
 > **Terminology.** This is a third, orthogonal axis of "managed codebase". It composes with the
 > [workflow dimension](managed-codebase-workflow.md) (recipe-driven state machine) and the
 > [remote-filesystem dimension](managed-codebase-subagents.md) (repo reached only via exec tools).
@@ -51,6 +62,8 @@ Web CreateSessionPane (claude-cli | cursor-cli)
         │
         ▼
   daemon start_(sandboxed_)claude_cli_session | …cursor_cli_session
+        │  (split placement ⇒ forwarded to the codebase host, which runs the same task
+        │   against its own worktree for the session's `workspace` half)
         │  (managed_codebase && semantic_index)
         │  ── BLOCKING ── SemanticIndexTask (tddy_task) on the worktree:
         │        walk → chunk → embed (local model) → store vectors in
@@ -77,7 +90,8 @@ Web CreateSessionPane (claude-cli | cursor-cli)
    **"Semantic index"** checkbox (`create-session-semantic-index-toggle`) is shown inside the
    expanded managed-codebase section, alongside the recipe picker and subagent list.
 2. The Semantic index checkbox is **absent** while Managed codebase is disabled, and **absent** for
-   the `"tool"` session type.
+   the `"tool"` session type. Choosing a codebase host does **not** withdraw it: it stays on offer for
+   a split placement, and the chosen value is submitted.
 3. Semantic index defaults to **off**; a managed session created without touching it sends
    `semantic_index = false`.
 4. Enabling Managed codebase + Semantic index and submitting sends `semantic_index = true` on
@@ -104,17 +118,20 @@ Web CreateSessionPane (claude-cli | cursor-cli)
     call it. Behavior for all other tools is unchanged.
 11. Applies to **both** sandboxed and non-sandboxed **claude-cli** and **cursor-cli** managed
     sessions.
+12. A **split** session started with `semantic_index = true` is not refused over the field: the
+    request is forwarded to the codebase host, which builds the index against the worktree it holds.
+    Nothing is indexed on the agent host, which has no checkout to index.
 
 ### Semantic index engine
 
-12. Indexing walks the worktree, chunks text files, embeds each chunk with the configured local
+13. Indexing walks the worktree, chunks text files, embeds each chunk with the configured local
     embedding model, and stores `(chunk text, source path, vector)` rows in a per-session
     `sqlite-vec` database at `<session_dir>/semantic-index.db`.
-13. `SemanticSearch(query)` embeds the query with the same model and returns the top-K chunks ranked
+14. `SemanticSearch(query)` embeds the query with the same model and returns the top-K chunks ranked
     by vector similarity (nearest first), each with its source path and text.
-14. The embedding model is injected behind an `Embedder` trait so the pipeline is deterministic and
+15. The embedding model is injected behind an `Embedder` trait so the pipeline is deterministic and
     model-free under test; the production default is the local bundled model.
-15. When `SemanticSearch` is invoked without an available index, it returns a clear error — it does
+16. When `SemanticSearch` is invoked without an available index, it returns a clear error — it does
     **not** fall back to a lexical/ripgrep search.
 
 ## Non-goals (v1)

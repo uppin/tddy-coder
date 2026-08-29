@@ -58,6 +58,33 @@ interface SessionInspectorDrawerProps {
 }
 
 // ---------------------------------------------------------------------------
+// Which session the roster belongs to
+// ---------------------------------------------------------------------------
+
+/**
+ * The half of a session whose roster governs its agent.
+ *
+ * A split session is two sessions — the agent runs on one host, the worktree and codebase live on
+ * another — and only the codebase half keeps the roster. That is the copy the agent's own tooling
+ * subscribes to: a split agent is launched pointed at `codebase_session_id` on
+ * `codebase_daemon_instance_id` (`split_session::split_remote_tool_env`), and its withdrawn tools
+ * are derived from the roster held there. The agent half would answer a roster read too, with an
+ * empty list beside the real one — and an attach made against it would report a withdrawal no
+ * process performs.
+ *
+ * Both fields are written together or not at all, so a session with neither is co-located and
+ * addresses itself.
+ */
+function rosterHalfOf(session: SessionEntry): { sessionId: string; daemonInstanceId: string } {
+  const codebaseHost = session.codebaseDaemonInstanceId.trim();
+  const codebaseSession = session.codebaseSessionId.trim();
+  if (codebaseHost === "" || codebaseSession === "") {
+    return { sessionId: session.sessionId, daemonInstanceId: session.daemonInstanceId };
+  }
+  return { sessionId: codebaseSession, daemonInstanceId: codebaseHost };
+}
+
+// ---------------------------------------------------------------------------
 // Metadata row helper
 // ---------------------------------------------------------------------------
 
@@ -358,9 +385,9 @@ export function SessionInspectorDrawer({
                 convention the Tools tab's calls use. `client` is this drawer's live daemon
                 connection, so its absence is exactly "not connected to that host". */}
             <SessionAgentRosterPane
-              sessionId={session.sessionId}
+              sessionId={rosterHalfOf(session).sessionId}
               sessionToken={sessionToken ?? ""}
-              daemonInstanceId={session.daemonInstanceId}
+              daemonInstanceId={rosterHalfOf(session).daemonInstanceId}
               daemonConnected={client !== undefined}
             />
           </ScrollArea>

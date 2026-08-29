@@ -20,6 +20,12 @@ import {
 } from "../testIds";
 
 export const sessionAgentRosterPage = {
+  // --- reaching the pane from the Session Inspector -------------------------
+  /** Open the Inspector's Agents tab, which is where this pane lives inside the drawer. */
+  openInspectorAgentsTab() {
+    byTestId(TEST_IDS.sessionInspectorTabAgents).click();
+  },
+
   // --- states ---------------------------------------------------------------
   pane: () => byTestId(TEST_IDS.agentRosterPane),
   loading: () => byTestId(TEST_IDS.agentRosterLoading),

@@ -91,7 +91,7 @@ export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => vo
         onUnloadModel={(model) => void registry.unloadModel(model)}
         onOpenChat={(model) => void openChat(model)}
         onOpenAssistantChat={openAssistantChat}
-        onCreateAssistant={({ model, name, label, systemPrompt, tools }) =>
+        onCreateAssistant={({ model, name, label, systemPrompt, tools, replaces }) =>
           registry.createAssistant({
             daemonInstanceId: model.daemonInstanceId,
             name,
@@ -100,6 +100,7 @@ export function ModelsAppPage({ onNavigate }: { onNavigate: (path: string) => vo
             modelId: model.modelId,
             systemPrompt,
             tools,
+            replaces,
           })
         }
         onUpdateAssistant={(input) => registry.updateAssistant(input)}

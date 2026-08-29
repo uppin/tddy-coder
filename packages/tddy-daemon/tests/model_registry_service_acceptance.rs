@@ -285,6 +285,7 @@ async fn refuses_to_create_an_assistant_for_an_unrecognised_session_token() {
             model_id: "qwen3:32b".to_string(),
             system_prompt: "You read code.".to_string(),
             tools: vec!["Read".to_string()],
+            replaces: Vec::new(),
         }))
         .await;
 
@@ -587,6 +588,7 @@ async fn lists_a_created_assistant_among_the_daemons_selectable_agents() {
             model_id: "qwen3:32b".to_string(),
             system_prompt: "You read code.".to_string(),
             tools: vec!["Read".to_string(), "Grep".to_string()],
+            replaces: Vec::new(),
         }))
         .await
         .expect("create the assistant");

@@ -520,7 +520,7 @@ async fn a_resumed_split_agent_is_pointed_at_the_codebase_hosts_session_not_its_
 
 #[tokio::test]
 #[serial]
-async fn a_resumed_split_agent_is_re_wired_to_its_rooms_host_and_the_daemon_it_was_paired_with() {
+async fn a_resumed_split_agents_tool_transport_is_rebuilt_from_the_persisted_pairing() {
     // Given a stopped split session whose only record of the pairing is its .session.yaml
     // When it is resumed
     let resumed = resume_a_split_session().await;

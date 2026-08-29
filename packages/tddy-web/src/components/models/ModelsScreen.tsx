@@ -59,12 +59,14 @@ export interface ModelsScreenProps {
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
   onUpdateAssistant: (input: {
     assistant: AssistantRow;
     label: string;
     systemPrompt: string;
     tools: string[];
+    replaces: string[];
   }) => Promise<string>;
   onDeleteAssistant: (assistant: AssistantRow) => void;
 }

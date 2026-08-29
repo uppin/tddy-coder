@@ -298,8 +298,13 @@ eligible daemon makes the session **split**. Feature doc:
   `Split { codebase_instance_id }`, or names the failed precondition. A split requires
   `managed_codebase` (an agent that kept its native filesystem tools has nothing to proxy) and
   `session_type == "claude-cli"` (the only agent that can be *prevented* from touching a local
-  filesystem, via `--allowedTools`/`--disallowedTools`). `recipe`, `semantic_index` and `sandbox`
-  are **refused by name** for a split: each resolves a worktree on the daemon running the agent.
+  filesystem, via `--allowedTools`/`--disallowedTools`). `recipe` and `sandbox` are **refused by
+  name** for a split: each resolves a worktree on the daemon running the agent.
+- **`semantic_index` and `specialized_agents` are served, not refused.** Both are carried into the
+  codebase host's `workspace` start (`workspace_start_request`), which is where the worktree is:
+  the index is built there (`index_workspace_worktree`), and the roster is written there — which is
+  also the host a roster call for a split session is routed to before the session is looked up. See
+  § Seeding the roster at start.
 - **The B-side session id is caller-chosen.** A split start generates the workspace session's id and
   sends it as `requested_session_id` (honoured only for `session_type: "workspace"`, refused with
   `already_exists` if taken). Without it a forward that times out leaves this daemon unable to name
@@ -315,6 +320,37 @@ eligible daemon makes the session **split**. Feature doc:
   because a local "no room" fault returns the same code the peer uses for a missing session.
 - `split-agent-` is a **reserved identity prefix**: discovery refuses to treat such a participant as
   an eligible daemon, so an agent cannot advertise itself as a host.
+
+### Seeding the roster at start
+
+`StartSessionRequest.specialized_agents[]` is a **roster write performed before the spawn**, not a
+second mechanism beside `AttachSessionAgent`. Feature doc:
+[session-agent-roster.md § Seeding at start](../../../docs/ft/daemon/session-agent-roster.md).
+
+| Function | Role |
+|---|---|
+| `seeded_roster_records` | Each reference → a `SessionAgentRecord`, via the attach path's `roster_record_for`. A bare name means this daemon; a qualified id resolves from the daemon it names, over the common room |
+| `SeedCodebase` | The three facts a seed needs about the session's codebase — `session_dir`, `worktree_root`, `project_id` — plus whether a withdrawal is enforceable on it. `of_a_starting_session` passes them from a start that has them; `read` recovers them from a `.session.yaml` that exists |
+| `seed_session_agent_roster` | The split/workspace path: per record, refuse an unenforceable withdrawal, claim a clone if the agent is not co-located with the worktree, then `session_agent_rosters.attach`. Any failure unwinds what came before it |
+| `claim_co_located_seed_clones` | The co-located twin: claims the same clones and stamps each record's `codebase_session_id`, but writes no entry — a co-located start persists its roster inline in the `.session.yaml` it writes once the agent has a pid |
+| `SeededCloneGuard` | Holds the clones a co-located start claimed until `keep()` is called after that metadata write. Dropped unkept — on any `?` between the claim and the write — it spawns the same `unwind_agent_clone_claim` releases `unwind_seeded_roster` performs |
+| `SeededAgentClones` | The trait the guard is obtained through, so the free-function `cursor_cli_spawn` path can claim without naming `ConnectionServiceImpl` — the same reason `session_room::SessionRoomHost` is a trait, and the same object in practice |
+| `unwind_seeded_roster` | Detach + release, in reverse order, logging and swallowing every failure so the original refusal is what the operator sees |
+
+**Ordering is the point.** A spawn's `--allowedTools`/`--disallowedTools` are fixed at launch, so an
+agent named at start must be on the roster before the agent process exists — which is why the claim
+happens before the spawn on all four launch paths (`start_split_claude_cli_session`, the two
+`start_sandboxed_*_session`s, and `cursor_cli_spawn::spawn_cursor_cli_session_inner`).
+
+**Placement is never a gate.** An agent is placed by comparing its owning daemon against the host
+holding the authoritative worktree — the comparison an attach already makes — and a peer's agent is
+admissible on a co-located start exactly as it is on a split one. `claim_agent_clone` opens the
+session's room itself, so nothing about admitting a peer waits on the spawn.
+
+**`refuse_unenforceable_withdrawal` runs on every path**, co-located included: a seeded agent
+declaring `replaces` is refused on a session shape where the withdrawal cannot be enforced (an
+unsandboxed cursor-cli start, for one), rather than accepted and quietly unenforced. This matches
+`AttachSessionAgent`'s long-standing behaviour.
 
 ### `StreamExecuteTool`
 
@@ -413,7 +449,7 @@ When `StartSessionRequest.session_type == "claude-cli"` **and** `sandbox == true
 4. Waits for the ready marker, then **`dial_and_bridge`** dials the runner over its piped stdio (`--stdio`, via `bridge_sandbox_stdio` → `StdioSandboxClient`) for a single bidi **`SessionChannel`** (`sandbox_session.rs`) — no gRPC socket or port is involved for this call site (the runner's own tonic gRPC server is retained only for `tddy-sandbox-app`'s standalone demo path and `sandbox_action.rs`'s separate generic-action-execution flow).
 5. Writes `.session.yaml` with `sandbox: true`; returns empty LiveKit fields.
 
-**Specialized subagents:** the jail never mounts the repo — the agent reaches it only through the `mcp__tddy-tools__*` exec tools (this is what `managed_codebase` on `StartSessionRequest` names for users; it doesn't toggle mount behavior, since this path is always mount-free). When `specialized_agents` is non-empty, `ConnectionServiceImpl::specialized_subagent_env` resolves each name against the builtin + `<tddyhome>/agents` defs (an unresolvable name fails the request with `INVALID_ARGUMENT`) and adds `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` to the spawned jail's env, so the in-jail `tddy-tools --mcp` process registers the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools for those agents — see [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md).
+**Specialized subagents:** the jail never mounts the repo — the agent reaches it only through the `mcp__tddy-tools__*` exec tools (this is what `managed_codebase` on `StartSessionRequest` names for users; it doesn't toggle mount behavior, since this path is always mount-free). When `specialized_agents` is non-empty, the start resolves each reference into a **roster record** (`seeded_roster_records`, § Seeding the roster at start — a qualified id naming another daemon resolves from *that* daemon; an unresolvable reference fails the request with `INVALID_ARGUMENT`) and `ConnectionServiceImpl::specialized_subagent_env` turns the resulting defs into `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` on the spawned jail's env, so the in-jail `tddy-tools --mcp` process registers the `subagent_new_session`/`subagent_prompt`/`subagent_cancel` MCP tools for those agents — see [specialized-subagents.md](../../../docs/ft/coder/specialized-subagents.md).
 
 **Specialized-agent warm-up gate:** after resolving the defs and **before** spawning the jail, the start path calls `tddy_discovery::warmup::warm_up_agents` to wake each agent's model endpoint (`/v1/chat/completions` probe) and wait until it answers. A cold Ollama model or unreachable endpoint fails the start with `FAILED_PRECONDITION` (naming the agent, endpoint, and model) rather than stalling the main agent's first `subagent_prompt` — no fallback to starting the jail anyway. `502`/`5xx`/`429`/connection-errors retry until the budget; a `404` fails fast. **Resume does not reuse this start path** — `ResumeSession` goes through `relaunch_sandboxed_runner`, which runs the same gate before relaunching the jail, so a resumed session's subagents are as ready as a fresh one's. Applies identically to the [cursor-cli sandboxed path](#sandboxed-cursor-agent-cli-sessions). See [specialized-subagents.md § Start-time warm-up gate](../../../docs/ft/coder/specialized-subagents.md#start-time-warm-up-gate).
 

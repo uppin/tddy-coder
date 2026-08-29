@@ -71,6 +71,7 @@ impl Registry {
                     model_id: "qwen3:32b".to_string(),
                     system_prompt: String::new(),
                     tools: vec!["Read".to_string()],
+                    replaces: Vec::new(),
                 },
                 THE_OPERATOR,
             )

@@ -93,7 +93,7 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
 
 /** Put the form into the state where the agent picker is rendered. */
 function openTheAgentPicker() {
-  byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+  chooseClaudeCli();
   byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
 }
 
@@ -105,6 +105,26 @@ function closeTheManagedCodebaseSection() {
 /** Open it again, on a form that has already had it open once. */
 function reopenTheManagedCodebaseSection() {
   byTestId(TEST_IDS.createSessionManagedCodebaseToggle).click();
+}
+
+/** Tick an agent in the picker, by the qualified id the option is keyed on. */
+function pickTheAgent(agentId: string) {
+  byTestId(createSessionAgentOption(agentId)).click();
+}
+
+/** Assert the picker offers an agent with its box unticked. */
+function theAgentIsOfferedUnpicked(agentId: string) {
+  byTestId(createSessionAgentOption(agentId)).should("not.be.checked");
+}
+
+/** Choose claude-cli without ever opening the Managed codebase section. */
+function chooseClaudeCli() {
+  byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
+}
+
+/** Submit the form. */
+function startTheSession() {
+  byTestId(TEST_IDS.createSessionSubmitBtn).click();
 }
 
 /** The `specialized_agents` lists carried by every `StartSession` host A received. */
@@ -151,9 +171,9 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     openTheAgentPicker();
 
     // When — one agent from each host
-    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
-    byTestId(createSessionAgentOption(LINTER_ON_B)).click();
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    pickTheAgent(EXPLORER_ON_A);
+    pickTheAgent(LINTER_ON_B);
+    startTheSession();
 
     // Then
     cy.wrap(null).should(() => {
@@ -168,8 +188,8 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     );
 
     // When — claude-cli, but the section is never opened
-    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    chooseClaudeCli();
+    startTheSession();
 
     // Then
     cy.wrap(null).should(() => {
@@ -185,7 +205,7 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     // Given an agent picked while the section was open
     mountPicker(aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]));
     openTheAgentPicker();
-    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
+    pickTheAgent(EXPLORER_ON_A);
 
     // When the section that offered it is closed and opened again
     closeTheManagedCodebaseSection();
@@ -193,7 +213,7 @@ describe("CreateSession specialized-agent picker across hosts", () => {
 
     // Then the picker offers it unpicked — closing the section is the operator's last sight of the
     // selection, so it cannot survive out of view
-    byTestId(createSessionAgentOption(EXPLORER_ON_A)).should("not.be.checked");
+    theAgentIsOfferedUnpicked(EXPLORER_ON_A);
   });
 
   it("sends no agent picked before the managed-codebase section was closed", () => {
@@ -202,12 +222,12 @@ describe("CreateSession specialized-agent picker across hosts", () => {
       aDaemonOfferingAgents([anAvailableAgent("linter", HOST_B.instanceId)]),
     );
     openTheAgentPicker();
-    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
+    pickTheAgent(EXPLORER_ON_A);
     closeTheManagedCodebaseSection();
 
     // When the section is reopened and the session started without picking again
     reopenTheManagedCodebaseSection();
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    startTheSession();
 
     // Then the request carries what the reopened picker shows, which is nothing — the request is
     // never rewritten on the way out
@@ -241,8 +261,8 @@ describe("CreateSession specialized-agent picker across hosts", () => {
     openTheAgentPicker();
 
     // When
-    byTestId(createSessionAgentOption(EXPLORER_ON_A)).click();
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
+    pickTheAgent(EXPLORER_ON_A);
+    startTheSession();
 
     // Then
     cy.wrap(null).should(() => {

@@ -435,7 +435,7 @@ async fn start_session_with_an_unknown_codebase_daemon_is_refused() {
 // as looking for the codebase host.
 
 #[tokio::test]
-async fn a_split_start_seeding_an_agent_of_this_host_reaches_the_codebase_host() {
+async fn a_split_start_seeding_an_agent_of_this_host_is_not_refused_over_the_seed() {
     // Given a split request seeding an agent this daemon defines
     let sessions_tmp = tempfile::tempdir().unwrap();
     an_agent_def_on_this_host(sessions_tmp.path(), "fastcontext");
@@ -458,6 +458,11 @@ async fn a_split_start_seeding_an_agent_of_this_host_reaches_the_codebase_host()
         tddy_rpc::Code::FailedPrecondition,
         "a seeded agent must not make a valid placement a bad request; got {:?}: {}",
         status.code(),
+        status.message()
+    );
+    assert!(
+        !status.message().contains("fastcontext"),
+        "the start must fail over the missing room, not over the seed it named; got '{}'",
         status.message()
     );
 }
@@ -496,7 +501,7 @@ async fn a_split_start_seeding_an_agent_no_host_defines_is_refused_naming_that_a
 }
 
 #[tokio::test]
-async fn a_split_start_asking_for_a_semantic_index_reaches_the_codebase_host() {
+async fn a_split_start_asking_for_a_semantic_index_is_not_refused_over_the_index() {
     // Given a split request that also asks for a semantic index
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
@@ -518,6 +523,11 @@ async fn a_split_start_asking_for_a_semantic_index_reaches_the_codebase_host() {
         tddy_rpc::Code::FailedPrecondition,
         "a semantic index must not make a valid placement a bad request; got {:?}: {}",
         status.code(),
+        status.message()
+    );
+    assert!(
+        !status.message().contains("semantic"),
+        "the start must fail over the missing room, not over the index it asked for; got '{}'",
         status.message()
     );
 }

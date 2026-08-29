@@ -463,11 +463,16 @@ fn escalates_the_backoff_when_each_pass_dies_as_soon_as_it_has_been_served() {
     let second = follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
     let third = follower.record(&served_then_died, no_longer_than_it_took_to_be_served());
 
-    // Then
-    assert!(
-        first < second && second < third,
-        "a pass that dies as soon as it is served must still slow the reconnects down, was \
-         {first:?} then {second:?} then {third:?}"
+    // Then — doubling, not merely rising: a run of subscriptions that each die on arrival is a hot
+    // loop, and only a delay that grows as fast as the churn does gets out of it
+    assert_eq!(
+        (first, second, third),
+        (
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4)
+        ),
+        "a pass that dies as soon as it is served must still slow the reconnects down"
     );
 }
 

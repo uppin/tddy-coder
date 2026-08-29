@@ -3,7 +3,8 @@
 ## Role
 
 Two modules implement a session's **agent roster** — the set of specialized agents attached to a
-live session, addressable as `name@daemon_instance_id`, mutable while the session runs. See
+session, addressable as `name@daemon_instance_id`, seeded at start or mutated while the session
+runs. See
 [docs/ft/daemon/session-agent-roster.md](../../../docs/ft/daemon/session-agent-roster.md) for the
 feature and its acceptance criteria.
 
@@ -11,6 +12,12 @@ feature and its acceptance criteria.
 |---|---|
 | `session_agent_roster` | The roster itself: membership, `rev`, persistence, subscriptions. |
 | `session_agent_clone` | Everything about a **remote** agent: the checkout on its owning daemon, the mirror that keeps it current, and the hosted-side tool split. |
+
+A start-time seed (`StartSessionRequest.specialized_agents[]`) is a caller of these same two
+modules, not a parallel path: it resolves each reference through `roster_record_for`, claims a clone
+through `session_agent_clone` for every agent not co-located with the authoritative worktree, and
+writes the entries before the agent is spawned. See
+[connection-service.md § Seeding the roster at start](connection-service.md).
 
 The RPCs, the conversation routing and the room wiring live in `connection_service.rs` — there is
 deliberately no `session_agent_conversation.rs`, because routing a conversation needs the peer
@@ -76,7 +83,8 @@ One clone per **(session, owning daemon)**, shared by every agent that daemon ow
 one host reading one tree is the common case, and a checkout each would multiply disk and sync cost
 for isolation a read-only mirror does not need.
 
-`claim` mints the id **before** contacting the peer, reusing the split-placement discipline from
+`claim` is reached from two callers — an attach, and a start seeding an agent this daemon does not
+own — and both get the same clone under the same key. It mints the id **before** contacting the peer, reusing the split-placement discipline from
 [remote-managed-worktree.md](../../../docs/ft/daemon/remote-managed-worktree.md): a forward that
 times out still leaves A able to name — and therefore delete — whatever B built. `ClaimedAgentClone`
 carries whether this attach *commissioned* the clone, so a second agent on the same host can never

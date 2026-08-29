@@ -1189,8 +1189,8 @@ mod tests {
         // than being left to discover a tool it was offered is not callable
         let claude_md = std::fs::read_to_string(context.join("CLAUDE.md")).expect("CLAUDE.md");
         assert!(
-            claude_md.contains("Grep") && claude_md.contains("explorer"),
-            "the notice must name the withdrawn tool and the agent serving it; got:\n{claude_md}"
+            claude_md.contains("Grep \u{2014} handled by the `explorer` subagent"),
+            "the notice must tie the withdrawn tool to the agent serving it; got:\n{claude_md}"
         );
     }
 }

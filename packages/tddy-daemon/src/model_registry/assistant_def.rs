@@ -51,9 +51,11 @@ pub fn assistant_to_agent_def(
         system_prompt_path: None,
         tools,
         max_turns: DEFAULT_MAX_TURNS,
-        // An assistant is an agent a session is started *as*, not a subagent that stands in for a
-        // main-agent tool, so it replaces nothing.
-        replaces: Vec::new(),
+        // The main-agent tools this assistant stands in for. An assistant is offered as an
+        // attachable subagent (`ListSubagents` resolves the registry alongside
+        // `<tddyhome>/agents/*.yaml`), so this is what a session withdraws from its own agent when
+        // it attaches one — without it the main agent keeps every tool and never delegates.
+        replaces: assistant.replaces.clone(),
     })
 }
 

@@ -98,6 +98,12 @@ export interface RosterScenario {
   offersUnavailable?: string;
 }
 
+/** Which session, on which daemon, a roster call named — the routing half of a request. */
+export interface RosterAddress {
+  sessionId: string;
+  daemonInstanceId: string;
+}
+
 /** The controls a spec drives the roster fake with, whichever backend serves it. */
 export interface RosterControls {
   /** Publish a new roster revision to every open stream, as a daemon does on attach/detach. */
@@ -106,6 +112,14 @@ export interface RosterControls {
   detachedAgentIds: () => string[];
   /** Qualified ids passed to `AttachSessionAgent`, in call order. */
   attachedAgentIds: () => string[];
+  /**
+   * What `StreamSessionAgents` named, in call order. A split session keeps its roster on the
+   * codebase host under the codebase half's session id, so which pair a caller sent is the whole
+   * question of whether it read the roster that governs the session or an empty one beside it.
+   */
+  rosterReadsAddressed: () => RosterAddress[];
+  /** What `AttachSessionAgent` named, in call order — the same question, for a write. */
+  attachesAddressed: () => RosterAddress[];
 }
 
 export interface RosterBackend extends RosterControls {
@@ -127,6 +141,8 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
   const tail = aRosterTail();
   const attached: string[] = [];
   const detached: string[] = [];
+  const rosterReads: RosterAddress[] = [];
+  const attaches: RosterAddress[] = [];
 
   const handlers: Partial<ServiceImpl<typeof ConnectionService>> = {
     async listSubagents() {
@@ -135,7 +151,8 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
       }
       return create(ListSubagentsResponseSchema, { subagents: scenario.offers ?? [] });
     },
-    async *streamSessionAgents() {
+    async *streamSessionAgents(req) {
+      rosterReads.push({ sessionId: req.sessionId, daemonInstanceId: req.daemonInstanceId });
       if (scenario.failBeforeSnapshot !== undefined) {
         throw new ConnectError(scenario.failBeforeSnapshot, Code.Unavailable);
       }
@@ -155,6 +172,7 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
     // answering is what makes a pane that fires the call and never re-renders observable.
     async attachSessionAgent(req) {
       attached.push(req.agentId);
+      attaches.push({ sessionId: req.sessionId, daemonInstanceId: req.daemonInstanceId });
       const agents = [...tail.currentAgents(), attachedEntryFor(req.agentId, scenario.offers ?? [])];
       tail.push(agents, tail.currentRev() + 1);
       return create(SessionAgentRosterSchema, {
@@ -182,6 +200,8 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
     pushRoster: (agents, rev) => tail.push(agents, rev),
     detachedAgentIds: () => [...detached],
     attachedAgentIds: () => [...attached],
+    rosterReadsAddressed: () => [...rosterReads],
+    attachesAddressed: () => [...attaches],
   };
 }
 

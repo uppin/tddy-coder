@@ -222,11 +222,6 @@ impl WithdrawnExecTools {
         let (tool, agent_id) = self.0.get_key_value(&canonical)?;
         Some(Takeover { tool, agent_id })
     }
-
-    /// Whether anything has been taken over at all.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
 struct RosterState {

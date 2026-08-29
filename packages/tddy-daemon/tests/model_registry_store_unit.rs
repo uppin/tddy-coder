@@ -81,6 +81,20 @@ fn an_assistant(provider_id: &str) -> NewAssistant {
         model_id: "qwen3:32b".to_string(),
         system_prompt: "You read code and answer questions about it.".to_string(),
         tools: vec!["Read".to_string(), "Grep".to_string()],
+        replaces: Vec::new(),
+    }
+}
+
+/// The same assistant, declared to stand in for `replaces` on the main agent's behalf — the tools
+/// the session's own agent stops being able to call once this assistant is attached.
+///
+/// A separate fixture rather than a wider `an_assistant`: `tools` and `replaces` are two different
+/// vocabularies (what this assistant may call, versus what it takes away from the main agent), and
+/// a fixture that set both to the same list could not tell a store that confused them apart.
+fn an_assistant_taking_over(provider_id: &str, replaces: &[&str]) -> NewAssistant {
+    NewAssistant {
+        replaces: replaces.iter().map(|t| t.to_string()).collect(),
+        ..an_assistant(provider_id)
     }
 }
 
@@ -387,6 +401,200 @@ async fn lists_a_created_assistant_with_the_tools_it_was_given() {
 }
 
 #[tokio::test]
+async fn lists_a_created_assistant_with_the_main_agent_tools_it_takes_over() {
+    // Given
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+
+    // When — an assistant whose takeover is deliberately not its own tool set
+    store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Grep", "Glob"]),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // Then the two sets are stored apart: `tools` is what the assistant may call, `replaces` is
+    // what the main agent may no longer call while it is attached
+    let assistants = store.list_assistants().await.expect("list assistants");
+    assert_eq!(assistants[0].tools, vec!["Read", "Grep"]);
+    assert_eq!(assistants[0].replaces, vec!["Grep", "Glob"]);
+}
+
+#[tokio::test]
+async fn lists_an_assistant_created_without_a_takeover_as_taking_over_nothing() {
+    // Given
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+
+    // When
+    store
+        .create_assistant(an_assistant(&provider.provider_id), AN_OPERATOR)
+        .await
+        .expect("create the assistant");
+
+    // Then — attaching it takes nothing away from the main agent, which is what an operator who
+    // ticked no takeover box asked for
+    let assistants = store.list_assistants().await.expect("list assistants");
+    assert!(
+        assistants[0].replaces.is_empty(),
+        "expected no takeover, got {:?}",
+        assistants[0].replaces
+    );
+}
+
+#[tokio::test]
+async fn refuses_an_assistant_taking_over_a_tool_outside_the_exec_catalog() {
+    // Given
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+
+    // When — a name no exec tool answers to
+    let result = store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Telepathy"]),
+            AN_OPERATOR,
+        )
+        .await;
+
+    // Then it is refused rather than dropped: an assistant admitted with the typo silently takes
+    // over nothing, and the main agent keeps a tool the operator meant to withdraw
+    assert!(
+        matches!(&result, Err(ModelRegistryError::UnknownTool(name)) if name == "Telepathy"),
+        "expected UnknownTool(Telepathy), got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn updates_the_main_agent_tools_an_assistant_takes_over() {
+    // Given a persisted assistant that takes over one tool
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let assistant = store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Grep"]),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // When the operator widens the takeover without touching its own tools
+    let updated = store
+        .update_assistant(
+            &assistant.assistant_id,
+            "Repo Reader",
+            "You read code and answer questions about it.",
+            &["Read".to_string(), "Grep".to_string()],
+            &["Grep".to_string(), "Glob".to_string()],
+            AN_OPERATOR,
+        )
+        .await
+        .expect("update the assistant");
+
+    // Then
+    assert_eq!(updated.tools, vec!["Read", "Grep"]);
+    assert_eq!(updated.replaces, vec!["Grep", "Glob"]);
+}
+
+#[tokio::test]
+async fn refuses_to_update_an_assistant_to_take_over_a_tool_outside_the_exec_catalog() {
+    // Given a persisted assistant that takes over one tool
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let assistant = store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Grep"]),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // When
+    let result = store
+        .update_assistant(
+            &assistant.assistant_id,
+            "Repo Reader",
+            "You read code and answer questions about it.",
+            &["Read".to_string()],
+            &["Telepathy".to_string()],
+            AN_OPERATOR,
+        )
+        .await;
+
+    // Then the stored takeover is left as it was, rather than replaced by a set the daemon could
+    // not enforce
+    assert!(
+        matches!(&result, Err(ModelRegistryError::UnknownTool(name)) if name == "Telepathy"),
+        "expected UnknownTool(Telepathy), got {result:?}"
+    );
+    let assistants = store.list_assistants().await.expect("list assistants");
+    assert_eq!(assistants[0].replaces, vec!["Grep"]);
+}
+
+#[tokio::test]
+async fn takes_over_tools_on_a_database_created_before_takeovers_existed() {
+    // Given a registry database whose `assistant` table predates the takeover column — the shape
+    // every already-deployed daemon's file has
+    let dir = tempfile::tempdir().expect("a tempdir for the registry db");
+    let db_path = dir.path().join("models.db");
+    let agents_dir = dir.path().join("agents");
+    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &agents_dir)
+        .await
+        .expect("open the registry store");
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    drop(store);
+    drop_the_takeover_column(&db_path).await;
+
+    // When the daemon opens that file again and an assistant takes a tool over
+    let store = ModelRegistryStore::open(&db_path, THIS_DAEMON, &agents_dir)
+        .await
+        .expect("reopen the registry store");
+    store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Grep"]),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // Then — an upgrade that skipped the column would fail every assistant write on the daemon
+    let assistants = store.list_assistants().await.expect("list assistants");
+    assert_eq!(assistants[0].replaces, vec!["Grep"]);
+}
+
+/// Put an existing registry file back into its pre-takeover shape, so the migration is exercised
+/// against a database this store itself wrote rather than a hand-copied schema that could drift.
+async fn drop_the_takeover_column(db_path: &std::path::Path) {
+    let pool = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
+        .await
+        .expect("open the registry db directly");
+    sqlx::query("ALTER TABLE assistant DROP COLUMN replaces")
+        .execute(&pool)
+        .await
+        .expect("the takeover column must be droppable");
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn refuses_a_second_assistant_with_the_same_name() {
     // Given
     let (_dir, store) = a_store().await;
@@ -431,6 +639,7 @@ async fn updates_an_assistants_label_prompt_and_tools() {
             "Repo Reader & Writer",
             "You read code and change it when asked.",
             &["Read".to_string(), "Write".to_string()],
+            &[],
             AN_OPERATOR,
         )
         .await
@@ -458,6 +667,7 @@ async fn refuses_to_update_an_assistant_that_does_not_exist() {
             "Ghost",
             "",
             &["Read".to_string()],
+            &[],
             AN_OPERATOR,
         )
         .await;
@@ -750,6 +960,31 @@ async fn projects_an_assistant_onto_an_agent_def_carrying_its_model_endpoint_and
     assert_eq!(def.tools, vec![SubagentTool::Read, SubagentTool::Grep]);
 }
 
+#[tokio::test]
+async fn projects_an_assistant_onto_an_agent_def_that_withdraws_the_tools_it_takes_over() {
+    // Given a persisted assistant that stands in for two of the main agent's tools
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let assistant = store
+        .create_assistant(
+            an_assistant_taking_over(&provider.provider_id, &["Grep", "Glob"]),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // When
+    let def = assistant_to_agent_def(&assistant, &provider).expect("project the def");
+
+    // Then the def carries the takeover, which is the only thing `tddy-tools` withdraws a main
+    // agent tool from — its own tool set says nothing about what the main agent may still call
+    assert_eq!(def.replaces, vec!["Grep".to_string(), "Glob".to_string()]);
+    assert_eq!(def.tools, vec![SubagentTool::Read, SubagentTool::Grep]);
+}
+
 #[test]
 fn refuses_to_project_an_assistant_whose_provider_is_not_the_one_it_names() {
     // Given an assistant built on `prov-ollama` and a row for a different provider
@@ -761,6 +996,7 @@ fn refuses_to_project_an_assistant_whose_provider_is_not_the_one_it_names() {
         model_id: "qwen3:32b".to_string(),
         system_prompt: String::new(),
         tools: vec!["Read".to_string()],
+        replaces: Vec::new(),
         daemon_instance_id: THIS_DAEMON.to_string(),
     };
     let other_provider = ProviderEntry {
@@ -1251,6 +1487,7 @@ async fn refuses_to_update_another_operators_assistant() {
             "Bob's version",
             "Do as I say.",
             &["Shell".to_string()],
+            &[],
             ANOTHER_OPERATOR,
         )
         .await;
@@ -1438,6 +1675,7 @@ async fn refuses_an_edit_that_grows_a_system_prompt_past_that_same_ceiling() {
             "Repo Reader",
             &"y".repeat(MAX_SYSTEM_PROMPT_BYTES + 1),
             &["Read".to_string()],
+            &[],
             AN_OPERATOR,
         )
         .await;

@@ -112,6 +112,7 @@ export function anAssistant(overrides: Partial<AssistantEntry> = {}): AssistantE
     modelId: "qwen3:32b",
     systemPrompt: "You read code and answer questions about it.",
     tools: ["Read", "Grep"],
+    replaces: [],
     daemonInstanceId: FIXTURE_DAEMON,
     ...overrides,
   } as AssistantEntry;
@@ -258,6 +259,7 @@ export function aModelRegistryBackend(fixture: ModelRegistryFixture = {}): InMem
         modelId: req.modelId,
         systemPrompt: req.systemPrompt,
         tools: req.tools,
+        replaces: req.replaces,
       });
       assistants.push(assistant);
       return { assistant };
@@ -274,6 +276,7 @@ export function aModelRegistryBackend(fixture: ModelRegistryFixture = {}): InMem
       assistant.label = req.label;
       assistant.systemPrompt = req.systemPrompt;
       assistant.tools = req.tools;
+      assistant.replaces = req.replaces;
       return { assistant };
     })
     .onUnary(ModelRegistryService.method.deleteAssistant, (req) => {
