@@ -2,6 +2,21 @@
 
 ## Known failing tests
 
+### `a_call_recorded_during_a_tick_is_served_the_patch_that_tick_produced` is load-sensitive (source: session-worktree-sync end-to-end suite, 2026-08-29)
+
+- `packages/tddy-daemon/tests/session_room_livekit_acceptance.rs:396` — passes alone (6/6, ~3 s)
+  and passes paired with any single other LiveKit suite, but failed twice while four LiveKit
+  suites ran concurrently against one shared testkit container, and passed three further
+  four-way runs. Intermittent, not deterministic.
+- The failure is `git apply refused the patch: No valid patches in input` — the delta served for
+  the call is **empty**, i.e. the call was attributed to a tick that did not carry its write. Under
+  CPU load the poll tick that measures the write and the tick the record is stamped with can differ.
+- Adding `session_sync_livekit_acceptance.rs` did not create this — it adds load that makes it
+  more likely. The durable fix is on the attribution side (the same numbering the seq-0 note above
+  concerns), not a retry: drive the write against a signal the fixture controls rather than racing
+  a poll tick.
+
+
 ### A session's first delta is numbered 0, which is also the wire's "no tick yet" sentinel (source: session-worktree-sync end-to-end suite, 2026-08-29)
 
 - `session_room.rs:1563` starts `PollState::next_delta_seq` at **0**, and
