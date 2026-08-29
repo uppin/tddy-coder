@@ -9,10 +9,7 @@ tddy-session-sync --session-id 1780828020298-abc --dest ~/mirrors/my-app
 
 Feature: [docs/ft/daemon/session-worktree-sync.md](../../docs/ft/daemon/session-worktree-sync.md)
 
-> ⚠️ **Not usable yet — the daemon side is unfinished.** Every layer of this client is built, but
-> the RPC it fetches a patch from (`StreamAgentActivityDelta`) still answers `unimplemented` and
-> nothing broadcasts `session.activity` yet, so a run attaches, mirrors the session's committed and
-> uncommitted state once, and then sees no edits. See [Status](#status).
+Module documentation: [docs/mirroring.md](docs/mirroring.md).
 
 ## How it works
 
@@ -95,20 +92,21 @@ the rest, along with the residual that carries what no call declared.
 
 ## Status
 
+Working end to end for daemon-hosted sessions. The poll loop stages a WIP tree, produces a scoped
+delta and publishes `refs/tddy/session/{id}/wip`; records are stamped with the commit they ran upon
+and broadcast on `session.activity`; both RPCs serve; and this client attaches, mirrors and
+reconciles.
+
 | Layer | State |
 |---|---|
 | `credentials` — flags, environment, `.env`, refusals | ✅ built and tested |
 | `mirror` — ownership, sequence de-duplication, apply, reconcile reasons | ✅ built and tested |
-| `attach` — resolve the session, join the room, subscribe | ✅ built; the resolution and the room/identity rules are tested, joining a real room is not |
-| `sync` — first attach, deltas, reconcile | ✅ built; every decision and every git command is tested, the delta fetch needs a daemon |
+| `attach` — resolve the session, join the room, subscribe | ✅ built; resolution and the room/identity rules tested, joining a real room is not |
+| `sync` — first attach, deltas, reconcile | ✅ built; every decision and every git command tested |
 
-The daemon side it depends on is still partial: `StreamAgentActivityDelta` and
-`StreamReadWorktreeFile` answer `unimplemented`, and nothing broadcasts `session.activity` yet. Until
-those land, a run attaches and produces a correct mirror of the session as it stands, and then
-receives nothing further. See the changeset for what remains.
-
-`StreamReadWorktreeFile` is **not** called yet: AC31's fallback for a path git cannot reconstruct —
-one the session's `.gitignore` excludes — is not implemented.
+**Known gap.** `StreamReadWorktreeFile` is served by the daemon but **not called** by this client:
+the fallback for a path git cannot reconstruct — one the session's `.gitignore` excludes — is not
+implemented, so such a file is absent from the mirror rather than fetched by hand.
 
 ## Modules
 

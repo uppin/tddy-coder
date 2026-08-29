@@ -5,7 +5,7 @@
 
 ## Summary
 
-Structured outputs for workflow goals (including **`analyze`** for the bugfix recipe, **`branch-review`** for the **review** recipe, plus plan, red, green, acceptance-tests, **post-green-review**, evaluate-changes, validate, refactor, update-docs, demo, and **`changeset-workflow`** for changeset-scoped workflow JSON) are defined as **JSON Schema** artifacts under **`generated/{recipe}/`** in **`tddy-workflow-recipes`**, registered in **`goals.json`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. Each registry entry lists the CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
+Structured outputs for workflow goals (including **`analyze`** for the bugfix recipe, **`branch-review`** for the **review** recipe, plus plan, red, green, acceptance-tests, **post-green-review**, evaluate-changes, validate, refactor, update-docs, demo, **`write-stack-plan`** for the pr-stack planning phase, and **`changeset-workflow`** for changeset-scoped workflow JSON) are defined as **JSON Schema** artifacts under **`generated/{recipe}/`** in **`tddy-workflow-recipes`**, registered in **`goals.json`**. The **`tddy-tools`** binary embeds those schemas, validates `submit` payloads, exposes **`get-schema <goal>`**, and lists registered goals via **`list-schemas`**. Each registry entry lists the CLI goal name, schema filename, and Protocol Buffer filename so registry drift is testable.
 
 ## Source layout
 
@@ -21,7 +21,7 @@ Structured outputs for workflow goals (including **`analyze`** for the bugfix re
 - **Embedding**: Goal schemas and `common/` resources ship inside the binary from `generated/`.
 - **`get-schema <goal>`**: Prints the JSON Schema for that goal (optional `-o` writes the goal file and common schemas).
 - **`list-schemas`**: Prints JSON `{"goals":["plan",...]}` in stable sorted order for automation.
-- **`submit --goal <name>`**: Validates stdin JSON against the goal schema before optional relay to `tddy-coder`; validation tips reference `get-schema` and `list-schemas`. For **`branch-review`**, after validation succeeds, **`review.md`** is written under **`TDDY_SESSION_DIR`** when that environment variable is set.
+- **`submit --goal <name>`**: Resolves the routing goal from `--goal` first, then the payload's `goal` field, then fails — a submission naming no goal anywhere, or a `--goal` contradicting the payload, exits **2** rather than relaying under the goal `unknown`. Validates stdin JSON against the goal schema (when one is registered) before optional relay to `tddy-coder`; validation tips reference `get-schema` and `list-schemas`. Goals with no registered schema still relay on `--goal` alone, which for them is the only routing signal. For **`branch-review`**, after validation succeeds, **`review.md`** is written under **`TDDY_SESSION_DIR`** when that environment variable is set.
 - **Input limit**: Submit and ask read at most 16 MiB from stdin or `--data` to bound memory use.
 
 ## Relationship to recipes

@@ -2,6 +2,44 @@
 
 ## Known failing tests
 
+### `a_call_recorded_during_a_tick_is_served_the_patch_that_tick_produced` is load-sensitive (source: session-worktree-sync end-to-end suite, 2026-08-29)
+
+- `packages/tddy-daemon/tests/session_room_livekit_acceptance.rs:396` — passes alone (6/6, ~3 s)
+  and passes paired with any single other LiveKit suite, but failed twice while four LiveKit
+  suites ran concurrently against one shared testkit container, and passed three further
+  four-way runs. Intermittent, not deterministic.
+- The failure is `git apply refused the patch: No valid patches in input` — the delta served for
+  the call is **empty**, i.e. the call was attributed to a tick that did not carry its write. Under
+  CPU load the poll tick that measures the write and the tick the record is stamped with can differ.
+- Adding `session_sync_livekit_acceptance.rs` did not create this — it adds load that makes it
+  more likely. The durable fix is on the attribution side (the same numbering the seq-0 note above
+  concerns), not a retry: drive the write against a signal the fixture controls rather than racing
+  a poll tick.
+
+
+### A session's first delta is numbered 0, which is also the wire's "no tick yet" sentinel (source: session-worktree-sync end-to-end suite, 2026-08-29)
+
+- `session_room.rs:1563` starts `PollState::next_delta_seq` at **0**, and
+  `tddy-session-sync`'s `decide_record` (`sync.rs:250`) reads `activity_seq == 0` as
+  `IgnoreReason::NoTickYet` — "no poll tick has measured this call yet".
+- So the **first** change any session makes produces a delta no mirror can act on. Its content
+  reaches the mirror only at the next reconcile, not from the delta that carries it.
+- Both LiveKit suites work around it by warming the room before a client attaches, and
+  `session_room_livekit_acceptance.rs` already documents the collision. A warm-up ritual in every
+  consumer is the wrong fix: start `next_delta_seq` at 1 and let 0 mean only the sentinel.
+
+### `tddy-session-sync`'s first attach does not wait for the WIP ref (source: as above)
+
+- `sync::run` calls `first_attach_if_empty` once (`sync.rs:512`); it fetches
+  `refs/tddy/session/{id}/wip` immediately, and against a room that has just opened git answers
+  "couldn't find remote ref", so `run` returns `SyncError::Git` and exits.
+- The daemon's in-process sibling handles exactly this case —
+  `session_agent_clone.rs::restore_once_the_session_has_published_its_state`, with a documented
+  `FIRST_RESTORE_WAIT` of 45 s. The standalone client has no equivalent.
+- An operator starting the CLI against a session whose room is still warming sees the same exit.
+  The two consumers of one contract should not disagree about whether it needs a retry.
+
+
 ### `restores_a_clone_that_diverged_and_says_so` is suite-order sensitive (source: session-agent-roster changeset, 2026-08-17)
 
 - `packages/tddy-daemon/tests/session_agent_remote_acceptance.rs` — passes **3/3 in isolation**
