@@ -1,23 +1,29 @@
 //! **pr-stack** workflow: unified PR-stack planning + orchestration recipe.
 //!
 //! Consolidates the two-session `plan-pr-stack` + `orchestrate-pr-stack` flow into a single
-//! session/recipe: `analyze-stack` → `write-stack-plan` → `orchestrate`. `orchestrate` is a single
-//! interactive goal with no successor edge — the session pauses for input after each turn and the
-//! developer drives the stack by hand through the PR-management tools (there is no autonomous
-//! assess/spawn/merge/repoint cycle). The legacy CLI names `"plan-pr-stack"` and
-//! `"orchestrate-pr-stack"` remain accepted as aliases that resolve to this recipe (see
-//! `recipe_resolve.rs`).
+//! session/recipe: `analyze-stack` → `write-stack-plan` → `write-stack-docs` → `orchestrate`.
+//! `orchestrate` is a single interactive goal with no successor edge — the session pauses for
+//! input after each turn and the developer drives the stack by hand through the PR-management
+//! tools (there is no autonomous assess/spawn/merge/repoint cycle). The legacy CLI names
+//! `"plan-pr-stack"` and `"orchestrate-pr-stack"` remain accepted as aliases that resolve to this
+//! recipe (see `recipe_resolve.rs`).
 //!
 //! After the plan exists (state `StackPlanned`), the session can be re-entered into
 //! [`WorkflowRecipe::plan_refinement_goal`] (`write-stack-plan`) for chat-driven refinement —
-//! the same session, not a new one — before continuing into `orchestrate` on resume.
+//! the same session, not a new one. A refinement leaves the session at `StackPlanned`, so the next
+//! run regenerates the per-PR documents before returning to `orchestrate`.
 //!
 //! PRD: `docs/ft/coder/pr-stacking.md`. Changeset: `docs/dev/1-WIP/pr-stack-workflow-views.md`.
 
 mod bridge;
+pub mod docs;
 mod hooks;
 
 pub use bridge::BeginOrchestrateTask;
+pub use docs::{
+    node_doc_paths, validate_stack_docs, write_stack_docs, NodeDocPaths, NodeDocs, StackDocsOutput,
+    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME, REQUIRED_CHANGESET_HEADINGS,
+};
 pub use hooks::PrStackHooks;
 
 use std::collections::BTreeMap;
@@ -45,6 +51,17 @@ use crate::SessionArtifactManifest;
 /// state has to agree with them on the spelling. It is a persisted value: a changeset written by an
 /// older build carries this exact string, so it is renamed only with a migration.
 pub const STATE_STACK_PLANNED: &str = "StackPlanned";
+
+/// The workflow state a `pr-stack` session records once every planned node owns its two documents:
+/// the docs pass is done, and the next thing to run is `orchestrate`.
+///
+/// Sits between [`STATE_STACK_PLANNED`] and the operator loop so a *planned* stack routes to
+/// `write-stack-docs` while a *documented* one routes past it. A stack seeded from an existing
+/// session starts here rather than at `StackPlanned`: its one node describes work that already
+/// exists, so a retroactive PRD documents a decision nobody is about to make.
+///
+/// Persisted, like [`STATE_STACK_PLANNED`] — renamed only with a migration.
+pub const STATE_STACK_DOCS_WRITTEN: &str = "StackDocsWritten";
 
 /// MCP tool names the orchestrator agent uses to manage the stack during the `orchestrate` goal.
 pub const PR_STACK_TOOL_NAMES: &[&str] = &[
@@ -108,7 +125,8 @@ nodes it stacks on.\n\
 \n\
 When unsure what to do next, run pr_stack_status and report the state to the developer.";
 
-/// **pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `orchestrate` (interactive loop).
+/// **pr-stack** recipe: `analyze-stack` → `write-stack-plan` → `write-stack-docs` → `orchestrate`
+/// (interactive loop).
 #[derive(Clone, Copy, Default, Debug)]
 pub struct PrStackRecipe;
 
@@ -131,6 +149,15 @@ impl WorkflowRecipe for PrStackRecipe {
             recipe.clone(),
             backend.clone(),
         ));
+        // Documents are authored in their own goal rather than folded into the plan submit: the
+        // plan is cheap and refined constantly through chat, the documents are expensive and
+        // mostly stable, and only the plan can be validated structurally by the host.
+        let write_docs = Arc::new(BackendInvokeTask::from_recipe(
+            "write-stack-docs",
+            GoalId::new("write-stack-docs"),
+            recipe.clone(),
+            backend.clone(),
+        ));
         // `orchestrate` is a single interactive goal with NO outgoing edge: `FlowRunner` finds no
         // successor after each backend turn and pauses as `WaitingForInput`, keeping the session
         // `Running` for a multi-turn operator chat. The developer drives the stack by hand through
@@ -145,9 +172,11 @@ impl WorkflowRecipe for PrStackRecipe {
         GraphBuilder::new("pr_stack")
             .add_task(analyze)
             .add_task(write_plan)
+            .add_task(write_docs)
             .add_task(orchestrate)
             .add_edge("analyze-stack", "write-stack-plan")
-            .add_edge("write-stack-plan", "orchestrate")
+            .add_edge("write-stack-plan", "write-stack-docs")
+            .add_edge("write-stack-docs", "orchestrate")
             .build()
     }
 
@@ -168,6 +197,15 @@ impl WorkflowRecipe for PrStackRecipe {
             }),
             "write-stack-plan" => Some(GoalHints {
                 display_name: "Write stack plan".to_string(),
+                permission: PermissionHint::ReadOnly,
+                allowed_tools: vec![],
+                default_model: None,
+                agent_output: true,
+                agent_cli_plan_mode: false,
+                claude_nonzero_exit_ok_if_structured_response: true,
+            }),
+            "write-stack-docs" => Some(GoalHints {
+                display_name: "Write stack docs".to_string(),
                 permission: PermissionHint::ReadOnly,
                 allowed_tools: vec![],
                 default_model: None,
@@ -197,6 +235,7 @@ impl WorkflowRecipe for PrStackRecipe {
         vec![
             GoalId::new("analyze-stack"),
             GoalId::new("write-stack-plan"),
+            GoalId::new("write-stack-docs"),
             GoalId::new("orchestrate"),
         ]
     }
@@ -209,6 +248,9 @@ impl WorkflowRecipe for PrStackRecipe {
         match state.as_str() {
             "Init" | "AnalyzeStack" => Some(GoalId::new("analyze-stack")),
             "WriteStackPlan" => Some(GoalId::new("write-stack-plan")),
+            // A planned stack documents itself before the operator starts driving it; a documented
+            // one — and every legacy mid-flight state — drops straight into the loop.
+            STATE_STACK_PLANNED => Some(GoalId::new("write-stack-docs")),
             "done" | "Done" | "failed" | "Failed" => None,
             // Any planned/mid-flight state drops into the interactive orchestrate loop.
             _ => Some(GoalId::new("orchestrate")),
@@ -298,7 +340,7 @@ impl WorkflowRecipe for PrStackRecipe {
     }
 
     fn goal_requires_tddy_tools_submit(&self, goal_id: &GoalId) -> bool {
-        goal_id.as_str() == "write-stack-plan"
+        matches!(goal_id.as_str(), "write-stack-plan" | "write-stack-docs")
     }
 }
 
@@ -2008,7 +2050,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn resuming_a_planned_stack_continues_into_the_orchestrate_loop() {
+    fn resuming_a_planned_stack_continues_into_the_docs_pass() {
         // Given — the plan exists and the session was closed/reopened
         let recipe = PrStackRecipe;
         let state = WorkflowState::new("StackPlanned");
@@ -2016,15 +2058,15 @@ mod tests {
         // When
         let next = recipe.next_goal_for_state(&state);
 
-        // Then
+        // Then — a planned stack documents itself before the operator drives it
         assert_eq!(
             next.map(|g| g.as_str().to_string()),
-            Some("orchestrate".to_string())
+            Some("write-stack-docs".to_string())
         );
     }
 
     #[rstest]
-    #[case::stack_planned("StackPlanned")]
+    #[case::stack_documented("StackDocsWritten")]
     #[case::legacy_assess("assess")]
     #[case::legacy_wait("wait")]
     fn every_non_terminal_state_resumes_into_the_orchestrate_loop(#[case] state_name: &str) {
@@ -2213,8 +2255,13 @@ mod tests {
         );
         assert_eq!(
             graph.next_task_id("write-stack-plan", &ctx),
+            Some("write-stack-docs".to_string()),
+            "edge write-stack-plan -> write-stack-docs"
+        );
+        assert_eq!(
+            graph.next_task_id("write-stack-docs", &ctx),
             Some("orchestrate".to_string()),
-            "edge write-stack-plan -> orchestrate"
+            "edge write-stack-docs -> orchestrate"
         );
         assert_eq!(
             graph.next_task_id("orchestrate", &ctx),

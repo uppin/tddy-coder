@@ -307,6 +307,7 @@ pub fn apply_session_list_status_to_proto(
                 key: doc.key,
                 basename: doc.basename,
                 path: doc.path.to_string_lossy().into_owned(),
+                relative_path: doc.relative_path,
                 description: doc.description,
                 exists: doc.exists,
                 kind: proto_context_doc_kind(doc.kind) as i32,

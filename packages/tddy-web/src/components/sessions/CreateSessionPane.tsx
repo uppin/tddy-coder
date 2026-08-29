@@ -32,6 +32,7 @@ import {
 } from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
+import type { InitialAttachment } from "./attachments/pendingAttachment";
 import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
 import { SessionAttachmentList } from "./attachments/SessionAttachmentList";
 
@@ -108,6 +109,12 @@ export type CreateSessionInitialValues = Partial<{
    * branch selection is irrelevant in that flow (see `CreateSessionPaneProps.peerMode`).
    */
   repoPath: string;
+  /**
+   * Documents the form opens with already attached — a *default* the operator can drop, not an
+   * invariant. Used by the PR-stack Start-session flow, which pre-attaches the planned node's own
+   * PRD and changeset plus the stack's shared documents (docs/ft/coder/pr-stack-docs.md).
+   */
+  attachments: InitialAttachment[];
 }>;
 
 export interface CreateSessionPaneProps {
@@ -472,6 +479,7 @@ export function CreateSessionPane({
     client,
     sessionToken,
     sessionDaemonInstanceId: effectiveDaemonInstanceId,
+    initialAttachments: initialValues?.attachments,
   });
 
   const isSubmitEnabled = (() => {

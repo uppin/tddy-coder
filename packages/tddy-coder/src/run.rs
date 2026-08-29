@@ -1599,10 +1599,15 @@ pub fn seed_stack_and_enter_orchestrate(
     // changeset that never held the node just appended.
     let mut cs = read_changeset(session_dir)
         .map_err(|e| format!("{OP}: failed to re-read the seeded changeset: {e}"))?;
+    // A seeded node is bound to a session whose work already exists and may be under way, so the
+    // docs pass does not apply to it: a retroactive PRD documents a decision nobody is about to
+    // make. Recording `StackDocsWritten` rather than `StackPlanned` is what keeps a seeded
+    // orchestrator coming up straight in `orchestrate`, now that `StackPlanned` routes to
+    // `write-stack-docs`.
     tddy_core::changeset::update_state(
         &mut cs,
         tddy_core::workflow::ids::WorkflowState::new(
-            tddy_workflow_recipes::pr_stack::STATE_STACK_PLANNED,
+            tddy_workflow_recipes::pr_stack::STATE_STACK_DOCS_WRITTEN,
         ),
     );
     tddy_core::changeset::write_changeset_atomic(session_dir, &cs)

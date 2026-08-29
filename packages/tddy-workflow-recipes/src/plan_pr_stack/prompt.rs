@@ -135,6 +135,84 @@ succeeds. A validation failure prints the offending paths — fix the JSON and r
         .replace("{recipe}", recipe)
 }
 
+/// System prompt for the **write-stack-docs** step, which authors the two per-PR documents. It
+/// lives beside the other two pr-stack system prompts so a change to the submit convention — the
+/// `--data-stdin` heredoc, the JSON body, `get-schema` as the authority — lands on all three at
+/// once. `recipe` names the workflow in the opening line, as it does for its siblings.
+///
+/// The fenced example is pinned against the registered `write-stack-docs` schema by
+/// `packages/tddy-tools/tests/stack_docs_submit_contract_acceptance.rs`, so a prompt that tells the
+/// agent one shape while `submit` accepts another cannot ship.
+pub fn write_stack_docs_system_prompt(recipe: &str) -> String {
+    r##"You are assisting with the **{recipe}** workflow **write-stack-docs** step.
+
+## Task: Author the per-PR documents
+
+The plan is written. Every planned PR now needs two documents, so the agent that builds it knows
+what it owns and, above all, where its PR stops and its neighbours' begin. Deliver them by running:
+
+  tddy-tools submit --goal write-stack-docs --data-stdin << 'EOF'
+  <your JSON output>
+  EOF
+
+Use `--data-stdin` and a heredoc. Do NOT use `--data` with inline JSON. Do NOT use Write, cat, or
+python to build the JSON first — only `Bash(tddy-tools *)` is auto-approved; other Bash commands
+require permission.
+
+Run `tddy-tools get-schema write-stack-docs` for the authoritative shape. The documents must conform
+to this contract:
+
+```json
+{
+  "goal": "write-stack-docs",
+  "version": 1,
+  "docs": [
+    {
+      "node_id": "token-store",
+      "prd": "# token-store — Auth token store\n\nDelivers keyring-backed storage for auth tokens: `TokenStore::save` and `TokenStore::load`, with the keyring failure path covered.\n\n## Acceptance\n- A saved token is readable across process restarts.\n- A missing token reads as `None`, never an error.\n",
+      "changeset": "# Changeset: token-store\n\n## Responsibility\nOwns the `TokenStore` trait and its keyring implementation.\n\n## Boundaries\nDoes not touch request authentication — the middleware node owns that, and reads tokens through this trait.\n\n## Dependencies\nNone — this is a root node, off the stack base.\n\n## Draft PR contract\n`trait TokenStore { fn save(&self, token: &Token) -> Result<()>; fn load(&self) -> Result<Option<Token>>; }` plus its failing tests land first, so a dependent can branch off a real ref and code against a real signature.\n"
+    }
+  ]
+}
+```
+
+Every `node_id` is one planned node's id, exactly as the user prompt lists it. `prd` and `changeset`
+are JSON strings holding markdown, so each line break inside them is an escaped `\n`.
+
+This is a **read-only** step — do not write code and do not create files; the host persists both
+documents from your submit.
+
+**Validation rules** (the hook enforces these, and a rejected submit writes nothing):
+- Every node in the stack has exactly one entry, and no entry names a node outside the stack
+- `prd` and `changeset` are non-blank
+- Each `changeset` carries all four required sections as headings
+
+## The four required sections
+
+- `## Responsibility` — what this PR owns.
+- `## Boundaries` — what it explicitly does **not** do, and which node does it instead.
+- `## Dependencies` — one entry per parent node, naming **what that PR delivers that this one
+  consumes** (the trait, the endpoint, the table, the component it hands over). Two children
+  building the same abstraction in parallel is the failure this section exists to prevent, so it is
+  not enough to list the parent's id — say what it delivers and therefore what this PR must not
+  create itself. A node with no parents says so.
+- `## Draft PR contract` — what lands first so dependents need not wait for the whole
+  implementation: the **API surface plus its failing tests**, enough to open a draft PR against, so
+  a dependent can branch off a real ref and code against a real signature while the implementation
+  continues in the same PR.
+
+Write for the agent that will build the node, not for a reviewer of the plan: it reads nothing else
+about its neighbours.
+
+A successful submit writes `artifacts/prs/<node_id>/PRD.md` and `artifacts/prs/<node_id>/changeset.md`
+under the session directory named by `$TDDY_SESSION_DIR` — look there, not in the repository working
+tree.
+
+**CRITICAL**: the workflow cannot continue until `tddy-tools submit --goal write-stack-docs`
+succeeds. A validation failure prints the offending paths — fix the JSON and run it again."##
+        .replace("{recipe}", recipe)
+}
+
 pub fn analyze_stack_user_prompt(feature_input: &str) -> String {
     format!(
         "Analyze the following feature request and determine the optimal PR stack decomposition:\n\n{feature_input}"

@@ -26,11 +26,16 @@ fn planning_flows_into_a_terminal_orchestrate_loop() {
     let graph = pr_stack_graph();
     let ctx = Context::new();
 
-    // When / Then — write-stack-plan hands off straight to the interactive orchestrate goal
+    // When / Then — planning hands off through the docs pass into the interactive orchestrate goal
     assert_eq!(
         graph.next_task_id("write-stack-plan", &ctx),
+        Some("write-stack-docs".to_string()),
+        "planning must flow into the docs pass"
+    );
+    assert_eq!(
+        graph.next_task_id("write-stack-docs", &ctx),
         Some("orchestrate".to_string()),
-        "planning must flow into the orchestrate free-prompting loop"
+        "the docs pass must flow into the orchestrate free-prompting loop"
     );
     assert!(
         graph.get_task("orchestrate").is_some(),
@@ -58,10 +63,10 @@ fn the_autonomous_assess_spawn_merge_repoint_loop_is_removed_from_the_graph() {
 }
 
 #[test]
-fn resuming_a_planned_stack_drops_into_the_orchestrate_loop() {
-    // Given — the plan exists and the session was closed/reopened
+fn resuming_a_documented_stack_drops_into_the_orchestrate_loop() {
+    // Given — the plan and its per-PR documents exist, and the session was closed/reopened
     let recipe = PrStackRecipe;
-    let state = WorkflowState::new("StackPlanned");
+    let state = WorkflowState::new("StackDocsWritten");
 
     // When
     let next = recipe.next_goal_for_state(&state);
@@ -70,7 +75,7 @@ fn resuming_a_planned_stack_drops_into_the_orchestrate_loop() {
     assert_eq!(
         next.map(|g| g.as_str().to_string()),
         Some("orchestrate".to_string()),
-        "a planned stack resumes into the interactive orchestrate loop, not an auto assess"
+        "a documented stack resumes into the interactive orchestrate loop, not an auto assess"
     );
 }
 
