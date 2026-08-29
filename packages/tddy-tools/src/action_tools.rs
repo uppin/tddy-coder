@@ -21,7 +21,8 @@ use tddy_core::session_actions::{
 };
 
 use crate::server::{
-    open_roster_agent_session, schema_object, subagent_error_json, subagent_route, PermissionServer,
+    cancel_remote_conversation, open_roster_agent_session, schema_object, subagent_error_json,
+    subagent_route, PermissionServer,
 };
 
 /// Bounded correction loop with the author model: initial attempt + this many retries carrying
@@ -114,11 +115,29 @@ async fn request_action_tool(args: serde_json::Value) -> String {
         .get("agent")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
-    let (author, mut session) = match open_roster_agent_session(agent_id) {
+    let opened = match open_roster_agent_session(agent_id).await {
         Ok(opened) => opened,
         Err(e) => return subagent_error_json(e),
     };
+    let result =
+        author_a_manifest(opened.session, &opened.agent_id, description, suggested_id).await;
+    // The exchange began and ended inside this call, so a conversation it opened on another daemon
+    // ends with it: nothing outside this function can name it, and left open the owning daemon
+    // keeps its turn loop for the life of its process.
+    cancel_remote_conversation(opened.remote).await;
+    result
+}
 
+/// Drive the author agent until it produces a manifest that pre-validates, and establish it.
+///
+/// Separated from the tool so every way out of the loop — an established manifest, a failed turn,
+/// attempts exhausted — passes through one place that closes the conversation behind it.
+async fn author_a_manifest(
+    mut session: Box<dyn tddy_discovery::subagent::SubagentSession>,
+    author: &str,
+    description: &str,
+    suggested_id: Option<&str>,
+) -> String {
     let mut prompt = author_prompt(description, suggested_id);
     let mut last_error = String::new();
     for _attempt in 0..MAX_AUTHOR_ATTEMPTS {

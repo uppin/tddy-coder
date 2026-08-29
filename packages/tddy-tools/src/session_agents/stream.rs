@@ -401,8 +401,8 @@ async fn open_roster_stream(
 
 /// The connection the roster stream rides, and the identity its request carries.
 ///
-/// The sandbox socket gets a connection of its **own**: it opens a fresh `UnixStream` per dispatch
-/// today, and a stream held for the process lifetime must not be torn down with a tool call's.
+/// Shared with the conversation RPCs ([`super::link`]) so the stream that decides which agent ids
+/// are addressable and the calls that address them cannot reach different daemons.
 async fn connect_roster_stream(
     transport: &SessionToolTransport,
 ) -> Result<
@@ -412,54 +412,5 @@ async fn connect_roster_stream(
     ),
     String,
 > {
-    match transport {
-        SessionToolTransport::SandboxIpc { socket_path } => {
-            let client = crate::session_tool_client::connect_sandbox_ipc(socket_path).await?;
-            // The socket identifies the session to the sandbox-runner, as it does for every tool
-            // call over it, so the envelope stays empty.
-            Ok((client, SessionToolEnvelope::default()))
-        }
-        #[cfg(feature = "livekit")]
-        SessionToolTransport::LiveKit {
-            url,
-            room,
-            token,
-            server_identity,
-            session_id,
-            session_token,
-            daemon_instance_id,
-        } => {
-            let key = crate::session_tool_client::LiveKitRoomKey {
-                url: url.clone(),
-                room: room.clone(),
-                token: token.clone(),
-                server_identity: server_identity.clone(),
-            };
-            let session = crate::session_tool_client::livekit_session(&key).await?;
-            if !session.peer_present() {
-                return Err(format!(
-                    "daemon \"{server_identity}\" is not in room \"{room}\""
-                ));
-            }
-            Ok((
-                std::sync::Arc::clone(session.transport()),
-                SessionToolEnvelope {
-                    session_id: session_id.clone(),
-                    session_token: session_token.clone(),
-                    daemon_instance_id: daemon_instance_id.clone(),
-                },
-            ))
-        }
-        #[cfg(not(feature = "livekit"))]
-        SessionToolTransport::LiveKit { .. } => Err(
-            "this tddy-tools was built without the 'livekit' feature, so the session's daemon \
-             cannot be reached at all"
-                .to_string(),
-        ),
-        // Both are refused before the loop starts; reaching here would mean the two disagreed.
-        SessionToolTransport::DaemonHttp { .. }
-        | SessionToolTransport::IncompleteLiveKit { .. } => {
-            Err("the roster stream has no client for this transport".to_string())
-        }
-    }
+    super::link::connect_facilitating_daemon(transport).await
 }

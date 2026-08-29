@@ -26,10 +26,15 @@
 //! before the first frame, and [`stream`] holds the subscription that replaces the one with the
 //! other.
 
+mod conversation;
+mod link;
 mod registry;
 mod seed;
 mod stream;
 
+pub use conversation::{
+    AgentConversationLink, RemoteAgentSession, RemoteConversationHandle, NO_TRANSPORT,
+};
 pub use registry::{
     AddressableAgent, CatalogVisibility, ConversationState, LiveAgentRoster, RosterError, Takeover,
     WithdrawnExecTools,
