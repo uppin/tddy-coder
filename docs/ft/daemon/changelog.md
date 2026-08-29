@@ -2,6 +2,14 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — Waiting for an agent, instead of asking again
+
+- **The main agent can now ask to be told when an agent is ready**, rather than checking and checking again. Attaching an agent returns before it can be used — its checkout may still be building — so the first prompt was often refused for a reason nobody could have anticipated. Asking repeatedly costs a full turn of the agent's own thinking each time, which made the cheapest question in the system one of the most expensive.
+- **A wait always ends, and never silently.** It gives up after 30 seconds by default and can never be asked to wait longer than two minutes; when it does give up it hands back the current rows marked `timedOut`, because knowing an agent is *still* connecting is worth more than an error that throws that away.
+- **Waiting on an agent that cannot recover ends immediately.** A checkout that has failed is not something waiting repairs, so the wait stops and reports it — otherwise the same failure would surface two minutes later wearing a timeout's clothes.
+- **A misspelled agent id is refused, not answered.** Quietly settling one would report success for an agent that does not exist, and send the main agent on to prompt it. An agent that was there and then detached is different, and is reported by simply no longer appearing.
+- **Asking to wait changes nothing for anyone who does not.** A plain read returns exactly what it always did, including when it names an agent — naming one chooses what to wait for, not what to show.
+
 ## 2026-08-29 — A roster agent says what it is doing
 
 - **Every attached agent now reports a status** — idle, running, executing tool, waiting for input, connecting or error — on the roster stream that already carries the agent list, so nothing new has to be subscribed to and no row can be shown a status for an agent it no longer holds.
