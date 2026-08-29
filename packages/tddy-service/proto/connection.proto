@@ -184,6 +184,19 @@ service ConnectionService {
   // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
   // See docs/ft/coder/pr-stack-live-status.md.
   rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
+  // Resolve, on the daemon that **owns** a PR-stack parent, what a child spawn's branch bases off.
+  //
+  // `stack_parent` is a bare session id, and every resolver behind it reads the parent's
+  // `changeset.yaml` out of the serving daemon's own sessions tree. The new-session form's
+  // orchestrator picker is fed by a fanned-out, all-host `ListSessions`, so it routinely offers an
+  // orchestrator that lives on a different daemon than the child is started on — and resolved
+  // locally that parent is not "not yet planned" but simply absent, which refuses the spawn over a
+  // session that exists one host over.
+  //
+  // So the spawning daemon asks the owner instead. The owner is the only place the parent's stack,
+  // its already-spawned child sessions and a checkout of the same logical project exist together,
+  // which is exactly what the answer is assembled from. See docs/ft/coder/pr-stacking.md.
+  rpc ResolveStackBase(ResolveStackBaseRequest) returns (ResolveStackBaseResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
   //
   // A session room lives on the daemon running the session's agent; when the repo is remote that
@@ -793,6 +806,19 @@ message StartSessionRequest {
   // tools is refused on it rather than accepted unenforced. See
   // docs/ft/daemon/session-agent-roster.md § Enforced at two layers.
   SplitAgentPlacement split_agent = 35;
+  // Daemon whose sessions tree holds `stack_parent`. Empty or matching the local instance = this
+  // daemon resolves the parent from its own disk, which is what every single-host deployment sends.
+  //
+  // It exists because `stack_parent` is a bare session id and the base it resolves to is read out
+  // of the parent's own `changeset.yaml`. The new-session form's orchestrator picker is fed by a
+  // fanned-out, all-host `ListSessions`, so the orchestrator it offers routinely lives on a
+  // different daemon than the child is started on — and resolved against this daemon's sessions
+  // tree that parent reads as a missing file rather than as a session one host over, which refuses
+  // the spawn. Named here, the base is resolved by `ResolveStackBase` on the daemon that owns it.
+  //
+  // Routing only: the child session itself is still created by the daemon this request names in
+  // `daemon_instance_id`, and still records `stack_parent` as its orchestrator.
+  string stack_parent_daemon_instance_id = 36;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -1703,6 +1729,34 @@ message QueryBranchRequest {
 }
 message QueryBranchResponse {
   BranchResolution resolution = 1;
+}
+
+// What a child spawn's branch bases off, asked of the daemon that owns the stack parent.
+message ResolveStackBaseRequest {
+  string session_token = 1;
+  // The daemon whose sessions tree holds `stack_parent`. Empty or matching the local instance =
+  // this daemon answers from its own disk, which is what every single-host deployment — and every
+  // caller predating the field — sends. Naming a daemon this one shares no common room with is a
+  // request error, not a silent local answer.
+  string daemon_instance_id = 2;
+  // The parent session: a pr-stack orchestrator, whose planned node for `new_branch_name` names the
+  // ancestor to base onto, or an ordinary code session, whose own branch it is.
+  string stack_parent = 3;
+  // The **logical** project id, which is stable across hosts (`AddProjectToHost` reuses it rather
+  // than minting a new one). That is what lets the owner resolve *its* checkout of the same
+  // repository from the id the child's host sent: the base is a remote-tracking ref, so the two
+  // checkouts need only share an origin, not a path.
+  string project_id = 4;
+  // The branch the child spawn is about to create — how the planned node it belongs to is found.
+  string new_branch_name = 5;
+}
+message ResolveStackBaseResponse {
+  // The remote-tracking ref the child's worktree is cut from (e.g. `origin/feature/token-store`).
+  // Empty means the parent named no chain base — an unplanned branch, on a stack that has one for
+  // other branches — and the child's host applies the project default instead. That is not an
+  // error, and is deliberately distinct from one: a spawn refused here reports the owner's own
+  // refusal verbatim.
+  string base_ref = 1;
 }
 
 // Everything the PR-Stack view needs about one branch, resolved server-side by branch name.

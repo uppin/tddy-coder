@@ -244,6 +244,17 @@ export function CreateSessionPane({
   // The orchestrators this session can be stack-parented to.
   const stackParentOptions = useMemo(() => prStackOrchestrators(sessions), [sessions]);
 
+  // The host that owns the selected stack parent. `stackParent` is a bare session id and the base
+  // it resolves to is read out of that session's own changeset, so the daemon serving this start
+  // has to be told which host holds it: the picker is fed by a fanned-out, all-host `ListSessions`
+  // and routinely offers an orchestrator living on a different daemon than the child is started on.
+  // Empty when the list holds no such session — the wire default, meaning the serving daemon's own
+  // sessions tree, which is the only place it could look anyway.
+  const stackParentDaemonInstanceId = useMemo(
+    () => sessions.find((s) => s.sessionId === stackParent)?.daemonInstanceId ?? "",
+    [sessions, stackParent],
+  );
+
   // In peer mode the project and host are locked to the orchestrating session (the pane reuses its
   // worktree via `repo_path`), so the Project/Host selectors are hidden and submit must send the
   // frozen `initialValues` values — not the live form state, which the mount-time auto-select could
@@ -517,6 +528,10 @@ export function CreateSessionPane({
         agent: selectedAgentId,
         recipe,
         stackParent,
+        // No owning host: a tool session's chain base is resolved by the `tddy-coder` the daemon
+        // spawns, against that process's own sessions tree, not by the daemon at start. Sending a
+        // host here would name a routing the start never performs.
+        stackParentDaemonInstanceId: "",
         // Only the tool branch can create an orchestrator, so only it can name a session to seed the
         // orchestrator's stack from. Sent only for the recipe whose picker offered it — the daemon
         // refuses a base session named beside any other recipe rather than dropping it silently, so a
@@ -536,6 +551,7 @@ export function CreateSessionPane({
         agent: "",
         recipe: managedCodebase ? recipe : "",
         stackParent,
+        stackParentDaemonInstanceId,
         sessionType: "cursor-cli",
         model,
         permissionMode: "",
@@ -560,6 +576,7 @@ export function CreateSessionPane({
       // request that cannot succeed.
       recipe: managedCodebase && !isSplitCodebase ? recipe : "",
       stackParent,
+      stackParentDaemonInstanceId,
       sessionType: "claude-cli",
       model,
       permissionMode,
