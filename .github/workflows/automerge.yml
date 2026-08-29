@@ -1,0 +1,112 @@
+name: Automerge
+
+# Comment `#automerge` on a pull request and GitHub merges it — squashed — the
+# moment the four required checks in ci.yml go green. `#automerge-cancel` turns
+# it back off. See docs/dev/guides/ci.md § Automerge.
+#
+# Two things this workflow depends on, both configured on the repo rather than
+# here: `Allow auto-merge` must be on, and `master` must have a ruleset with
+# required status checks. Native auto-merge is a *queue for a blocked PR* — with
+# nothing required, a PR is mergeable the instant it opens and GitHub rejects
+# the request with "Pull request is in clean status".
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+# `issue_comment` fires on issues too, and the comment body is attacker-supplied
+# on a public repo. Both are filtered in the job's `if:` and by the write-access
+# check below; the token itself gets only what enabling auto-merge needs.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: Toggle auto-merge
+    # `github.event.issue.pull_request` is null on plain issues.
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '#automerge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The comment author is not necessarily a collaborator. `author_association`
+      # is not a permission — an org member with no access to this repo still
+      # reports MEMBER — so ask for the actual permission level.
+      - name: Require write access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          level=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" \
+                    --jq .permission 2>/dev/null || echo none)
+          echo "$ACTOR has '$level' permission"
+          case "$level" in
+            admin|write|maintain) ;;
+            *) echo "::error::$ACTOR lacks write access; ignoring the automerge request"
+               exit 1 ;;
+          esac
+
+      - name: Toggle auto-merge
+        id: toggle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          # Via env, never inlined into the script — a comment body is untrusted
+          # input and `${{ }}` interpolation would splice it into the shell.
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          if grep -qF -- '#automerge-cancel' <<<"$BODY"; then
+            gh pr merge "$PR" --repo "$REPO" --disable-auto
+            echo "reaction=eyes" >> "$GITHUB_OUTPUT"
+            echo "Auto-merge disabled for #$PR"
+            exit 0
+          fi
+
+          # Which of the two merges to ask for is not a preference — auto-merge
+          # is a queue for a *blocked* PR, and asking to queue one that has
+          # nothing left to wait for is an error, not a no-op. So read the state
+          # first. UNKNOWN means GitHub has not finished computing mergeability.
+          state=UNKNOWN
+          for _ in 1 2 3 4 5; do
+            state=$(gh pr view "$PR" --repo "$REPO" --json mergeStateStatus \
+                      --jq .mergeStateStatus)
+            [ "$state" = UNKNOWN ] || break
+            sleep 3
+          done
+          echo "merge state: $state"
+
+          case "$state" in
+            # Required checks are already satisfied; nothing to queue behind.
+            # UNSTABLE means a check failed or is pending that the ruleset does
+            # not require — VM boot control, say — which by definition is not a
+            # gate.
+            CLEAN|UNSTABLE|HAS_HOOKS)
+              gh pr merge "$PR" --repo "$REPO" --squash
+              echo "Merged #$PR — the required checks were already green"
+              ;;
+            *)
+              gh pr merge "$PR" --repo "$REPO" --squash --auto
+              echo "Auto-merge armed for #$PR; it merges when the required checks pass"
+              ;;
+          esac
+          echo "reaction=rocket" >> "$GITHUB_OUTPUT"
+
+      # Acknowledge on the comment itself, so the requester can tell the
+      # difference between "armed" and "the workflow never fired".
+      - name: React to the comment
+        if: always() && steps.toggle.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REACTION: ${{ steps.toggle.outputs.reaction || 'confused' }}
+        run: |
+          gh api --silent -X POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content="$REACTION"

@@ -193,8 +193,8 @@ dotnet/android/ghc toolchains first, and debuginfo is reduced to
 
 ## Making the checks required
 
-CI reports status but does not block merges until branch protection says so. In
-**Settings → Branches → `master`**, require these status checks:
+CI reports status but does not block merges until a ruleset says so. The
+`master` ruleset requires these four contexts:
 
 - `Rust lint`
 - `Rust tests`
@@ -203,6 +203,94 @@ CI reports status but does not block merges until branch protection says so. In
 
 Do **not** add `VM boot control` to that list yet — it is still being proven out,
 and a required check that flakes on QEMU would block every merge.
+
+Creating it needs **repository admin**, so it lives here as a command rather
+than as a file the repo can apply itself:
+
+```bash
+gh api -X POST repos/uppin/tddy-coder/rulesets --input - <<'JSON'
+{
+  "name": "master",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Rust lint" },
+          { "context": "Rust build" },
+          { "context": "Rust tests" },
+          { "context": "Web tests" }
+        ]
+      }
+    }
+  ]
+}
+JSON
+```
+
+`strict_required_status_checks_policy` is deliberately **false**. Strict mode
+demands every PR be up to date with `master` before it merges, which on a
+15-minute test job means a queue of two PRs re-runs CI on the second one every
+time the first lands.
+
+Note that the ruleset applies to **direct pushes to `master`** as well, not just
+to PRs: a pushed commit has no check runs yet, so the push is rejected and every
+change has to arrive through a PR. That is the intended state — but if you want
+an escape hatch, add a bypass actor for the admin role:
+
+```json
+"bypass_actors": [
+  { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+]
+```
+
+with the caveat in the next section.
+
+## Automerge
+
+Comment **`#automerge`** on a pull request and it merges itself — squashed — as
+soon as the four required checks pass. `#automerge-cancel` disarms it. Both are
+handled by `.github/workflows/automerge.yml`, which turns the comment into
+GitHub's own native auto-merge (`gh pr merge --squash --auto`) and reacts to the
+comment: 🚀 armed, 👀 disarmed, 😕 the request failed.
+
+Only commenters with `write`, `maintain` or `admin` on the repo are obeyed. The
+workflow asks the API for the actual permission level rather than trusting the
+comment's `author_association`, which reports `MEMBER` for any org member
+regardless of whether they can touch this repo. An unauthorised comment gets no
+reaction at all — the run fails silently rather than confirming to a stranger
+that the trigger exists.
+
+The workflow reads the PR's merge state before deciding what to ask for. If the
+required checks are **already green** when the comment lands, it merges on the
+spot; only a genuinely blocked PR gets queued. That distinction is forced on it —
+see the second bullet.
+
+Three things to know about it:
+
+- **`issue_comment` workflows always run from the default branch.** Editing this
+  workflow on a branch changes nothing until it is on `master`; the version that
+  runs for a PR's comments is master's, not the PR's. That is also what makes it
+  safe on a public repo — a fork cannot alter what the trigger executes.
+- **Native auto-merge only works on a PR that is blocked.** It is a queue, not a
+  merge button: with no required status checks, a PR is mergeable the moment it
+  opens and the API rejects the request with *"Pull request is in clean status"*.
+  So the ruleset above is not optional decoration, it is the mechanism. The repo
+  setting `Allow auto-merge` must also be on
+  (`gh api -X PATCH repos/uppin/tddy-coder -F allow_auto_merge=true`, admin only).
+- **A bypass actor can defeat it.** If the PR author's role is allowed to bypass
+  required checks, GitHub may already consider that PR clean and refuse to arm
+  auto-merge. If `#automerge` starts reporting "clean status" for admins, the
+  admin bypass in the ruleset is the reason — drop it.
+
+The merge itself uses the repo's squash defaults (`COMMIT_OR_PR_TITLE` /
+`COMMIT_MESSAGES`), which is what produces the `... (#406)` subjects in
+`git log`.
 
 ## Forks
 
