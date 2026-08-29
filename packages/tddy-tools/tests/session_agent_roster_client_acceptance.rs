@@ -1068,3 +1068,68 @@ fn allows_a_replaced_tool_again_once_its_agent_is_detached() {
         .check_tool_available("Grep")
         .expect("detaching the last replacing agent must restore the tool");
 }
+
+// ---------------------------------------------------------------------------
+// The wake a bounded wait parks on (AC68)
+// ---------------------------------------------------------------------------
+
+/// The signal `subagent_status { waitFor }` sleeps on has to move for a **status** change, not just
+/// an attach — a status republishes at the revision already in force, so a wake driven by `rev`
+/// alone would leave every wait parked until its deadline on the transition it exists to catch.
+#[test]
+fn wakes_a_snapshot_subscriber_on_a_frame_at_the_revision_already_applied() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+    let subscriber = registry.subscribe_to_snapshots();
+
+    // When
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert!(
+        subscriber
+            .has_changed()
+            .expect("the roster outlives the subscriber"),
+        "a republished status must wake a parked wait"
+    );
+}
+
+#[test]
+fn wakes_a_snapshot_subscriber_on_a_frame_that_attaches_an_agent() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    let subscriber = registry.subscribe_to_snapshots();
+
+    // When
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert!(
+        subscriber
+            .has_changed()
+            .expect("the roster outlives the subscriber"),
+        "an attach must wake a parked wait"
+    );
+}
+
+/// A frame too old to apply changed nothing, so it wakes nothing. Waking on it would have every
+/// parked wait re-read the same roster on each reconnect replay.
+#[test]
+fn leaves_a_snapshot_subscriber_asleep_for_a_frame_older_than_the_one_in_force() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(2, vec![an_entry("explorer@ws-01")]));
+    let subscriber = registry.subscribe_to_snapshots();
+
+    // When
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // Then
+    assert!(
+        !subscriber
+            .has_changed()
+            .expect("the roster outlives the subscriber"),
+        "a frame too old to apply must not wake a parked wait"
+    );
+}
