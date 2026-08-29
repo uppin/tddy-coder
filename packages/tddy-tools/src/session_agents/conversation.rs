@@ -28,6 +28,7 @@ use tddy_discovery::subagent::{
 use tddy_service::proto::connection::{
     AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
     OpenAgentConversationResponse, PromptAgentConversationRequest,
+    ReportAgentConversationStateRequest, SessionAgentStatus,
 };
 
 use crate::session_tool_client::SessionToolEnvelope;
@@ -159,6 +160,42 @@ impl AgentConversationLink {
             )
             .await
             .map_err(|e| format!("CancelAgentConversation: {e}"))?;
+        Ok(())
+    }
+
+    /// Tell the facilitating daemon what a turn loop running **here** is doing.
+    ///
+    /// The daemon infers a status for every agent whose loop *it* runs, from the three RPCs above.
+    /// An agent this process was seeded with runs its loop here, so the daemon is never asked to
+    /// open anything and the roster row would sit at UNSPECIFIED for an agent that is demonstrably
+    /// working. This is the only source for that row.
+    ///
+    /// Best-effort by design, and the caller is expected to ignore the error: a status is a display
+    /// signal, and failing a turn because a badge could not be updated would trade a stale badge for
+    /// a broken conversation. The error is returned rather than swallowed here only so the caller
+    /// can log it.
+    pub async fn report_state(
+        &self,
+        agent_id: &str,
+        status: SessionAgentStatus,
+        summary: &str,
+    ) -> Result<(), String> {
+        let request = ReportAgentConversationStateRequest {
+            session_token: self.envelope.session_token.clone(),
+            session_id: self.envelope.session_id.clone(),
+            daemon_instance_id: self.envelope.daemon_instance_id.clone(),
+            agent_id: agent_id.to_string(),
+            status: status as i32,
+            summary: summary.to_string(),
+        };
+        self.client
+            .call_unary(
+                CONNECTION_SERVICE,
+                "ReportAgentConversationState",
+                request.encode_to_vec(),
+            )
+            .await
+            .map_err(|e| format!("ReportAgentConversationState: {e}"))?;
         Ok(())
     }
 

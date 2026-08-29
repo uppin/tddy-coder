@@ -1416,6 +1416,17 @@ export const agentRosterRowReplaces = (agentId: string) => `${agentRosterRow(age
 export const agentRosterRowCloneState = (agentId: string) =>
   `${agentRosterRow(agentId)}-clone-state`;
 
+/**
+ * What the agent is doing (`data-agent-status`: unknown | idle | running | executing-tool |
+ * waiting-for-input | connecting | error). Always present on a row — `unknown` is a value, not an
+ * absence.
+ */
+export const agentRosterRowStatus = (agentId: string) => `${agentRosterRow(agentId)}-status`;
+
+/** The agent's last observed activity. Absent when nothing has been observed of it. */
+export const agentRosterRowLastActivity = (agentId: string) =>
+  `${agentRosterRow(agentId)}-last-activity`;
+
 /** The detach action on an attached agent's row. */
 export const agentRosterRowDetachBtn = (agentId: string) =>
   `${agentRosterRow(agentId)}-detach-btn`;

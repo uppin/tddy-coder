@@ -36,8 +36,8 @@ pub use conversation::{
     AgentConversationLink, RemoteAgentSession, RemoteConversationHandle, NO_TRANSPORT,
 };
 pub use registry::{
-    AddressableAgent, CatalogVisibility, ConversationState, LiveAgentRoster, RosterError, Takeover,
-    WithdrawnExecTools,
+    AddressableAgent, AgentStatus, CatalogVisibility, ConversationState, ConversationSummary,
+    LiveAgentRoster, RosterError, RosterStatusReport, Takeover, WithdrawnExecTools,
 };
 pub use seed::session_agent_roster;
 pub use stream::{

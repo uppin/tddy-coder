@@ -174,6 +174,38 @@ pub struct AddressableAgent {
     pub daemon_instance_id: String,
 }
 
+/// The whole roster as `subagent_status` reports it: every attached agent, what the daemon says it
+/// is doing, and the conversations this process holds with it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RosterStatusReport {
+    pub session_id: String,
+    /// The revision in force, or `None` when no frame has ever arrived and only the spawn seed is
+    /// in play. A report that showed `0` for both would conflate "seeded, nothing confirmed" with
+    /// "the daemon published an empty roster".
+    pub applied_rev: Option<u64>,
+    /// Why no agent may be addressed, when none may be. `None` is the healthy case.
+    pub refusal: Option<String>,
+    pub agents: Vec<AgentStatus>,
+}
+
+/// One attached agent: the daemon's row for it, plus this process's conversations with it.
+// Not `Eq`: the entry is a prost message, whose `google.protobuf`-derived fields are only
+// `PartialEq`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentStatus {
+    pub entry: SessionAgentEntry,
+    /// In conversation-id order, so two identical calls read identically.
+    pub conversations: Vec<ConversationSummary>,
+}
+
+/// One conversation this process opened with an agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationSummary {
+    pub conversation_id: String,
+    /// Why it can no longer be prompted, when it cannot. `None` means open.
+    pub cancelled_reason: Option<String>,
+}
+
 /// One exec tool an attached agent serves in the main agent's place.
 pub struct Takeover<'a> {
     /// The tool, in the catalog's canonical spelling — the name a refusal should quote back.
@@ -311,8 +343,17 @@ impl LiveAgentRoster {
     ///
     /// A frame older than the one already applied is ignored. Frames are whole snapshots, so
     /// applying a stale one would move the registry backwards — and re-delivery is what a reconnect
-    /// does. A frame at the revision already applied carries the same snapshot by construction, so
-    /// it changes nothing and announces nothing.
+    /// does.
+    ///
+    /// A frame at the revision **already applied** is adopted but announces nothing. `rev` moves
+    /// only when the roster itself changes — an attach or a detach — while `status` and
+    /// `last_activity` move whenever an agent starts or finishes a turn, and the daemon republishes
+    /// at the *same* rev for exactly that. Discarding those frames (which this did, on the premise
+    /// that one rev means one snapshot) left the registry reporting whatever each agent was doing at
+    /// the moment it was attached, for the life of the session. Adopting the entries is what carries
+    /// a status into the jail; `tool_list_changes` deliberately does not move with it, because the
+    /// addressable agents and their withdrawals are identical at one rev — announcing a tool-list
+    /// change on every tool call an agent makes would be a notification storm for a badge.
     ///
     /// **Any** decoded frame restores currency, including one whose revision is not applied: a
     /// frame arriving is the proof that the stream is being served, and leaving the registry
@@ -334,6 +375,11 @@ impl LiveAgentRoster {
             }
             if roster.rev == applied {
                 state.currency = RosterCurrency::Current { rev: applied };
+                // The entries, and nothing else: a same-rev frame carries the same *agents* by
+                // construction (only a commit moves `rev`), so nothing can newly need cancelling
+                // and no tool list has changed — but what those agents are *doing* is exactly what
+                // this frame exists to deliver.
+                state.entries = roster.agents;
                 return;
             }
         }
@@ -511,6 +557,53 @@ impl LiveAgentRoster {
                 })
                 .collect(),
             withdrawn_exec_tools: Self::withdrawn_exec_tools_in(&state),
+        }
+    }
+
+    /// Every attached agent, with what the daemon says it is doing and this process's own
+    /// conversations with it — read under **one** lock, for the reason
+    /// [`Self::catalog_visibility`] gives: two calls let a revision land between them and produce a
+    /// report of a roster that never existed.
+    ///
+    /// `refusal` is carried rather than turned into an error, because a roster that has gone stale
+    /// still has something worth reporting: the rows it last knew about, plus the reason none of
+    /// them can be addressed. Erroring instead would answer "what are my agents doing?" with
+    /// nothing at all, which is the one answer that helps no one.
+    pub fn status_report(&self) -> RosterStatusReport {
+        let state = self.state.lock().expect("session agent roster");
+        let mut conversations: HashMap<&str, Vec<ConversationSummary>> = HashMap::new();
+        for (id, conversation) in &state.conversations {
+            conversations
+                .entry(conversation.agent_id.as_str())
+                .or_default()
+                .push(ConversationSummary {
+                    conversation_id: id.clone(),
+                    cancelled_reason: match &conversation.state {
+                        ConversationState::Open => None,
+                        ConversationState::Cancelled { reason } => Some(reason.clone()),
+                    },
+                });
+        }
+        RosterStatusReport {
+            session_id: self.session_id.clone(),
+            applied_rev: state.currency.applied_rev(),
+            refusal: state.currency.refusal().map(str::to_string),
+            agents: state
+                .entries
+                .iter()
+                .map(|entry| {
+                    let mut open = conversations
+                        .remove(entry.agent_id.as_str())
+                        .unwrap_or_default();
+                    // Stable order: the map is a `HashMap`, and a report whose rows reshuffle
+                    // between two identical calls reads as change that did not happen.
+                    open.sort_by(|a, b| a.conversation_id.cmp(&b.conversation_id));
+                    AgentStatus {
+                        entry: entry.clone(),
+                        conversations: open,
+                    }
+                })
+                .collect(),
         }
     }
 

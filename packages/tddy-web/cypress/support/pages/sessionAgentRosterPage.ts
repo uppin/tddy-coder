@@ -15,7 +15,9 @@ import {
   agentRosterRowCloneState,
   agentRosterRowDetachBtn,
   agentRosterRowHost,
+  agentRosterRowLastActivity,
   agentRosterRowReplaces,
+  agentRosterRowStatus,
   byTestId,
 } from "../testIds";
 
@@ -38,6 +40,18 @@ export const sessionAgentRosterPage = {
   rowHost: (agentId: string) => byTestId(agentRosterRowHost(agentId)),
   rowReplaces: (agentId: string) => byTestId(agentRosterRowReplaces(agentId)),
   rowCloneState: (agentId: string) => byTestId(agentRosterRowCloneState(agentId)),
+  /** What the agent is doing. Always present — `unknown` is a value, not an absence. */
+  rowStatus: (agentId: string) => byTestId(agentRosterRowStatus(agentId)),
+  /** The agent's last observed activity. Absent when nothing has been observed of it. */
+  rowLastActivity: (agentId: string) => byTestId(agentRosterRowLastActivity(agentId)),
+
+  /**
+   * Assert a row's status by its stable token rather than its prose, so rewording the badge is not
+   * a test change. The prose is asserted once, where the wording itself is the point.
+   */
+  assertStatus(agentId: string, token: string) {
+    byTestId(agentRosterRowStatus(agentId)).should("have.attr", "data-agent-status", token);
+  },
 
   /** Click a row's detach action. Does not confirm — a remote agent's detach asks first. */
   clickDetach(agentId: string) {

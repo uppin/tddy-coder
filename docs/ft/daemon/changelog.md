@@ -2,6 +2,16 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — A roster agent says what it is doing
+
+- **Every attached agent now reports a status** — idle, running, executing tool, waiting for input, connecting or error — on the roster stream that already carries the agent list, so nothing new has to be subscribed to and no row can be shown a status for an agent it no longer holds.
+- **The checkout outranks the conversation.** An agent whose clone is still being built reports `connecting` however idle its conversation looks: it refuses prompts, so calling it idle would offer an operator an agent that cannot answer. A clone this process has never measured reports `connecting` too, for the same reason it is never called ready.
+- **"Nothing has been observed" is its own state, never "idle".** A restarted daemon reports `unknown` for every agent until a signal reaches it — a status is a fact about a running turn loop, and one restored from disk would claim a turn is in flight in a process that never started one.
+- **Each row also carries what the agent was last seen doing** — one short line and the time it happened — which is the only useful thing to show for an agent that is idle.
+- **A turn that fails leaves the agent idle, not in error.** It is still attached and still promptable; `error` is reserved for a broken checkout, and the summary is what says what happened.
+- **An agent whose loop runs inside the sandbox reports itself** (`ReportAgentConversationState`), because the daemon is never asked to open a conversation for a seeded agent and would otherwise have nothing to say about one that is demonstrably working. It may only report conversation states: the checkout is the daemon's own to measure.
+- **Known and unchanged:** a remote or sandbox-run loop reports `running` and `idle` but never `executing tool` (its tool calls happen where the daemon cannot see them), `waiting for input` has no producer yet, and the per-worktree activity hooks stay session-scoped because they carry no agent id.
+
 ## 2026-08-29 — A specialized agent can be seeded on any placement, and the index is built where the worktree is
 
 - **`specialized_agents` is admissible on every codebase placement.** Naming an agent another daemon owns was refused on *every* start (`remote_agent_at_start_unsupported`), and naming *any* agent was refused on a split one — both on the premise that a peer is admitted to the session's room only once the spawn opens it. Claiming a clone opens that room itself, so the premise was false. A seed is now the same operation an attach is, performed before the spawn: each reference resolves from the daemon that owns it, an agent co-located with the authoritative worktree reads it directly, and an agent anywhere else gets the clone an attach would have given it. Where an agent runs decides **how the session is split across hosts**, never whether it may be selected. See [session-agent-roster.md § Seeding at start](session-agent-roster.md).
