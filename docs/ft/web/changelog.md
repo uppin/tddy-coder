@@ -4,6 +4,13 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — The Agent roster shows what each agent is doing
+
+- **Every row in the Agent roster now carries a status badge** — idle, running, executing tool, waiting for input, connecting or error — updated live, so a dispatched agent is distinguishable from an idle one without prompting it.
+- **An agent nothing is known about reads "unknown", never "idle".** "Idle" reads as "free, ready for work", which is a different claim from "nobody here knows" — and the badge is always shown, because a row with no badge and a row whose daemon has nothing to say look identical otherwise.
+- **Each row shows what the agent was last seen doing**, as "<what it did> · 4m ago", and only when there is something to show — a blank line reserved for an agent with no history reads as a row that lost one.
+- **That timestamp ages on its own**, ticking once a minute: an idle agent produces no updates, so a line that only aged when one arrived would read "just now" for the rest of the session.
+
 ## 2026-08-19 — Session agent catalog across hosts
 
 - **The New-session Agent dropdown now lists the agents of every connected host**, each labelled with the host that offers it — an assistant created on one machine is selectable from a browser pointed at another, which it previously was not. See [session-agent-catalog-fan-out.md](session-agent-catalog-fan-out.md).

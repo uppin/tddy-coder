@@ -4831,6 +4831,14 @@ impl ConnectionServiceImpl {
     ///
     /// Non-fatal on purpose: the status is a display signal, and failing the turn it decorates would
     /// trade a stale badge for a broken conversation.
+    ///
+    /// `republish` alone, deliberately — not [`Self::publish_roster_change`], which also broadcasts
+    /// the snapshot into the session room. Both consumers that act on a status follow
+    /// `StreamSessionAgents`, which `republish` feeds: the roster pane and the in-jail registry. The
+    /// room broadcast exists for participants rebuilding a registry from whole snapshots, and a
+    /// status ticks on **every tool call** — putting a whole roster on the room for each one would
+    /// spend the room's bandwidth on a badge, and `rev` has not moved, so nothing those
+    /// participants act on has changed.
     fn republish_roster_quietly(&self, session_id: &str, session_dir: &Path, agent_id: &str) {
         if let Err(e) = self
             .session_agent_rosters
@@ -9244,7 +9252,8 @@ async fn merge_listed_projects_with_peers(
 /// conversation RPCs the in-jail `tddy-tools` issues (forwarded by the runner as `RpcRequest`s)
 /// to this daemon's `ConnectionServiceImpl`. The runner's `ToolExecService` forwards
 /// `StreamSessionAgents` / `OpenAgentConversation` / `PromptAgentConversation` /
-/// `CancelAgentConversation`; this handler decodes each, calls the matching typed method on the
+/// `CancelAgentConversation` / `ReportAgentConversationState`; this handler decodes each, calls the
+/// matching typed method on the
 /// `Arc<ConnectionServiceImpl>` it holds, and returns the encoded response — unary for the two
 /// unary RPCs, a server stream of encoded frames for the two streaming ones. `tonic::Status`
 /// errors are carried back to the in-jail caller as a single terminal `RpcStreamFrame` with
@@ -9258,7 +9267,7 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
     async fn handle_rpc(&self, service: &str, method: &str, payload: &[u8]) -> tddy_rpc::RpcResult {
         use prost::Message;
         use tddy_rpc::Request;
-        // Only the four RPCs the runner forwards ride this bridge; anything else is a wiring bug
+        // Only the RPCs the runner forwards ride this bridge; anything else is a wiring bug
         // (the runner's `ToolExecService` would not forward it) and is refused with `not_found`
         // rather than reaching arbitrary `ConnectionService` surface from inside a jail.
         match (service, method) {
@@ -9348,6 +9357,26 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     }
                 };
                 match self.conn.cancel_agent_conversation(Request::new(req)).await {
+                    Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
+                    Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
+                }
+            }
+            ("connection.ConnectionService", "ReportAgentConversationState") => {
+                let req = match tddy_service::proto::connection::ReportAgentConversationStateRequest::decode(payload) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return tddy_rpc::RpcResult::Unary(Err(
+                            tddy_rpc::Status::invalid_argument(format!(
+                                "decode ReportAgentConversationStateRequest: {e}"
+                            )),
+                        ));
+                    }
+                };
+                match self
+                    .conn
+                    .report_agent_conversation_state(Request::new(req))
+                    .await
+                {
                     Ok(resp) => tddy_rpc::RpcResult::Unary(Ok(resp.into_inner().encode_to_vec())),
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
@@ -10199,6 +10228,80 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .await;
         Ok(Response::new(
             tddy_service::proto::connection::ReportAgentCloneStateResponse {},
+        ))
+    }
+
+    /// An agent whose turn loop runs in the jail, telling this daemon what that loop is doing.
+    ///
+    /// The daemon infers a status from the conversation RPCs for every agent whose loop it runs. An
+    /// agent the in-jail `tddy-tools` was *seeded* with runs its loop there instead, and this daemon
+    /// is never asked to open anything — so without this report the row would sit at UNSPECIFIED for
+    /// an agent that is demonstrably working.
+    ///
+    /// Three things are checked, and each is a way the roster could otherwise be made to lie:
+    ///
+    /// - **Routed first**, as the conversation RPCs are. The roster is on the facilitating daemon;
+    ///   a report served anywhere else records a status nothing publishes.
+    /// - **The agent must be attached.** An id the roster does not hold is `NOT_FOUND`, so an
+    ///   in-jail registry that has gone stale cannot put a row on a roster an operator emptied.
+    /// - **Only a conversation state is accepted.** `CONNECTING` and `ERROR` describe the checkout,
+    ///   which this daemon measures itself and which outranks the conversation at snapshot time; a
+    ///   reporter allowed to send them could hide a broken clone behind a cheerful conversation.
+    ///
+    /// Authenticated as `ReportAgentCloneState` is, and for the same reason: the (session, agent)
+    /// pair is published in the `session.agents` broadcast, so on the pair alone any participant
+    /// that saw a frame could park an agent at RUNNING for ever.
+    async fn report_agent_conversation_state(
+        &self,
+        request: Request<tddy_service::proto::connection::ReportAgentConversationStateRequest>,
+    ) -> Result<
+        Response<tddy_service::proto::connection::ReportAgentConversationStateResponse>,
+        Status,
+    > {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(acknowledged) = self
+            .rpc_served_by_peer(
+                "ReportAgentConversationState",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(acknowledged));
+        }
+
+        let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
+        if self
+            .session_agent_rosters
+            .entry(&req.session_id, &session_dir, &req.agent_id)?
+            .is_none()
+        {
+            return Err(Status::not_found(format!(
+                "agent '{}' is not attached to session '{}', so there is no row to report on",
+                req.agent_id, req.session_id
+            )));
+        }
+
+        let status = tddy_service::proto::connection::SessionAgentStatus::try_from(req.status)
+            .unwrap_or(tddy_service::proto::connection::SessionAgentStatus::Unspecified);
+        let state = crate::session_agent_status::reported_state(status).ok_or_else(|| {
+            Status::invalid_argument(format!(
+                "{status:?} is not a conversation state: CONNECTING and ERROR describe the \
+                 checkout, which this daemon measures itself, and UNSPECIFIED claims nothing"
+            ))
+        })?;
+
+        self.note_agent_activity(
+            &req.session_id,
+            &session_dir,
+            &req.agent_id,
+            state,
+            &req.summary,
+        );
+        Ok(Response::new(
+            tddy_service::proto::connection::ReportAgentConversationStateResponse {},
         ))
     }
 

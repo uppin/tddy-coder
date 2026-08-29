@@ -15,7 +15,9 @@
 use std::time::Duration;
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
-use tddy_service::proto::connection::{SessionAgentEntry, SessionAgentRoster};
+use tddy_service::proto::connection::{
+    SessionAgentActivity, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
+};
 use tddy_tools::session_agents::{
     ConversationState, LiveAgentRoster, ReconnectPacing, RosterError, RosterStreamOutcome,
 };
@@ -42,6 +44,19 @@ fn an_entry(agent_id: &str) -> SessionAgentEntry {
         clone_error: String::new(),
         status: 0, // SESSION_AGENT_STATUS_UNSPECIFIED
         last_activity: None,
+    }
+}
+
+/// The same entry, with the daemon reporting what it is doing. `status` and `last_activity` move
+/// *without* `rev` moving — the roster did not change, only what one of its agents is up to.
+fn an_entry_doing(agent_id: &str, status: SessionAgentStatus, summary: &str) -> SessionAgentEntry {
+    SessionAgentEntry {
+        status: status as i32,
+        last_activity: Some(SessionAgentActivity {
+            at_unix_ms: 1_780_828_020_298,
+            summary: summary.to_string(),
+        }),
+        ..an_entry(agent_id)
     }
 }
 
@@ -295,6 +310,206 @@ fn announces_nothing_when_a_reconnect_redelivers_the_revision_already_applied() 
 
     // Then
     assert_eq!(registry.tool_list_change_count(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// A status moves without the revision moving
+// ---------------------------------------------------------------------------
+
+/// The regression this pair exists for: `rev` moves on an attach or a detach, but `status` and
+/// `last_activity` move whenever an agent starts or finishes a turn, and the daemon republishes at
+/// the *same* rev for exactly that. A registry that discarded same-rev frames — on the once-true
+/// premise that one rev means one snapshot — reported whatever each agent was doing at the moment
+/// it was attached, for the life of the session.
+#[test]
+fn adopts_a_status_that_arrives_at_the_revision_already_applied() {
+    // Given a roster whose agent has been observed doing nothing yet
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When the daemon republishes at the same rev because the agent started a turn
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_doing(
+            "explorer@ws-01",
+            SessionAgentStatus::Running,
+            "prompted: find the caller",
+        )],
+    ));
+
+    // Then
+    let report = registry.status_report();
+    let agent = report.agents.first().expect("the attached agent");
+    assert_eq!(agent.entry.status, SessionAgentStatus::Running as i32);
+    assert_eq!(
+        agent
+            .entry
+            .last_activity
+            .as_ref()
+            .map(|a| a.summary.clone()),
+        Some("prompted: find the caller".to_string())
+    );
+}
+
+#[test]
+fn a_status_change_does_not_announce_a_tool_list_change() {
+    // Given
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    // When the agent runs three tool calls, each republished at the same rev
+    for summary in ["Read a.rs", "Read b.rs", "Read c.rs"] {
+        registry.apply_snapshot(a_roster(
+            1,
+            vec![an_entry_doing(
+                "explorer@ws-01",
+                SessionAgentStatus::ExecutingTool,
+                summary,
+            )],
+        ));
+    }
+
+    // Then — the addressable agents and their withdrawals are identical at one rev, and making the
+    // main agent re-list its tools on every tool call an agent makes is a storm for a badge
+    assert_eq!(registry.tool_list_change_count(), 1);
+}
+
+#[test]
+fn a_status_frame_older_than_the_applied_revision_is_still_ignored() {
+    // The same-rev adoption must not become "adopt anything": a frame from before a detach would
+    // put the detached agent back.
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        2,
+        vec![an_entry("explorer@ws-01"), an_entry("reviewer@ws-01")],
+    ));
+
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry_doing(
+            "auditor@ws-01",
+            SessionAgentStatus::Running,
+            "prompted",
+        )],
+    ));
+
+    let report = registry.status_report();
+    assert_eq!(report.applied_rev, Some(2));
+    let ids: Vec<String> = report
+        .agents
+        .iter()
+        .map(|a| a.entry.agent_id.clone())
+        .collect();
+    assert_eq!(ids, vec!["explorer@ws-01", "reviewer@ws-01"]);
+}
+
+// ---------------------------------------------------------------------------
+// The status report `subagent_status` answers from
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_status_report_lists_an_agent_nothing_has_been_asked_of() {
+    // The whole reason this is not `subagent_list`: an agent the main agent could address but has
+    // never opened a conversation with appears here and nowhere else.
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+
+    let report = registry.status_report();
+
+    let agent = report.agents.first().expect("the attached agent");
+    assert_eq!(agent.entry.agent_id, "explorer@ws-01");
+    assert!(agent.conversations.is_empty());
+    assert_eq!(report.refusal, None);
+}
+
+#[test]
+fn the_status_report_puts_each_conversation_on_the_agent_it_is_with() {
+    // Given two agents and a conversation with one of them
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry("explorer@ws-01"), an_entry("reviewer@ws-01")],
+    ));
+    registry
+        .open_conversation_as("conv-1", "explorer@ws-01")
+        .expect("open a conversation with the explorer");
+
+    // When
+    let report = registry.status_report();
+
+    // Then
+    let explorer = report
+        .agents
+        .iter()
+        .find(|a| a.entry.agent_id == "explorer@ws-01")
+        .expect("the explorer's row");
+    assert_eq!(explorer.conversations.len(), 1);
+    assert_eq!(explorer.conversations[0].conversation_id, "conv-1");
+    assert_eq!(explorer.conversations[0].cancelled_reason, None);
+    let reviewer = report
+        .agents
+        .iter()
+        .find(|a| a.entry.agent_id == "reviewer@ws-01")
+        .expect("the reviewer's row");
+    assert!(reviewer.conversations.is_empty());
+}
+
+#[test]
+fn the_status_report_says_why_a_conversation_can_no_longer_be_prompted() {
+    // Given a conversation whose agent was detached underneath it
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(
+        1,
+        vec![an_entry("explorer@ws-01"), an_entry("reviewer@ws-01")],
+    ));
+    registry
+        .open_conversation_as("conv-1", "explorer@ws-01")
+        .expect("open a conversation with the explorer");
+
+    // When the explorer goes
+    registry.apply_snapshot(a_roster(2, vec![an_entry("reviewer@ws-01")]));
+
+    // Then the row is gone with it, and so is the conversation's place on the report — but the
+    // reason survives where the conversation is still enumerable
+    let report = registry.status_report();
+    let ids: Vec<String> = report
+        .agents
+        .iter()
+        .map(|a| a.entry.agent_id.clone())
+        .collect();
+    assert_eq!(ids, vec!["reviewer@ws-01"]);
+    assert!(matches!(
+        registry.conversation_state("conv-1"),
+        ConversationState::Cancelled { .. }
+    ));
+}
+
+#[test]
+fn the_status_report_still_answers_when_the_roster_has_gone_dark() {
+    // Given a roster that was current and whose stream then died
+    let registry = a_seeded_registry(&[]);
+    registry.apply_snapshot(a_roster(1, vec![an_entry("explorer@ws-01")]));
+    registry.mark_unavailable("the roster stream gave up after 5 attempts");
+
+    // When
+    let report = registry.status_report();
+
+    // Then — the rows it last knew about plus the reason none can be addressed beats an error,
+    // which answers "what are my agents doing?" with nothing at all
+    assert_eq!(report.agents.len(), 1);
+    let refusal = report.refusal.expect("a dark roster says why");
+    assert!(
+        refusal.contains("gave up"),
+        "the refusal must name the cause, got {refusal:?}"
+    );
+}
+
+#[test]
+fn the_status_report_distinguishes_a_seed_from_a_published_empty_roster() {
+    // `appliedRev: null` is "no frame has ever arrived"; `0` would be a roster the daemon published.
+    let registry = a_seeded_registry(&["explorer"]);
+
+    assert_eq!(registry.status_report().applied_rev, None);
 }
 
 // ---------------------------------------------------------------------------

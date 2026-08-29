@@ -46,6 +46,15 @@ service ConnectionService {
   // can say any of this — so it is pushed rather than polled, and a reconcile is reported rather
   // than absorbed (docs/ft/daemon/session-agent-roster.md § Kept current from the room).
   rpc ReportAgentCloneState(ReportAgentCloneStateRequest) returns (ReportAgentCloneStateResponse);
+  // A conversation whose turn loop runs OUTSIDE the daemon telling it what that loop is doing.
+  //
+  // The daemon infers a roster agent's `status` from the conversation RPCs above, which works for
+  // every agent whose loop it runs. An agent the in-jail `tddy-tools` was *seeded* with runs its
+  // loop in the jail instead: the daemon is never asked to open anything, so it has nothing to
+  // infer from and the row would report UNSPECIFIED for an agent that is demonstrably working.
+  // This is that agent's own report, and the only possible source for it
+  // (docs/ft/daemon/session-agent-roster.md § What an agent is doing).
+  rpc ReportAgentConversationState(ReportAgentConversationStateRequest) returns (ReportAgentConversationStateResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
@@ -554,6 +563,29 @@ message ReportAgentCloneStateRequest {
 }
 
 message ReportAgentCloneStateResponse {}
+
+// Authenticated exactly as the conversation RPCs are, and that is not ceremony: the (session,
+// agent) pair this names is published in the session's `session.agents` broadcast, so on the pair
+// alone any participant that saw a roster frame could park an agent at RUNNING for ever.
+message ReportAgentConversationStateRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // Routing, as on ExecuteTool: which daemon serves the call. Empty = this one.
+  string daemon_instance_id = 3;
+  // The roster agent whose loop is being reported on. An id the roster does not hold is refused
+  // rather than recorded — a stale in-jail registry must not be able to invent a row.
+  string agent_id = 4;
+  // What that loop is doing. Only the four states a *conversation* can be in are accepted:
+  // CONNECTING and ERROR belong to the checkout, which the daemon measures itself, and a reporter
+  // allowed to send them could hide a broken clone behind a cheerful conversation.
+  SessionAgentStatus status = 5;
+  // One short line for `last_activity.summary`. Truncated by the daemon rather than trusted at the
+  // length it arrives: the summary rides a whole-roster broadcast, where an oversized frame is
+  // chunk-framed and one lost chunk wedges the call with no error.
+  string summary = 6;
+}
+
+message ReportAgentConversationStateResponse {}
 
 message ListSessionsRequest {
   string session_token = 1;

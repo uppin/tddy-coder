@@ -73,6 +73,27 @@ impl ManagedAgentState {
     }
 }
 
+/// A reported status as an agent state, or `None` when the reporter may not say it.
+///
+/// The four conversation states are accepted; `CONNECTING`, `ERROR` and `UNSPECIFIED` are not.
+/// The first two belong to the **checkout**, which this daemon measures itself and which outranks
+/// the conversation at snapshot time — a reporter allowed to send them could hide a broken clone
+/// behind a cheerful conversation. `UNSPECIFIED` is refused because it is the absence of a claim:
+/// a report is by definition someone claiming something, and accepting it would let a reporter
+/// erase what it last said instead of saying what is true now.
+#[must_use]
+pub fn reported_state(status: SessionAgentStatus) -> Option<ManagedAgentState> {
+    match status {
+        SessionAgentStatus::Idle => Some(ManagedAgentState::Open),
+        SessionAgentStatus::Running => Some(ManagedAgentState::Prompting),
+        SessionAgentStatus::ExecutingTool => Some(ManagedAgentState::ExecutingTool),
+        SessionAgentStatus::WaitingForInput => Some(ManagedAgentState::WaitingForInput),
+        SessionAgentStatus::Unspecified
+        | SessionAgentStatus::Connecting
+        | SessionAgentStatus::Error => None,
+    }
+}
+
 /// The last thing this daemon observed one agent doing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentActivity {
@@ -522,6 +543,60 @@ mod tests {
             .at_unix_ms;
         // A summary with no time behind it reads as current forever.
         assert!(at > 1_700_000_000_000, "stamped with {at}");
+    }
+
+    // ─── what a reporter may say ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_reporter_may_say_any_of_the_four_conversation_states() {
+        assert_eq!(
+            reported_state(SessionAgentStatus::Idle),
+            Some(ManagedAgentState::Open)
+        );
+        assert_eq!(
+            reported_state(SessionAgentStatus::Running),
+            Some(ManagedAgentState::Prompting)
+        );
+        assert_eq!(
+            reported_state(SessionAgentStatus::ExecutingTool),
+            Some(ManagedAgentState::ExecutingTool)
+        );
+        assert_eq!(
+            reported_state(SessionAgentStatus::WaitingForInput),
+            Some(ManagedAgentState::WaitingForInput)
+        );
+    }
+
+    #[test]
+    fn a_reporter_may_not_say_anything_about_the_checkout() {
+        // CONNECTING and ERROR are the clone's, measured by this daemon and outranking the
+        // conversation — a reporter allowed to send them could hide a broken clone behind a
+        // cheerful conversation.
+        assert_eq!(reported_state(SessionAgentStatus::Connecting), None);
+        assert_eq!(reported_state(SessionAgentStatus::Error), None);
+    }
+
+    #[test]
+    fn a_reporter_may_not_erase_what_it_last_said() {
+        // A report is someone claiming something; UNSPECIFIED is the absence of a claim.
+        assert_eq!(reported_state(SessionAgentStatus::Unspecified), None);
+    }
+
+    #[test]
+    fn a_reported_state_still_loses_to_a_broken_checkout() {
+        // The whole point of clamping the reporter: whatever it says, the clone decides whether the
+        // agent can serve a prompt at all.
+        let reported = reported_state(SessionAgentStatus::Running).expect("running is reportable");
+        let activity = AgentActivity {
+            state: reported,
+            summary: "prompted".to_string(),
+            at_unix_ms: 1_780_828_020_298,
+        };
+
+        assert_eq!(
+            agent_status(AgentCloneState::Error, Some(&activity)),
+            SessionAgentStatus::Error
+        );
     }
 
     // ─── a turn ending ──────────────────────────────────────────────────────────────────────────
