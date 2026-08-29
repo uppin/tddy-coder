@@ -55,6 +55,7 @@ pub mod session_workflow_files;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod split_session;
+pub mod stack_doc_attachments;
 pub mod startup;
 pub mod supervisor_client;
 pub mod supervisor_spawn;

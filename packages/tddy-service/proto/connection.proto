@@ -627,6 +627,12 @@ message SessionContextDoc {
   bool exists = 5;
   SessionContextDocKind kind = 6;
   uint64 size_bytes = 7;
+  // Path relative to the session's artifacts root — the address a HostDocumentRef under
+  // HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT uses. A stack-level manifest doc is its own basename, an
+  // attachment is "attachments/<basename>", a per-PR document is "prs/<node_id>/<basename>". Sent
+  // because a client cannot derive it: nothing in `kind` distinguishes a nested document from a
+  // flat one.
+  string relative_path = 8;
 }
 
 message SessionEntry {
@@ -2126,8 +2132,8 @@ message StagedAttachmentEntry {
 }
 
 // One document attached to a session at start. The daemon running the session materializes each
-// attachment under {session_dir}/attachments/<basename> before launching the agent, so the agent
-// sees a plain local file regardless of which source variant produced it.
+// attachment under {session_dir}/artifacts/attachments/<basename> before launching the agent, so
+// the agent sees a plain local file regardless of which source variant produced it.
 message SessionAttachment {
   // Basename the document is materialized under. Basename only — path separators, "." / ".." and
   // empty are rejected; duplicate basenames within one StartSessionRequest are a request error
@@ -2170,8 +2176,10 @@ message HostDocumentRef {
   // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
   string project_id = 4;
   // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
-  // For SESSION_ARTIFACT the basename of a SessionContextDoc; for SESSION_UPLOAD
-  // "<upload_id>/<file_name>" (see SessionUploadEntry).
+  // Separators are permitted and the whole path is resolved under the root, so a nested document
+  // is addressable: for SESSION_ARTIFACT this is a SessionContextDoc's `relative_path`, which may
+  // be a bare basename, "attachments/<basename>" or "prs/<node_id>/<basename>". For SESSION_UPLOAD
+  // it is "<upload_id>/<file_name>" (see SessionUploadEntry).
   string relative_path = 5;
 }
 

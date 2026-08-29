@@ -26,6 +26,8 @@ use crate::plan_pr_stack::{
 };
 use crate::SessionArtifactManifest;
 
+use super::docs::{validate_stack_docs, write_stack_docs, StackDocsOutput};
+
 /// Workflow name the shared planning prompts announce to the agent.
 const RECIPE_NAME: &str = "pr-stack";
 
@@ -61,6 +63,50 @@ fn set_changeset_state(session_dir: &Path, state: WorkflowState) {
             log::warn!("[pr-stack hooks] could not persist state: {e}");
         }
     }
+}
+
+fn write_stack_docs_system_prompt() -> String {
+    "You are assisting with the **pr-stack** workflow **write-stack-docs** step.\n\n\
+     ## Task: Author the per-PR documents\n\n\
+     The plan is written. Every planned PR now needs two documents so the agent that builds it \
+     knows what it owns and, above all, where its PR stops and its neighbours' begin. Emit them \
+     with the `submit` tool using key `stack-docs`. The YAML must conform to this contract:\n\n\
+     ```yaml\n\
+     version: 1\n\
+     docs:\n\
+       - node_id: n1          # every planned node, and no other\n\
+         prd: |\n\
+           # n1 — Token store\n\
+           What this PR delivers: behaviour, API surface, acceptance criteria.\n\
+         changeset: |\n\
+           # Changeset: n1 — Token store\n\
+           ## Responsibility\n\
+           ## Boundaries\n\
+           ## Dependencies\n\
+           ## Draft PR contract\n\
+     ```\n\n\
+     This is a **read-only** step — do not write code or create files; the host persists the \
+     documents from your submit.\n\n\
+     **Validation rules** (the hook enforces these, and a rejected submit writes nothing):\n\
+     - Every node in the stack has exactly one entry, and no entry names a node outside the \
+     stack\n\
+     - `prd` and `changeset` are non-blank\n\
+     - Each `changeset` carries all four required sections as headings\n\n\
+     ## The four required sections\n\n\
+     - `## Responsibility` — what this PR owns.\n\
+     - `## Boundaries` — what it explicitly does **not** do, and which node does it instead.\n\
+     - `## Dependencies` — one entry per parent node, naming **what that PR delivers that this \
+     one consumes** (the trait, the endpoint, the table, the component it hands over). Two \
+     children building the same abstraction in parallel is the failure this section exists to \
+     prevent, so it is not enough to list the parent's id — say what it delivers and therefore \
+     what this PR must not create itself. A node with no parents says so.\n\
+     - `## Draft PR contract` — what lands first so dependents need not wait for the whole \
+     implementation: the **API surface plus its failing tests**, enough to open a draft PR \
+     against, so a dependent can branch off a real ref and code against a real signature while \
+     the implementation continues in the same PR.\n\n\
+     Write for the agent that will build the node, not for a reviewer of the plan: it reads \
+     nothing else about its neighbours.\n"
+        .to_string()
 }
 
 fn generate_pr_stack_plan_md(plan: &StackPlanOutput) -> String {
@@ -201,6 +247,44 @@ fn before_write_stack_plan(context: &Context, session_dir: Option<&Path>) {
     }
 }
 
+/// `before_task` for `write-stack-docs`: seed the system/user prompt.
+///
+/// The user prompt names the planned nodes from the persisted stack, since the submit must cover
+/// every one of them by id and the agent has no other list to work from.
+fn before_write_stack_docs(context: &Context, session_dir: Option<&Path>) {
+    context.set_sync("system_prompt", write_stack_docs_system_prompt());
+    let stack = session_dir
+        .and_then(|dir| read_changeset(dir).ok())
+        .and_then(|cs| cs.stack);
+    context.set_sync("prompt", write_stack_docs_user_prompt(stack.as_ref()));
+}
+
+/// The nodes to document, so the agent submits an entry for each by its exact `node_id`.
+fn write_stack_docs_user_prompt(stack: Option<&Stack>) -> String {
+    let mut prompt =
+        String::from("Author the PRD and the changeset for every node in the planned stack.\n");
+    let nodes = stack.map(|s| s.nodes.as_slice()).unwrap_or_default();
+    if nodes.is_empty() {
+        return prompt;
+    }
+    prompt.push_str("\n## Planned nodes\n\n");
+    for node in nodes {
+        let parents = if node.parents.is_empty() {
+            "(root — off the stack base)".to_string()
+        } else {
+            node.parents.join(", ")
+        };
+        prompt.push_str(&format!(
+            "- `{}` — {}\n  - parents: {parents}\n",
+            node.node_id, node.title
+        ));
+        if !node.description.trim().is_empty() {
+            prompt.push_str(&format!("  - description: {}\n", node.description.trim()));
+        }
+    }
+    prompt
+}
+
 /// `before_task` for `orchestrate`: prepend a context-reminder header pointing the agent at the
 /// on-disk session artifacts (e.g. `exploration.md`), mirroring the tdd/bugfix recipes. When no
 /// artifacts exist, [`prepend_context_header`] returns the prompt unchanged.
@@ -239,13 +323,18 @@ fn after_write_stack_plan(
     // a populated stack.
     super::reseed_stack_from_plan_if_unspawned(dir, &plan)?;
 
+    // Both plan artifacts live under the artifacts root, beside exploration.md and the two
+    // stack-status files: every wire reader resolves a manifest basename under `artifacts/`, so a
+    // plan at the session root is invisible to them and unreachable as a host document.
+    let artifacts_root = tddy_workflow::session_artifacts_root(dir);
+
     let yaml =
         serde_yaml::to_string(&plan).map_err(|e| format!("failed to serialize stack-plan: {e}"))?;
-    tddy_core::atomic_file::write_atomic(&dir.join(STACK_PLAN_BASENAME), &yaml)
+    tddy_core::atomic_file::write_atomic(&artifacts_root.join(STACK_PLAN_BASENAME), &yaml)
         .map_err(|e| format!("write {STACK_PLAN_BASENAME}: {e}"))?;
 
     let md = generate_pr_stack_plan_md(&plan);
-    tddy_core::atomic_file::write_atomic(&dir.join(PR_STACK_PLAN_MD_BASENAME), &md)
+    tddy_core::atomic_file::write_atomic(&artifacts_root.join(PR_STACK_PLAN_MD_BASENAME), &md)
         .map_err(|e| format!("write {PR_STACK_PLAN_MD_BASENAME}: {e}"))?;
 
     // Persist the optional code-discovery map to artifacts/exploration.md, reusing the same
@@ -256,12 +345,40 @@ fn after_write_stack_plan(
         .map(str::trim)
         .filter(|e| !e.is_empty())
     {
-        let artifacts_root = tddy_workflow::session_artifacts_root(dir);
         crate::writer::write_exploration_file(&artifacts_root, exploration)
             .map_err(|e| format!("write exploration.md: {e}"))?;
     }
 
     set_changeset_state(dir, WorkflowState::new(super::STATE_STACK_PLANNED));
+    Ok(())
+}
+
+/// `after_task` for `write-stack-docs`: parse the agent's YAML output, validate it against the
+/// persisted stack, persist a `PRD.md` + `changeset.md` per node, and mark `StackDocsWritten`.
+///
+/// Validation runs before the first write, so a refused pass leaves the previous one — or an empty
+/// artifacts root — exactly as it was. A half-written pass would leave an operator unable to tell
+/// "not documented yet" from "deliberately empty".
+fn after_write_stack_docs(
+    dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let output: String = context
+        .get_sync("output")
+        .ok_or("write-stack-docs after_task requires output in context")?;
+
+    let docs: StackDocsOutput = serde_yaml::from_str(&output)
+        .map_err(|e| format!("failed to parse stack-docs YAML: {e}"))?;
+
+    let changeset = read_changeset(dir).map_err(|e| format!("read changeset: {e}"))?;
+    let stack = changeset
+        .stack
+        .ok_or("write-stack-docs requires a planned stack; none is persisted")?;
+
+    validate_stack_docs(&stack, &docs)?;
+    write_stack_docs(dir, &docs)?;
+
+    set_changeset_state(dir, WorkflowState::new(super::STATE_STACK_DOCS_WRITTEN));
     Ok(())
 }
 
@@ -288,6 +405,7 @@ impl RunnerHooks for PrStackHooks {
         match task_id {
             "analyze-stack" => before_analyze_stack(context, session_dir.as_deref()),
             "write-stack-plan" => before_write_stack_plan(context, session_dir.as_deref()),
+            "write-stack-docs" => before_write_stack_docs(context, session_dir.as_deref()),
             "orchestrate" => before_orchestrate(context, session_dir.as_deref()),
             _ => {}
         }
@@ -314,6 +432,11 @@ impl RunnerHooks for PrStackHooks {
                     .ok_or("write-stack-plan after_task requires session_dir in context")?;
                 after_write_stack_plan(&dir, context)?;
             }
+            "write-stack-docs" => {
+                let dir = session_dir
+                    .ok_or("write-stack-docs after_task requires session_dir in context")?;
+                after_write_stack_docs(&dir, context)?;
+            }
             _ => {}
         }
 
@@ -327,6 +450,79 @@ impl RunnerHooks for PrStackHooks {
             return;
         };
         set_changeset_state(&dir, WorkflowState::new("Failed"));
+    }
+}
+
+#[cfg(test)]
+mod write_stack_docs_prompt_tests {
+    use super::*;
+
+    /// The rules have to reach the agent through the seeded `system_prompt`, not merely exist as a
+    /// string constant — so this drives the real `before_task` seam, as the boundary-contract tests do.
+    fn seeded_system_prompt() -> String {
+        let ctx = Context::new();
+        before_write_stack_docs(&ctx, None);
+        ctx.get_sync::<String>("system_prompt")
+            .expect("the docs hook must seed a system_prompt")
+    }
+
+    /// The Dependencies section is the whole anti-duplication mechanism: a child that is told only
+    /// *that* it depends on n1 still has no idea which surfaces are n1's to create.
+    #[test]
+    fn the_prompt_requires_each_dependency_to_name_what_that_pr_delivers() {
+        // Given / When
+        let prompt = seeded_system_prompt();
+        let lower = prompt.to_lowercase();
+
+        // Then
+        assert!(
+            lower.contains("## dependencies"),
+            "the prompt must name the Dependencies section; got:\n{prompt}"
+        );
+        assert!(
+            lower.contains("deliver"),
+            "the prompt must require each dependency to state what that PR delivers, not merely \
+             that a dependency exists; got:\n{prompt}"
+        );
+        assert!(
+            lower.contains("not enough"),
+            "the prompt must rule out the mechanical answer — listing the parent's id and stopping \
+             there — since that is what a dependency section degrades into; got:\n{prompt}"
+        );
+    }
+
+    /// Without an API-plus-failing-tests contract the section degrades into "ship it sooner", which
+    /// is advice rather than something a dependent can branch off.
+    #[test]
+    fn the_prompt_requires_a_draft_pr_contract_of_api_plus_failing_tests() {
+        // Given / When
+        let prompt = seeded_system_prompt();
+        let lower = prompt.to_lowercase();
+
+        // Then
+        assert!(
+            lower.contains("## draft pr contract"),
+            "the prompt must name the Draft PR contract section; got:\n{prompt}"
+        );
+        assert!(
+            lower.contains("failing test"),
+            "the contract must be the API surface plus its failing tests; got:\n{prompt}"
+        );
+    }
+
+    #[test]
+    fn the_prompt_names_every_required_section() {
+        // Given / When
+        let lower = seeded_system_prompt().to_lowercase();
+
+        // Then — a section the prompt never mentions is one the validator will refuse for a reason
+        // the agent was never told
+        for heading in crate::pr_stack::REQUIRED_CHANGESET_HEADINGS {
+            assert!(
+                lower.contains(&heading.to_lowercase()),
+                "the prompt must name the '{heading}' section the validator requires"
+            );
+        }
     }
 }
 
@@ -480,12 +676,14 @@ prs:
 
         // Then — adding exploration.md does not disturb the two pre-existing plan artifacts
         assert!(
-            dir.join(STACK_PLAN_BASENAME).is_file(),
-            "stack-plan.yaml must still be written to the session root"
+            dir.join("artifacts").join(STACK_PLAN_BASENAME).is_file(),
+            "stack-plan.yaml must be written under the artifacts root"
         );
         assert!(
-            dir.join(PR_STACK_PLAN_MD_BASENAME).is_file(),
-            "pr-stack-plan.md must still be written to the session root"
+            dir.join("artifacts")
+                .join(PR_STACK_PLAN_MD_BASENAME)
+                .is_file(),
+            "pr-stack-plan.md must be written under the artifacts root"
         );
         assert!(
             dir.join("artifacts").join("exploration.md").is_file(),

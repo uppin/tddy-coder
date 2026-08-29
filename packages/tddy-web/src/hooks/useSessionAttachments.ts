@@ -34,6 +34,7 @@ import type { HostDocumentPick } from "../components/sessions/attachments/HostDo
 import type {
   AttachmentProgress,
   AttachmentProgressByBasename,
+  InitialAttachment,
   PendingAttachment,
 } from "../components/sessions/attachments/pendingAttachment";
 import {
@@ -55,6 +56,14 @@ export interface UseSessionAttachmentsArgs {
    * does.
    */
   sessionDaemonInstanceId: string;
+  /**
+   * Rows the form opens with — the documents a caller already knows the session should carry (the
+   * PR-stack Start-session dialog pre-attaches the node's own documents this way).
+   *
+   * Read once, when the hook first mounts: they seed the operator's rows rather than owning them, so
+   * a row removed here stays removed however often the caller re-renders with the same list.
+   */
+  initialAttachments?: readonly InitialAttachment[];
 }
 
 /** Everything the form needs to render and submit its attachment rows. */
@@ -189,6 +198,7 @@ export function useSessionAttachments({
   client,
   sessionToken,
   sessionDaemonInstanceId,
+  initialAttachments = [],
 }: UseSessionAttachmentsArgs): SessionAttachments {
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
@@ -196,7 +206,9 @@ export function useSessionAttachments({
 
   // Documents to materialize into the session before its agent starts. Nothing is uploaded until
   // Create is pressed, so an abandoned form leaves no staged bytes behind.
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>(() =>
+    initialAttachments.map((attachment) => ({ ...attachment, id: randomUuid() })),
+  );
   const [pickRefusal, setPickRefusal] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, AttachmentProgress>>({});
   const [hostDocPickerOpen, setHostDocPickerOpen] = useState(false);

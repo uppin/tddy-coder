@@ -7,6 +7,12 @@
 //! `artifacts/attachments/` that [`crate::session_attachments`] stores. Attachments are
 //! recipe-independent — a session with a blank or unknown recipe still lists them.
 //!
+//! Manifest rows come from two sources, because [`SessionArtifactManifest::known_artifacts`]
+//! returns `&'static` basenames and so cannot enumerate the N per-PR documents a PR-stack
+//! orchestrator writes under `artifacts/prs/<node_id>/`. Those are discovered by scanning, exactly
+//! as attachment rows are, and are `Manifest` rather than `Attachment`: the docs pass authored
+//! them, no operator attached them (`docs/ft/coder/pr-stack-docs.md` § Listing per-PR documents).
+//!
 //! The *reader* covers manifest docs only: its allowlist is the recipe's
 //! [`SessionArtifactManifest::known_artifacts`], and nothing else under the session directory is
 //! readable through this surface (mirrors the guard shape in [`crate::session_workflow_files`]).
@@ -15,7 +21,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_rpc::Status;
-use tddy_workflow::session_artifacts_root;
+use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
+use tddy_workflow_recipes::pr_stack::{
+    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME,
+};
 use tddy_workflow_recipes::{workflow_recipe_and_manifest_from_cli_name, SessionArtifactManifest};
 
 use crate::session_attachments::list_session_attachments;
@@ -32,13 +41,19 @@ pub const ATTACHMENT_DOC_DESCRIPTION: &str = "Attached document";
 
 /// One planning document for a session: its `key` (manifest key for a manifest doc, basename for an
 /// attachment), on-disk `basename`, absolute `path` (not canonicalized — a manifest doc's file may
-/// not exist), a human `description`, whether it currently `exists` on disk, its `kind`, and its
-/// on-disk size in bytes (`0` when it does not exist).
+/// not exist), its `relative_path` under the artifacts root, a human `description`, whether it
+/// currently `exists` on disk, its `kind`, and its on-disk size in bytes (`0` when it does not
+/// exist).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextDoc {
     pub key: String,
     pub basename: String,
     pub path: PathBuf,
+    /// Address under the artifacts root, POSIX-separated: a stack-level artifact's own basename,
+    /// `attachments/<basename>` for an attachment, `prs/<node_id>/<basename>` for a per-PR
+    /// document. This is what a `HostDocumentRef` under `SESSION_ARTIFACT` carries, and it is the
+    /// server's to state — a client cannot tell a nested document from a flat one.
+    pub relative_path: String,
     pub description: String,
     pub exists: bool,
     pub kind: ContextDocKind,
@@ -63,9 +78,66 @@ fn manifest_for_recipe(recipe_name: &str) -> Option<Arc<dyn SessionArtifactManif
     }
 }
 
+/// The per-PR documents a docs pass wrote under `artifacts/prs/<node_id>/`, in node-id order and,
+/// within a node, its PRD before its changeset.
+///
+/// Discovered by scanning because [`SessionArtifactManifest::known_artifacts`] returns `&'static`
+/// basenames and a stack has N nodes. Only the two authored basenames are surfaced: a node
+/// directory is somewhere an agent can write, so listing whatever turns up there would let an
+/// editor backup or a scratch note present itself as a recipe-authored document.
+fn per_pr_context_docs(artifacts_root: &Path) -> Vec<ContextDoc> {
+    let Ok(entries) = std::fs::read_dir(artifacts_root.join(NODE_DOCS_SUBDIR)) else {
+        // No docs pass has run (or this recipe writes no per-PR documents at all).
+        return Vec::new();
+    };
+    let mut node_ids: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    node_ids.sort();
+
+    let mut docs: Vec<ContextDoc> = Vec::new();
+    for node_id in node_ids {
+        let authored = [
+            (
+                NODE_PRD_BASENAME,
+                format!("PR {node_id}: what this PR delivers"),
+            ),
+            (
+                NODE_CHANGESET_BASENAME,
+                format!(
+                    "PR {node_id}: responsibility, boundaries, dependencies and the draft-PR contract"
+                ),
+            ),
+        ];
+        for (basename, description) in authored {
+            let relative_path = format!("{NODE_DOCS_SUBDIR}/{node_id}/{basename}");
+            let path = artifacts_root.join(&relative_path);
+            let Some(file_metadata) = std::fs::metadata(&path).ok().filter(|m| m.is_file()) else {
+                continue;
+            };
+            docs.push(ContextDoc {
+                // Keyed by path: a stack has one `PRD.md` per node, so the basename alone would
+                // name several rows.
+                key: relative_path.clone(),
+                basename: basename.to_string(),
+                path,
+                relative_path,
+                description,
+                exists: true,
+                kind: ContextDocKind::Manifest,
+                size_bytes: file_metadata.len(),
+            });
+        }
+    }
+    docs
+}
+
 /// Enumerate a session's context docs: the recipe manifest's artifacts (in manifest order, each
 /// resolved to an absolute `artifacts/` path with its on-disk existence, size and human
-/// description), followed by the session's attachments in basename order.
+/// description), then the per-PR documents under `artifacts/prs/`, then the session's attachments
+/// in basename order.
 ///
 /// The manifest half is empty for a blank or unknown recipe (manifest docs are surfaced only when
 /// the recipe is known); attachments are listed either way.
@@ -84,12 +156,18 @@ pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<Co
                 key: (*key).to_string(),
                 basename: (*basename).to_string(),
                 path,
+                // A stack-level artifact sits directly under the artifacts root.
+                relative_path: (*basename).to_string(),
                 description: descriptions.get(key).copied().unwrap_or("").to_string(),
                 exists: file_metadata.is_some(),
                 kind: ContextDocKind::Manifest,
                 size_bytes: file_metadata.map_or(0, |m| m.len()),
             }
         }));
+
+        // Not gated on the recipe name: a recipe that authors no per-PR documents has no `prs/`
+        // directory, so the scan finds nothing rather than needing to be told not to look.
+        docs.extend(per_pr_context_docs(&artifacts_root));
     }
 
     let manifest_doc_count = docs.len();
@@ -99,6 +177,7 @@ pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<Co
             .into_iter()
             .map(|file| ContextDoc {
                 key: file.basename.clone(),
+                relative_path: format!("{SESSION_ATTACHMENTS_SUBDIR}/{}", file.basename),
                 basename: file.basename,
                 path: file.path,
                 description: ATTACHMENT_DOC_DESCRIPTION.to_string(),

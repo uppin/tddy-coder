@@ -297,6 +297,21 @@ counts as *ready* deliberately — a restored roster has nothing to say about an
 nonetheless promptable — but it must **not** count as *idle*. A wait treating "nothing to say" as
 "the turn finished" would report a turn complete that may still be running.
 
+### `stack-progress.json` is documented as a host guarantee but nothing writes it (source: pr-stack-docs changeset, 2026-08-29)
+`docs/ft/coder/pr-stacking.md` § "Progress tracking contract" states each child session is obliged to
+maintain `artifacts/stack-progress.json`, written by a shared child hook's `after_task` — "a host
+guarantee, not an agent promise". No production code writes that file; the only repo-wide match is a
+scratch-directory label in `packages/tddy-workflow-recipes/tests/stack_progress_contract_acceptance.rs:16`.
+The orchestrator in fact syncs through `sync_stack_node_from_child`, reading the child's
+`changeset.yaml` for `state.current` and `workflow.github_pr_status`. Either implement the file or
+correct the document — a reader currently believes a recipe-agnostic progress signal exists.
+
+### `GrillMeRecipe` ships blank context-doc descriptions (source: pr-stack-docs changeset, 2026-08-29)
+`GrillMeRecipe` does not override `SessionArtifactManifest::artifact_doc_descriptions()`, so its two
+context docs (`grill-me-brief.md`, `exploration.md`) reach the web with an empty `description`.
+`PrStackRecipe` supplies a one-liner per key (`pr_stack/mod.rs:342-362`) and is the model to follow.
+Cheap; affects any client rendering a doc list.
+
 
 ### The action tools are advertised where nothing implements them (source: seeded-agents-on-any-placement changeset, 2026-08-23)
 `tddy-tools` merges `action_tool_router()` — `request_action`, `list_actions`, `invoke_action` — into

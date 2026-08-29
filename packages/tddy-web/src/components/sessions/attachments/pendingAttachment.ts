@@ -41,6 +41,13 @@ export interface PendingAttachment {
   source: PendingAttachmentSource;
 }
 
+/**
+ * An attach row a caller opens the form with — a {@link PendingAttachment} without the row identity,
+ * which the form assigns. Pre-populated rows are a *default*, not an invariant: they render, rename
+ * and remove like any other row.
+ */
+export type InitialAttachment = Omit<PendingAttachment, "id">;
+
 /** How far one attachment has got, and which half of the flow it is in. */
 export interface AttachmentProgress {
   /** `0`–`100`, rounded. Zero while a byte count is not yet known. */
