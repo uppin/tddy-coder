@@ -610,6 +610,7 @@ subagent_new_session { agent: "explorer@ws-01" }   → { sessionId }
 subagent_prompt      { sessionId, prompt: [...] }  → { stopReason, content }
 subagent_cancel      { sessionId }
 subagent_status      { }                           → { sessionId, appliedRev, agents:[…] }
+subagent_status      { agent, waitFor: "ready" }   → …the same, once it can be prompted
 ```
 
 `tddy-tools` resolves `agent` against its **live roster**, not `TDDY_SUBAGENT`:
@@ -644,6 +645,40 @@ arrived, which is a different state from a daemon that published an empty roster
 A jail-run conversation also **reports itself** through `ReportAgentConversationState` at open,
 prompt, turn end and cancel (§ What an agent is doing), so the row this tool reads is populated for
 a seeded agent the daemon never opened.
+
+#### Waiting, rather than polling
+
+Reading the roster answers "can this agent be prompted?" at one instant. The main agent's actual
+question is "tell me when it can" — an attach returns before the agent is usable, and a prompt sent
+while its checkout is provisioning is refused naming the clone state (AC33). Polling costs a whole
+turn per look, which is the most expensive way to wait that exists.
+
+`subagent_status { agent, waitFor: "ready", timeoutMs }` parks until the named agent stops being
+`connecting`, then returns **the same report a plain read returns**, plus `timedOut`. `agent` is the
+wait's target, not a filter: the report still carries every row, so nothing about the plain read
+changes when a wait is asked for.
+
+- **`waitFor` requires `agent`.** "Ready" across an unbounded roster is neither "all of them" nor
+  "any of them" in a way the caller could have meant, and guessing either would make the answer
+  depend on attach order, which the main agent cannot see.
+- **`error` settles the wait.** Promptable is `status ∉ { connecting, error }`, but only one of the
+  two is worth waiting through: a failed checkout is not something waiting fixes, and parking to the
+  deadline would report the same failure later and call it a timeout.
+- **`unknown` settles it too.** It is what a restarted daemon reports for an agent whose checkout is
+  on disk and perfectly promptable, so treating it as not-ready would park every wait on such a
+  session until its deadline.
+- **A detach settles it.** What the wait is waiting for cannot happen once the roster stops carrying
+  the row, and the report says so by not listing it — better than an error, which would discard
+  every other row to report one.
+- **A deadline is always in force.** `timeoutMs` defaults to 30s and is capped at 120s; one tool
+  call holding the main agent for ten minutes is worse than one saying "still connecting". Expiry
+  returns the current rows with `timedOut: true` rather than an error, because the last known status
+  is the actionable half of the answer.
+
+The wait wakes on the roster's **snapshot generation**, not on `rev`. A status change republishes at
+the revision already in force — `rev` moves on attach and detach, not on a badge — so a wait
+watching revisions alone would park until its deadline on precisely the transition it exists to
+catch.
 
 ### The roster stream
 
@@ -867,6 +902,25 @@ peer-session section, which is about child sessions and is untouched.
     no session is created.
 60. Session start never blocks on the owning daemon's model; a prompt to a seeded agent whose clone
     is still provisioning is refused naming the clone state (AC33).
+
+### Waiting for an agent to become promptable
+
+61. `subagent_status { agent, waitFor: "ready" }` returns as soon as a later frame reports the agent
+    out of `connecting`, without waiting out the deadline.
+62. It returns when that frame arrives at the revision **already applied**, which is how a status
+    change is published — a wait driven by `rev` alone would miss every one of them.
+63. An agent that is already promptable returns immediately, `unknown` included.
+64. An agent whose clone failed settles the wait and is reported `error`; waiting does not fix a
+    failed checkout, and running to the deadline would report it as a timeout instead.
+65. An agent detached while the wait is parked settles it, and the report simply no longer lists
+    that agent — every other row survives.
+66. Reaching the deadline returns the current rows with `timedOut: true`, never an error.
+67. No wait parks longer than 120s however large `timeoutMs` is.
+68. `waitFor` without `agent` is refused naming the field; `waitFor` with an unrecognised condition
+    is refused naming what it takes; a `timeoutMs` that is not a whole number is refused rather than
+    silently replaced by the default.
+69. A read that asked for no wait carries no `timedOut` at all, and naming an `agent` without
+    `waitFor` still reports every attached agent.
 
 ## Design decisions
 

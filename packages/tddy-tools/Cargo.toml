@@ -86,3 +86,7 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-core = { path = "../tddy-core" }
 # subagent_mcp_acceptance.rs: mocks the FastContext /v1/chat/completions endpoint.
 wiremock = "0.6"
+# subagent_status_wait_acceptance.rs: `#[tokio::test(start_paused = true)]`, so a wait's deadline
+# and the frame that beats it are ordered by virtual time rather than by a real sleep whose length
+# the test would have to guess.
+tokio = { version = "1", features = ["full", "test-util"] }
