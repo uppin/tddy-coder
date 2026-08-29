@@ -107,6 +107,22 @@ not how it is later partitioned.)
 A call that declared nothing gets an **empty** delta, not its neighbours' changes. Falling back to
 the whole tick would credit a call with another's work and apply the same change twice.
 
+### A tick attributes only the calls its measurement could have seen
+
+A call is stamped with the seq of a delta, and that delta has to be able to hold the call's change.
+So a tick **cuts the activity log before it measures**, and attributes only the rows in that cut:
+a tool writes its file and *then* records the completed call, so a row that already existed when the
+measurement was taken describes a write the measurement includes. Rows appended after the cut wait
+for the next tick, whose measurement is later than the write they describe.
+
+Reading the log *after* the measurement instead — with a git `write-tree`, a `diff` and a metadata
+write in between — attributed calls to a delta cut before their writes existed, and their
+`DELTA_SCOPE_CALL` patch was then empty for good, the bytes reaching clients only as residual.
+
+A tick boundary falling *between* a write and the record that describes it still mis-attributes that
+one call: the write is measured by tick N and the row is cut by tick N+1, whose diff no longer names
+the path. That window is the microseconds between a tool's write and its log append.
+
 ### Reconciling is a git fetch, not a patch
 
 The mirror is a clone of the same repository, so recovering does not need a whole-worktree diff —

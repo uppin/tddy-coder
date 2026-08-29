@@ -2,6 +2,12 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — A tick attributes only the calls its measurement could have seen
+
+- **A session room's poll tick now cuts the activity log before it measures the checkout.** Reading it afterwards admitted rows the measurement could not have seen: a tool writes its file and then records the completed call, so a call appended during the measure-and-announce span was stamped with the seq of a delta cut before its write existed.
+- **The effect was an empty `DELTA_SCOPE_CALL` patch, permanently** — the bytes surfaced in the tick's residual instead, so nothing was lost on the wire, but a client that trusts a call's own delta never saw that edit (AC6). It showed up as an intermittent `git apply` failure in `session_room_livekit_acceptance`, because `git apply` answers an empty patch with `No valid patches in input`.
+- **Rows appended after the cut wait for the next tick**, whose measurement is later than the write they describe. A tick boundary falling *between* a write and its record still mis-attributes that one call — microseconds against a 2 s poll, where the closed window was a large fraction of every interval; see [TODO](../../dev/TODO.md). Feature: [Session worktree sync](session-worktree-sync.md).
+
 ## 2026-08-29 — A specialized agent can be seeded on any placement, and the index is built where the worktree is
 
 - **`specialized_agents` is admissible on every codebase placement.** Naming an agent another daemon owns was refused on *every* start (`remote_agent_at_start_unsupported`), and naming *any* agent was refused on a split one — both on the premise that a peer is admitted to the session's room only once the spawn opens it. Claiming a clone opens that room itself, so the premise was false. A seed is now the same operation an attach is, performed before the spawn: each reference resolves from the daemon that owns it, an agent co-located with the authoritative worktree reads it directly, and an agent anywhere else gets the clone an attach would have given it. Where an agent runs decides **how the session is split across hosts**, never whether it may be selected. See [session-agent-roster.md § Seeding at start](session-agent-roster.md).

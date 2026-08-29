@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-29 — Mobile touch scrolling in a full-screen TUI
+
+- **A one-finger drag in a full-screen TUI now scrolls the TUI.** In the Claude CLI's terminal (alternate screen + mouse tracking) a drag used to scroll the live pane's scrollback, which is empty by design, so the gesture did nothing and the lazy-history double buffer was the only way back through the output.
+- **The gesture is routed the same three ways the wheel is on desktop**, decided once at `touchstart`, one notch per line of finger travel: a mouse-tracking TUI is sent an **SGR wheel report** (button 64 up / 65 down) at the touch point; the alternate screen without tracking — a pager such as `less` — is sent the **arrow key** ghostty-web emulates the wheel with; the **normal screen** scrolls the emulator's own scrollback, unchanged.
+- **Neither TUI route engages the history double buffer**, so a full-screen TUI on mobile behaves as it does on desktop. See [Web terminal § Mobile UX](web-terminal.md) and [Terminal replay — lazy scroll](terminal-replay-lazy-scroll.md).
+
 ## 2026-08-19 — Session agent catalog across hosts
 
 - **The New-session Agent dropdown now lists the agents of every connected host**, each labelled with the host that offers it — an assistant created on one machine is selectable from a browser pointed at another, which it previously was not. See [session-agent-catalog-fan-out.md](session-agent-catalog-fan-out.md).
