@@ -126,19 +126,15 @@ export function isSessionsNewPath(pathname: string): boolean {
   return pathname === SESSIONS_NEW_ROUTE;
 }
 
-/** Trailing segment marking the peer-spawn ("Add agent") pane for a session. */
-const ADD_AGENT_SEGMENT = "add-agent";
-
 /**
- * Returns true for `/sessions` (the drawer root), `/sessions/:id` (deep links), `/sessions/new`
- * and `/sessions/:id/add-agent` — every path the sessions drawer screen owns.
+ * Returns true for `/sessions` (the drawer root), `/sessions/:id` (deep links) and `/sessions/new` —
+ * every path the sessions drawer screen owns.
  * Does NOT match `/sessions-extra` or other paths that merely start with `/sessions`.
  */
 export function isSessionsDrawerPath(pathname: string): boolean {
   return (
     pathname === SESSIONS_DRAWER_ROUTE ||
-    singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
-    rawAddAgentSegment(pathname) !== null
+    singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null
   );
 }
 
@@ -147,42 +143,15 @@ export function sessionsDrawerPathForSession(sessionId: string): string {
   return `${SESSIONS_DRAWER_ROUTE}/${encodeURIComponent(sessionId)}`;
 }
 
-/** Builds the `/sessions/:id/add-agent` peer-spawn path for the given session id. */
-export function sessionsDrawerAddAgentPath(sessionId: string): string {
-  return `${sessionsDrawerPathForSession(sessionId)}/${ADD_AGENT_SEGMENT}`;
-}
-
-/** The still-encoded session-id segment of a `/sessions/:id/add-agent` path, or `null`. */
-function rawAddAgentSegment(pathname: string): string | null {
-  const prefix = `${SESSIONS_DRAWER_ROUTE}/`;
-  const suffix = `/${ADD_AGENT_SEGMENT}`;
-  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
-    return null;
-  }
-  const segment = pathname.slice(prefix.length, pathname.length - suffix.length);
-  return segment === "" || segment.includes("/") ? null : segment;
-}
-
 /**
- * Extracts the session id from a `/sessions/:id/add-agent` pathname.
- * Returns `null` for any path that is not the peer-spawn pane.
- */
-export function parseSessionsDrawerAddAgentSessionId(pathname: string): string | null {
-  return decodeSegment(rawAddAgentSegment(pathname));
-}
-
-/**
- * Extracts the selected session id from `/sessions/:id` or `/sessions/:id/add-agent` — the
- * add-agent pane is a mode *of* a selected session, so it resolves to the same id.
+ * Extracts the selected session id from `/sessions/:id`.
  * Returns `null` for `/sessions`, the reserved `/sessions/new`, and non-matching paths.
  */
 export function parseSessionsDrawerSessionId(pathname: string): string | null {
   if (isSessionsNewPath(pathname)) {
     return null;
   }
-  return decodeSegment(
-    singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) ?? rawAddAgentSegment(pathname),
-  );
+  return decodeSegment(singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE));
 }
 
 /**

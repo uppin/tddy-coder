@@ -73,7 +73,7 @@ the list loads) shows a "session not found" state with a Home link
 ## Routing (updated 2026-08-01)
 
 The hash switch described here now covers only the **screen**. Every navigable selection *inside* a
-screen — the selected session and task, the create-session and Add-agent panes, the inspector's
+screen — the selected session and task, the create-session pane, the inspector's
 tab and open/expanded state, the Code pane, the task output channel, the worktrees project filter,
 the RPC-playground selection, and **the selected host** — is likewise carried in the URL, and the
 URL is the source of truth for all of it (Back, Forward, an edited address bar and a pasted link all

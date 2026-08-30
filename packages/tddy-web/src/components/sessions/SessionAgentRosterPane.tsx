@@ -7,10 +7,10 @@ import {
   type SessionAgentEntry,
 } from "../../gen/connection_pb";
 import { safeTestIdPart } from "../../lib/testId";
-import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { Button } from "../ui/button";
-import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
+import { AgentPicker } from "./AgentPicker";
+import { type AvailableAgent } from "./useAvailableAgents";
 import { useSessionAgentRoster } from "./useSessionAgentRoster";
 
 /**
@@ -47,8 +47,8 @@ export interface SessionAgentRosterPaneProps {
 // ---------------------------------------------------------------------------
 
 const rowTestId = (agentId: string) => `agent-roster-row-${safeTestIdPart(agentId)}`;
-const pickerOptionTestId = (agentId: string) =>
-  `agent-roster-picker-option-${safeTestIdPart(agentId)}`;
+/** The prefix every control of this pane's picker is named after — see {@link AgentPicker}. */
+const PICKER_TEST_ID_PREFIX = "agent-roster-picker";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,10 +173,6 @@ export function SessionAgentRosterPane({
   // every other session-scoped call in the inspector is routed (see `ExecuteTool`'s
   // `daemon_instance_id`) — the roster is served by the daemon that owns the session.
   const client = useHttpClient(ConnectionService);
-  // Which host the pane's own client reaches: the origin, i.e. the daemon that served this bundle.
-  // Not the same idea as `selectedInstanceId`, which an operator can point at a peer host without
-  // changing where this HTTP transport lands.
-  const { servingInstanceId } = useSelectedDaemon();
   const { agents, hasSnapshot, error } = useSessionAgentRoster({
     client,
     sessionToken,
@@ -184,14 +180,6 @@ export function SessionAgentRosterPane({
     daemonInstanceId,
     enabled: daemonConnected,
   });
-  // The catalog is a fan-out, and its home is the host behind the client it is handed — not the host
-  // that owns the session. `ListSubagents` carries no routing field and a daemon never forwards it,
-  // so the fan-out reads its home host through `client` and addresses every *other* common-room
-  // daemon over LiveKit RPC. Naming the facilitating daemon here would invert both halves of that
-  // for a split session — the codebase host asked over an HTTP route that does not reach it, the
-  // connected host addressed as a peer — which is why such a session showed an empty catalog.
-  const available = useAvailableAgents(client, servingInstanceId ?? "");
-
   // Ticked so a "4m ago" becomes "5m ago" without a roster frame. A minute is the resolution the
   // text itself has past the first minute; anything faster would re-render the pane for a string
   // that cannot change.
@@ -202,18 +190,10 @@ export function SessionAgentRosterPane({
   }, []);
 
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickedAgent, setPickedAgent] = useState<AvailableAgent | null>(null);
-  const [attachError, setAttachError] = useState<string | null>(null);
   const [pendingDetach, setPendingDetach] = useState<SessionAgentEntry | null>(null);
   const [detachError, setDetachError] = useState<string | null>(null);
 
-  const closePicker = () => {
-    setPickerOpen(false);
-    setPickedAgent(null);
-    setAttachError(null);
-  };
-
-  const attach = async (agent: AvailableAgent) => {
+  const attach = async (agent: AvailableAgent): Promise<string | null> => {
     try {
       await client.attachSessionAgent({
         sessionToken,
@@ -222,12 +202,11 @@ export function SessionAgentRosterPane({
         agentId: agent.agentId,
       });
     } catch (err) {
-      setAttachError(ConnectError.from(err).rawMessage);
-      return;
+      return ConnectError.from(err).rawMessage;
     }
     // The roster itself arrives on the stream, so nothing is written here — the pane shows what the
     // daemon says the roster is, not what this browser asked for.
-    closePicker();
+    return null;
   };
 
   const detach = async (entry: SessionAgentEntry) => {
@@ -402,89 +381,12 @@ export function SessionAgentRosterPane({
       )}
 
       {pickerOpen && (
-        <div
-          data-testid="agent-roster-picker"
-          className="flex flex-col gap-2 rounded-md border border-border bg-background p-2"
-        >
-          {/* A host that could not answer costs its own row and nothing else — the other hosts'
-              agents stay on offer. */}
-          {available.failures.map((failure) => (
-            <p
-              key={failure.daemonInstanceId}
-              data-testid={`agent-roster-picker-host-error-${safeTestIdPart(failure.daemonInstanceId)}`}
-              className="text-destructive"
-            >
-              {`${failure.daemonInstanceId}: ${failure.message}`}
-            </p>
-          ))}
-
-          {available.agents.length === 0 && available.failures.length === 0 ? (
-            <p className="text-muted-foreground">No agents on offer.</p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {available.agents.map((agent) => (
-                <li key={agent.agentId}>
-                  <button
-                    type="button"
-                    data-testid={pickerOptionTestId(agent.agentId)}
-                    aria-pressed={pickedAgent?.agentId === agent.agentId}
-                    onClick={() => {
-                      setPickedAgent(agent);
-                      setAttachError(null);
-                    }}
-                    className={`flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1 text-left ${
-                      pickedAgent?.agentId === agent.agentId
-                        ? "border-foreground"
-                        : "border-transparent hover:border-border"
-                    }`}
-                  >
-                    <span className="truncate">{agent.label || agent.name}</span>
-                    <span
-                      data-testid={`${pickerOptionTestId(agent.agentId)}-host`}
-                      className="text-muted-foreground"
-                    >
-                      {agent.daemonInstanceId}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* The cost of the attach, stated before it is made: every tool named here stops being
-              callable by the main agent for as long as this agent stays attached. */}
-          {pickedAgent !== null && (
-            <>
-              <p
-                data-testid="agent-roster-picker-withdrawal-warning"
-                className="text-muted-foreground"
-              >
-                {pickedAgent.replaces.length === 0
-                  ? `${pickedAgent.agentId} takes no tools away from the main agent.`
-                  : `The main agent loses ${pickedAgent.replaces.join(", ")} while ${pickedAgent.agentId} is attached.`}
-              </p>
-              {attachError !== null && <p className="text-destructive">{attachError}</p>}
-              <div className="flex gap-2">
-                <Button
-                  data-testid="agent-roster-picker-confirm-btn"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => void attach(pickedAgent)}
-                >
-                  Attach
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={closePicker}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
+        <AgentPicker
+          testIdPrefix={PICKER_TEST_ID_PREFIX}
+          errorTestId="agent-roster-attach-error"
+          onAttach={attach}
+          onClose={() => setPickerOpen(false)}
+        />
       )}
     </div>
   );

@@ -1,8 +1,7 @@
 /**
  * Acceptance: the new-session form's **Agent** `<select>` — the agent a tool session is started
  * *as* — lists the agents of **every** common-room daemon, names the host that offers each, and
- * sets the session's Host from the agent that was picked — except in the peer-agent spawn flow,
- * where the host is settled before the form opens and only that host's agents may be offered.
+ * sets the session's Host from the agent that was picked.
  *
  * Feature: docs/ft/web/session-agent-catalog-fan-out.md (AC1–AC12)
  *
@@ -117,13 +116,13 @@ function mountForm(
 }
 
 /**
- * Mount the form as the **peer-agent spawn** flow: a second agent joining an existing session's
- * worktree on `orchestratorHost`. The pane's own `client` still addresses host A — the app-level
- * selected daemon — but the session being joined decides the host, so that is the host whose agents
- * the form may offer.
+ * Mount the form already pointed at `sessionHost` — a host the caller settled before the form
+ * opened, handed in as `initialValues.daemonInstanceId`. The pane's own `client` still addresses
+ * host A, the app-level selected daemon, so which host's agent the form opens on is proof the
+ * selection follows the session's host rather than the transport's.
  */
-function mountPeerForm(
-  orchestratorHost: DaemonHost,
+function mountFormForHost(
+  sessionHost: DaemonHost,
   hostAAgents: readonly AgentRow[],
   hostB: InMemoryRpcBackend,
 ): InMemoryRpcBackend {
@@ -135,12 +134,10 @@ function mountPeerForm(
         sessionToken="tok"
         onCancel={cy.stub()}
         onCreated={cy.stub()}
-        peerMode
         initialValues={{
           sessionType: "tool",
           projectId: "proj-1",
-          daemonInstanceId: orchestratorHost.instanceId,
-          repoPath: "/repo/.worktrees/orchestrator",
+          daemonInstanceId: sessionHost.instanceId,
         }}
       />,
       [HOST_A, HOST_B],
@@ -310,21 +307,21 @@ describe("CreateSession Agent select across hosts", () => {
   });
 
   // -------------------------------------------------------------------------
-  // AC12 — peer mode: the host is decided before the form opens
+  // AC8 — a host settled before the form opened
   // -------------------------------------------------------------------------
 
-  it("offers only the agents of the host the peer will run on", () => {
-    // Given — a peer joining a session on host B, while the form itself addresses host A
-    mountPeerForm(HOST_B, [CLAUDE], aHostOffering([REVIEWER]));
+  it("opens on the agents of the host it was pointed at rather than the one it talks to", () => {
+    // Given — a form pointed at host B while its own client addresses host A
+    mountFormForHost(HOST_B, [CLAUDE], aHostOffering([REVIEWER]));
     page.agentOption(REVIEWER_ON_B).should("exist");
 
-    // Then — host A's agent is not on offer: host B could not resolve it, and the peer runs there
-    page.agentOptionValues().should("deep.equal", [REVIEWER_ON_B]);
+    // Then — the session's host decides the agent, so host B's is the opening selection
+    page.selectedAgentValue().should("equal", REVIEWER_ON_B);
   });
 
-  it("starts a peer as an agent the host it runs on offers", () => {
+  it("starts the session as an agent the host it was pointed at offers", () => {
     // Given
-    const hostA = mountPeerForm(HOST_B, [CLAUDE], aHostOffering([REVIEWER]));
+    const hostA = mountFormForHost(HOST_B, [CLAUDE], aHostOffering([REVIEWER]));
     page.agentOption(REVIEWER_ON_B).should("exist");
 
     // When
@@ -334,14 +331,5 @@ describe("CreateSession Agent select across hosts", () => {
     cy.wrap(null).should(() => {
       expect(startedSessionAgents(hostA)).to.deep.equal([["reviewer", HOST_B.instanceId]]);
     });
-  });
-
-  it("stays silent about a host the peer will not run on failing to answer", () => {
-    // Given — the peer runs on host A; host B cannot be listed and has no bearing on it
-    mountPeerForm(HOST_A, [CLAUDE], aHostThatCannotBeReached("server-2 is not reachable"));
-    page.agentOption(CLAUDE_ON_A).should("exist");
-
-    // Then
-    page.agentHostError(HOST_B.instanceId, { timeout: 0 }).should("not.exist");
   });
 });

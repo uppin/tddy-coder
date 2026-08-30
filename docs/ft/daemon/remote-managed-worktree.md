@@ -463,10 +463,6 @@ block, sourced from the same shared common-room daemon list as the existing Host
   matching the existing convention where `specializedAgents` and `semanticIndex` are sent empty
   unless the block is open.
 
-- Not offered in **peer mode** either. That flow joins an orchestrator's existing worktree and is
-  given it as `repoPath`, so the codebase's location is already settled by the session being
-  joined — the pane hides its Host and Project pickers for the same reason.
-
 Note for implementation: the managed-codebase block exists **twice** in `CreateSessionPane` — once
 in the cursor-cli branch and once in the claude-cli branch — sharing the same state and the same
 `data-testid`s, so only one is mounted at a time. The new selector goes in the **claude-cli copy

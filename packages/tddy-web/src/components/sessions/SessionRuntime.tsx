@@ -7,6 +7,8 @@ import type { TokenService } from "../../gen/token_pb";
 import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
+import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
+import type { AgentConversation } from "./agentConversationTabs";
 import { AGENT_TERMINAL_ID, useSessionTerminals } from "./useSessionTerminals";
 import { useChildSessions } from "./useChildSessions";
 import { useSessionAttachment } from "./useSessionAttachment";
@@ -22,6 +24,7 @@ import {
   isTargetInActiveFullscreen,
   requestFullscreenForConnectedTerminal,
 } from "../../lib/browserFullscreen";
+import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
 
 type ConnectionClient = Client<typeof ConnectionService>;
@@ -63,6 +66,15 @@ export interface SessionRuntimeProps {
   /** The drawer's full session list — used to discover this session's spawned child conversations
    *  (`orchestratorSessionId === this session`) and render them as tabs. */
   sessions?: ReadonlyArray<SessionEntry>;
+  /** Open conversations with agents attached to this session, one tab and one pane each. Held by the
+   *  screen rather than here so switching sessions (which backgrounds this runtime) cannot end one. */
+  agentConversations?: readonly AgentConversation[];
+  /** The focused conversation's id, or `null` when a terminal or child tab holds the pane. */
+  activeAgentConversationId?: string | null;
+  /** Focus a conversation, or `null` to hand the pane back to the terminal/child tabs. */
+  onSelectAgentConversation?: (conversationId: string | null) => void;
+  /** Close a conversation's tab — the owner drops it, which cancels it. */
+  onCloseAgentConversation?: (conversationId: string) => void;
 }
 
 /**
@@ -101,6 +113,10 @@ export function SessionRuntime({
   liveKitFactoryIsOverridden = false,
   commonRoom = null,
   sessions = [],
+  agentConversations = [],
+  activeAgentConversationId = null,
+  onSelectAgentConversation,
+  onCloseAgentConversation,
 }: SessionRuntimeProps) {
   // The runtime's own connected Room, captured via the terminal's `onRoom`. Stored both in a ref
   // (for the lazy steal-claim client) and in state (so the memoized session-scoped terminal client
@@ -184,15 +200,20 @@ export function SessionRuntime({
   const selectTerminal = useCallback(
     (id: string) => {
       setActiveChildSessionId(null);
+      onSelectAgentConversation?.(null);
       setActive(id);
     },
-    [setActive],
+    [setActive, onSelectAgentConversation],
   );
 
-  const selectChild = useCallback((sessionId: string) => {
-    setActiveChildSessionId(sessionId);
-    setAttachedChildIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]));
-  }, []);
+  const selectChild = useCallback(
+    (sessionId: string) => {
+      onSelectAgentConversation?.(null);
+      setActiveChildSessionId(sessionId);
+      setAttachedChildIds((prev) => (prev.includes(sessionId) ? prev : [...prev, sessionId]));
+    },
+    [onSelectAgentConversation],
+  );
 
   const dropChild = useCallback((sessionId: string) => {
     setAttachedChildIds((prev) => prev.filter((id) => id !== sessionId));
@@ -242,7 +263,10 @@ export function SessionRuntime({
   // focus for a backgrounded runtime, and stays out of the way when a bash tab or child pane is up.
   // TODO: gRPC sessions (`connected-grpc`, GrpcSessionTerminal/GhosttyTerminalGrpc) don't yet plumb
   // a focus handle, so focus-on-select is LiveKit-only for now.
-  const agentPaneActive = activeChildSessionId === null && activeTerminalId === AGENT_TERMINAL_ID;
+  const agentPaneActive =
+    activeChildSessionId === null &&
+    activeAgentConversationId === null &&
+    activeTerminalId === AGENT_TERMINAL_ID;
   useEffect(() => {
     if (focused && agentPaneActive) {
       focusAgentTerminalRef.current?.();
@@ -327,12 +351,16 @@ export function SessionRuntime({
     void requestFullscreenForConnectedTerminal(target).catch(() => undefined);
   }, []);
 
-  // A terminal pane (Agent/bash) is visible only when its tab is active AND no child conversation
-  // is selected — a selected child's pane overlays the terminal stack.
+  // A terminal pane (Agent/bash) is visible only when its tab is active AND nothing else holds the
+  // pane — a selected child or agent conversation overlays the terminal stack.
   const paneClass = (terminalId: string) =>
     cn(
       "absolute inset-0 h-full w-full",
-      activeChildSessionId === null && activeTerminalId === terminalId ? "" : "hidden",
+      activeChildSessionId === null &&
+        activeAgentConversationId === null &&
+        activeTerminalId === terminalId
+        ? ""
+        : "hidden",
     );
 
   return (
@@ -351,14 +379,25 @@ export function SessionRuntime({
         childSessions={childSessions}
         activeChildSessionId={activeChildSessionId}
         onSelectChild={selectChild}
+        agentConversations={agentConversations}
+        activeAgentConversationId={activeAgentConversationId}
+        onSelectAgentConversation={onSelectAgentConversation}
+        onCloseAgentConversation={onCloseAgentConversation}
         fullscreenActive={fullscreenActive}
         onToggleFullscreen={toggleFullscreen}
       />
 
+      {/* The pane stack. Its `position` is stated inline as well as in the utility class because
+          every pane below is positioned against it, and the terminal panes carry their own inline
+          stacking (`terminal-live-pane` takes z-index 2) — a containing block that resolved
+          anywhere else would let a pane cover the tab strip that switches it.
+          It is also the Fullscreen API target (see `paneStackRef`), which is why it paints its own
+          background: a transparent fullscreen element shows the UA's black backdrop through it. */}
       <div
         ref={paneStackRef}
         data-testid={`sessions-terminal-pane-stack-${runtime.sessionId}`}
         className="relative min-h-0 flex-1 bg-background"
+        style={{ position: "relative" }}
       >
         {/* Agent pane — the reserved "main" terminal. LiveKit sessions render the VirtualTui
             terminal; gRPC sessions render the direct terminal stream (terminalId ""). */}
@@ -428,7 +467,9 @@ export function SessionRuntime({
             data-testid={`sessions-child-pane-${childId}`}
             className={cn(
               "absolute inset-0 h-full w-full",
-              activeChildSessionId === childId ? "" : "hidden",
+              activeAgentConversationId === null && activeChildSessionId === childId
+                ? ""
+                : "hidden",
             )}
           >
             <SessionChildRuntime
@@ -446,6 +487,37 @@ export function SessionRuntime({
               liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
               commonRoom={commonRoom}
               sessions={sessions}
+            />
+          </div>
+        ))}
+
+        {/* One mounted body per open conversation with an attached agent. Kept mounted while
+            another tab is up, so switching tabs never re-opens a conversation; only closing the tab
+            ends one. */}
+        {agentConversations.map((conversation) => (
+          <div
+            key={conversation.conversationId}
+            data-testid={`sessions-agent-pane-${safeTestIdPart(conversation.conversationId)}`}
+            className="bg-background"
+            // Stated inline, not as utility classes, because the terminal this overlays states its
+            // own stacking inline too (`terminal-live-pane` takes z-index 2 and paints over anything
+            // that only claims document order), and a conversation that ends up under a terminal
+            // still painting is one the operator cannot type into.
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 3,
+              display:
+                activeAgentConversationId === conversation.conversationId ? "block" : "none",
+            }}
+          >
+            <SessionAgentConversationPane
+              sessionId={runtime.sessionId}
+              sessionToken={sessionToken}
+              daemonInstanceId={conversation.daemonInstanceId}
+              agentId={conversation.agentId}
+              conversationId={conversation.conversationId}
+              client={client ?? undefined}
             />
           </div>
         ))}

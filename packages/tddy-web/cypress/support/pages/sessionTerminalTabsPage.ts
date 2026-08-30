@@ -12,6 +12,9 @@ import {
   sessionsTerminalPaneStack,
   sessionsChildTab,
   sessionsChildPane,
+  sessionsAgentTab,
+  sessionsAgentTabClose,
+  sessionsAgentPane,
   TEST_IDS,
 } from "../testIds";
 
@@ -69,4 +72,24 @@ export const sessionTerminalTabsPage = {
   /** The mounted runtime pane for a selected child conversation, keyed by the child's session id. */
   childPane: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsChildPane(sessionId), { timeout: 10000, ...options }),
+
+  /** A tab for an open conversation with an attached agent, keyed by the conversation id. */
+  agentConversationTab: (conversationId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsAgentTab(conversationId), { timeout: 10000, ...options }),
+
+  /** The ✕ on an agent conversation tab — closing it cancels the conversation. */
+  agentConversationTabClose: (conversationId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsAgentTabClose(conversationId), { timeout: 10000, ...options }),
+
+  /** All agent conversation tabs currently rendered — for "exactly one" / "none" assertions. The
+   *  close controls share the prefix, so they are excluded rather than counted as tabs. */
+  agentConversationTabs: (options?: Parameters<typeof cy.get>[1]) =>
+    cy.get("[data-testid^='sessions-agent-tab-']:not([data-testid$='-close'])", {
+      timeout: 10000,
+      ...options,
+    }),
+
+  /** The mounted body of a selected agent conversation, keyed by the conversation id. */
+  agentConversationPane: (conversationId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsAgentPane(conversationId), { timeout: 10000, ...options }),
 };

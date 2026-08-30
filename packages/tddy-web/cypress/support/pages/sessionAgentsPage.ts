@@ -13,10 +13,6 @@ import {
 } from "../testIds";
 
 export const sessionAgentsPage = {
-  /** The "Add agent" button in the session-detail header. */
-  addAgentBtn: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.sessionAgentsAddBtn, { timeout: 5000, ...options }),
-
   /** The "Session agents" section root. */
   section: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionAgentsSection, { timeout: 5000, ...options }),

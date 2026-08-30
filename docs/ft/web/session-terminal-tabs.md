@@ -58,6 +58,8 @@ horizontal scroller so a session with many terminals cannot push it out of reach
 **active pane** into browser full screen via the Fullscreen API — the same
 `lib/browserFullscreen.ts` helper the standalone connect screen's terminal already uses.
 
+- **The active pane** is whichever tab holds the pane — the Agent terminal, a bash terminal, a
+  spawned child conversation, or a conversation with an attached agent.
 - **What goes full screen is the pane stack**, not an individual pane
   (`data-testid="sessions-terminal-pane-stack-<sessionId>"`). Only one pane is ever visible, so the
   operator sees exactly the active terminal — and the stack's siblings, the terminal-control mutex

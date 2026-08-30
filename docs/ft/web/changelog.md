@@ -6,7 +6,7 @@ Release note history for the Web product area.
 
 ## 2026-08-30 — A session terminal can take the whole screen
 
-- **Every terminal pane in the session view now has a ⛶ full-screen control**, at the right end of the tab strip, acting on whichever pane is showing — Agent, a bash tab, or a spawned conversation.
+- **Every terminal pane in the session view now has a ⛶ full-screen control**, at the right end of the tab strip, acting on whichever pane is showing — Agent, a bash tab, a spawned conversation, or a conversation with an attached agent.
 - **What goes full screen is the pane stack, not the single pane.** Only one pane is ever visible, so the operator sees exactly the active terminal — and the "Claim terminal" mutex overlay and the LiveKit connection overlay ride along. Handing over the pane alone would have left a session whose control another screen holds looking interactive while it swallowed every keystroke.
 - **The control sits outside the tabs' horizontal scroller**, so a session with a dozen terminals cannot push it out of reach.
 - **The tab strip is left behind** — full screen is the whole viewport for one terminal — so the pane draws its own exit control while it holds fullscreen, rather than stranding the operator on <kbd>Esc</kbd>.
@@ -15,6 +15,15 @@ Release note history for the Web product area.
 - Known limitation: <kbd>Esc</kbd> exits full screen before the terminal sees it, so a full-screen `vim` cannot be left with <kbd>Esc</kbd> alone — that needs the Keyboard Lock API, which changes the exit gesture to press-and-hold.
 - See [session-terminal-tabs.md](session-terminal-tabs.md) § Full screen.
 
+## 2026-08-30 — Talk to a session's attached agent from a conversation tab
+
+- **"Add agent" in the session header attaches a specialized agent to the session you are looking at**, instead of spawning a second coding session on its worktree. The old flow cost a whole session to do what the agent roster already does properly.
+- **The attached agent gets a conversation tab** beside the Agent and bash tabs: type a prompt, watch the answer stream in. Closing the tab ends the conversation; nothing else does — selecting another session leaves it open.
+- **The picker names what the main agent loses before you confirm** — every tool the agent replaces stops being callable by the main agent while it stays attached — and offers every common-room host's agents under their qualified `name@host` ids, since two hosts routinely offer an agent of the same name.
+- **Attaching an agent that already has a tab focuses that tab** rather than opening a second, because the second attach is a no-op on the roster.
+- **An agent that answers with nothing still shows a completed turn**, so "said nothing" never looks like "nothing arrived"; a refused open, a refused attach and a failed prompt are each named where they happened.
+- **This is your conversation with the agent, not a replay of the main agent's.** A roster agent writes no transcript anywhere, so what the main agent asked it stays visible only as the roster row's status and last-activity line.
+- The `#/sessions/:id/add-agent` route is gone, along with the create-session pane's peer mode. Peer *sessions* still exist and are still listed — they now arrive only from `spawn_conversation` and the PR-stack flow.
 ## 2026-08-30 — The session drawer's dot says what the agent is doing
 
 - **Four states instead of three:** grey (gone), steady green (idle), **blinking green** (activity within 30 seconds, a fade in and out), yellow (attention required).

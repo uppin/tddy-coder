@@ -1,8 +1,12 @@
 /**
- * Acceptance tests: the session detail pane (`SessionMainPane`) gains an "Add agent" button in its
- * header and a "Session agents" section listing the selected session's peers. Switching to a peer
- * from the section fires `onSwitchPeer` with the peer's session id (the parent wires this to
- * selecting the peer in the drawer, which focuses its runtime).
+ * Acceptance tests: the session detail pane (`SessionMainPane`) carries a "Session agents" section
+ * listing the selected session's peers. Switching to a peer from the section fires `onSwitchPeer`
+ * with the peer's session id (the parent wires this to selecting the peer in the drawer, which
+ * focuses its runtime).
+ *
+ * Peers still arrive from `spawn_conversation`, so this section outlives the peer-*spawn* flow the
+ * header's "Add agent" button used to open — that button now attaches a roster agent to the current
+ * session and is covered by `SessionAgentAttachTabAcceptance.cy.tsx`.
  *
  * PRD: docs/ft/web/1-WIP/PRD-2026-07-27-session-agent.md
  */
@@ -18,7 +22,6 @@ import {
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
 import { sessionAgentsPage } from "../support/pages/sessionAgentsPage";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -113,7 +116,6 @@ function aSessionMainPane(options: MainPaneOptions = {}) {
       );
       return driver;
     },
-    addAgentBtn: () => sessionAgentsPage.addAgentBtn(),
     section: () => sessionAgentsPage.section(),
     peerRow: (sessionId: string) => sessionAgentsPage.peerRow(sessionId),
     peerSwitchBtn: (sessionId: string) => sessionAgentsPage.peerSwitchBtn(sessionId),
@@ -137,15 +139,6 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-it("renders the Add agent button in the session-detail header", () => {
-  // Given / When
-  aSessionMainPane().mount();
-
-  // Then
-  sessionAgentsPage.addAgentBtn().should("be.visible");
-  sessionsDrawerPage.detailPane().should("exist");
-});
 
 it("lists the selected session's peers in the Session agents section", () => {
   // Given / When

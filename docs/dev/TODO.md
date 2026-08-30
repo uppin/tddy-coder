@@ -255,6 +255,74 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Agent conversation tabs — four follow-ups (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- **A conversation still dies when the create-session pane opens.** `runtimeLayer` now holds one
+  stable slot across every *base view* branch, so selecting a workflow session no longer unmounts the
+  conversation bodies (and a body cancels its conversation as it unmounts). `isCreating` is the
+  remaining hole: it skips the whole session-detail block, so opening "new session" cancels every open
+  conversation while its tabs survive in state. Fixing it means hoisting the runtime layer above the
+  `PanelGroup` in `SessionMainPane`, which breaks the Code-pane split — a layout change, not a wiring
+  one, and bigger than the gap.
+- **The header's Add-agent button renders where there is no tab strip.** Any selected session with a
+  client gets it, including workflow, PR-Stack and dormant sessions. The attach succeeds, the picker
+  closes, and nothing visible happens. Hide the button where no tab strip exists, or say in the UI why
+  the agent cannot be talked to there.
+- **The conversation body's inner test ids are not keyed by conversation.**
+  `agent-conversation-input` / `-transcript` / `-error` / `-turn-<i>` are unscoped while every open
+  conversation stays mounted, so two open tabs make them ambiguous and a spec that prompts with two
+  tabs open would fail on a multi-element match. No current spec does. Key them by `conversationId`,
+  or scope the page object's helpers with `.within(pane(id))`.
+- **The per-session conversation maps are never pruned.** `agentConversations` / `activeConversations`
+  in `SessionMainPane` keep entries for sessions that have left the list. Growth is trivial, but a
+  *resumed* session keeps its `sessionId`, so its tabs come back pointing at conversations the daemon
+  dropped long ago, which then re-open under ids it has already seen.
+
+### `SessionMainPane` and `SessionRuntime` are over the file-size guideline (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- Both were over before that change (539 → 560 and 515 → 587); it added ~20 and ~70 lines and deleted
+  ~80 of peer-spawn machinery from the first. Flagged rather than acted on so the feature diff stayed
+  reviewable.
+- `SessionMainPane`: the cheapest extraction is `useSessionAgentConversations` — the two per-session
+  maps plus `attachAgent` / `focusConversation` / `closeConversation`, ~85 lines. No call site moves,
+  no test repoints (every spec drives the DOM through `testIds.ts`), and it lands the file at ~478.
+- `SessionRuntime`: `useRuntimeFocusGuard` (the `focusin` steal guard and focus-on-select effect) and
+  `useSessionRuntimeClients` (the `buildSessionClient` / lease / terminal-client memos), ~90 lines
+  together, no shared state to widen. Do **not** split `SessionChildRuntime` out: it renders
+  `SessionRuntime`, which renders it, and separating them creates an import cycle that resolves at
+  runtime but trips `import/no-cycle`.
+- `CreateSessionPane` is 1319 lines and wants the same treatment, but under a six-spec Cypress test-id
+  contract a structural move should be the only thing in its diff.
+
+### `sessionPeers.ts` and `useChildSessions.ts` now describe the same population (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- Both filter `orchestratorSessionId === current && sessionId !== current`, differing only in return
+  shape. The duplication is unchanged by that changeset — but its *justification* did not survive it.
+  "Peer agents I spawned from the header" and "child conversations a workflow spawned" used to be
+  different populations; the header no longer spawns anything, so both now name the same set, rendered
+  twice on screen (the Session agents list with a Switch button, and the child tabs).
+- Collapse to one `useChildSessions(sessionId, sessions)` returning `SessionEntry[]`, let each surface
+  project what it needs, and delete `src/utils/sessionPeers.ts`. Two call sites and folding
+  `sessionPeers.test.ts` into the other's tests.
+
+### A roster agent's own turns are unobservable from the web (source: session-agent-conversation-tab changeset, 2026-08-29)
+
+- The web can now hold *its own* conversation with an attached agent, but it still cannot replay the
+  turns the **main agent** ran against it. There is no artifact to replay: a roster agent has no
+  session directory, `StreamAcpReplay` resolves only `unified_session_dir_path(sessions_base,
+  session_id)` (`packages/tddy-daemon/src/connection_service.rs:13518`), and the only non-test caller
+  of `append_acp_frame` in the repo is the coder process
+  (`packages/tddy-coder/src/session_participant/acp_transcript.rs:42`).
+- The answer text exists only in the one-shot `mpsc` behind the `PromptAgentConversation` call that
+  asked for it (`connection_service.rs:10256`) and is discarded after framing. What reaches a third
+  party is a <=120-char `last_activity.summary` on the roster (`session_agent_status.rs:34`).
+- Fix shape, all daemon-side: append a frame per agent turn under a synthesized per-agent transcript
+  key, add an `agent_id` axis to `StreamAcpReplayRequest`
+  (`packages/tddy-service/proto/connection.proto:1535-1542`, which has no such field), and implement
+  the peer forward `stream_acp_replay` currently refuses (`connection_service.rs:13492` returns
+  `UNIMPLEMENTED`) — a remote roster agent runs on another host, so without it the transcript would
+  only ever work for local agents.
+
 ### Session notifications — three follow-ups left open (source: session-notifications-as-indicators changeset, 2026-08-29)
 
 - **The presenter's elicitation surface still bypasses the notification bus.** `ModeChanged`
