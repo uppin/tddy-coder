@@ -456,7 +456,7 @@ For **claude-cli** sessions: the daemon writes `orchestrator_session_id` into th
 > already exists**, instead of leaving the agent to plan a stack from a feature description.
 
 A **"Base the stack on"** `<select>` (`create-session-pr-stack-base-session-select`) appears when the
-session type is **tool**, the recipe is `pr-stack`, and the pane is not in peer mode. It reads the same
+session type is **tool** and the recipe is `pr-stack`. It reads the same
 `ListSessions` fetch as the [parent picker](#pr-stack-parent-picker), filtered by
 `stackBaseSessionCandidates()` in `src/utils/stackParents.ts` to the sessions that **own a branch**, are
 in the form's effective project, are on its effective host, and are not already a node of another
@@ -555,41 +555,139 @@ See [PR Stack Parent Picker](#pr-stack-parent-picker) in the Create Session sect
 
 ## Session Agents (Peer Agent Sessions)
 
-A session detail view (`SessionMainPane`) hosts **peer agent sessions** — additional coding
-backends (e.g. a Cursor session alongside the session's Claude agent) that share the current
-session's **worktree**. Each peer is a normal child session linked back to its orchestrator via
-`SessionEntry.orchestratorSessionId` (the same field the PR-stack grouping above uses); the
-operator switches between peers from the session detail view. There is **no agent-to-agent
-messaging** — agents co-exist on the same checkout and the operator coordinates them.
+A session detail view (`SessionMainPane`) lists the selected session's **peer agent sessions** —
+child sessions linked back to it by `SessionEntry.orchestratorSessionId` (the same field the
+PR-stack grouping above uses), each running its own agent backend. The operator switches between
+them from the session detail view. There is **no agent-to-agent messaging** — the operator
+coordinates them.
+
+> **Updated 2026-08-29 — two different things are called "agent" in this pane, and the header
+> button now means the second one.** A **peer** is a whole session, and it arrives from the *agent*
+> side: a managed workflow calling [`spawn_conversation`](../coder/spawn-conversation.md), or a
+> PR-stack orchestrator spawning a child for a planned PR
+> ([PR stacking](../coder/pr-stacking.md)). A **roster agent** is not a session at all — it is a
+> specialized agent attached to *this* session
+> ([session agent roster](../daemon/session-agent-roster.md)), and it never appears in the peer
+> list. The **Add agent** button used to produce the first and now produces the second: the
+> peer-spawn flow it drove, its `#/sessions/:id/add-agent` route and `CreateSessionPane`'s peer mode
+> are all gone. The two are easy to confuse, so the distinction is worth holding onto — nothing the
+> header button does adds a row to the peer list below.
 
 ### Add agent
 
 `SessionMainPane`'s header carries an **"Add agent"** button
-(`data-testid="session-agents-add-btn"`, a peer of the `Code` / `Inspector` / activity-overlay
-toggles). Clicking it opens `CreateSessionPane` in **peer mode**, pre-filled to spawn a peer that
-runs on the **same worktree** as the selected session:
+(`data-testid="session-agent-attach-btn"`, a peer of the `Code` / `Inspector` / activity-overlay
+toggles). It **attaches a roster agent to the session on screen** and opens a conversation tab with
+it — it does not create a session. The button is only rendered when the pane holds a daemon client:
+there is no attach without one, and offering a control that cannot act is worse than not offering
+it.
 
-- `stackParent = selectedSession.sessionId`
-- `projectId` / `daemonInstanceId` = the selected session's (project resolved via
-  `projectForUnscopedSession` for unscoped sessions, so the Create button enables)
-- `repoPath = selectedSession.repoPath` → sets `StartSession.repo_path`; per the daemon contract a
-  non-empty `repo_path` makes the session's worktree **be** that path — no git worktree is created
-  and no branch is checked out
-- `sessionType` / `agent` / `model` / `initialPrompt` = operator-chosen (the peer's backend is a
-  separate pick)
+The flow is picker → attach → tab:
 
-In peer mode the branch selectors (branch mode / new branch name / branch to work on / create
-remote branch), the PR-stack parent picker, the **Project** selector, and the **Host** selector are
-hidden — the peer reuses the orchestrator's worktree, project, and host, so those controls have no
-effect. Submit sends the frozen orchestrator `projectId` / `daemonInstanceId` (not live form state),
-so a peer always matches the worktree it runs on.
+1. **Pick.** Clicking the button opens `AgentPicker` (`session-agent-picker`) below the header —
+   the same component the Inspector's Agent roster pane mounts, extracted so there is exactly one
+   picker and an operator is never told two different things about the same catalog. It is a
+   **fan-out**: `ListSubagents` carries no routing field and a daemon answers only for its own defs,
+   so the picker reads its home host through the app's transport and addresses every other
+   common-room daemon over LiveKit RPC (`useAvailableAgents` over `useHostFanOut`). One host failing
+   to answer costs one error row (`session-agent-picker-host-error-<daemonInstanceId>`) and leaves
+   the other hosts' agents on offer.
+2. **See the cost, then confirm.** Each option
+   (`session-agent-picker-option-<agentId>`, with the owning host beside it under
+   `…-option-<agentId>-host`) is offered under its **qualified** `name@daemon_instance_id` — two
+   hosts routinely offer a def called `explorer`, and only the qualified id says which one. Picking
+   one states what the main agent loses (`session-agent-picker-withdrawal-warning`): every tool in
+   the def's `replaces` list stops being callable by the main agent for as long as the agent stays
+   attached. **Attach** (`session-agent-picker-confirm-btn`) confirms; **Cancel**
+   (`session-agent-picker-cancel-btn`) dismisses without attaching.
+3. **Attach.** Confirming calls **`AttachSessionAgent`** with the current session's `sessionId` and
+   its facilitating `daemonInstanceId`, and the picked agent's qualified `agentId`. The facilitating
+   daemon runs a local roster entry in-process and forwards a remote one to its owning host, so the
+   web never has to know which host answered. A refusal is rendered in the picker
+   (`session-agent-attach-error`) and the picker stays open; only a successful attach closes it. The
+   confirm control is disabled while an attach is in flight, because whether a second tab is needed
+   is decided from the state visible when the attach *resolves* — two attaches of the same agent
+   racing would both find no conversation open.
+4. **Talk.** A successful attach mints a `conversation_id`, adds a **conversation tab** to that
+   session's [tab strip](session-terminal-tabs.md) and focuses it. The id is minted in the browser
+   with `randomUuid` (`src/lib/randomId.ts`) and never `crypto.randomUUID`, which is `undefined` on
+   the plain-http LAN origins this app is routinely served from; `OpenAgentConversation` accepts a
+   caller-chosen id precisely so the caller can still name — and therefore cancel — what it opened.
 
-A peer `StartSession` is async. The capture used for the optimistic drawer overlay is held in a
-ref that survives a mid-flight drawer selection change, so the new peer always appears in the list
-immediately (via the same `onChildSessionStarted` optimistic-overlay path the PR-stack orchestrator
-uses). A peer→standalone transition (the drawer opens its own new-session flow while peer mode is
-open) remounts `CreateSessionPane` with fresh state, so a standalone submit never carries a stale
-`stackParent`.
+Attaching an agent that already has a tab open **focuses that tab** instead of opening a second one.
+A repeat `AttachSessionAgent` is a no-op on the roster, so a second tab would claim something the
+daemon did not do.
+
+#### The conversation tab
+
+| Element | Test id |
+|---|---|
+| Tab | `sessions-agent-tab-<conversationId>` |
+| Tab close control | `sessions-agent-tab-<conversationId>-close` |
+| Tab body (mounted pane) | `sessions-agent-pane-<conversationId>` |
+| Transcript | `agent-conversation-transcript` |
+| One turn | `agent-conversation-turn-<index>` |
+| Composer input | `agent-conversation-input` |
+| Send | `agent-conversation-send-btn` |
+| Failure line | `agent-conversation-error` |
+
+Tabs are keyed by the **conversation** id, not the agent id: an agent can be attached with no
+conversation open, and closing a tab cancels a conversation, not an attachment. The close control is
+a *sibling* of the tab button rather than a child — nesting it would make closing a conversation
+also a request to look at it, and would put a ✕ inside the tab's accessible name.
+
+The body is `SessionAgentConversationPane`, driven by the `useAgentConversation` hook:
+
+- **`OpenAgentConversation` is issued by the tab's body, not by the header.** One owner for the
+  conversation's whole life is what keeps exactly one open per tab — the header opening it as well
+  would open every conversation twice — and it is what makes a failed open surface in the tab that
+  holds it rather than in a picker that has already closed.
+- Sending a prompt calls **`PromptAgentConversation`**. Its `content_chunk` frames accumulate into a
+  single agent turn; the final frame's `stop_reason` closes it. A turn carries `data-role`,
+  `data-complete` and `data-stop-reason`, and the speaker's name is rendered as a sibling of the
+  turn rather than inside it, so an **empty answer reads as an empty completed turn** — the daemon
+  guarantees exactly one frame, and "said nothing" must never render as "nothing arrived".
+- The composer is closed while an answer is still arriving. A second prompt sent into a live stream
+  would strand itself mid-answer and merge two answers into one turn. The gate is in the send
+  handler, not on the button, because the button is not the only way in — Enter is.
+- A failed open and a failed prompt are each named on their own line. Neither is ever shown as an
+  empty transcript, and a failed prompt keeps the operator turn that provoked it.
+- Closing the tab unmounts the body, which calls **`CancelAgentConversation`**, and focus returns to
+  the Agent terminal tab. The cancel waits on the open it is cancelling: landing first would have
+  the daemon answer `NOT_FOUND` for a conversation it had not created yet, and the open would then
+  land behind it, leaving an agent session running with nothing left to cancel it.
+- Switching tabs or sessions tears nothing down. Every open conversation's body stays mounted and is
+  hidden by `display: none`; the visible one is positioned `absolute inset-0` at `z-index: 3` over
+  the terminal, stated inline because the terminal states its own stacking inline too and a
+  conversation under a still-painting terminal is one the operator cannot type into.
+
+The open conversations and the focused one are held **in `SessionMainPane`**, keyed by session id,
+rather than inside `SessionRuntime`: a runtime is backgrounded and not unmounted on a session
+switch, and must come back with its conversations intact.
+
+This is a live conversation, never a replay. It is deliberately **not** the Agent Activity overlay
+or the [agent activity pane](agent-activity-pane.md), which replay a *session's* recorded ACP
+transcript: a roster agent has no session directory and no transcript, so the main agent's own use
+of its sub-agents stays visible only as the roster row's status badge and last-activity line.
+
+"Switching sessions tears nothing down" rests on the runtime layer keeping **one slot in the element
+tree** in every base-view case — shown, hidden behind a workflow view or a dormant session's
+transcript, or absent only because nothing is attached. React unmounts a subtree that moves, and
+unmounting a conversation's body cancels its conversation. See
+[session-agent-conversation.md](../../../packages/tddy-web/docs/session-agent-conversation.md) for
+the invariant a refactor here has to preserve.
+
+#### Known limitations
+
+- **Opening the create-session pane still ends every open conversation.** That path replaces the
+  whole session-detail block rather than the base view, so the runtime layer — and every conversation
+  body under it — unmounts. The tabs survive in state and re-open under ids the daemon has already
+  cancelled. Switching *sessions* is unaffected.
+- **The button is offered where there is no tab strip.** A workflow, PR-Stack or dormant session has
+  no runtime area to put a tab in, so the attach succeeds and nothing visible happens. The agent *is*
+  attached — it shows in the Inspector's Agent roster — there is just no way to talk to it there.
+
+Both are tracked in [docs/dev/TODO.md](../../dev/TODO.md).
 
 ### Session agents section
 
@@ -607,11 +705,16 @@ without peers sees no list noise.
 
 ### Reused infrastructure
 
-- `StartSession.stack_parent` (proto field 15) — the spawned coder receives `--stack-parent <id>`.
-- `SessionEntry.orchestratorSessionId` (proto field 21) — back-reference from child to orchestrator.
-- `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay.
+- `SessionEntry.orchestratorSessionId` (proto field 21) — the back-reference from a child to its
+  orchestrator, which is the whole of how the peer list is discovered: no new RPC, just the
+  `ListSessions` poll the drawer already runs.
+- `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay, so a child spawned
+  from the PR-Stack screen appears without waiting for the next poll.
+- `AttachSessionAgent` / `OpenAgentConversation` / `PromptAgentConversation` /
+  `CancelAgentConversation` — the roster and conversation RPCs behind **Add agent**, all of which
+  already existed and were already reachable with a `session_token`.
 
-No proto or daemon changes; no new external dependencies. The feature is tddy-web-only.
+No proto or daemon changes; no new external dependencies. Both halves are tddy-web-only.
 
 ## Per-Workflow Session Views
 

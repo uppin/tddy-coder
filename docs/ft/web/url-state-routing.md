@@ -43,7 +43,6 @@ rules.
 | `#/sessions` | Sessions drawer, nothing selected |
 | `#/sessions/new` | Sessions drawer with the create-session pane open |
 | `#/sessions/:sessionId` | That session selected (and auto-attached when active) |
-| `#/sessions/:sessionId/add-agent` | Peer-spawn ("Add agent") pane for that session |
 | `#/tasks` | Tasks drawer, nothing selected |
 | `#/tasks/:taskId` | That task selected |
 | `#/worktrees` · `#/projects` · `#/vms` · `#/livekit` · `#/rpc-playground` | As before |
@@ -87,7 +86,7 @@ A history entry records **something the operator did**.
 | Change | Entry |
 |--------|-------|
 | Screen change, session select, task select | push |
-| Open create-session / Add-agent pane | push |
+| Open create-session pane | push |
 | Inspector tab click, inspector toggle, Code toggle, channel tab | push |
 | Host change; worktrees project change; playground service/method select | push |
 | Inspector **auto**-open (idle/error) and **auto**-close (on connect) | replace |

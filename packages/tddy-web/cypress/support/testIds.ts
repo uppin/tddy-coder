@@ -327,8 +327,6 @@ export const TEST_IDS = {
   branchConflictCancelBtn: "branch-conflict-cancel-btn",
 
   // Session agents — peer agent sessions section in SessionMainPane
-  /** The "Add agent" button in the session-detail header (spawns a peer child session). */
-  sessionAgentsAddBtn: "session-agents-add-btn",
   /** The collapsible "Session agents" section listing the current session's peers. */
   sessionAgentsSection: "session-agents-section",
   /** Empty-state message shown when the current session has no peers. */
@@ -363,6 +361,34 @@ export const TEST_IDS = {
   agentRosterDetachConfirm: "agent-roster-detach-confirm",
   /** Accepts `agentRosterDetachConfirm`. */
   agentRosterDetachConfirmBtn: "agent-roster-detach-confirm-btn",
+
+  // Agent conversation — attaching a roster agent from the session header and talking to it in a
+  // tab (docs/ft/web/session-drawer.md § Add agent).
+  /** The "Add agent" button in the session-detail header. Attaches a roster agent to the CURRENT
+   *  session — it does not spawn a peer session, which is what it used to do. */
+  sessionAgentAttachBtn: "session-agent-attach-btn",
+  /** The header's fanned-out agent picker. The same component as the roster pane's picker, under
+   *  its own id prefix so the two can be open at once without colliding. */
+  sessionAgentPicker: "session-agent-picker",
+  /** Warning naming the tools the main agent loses if the highlighted agent is attached. */
+  sessionAgentPickerWithdrawalWarning: "session-agent-picker-withdrawal-warning",
+  /** Confirms the attach of the agent selected in the header picker. */
+  sessionAgentPickerConfirmBtn: "session-agent-picker-confirm-btn",
+  /** Dismisses the header picker without attaching. */
+  sessionAgentPickerCancelBtn: "session-agent-picker-cancel-btn",
+  /** Rendered when the attach itself failed — distinct from a picker that could not be filled. */
+  sessionAgentAttachError: "session-agent-attach-error",
+
+  /** The conversation tab's body: transcript plus composer. */
+  agentConversationPane: "agent-conversation-pane",
+  /** The scrolling list of turns inside `agentConversationPane`. */
+  agentConversationTranscript: "agent-conversation-transcript",
+  /** Where the operator types the next prompt. */
+  agentConversationInput: "agent-conversation-input",
+  /** Sends what is in `agentConversationInput`. */
+  agentConversationSendBtn: "agent-conversation-send-btn",
+  /** A failed open or a failed prompt, named. Never an empty transcript standing in for one. */
+  agentConversationError: "agent-conversation-error",
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
@@ -892,6 +918,36 @@ export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${ses
 /** `[data-testid="sessions-child-pane-<sessionId>"]` — the mounted runtime pane for a spawned
  *  child conversation, shown when its tab is selected. */
 export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
+
+/** `[data-testid="sessions-agent-tab-<conversationId>"]` — a tab for an open conversation with an
+ *  agent attached to this session. Keyed by the conversation id rather than the agent id: the
+ *  conversation is what the tab owns, and it is what closing the tab cancels. */
+export const sessionsAgentTab = (conversationId: string) =>
+  `sessions-agent-tab-${safeTestIdPart(conversationId)}`;
+
+/** `[data-testid="sessions-agent-tab-<conversationId>-close"]` — the ✕ on an agent tab. Closing it
+ *  cancels the conversation. Suffixed rather than infixed so the tab-listing selectors can exclude
+ *  the close controls with a `$=` match. */
+export const sessionsAgentTabClose = (conversationId: string) =>
+  `${sessionsAgentTab(conversationId)}-close`;
+
+/** `[data-testid="sessions-agent-pane-<conversationId>"]` — the mounted body of one agent
+ *  conversation tab, shown when its tab is selected. */
+export const sessionsAgentPane = (conversationId: string) =>
+  `sessions-agent-pane-${safeTestIdPart(conversationId)}`;
+
+/** `[data-testid="agent-conversation-turn-<index>"]` — one turn in the conversation transcript, in
+ *  arrival order. Carries `data-role` (`operator` | `agent`), `data-complete`, and — on a finished
+ *  agent turn — `data-stop-reason`. */
+export const agentConversationTurn = (index: number) => `agent-conversation-turn-${index}`;
+
+/** One selectable agent in the header's picker. */
+export const sessionAgentPickerOption = (agentId: string) =>
+  `session-agent-picker-option-${safeTestIdPart(agentId)}`;
+
+/** The owning-daemon label on a header-picker option. */
+export const sessionAgentPickerOptionHost = (agentId: string) =>
+  `${sessionAgentPickerOption(agentId)}-host`;
 
 /** `[data-testid="session-agents-row-<sessionId>"]` — one row in the Session agents section, keyed
  *  by the peer's session id. */

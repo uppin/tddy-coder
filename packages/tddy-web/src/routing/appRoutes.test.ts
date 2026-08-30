@@ -17,8 +17,6 @@ import {
   parseSessionsDrawerSessionId,
   SESSIONS_NEW_ROUTE,
   isSessionsNewPath,
-  sessionsDrawerAddAgentPath,
-  parseSessionsDrawerAddAgentSessionId,
   TASKS_ROUTE,
   isTasksPath,
   tasksPathForTask,
@@ -249,7 +247,7 @@ describe("appRoutes — sessions drawer route helpers", () => {
 // URL state routing (docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md)
 // ---------------------------------------------------------------------------
 
-describe("sessions create + add-agent routes", () => {
+describe("sessions create routes", () => {
   it("recognises /sessions/new as the create-session route", () => {
     // When
     const result = isSessionsNewPath(SESSIONS_NEW_ROUTE);
@@ -271,33 +269,6 @@ describe("sessions create + add-agent routes", () => {
     expect(result).toBe(true);
   });
 
-  it("builds the add-agent path for a session", () => {
-    // When
-    const result = sessionsDrawerAddAgentPath("abc-123");
-    // Then
-    expect(result).toBe("/sessions/abc-123/add-agent");
-  });
-
-  it("extracts the session id from an add-agent pathname", () => {
-    // When
-    const result = parseSessionsDrawerAddAgentSessionId("/sessions/abc-123/add-agent");
-    // Then
-    expect(result).toBe("abc-123");
-  });
-
-  it("returns null when a /sessions/:id path carries no add-agent segment", () => {
-    // When
-    const result = parseSessionsDrawerAddAgentSessionId("/sessions/abc-123");
-    // Then
-    expect(result).toBeNull();
-  });
-
-  it("extracts the session id from a /sessions/:id/add-agent path as the selected session", () => {
-    // When
-    const result = parseSessionsDrawerSessionId("/sessions/abc-123/add-agent");
-    // Then
-    expect(result).toBe("abc-123");
-  });
 });
 
 describe("tasks routes", () => {

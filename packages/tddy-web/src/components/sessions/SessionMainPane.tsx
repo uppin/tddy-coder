@@ -1,5 +1,5 @@
 import React from "react";
-import { type Client, type Transport } from "@connectrpc/connect";
+import { ConnectError, type Client, type Transport } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
@@ -11,14 +11,17 @@ import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
 import { SessionActivitiesPane } from "./SessionActivitiesPane";
 import { PARAM_CODE } from "../../routing/appLocation";
 import { useAppLocation } from "../../routing/useAppLocation";
-import {
-  parseSessionsDrawerAddAgentSessionId,
-  sessionsDrawerAddAgentPath,
-  sessionsDrawerPathForSession,
-} from "../../routing/appRoutes";
 import { AgentActivityOverlay } from "./AgentActivityOverlay";
 import { Button } from "../ui/button";
-import { CreateSessionPane, type CreateSessionInitialValues } from "./CreateSessionPane";
+import { CreateSessionPane } from "./CreateSessionPane";
+import { AgentPicker } from "./AgentPicker";
+import type { AvailableAgent } from "./useAvailableAgents";
+import {
+  conversationForAgent,
+  withAgentConversation,
+  type AgentConversation,
+} from "./agentConversationTabs";
+import { randomUuid } from "../../lib/randomId";
 import { SessionAgentsSection } from "./SessionAgentsSection";
 import { SessionRuntime } from "./SessionRuntime";
 import { sessionPeers } from "../../utils/sessionPeers";
@@ -140,7 +143,7 @@ export function SessionMainPane({
   // The worktree Code pane is a split view available for every session type: it never replaces the
   // base view (terminal / chat / PR-Stack), it opens beside it. Its open/closed state lives in the
   // URL (`?code=1`) so a shared link reproduces the pane layout.
-  const { location, navigate, setParams } = useAppLocation();
+  const { location, setParams } = useAppLocation();
   const codeOpen = location.params[PARAM_CODE] === "1";
   const toggleCodePane = React.useCallback(
     () => setParams({ [PARAM_CODE]: codeOpen ? null : "1" }),
@@ -163,87 +166,86 @@ export function SessionMainPane({
     return projectForUnscopedSession(selectedSession, [...projects])?.projectId ?? "";
   }, [selectedSession, projects]);
 
-  // Peer-agent spawn mode: when set, the pane renders `CreateSessionPane` in peer mode, pre-filled
-  // to spawn a peer child session that runs on the SAME worktree as the selected session
-  // (via `repo_path`). Branch selection is hidden in that mode (irrelevant when `repo_path` is set).
-  // The initialValues capture the orchestrator at "Add agent" click time so a later drawer selection
-  // change can't desync the spawned peer's `stackParent`/`repoPath`/`projectId` from the optimistic
-  // overlay's `orchestratorSessionId`.
-  // Peer mode is `#/sessions/:id/add-agent`, so it survives a reload and is shareable. The values
-  // are still *derived from the selected session*, exactly as the "Add agent" click derived them —
-  // the URL carries only the mode.
-  const peerCreateInitialValues = React.useMemo<CreateSessionInitialValues | null>(() => {
-    if (!selectedSession) return null;
-    if (parseSessionsDrawerAddAgentSessionId(location.path) !== selectedSession.sessionId) {
-      return null;
-    }
-    return {
-      stackParent: selectedSession.sessionId,
-      // Use the resolved project so unscoped sessions (empty `projectId`) can still submit — the
-      // pane requires a non-empty `projectId` to enable Create.
-      projectId: resolvedProjectId || selectedSession.projectId,
-      daemonInstanceId: selectedSession.daemonInstanceId,
-      repoPath: selectedSession.repoPath,
-    };
-  }, [selectedSession, resolvedProjectId, location.path]);
-  const isPeerCreating = peerCreateInitialValues !== null;
+  // The specialized agents attached to each session, and which of their conversations holds that
+  // session's pane. Held here rather than inside `SessionRuntime` because a runtime is backgrounded
+  // (not unmounted) on a session switch and must come back with its conversations intact — only
+  // closing a tab ends one.
+  const [agentConversations, setAgentConversations] = React.useState<
+    Record<string, AgentConversation[]>
+  >({});
+  const [activeConversations, setActiveConversations] = React.useState<
+    Record<string, string | null>
+  >({});
+  const [pickerOpen, setPickerOpen] = React.useState(false);
 
-  // Ref mirror of `peerCreateInitialValues` that survives the derivation going null. A peer
-  // `StartSession` is async: if the drawer selection changes between submit and `onCreated`, the
-  // pane unmounts but `handlePeerCreated` still runs from the in-flight promise and must read the
-  // capture that was actually submitted — otherwise the optimistic overlay is skipped and the new
-  // peer never appears in the drawer.
-  const peerCreateCaptureRef = React.useRef<CreateSessionInitialValues | null>(null);
-  React.useEffect(() => {
-    if (peerCreateInitialValues) peerCreateCaptureRef.current = peerCreateInitialValues;
-  }, [peerCreateInitialValues]);
+  const focusConversation = React.useCallback(
+    (sessionId: string, conversationId: string | null) => {
+      setActiveConversations((current) => ({ ...current, [sessionId]: conversationId }));
+    },
+    [],
+  );
 
-  const handleAddAgent = () => {
-    if (!selectedSession) return;
-    navigate(sessionsDrawerAddAgentPath(selectedSession.sessionId));
-  };
-  const handleCancelPeerCreate = () => {
-    peerCreateCaptureRef.current = null;
-    if (selectedSession) navigate(sessionsDrawerPathForSession(selectedSession.sessionId));
-  };
-  // A spawned peer is a child session — surface it via the optimistic overlay (same path the
-  // PR-stack orchestrator uses) so it appears in the drawer immediately, then drop out of peer
-  // mode. We deliberately do NOT call `onSessionCreated` (that would switch away from the current
-  // session); the operator stays put and switches to the peer from the Session agents section.
-  // The overlay's `orchestratorSessionId`/`projectId` come from the captured initialValues (not the
-  // live `selectedSession`) so they always match the `stackParent`/`projectId` sent in StartSession.
-  const handlePeerCreated = (sessionId: string) => {
-    // Read from the ref (not the state) so a mid-flight drawer selection change — which clears the
-    // state and unmounts the pane — can't strip the capture before the optimistic overlay fires.
-    const captured = peerCreateCaptureRef.current;
-    if (captured) {
-      onChildSessionStarted?.({
+  /**
+   * Attach the picked agent to the session on screen and open a conversation tab with it.
+   *
+   * The conversation id is minted here, by the browser, so the tab is keyed by an id it can also
+   * cancel — `OpenAgentConversation` accepts a caller-chosen one precisely for that. It is minted
+   * with `randomUuid`, never `crypto.randomUUID`, which is undefined on the plain-http LAN origins
+   * this app is routinely served from. The `OpenAgentConversation` call itself belongs to the tab's
+   * body, which owns the conversation for as long as the tab is open.
+   */
+  const attachAgent = async (agent: AvailableAgent): Promise<string | null> => {
+    // The picker is only rendered with both in hand; a refusal names what is missing rather than
+    // reporting an attach that was never sent as a success.
+    if (!client || !selectedSession) return "Not connected to this session's daemon.";
+    const { sessionId, daemonInstanceId } = selectedSession;
+    try {
+      await client.attachSessionAgent({
+        sessionToken,
         sessionId,
-        recipe: "",
-        // `handleAddAgent` always sets these; the `?? ""` only narrows the Partial type.
-        orchestratorSessionId: captured.stackParent ?? "",
-        projectId: captured.projectId ?? "",
+        daemonInstanceId,
+        agentId: agent.agentId,
       });
+    } catch (err) {
+      return ConnectError.from(err).rawMessage;
     }
-    peerCreateCaptureRef.current = null;
-    if (captured?.stackParent) navigate(sessionsDrawerPathForSession(captured.stackParent));
+
+    // Attaching an agent that is already attached is a no-op on the roster, so a second tab would
+    // claim something the daemon did not do: the conversation already open is focused instead.
+    const open = agentConversations[sessionId] ?? [];
+    const existing = conversationForAgent(open, agent.agentId);
+    const conversation: AgentConversation = existing ?? {
+      conversationId: randomUuid(),
+      agentId: agent.agentId,
+      label: agent.label,
+      daemonInstanceId,
+    };
+    if (existing === null) {
+      setAgentConversations((current) => ({
+        ...current,
+        [sessionId]: withAgentConversation(current[sessionId] ?? [], conversation),
+      }));
+    }
+    focusConversation(sessionId, conversation.conversationId);
+    return null;
   };
 
-  // Peer mode drops out on its own when the operator navigates away: the derivation above is keyed
-  // on the add-agent path *and* the current selection, so a drawer selection change or the
-  // standalone "new session" flow (`#/sessions/new`) leaves it null without an effect.
-
-  // Standalone "new session" (`isCreating`) takes precedence over peer-create mode so the drawer's
-  // new-session flow always wins when both are active (the effect above also clears peer mode when
-  // `isCreating` flips on; this guards the one-render gap).
-  const activePeerMode = isPeerCreating && !isCreating;
-  const createPaneCancel = activePeerMode
-    ? handleCancelPeerCreate
-    : (onCancelCreate ?? (() => undefined));
-  const createPaneCreated = activePeerMode
-    ? handlePeerCreated
-    : (onSessionCreated ?? (() => undefined));
-  const createPaneInitialValues = activePeerMode ? peerCreateInitialValues ?? undefined : undefined;
+  /** Drop a conversation's tab. Unmounting its body is what cancels the conversation. */
+  const closeConversation = React.useCallback(
+    (sessionId: string, conversationId: string) => {
+      setAgentConversations((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] ?? []).filter(
+          (c) => c.conversationId !== conversationId,
+        ),
+      }));
+      setActiveConversations((current) => ({
+        ...current,
+        [sessionId]: current[sessionId] === conversationId ? null : (current[sessionId] ?? null),
+      }));
+    },
+    [],
+  );
 
   // The selected session's project default branch, read from the registry the drawer already loaded
   // rather than an RPC or a git probe (D20). Empty when the project is not in the list or stores no
@@ -307,6 +309,14 @@ export function SessionMainPane({
         <SessionRuntime
           key={r.sessionId}
           runtime={r}
+          agentConversations={agentConversations[r.sessionId] ?? []}
+          activeAgentConversationId={activeConversations[r.sessionId] ?? null}
+          onSelectAgentConversation={(conversationId) =>
+            focusConversation(r.sessionId, conversationId)
+          }
+          onCloseAgentConversation={(conversationId) =>
+            closeConversation(r.sessionId, conversationId)
+          }
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
@@ -328,40 +338,54 @@ export function SessionMainPane({
   // The base view (custom workflow view / recorded activities / mounted terminals / placeholder).
   // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
   // open — never unmounted between the two so terminals stay attached.
-  const baseView = customView ? (
-    // Custom per-workflow view — renders in place of the terminal regardless of attachment
-    // status; the workflow owns its own chrome.
-    customView
-  ) : baseViewMode === "activities" && selectedSession ? (
-    // Dormant session — its recorded ACP transcript is the pane. A runtime attached earlier stays
-    // mounted behind it (background streaming preserved, a later resume is instant) but unfocused,
-    // so the transcript is what shows.
+  // What covers the runtimes, when anything does: a custom per-workflow view, or a dormant session's
+  // recorded transcript. Null means the runtimes themselves are the pane.
+  const overlay: React.ReactNode =
+    customView ??
+    (baseViewMode === "activities" && selectedSession ? (
+      <SessionActivitiesPane
+        sessionId={selectedSession.sessionId}
+        sessionToken={sessionToken}
+        client={buildSessionClient?.() ?? client}
+      />
+    ) : null);
+
+  // The base view: the mounted runtimes, with an overlay over them when one owns the pane.
+  //
+  // The runtime layer sits in the **same slot in the element tree in every case** — shown, hidden
+  // behind an overlay, or absent only because nothing is attached. That is load-bearing, not tidiness:
+  // React unmounts a subtree that changes position, and unmounting a runtime unmounts the bodies of
+  // its open agent conversations, each of which cancels its conversation on the daemon as it goes.
+  // Selecting a workflow session used to do exactly that — swapping the layer out for the workflow's
+  // own view — so an operator who glanced at a PR-Stack session came back to tabs whose conversations
+  // the daemon had already dropped. Only closing a tab may end a conversation.
+  //
+  // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
+  // open — never unmounted between the two, so terminals stay attached.
+  const baseView = (
     <div className="flex-1 min-h-0 relative overflow-hidden">
-      {hasRuntimes && <div className="absolute inset-0 flex flex-col">{runtimeLayer}</div>}
-      <div className="absolute inset-0 flex flex-col">
-        <SessionActivitiesPane
-          sessionId={selectedSession.sessionId}
-          sessionToken={sessionToken}
-          client={buildSessionClient?.() ?? client}
-        />
-      </div>
-    </div>
-  ) : hasRuntimes ? (
-    runtimeLayer
-  ) : isConnected ? (
-    // Connected but the runtime hasn't been registered yet (brief window before the attach
-    // effect runs) — keep the terminal container marker so existing acceptance contracts hold
-    // during the transition.
-    <div
-      data-testid="sessions-detail-terminal-container"
-      className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
-    />
-  ) : (
-    // Disconnected / idle — simple placeholder
-    <div className="flex-1 min-h-0 relative overflow-hidden">
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        Select Resume to reconnect
-      </div>
+      {hasRuntimes && (
+        <div className={overlay !== null ? "hidden" : "absolute inset-0 flex flex-col"}>
+          {runtimeLayer}
+        </div>
+      )}
+      {overlay !== null && <div className="absolute inset-0 flex flex-col">{overlay}</div>}
+      {!hasRuntimes &&
+        overlay === null &&
+        (isConnected ? (
+          // Connected but the runtime hasn't been registered yet (brief window before the attach
+          // effect runs) — keep the terminal container marker so existing acceptance contracts hold
+          // during the transition.
+          <div
+            data-testid="sessions-detail-terminal-container"
+            className="absolute inset-0 flex flex-col overflow-hidden"
+          />
+        ) : (
+          // Disconnected / idle — simple placeholder
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Select Resume to reconnect
+          </div>
+        ))}
     </div>
   );
 
@@ -370,23 +394,16 @@ export function SessionMainPane({
       data-testid="sessions-detail-pane"
       className="flex-1 min-w-0 flex flex-col h-full overflow-hidden relative"
     >
-      {(isCreating || isPeerCreating) && client && (
+      {isCreating && client && (
         <CreateSessionPane
-          // A mode switch (peer → standalone when the drawer opens its new-session flow mid-peer)
-          // must reset the pane's internal state — otherwise a standalone submit would carry the
-          // peer pre-fill's `stackParent` and spawn an unintended child. The key forces a remount
-          // with the new mode's `initialValues` (standalone ⇒ none ⇒ `stackParent=""`).
-          key={activePeerMode ? "peer" : "standalone"}
           client={client}
           sessionToken={sessionToken}
-          onCancel={createPaneCancel}
-          onCreated={createPaneCreated}
-          initialValues={createPaneInitialValues}
-          peerMode={activePeerMode}
+          onCancel={onCancelCreate ?? (() => undefined)}
+          onCreated={onSessionCreated ?? (() => undefined)}
         />
       )}
 
-      {!isCreating && !isPeerCreating && (
+      {!isCreating && (
         <>
           {/* Header toggles — always visible when a session is selected */}
           {selectedSession && (
@@ -418,16 +435,21 @@ export function SessionMainPane({
                   Resume
                 </Button>
               )}
-              <Button
-                data-testid="session-agents-add-btn"
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={handleAddAgent}
-                title="Spawn a peer agent session on this session's worktree"
-              >
-                Add agent
-              </Button>
+              {/* Attaches a specialized agent from the roster catalog to THIS session and opens a
+                  conversation tab with it. It does not spawn a peer session, which is what it used
+                  to do. Only offered with a daemon client in hand — there is no attach without one. */}
+              {client && (
+                <Button
+                  data-testid="session-agent-attach-btn"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setPickerOpen(true)}
+                  title="Attach an agent to this session and talk to it"
+                >
+                  Add agent
+                </Button>
+              )}
               <Button
                 data-testid="sessions-code-toggle"
                 variant="ghost"
@@ -448,6 +470,17 @@ export function SessionMainPane({
               >
                 Inspector
               </Button>
+            </div>
+          )}
+
+          {selectedSession && pickerOpen && client && (
+            <div className="flex-shrink-0 border-b border-border px-2 py-2">
+              <AgentPicker
+                testIdPrefix="session-agent-picker"
+                errorTestId="session-agent-attach-error"
+                onAttach={attachAgent}
+                onClose={() => setPickerOpen(false)}
+              />
             </div>
           )}
 
