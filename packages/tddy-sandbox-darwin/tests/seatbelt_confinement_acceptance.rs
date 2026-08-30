@@ -325,10 +325,10 @@ fn a_strict_profile_denies_reading_a_path_not_on_the_allow_list() {
 const AGENT_GUIDANCE_FILE: &str = "CLAUDE.md";
 const AGENT_GUIDANCE_TEXT: &str = "# Managed codebase\nThe codebase is not in this directory.\n";
 
-/// A project tree on `/private/tmp` rather than under `TMPDIR`. The profile grants the whole
-/// `/var/folders` tree (the OS per-user scratch base) write access, so a project root inside it
-/// would be writable no matter what the project-root rule said — and these tests must observe the
-/// context-dir deny beating the *project-root* allow specifically.
+/// A project tree on `/private/tmp` rather than under `TMPDIR`. These tests must observe the
+/// context-dir deny beating the *project-root* allow specifically, so the tree the profile grants
+/// has to be the project root and nothing that encloses it — a fixed path outside the OS per-user
+/// scratch base keeps that true whatever `TMPDIR` the suite inherits.
 fn a_project_tree_outside_the_os_scratch_base(name: &str) -> PathBuf {
     let root = PathBuf::from("/private/tmp").join(name);
     let _ = std::fs::remove_dir_all(&root);
