@@ -3,8 +3,8 @@
  * attached to it and the subagent sessions it spawned beneath it, and a subagent's own roster agents
  * and subagents beneath that.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md (AC1-AC22)
- * Changeset: docs/dev/1-WIP/CS-2026-08-30-agents-tab-subagent-tree.md
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC50-AC53f).
+ * Module notes: packages/tddy-web/docs/session-agent-tree.md.
  *
  * Two populations meet here, and the point of the tree is that they are shown as one hierarchy
  * rather than as two lists in two places:

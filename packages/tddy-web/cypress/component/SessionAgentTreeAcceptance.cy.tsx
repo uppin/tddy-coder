@@ -3,8 +3,8 @@
  * in the Inspector's **Agents** tab, as branches of the main agent's tree — with an inferred status
  * instead of the session's lifecycle string, and with the Switch that focuses them.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md (AC18, AC23)
- * Changeset: docs/dev/1-WIP/CS-2026-08-30-agents-tab-subagent-tree.md
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC53a, AC53d).
+ * Module notes: packages/tddy-web/docs/session-agent-tree.md.
  *
  * Driven through `SessionsDrawerScreen` rather than through the pane, because the two properties
  * under test span three collaborators a narrower mount lets disagree in silence: the session list is

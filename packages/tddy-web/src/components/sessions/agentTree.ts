@@ -26,7 +26,7 @@ export interface SubagentSessionNode {
  *
  * Siblings keep the input list's order, so two folds over one list agree.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md (AC3, AC4, AC6-AC9).
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC53a, AC53e).
  */
 export function subagentSessionNodes(
   sessions: ReadonlyArray<SessionEntry>,

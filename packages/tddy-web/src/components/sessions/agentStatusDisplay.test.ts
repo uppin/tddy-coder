@@ -16,7 +16,7 @@ import {
  * renders them alike. Two renderers wording `EXECUTING_TOOL` differently is the failure this file
  * exists to make impossible.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md (AC12-AC14)
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC53b).
  */
 
 const NOW_MS = 1_780_828_020_298;

@@ -352,7 +352,7 @@ export const TEST_IDS = {
 
   // Agent tree — the Agents tab as a hierarchy: the session's main agent at the root, its roster
   // agents and its subagent sessions beneath it
-  // (docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md).
+  // (docs/ft/daemon/session-agent-roster.md § The Agents tab).
   /** The tree's outermost list. Replaces the roster pane's flat `<ul>`. */
   agentTree: "agent-tree",
   /** The root row — the session's own main agent. */

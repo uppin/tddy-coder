@@ -10,7 +10,7 @@ import { subagentSessionNodes, type SubagentSessionNode } from "./agentTree";
  * mounted tree either hangs the runner or says nothing this file does not already say, and a
  * grandchild's placement is decided here before any row exists.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md (AC3, AC4, AC6-AC9)
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab (AC53a, AC53e).
  */
 
 const MAIN = "session-main-0000-0000-0000-000000000001";

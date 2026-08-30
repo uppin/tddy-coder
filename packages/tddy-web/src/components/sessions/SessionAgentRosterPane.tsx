@@ -27,7 +27,8 @@ import { useSessionAgentRoster } from "./useSessionAgentRoster";
  * `ListSessions` list, folded by {@link subagentSessionNodes}.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md § Web UI (AC50-AC53),
- * docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md.
+ * docs/ft/daemon/session-agent-roster.md § The Agents tab;
+ * module notes in packages/tddy-web/docs/session-agent-tree.md.
  */
 
 export interface SessionAgentRosterPaneProps {

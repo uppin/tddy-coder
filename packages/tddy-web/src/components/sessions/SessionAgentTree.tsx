@@ -32,7 +32,8 @@ import { useSessionAgentRoster } from "./useSessionAgentRoster";
  * `data-agent-kind` rather than left to be guessed from its label — the two afford different
  * actions.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-30-agents-tab-subagent-tree.md
+ * Feature: docs/ft/daemon/session-agent-roster.md § The Agents tab.
+ * Module notes: packages/tddy-web/docs/session-agent-tree.md.
  */
 
 // ---------------------------------------------------------------------------

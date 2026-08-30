@@ -744,28 +744,61 @@ is resolved and recorded on the codebase host, which is the host that holds the 
 (§ Seeding at start). The Semantic index toggle beside it is offered on the same terms, and for the
 same reason (remote-managed-worktree.md § What a split session cannot also ask for).
 
-### Agent roster pane (new)
+### The Agents tab — a tree of everything working for one agent
 
-An **Agent roster** section in the session inspector — distinct from the existing "Session agents"
-peer-session section, which is about child sessions and is untouched.
+The session inspector's **Agents** tab is a tree rooted at the session's own **main agent**. Two
+populations hang beneath it, and the tab is the only place either is listed:
 
-- Rows come from `StreamSessionAgents`, so an attach made from another browser tab or by another
-  operator appears without a refresh.
-- Each row shows qualified id, label, model, owning daemon, the tools it replaces, and its clone
-  state — `provisioning` / `ready` / `error`, never a blank.
-- Each row also shows **what the agent is doing** and **what it was last seen doing**. The status
-  badge is always rendered, `unknown` included: a row with no badge and a row whose daemon has
-  nothing to say look identical otherwise. `unknown` is never spelled "idle" — an operator reads
-  "idle" as "free, ready for work", which is a different claim from "nobody here knows".
-- The last-activity line reads "<summary> · 4m ago" and **ages on its own**, ticked once a minute:
-  an idle agent produces no frames, so a line that only aged on a frame would read "just now" for
-  the rest of the session. A stamp in the future reads "just now" rather than a negative age,
-  because two hosts' clocks disagree by seconds routinely.
-- **Add agent** opens the same fanned-out picker as the create pane, and warns which tools the main
-  agent loses before confirming.
-- **Detach** is inline, and confirms when the entry is the last one owned by a remote daemon, because
-  that detach deletes a checkout on another host.
-- Four states are distinct: not connected, loading, read failed, genuinely empty.
+| | Managed roster agent | Subagent session |
+|---|---|---|
+| What it is | A specialized agent the facilitating daemon runs a loop for | A `claude-cli` / `cursor-cli` session the main agent spawned |
+| Arrives on | `StreamSessionAgents` | `ListSessions`, linked by `orchestrator_session_id` |
+| Status from | `SessionAgentEntry.status` | The inferred `SessionEntry.agent_status` ([agent-session-status.md](agent-session-status.md)) |
+| Row affords | **Detach** | **Switch** — focuses that session's runtime |
+
+A subagent session nests its own roster agents and its own subagents in turn, so a spawn chain reads
+as a chain rather than as a row of siblings. Every row states which kind it is; a label cannot say,
+and the two afford different actions.
+
+**One badge for both.** The proto ships one `SessionAgentStatus` for a roster agent and an agent
+session alike, and the tab renders them through one vocabulary. The badge is always present,
+`unknown` included: a row with no badge and a row whose daemon has nothing to say look identical
+otherwise. `unknown` is never spelled "idle" — an operator reads "idle" as "free, ready for work",
+which is a different claim from "nobody here knows". A subagent whose session type the daemon does
+not tail (`tool`, `workspace`) reports `unknown` honestly rather than being assigned a state.
+
+**Rows and their contents.** A roster row shows qualified id, label, model, owning daemon, the tools
+it replaces, and its clone state — `provisioning` / `ready` / `error`, never a blank. A subagent row
+shows its session id, agent and model. Both carry a last-activity line reading "<summary> · 4m ago"
+that **ages on its own**, ticked once a minute for the whole tree: an idle agent produces no frames,
+so a line that only aged on a frame would read "just now" for the rest of the session. A stamp in the
+future reads "just now" rather than a negative age, because two hosts' clocks disagree by seconds
+routinely. A row nothing has been observed of shows no line at all — one reserved for a history that
+does not exist reads as a row that lost one.
+
+**A collapsed subagent costs nothing.** The tab stays open for the life of the inspector, so
+subscribing every descendant on mount would hold one daemon stream per subagent for that whole time.
+A subagent opens its roster stream only while expanded, and its *own* status needs no stream, so a
+collapsed row still says what it is doing. An expanded subagent reads its roster on **its own**
+codebase half — it can be split independently of its parent, and the agent half would answer with an
+empty list beside the real one.
+
+**What the tree cannot show.** It is folded from the session list the browser holds, so a subagent
+spawned on a host the browser is not aggregating is not a node of it. An orphan — a session whose
+orchestrator is absent — is dropped rather than promoted to the root, where it would claim the main
+agent spawned it. Orchestrator links that form a cycle terminate the branch instead of repeating it;
+the list is assembled from several hosts' answers, so a cycle is a shape to survive, not one to
+assume away.
+
+**Flows.** **Add agent** opens the same fanned-out picker as the create pane and warns which tools
+the main agent loses before confirming. **Detach** is inline and confirms when the entry is the last
+one owned by a remote daemon, because that detach deletes a checkout on another host — judged
+against the roster the entry belongs to, which for a nested row is that subagent's roster, not the
+root's. A subagent row has no Detach: there is no roster entry behind it.
+
+**Failure is never silence.** Four states are distinct for the tab as a whole — not connected,
+loading, read failed, genuinely empty — and an expanded subagent whose own roster could not be read
+says why on its row. An unreadable roster is not an empty one, at any depth.
 
 ## Acceptance Criteria
 
@@ -878,12 +911,21 @@ peer-session section, which is about child sessions and is untouched.
 48. The create-session subagent picker lists agents from every common-room daemon, each labelled
     with its owning daemon, and sends qualified ids.
 49. One daemon failing to answer the picker's fan-out costs one error row, not the picker.
-50. The Agent roster pane renders the live roster and updates on an attach made elsewhere, with no
+50. The Agents tab renders the live roster and updates on an attach made elsewhere, with no
     manual refresh.
-51. The pane's Add-agent flow states which tools the main agent will lose before confirming.
+51. The tab's Add-agent flow states which tools the main agent will lose before confirming.
 52. Detaching the last agent of a remote daemon asks for confirmation naming the host whose
-    checkout will be deleted.
+    checkout will be deleted, judged against the roster that entry belongs to.
 53. Not-connected, loading, read-failed and empty are four distinct rendered states.
+53a. The tab is a tree: roster agents and spawned subagent sessions render as children of the
+    session's main agent, and a subagent's own roster agents and subagents render beneath it.
+53b. A managed row and a subagent row draw their badge from one vocabulary, and each row states
+    which of the two it is.
+53c. A collapsed subagent opens no roster stream; an expanded one reads its own codebase half.
+53d. A subagent row offers Switch and no Detach.
+53e. An orchestrator cycle terminates, a self-reference is dropped, and an orphan is not promoted
+    to the root.
+53f. An expanded subagent whose roster could not be read says why, on its own row.
 
 ### Seeding at start
 
