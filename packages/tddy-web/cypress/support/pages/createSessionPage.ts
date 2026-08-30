@@ -323,6 +323,15 @@ export const createSessionPage = {
       .find(`[data-attachment-basename]`)
       .then(($rows) => [...$rows].map((el) => el.getAttribute("data-attachment-basename") ?? "")),
 
+  /**
+   * Nothing is attached. Stated as its own absence assertion because {@link attachmentBasenames}
+   * cannot express it: it reads the rows out of the section, and a form with none renders no row
+   * elements to read.
+   */
+  expectNoAttachments() {
+    createSessionPage.attachmentsSection().find(`[data-attachment-basename]`).should("not.exist");
+  },
+
   /** An attachment row's rendered size in bytes. */
   attachmentSize: (basename: string) => byTestId(ids.createSessionAttachmentSize(basename)),
 

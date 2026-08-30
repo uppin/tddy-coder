@@ -634,6 +634,12 @@ message SessionContextDoc {
   bool exists = 5;
   SessionContextDocKind kind = 6;
   uint64 size_bytes = 7;
+  // Path relative to the session's artifacts root — the address a HostDocumentRef under
+  // HOST_DOCUMENT_SCOPE_SESSION_ARTIFACT uses. A stack-level manifest doc is its own basename, an
+  // attachment is "attachments/<basename>", a per-PR document is "prs/<node_id>/<basename>". Sent
+  // because a client cannot derive it: nothing in `kind` distinguishes a nested document from a
+  // flat one.
+  string relative_path = 8;
 }
 
 message SessionEntry {
@@ -702,6 +708,20 @@ message SessionEntry {
   // The paired `workspace` session on that daemon whose worktree this session works in.
   // Empty for co-located sessions.
   string codebase_session_id = 30;
+  // What this session's agent is doing, inferred from its own ACP transcript and activity stream
+  // (docs/ft/daemon/agent-session-status.md). The same vocabulary a roster agent reports, so one
+  // badge renders both. UNSPECIFIED is "this daemon has nothing to say", never "idle" — and it is
+  // what every non-agent session (workspace, tool, changeset) reports, because none runs an agent.
+  //
+  // `agent_status`, not `status`: field 3 is already a session's lifecycle string. The two are
+  // different subjects — one is the session, one is the agent inside it. Distinct from
+  // `activity_status` (15) too: that is the raw hook word a claude-cli or cursor worktree reports,
+  // and this is an inference built partly on top of it.
+  SessionAgentStatus agent_status = 31;
+  // The last thing this session's agent was observed doing; unset when nothing has been observed,
+  // and unset when the status came from the hook word alone (a bare timestamp with no summary
+  // renders as an agent that did something unnameable just now).
+  SessionAgentActivity last_activity = 32;
 }
 
 message ProjectEntry {
@@ -2176,8 +2196,8 @@ message StagedAttachmentEntry {
 }
 
 // One document attached to a session at start. The daemon running the session materializes each
-// attachment under {session_dir}/attachments/<basename> before launching the agent, so the agent
-// sees a plain local file regardless of which source variant produced it.
+// attachment under {session_dir}/artifacts/attachments/<basename> before launching the agent, so
+// the agent sees a plain local file regardless of which source variant produced it.
 message SessionAttachment {
   // Basename the document is materialized under. Basename only — path separators, "." / ".." and
   // empty are rejected; duplicate basenames within one StartSessionRequest are a request error
@@ -2220,8 +2240,10 @@ message HostDocumentRef {
   // Owning project for HOST_DOCUMENT_SCOPE_PROJECT_REPO; ignored otherwise.
   string project_id = 4;
   // Path relative to the resolved root: POSIX separators, no "." / ".." segments, not absolute.
-  // For SESSION_ARTIFACT the basename of a SessionContextDoc; for SESSION_UPLOAD
-  // "<upload_id>/<file_name>" (see SessionUploadEntry).
+  // Separators are permitted and the whole path is resolved under the root, so a nested document
+  // is addressable: for SESSION_ARTIFACT this is a SessionContextDoc's `relative_path`, which may
+  // be a bare basename, "attachments/<basename>" or "prs/<node_id>/<basename>". For SESSION_UPLOAD
+  // it is "<upload_id>/<file_name>" (see SessionUploadEntry).
   string relative_path = 5;
 }
 

@@ -274,6 +274,36 @@ its own failure message, none from that branch. New entries beyond the list abov
   indicator work added a daemon-level feed rather than adopting it, because a per-session stream
   cannot drive a drawer of rows. Either it becomes the focused session's detail feed or it goes.
 
+### `connection_service.rs` is 19,600 lines (source: subagent-conversation-inference changeset, 2026-08-29)
+
+- Pre-existing, and long past any sane module limit. Flagged here rather than acted on: this
+  changeset adds 44 lines to it, and a split would bury a reviewable feature under a 19,000-line
+  move — the same trade #418 recorded for `tddy-tools/src/server.rs`.
+- Cohesive groups a split would follow, by responsibility rather than line range: session lifecycle
+  (start / resume / delete / repoint), the agent-roster and agent-conversation RPCs, the streaming
+  replay handlers (`StreamAcpReplay`, `StreamSessionActivity`, terminal), the PR-stack and changeset
+  mutations, and peer routing / forwarding. Each is a plausible module.
+- Cost: `ConnectionServiceImpl`'s ~60 private fields would have to become `pub(crate)` or move
+  behind accessors, and every `#[cfg(test)] mod tests` block in the file (several hundred tests)
+  would repoint. That is the reason nobody has done it, and the reason it needs to be its own PR.
+
+### A cursor-cli session's orchestrator link never reaches `SessionEntry` (source: subagent-conversation-inference changeset, 2026-08-29)
+
+- `cursor_cli_spawn.rs` writes `Changeset.orchestrator_session_id` for a session spawned under a
+  stack parent (`packages/tddy-daemon/src/cursor_cli_spawn.rs:189`), but
+  `session_list_status_from_session_dir` returns early for `session_type == "cursor-cli"` with
+  `orchestrator_session_id: String::new()` before `changeset.yaml` is ever read
+  (`packages/tddy-daemon/src/session_list_enrichment.rs:177`). The claude-cli arm above it does the
+  same, and for claude-cli that is correct — it writes no changeset.
+- Consequence: `sessionPeers.ts` finds no peers for a cursor-cli child, so a cursor peer never
+  appears in the web's *Session agents* section however healthy it is. The
+  [agent session status](../ft/daemon/agent-session-status.md) work populates the status such a row
+  would display, and is deliberately independent of it — the status lands on every agent session's
+  `SessionEntry`, whoever groups them.
+- Fix shape: read the changeset for the `orchestrator_session_id` (and `recipe`, which has the same
+  gap) in the cursor-cli arm rather than short-circuiting past it. Needs a test that a cursor-cli
+  session spawned under a stack parent lists with its parent's id.
+
 ### Mobile terminal touch — two gaps left open (source: mobile-touch-scroll-routing changeset, 2026-08-29)
 
 - **A scroll gesture still reports a stray click to a mouse-tracking TUI.** The capture-phase tap
@@ -315,6 +345,21 @@ The one design question it raises and `"ready"` does not: `unknown` (`SESSION_AG
 counts as *ready* deliberately — a restored roster has nothing to say about an agent that is
 nonetheless promptable — but it must **not** count as *idle*. A wait treating "nothing to say" as
 "the turn finished" would report a turn complete that may still be running.
+
+### `stack-progress.json` is documented as a host guarantee but nothing writes it (source: pr-stack-docs changeset, 2026-08-29)
+`docs/ft/coder/pr-stacking.md` § "Progress tracking contract" states each child session is obliged to
+maintain `artifacts/stack-progress.json`, written by a shared child hook's `after_task` — "a host
+guarantee, not an agent promise". No production code writes that file; the only repo-wide match is a
+scratch-directory label in `packages/tddy-workflow-recipes/tests/stack_progress_contract_acceptance.rs:16`.
+The orchestrator in fact syncs through `sync_stack_node_from_child`, reading the child's
+`changeset.yaml` for `state.current` and `workflow.github_pr_status`. Either implement the file or
+correct the document — a reader currently believes a recipe-agnostic progress signal exists.
+
+### `GrillMeRecipe` ships blank context-doc descriptions (source: pr-stack-docs changeset, 2026-08-29)
+`GrillMeRecipe` does not override `SessionArtifactManifest::artifact_doc_descriptions()`, so its two
+context docs (`grill-me-brief.md`, `exploration.md`) reach the web with an empty `description`.
+`PrStackRecipe` supplies a one-liner per key (`pr_stack/mod.rs:342-362`) and is the model to follow.
+Cheap; affects any client rendering a doc list.
 
 
 ### The action tools are advertised where nothing implements them (source: seeded-agents-on-any-placement changeset, 2026-08-23)

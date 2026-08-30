@@ -4,9 +4,10 @@
  * user happens to be able to read. Nothing is uploaded: the session host reads the bytes itself.
  *
  * Three traps this encodes:
- * - a `SessionContextDoc` of kind `ATTACHMENT` lives at `attachments/<basename>` under `artifacts/`,
- *   while a `MANIFEST` doc is the bare basename. Getting it wrong is silent — the daemon just reports
- *   the document as missing.
+ * - a `SessionContextDoc` is addressed by the `relative_path` the server sends, not by a path
+ *   rebuilt from its `kind`: an attachment lives at `attachments/<basename>`, a per-PR document at
+ *   `prs/<node_id>/<basename>`. Getting it wrong is silent — the daemon just reports the document as
+ *   missing.
  * - a doc the recipe declared but never wrote (`exists === false`) is not offered at all; picking it
  *   could only earn a `NOT_FOUND` at materialization time.
  * - each scope has its own root, and a ref carries only the id that root is resolved from: a session
@@ -25,7 +26,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import {
   HostDocumentScope,
-  SessionContextDocKind,
   type ConnectionService,
   type SessionEntry,
   type SessionUploadEntry,
@@ -33,6 +33,7 @@ import {
 import { formatAttachmentBytes } from "../../../lib/attachmentBytes";
 import { WorktreeFileTree } from "../../session/WorktreeFileTree";
 import { createWorktreeFilesApi, type WorktreeFilesApi } from "../../session/worktreeFilesApi";
+import { contextDocRelativePath } from "./contextDocPath";
 import type { HostDocumentSelection } from "./pendingAttachment";
 
 /** The document the operator chose, ready to become a `SessionAttachment`. */
@@ -98,17 +99,15 @@ function isTreeScope(scope: HostDocumentScope): boolean {
 
 /**
  * The artifact-scope rows of one session: every context doc that is actually on disk, addressed
- * relative to `artifacts/` — which puts a user-attached doc under `attachments/`.
+ * relative to `artifacts/` — which puts a user-attached doc under `attachments/` and a per-PR
+ * document under `prs/<node_id>/`.
  */
 function artifactRows(session: SessionEntry | undefined): HostDocumentRow[] {
   if (session === undefined) return [];
   return session.contextDocs
     .filter((doc) => doc.exists)
     .map((doc) => ({
-      relativePath:
-        doc.kind === SessionContextDocKind.ATTACHMENT
-          ? `attachments/${doc.basename}`
-          : doc.basename,
+      relativePath: contextDocRelativePath(doc),
       basename: doc.basename,
       sizeBytes: Number(doc.sizeBytes),
       description: doc.description,

@@ -18,9 +18,14 @@
  * ```
  */
 
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthService } from "../../../src/gen/auth_pb";
-import { ConnectionService, type SessionEntry } from "../../../src/gen/connection_pb";
+import {
+  ConnectionService,
+  type SessionContextDocSchema,
+  type SessionEntry,
+} from "../../../src/gen/connection_pb";
 import { aGitHubUser } from "./responses";
 
 // ---------------------------------------------------------------------------
@@ -28,11 +33,22 @@ import { aGitHubUser } from "./responses";
 // ---------------------------------------------------------------------------
 
 /**
+ * One session as a scenario states it: whichever `SessionEntry` fields it is about, and nothing else.
+ *
+ * `contextDocs` is loosened to the message's *init* shape so a scenario can name the two fields it
+ * cares about (`relativePath`, `exists`) without constructing a whole `SessionContextDoc` — the
+ * router fills the rest with the same defaults a daemon that never wrote them would send.
+ */
+export type SessionEntryFixture = Partial<Omit<SessionEntry, "contextDocs">> & {
+  contextDocs?: MessageInitShape<typeof SessionContextDocSchema>[];
+};
+
+/**
  * Create an in-memory backend pre-seeded with all RPCs `SessionsDrawerScreen`
  * calls on startup.  Callers add VNC or other test-specific stubs on top.
  */
 export function aSessionsDrawerBackend(
-  sessions: Partial<SessionEntry>[],
+  sessions: SessionEntryFixture[],
 ): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
     .onUnary(AuthService.method.getAuthStatus, () => ({ authenticated: true, user: aGitHubUser() }))

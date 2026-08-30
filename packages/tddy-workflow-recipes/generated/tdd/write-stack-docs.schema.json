@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tddy:goal/write-stack-docs",
+  "title": "WriteStackDocsOutput",
+  "type": "object",
+  "required": ["goal", "version", "docs"],
+  "properties": {
+    "goal": { "const": "write-stack-docs" },
+    "version": { "type": "integer" },
+    "docs": {
+      "type": "array",
+      "description": "One entry per planned node of the stack, and no other.",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "prd", "changeset"],
+        "properties": {
+          "node_id": { "type": "string" },
+          "prd": {
+            "type": "string",
+            "description": "PRD.md — markdown: what this PR delivers."
+          },
+          "changeset": {
+            "type": "string",
+            "description": "changeset.md — markdown carrying the Responsibility, Boundaries, Dependencies and Draft PR contract sections as headings."
+          }
+        }
+      }
+    }
+  }
+}
