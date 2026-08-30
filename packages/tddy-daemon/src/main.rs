@@ -514,6 +514,25 @@ fn main() -> anyhow::Result<()> {
                 .reserving_agent_ids(config.allowed_agents().iter().map(|a| a.id.clone())),
             );
 
+            // The daemon's session-notification bus: Telegram takes the attention-worthy events
+            // from the activity-status path, and `StreamSessionNotifications` relays every event
+            // to the browsers driving the drawer's indicators. Assembled here rather than left to
+            // `ConnectionServiceImpl::new` (which would build a Telegram-only bus) because the
+            // stream subscriber must be the very one the RPC handler subscribes to.
+            let session_notification_bus = {
+                let mut bus = tddy_daemon::session_notifications::SessionNotificationBus::new();
+                if let Some(ref hooks) = telegram_hooks {
+                    bus = bus.with_subscriber(Arc::new(
+                        tddy_daemon::session_notification_subscribers::TelegramNotificationSubscriber::new(
+                            Arc::clone(hooks),
+                        ),
+                    ));
+                }
+                Arc::new(bus.with_subscriber(Arc::new(
+                    tddy_daemon::session_notification_subscribers::SessionNotificationStreamSubscriber::new(),
+                )))
+            };
+
             let mut connection_impl = tddy_daemon::connection_service::ConnectionServiceImpl::new(
                 config.clone(),
                 sessions_base_resolver,
@@ -525,7 +544,8 @@ fn main() -> anyhow::Result<()> {
                 Arc::clone(&shared_claude_cli_manager),
             )
             .with_session_rooms(Arc::clone(&shared_session_rooms))
-            .with_model_registry(Arc::clone(&model_registry));
+            .with_model_registry(Arc::clone(&model_registry))
+            .with_session_notification_bus(session_notification_bus);
             if let Some(ref tracker) = idle_tracker_opt {
                 connection_impl = connection_impl.with_idle_tracker(tracker.clone());
             }

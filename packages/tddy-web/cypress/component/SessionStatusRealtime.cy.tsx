@@ -14,9 +14,10 @@
  * `SessionTerminateRefetch.cy.tsx`. Here the session ends *externally*, so the only thing that can
  * make the row update is the list keeping itself fresh on its own.
  *
- * The status dot's `data-status` is derived purely from `SessionEntry.isActive` via
- * `connectionStatusForSession`, so it is the authoritative, attachment-independent reflection of a
- * session's liveness in the list. The in-memory backend's `listSessionsFactory` is re-evaluated on
+ * The status dot's `data-status` is derived by `sessionIndicatorFor` (`src/lib/sessionIndicator.ts`),
+ * which decides liveness *first*: an inactive session reads `disconnected` whatever its
+ * notification feed has said. The dot is therefore still the authoritative, attachment-independent
+ * reflection of a session's liveness in the list. The in-memory backend's `listSessionsFactory` is re-evaluated on
  * every `ListSessions` call, so it can report the session alive at mount and dead a moment later —
  * modelling the real PID-liveness flip.
  *

@@ -17,6 +17,7 @@ import { DirtyWorktreeDialog, type DirtyWorktreePrompt } from "./DirtyWorktreeDi
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
 import { resolveRepointTarget } from "./startBlockers";
+import { stackDocAttachments } from "./stackDocAttachments";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
 import { remoteTrackingName } from "../../../lib/branchNames";
@@ -254,6 +255,10 @@ export function PrStackScreen({
         initialPrompt: [startSessionNode.title, startSessionNode.description]
           .filter(Boolean)
           .join("\n\n"),
+        // The orchestrator's documents, attached by reference so the child agent reads its own
+        // boundaries rather than inferring them. Rows, not an invariant: an operator restarting an
+        // orphaned node whose child already holds them drops them here.
+        attachments: stackDocAttachments(session, startSessionNode.nodeId),
       }
     : undefined;
 

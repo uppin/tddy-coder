@@ -1774,16 +1774,47 @@ pub(crate) fn env_non_empty(key: &str) -> Option<String> {
 }
 
 /// One open subagent conversation plus the accounting metadata that lives alongside the session
-/// (its agent name and turn count). Cumulative token usage and the model are read back from the
-/// session itself (`SubagentSession::cumulative_usage`/`model`).
+/// (its agent name, model, turn count and cumulative token usage).
+///
+/// The accounting is **copied out of the session** — at open, and again at the end of every turn —
+/// rather than read back through it. A turn runs in its own task holding [`Self::session`], so a
+/// record read off the session would either block behind the turn or report a partially-billed one;
+/// the fields here report the conversation as of its last completed turn, which is the truthful
+/// answer while another is in flight (docs/ft/coder/managed-codebase-subagents.md criterion 32).
 struct SubagentConversation {
     agent: String,
     turns: u32,
-    session: Box<dyn SubagentSession>,
+    /// The model the session talks to, as it named itself at open.
+    model: String,
+    /// Token usage across the turns that have **ended**. A turn in flight has spent nothing this
+    /// session can attribute to it yet.
+    usage: tddy_discovery::openai::TokenUsage,
+    /// The turn loop, behind the lock that serializes turns on *this* conversation and nothing
+    /// else. A conversation's history is one sequence, so two turns must not run against it at
+    /// once; `tokio::sync::Mutex` is fair, so waiting for it is the queue (criterion 30).
+    session: std::sync::Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
     /// The daemon-side conversation this one is a handle to, when the turn loop runs elsewhere.
     /// Ending it here has to close it there too: the owning daemon otherwise keeps the loop, and
     /// its own registration of it, for the life of its process.
     remote: Option<crate::session_agents::RemoteConversationHandle>,
+}
+
+impl SubagentConversation {
+    /// Adopt a freshly opened session, taking its accounting identity from the session itself.
+    fn opened(
+        agent: String,
+        session: Box<dyn SubagentSession>,
+        remote: Option<crate::session_agents::RemoteConversationHandle>,
+    ) -> Self {
+        Self {
+            agent,
+            turns: 0,
+            model: session.model().to_string(),
+            usage: session.cumulative_usage(),
+            session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
+            remote,
+        }
+    }
 }
 
 /// Every conversation this process has run: the ones still open, and the accounting of the ones
@@ -1798,6 +1829,10 @@ struct SubagentConversations {
     /// from this table, and dropping a conversation before the rewrite erases its totals from the
     /// host's view of what the session cost.
     retired: Vec<tddy_core::token_accounting::ConversationRecord>,
+    /// Turns that outlived the call that started them, keyed by the `responseId` their caller was
+    /// given. They live in the same table as the conversations they belong to, so one lock covers
+    /// both a turn's accounting and the publication of its result.
+    pending: PendingTurns,
 }
 
 impl SubagentConversations {
@@ -1820,6 +1855,167 @@ type SubagentSessionTable = tokio::sync::Mutex<SubagentConversations>;
 fn subagent_sessions() -> &'static SubagentSessionTable {
     static SESSIONS: OnceLock<SubagentSessionTable> = OnceLock::new();
     SESSIONS.get_or_init(|| tokio::sync::Mutex::new(SubagentConversations::default()))
+}
+
+/// How long a conversation tool blocks before it hands the caller a receipt rather than an answer:
+/// the default for `subagent_prompt`'s `graceMs` and for `subagent_await`'s `timeoutMs`.
+///
+/// Not a turn budget — nothing is cancelled when it elapses. It is how long the *main agent* waits,
+/// which is a different question from how long the subagent may take
+/// (docs/ft/coder/managed-codebase-subagents.md § Long turns).
+const SUBAGENT_PROMPT_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
+
+/// Where a turn that outlived the call that started it has got to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TurnState {
+    Running,
+    /// The turn ended. Carries its already-serialized result — an outcome or a failure alike, since
+    /// both are answers and only a turn still running is not.
+    Done(String),
+}
+
+/// One turn that outlived its call: which conversation it belongs to, how its result reaches
+/// everyone waiting, and how to stop it if the conversation is closed underneath it.
+///
+/// The **table** holds the `watch::Sender`, not the running task. A turn therefore publishes its
+/// result by taking the table lock at its end — the lock it already needs to update the
+/// conversation's accounting — and any number of awaiters hold a `Receiver` without holding the
+/// table.
+struct PendingTurn {
+    conversation_id: String,
+    publish: tokio::sync::watch::Sender<TurnState>,
+    abort: tokio::task::AbortHandle,
+}
+
+/// Every turn this process deferred, keyed by the `responseId` its caller was given.
+///
+/// Entries are not consumed by collecting them: a tool result lost between this process and the
+/// main agent would otherwise make a computed answer permanently unreachable
+/// (docs/ft/coder/managed-codebase-subagents.md criterion 29).
+#[derive(Default)]
+struct PendingTurns {
+    turns: HashMap<String, PendingTurn>,
+}
+
+impl PendingTurns {
+    /// Register a turn about to run on `conversation_id` under the id its caller will be given.
+    fn start(&mut self, response_id: &str, conversation_id: &str, abort: tokio::task::AbortHandle) {
+        let (publish, _) = tokio::sync::watch::channel(TurnState::Running);
+        self.turns.insert(
+            response_id.to_string(),
+            PendingTurn {
+                conversation_id: conversation_id.to_string(),
+                publish,
+                abort,
+            },
+        );
+    }
+
+    /// A receiver for `response_id`, for a caller that wants to wait on it. `None` means no turn
+    /// was ever registered under that id — which a tool reports as an error, never as "still
+    /// running".
+    fn watch(&self, response_id: &str) -> Option<tokio::sync::watch::Receiver<TurnState>> {
+        self.turns
+            .get(response_id)
+            .map(|turn| turn.publish.subscribe())
+    }
+
+    /// Publish `result` as the answer to `response_id`, releasing everyone waiting on it.
+    ///
+    /// A turn that has already ended keeps the answer it ended with: a result landing after a
+    /// cancel would otherwise overwrite the cancellation everyone was already told about.
+    fn resolve(&mut self, response_id: &str, result: String) {
+        let Some(turn) = self.turns.get(response_id) else {
+            return;
+        };
+        turn.publish.send_if_modified(|state| match state {
+            TurnState::Running => {
+                *state = TurnState::Done(result);
+                true
+            }
+            TurnState::Done(_) => false,
+        });
+    }
+
+    /// Answer every turn still running on `conversation_id` with `reason`, and stop them.
+    ///
+    /// Every turn, not just the one in flight: prompts queued behind it belong to a conversation
+    /// that is gone, so each one has a caller holding an id nothing else will ever answer. A turn
+    /// that already ended is left as it ended — a cancel arriving after the answer must not replace
+    /// it with a cancellation.
+    fn cancel_conversation(&mut self, conversation_id: &str, reason: &str) {
+        for turn in self.turns.values() {
+            if turn.conversation_id != conversation_id {
+                continue;
+            }
+            let stopped = turn.publish.send_if_modified(|state| match state {
+                TurnState::Running => {
+                    *state = TurnState::Done(subagent_error_json(reason));
+                    true
+                }
+                TurnState::Done(_) => false,
+            });
+            if stopped {
+                turn.abort.abort();
+            }
+        }
+    }
+
+    /// Drop a turn whose id its caller was never given — one that yielded inside its grace period,
+    /// so nothing can ever name it.
+    fn forget(&mut self, response_id: &str) {
+        self.turns.remove(response_id);
+    }
+}
+
+/// Block on `watched` until the turn behind it has ended, for at most `budget`.
+///
+/// `Some` is the turn's already-serialized result; `None` means it is still running, which is a
+/// deferral rather than a failure — the turn keeps going and its id stays collectable.
+async fn wait_for_turn(
+    watched: &mut tokio::sync::watch::Receiver<TurnState>,
+    budget: std::time::Duration,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + budget;
+    loop {
+        if let TurnState::Done(result) = &*watched.borrow_and_update() {
+            return Some(result.clone());
+        }
+        // A closed channel is a turn whose entry was dropped while this caller held a receiver.
+        // Nothing more will ever be published on it, so waiting on it again would never return.
+        match tokio::time::timeout_at(deadline, watched.changed()).await {
+            Ok(Ok(())) => continue,
+            Ok(Err(_)) | Err(_) => return None,
+        }
+    }
+}
+
+/// `{responseId, pending: true}` — the second shape a conversation tool can return, told apart from
+/// an outcome by a key an outcome never carries.
+fn pending_turn_json(response_id: &str) -> String {
+    serde_json::json!({ "responseId": response_id, "pending": true }).to_string()
+}
+
+/// Read a caller-named blocking budget (`graceMs`, `timeoutMs`) in milliseconds.
+///
+/// A malformed value is refused naming the field rather than replaced by `default`: substituting 25
+/// seconds for a budget the caller got wrong would block a call that asked for something else, with
+/// nothing saying so. `0` is a budget of its own — "hand me the id, I will collect it myself" — and
+/// not an absence; only an absent field (or JSON's own spelling of one, `null`) takes `default`.
+fn blocking_budget(
+    args: &serde_json::Value,
+    field: &str,
+    default: std::time::Duration,
+) -> Result<std::time::Duration, String> {
+    match args.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(default),
+        Some(value) => match value.as_u64() {
+            Some(millis) => Ok(std::time::Duration::from_millis(millis)),
+            None => Err(format!(
+                "{field} must be a whole number of milliseconds to block for, got: {value}"
+            )),
+        },
+    }
 }
 
 /// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
@@ -1918,14 +2114,13 @@ fn conversation_record(
     id: &str,
     conv: &SubagentConversation,
 ) -> tddy_core::token_accounting::ConversationRecord {
-    let usage = conv.session.cumulative_usage();
     tddy_core::token_accounting::ConversationRecord {
         agent: conv.agent.clone(),
         id: id.to_string(),
-        model: conv.session.model().to_string(),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        total_tokens: usage.total(),
+        model: conv.model.clone(),
+        input_tokens: conv.usage.input_tokens,
+        output_tokens: conv.usage.output_tokens,
+        total_tokens: conv.usage.total(),
         turns: conv.turns,
     }
 }
@@ -1994,12 +2189,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
             Ok(opened) => {
                 subagent_sessions().lock().await.open.insert(
                     session_id.clone(),
-                    SubagentConversation {
-                        agent: opened.agent_id,
-                        turns: 0,
-                        session: opened.session,
-                        remote: opened.remote,
-                    },
+                    SubagentConversation::opened(opened.agent_id, opened.session, opened.remote),
                 );
                 serde_json::json!({ "sessionId": session_id }).to_string()
             }
@@ -2016,12 +2206,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
             let agent_id = entry.agent_id.clone();
             subagent_sessions().lock().await.open.insert(
                 session_id.clone(),
-                SubagentConversation {
-                    agent: entry.agent_id,
-                    turns: 0,
-                    session,
-                    remote: None,
-                },
+                SubagentConversation::opened(entry.agent_id, session, None),
             );
             // The daemon is never asked to open this one, so this is the first and only moment its
             // roster row can stop reporting UNSPECIFIED.
@@ -2041,7 +2226,12 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_prompt` (ACP `session/prompt`-shaped): sends one prompt turn to an already-open
-/// session and returns `{stopReason, content}` once the subagent yields.
+/// session and returns `{stopReason, content, usage}` once the subagent yields — or
+/// `{responseId, pending: true}` when it has not yielded within the caller's grace period.
+///
+/// The turn itself is never bounded; only the wait for it is. A turn still running when `graceMs`
+/// elapses keeps going in a background task, and `subagent_await` collects its outcome under the
+/// returned id (docs/ft/coder/managed-codebase-subagents.md § Long turns).
 ///
 /// A conversation whose agent was detached underneath it is refused naming the detach rather than
 /// prompted: the main agent waits on this call, so a conversation that can no longer be answered has
@@ -2061,6 +2251,12 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
     if prompt_text.is_empty() {
         return subagent_error_json("prompt must contain at least one non-empty text block");
     }
+    // Read before anything runs: a call whose blocking budget cannot be honored as written must not
+    // leave a turn behind that its caller was never told the id of.
+    let grace = match blocking_budget(&args, "graceMs", SUBAGENT_PROMPT_GRACE) {
+        Ok(grace) => grace,
+        Err(e) => return subagent_error_json(e),
+    };
 
     let mut sessions = subagent_sessions().lock().await;
     if sessions.open.contains_key(session_id) {
@@ -2077,6 +2273,9 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
                 .get(session_id)
                 .and_then(|conv| conv.remote.clone());
             sessions.retire(session_id);
+            // Anyone parked on a turn of this conversation is answered here: the conversation is
+            // gone, so no turn of it will ever produce an outcome to wait for.
+            sessions.pending.cancel_conversation(session_id, &reason);
             // The roster tracked this conversation only so it could be cancelled; nothing will ask
             // about it again, and a cancelled entry nobody forgets is rescanned by every later
             // frame for the process lifetime.
@@ -2087,53 +2286,162 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
             return subagent_error_json(reason);
         }
     }
-    let Some(conv) = sessions.open.get_mut(session_id) else {
+    let Some(conv) = sessions.open.get(session_id) else {
         return subagent_error_json(format!("unknown subagent session: {session_id}"));
     };
-    // Only a loop running here is reported on; one the daemon runs it already sees.
-    let reported_agent = conv.remote.is_none().then(|| conv.agent.clone());
-    if let Some(agent_id) = reported_agent.as_deref() {
+    let turn = DeferredTurn {
+        response_id: uuid::Uuid::new_v4().to_string(),
+        conversation_id: session_id.to_string(),
+        prompt_text,
+        session: conv.session.clone(),
+        // Only a loop running here is reported on; one the daemon runs it already sees.
+        reported_agent: conv.remote.is_none().then(|| conv.agent.clone()),
+    };
+    let response_id = turn.response_id.clone();
+    // Spawned and registered under the same hold on the table: the task takes this lock before it
+    // can publish anything, so registering it here cannot lose a race with a turn that finishes
+    // immediately.
+    let running = tokio::spawn(run_turn(turn));
+    sessions
+        .pending
+        .start(&response_id, session_id, running.abort_handle());
+    let mut watched = sessions
+        .pending
+        .watch(&response_id)
+        .expect("a turn registered under this lock must be watchable");
+    drop(sessions);
+
+    match wait_for_turn(&mut watched, grace).await {
+        // Its caller was never told the id, so nothing can ever name it: keeping the entry would be
+        // a per-turn leak with no reader.
+        Some(result) => {
+            subagent_sessions()
+                .lock()
+                .await
+                .pending
+                .forget(&response_id);
+            result
+        }
+        None => pending_turn_json(&response_id),
+    }
+}
+
+/// `subagent_await`: collect the outcome of a turn that outran its prompt's grace period.
+///
+/// An unknown id is refused naming it rather than waited on — an await that blocked out its timeout
+/// on an id nothing was ever stored under is indistinguishable from a slow turn, and would have the
+/// agent poll forever for an answer that is not coming (criterion 29).
+async fn subagent_await_tool(args: serde_json::Value) -> String {
+    let Some(response_id) = args.get("responseId").and_then(|v| v.as_str()) else {
+        return subagent_error_json("missing required field: responseId");
+    };
+    let timeout = match blocking_budget(&args, "timeoutMs", SUBAGENT_PROMPT_GRACE) {
+        Ok(timeout) => timeout,
+        Err(e) => return subagent_error_json(e),
+    };
+    let watched = subagent_sessions().lock().await.pending.watch(response_id);
+    let Some(mut watched) = watched else {
+        return subagent_error_json(format!("unknown subagent response: {response_id}"));
+    };
+    match wait_for_turn(&mut watched, timeout).await {
+        Some(result) => result,
+        None => pending_turn_json(response_id),
+    }
+}
+
+/// One prompt turn, and everything it needs to run without the table lock.
+struct DeferredTurn {
+    response_id: String,
+    conversation_id: String,
+    prompt_text: String,
+    session: std::sync::Arc<tokio::sync::Mutex<Box<dyn SubagentSession>>>,
+    /// The agent to report this conversation's state as, when the loop runs in this process.
+    reported_agent: Option<String>,
+}
+
+/// Run one turn to completion, whether or not the call that started it is still waiting.
+///
+/// Acquires the conversation's turn lock first and prompts second, so a prompt that arrives
+/// mid-turn queues behind the running one and runs against the history it leaves (criterion 30).
+/// At the end it takes the table lock once — for the conversation's accounting, the accounting
+/// file, and the publication of the result — so no awaiter can read a turn as done before what it
+/// spent has been recorded.
+async fn run_turn(turn: DeferredTurn) {
+    let mut session = turn.session.lock().await;
+    if let Some(agent_id) = turn.reported_agent.as_deref() {
         report_local_conversation_state(
             agent_id,
             tddy_service::proto::connection::SessionAgentStatus::Running,
-            &format!("prompted: {prompt_text}"),
+            &format!("prompted: {}", turn.prompt_text),
         )
         .await;
     }
-    let response = match conv.session.prompt(&prompt_text).await {
-        Ok(outcome) => {
+    let ended = TurnEnd::from(session.prompt(&turn.prompt_text).await);
+    // Read while the turn lock is still held, and kept held until the table is updated: releasing
+    // it first would let the next queued turn end and record its own totals underneath this one.
+    let usage = session.cumulative_usage();
+
+    let mut sessions = subagent_sessions().lock().await;
+    if let Some(conv) = sessions.open.get_mut(&turn.conversation_id) {
+        // A turn that failed still counts what it spent reaching that failure, but is not a turn
+        // the conversation took: nothing was added to its history.
+        conv.usage = usage;
+        if ended.took_a_turn {
             conv.turns += 1;
-            let answered = outcome
-                .content
-                .iter()
-                .map(|block| block.text.chars().count())
-                .sum::<usize>();
-            if let Some(agent_id) = reported_agent.as_deref() {
-                report_local_conversation_state(
-                    agent_id,
-                    tddy_service::proto::connection::SessionAgentStatus::Idle,
-                    &format!("answered ({answered} chars)"),
-                )
-                .await;
-            }
-            prompt_outcome_json(outcome)
         }
-        Err(e) => {
-            // Idle, not ERROR: the agent is still attached and still promptable, and ERROR on a
-            // roster row means the checkout is broken. The summary is what says what happened.
-            if let Some(agent_id) = reported_agent.as_deref() {
-                report_local_conversation_state(
-                    agent_id,
-                    tddy_service::proto::connection::SessionAgentStatus::Idle,
-                    &format!("turn failed: {e}"),
-                )
-                .await;
-            }
-            return subagent_error_json(e);
-        }
-    };
+    }
     write_accounting_file(&sessions);
-    response
+    sessions.pending.resolve(&turn.response_id, ended.result);
+    drop(sessions);
+    drop(session);
+
+    if let Some(agent_id) = turn.reported_agent.as_deref() {
+        // Idle either way, including on a failure: the agent is still attached and still
+        // promptable, and ERROR on a roster row means the checkout is broken. The summary is what
+        // says what happened.
+        report_local_conversation_state(
+            agent_id,
+            tddy_service::proto::connection::SessionAgentStatus::Idle,
+            &ended.summary,
+        )
+        .await;
+    }
+}
+
+/// How a turn ended, in the three forms its end is recorded in: the result its caller collects, the
+/// line the roster row shows, and whether the conversation's history grew by it.
+struct TurnEnd {
+    /// The serialized answer — an outcome or a failure, since both are answers.
+    result: String,
+    /// One line for the agent's roster row, saying what happened.
+    summary: String,
+    /// Whether this counts as a turn the conversation took. A failure spent tokens but added
+    /// nothing to the history, so it is not one.
+    took_a_turn: bool,
+}
+
+impl From<Result<PromptOutcome, tddy_discovery::subagent::SubagentError>> for TurnEnd {
+    fn from(outcome: Result<PromptOutcome, tddy_discovery::subagent::SubagentError>) -> Self {
+        match outcome {
+            Ok(outcome) => {
+                let chars = outcome
+                    .content
+                    .iter()
+                    .map(|block| block.text.chars().count())
+                    .sum::<usize>();
+                Self {
+                    result: prompt_outcome_json(outcome),
+                    summary: format!("answered ({chars} chars)"),
+                    took_a_turn: true,
+                }
+            }
+            Err(e) => Self {
+                result: subagent_error_json(&e),
+                summary: format!("turn failed: {e}"),
+                took_a_turn: false,
+            },
+        }
+    }
 }
 
 /// Tell the facilitating daemon what a conversation **this process** runs is doing.
@@ -2213,6 +2521,11 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     // Retired rather than forgotten: a cancelled conversation's tokens were spent by this session,
     // and the accounting file below is rewritten from this table wholesale.
     let cancelled = sessions.retire(session_id);
+    // Every turn of it is answered as cancelled: an await already parked on one would otherwise
+    // wait out a turn nobody will ever finish (criterion 31).
+    sessions
+        .pending
+        .cancel_conversation(session_id, "conversation cancelled");
     // The roster tracks the same conversation, so that a later detach of its agent does not report
     // a cancellation for something the main agent already closed.
     crate::session_agents::session_agent_roster().close_conversation(session_id);
@@ -2582,7 +2895,56 @@ where
     })
 }
 
-/// Build the `ToolRouter` for the three ACP-shaped subagent tools. Merged into
+/// The `subagent_prompt` input schema. Named, like [`subagent_new_session_schema`], so the router
+/// reads as the list of tools it is rather than the schemas they carry.
+fn subagent_prompt_schema() -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    schema_object(serde_json::json!({
+        "type": "object",
+        "required": ["sessionId", "prompt"],
+        "properties": {
+            "sessionId": {"type": "string"},
+            "prompt": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["type", "text"],
+                    "properties": {
+                        "type": {"type": "string"},
+                        "text": {"type": "string"}
+                    }
+                }
+            },
+            "graceMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "How long to block for the turn before returning a responseId to \
+                                collect it with. Defaults to 25000; 0 defers immediately."
+            }
+        }
+    }))
+}
+
+/// The `subagent_await` input schema: the receipt is required, bounding the wait is not.
+fn subagent_await_schema() -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
+    schema_object(serde_json::json!({
+        "type": "object",
+        "required": ["responseId"],
+        "properties": {
+            "responseId": {
+                "type": "string",
+                "description": "The id a subagent_prompt returned instead of an outcome."
+            },
+            "timeoutMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "How long to block before reporting the turn still pending. \
+                                Defaults to 25000; 0 reports whatever is ready right now."
+            }
+        }
+    }))
+}
+
+/// Build the `ToolRouter` for the ACP-shaped subagent conversation tools. Merged into
 /// `PermissionServer::new()`'s router only when [`subagent_enabled`].
 fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
     use rmcp::handler::server::router::tool::ToolRouter;
@@ -2604,28 +2966,28 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     let prompt_tool = rmcp::model::Tool::new(
         "subagent_prompt",
         "Send a prompt turn to an open subagent session (ACP session/prompt-shaped). \
-         Returns {stopReason, content}.",
-        schema_object(serde_json::json!({
-            "type": "object",
-            "required": ["sessionId", "prompt"],
-            "properties": {
-                "sessionId": {"type": "string"},
-                "prompt": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["type", "text"],
-                        "properties": {
-                            "type": {"type": "string"},
-                            "text": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        })),
+         Blocks for at most `graceMs` (default 25000). A turn that yields in time returns \
+         {stopReason, content, usage}. A turn still running when that elapses is NOT cancelled: \
+         the call returns {responseId, pending: true}, the turn keeps running, and \
+         `subagent_await` collects its outcome — in the same {stopReason, content, usage} shape — \
+         under that responseId. A responseId is a receipt, not an error.",
+        subagent_prompt_schema(),
     );
     router.add_route(subagent_route(prompt_tool, |args| {
         Box::pin(subagent_prompt_tool(args))
+    }));
+
+    let await_tool = rmcp::model::Tool::new(
+        "subagent_await",
+        "Collect the outcome of a subagent turn that subagent_prompt handed back a responseId \
+         for. Blocks for at most `timeoutMs` (default 25000). Returns the turn's {stopReason, \
+         content, usage} once it has ended, or {responseId, pending: true} if it is still \
+         running — in which case call again with the same responseId. Collecting an outcome does \
+         not consume it: the same responseId can be awaited again.",
+        subagent_await_schema(),
+    );
+    router.add_route(subagent_route(await_tool, |args| {
+        Box::pin(subagent_await_tool(args))
     }));
 
     let cancel_tool = rmcp::model::Tool::new(
@@ -3432,6 +3794,359 @@ mod tests {
                     },
                 ],
             })
+        );
+    }
+
+    // ─── Deferring a turn that outruns its caller's patience ──────────────────
+    //
+    // Feature: docs/ft/coder/managed-codebase-subagents.md (criteria 25-29, 31, 34)
+
+    use std::time::Duration;
+    use tddy_discovery::openai::TokenUsage;
+    use tddy_discovery::subagent::{ContentBlock, StopReason};
+
+    /// A task that will never finish on its own — the abort handle a registered turn is held by,
+    /// with nothing else about a real turn to get in the way.
+    fn a_turn_still_running() -> tokio::task::AbortHandle {
+        tokio::spawn(std::future::pending::<()>()).abort_handle()
+    }
+
+    fn an_end_turn_outcome(answer: &str) -> PromptOutcome {
+        PromptOutcome {
+            stop_reason: StopReason::EndTurn,
+            content: vec![ContentBlock::text(answer)],
+            usage: TokenUsage {
+                input_tokens: 30,
+                output_tokens: 12,
+            },
+        }
+    }
+
+    /// What a `watch` receiver is holding right now, as a test reads it.
+    fn state_of(receiver: &tokio::sync::watch::Receiver<TurnState>) -> TurnState {
+        receiver.borrow().clone()
+    }
+
+    // ─── The dual return shape ────────────────────────────────────────────────
+
+    /// The whole contract the tool description promises rests on one key: a caller that reads
+    /// `pending` knows it holds a receipt rather than an answer. If a deferral could be mistaken
+    /// for an outcome — or an outcome for a deferral — every caller of either is wrong.
+    #[test]
+    fn an_outcome_and_a_deferral_are_told_apart_by_the_pending_key() {
+        // Given one of each
+        let outcome: serde_json::Value = serde_json::from_str(&prompt_outcome_json(
+            an_end_turn_outcome("src/auth.rs:1-50"),
+        ))
+        .expect("an outcome must serialize to JSON");
+        let deferral: serde_json::Value = serde_json::from_str(&pending_turn_json("response-1"))
+            .expect("a deferral must serialize to JSON");
+
+        // Then the outcome carries no trace of the deferred shape
+        assert!(
+            outcome.get("pending").is_none() && outcome.get("responseId").is_none(),
+            "a turn that yielded must return the outcome shape verbatim; got: {outcome}"
+        );
+
+        // And the deferral carries no trace of an answer, only the id that will produce one
+        assert_eq!(deferral["pending"].as_bool(), Some(true));
+        assert_eq!(deferral["responseId"].as_str(), Some("response-1"));
+        assert!(
+            deferral.get("stopReason").is_none() && deferral.get("content").is_none(),
+            "a deferred turn has not stopped and has said nothing; got: {deferral}"
+        );
+    }
+
+    // ─── The blocking budget a caller names ───────────────────────────────────
+
+    /// How long a call may block is the caller's fact — a workflow step waiting on a coding agent
+    /// and a discovery question mid-edit want different numbers from the same process.
+    #[rstest]
+    #[case::grace("graceMs")]
+    #[case::timeout("timeoutMs")]
+    fn a_blocking_budget_the_caller_names_is_the_one_used(#[case] field: &str) {
+        // Given a call naming its own budget
+        let args = serde_json::json!({ field: 750 });
+
+        // When the tool reads it
+        let budget = blocking_budget(&args, field, SUBAGENT_PROMPT_GRACE);
+
+        // Then the caller's number, in milliseconds, is what it blocks for
+        assert_eq!(budget, Ok(Duration::from_millis(750)));
+    }
+
+    /// The default exists so the parameter can be omitted, not so a malformed one can be ignored.
+    #[test]
+    fn a_call_that_names_no_blocking_budget_blocks_for_the_default() {
+        // Given a call that names none
+        let args = serde_json::json!({ "sessionId": "conv-1" });
+
+        // When the tool reads it
+        let budget = blocking_budget(&args, "graceMs", SUBAGENT_PROMPT_GRACE);
+
+        // Then it blocks for the documented default
+        assert_eq!(budget, Ok(SUBAGENT_PROMPT_GRACE));
+    }
+
+    /// Zero is a budget, not an absence: "hand me the id, I will collect it myself" is exactly what
+    /// an agent dispatching parallel work wants, and reading it as "unset" would block it for 25s.
+    #[test]
+    fn a_zero_blocking_budget_defers_the_turn_without_blocking() {
+        // Given a call that will not wait at all
+        let args = serde_json::json!({ "graceMs": 0 });
+
+        // When the tool reads it
+        let budget = blocking_budget(&args, "graceMs", SUBAGENT_PROMPT_GRACE);
+
+        // Then it blocks for no time, rather than falling back to the default
+        assert_eq!(budget, Ok(Duration::ZERO));
+    }
+
+    /// Substituting the default for a budget the caller got wrong would silently block a call for
+    /// 25 seconds that asked for something else entirely, with nothing saying so.
+    #[rstest]
+    #[case::text(serde_json::json!({"graceMs": "soon"}))]
+    #[case::negative(serde_json::json!({"graceMs": -1}))]
+    fn a_blocking_budget_that_is_not_a_count_of_milliseconds_is_refused(
+        #[case] args: serde_json::Value,
+    ) {
+        // When the tool reads it
+        let budget = blocking_budget(&args, "graceMs", SUBAGENT_PROMPT_GRACE);
+
+        // Then it is refused naming the field, not quietly replaced by the default
+        let refusal = budget.expect_err("a malformed budget must be refused, not defaulted");
+        assert!(
+            refusal.contains("graceMs"),
+            "the refusal must name the field the caller got wrong; got: {refusal:?}"
+        );
+    }
+
+    // ─── The table of turns that outlived their call ──────────────────────────
+
+    /// Registering a turn is what makes its id answerable at all — before it resolves, the honest
+    /// answer to "is it done" is "no", not "I have never heard of it".
+    #[tokio::test]
+    async fn a_started_turn_is_watchable_and_reads_as_running() {
+        // Given a turn registered against its conversation
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+
+        // When a caller asks to watch it
+        let watched = pending
+            .watch("response-1")
+            .expect("a started turn must be watchable");
+
+        // Then it reads as still running
+        assert_eq!(state_of(&watched), TurnState::Running);
+    }
+
+    /// Every caller parked on a turn has to be released by it — an await that arrived while the
+    /// turn ran and one that arrived after must not get different answers.
+    #[tokio::test]
+    async fn resolving_a_turn_answers_everyone_watching_it() {
+        // Given two callers already watching one running turn
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+        let first = pending
+            .watch("response-1")
+            .expect("a started turn must be watchable");
+        let second = pending
+            .watch("response-1")
+            .expect("a started turn must be watchable");
+
+        // When the turn ends
+        pending.resolve(
+            "response-1",
+            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
+        );
+
+        // Then both hold the same finished result
+        let done = TurnState::Done(prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")));
+        assert_eq!(state_of(&first), done);
+        assert_eq!(state_of(&second), done);
+    }
+
+    /// A tool result lost between this process and the main agent must not make a computed answer
+    /// permanently unreachable, so collecting one does not consume it.
+    #[tokio::test]
+    async fn a_resolved_turn_stays_claimable() {
+        // Given a turn that has already ended and been collected once
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.resolve(
+            "response-1",
+            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
+        );
+        let _collected = pending
+            .watch("response-1")
+            .expect("a resolved turn must be watchable");
+
+        // When a later caller asks for it again
+        let again = pending
+            .watch("response-1")
+            .expect("a claimed turn must stay watchable");
+
+        // Then the same answer is still there
+        assert_eq!(
+            state_of(&again),
+            TurnState::Done(prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")))
+        );
+    }
+
+    /// An id nothing was ever stored under has to be distinguishable from one whose turn is slow —
+    /// a caller told "running" would poll forever for an answer that is never coming.
+    #[tokio::test]
+    async fn a_turn_nobody_started_is_unknown_rather_than_running() {
+        // Given a table with one turn in it
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+
+        // When a caller asks about an id that was never handed out
+        let watched = pending.watch("response-that-never-was");
+
+        // Then there is nothing to watch, so the tool can refuse rather than wait
+        assert!(
+            watched.is_none(),
+            "an unregistered response id must not read as a running turn"
+        );
+    }
+
+    /// Closing a conversation has to answer everyone parked on its turns. Leaving them unresolved
+    /// would strand an agent on an await that nothing will ever complete.
+    #[tokio::test]
+    async fn cancelling_a_conversation_resolves_every_turn_it_had_in_flight() {
+        // Given two turns running on one conversation and one on another
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-doomed", a_turn_still_running());
+        pending.start("response-2", "conv-doomed", a_turn_still_running());
+        pending.start("response-3", "conv-untouched", a_turn_still_running());
+
+        // When the first conversation is closed
+        pending.cancel_conversation("conv-doomed", "the agent was detached");
+
+        // Then both of its turns are answered, naming why
+        for response_id in ["response-1", "response-2"] {
+            let watched = pending
+                .watch(response_id)
+                .expect("a cancelled turn stays watchable");
+            let TurnState::Done(result) = state_of(&watched) else {
+                panic!("{response_id} must be resolved by the cancel, not left running");
+            };
+            assert!(
+                result.contains("the agent was detached"),
+                "a cancelled turn must say why it will never answer; got: {result}"
+            );
+        }
+
+        // And the other conversation's turn is untouched
+        let untouched = pending
+            .watch("response-3")
+            .expect("an unrelated turn stays watchable");
+        assert_eq!(state_of(&untouched), TurnState::Running);
+    }
+
+    /// A turn that yielded inside its grace period was answered on the call itself, so its id was
+    /// never handed out. Keeping it would be a per-turn leak with no reader.
+    #[tokio::test]
+    async fn a_turn_whose_id_was_never_handed_out_is_forgotten() {
+        // Given a turn that resolved before its caller gave up waiting
+        let mut pending = PendingTurns::default();
+        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.resolve(
+            "response-1",
+            prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
+        );
+
+        // When the call that started it returns the outcome directly
+        pending.forget("response-1");
+
+        // Then nothing holds it any more
+        assert!(
+            pending.watch("response-1").is_none(),
+            "a response id the caller was never given must not be retained"
+        );
+    }
+
+    // ─── The catalog ──────────────────────────────────────────────────────────
+
+    /// The advertisement filter reads off the router, so a tool absent from the router is a tool no
+    /// agent can ever call — and an agent handed a `responseId` with no way to redeem it.
+    #[test]
+    fn the_subagent_router_offers_a_tool_for_collecting_a_deferred_turn() {
+        // When the conversation tools are built
+        let names = subagent_tool_names();
+
+        // Then the one that collects a deferred turn is among them
+        assert!(
+            names.contains(&"subagent_await".to_string()),
+            "the subagent router must offer 'subagent_await'; got: {names:?}"
+        );
+    }
+
+    /// An agent cannot pass a parameter the schema does not name, so `graceMs` being declared is
+    /// what makes the blocking budget the caller's choice rather than the host's.
+    #[test]
+    fn the_prompt_tool_schema_names_the_callers_blocking_budget() {
+        // Given the advertised prompt tool
+        let router = subagent_tool_router();
+        let prompt_tool = router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "subagent_prompt")
+            .expect("the subagent router must offer 'subagent_prompt'");
+
+        // Then its input schema declares the budget, and does not require it
+        let properties = prompt_tool.input_schema["properties"]
+            .as_object()
+            .expect("subagent_prompt must declare its properties");
+        assert!(
+            properties.contains_key("graceMs"),
+            "subagent_prompt must accept 'graceMs'; got: {:?}",
+            properties.keys().collect::<Vec<_>>()
+        );
+        let required: Vec<&str> = prompt_tool.input_schema["required"]
+            .as_array()
+            .expect("subagent_prompt must declare its required fields")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(
+            !required.contains(&"graceMs"),
+            "a call that names no budget must still be valid; got required: {required:?}"
+        );
+    }
+
+    /// The await tool is useless without the id it collects, and pointless if the caller cannot
+    /// bound how long it waits — the two together are its whole input.
+    #[test]
+    fn the_await_tool_schema_requires_the_response_id_and_bounds_the_wait() {
+        // Given the advertised await tool
+        let router = subagent_tool_router();
+        let await_tool = router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "subagent_await")
+            .expect("the subagent router must offer 'subagent_await'");
+
+        // Then it requires the id, and accepts an optional bound on the wait
+        let required: Vec<&str> = await_tool.input_schema["required"]
+            .as_array()
+            .expect("subagent_await must declare its required fields")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(
+            required,
+            vec!["responseId"],
+            "subagent_await must require the response id and nothing else"
+        );
+        let properties = await_tool.input_schema["properties"]
+            .as_object()
+            .expect("subagent_await must declare its properties");
+        assert!(
+            properties.contains_key("timeoutMs"),
+            "subagent_await must accept 'timeoutMs'; got: {:?}",
+            properties.keys().collect::<Vec<_>>()
         );
     }
 }

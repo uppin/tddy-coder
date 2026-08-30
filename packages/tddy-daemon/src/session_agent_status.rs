@@ -286,7 +286,10 @@ pub fn tool_call_summary(tool_name: &str, args: &serde_json::Value) -> String {
 ///
 /// Whitespace collapses to single spaces: the consumers render the summary on one row, and a raw
 /// newline there truncates the line at the reader instead, hiding the rest without saying so.
-fn truncate_summary(raw: &str) -> String {
+///
+/// Shared with [`crate::session_agent_inference`] rather than copied: two truncation rules is how
+/// the roster's summaries and a session's start wording the same call differently.
+pub(crate) fn truncate_summary(raw: &str) -> String {
     let flattened = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     match flattened.chars().count() > SUMMARY_MAX_CHARS {
         false => flattened,
@@ -297,7 +300,7 @@ fn truncate_summary(raw: &str) -> String {
     }
 }
 
-fn now_unix_ms() -> u64 {
+pub(crate) fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))

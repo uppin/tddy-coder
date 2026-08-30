@@ -124,6 +124,39 @@ export const sessionsDrawerPage = {
   drawerItemStatus: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemStatus(sessionId), options),
 
+  /**
+   * The row's indicator is in `indicator` — one of `disconnected`, `connected`, `working`,
+   * `needs-input` (see `src/lib/sessionIndicator.ts`). The dot carries the token in `data-status`,
+   * so a spec states the operator-visible meaning rather than a Tailwind colour class.
+   */
+  expectIndicator: (sessionId: string, indicator: string, options?: Parameters<typeof cy.get>[1]) => {
+    byTestId(sessionsDrawerItemStatus(sessionId), { timeout: 5000, ...options }).should(
+      "have.attr",
+      "data-status",
+      indicator,
+    );
+  },
+
+  /**
+   * The row's dot is fading in and out — the agent is working. The animation is applied as a class
+   * (`tddy-session-dot--working`) rather than inspected as a computed style, because a headless
+   * runner reports whatever frame it samples and an assertion on opacity would be a coin toss.
+   */
+  expectIndicatorBlinking: (sessionId: string) => {
+    byTestId(sessionsDrawerItemStatus(sessionId), { timeout: 5000 }).should(
+      "have.class",
+      "tddy-session-dot--working",
+    );
+  },
+
+  /** The row's dot is steady — whatever colour it is, it is not blinking. */
+  expectIndicatorSteady: (sessionId: string) => {
+    byTestId(sessionsDrawerItemStatus(sessionId), { timeout: 5000 }).should(
+      "not.have.class",
+      "tddy-session-dot--working",
+    );
+  },
+
   /** The tooltip content element (visible on hover) that contains the full session id. */
   drawerItemTooltip: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItemTooltip(sessionId), options),

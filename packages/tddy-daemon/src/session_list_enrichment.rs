@@ -140,7 +140,10 @@ fn find_session_row<'a>(changeset: &'a Changeset, session_id: &str) -> Option<&'
 pub fn session_list_status_from_session_dir(
     session_dir: &Path,
 ) -> anyhow::Result<SessionListStatusDisplay> {
-    log::info!(
+    // `debug!`, not `info!`: this is called per row of a polled session list, and now also on the
+    // label lookup behind every reported hook — at INFO a dozen busy agents would bury the daemon
+    // log in it.
+    log::debug!(
         target: "tddy_daemon::session_list_enrichment",
         "enriching session list row for {}",
         session_dir.display()
@@ -307,6 +310,7 @@ pub fn apply_session_list_status_to_proto(
                 key: doc.key,
                 basename: doc.basename,
                 path: doc.path.to_string_lossy().into_owned(),
+                relative_path: doc.relative_path,
                 description: doc.description,
                 exists: doc.exists,
                 kind: proto_context_doc_kind(doc.kind) as i32,
@@ -510,6 +514,8 @@ state:
             branch: String::new(),
             codebase_daemon_instance_id: String::new(),
             codebase_session_id: String::new(),
+            agent_status: 0,
+            last_activity: None,
         };
         apply_session_list_status_to_proto(session_dir, &mut proto).unwrap();
         assert_eq!(proto.workflow_goal, "acceptance-tests");
@@ -873,6 +879,8 @@ sessions:
             branch: String::new(),
             codebase_daemon_instance_id: String::new(),
             codebase_session_id: String::new(),
+            agent_status: 0,
+            last_activity: None,
         };
         apply_session_list_status_to_proto(&session_dir, &mut proto).unwrap();
         assert_eq!(

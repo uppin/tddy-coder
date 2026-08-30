@@ -2215,7 +2215,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             g.insert(result.session_id.clone(), result.grpc_port);
         }
         if let Some(ref hooks) = presenter_hooks {
-            hooks.spawn_presenter_observer_task(&result.session_id, result.grpc_port);
+            // TODO(session-notifications): publish this session's presenter events onto the
+            // notification bus too, so a Telegram-started workflow session raises the same drawer
+            // indicator a web-started one does. It needs the bus (and the sessions base its label
+            // is read from) on `TelegramWorkflowSpawn`, which every inbound-control harness
+            // constructs by hand; adding it is a change of its own. The Telegram surface for these
+            // sessions is unaffected — it never went through the bus.
+            crate::telegram_session_subscriber::spawn_presenter_observer_task(
+                Some(Arc::clone(hooks)),
+                None,
+                &result.session_id,
+                result.grpc_port,
+            );
         }
         let sid_short = {
             let s = result.session_id.as_str();

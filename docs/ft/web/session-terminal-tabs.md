@@ -50,6 +50,38 @@ styled like the existing inspector tab strip (`InspectorTabs`).
 The terminal-control mutex is unchanged and remains **per session** — a single control lease covers
 all of a session's terminals (the Agent and every bash tab share it).
 
+### Full screen
+
+The tab strip carries a trailing **⛶ full-screen control**
+(`data-testid="sessions-terminal-fullscreen"`), pinned to the right edge outside the tabs' own
+horizontal scroller so a session with many terminals cannot push it out of reach. It puts the
+**active pane** into browser full screen via the Fullscreen API — the same
+`lib/browserFullscreen.ts` helper the standalone connect screen's terminal already uses.
+
+- **The active pane** is whichever tab holds the pane — the Agent terminal, a bash terminal, a
+  spawned child conversation, or a conversation with an attached agent.
+- **What goes full screen is the pane stack**, not an individual pane
+  (`data-testid="sessions-terminal-pane-stack-<sessionId>"`). Only one pane is ever visible, so the
+  operator sees exactly the active terminal — and the stack's siblings, the terminal-control mutex
+  overlay and the LiveKit connection overlay, come with it. Handing a single pane to the API instead
+  would leave the "Claim terminal" CTA behind the fullscreen layer, so a session whose control
+  another screen holds would look interactive while swallowing every keystroke.
+- **The tab strip is deliberately left behind** — full screen is the whole viewport for one
+  terminal. Because that takes the strip's own toggle with it, the pane draws a floating
+  **exit control** (`data-testid="sessions-terminal-fullscreen-exit"`) while it holds fullscreen;
+  <kbd>Esc</kbd> works too.
+- **Full screen is a view mode.** Nothing unmounts across the transition, so every terminal of the
+  session keeps its stream and the session keeps its control lease; the grid re-fits itself through
+  the terminal's own `ResizeObserver` / `FitAddon`.
+- **The state is not in the URL.** Unlike the inspector's `?full=1` and the Code pane's `?code=1`,
+  browser fullscreen cannot be restored from a link — the Fullscreen API requires a user gesture, so
+  a shared URL that claimed to reproduce it would silently not.
+
+Known limitation: <kbd>Esc</kbd> exits full screen before the terminal sees it, so a full-screen
+`vim` cannot be left with <kbd>Esc</kbd> alone. Lifting that needs the Keyboard Lock API
+(`navigator.keyboard.lock(["Escape"])`), which changes the exit gesture to press-and-hold; not done
+here.
+
 ## Requirements
 
 1. A connected session shows a terminal tab bar with an **Agent** tab that has no close control.
@@ -61,11 +93,16 @@ all of a session's terminals (the Agent and every bash tab share it).
    the Agent tab when the closed tab was active.
 5. Keyboard input routes to the **active** tab's `terminal_id` (`SendTerminalInput`).
 6. On (re)attach the tab bar reflects the session's live terminals via `ListTerminalSessions`.
+7. The tab bar carries a full-screen control that puts the **active** pane into browser full screen,
+   flips to an "exit" affordance while active, and leaves every terminal of the session mounted
+   across the transition.
 
 ## Non-goals
 
 - Renaming terminal tabs.
 - Reordering / drag-and-drop of tabs.
+- Tiling two terminals side by side — the panes are a tabbed deck, not a split.
+- Restoring full screen from a URL, or a keyboard shortcut for it.
 - Persisting open bash terminals across daemon (or coder) restart — terminals are in-memory.
 - Per-terminal control leases (the mutex stays per-session).
 

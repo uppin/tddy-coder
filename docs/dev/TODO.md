@@ -255,6 +255,137 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ## Future Enhancements
 
+### Agent conversation tabs — four follow-ups (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- **A conversation still dies when the create-session pane opens.** `runtimeLayer` now holds one
+  stable slot across every *base view* branch, so selecting a workflow session no longer unmounts the
+  conversation bodies (and a body cancels its conversation as it unmounts). `isCreating` is the
+  remaining hole: it skips the whole session-detail block, so opening "new session" cancels every open
+  conversation while its tabs survive in state. Fixing it means hoisting the runtime layer above the
+  `PanelGroup` in `SessionMainPane`, which breaks the Code-pane split — a layout change, not a wiring
+  one, and bigger than the gap.
+- **The header's Add-agent button renders where there is no tab strip.** Any selected session with a
+  client gets it, including workflow, PR-Stack and dormant sessions. The attach succeeds, the picker
+  closes, and nothing visible happens. Hide the button where no tab strip exists, or say in the UI why
+  the agent cannot be talked to there.
+- **The conversation body's inner test ids are not keyed by conversation.**
+  `agent-conversation-input` / `-transcript` / `-error` / `-turn-<i>` are unscoped while every open
+  conversation stays mounted, so two open tabs make them ambiguous and a spec that prompts with two
+  tabs open would fail on a multi-element match. No current spec does. Key them by `conversationId`,
+  or scope the page object's helpers with `.within(pane(id))`.
+- **The per-session conversation maps are never pruned.** `agentConversations` / `activeConversations`
+  in `SessionMainPane` keep entries for sessions that have left the list. Growth is trivial, but a
+  *resumed* session keeps its `sessionId`, so its tabs come back pointing at conversations the daemon
+  dropped long ago, which then re-open under ids it has already seen.
+
+### `SessionMainPane` and `SessionRuntime` are over the file-size guideline (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- Both were over before that change (539 → 560 and 515 → 587); it added ~20 and ~70 lines and deleted
+  ~80 of peer-spawn machinery from the first. Flagged rather than acted on so the feature diff stayed
+  reviewable.
+- `SessionMainPane`: the cheapest extraction is `useSessionAgentConversations` — the two per-session
+  maps plus `attachAgent` / `focusConversation` / `closeConversation`, ~85 lines. No call site moves,
+  no test repoints (every spec drives the DOM through `testIds.ts`), and it lands the file at ~478.
+- `SessionRuntime`: `useRuntimeFocusGuard` (the `focusin` steal guard and focus-on-select effect) and
+  `useSessionRuntimeClients` (the `buildSessionClient` / lease / terminal-client memos), ~90 lines
+  together, no shared state to widen. Do **not** split `SessionChildRuntime` out: it renders
+  `SessionRuntime`, which renders it, and separating them creates an import cycle that resolves at
+  runtime but trips `import/no-cycle`.
+- `CreateSessionPane` is 1319 lines and wants the same treatment, but under a six-spec Cypress test-id
+  contract a structural move should be the only thing in its diff.
+
+### `sessionPeers.ts` and `useChildSessions.ts` now describe the same population (source: session-agent-conversation-tab changeset, 2026-08-30)
+
+- Both filter `orchestratorSessionId === current && sessionId !== current`, differing only in return
+  shape. The duplication is unchanged by that changeset — but its *justification* did not survive it.
+  "Peer agents I spawned from the header" and "child conversations a workflow spawned" used to be
+  different populations; the header no longer spawns anything, so both now name the same set, rendered
+  twice on screen (the Session agents list with a Switch button, and the child tabs).
+- Collapse to one `useChildSessions(sessionId, sessions)` returning `SessionEntry[]`, let each surface
+  project what it needs, and delete `src/utils/sessionPeers.ts`. Two call sites and folding
+  `sessionPeers.test.ts` into the other's tests.
+### The Agents tab tree can only see subagents the browser already lists (source: agents-tab-subagent-tree changeset, 2026-08-30)
+
+- The tree's non-managed branch is folded from the drawer's `ListSessions` list by
+  `orchestrator_session_id`. A subagent session spawned on a host the browser is not aggregating —
+  or one whose orchestrator row is missing from the list — is dropped rather than shown, because an
+  orphan promoted to the root would claim the main agent spawned it (`agentTree.ts`).
+- The operator therefore sees a *complete* tree only when the session list is complete. Nothing on
+  screen says the tree may be partial, and there is no signal on the wire that would let it: a
+  `SessionEntry` says who spawned it, never how many it spawned.
+- A fix wants a child count on the parent — `SessionEntry.subagent_count`, stamped by the daemon that
+  owns the parent — so a node can say "3 subagents, 1 not listed here" instead of quietly rendering
+  two. That is a proto and daemon change, which is why it is not in the web-only changeset.
+
+### A roster agent's own turns are unobservable from the web (source: session-agent-conversation-tab changeset, 2026-08-29)
+
+- The web can now hold *its own* conversation with an attached agent, but it still cannot replay the
+  turns the **main agent** ran against it. There is no artifact to replay: a roster agent has no
+  session directory, `StreamAcpReplay` resolves only `unified_session_dir_path(sessions_base,
+  session_id)` (`packages/tddy-daemon/src/connection_service.rs:13518`), and the only non-test caller
+  of `append_acp_frame` in the repo is the coder process
+  (`packages/tddy-coder/src/session_participant/acp_transcript.rs:42`).
+- The answer text exists only in the one-shot `mpsc` behind the `PromptAgentConversation` call that
+  asked for it (`connection_service.rs:10256`) and is discarded after framing. What reaches a third
+  party is a <=120-char `last_activity.summary` on the roster (`session_agent_status.rs:34`).
+- Fix shape, all daemon-side: append a frame per agent turn under a synthesized per-agent transcript
+  key, add an `agent_id` axis to `StreamAcpReplayRequest`
+  (`packages/tddy-service/proto/connection.proto:1535-1542`, which has no such field), and implement
+  the peer forward `stream_acp_replay` currently refuses (`connection_service.rs:13492` returns
+  `UNIMPLEMENTED`) — a remote roster agent runs on another host, so without it the transcript would
+  only ever work for local agents.
+
+### Session notifications — three follow-ups left open (source: session-notifications-as-indicators changeset, 2026-08-29)
+
+- **The presenter's elicitation surface still bypasses the notification bus.** `ModeChanged`
+  elicitations publish `ATTENTION_REQUIRED` for indicators, but the Telegram side of them keeps
+  sending through `telegram_notifier`'s session-control path — inline keyboards, the per-chat
+  elicitation FIFO (`ActiveElicitationCoordinator`) and the tracked-session gate have no
+  representation on the bus, so the Telegram subscriber deliberately declines
+  `source == PRESENTER` to avoid double-sending. Folding that path onto the bus means giving a
+  notification an optional keyboard and a routing policy, which is a larger design than this
+  changeset's plain-text events.
+- **Two id-shortening rules still coexist in Telegram.** `session_telegram_label` (first two
+  UUID segments) survives for inbound callback-data keys, alongside `claude-{id[..8]}` and
+  `cursor-cli/{short_id}` in `telegram_session_control.rs`. Only the *notification* label was
+  unified; the session list and chain-parent buttons still name sessions their own way.
+- **`useSessionActivity.ts` is still unused.** It carries a per-session
+  `unreadCount`/`markSeen` model over `StreamSessionActivity` and no component consumes it. The
+  indicator work added a daemon-level feed rather than adopting it, because a per-session stream
+  cannot drive a drawer of rows. Either it becomes the focused session's detail feed or it goes.
+
+### `connection_service.rs` is 19,600 lines (source: subagent-conversation-inference changeset, 2026-08-29)
+
+- Pre-existing, and long past any sane module limit. Flagged here rather than acted on: this
+  changeset adds 44 lines to it, and a split would bury a reviewable feature under a 19,000-line
+  move — the same trade #418 recorded for `tddy-tools/src/server.rs`.
+- Cohesive groups a split would follow, by responsibility rather than line range: session lifecycle
+  (start / resume / delete / repoint), the agent-roster and agent-conversation RPCs, the streaming
+  replay handlers (`StreamAcpReplay`, `StreamSessionActivity`, terminal), the PR-stack and changeset
+  mutations, and peer routing / forwarding. Each is a plausible module.
+- Cost: `ConnectionServiceImpl`'s ~60 private fields would have to become `pub(crate)` or move
+  behind accessors, and every `#[cfg(test)] mod tests` block in the file (several hundred tests)
+  would repoint. That is the reason nobody has done it, and the reason it needs to be its own PR.
+
+### A cursor-cli session's orchestrator link never reaches `SessionEntry` (source: subagent-conversation-inference changeset, 2026-08-29)
+
+- `cursor_cli_spawn.rs` writes `Changeset.orchestrator_session_id` for a session spawned under a
+  stack parent (`packages/tddy-daemon/src/cursor_cli_spawn.rs:189`), but
+  `session_list_status_from_session_dir` returns early for `session_type == "cursor-cli"` with
+  `orchestrator_session_id: String::new()` before `changeset.yaml` is ever read
+  (`packages/tddy-daemon/src/session_list_enrichment.rs:177`). The claude-cli arm above it does the
+  same, and for claude-cli that is correct — it writes no changeset.
+- Consequence: `agentTree.ts` folds the subagent tree out of `orchestrator_session_id`, so a
+  cursor-cli child is not a node of it however healthy it is. **Raised stakes as of the
+  agents-tab-subagent-tree changeset (2026-08-30):** the Agents tab's tree is now the *only* surface
+  listing a session's subagents — `SessionAgentsSection` and `sessionPeers.ts` are gone — so a
+  cursor-cli subagent is not merely missing from one section, it is invisible in the product. The
+  [agent session status](../ft/daemon/agent-session-status.md) work populates the status such a row
+  would display, and is deliberately independent of it — the status lands on every agent session's
+  `SessionEntry`, whoever groups them.
+- Fix shape: read the changeset for the `orchestrator_session_id` (and `recipe`, which has the same
+  gap) in the cursor-cli arm rather than short-circuiting past it. Needs a test that a cursor-cli
+  session spawned under a stack parent lists with its parent's id.
 ### Agent context sync — the re-sync trigger is not wired (source: agent-context-sync changeset, 2026-08-29)
 
 The feature's headline claim is "continuously synced". **The setup sync landed; the continuous half
@@ -340,6 +471,21 @@ The one design question it raises and `"ready"` does not: `unknown` (`SESSION_AG
 counts as *ready* deliberately — a restored roster has nothing to say about an agent that is
 nonetheless promptable — but it must **not** count as *idle*. A wait treating "nothing to say" as
 "the turn finished" would report a turn complete that may still be running.
+
+### `stack-progress.json` is documented as a host guarantee but nothing writes it (source: pr-stack-docs changeset, 2026-08-29)
+`docs/ft/coder/pr-stacking.md` § "Progress tracking contract" states each child session is obliged to
+maintain `artifacts/stack-progress.json`, written by a shared child hook's `after_task` — "a host
+guarantee, not an agent promise". No production code writes that file; the only repo-wide match is a
+scratch-directory label in `packages/tddy-workflow-recipes/tests/stack_progress_contract_acceptance.rs:16`.
+The orchestrator in fact syncs through `sync_stack_node_from_child`, reading the child's
+`changeset.yaml` for `state.current` and `workflow.github_pr_status`. Either implement the file or
+correct the document — a reader currently believes a recipe-agnostic progress signal exists.
+
+### `GrillMeRecipe` ships blank context-doc descriptions (source: pr-stack-docs changeset, 2026-08-29)
+`GrillMeRecipe` does not override `SessionArtifactManifest::artifact_doc_descriptions()`, so its two
+context docs (`grill-me-brief.md`, `exploration.md`) reach the web with an empty `description`.
+`PrStackRecipe` supplies a one-liner per key (`pr_stack/mod.rs:342-362`) and is the model to follow.
+Cheap; affects any client rendering a doc list.
 
 
 ### The action tools are advertised where nothing implements them (source: seeded-agents-on-any-placement changeset, 2026-08-23)

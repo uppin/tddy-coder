@@ -103,10 +103,13 @@ use tddy_service::proto::connection::{
     PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
     ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
     RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse, StartDemoVmRequest, StartDemoVmResponse,
-    StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest,
-    StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
+    SessionNotificationEvent as ProtoSessionNotificationEvent,
+    SessionNotificationKind as ProtoSessionNotificationKind,
+    SessionNotificationSource as ProtoSessionNotificationSource, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
+    StreamSessionNotificationsRequest, ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -558,6 +561,102 @@ impl Stream for MpscAgentActivityStream {
 }
 
 impl Unpin for MpscAgentActivityStream {}
+
+/// Stream adapter backed by an mpsc channel for [`ProtoSessionNotificationEvent`] server-streaming.
+pub struct MpscSessionNotificationStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<ProtoSessionNotificationEvent>,
+}
+
+impl Stream for MpscSessionNotificationStream {
+    type Item = Result<ProtoSessionNotificationEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscSessionNotificationStream {}
+
+/// One session notification on the wire.
+///
+/// [`SessionNotification::os_user`] is dropped here rather than carried: it is what decides
+/// *whether* a client is shown the event at all (see [`relay_session_notifications`]), and the
+/// drawer has no use for it. Putting an authorization fact on the wire would only tell a browser
+/// something about the host's other operators that it has no reason to know.
+fn session_notification_event(
+    notification: crate::session_notifications::SessionNotification,
+) -> ProtoSessionNotificationEvent {
+    use crate::session_notifications::{SessionNotificationKind, SessionNotificationSource};
+    ProtoSessionNotificationEvent {
+        session_id: notification.session_id,
+        label: notification.label,
+        kind: match notification.kind {
+            SessionNotificationKind::Activity => ProtoSessionNotificationKind::Activity,
+            SessionNotificationKind::AttentionRequired => {
+                ProtoSessionNotificationKind::AttentionRequired
+            }
+        } as i32,
+        source: match notification.source {
+            SessionNotificationSource::ActivityStatus => {
+                ProtoSessionNotificationSource::ActivityStatus
+            }
+            SessionNotificationSource::AgentToolCall => {
+                ProtoSessionNotificationSource::AgentToolCall
+            }
+            SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
+        } as i32,
+        text: notification.text,
+        at_unix_ms: notification.at_unix_ms,
+    }
+}
+
+/// Relay task for `StreamSessionNotifications`: forwards `os_user`'s session notifications to one
+/// client until it disconnects. A client that falls behind the channel's capacity loses its oldest
+/// events (`Lagged`) and keeps its stream: the newest notification is the one an indicator is
+/// derived from, so dropping the stream over a stale one would cost more than the gap.
+///
+/// The bus is daemon-wide — one channel carries every session on the host, which is what lets a
+/// drawer of any size pay for a single subscription (PRD NFR1). Scoping to one operator is
+/// therefore this relay's job: without it, a daemon serving several users would hand each of them
+/// the others' session ids, repository names and operator-facing text.
+async fn relay_session_notifications(
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        crate::session_notifications::SessionNotification,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<ProtoSessionNotificationEvent>,
+    os_user: String,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(notification) => {
+                // Delivered only on a positive match of a named owner. A notification that names
+                // no owner is not a notification for everybody — it is one whose owner could not
+                // be established, and the safe answer to that is to deliver it to no one.
+                if notification.os_user.is_empty() || notification.os_user != os_user {
+                    continue;
+                }
+                if tx.send(session_notification_event(notification)).is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(missed)) => {
+                log::debug!(
+                    target: "tddy_daemon::session_notifications",
+                    "a notification stream client fell behind and missed {missed} event(s)"
+                );
+            }
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
 
 /// Stream adapter backed by an mpsc channel for [`AcpReplayFrame`] server-streaming.
 pub struct MpscAcpReplayStream {
@@ -1022,6 +1121,11 @@ pub struct ConnectionServiceImpl {
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
     agent_activity_hub: Arc<AgentActivityHub>,
+    /// What each agent session's own conversation says its agent is doing
+    /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
+    /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
+    /// next one.
+    session_agent_inference: Arc<crate::session_agent_inference::SessionAgentInferenceStore>,
     /// GitHub access tokens retained at web login, keyed by GitHub login — the credential the
     /// PR-status reads act with. `None` (no `auth_storage` configured) means a real login's PR
     /// status reads as *unavailable*, never as "no PR".
@@ -1062,6 +1166,11 @@ pub struct ConnectionServiceImpl {
     /// daemon.
     agent_conversations:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, AgentConversation>>>,
+    /// Where this daemon publishes its session notifications
+    /// (`docs/ft/daemon/session-notifications.md`). `None` means
+    /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
+    /// hand a client.
+    session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
     /// Self-reference for handing out `Arc<ConnectionServiceImpl>` from a `&self` method. Set
     /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `main.rs`;
     /// shared across `Clone`s because it is itself behind an `Arc`, so a clone tonic holds can
@@ -1500,6 +1609,21 @@ impl ConnectionServiceImpl {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        // A service given Telegram hooks and no explicit bus still notifies Telegram, because the
+        // notification bus is now the only path from `ReportSessionStatus` to a chat. Without this
+        // the hooks would be inert until a caller happened to install a bus, and "Telegram is
+        // configured" would stop meaning "Telegram is notified". `main.rs` overrides it with a bus
+        // carrying the notification stream alongside Telegram.
+        let session_notification_bus = telegram.as_ref().map(|hooks| {
+            Arc::new(
+                crate::session_notifications::SessionNotificationBus::new()
+                    .with_subscriber(Arc::new(
+                    crate::session_notification_subscribers::TelegramNotificationSubscriber::new(
+                        Arc::clone(hooks),
+                    ),
+                )),
+            )
+        });
         Self {
             config,
             sessions_base_for_user,
@@ -1524,6 +1648,9 @@ impl ConnectionServiceImpl {
             demo_vm_state,
             session_stdio,
             agent_activity_hub: Arc::new(AgentActivityHub::default()),
+            session_agent_inference: Arc::new(
+                crate::session_agent_inference::SessionAgentInferenceStore::new(),
+            ),
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
@@ -1542,6 +1669,7 @@ impl ConnectionServiceImpl {
             agent_conversations: Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
+            session_notification_bus,
             self_handle: Arc::new(std::sync::OnceLock::new()),
         }
     }
@@ -1698,6 +1826,19 @@ impl ConnectionServiceImpl {
         self.task_registry.clone()
     }
 
+    /// Substitute the session-notification bus (builder pattern).
+    ///
+    /// Replaces the Telegram-only bus [`Self::new`] builds from the hooks it was given, which is
+    /// what `main.rs` does to add the `StreamSessionNotifications` relay beside Telegram, and what
+    /// a test does to record what a publish reached.
+    pub fn with_session_notification_bus(
+        mut self,
+        bus: Arc<crate::session_notifications::SessionNotificationBus>,
+    ) -> Self {
+        self.session_notification_bus = Some(bus);
+        self
+    }
+
     /// Attach an idle-timeout tracker to this service (builder pattern).
     ///
     /// When set, every RPC handler calls `tracker.record_activity()` so the relay daemon does
@@ -1778,10 +1919,40 @@ impl ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve sessions path"))
     }
 
-    fn maybe_spawn_telegram_observer(&self, session_id: &str, grpc_port: u16) {
-        if let Some(ref tg) = self.telegram {
-            tg.spawn_presenter_observer_task(session_id, grpc_port);
-        }
+    /// Start the presenter observer for a freshly spawned workflow session: Telegram's surface when
+    /// this daemon has one, and — when it has a bus and can resolve `os_user`'s sessions directory
+    /// to read the session's label from — the notification publish that raises its indicator.
+    ///
+    /// The two are independent. Gating the observer on Telegram would leave a workflow session's
+    /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
+    /// them; `spawn_presenter_observer_task` declines only when *neither* sink exists.
+    fn maybe_spawn_presenter_observer(&self, os_user: &str, session_id: &str, grpc_port: u16) {
+        let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
+            match crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            ) {
+                Some(sessions_base) => {
+                    Some(crate::session_notifications::SessionNotificationPublishing {
+                        bus: Arc::clone(bus),
+                        sessions_base,
+                        os_user: os_user.to_string(),
+                    })
+                }
+                None => {
+                    log::warn!(
+                        "presenter observer for session {session_id}: no sessions base for os_user — its notifications will not be published"
+                    );
+                    None
+                }
+            }
+        });
+        crate::telegram_session_subscriber::spawn_presenter_observer_task(
+            self.telegram.clone(),
+            publishing,
+            session_id,
+            grpc_port,
+        );
     }
 
     /// PR status for one branch, resolved with the calling operator's own GitHub credential.
@@ -2205,6 +2376,7 @@ impl ConnectionServiceImpl {
                 Some(Arc::new(StackChildSpawnHandler {
                     room_host: Arc::new(self.session_room_host()),
                     stack_parent_host: Arc::new(self.clone()),
+                    service: self.clone(),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),
                     claude_cli_manager: Arc::clone(&self.claude_cli_manager),
@@ -7323,6 +7495,12 @@ struct StackChildSpawnHandler {
     /// daemon, so the resolution never leaves the host — but it takes the one path every spawn
     /// takes, rather than a second one that would drift from it.
     stack_parent_host: Arc<dyn StackParentHost>,
+
+    /// The daemon whose attachment path materializes the child's documents. A shallow clone (every
+    /// mutable field is behind an `Arc`), exactly as [`DaemonSessionRoomHost`] holds one: the
+    /// documents go through [`ConnectionServiceImpl::prepare_session_attachments`], the same
+    /// materializer `StartSession` uses, so a child cannot differ by how it was started.
+    service: ConnectionServiceImpl,
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     claude_cli_manager: Arc<CliSessionManager>,
@@ -7355,11 +7533,20 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             .branch_suggestion
             .clone()
             .ok_or_else(|| format!("node '{node_id}' has no branch_suggestion to create"))?;
-        let initial_prompt = if node.description.trim().is_empty() {
+        let node_brief = if node.description.trim().is_empty() {
             node.title.clone()
         } else {
             format!("{}\n\n{}", node.title, node.description)
         };
+        // The documents the orchestrator authored for this node, attached by reference. One that
+        // has not been written yet is skipped rather than fatal — starting a node before the docs
+        // pass has run is sometimes correct (`docs/ft/coder/pr-stack-docs.md`).
+        let attachments = crate::stack_doc_attachments::stack_doc_attachments(
+            &self.orchestrator_session_dir,
+            &self.orchestrator_session_id,
+            &local_instance_id_for_config(&self.config),
+            node_id,
+        );
         // Inherit the orchestrator's model — the daemon has no standalone model default and an
         // empty model is rejected by the spawn path.
         let meta = tddy_core::read_session_metadata(&self.orchestrator_session_dir)
@@ -7370,6 +7557,34 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
         }
 
         let child_session_id = Uuid::new_v4().to_string();
+        // Materialized before the spawn, exactly as `start_session_core` does for a `StartSession`
+        // request: the child's `artifacts/attachments/` is in place by the time its agent starts.
+        // The session token is empty because every ref this handler builds names *this* daemon —
+        // the orchestrator is local to it — so the read never leaves the host and never needs one.
+        let materialized = self
+            .service
+            .prepare_session_attachments(&AttachmentMaterialization {
+                session_token: "",
+                os_user: &self.os_user,
+                sessions_base: &self.sessions_base,
+                session_id: &child_session_id,
+                attachments: &attachments,
+                progress: &AttachmentProgressSink::discarding(),
+            })
+            .await
+            .map_err(|status| {
+                format!(
+                    "failed to attach the node's documents: {}",
+                    status.message()
+                )
+            })?;
+        // The changeset is named in the prompt so the agent reads its boundaries before writing
+        // code instead of finding the file by chance — the same hand-off the grill-me brief gets,
+        // and the same rule the Start-session dialog's children go through.
+        let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
+            &node_brief,
+            &materialized,
+        );
         let response = spawn_claude_cli_session_inner(
             &self.config,
             &self.tddy_data_dir,
@@ -7408,6 +7623,442 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
         .await
         .map_err(|status| status.message().to_string())?;
         Ok(response.into_inner().session_id)
+    }
+}
+
+/// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
+/// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
+/// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.
+///
+/// These drive real spawns. A git worktree is cut, the daemon's own attachment materializer runs,
+/// and a stub standing in for `claude` records the command line it was handed — so deleting the
+/// call to [`crate::stack_doc_attachments`] fails here, which no test of that pure helper does.
+#[cfg(test)]
+mod stack_child_spawn_tests {
+    use super::*;
+    use tddy_core::toolcall::ChildSpawnHandler;
+    use tddy_core::{Stack, StackNode};
+    use tddy_testing_commons::wait::eventually;
+    use tddy_workflow::SESSION_ATTACHMENTS_SUBDIR;
+
+    const VALID_TOKEN: &str = "stack-child-token";
+    const TEST_PROJECT_ID: &str = "stack-child-project";
+    const TEST_MODEL: &str = "claude-opus-4-8";
+    const ORCHESTRATOR_SESSION_ID: &str = "018f7777-cccc-7000-3333-000000000001";
+    const NODE_ID: &str = "n1";
+    const NODE_TITLE: &str = "Token store";
+    const NODE_DESCRIPTION: &str = "Adds the token store the rest of the stack reads.";
+
+    /// How long the stub gets to record the command line it was spawned with. A safety net, not a
+    /// prediction: it covers fork/exec and the daemon's own worktree setup under a loaded suite.
+    const AGENT_SPAWN: Duration = Duration::from_secs(10);
+
+    // ── The orchestrator ─────────────────────────────────────────────────────────────────────
+
+    /// A pr-stack orchestrator session on a daemon that can really start a child: a registered
+    /// project with a git repo, and a stub in place of `claude` that records its argv.
+    struct Orchestrator {
+        service: ConnectionServiceImpl,
+        config: DaemonConfig,
+        os_user: String,
+        sessions: tempfile::TempDir,
+        agent_command_line_path: PathBuf,
+        _repo: tempfile::TempDir,
+        _config_dir: tempfile::TempDir,
+        _stub_dir: tempfile::TempDir,
+    }
+
+    fn a_pr_stack_orchestrator() -> Orchestrator {
+        let os_user = crate::user_sessions_path::username_for_uid(unsafe { libc::getuid() })
+            .expect("the test process's uid must resolve to a passwd entry");
+
+        let repo = tempfile::tempdir().expect("repo dir");
+        create_repo_with_origin(repo.path());
+
+        let sessions = tempfile::tempdir().expect("sessions dir");
+        register_project(&sessions.path().join("projects"), repo.path());
+
+        let stub_dir = tempfile::tempdir().expect("stub dir");
+        let agent_command_line_path = stub_dir.path().join("agent-command-line.txt");
+        let stub = write_argv_recording_stub(stub_dir.path(), &agent_command_line_path);
+
+        let config_dir = tempfile::tempdir().expect("config dir");
+        let config_path = config_dir.path().join("daemon.yaml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "users:\n  - github_user: \"{os_user}\"\n    os_user: \"{os_user}\"\nclaude_cli:\n  binary_path: {}\n",
+                stub.display()
+            ),
+        )
+        .expect("write daemon config");
+        let config = DaemonConfig::load(&config_path).expect("daemon config must parse");
+
+        let sessions_base = sessions.path().to_path_buf();
+        let resolver: SessionsBaseResolver = Arc::new(move |_| Some(sessions_base.clone()));
+        let resolved_user = os_user.clone();
+        let user_resolver: SessionUserResolver =
+            Arc::new(move |token| (token == VALID_TOKEN).then(|| resolved_user.clone()));
+        let service = ConnectionServiceImpl::new(
+            config.clone(),
+            resolver,
+            sessions.path().to_path_buf(),
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        );
+
+        let orchestrator = Orchestrator {
+            service,
+            config,
+            os_user,
+            sessions,
+            agent_command_line_path,
+            _repo: repo,
+            _config_dir: config_dir,
+            _stub_dir: stub_dir,
+        };
+        orchestrator.write_planned_stack();
+        orchestrator
+    }
+
+    impl Orchestrator {
+        fn sessions_base(&self) -> &Path {
+            self.sessions.path()
+        }
+
+        fn session_dir(&self, session_id: &str) -> PathBuf {
+            unified_session_dir_path(self.sessions_base(), session_id)
+        }
+
+        fn artifacts(&self) -> PathBuf {
+            self.session_dir(ORCHESTRATOR_SESSION_ID).join("artifacts")
+        }
+
+        /// The planned stack and the session metadata a spawn reads: one undeveloped node, and the
+        /// model the child inherits.
+        fn write_planned_stack(&self) {
+            let dir = self.session_dir(ORCHESTRATOR_SESSION_ID);
+            std::fs::create_dir_all(dir.join("artifacts")).expect("orchestrator artifacts");
+            std::fs::write(
+                dir.join(".session.yaml"),
+                format!(
+                    "session_id: {ORCHESTRATOR_SESSION_ID}\nproject_id: {TEST_PROJECT_ID}\n\
+                     created_at: 2026-08-29T10:00:00Z\nupdated_at: 2026-08-29T10:00:00Z\n\
+                     status: active\nsession_type: claude-cli\nrecipe: pr-stack\nmodel: {TEST_MODEL}\n"
+                ),
+            )
+            .expect("write orchestrator metadata");
+            tddy_core::write_changeset(
+                &dir,
+                &Changeset {
+                    stack: Some(Stack {
+                        version: 1,
+                        nodes: vec![StackNode {
+                            node_id: NODE_ID.to_string(),
+                            title: NODE_TITLE.to_string(),
+                            description: NODE_DESCRIPTION.to_string(),
+                            branch_suggestion: Some("feature/token-store".to_string()),
+                            ..Default::default()
+                        }],
+                    }),
+                    ..Changeset::default()
+                },
+            )
+            .expect("write orchestrator changeset");
+        }
+
+        /// The stack-level documents every child is offered.
+        fn with_shared_documents(self) -> Self {
+            std::fs::write(self.artifacts().join("pr-stack-plan.md"), "# The stack\n")
+                .expect("write plan");
+            std::fs::write(self.artifacts().join("exploration.md"), "# The map\n")
+                .expect("write exploration map");
+            self
+        }
+
+        /// The pair the `write-stack-docs` pass authors for one node.
+        fn with_documents_for(self, node_id: &str) -> Self {
+            let node_dir = self.artifacts().join("prs").join(node_id);
+            std::fs::create_dir_all(&node_dir).expect("node docs dir");
+            std::fs::write(
+                node_dir.join("PRD.md"),
+                format!("# {node_id} — what it delivers\n"),
+            )
+            .expect("write prd");
+            std::fs::write(
+                node_dir.join("changeset.md"),
+                format!("# {node_id} — where the edges are\n"),
+            )
+            .expect("write changeset");
+            self
+        }
+
+        /// The handler the `pr_spawn_child` tool reaches, wired exactly as
+        /// [`ConnectionServiceImpl::start_claude_cli_session`] wires it for a pr-stack session.
+        fn child_spawn_handler(&self) -> StackChildSpawnHandler {
+            StackChildSpawnHandler {
+                room_host: Arc::new(self.service.session_room_host()),
+                // Same clone production passes: the orchestrator is a session of this daemon, so
+                // resolving a child's base never leaves the host.
+                stack_parent_host: Arc::new(self.service.clone()),
+                service: self.service.clone(),
+                config: self.config.clone(),
+                tddy_data_dir: self.sessions_base().to_path_buf(),
+                claude_cli_manager: Arc::clone(&self.service.claude_cli_manager),
+                os_user: self.os_user.clone(),
+                project_id: TEST_PROJECT_ID.to_string(),
+                sessions_base: self.sessions_base().to_path_buf(),
+                orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
+                orchestrator_session_dir: self.session_dir(ORCHESTRATOR_SESSION_ID),
+            }
+        }
+
+        /// What the operator's Start-session dialog sends for this node: the same documents, as
+        /// pre-populated attachment rows, plus the node's own brief as the initial prompt.
+        fn dialog_start_request(&self) -> StartSessionRequest {
+            StartSessionRequest {
+                session_token: VALID_TOKEN.to_string(),
+                project_id: TEST_PROJECT_ID.to_string(),
+                session_type: "claude-cli".to_string(),
+                model: TEST_MODEL.to_string(),
+                branch_worktree_intent: "new_branch_from_base".to_string(),
+                new_branch_name: "feature/token-store".to_string(),
+                initial_prompt: format!("{NODE_TITLE}\n\n{NODE_DESCRIPTION}"),
+                stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+                attachments: crate::stack_doc_attachments::stack_doc_attachments(
+                    &self.session_dir(ORCHESTRATOR_SESSION_ID),
+                    ORCHESTRATOR_SESSION_ID,
+                    &local_instance_id_for_config(&self.config),
+                    NODE_ID,
+                ),
+                ..Default::default()
+            }
+        }
+
+        async fn start_from_the_dialog(&self) -> String {
+            self.service
+                .start_session(Request::new(self.dialog_start_request()))
+                .await
+                .expect("the dialog's StartSession must succeed")
+                .into_inner()
+                .session_id
+        }
+
+        /// The command line the child's agent was actually spawned with, once the stub has recorded
+        /// it. Read off disk rather than off the PTY: a terminal capture wraps at the window width,
+        /// which would split the very sentence under test.
+        async fn the_agent_was_spawned_with(&self) -> String {
+            let path = self.agent_command_line_path.clone();
+            eventually(
+                "the child's agent to record its command line",
+                AGENT_SPAWN,
+                || {
+                    std::fs::read_to_string(&path)
+                        .map_err(|e| format!("the stub has recorded nothing yet: {e}"))
+                },
+            )
+            .await
+        }
+
+        /// What landed in the child's attachment store, by basename.
+        fn documents_held_by(&self, session_id: &str) -> Vec<String> {
+            let dir = self
+                .session_dir(session_id)
+                .join("artifacts")
+                .join(SESSION_ATTACHMENTS_SUBDIR);
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                return Vec::new();
+            };
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        }
+    }
+
+    // ── Fixtures ─────────────────────────────────────────────────────────────────────────────
+
+    fn create_repo_with_origin(dir: &Path) {
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "t@t.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "t@t.com")
+                .output()
+                .expect("git command must run");
+        };
+        run(&["init", "-b", "main"]);
+        run(&["config", "user.email", "t@t.com"]);
+        run(&["config", "user.name", "Test"]);
+        run(&["commit", "--allow-empty", "-m", "init"]);
+        run(&["remote", "add", "origin", dir.to_str().expect("repo path")]);
+        run(&["push", "-u", "origin", "main"]);
+    }
+
+    fn register_project(projects_dir: &Path, repo: &Path) {
+        std::fs::create_dir_all(projects_dir).expect("projects dir");
+        std::fs::write(
+            projects_dir.join("projects.yaml"),
+            format!(
+                "projects:\n  - project_id: {TEST_PROJECT_ID}\n    name: stack\n    git_url: \"\"\n    main_repo_path: {}\n",
+                repo.display()
+            ),
+        )
+        .expect("write projects.yaml");
+    }
+
+    /// A stand-in for `claude` that writes each argument it was given on its own line, so a
+    /// multi-line prompt is recoverable verbatim.
+    fn write_argv_recording_stub(dir: &Path, record_to: &Path) -> PathBuf {
+        let script = dir.join("stub_claude.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
+                record_to.display()
+            ),
+        )
+        .expect("write stub");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+            .expect("stub must be executable");
+        script
+    }
+
+    fn a_changeset_reading_instruction(command_line: &str) -> Option<&str> {
+        command_line
+            .lines()
+            .find(|line| line.contains("Read your changeset at"))
+    }
+
+    // ── The agent's path: `pr_spawn_child` ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn a_child_the_agent_spawned_holds_the_nodes_documents() {
+        // Given
+        let orchestrator = a_pr_stack_orchestrator()
+            .with_shared_documents()
+            .with_documents_for(NODE_ID);
+
+        // When
+        let child = orchestrator
+            .child_spawn_handler()
+            .spawn_child(NODE_ID)
+            .await
+            .expect("spawning the planned node must succeed");
+
+        // Then — materialized into the child's own attachment store, flat
+        assert_eq!(
+            orchestrator.documents_held_by(&child),
+            vec![
+                "PRD.md".to_string(),
+                "changeset.md".to_string(),
+                "exploration.md".to_string(),
+                "pr-stack-plan.md".to_string(),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                orchestrator
+                    .session_dir(&child)
+                    .join("artifacts")
+                    .join(SESSION_ATTACHMENTS_SUBDIR)
+                    .join("changeset.md")
+            )
+            .expect("the child's changeset must be readable"),
+            format!("# {NODE_ID} — where the edges are\n"),
+            "the child must hold its own node's boundaries, byte for byte"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_child_the_agent_spawned_is_told_to_read_its_changeset() {
+        // Given
+        let orchestrator = a_pr_stack_orchestrator()
+            .with_shared_documents()
+            .with_documents_for(NODE_ID);
+
+        // When
+        orchestrator
+            .child_spawn_handler()
+            .spawn_child(NODE_ID)
+            .await
+            .expect("spawning the planned node must succeed");
+
+        // Then — the node's brief, and where to read its boundaries before writing code
+        let command_line = orchestrator.the_agent_was_spawned_with().await;
+        assert!(
+            command_line.contains(NODE_TITLE),
+            "the child must be given its node's brief; got: {command_line:?}"
+        );
+        assert_eq!(
+            a_changeset_reading_instruction(&command_line),
+            Some("Read your changeset at artifacts/attachments/changeset.md before writing code — it states this PR's responsibility, its boundaries, and what each dependency delivers."),
+            "the child must be pointed at the changeset it actually holds"
+        );
+    }
+
+    // ── The operator's path: the Start-session dialog ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn a_child_started_from_the_dialog_is_told_to_read_its_changeset() {
+        // Given
+        let orchestrator = a_pr_stack_orchestrator()
+            .with_shared_documents()
+            .with_documents_for(NODE_ID);
+
+        // When
+        let child = orchestrator.start_from_the_dialog().await;
+
+        // Then — a child must not differ by how it was started
+        assert_eq!(
+            orchestrator.documents_held_by(&child),
+            vec![
+                "PRD.md".to_string(),
+                "changeset.md".to_string(),
+                "exploration.md".to_string(),
+                "pr-stack-plan.md".to_string(),
+            ]
+        );
+        let command_line = orchestrator.the_agent_was_spawned_with().await;
+        assert_eq!(
+            a_changeset_reading_instruction(&command_line),
+            Some("Read your changeset at artifacts/attachments/changeset.md before writing code — it states this PR's responsibility, its boundaries, and what each dependency delivers."),
+            "the dialog's child must be pointed at its changeset too"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_child_started_before_its_documents_were_written_is_told_nothing() {
+        // Given — the docs pass has not reached this node; only the stack-level pair exists
+        let orchestrator = a_pr_stack_orchestrator().with_shared_documents();
+
+        // When
+        let child = orchestrator.start_from_the_dialog().await;
+
+        // Then — the shared documents still arrive, and nothing points at a file that is not there
+        assert_eq!(
+            orchestrator.documents_held_by(&child),
+            vec!["exploration.md".to_string(), "pr-stack-plan.md".to_string()]
+        );
+        let command_line = orchestrator.the_agent_was_spawned_with().await;
+        assert!(
+            command_line.contains(NODE_TITLE),
+            "the child must still be given its node's brief; got: {command_line:?}"
+        );
+        assert_eq!(
+            a_changeset_reading_instruction(&command_line),
+            None,
+            "pointing at a changeset nobody wrote would send the agent hunting"
+        );
     }
 }
 
@@ -7578,9 +8229,9 @@ fn file_mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-fn cleanup_materialized_attachments(session_dir: &Path, written_basenames: &[String]) {
+fn cleanup_materialized_attachments(session_dir: &Path, written: &[SessionAttachment]) {
     let attachments_dir = tddy_workflow::session_attachments_root(session_dir);
-    for basename in written_basenames {
+    for basename in written.iter().map(|a| &a.basename) {
         let path = attachments_dir.join(basename);
         if path.is_file() {
             if let Err(e) = std::fs::remove_file(&path) {
@@ -8168,12 +8819,16 @@ impl ConnectionServiceImpl {
     }
 
     /// Pre-creates `session_dir` when needed and materializes the request's attachments before spawn.
+    ///
+    /// Answers with the attachments that reached the session's store, which is what a caller
+    /// deriving anything from them — the pr-stack changeset the child's prompt names, say — must
+    /// read: the request says what was asked for, this says what the child actually holds.
     async fn prepare_session_attachments(
         &self,
         ctx: &AttachmentMaterialization<'_>,
-    ) -> Result<(), Status> {
+    ) -> Result<Vec<SessionAttachment>, Status> {
         if ctx.attachments.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let session_dir = ctx.session_dir();
         std::fs::create_dir_all(&session_dir)
@@ -8184,9 +8839,9 @@ impl ConnectionServiceImpl {
     async fn materialize_session_attachments(
         &self,
         ctx: &AttachmentMaterialization<'_>,
-    ) -> Result<(), Status> {
+    ) -> Result<Vec<SessionAttachment>, Status> {
         if ctx.attachments.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let session_dir = ctx.session_dir();
@@ -8205,7 +8860,7 @@ impl ConnectionServiceImpl {
             ctx.os_user,
             &self.staging_base_dir,
         );
-        let mut written: Vec<String> = Vec::new();
+        let mut written: Vec<SessionAttachment> = Vec::new();
         let attachment_count = ctx.attachments.len() as u32;
 
         for (index, att) in ctx.attachments.iter().enumerate() {
@@ -8252,7 +8907,12 @@ impl ConnectionServiceImpl {
                     // report — and it is the only report a source that copies in one step makes.
                     let bytes = attachment_size_bytes(&session_dir, &basename);
                     reporter.report(bytes, bytes);
-                    written.push(basename);
+                    // Under the basename it was written as, not the one that was requested — the
+                    // two differ whenever validation trimmed it.
+                    written.push(SessionAttachment {
+                        basename,
+                        source: att.source.clone(),
+                    });
                 }
                 Err(e) => {
                     cleanup_materialized_attachments(&session_dir, &written);
@@ -8261,7 +8921,7 @@ impl ConnectionServiceImpl {
             }
         }
 
-        Ok(())
+        Ok(written)
     }
 
     /// Copies one staged file into the session's attachments.
@@ -8658,15 +9318,23 @@ impl ConnectionServiceImpl {
         let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         std::fs::create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
-        self.prepare_session_attachments(&AttachmentMaterialization {
-            session_token: &req.session_token,
-            os_user,
-            sessions_base,
-            session_id,
-            attachments: &req.attachments,
-            progress,
-        })
-        .await?;
+        let materialized = self
+            .prepare_session_attachments(&AttachmentMaterialization {
+                session_token: &req.session_token,
+                os_user,
+                sessions_base,
+                session_id,
+                attachments: &req.attachments,
+                progress,
+            })
+            .await?;
+        // Where the codebase lives is not a reason for a planned PR's child to come up without its
+        // boundaries: the same rule the co-located branches apply, on the attachments this host
+        // materialized into the session it is about to run the agent for.
+        let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
+            req.initial_prompt.trim(),
+            &materialized,
+        );
 
         let tddy_tools_path = self.resolve_tddy_tools_path();
         let remote = crate::split_session::split_remote_tool_env(
@@ -8789,7 +9457,7 @@ impl ConnectionServiceImpl {
                 context_dir,
                 req.model.trim(),
                 &resolve_start_session_claude_binary(&self.config),
-                Some(req.initial_prompt.trim()).filter(|p| !p.is_empty()),
+                Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
                 Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
                 req.dangerously_skip_permissions,
                 false,
@@ -9325,15 +9993,24 @@ impl ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
-            self.prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user,
-                sessions_base: &sessions_base,
-                session_id: &session_id,
-                attachments: &req.attachments,
-                progress,
-            })
-            .await?;
+            let materialized = self
+                .prepare_session_attachments(&AttachmentMaterialization {
+                    session_token: &req.session_token,
+                    os_user,
+                    sessions_base: &sessions_base,
+                    session_id: &session_id,
+                    attachments: &req.attachments,
+                    progress,
+                })
+                .await?;
+            // A child of a planned PR is told where its boundaries are, however it was started: the
+            // dialog opens with the node's documents pre-attached but carries only the node's title
+            // and description as the prompt, so the line is added here rather than in the browser.
+            // Derived from what materialized, so it can only name a document the child holds.
+            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
+                req.initial_prompt.trim(),
+                &materialized,
+            );
             let stack_parent_for_claude_cli: Option<String> = {
                 let t = req.stack_parent.trim();
                 if t.is_empty() {
@@ -9371,7 +10048,7 @@ impl ConnectionServiceImpl {
                         req.new_branch_name.trim(),
                         req.selected_integration_base_ref.trim(),
                         req.selected_branch_to_work_on.trim(),
-                        req.initial_prompt.trim(),
+                        &initial_prompt,
                         &req.claude_args,
                         req.permission_mode.trim(),
                         req.dangerously_skip_permissions,
@@ -9396,7 +10073,7 @@ impl ConnectionServiceImpl {
                     req.new_branch_name.trim(),
                     req.selected_integration_base_ref.trim(),
                     req.selected_branch_to_work_on.trim(),
-                    req.initial_prompt.trim(),
+                    &initial_prompt,
                     req.permission_mode.trim(),
                     req.dangerously_skip_permissions,
                     stack_parent_for_claude_cli.as_deref(),
@@ -9417,15 +10094,22 @@ impl ConnectionServiceImpl {
             )
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
             let session_id = Uuid::now_v7().to_string();
-            self.prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user,
-                sessions_base: &sessions_base,
-                session_id: &session_id,
-                attachments: &req.attachments,
-                progress,
-            })
-            .await?;
+            let materialized = self
+                .prepare_session_attachments(&AttachmentMaterialization {
+                    session_token: &req.session_token,
+                    os_user,
+                    sessions_base: &sessions_base,
+                    session_id: &session_id,
+                    attachments: &req.attachments,
+                    progress,
+                })
+                .await?;
+            // Same rule as the claude-cli branch above: which agent runs a planned PR's child is
+            // not a reason for it to come up without its boundaries.
+            let initial_prompt = crate::stack_doc_attachments::prompt_with_attached_changeset(
+                req.initial_prompt.trim(),
+                &materialized,
+            );
             let managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>> = if req
                 .managed_codebase
                 && !req.recipe.trim().is_empty()
@@ -9452,7 +10136,7 @@ impl ConnectionServiceImpl {
                         req.selected_branch_to_work_on.trim(),
                         Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                         req.stack_parent_daemon_instance_id.trim(),
-                        req.initial_prompt.trim(),
+                        &initial_prompt,
                         req.managed_codebase,
                         &req.specialized_agents,
                         managed_recipe,
@@ -9490,7 +10174,7 @@ impl ConnectionServiceImpl {
                     },
                     None => SpawnStackParent::NoParent,
                 },
-                req.initial_prompt.trim(),
+                &initial_prompt,
                 req.managed_codebase,
                 &mut started_agents,
                 managed_recipe,
@@ -9528,6 +10212,9 @@ impl ConnectionServiceImpl {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
+        // The spawn closure below takes ownership; the presenter observer started afterwards needs
+        // the same user to resolve the session's label from its sessions directory.
+        let observer_os_user = os_user.clone();
         let tool_path = req.tool_path.clone();
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let repo_path = repo_path.to_path_buf();
@@ -9742,7 +10429,11 @@ impl ConnectionServiceImpl {
             "StartSession: spawn returned, session_id={}",
             result.session_id
         );
-        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
+        self.maybe_spawn_presenter_observer(
+            &observer_os_user,
+            &result.session_id,
+            result.grpc_port,
+        );
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -10853,6 +11544,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
+        // Tailing a session reads its transcript once, on the listing that first sees it, so the
+        // seed is paid for on this blocking thread rather than on the reactor.
+        let session_agent_inference = Arc::clone(&self.session_agent_inference);
+        let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
         let entries =
             spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
@@ -10905,6 +11600,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         // daemon as its codebase host.
                         codebase_daemon_instance_id: s.codebase_daemon_instance_id,
                         codebase_session_id: s.codebase_session_id,
+                        // Inferred below from the session's own conversation
+                        // (docs/ft/daemon/agent-session-status.md). UNSPECIFIED with no activity is
+                        // the honest value for a session nothing has been observed on, and stays the
+                        // value for every session type that runs no agent.
+                        agent_status:
+                            tddy_service::proto::connection::SessionAgentStatus::Unspecified as i32,
+                        last_activity: None,
                     };
                     if let Err(e) = session_list_enrichment::apply_session_list_status_to_proto(
                         &session_dir,
@@ -10916,6 +11618,27 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                             session_dir.display(),
                             e
                         );
+                    }
+                    // Only a session that runs an agent is tailed — the same gate
+                    // `report_session_status` applies, and for the same reason: those are the two
+                    // session types that write a conversation. A `workspace` session holds a clone
+                    // and would spend a subscription and a file read to conclude UNSPECIFIED.
+                    if matches!(entry.session_type.as_str(), "claude-cli" | "cursor-cli") {
+                        session_agent_inference.ensure_tailing(
+                            &agent_activity_hub,
+                            &entry.session_id,
+                            &session_dir,
+                        );
+                        let inferred = crate::session_agent_inference::inferred_activity(
+                            tddy_core::SessionActivityStatus::from_wire(&entry.activity_status),
+                            session_agent_inference.latest(&entry.session_id).as_ref(),
+                        );
+                        entry.agent_status =
+                            crate::session_agent_inference::session_agent_status(inferred.as_ref())
+                                as i32;
+                        entry.last_activity = inferred
+                            .as_ref()
+                            .and_then(crate::session_agent_status::AgentActivity::to_proto);
                     }
                     out.push(entry);
                 }
@@ -11456,6 +12179,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
+        // The spawn closure below takes ownership; the presenter observer started afterwards needs
+        // the same user to resolve the session's label from its sessions directory.
+        let observer_os_user = os_user.clone();
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
@@ -11585,7 +12311,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
         };
-        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
+        self.maybe_spawn_presenter_observer(
+            &observer_os_user,
+            &result.session_id,
+            result.grpc_port,
+        );
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -11728,6 +12458,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // one being deleted. Forgetting it before the directory goes is what stops a tool call
         // arriving a moment later from being served out of a checkout that no longer exists.
         self.hosted_agent_clones.forget_checkout(session_id);
+        // The conversation this daemon was tailing goes with the session: its consumer task exits on
+        // the next record rather than holding a subscription for the daemon's life, and a session id
+        // reused later starts from nothing observed instead of the deleted session's last call.
+        self.session_agent_inference.forget(session_id);
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }
@@ -13492,15 +14226,29 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             req.status
         );
 
-        if let Some(ref telegram) = self.telegram {
-            let mut w = telegram.watcher.lock().await;
-            w.on_claude_cli_activity_status_changed(
-                &telegram.config,
-                &*telegram.sender,
+        // One publish, every interested subscriber: Telegram renders the attention-worthy ones,
+        // and the notification stream carries all of them to the drawer's indicators. A subscriber
+        // that fails is logged by the bus and never fails this hook (PRD NFR3).
+        //
+        // The notification names `req.os_user` as its owner — the same user whose sessions
+        // directory the hook token was just checked against — so the stream can hand it to that
+        // operator's clients and to no one else's.
+        if let Some(ref bus) = self.session_notification_bus {
+            let label = crate::session_notifications::resolve_session_label(
+                &sessions_base,
                 &req.session_id,
-                &req.status,
-            )
-            .await;
+            );
+            if let Some(notification) =
+                crate::session_notifications::notification_for_activity_status(
+                    &req.session_id,
+                    &req.os_user,
+                    &label,
+                    &req.status,
+                    now_unix_ms(),
+                )
+            {
+                bus.publish(notification).await;
+            }
         }
 
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
@@ -13621,6 +14369,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.session_id,
                 e
             );
+        }
+        // The agent's own tool loop is the other thing that means "this session is working", and
+        // the only one a cursor-cli or tool session reports at all. Owned by `req.os_user`, as at
+        // the activity-status site above: the notification stream relays it to that operator only.
+        if let Some(ref bus) = self.session_notification_bus {
+            let label = crate::session_notifications::resolve_session_label(
+                &sessions_base,
+                &req.session_id,
+            );
+            bus.publish(
+                crate::session_notifications::notification_for_agent_tool_call(
+                    &req.session_id,
+                    &req.os_user,
+                    &label,
+                    &record.tool_name,
+                    now_unix_ms(),
+                ),
+            )
+            .await;
         }
         self.agent_activity_hub.publish(&req.session_id, record);
         // The record is **not** broadcast into the session room from here, deliberately.
@@ -13943,6 +14710,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         tokio::spawn(relay_agent_activity(broadcast_rx, tx));
 
         Ok(Response::new(MpscAgentActivityStream { rx }))
+    }
+
+    // --- session notifications ---
+
+    type StreamSessionNotificationsStream = MpscSessionNotificationStream;
+
+    /// Stream every session notification this daemon raises, for as long as the client stays
+    /// connected.
+    ///
+    /// Daemon-level by design (PRD NFR1): the request names no session, because one subscription
+    /// serves a drawer of any size. It does *not* name a user either — the caller's own token
+    /// does, and the relay carries only the sessions belonging to the OS user it maps to.
+    /// Live-only: each event carries the moment it happened, and a replayed backlog would raise
+    /// indicators for turns that finished while the tab was closed.
+    async fn stream_session_notifications(
+        &self,
+        request: Request<StreamSessionNotificationsRequest>,
+    ) -> Result<Response<Self::StreamSessionNotificationsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Authenticate, then authorize exactly as `stream_session_activity` does: a token that
+        // maps to no OS user owns no sessions on this host, so there is nothing it may be shown.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
+            .to_string();
+
+        let broadcast_rx = self
+            .session_notification_bus
+            .as_ref()
+            .and_then(|bus| bus.subscribe_clients())
+            .ok_or_else(|| {
+                Status::failed_precondition("this daemon publishes no session notifications")
+            })?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoSessionNotificationEvent>();
+        tokio::spawn(relay_session_notifications(broadcast_rx, tx, os_user));
+
+        Ok(Response::new(MpscSessionNotificationStream { rx }))
     }
 
     // --- ACP transcript replay ---

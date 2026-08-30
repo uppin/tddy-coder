@@ -326,21 +326,7 @@ export const TEST_IDS = {
   branchConflictRenameBtn: "branch-conflict-rename-btn",
   branchConflictCancelBtn: "branch-conflict-cancel-btn",
 
-  // Session agents — peer agent sessions section in SessionMainPane
-  /** The "Add agent" button in the session-detail header (spawns a peer child session). */
-  sessionAgentsAddBtn: "session-agents-add-btn",
-  /** The collapsible "Session agents" section listing the current session's peers. */
-  sessionAgentsSection: "session-agents-section",
-  /** Empty-state message shown when the current session has no peers. */
-  sessionAgentsEmpty: "session-agents-empty",
-  /** One row per peer, keyed by the peer's session id. */
-  sessionAgentsRow: "session-agents-row",
-  /** The "switch" action on a peer row — focuses that peer's runtime. */
-  sessionAgentsSwitchBtn: "session-agents-switch-btn",
-
   // Agent roster — the specialized agents attached to a session (docs/ft/daemon/session-agent-roster.md).
-  // Deliberately NOT the `sessionAgents*` ids above: those are peer child *sessions*, a different
-  // concept that happens to share the word "agent".
   /** The roster pane in the session inspector. */
   agentRosterPane: "agent-roster-pane",
   /** Rendered while the first roster frame has not arrived. */
@@ -363,6 +349,48 @@ export const TEST_IDS = {
   agentRosterDetachConfirm: "agent-roster-detach-confirm",
   /** Accepts `agentRosterDetachConfirm`. */
   agentRosterDetachConfirmBtn: "agent-roster-detach-confirm-btn",
+
+  // Agent tree — the Agents tab as a hierarchy: the session's main agent at the root, its roster
+  // agents and its subagent sessions beneath it
+  // (docs/ft/daemon/session-agent-roster.md § The Agents tab).
+  /** The tree's outermost list. Replaces the roster pane's flat `<ul>`. */
+  agentTree: "agent-tree",
+  /** The root row — the session's own main agent. */
+  agentTreeRoot: "agent-tree-root",
+  /** What the main agent is doing; carries `data-agent-status`. */
+  agentTreeRootStatus: "agent-tree-root-status",
+  /** The main agent's last observed activity. Absent when nothing has been observed of it. */
+  agentTreeRootLastActivity: "agent-tree-root-last-activity",
+  /** The list holding the main agent's children — its roster agents and its subagent sessions. */
+  agentTreeRootChildren: "agent-tree-root-children",
+
+  // Agent conversation — attaching a roster agent from the session header and talking to it in a
+  // tab (docs/ft/web/session-drawer.md § Add agent).
+  /** The "Add agent" button in the session-detail header. Attaches a roster agent to the CURRENT
+   *  session — it does not spawn a peer session, which is what it used to do. */
+  sessionAgentAttachBtn: "session-agent-attach-btn",
+  /** The header's fanned-out agent picker. The same component as the roster pane's picker, under
+   *  its own id prefix so the two can be open at once without colliding. */
+  sessionAgentPicker: "session-agent-picker",
+  /** Warning naming the tools the main agent loses if the highlighted agent is attached. */
+  sessionAgentPickerWithdrawalWarning: "session-agent-picker-withdrawal-warning",
+  /** Confirms the attach of the agent selected in the header picker. */
+  sessionAgentPickerConfirmBtn: "session-agent-picker-confirm-btn",
+  /** Dismisses the header picker without attaching. */
+  sessionAgentPickerCancelBtn: "session-agent-picker-cancel-btn",
+  /** Rendered when the attach itself failed — distinct from a picker that could not be filled. */
+  sessionAgentAttachError: "session-agent-attach-error",
+
+  /** The conversation tab's body: transcript plus composer. */
+  agentConversationPane: "agent-conversation-pane",
+  /** The scrolling list of turns inside `agentConversationPane`. */
+  agentConversationTranscript: "agent-conversation-transcript",
+  /** Where the operator types the next prompt. */
+  agentConversationInput: "agent-conversation-input",
+  /** Sends what is in `agentConversationInput`. */
+  agentConversationSendBtn: "agent-conversation-send-btn",
+  /** A failed open or a failed prompt, named. Never an empty transcript standing in for one. */
+  agentConversationError: "agent-conversation-error",
 
   // Shell navigation
   shellMenuButton: "shell-menu-button",
@@ -497,6 +525,10 @@ export const TEST_IDS = {
   sessionsTerminalTabAgent: "sessions-terminal-tab-agent",
   /** The "+" button that opens a new bash terminal. */
   sessionsTerminalTabNew: "sessions-terminal-tab-new",
+  /** The trailing ⛶ control that puts the active pane into browser full screen. */
+  sessionsTerminalFullscreen: "sessions-terminal-fullscreen",
+  /** The floating "exit full screen" control drawn over a pane stack that holds fullscreen. */
+  sessionsTerminalFullscreenExit: "sessions-terminal-fullscreen-exit",
 
   // Session connection overlay — covers the runtime's panes until LiveKit is connected
   sessionConnectionOverlay: "session-connection-overlay",
@@ -885,6 +917,11 @@ export const sessionsTerminalTabClose = (terminalId: string) =>
 export const sessionsTerminalPane = (terminalId: string) =>
   `sessions-terminal-pane-${terminalId}`;
 
+/** `[data-testid="sessions-terminal-pane-stack-<sessionId>"]` — one runtime's stack of mounted
+ *  terminal panes. This is the element handed to the Fullscreen API by the tab strip's ⛶ control. */
+export const sessionsTerminalPaneStack = (sessionId: string) =>
+  `sessions-terminal-pane-stack-${sessionId}`;
+
 /** `[data-testid="sessions-child-tab-<sessionId>"]` — a tab for a spawned child conversation
  *  (a child session whose `orchestratorSessionId` is the parent runtime's session). */
 export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${sessionId}`;
@@ -893,13 +930,35 @@ export const sessionsChildTab = (sessionId: string) => `sessions-child-tab-${ses
  *  child conversation, shown when its tab is selected. */
 export const sessionsChildPane = (sessionId: string) => `sessions-child-pane-${sessionId}`;
 
-/** `[data-testid="session-agents-row-<sessionId>"]` — one row in the Session agents section, keyed
- *  by the peer's session id. */
-export const sessionAgentsRow = (sessionId: string) => `session-agents-row-${sessionId}`;
+/** `[data-testid="sessions-agent-tab-<conversationId>"]` — a tab for an open conversation with an
+ *  agent attached to this session. Keyed by the conversation id rather than the agent id: the
+ *  conversation is what the tab owns, and it is what closing the tab cancels. */
+export const sessionsAgentTab = (conversationId: string) =>
+  `sessions-agent-tab-${safeTestIdPart(conversationId)}`;
 
-/** `[data-testid="session-agents-switch-btn-<sessionId>"]` — the switch action on a peer row. */
-export const sessionAgentsSwitchBtn = (sessionId: string) =>
-  `session-agents-switch-btn-${sessionId}`;
+/** `[data-testid="sessions-agent-tab-<conversationId>-close"]` — the ✕ on an agent tab. Closing it
+ *  cancels the conversation. Suffixed rather than infixed so the tab-listing selectors can exclude
+ *  the close controls with a `$=` match. */
+export const sessionsAgentTabClose = (conversationId: string) =>
+  `${sessionsAgentTab(conversationId)}-close`;
+
+/** `[data-testid="sessions-agent-pane-<conversationId>"]` — the mounted body of one agent
+ *  conversation tab, shown when its tab is selected. */
+export const sessionsAgentPane = (conversationId: string) =>
+  `sessions-agent-pane-${safeTestIdPart(conversationId)}`;
+
+/** `[data-testid="agent-conversation-turn-<index>"]` — one turn in the conversation transcript, in
+ *  arrival order. Carries `data-role` (`operator` | `agent`), `data-complete`, and — on a finished
+ *  agent turn — `data-stop-reason`. */
+export const agentConversationTurn = (index: number) => `agent-conversation-turn-${index}`;
+
+/** One selectable agent in the header's picker. */
+export const sessionAgentPickerOption = (agentId: string) =>
+  `session-agent-picker-option-${safeTestIdPart(agentId)}`;
+
+/** The owning-daemon label on a header-picker option. */
+export const sessionAgentPickerOptionHost = (agentId: string) =>
+  `${sessionAgentPickerOption(agentId)}-host`;
 
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers
@@ -1430,6 +1489,47 @@ export const agentRosterRowLastActivity = (agentId: string) =>
 /** The detach action on an attached agent's row. */
 export const agentRosterRowDetachBtn = (agentId: string) =>
   `${agentRosterRow(agentId)}-detach-btn`;
+
+// --- Agent tree --------------------------------------------------------------------------------
+// A subagent session's ids are keyed by its *session* id, not by an agent id: it is a session of its
+// own, spawned by the main agent, and it has no roster entry to be named by.
+
+/** One subagent session's row in the tree. */
+export const agentTreeSession = (sessionId: string) =>
+  `agent-tree-session-${safeTestIdPart(sessionId)}`;
+
+/**
+ * What a subagent session's agent is doing, inferred by the daemon from that session's own
+ * conversation (`SessionEntry.agent_status`). Carries the same `data-agent-status` tokens a roster
+ * row does, because it is the same enum.
+ */
+export const agentTreeSessionStatus = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-status`;
+
+/** A subagent session's last observed activity. Absent when nothing has been observed of it. */
+export const agentTreeSessionLastActivity = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-last-activity`;
+
+/** Focuses a subagent session's runtime. A subagent session has no detach — there is no roster
+ *  entry behind it. */
+export const agentTreeSessionSwitchBtn = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-switch-btn`;
+
+/** Expands or collapses a subagent session's own children. Collapsed nodes hold no roster stream. */
+export const agentTreeSessionToggleBtn = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-toggle-btn`;
+
+/** The list holding a subagent session's children — its roster agents and its own subagents. */
+export const agentTreeSessionChildren = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-children`;
+
+/**
+ * Why an expanded subagent session's roster could not be read. Absent while it reads fine — and it
+ * is not the same thing as the node having no roster agents, which is what makes it worth a row of
+ * its own.
+ */
+export const agentTreeSessionRosterError = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-roster-error`;
 
 /** One selectable agent in the fanned-out picker. */
 export const agentRosterPickerOption = (agentId: string) =>

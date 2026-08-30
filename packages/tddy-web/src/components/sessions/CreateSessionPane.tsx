@@ -32,6 +32,7 @@ import {
 } from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
 import { AttachmentDropZone } from "./attachments/AttachmentDropZone";
+import type { InitialAttachment } from "./attachments/pendingAttachment";
 import { HostDocumentPicker } from "./attachments/HostDocumentPicker";
 import { SessionAttachmentList } from "./attachments/SessionAttachmentList";
 
@@ -102,12 +103,11 @@ export type CreateSessionInitialValues = Partial<{
   initialPrompt: string;
   daemonInstanceId: string;
   /**
-   * Absolute path to a local git checkout to reuse as the session worktree (sets
-   * `StartSession.repo_path`). Used by the peer-agent spawn flow so a peer runs on the SAME worktree
-   * as the orchestrating session — no new git worktree is created and no branch is checked out, so
-   * branch selection is irrelevant in that flow (see `CreateSessionPaneProps.peerMode`).
+   * Documents the form opens with already attached — a *default* the operator can drop, not an
+   * invariant. Used by the PR-stack Start-session flow, which pre-attaches the planned node's own
+   * PRD and changeset plus the stack's shared documents (docs/ft/coder/pr-stack-docs.md).
    */
-  repoPath: string;
+  attachments: InitialAttachment[];
 }>;
 
 export interface CreateSessionPaneProps {
@@ -116,13 +116,6 @@ export interface CreateSessionPaneProps {
   onCancel: () => void;
   onCreated: (sessionId: string) => void;
   initialValues?: CreateSessionInitialValues;
-  /**
-   * Peer-agent spawn mode: the new session runs on the SAME worktree as an orchestrating session
-   * (via `initialValues.repoPath`), so branch selection (`branchIntent` / `newBranchName` /
-   * `selectedBranch` / `createRemoteBranch`) is hidden — those controls have no effect when
-   * `repo_path` is set. The submit still sends `stackParent` (from `initialValues`) and `repoPath`.
-   */
-  peerMode?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +128,6 @@ export function CreateSessionPane({
   onCancel,
   onCreated,
   initialValues,
-  peerMode = false,
 }: CreateSessionPaneProps) {
   const daemons = useDaemons();
   const { selectedInstanceId } = useSelectedDaemon();
@@ -199,14 +191,13 @@ export function CreateSessionPane({
    *
    * claude-cli only: it is the one agent that can be *prevented* from touching a local filesystem
    * (`--allowedTools`/`--disallowedTools`), so it is the only type the daemon accepts a split for.
-   * Never in peer mode — that flow joins an orchestrator's existing worktree, so the placement is
-   * settled by the session being joined. And never without a common room to name a host in.
+   * And never without a common room to name a host in.
    *
    * This is what the selector renders on. `isSplitCodebase` below builds on it rather than
    * restating it, so the control's visibility and everything a split withdraws cannot drift apart.
    */
   const canChooseCodebaseHost =
-    sessionType === "claude-cli" && managedCodebase && !peerMode && daemons.length > 0;
+    sessionType === "claude-cli" && managedCodebase && daemons.length > 0;
 
   /**
    * The session's worktree lives on a daemon other than the one running its agent — see
@@ -223,8 +214,7 @@ export function CreateSessionPane({
     codebaseDaemonInstanceId !== "" &&
     // Naming the session's own host is the explicit spelling of "co-located", and the daemon
     // classifies it exactly that way. Treating it as a split here would withdraw the recipe from a
-    // session that is going to run with one. `daemonInstanceId` rather than its peer-mode-aware
-    // form: `canChooseCodebaseHost` already means the two are the same value.
+    // session that is going to run with one.
     codebaseDaemonInstanceId !== daemonInstanceId;
   // The whole session list as the daemon reported it. Kept raw because two pickers draw different
   // views of it — the orchestrators that can parent this session, and the sessions that own a branch
@@ -255,15 +245,6 @@ export function CreateSessionPane({
     [sessions, stackParent],
   );
 
-  // In peer mode the project and host are locked to the orchestrating session (the pane reuses its
-  // worktree via `repo_path`), so the Project/Host selectors are hidden and submit must send the
-  // frozen `initialValues` values — not the live form state, which the mount-time auto-select could
-  // have overridden with a different single project.
-  const effectiveProjectId = peerMode ? (initialValues?.projectId ?? "") : projectId;
-  const effectiveDaemonInstanceId = peerMode
-    ? (initialValues?.daemonInstanceId ?? "")
-    : daemonInstanceId;
-
   /**
    * The daemon the browser's RPC reaches: the host the fan-out reads as its home, and the host that
    * serves a request naming none.
@@ -281,25 +262,15 @@ export function CreateSessionPane({
 
   /**
    * The host whose agents the session can actually be started as — the host the form will ask for, in
-   * the spelling the fan-out stamps its rows with. See `hostRunningSession` for why the empty
-   * `daemon_instance_id` the peer flow can carry names a host rather than lacking one. The request is
-   * unaffected: it keeps sending `effectiveDaemonInstanceId` exactly as given.
+   * the spelling the fan-out stamps its rows with. See `hostRunningSession` for why an empty
+   * `daemon_instance_id` names a host rather than lacking one. The request is unaffected: it keeps
+   * sending `daemonInstanceId` exactly as the form holds it.
    */
-  const agentHostInstanceId = hostRunningSession(effectiveDaemonInstanceId, connectedInstanceId);
+  const agentHostInstanceId = hostRunningSession(daemonInstanceId, connectedInstanceId);
 
-  /**
-   * The agents this form may offer, and the hosts whose silence it may report: every host's in the
-   * standalone flow, and **only the session's host** in peer mode. A peer joins an orchestrator's
-   * worktree, so its host is settled before the form opens and the request carries
-   * `effectiveDaemonInstanceId` whatever the select shows — offering another host's agent there would
-   * compose a pair the host cannot resolve, and another host's outage is not this session's problem.
-   */
-  const offeredAgents = peerMode
-    ? selectableAgents.agents.filter((a) => a.daemonInstanceId === agentHostInstanceId)
-    : selectableAgents.agents;
-  const offeredHostFailures = peerMode
-    ? selectableAgents.failures.filter((f) => f.daemonInstanceId === agentHostInstanceId)
-    : selectableAgents.failures;
+  /** The agents this form may offer, and the hosts whose silence it may report. */
+  const offeredAgents = selectableAgents.agents;
+  const offeredHostFailures = selectableAgents.failures;
 
   /**
    * The agent the session will actually start as: the picked name, as the host taking the session
@@ -432,14 +403,10 @@ export function CreateSessionPane({
   // The sessions whose branch can seed this orchestrator's stack — scoped to the project and host
   // the form will actually create it on, because a base session in another repository (or on another
   // daemon's checkout) owns a branch this stack cannot base anything off. Derived here rather than
-  // beside the parent picker above because it depends on the effective project/host resolved just now.
+  // beside the parent picker above because it depends on the project/host the form currently holds.
   const stackBaseSessionOptions = useMemo(
-    () =>
-      stackBaseSessionCandidates(sessions, {
-        projectId: effectiveProjectId,
-        daemonInstanceId: effectiveDaemonInstanceId,
-      }),
-    [sessions, effectiveProjectId, effectiveDaemonInstanceId],
+    () => stackBaseSessionCandidates(sessions, { projectId, daemonInstanceId }),
+    [sessions, projectId, daemonInstanceId],
   );
 
   // A base session belongs to one project on one host, so switching either abandons the choice. Reset
@@ -447,7 +414,7 @@ export function CreateSessionPane({
   // now do — instead of leaving a value the picker no longer offers selected behind a blank <select>.
   useEffect(() => {
     setPrStackBaseSessionId("");
-  }, [effectiveProjectId, effectiveDaemonInstanceId]);
+  }, [projectId, daemonInstanceId]);
 
   // The attach rows and everything that follows from them: the effective size cap, the refusal shown
   // next to a bad row, the upload of local files on submit, and the streamed start that reports the
@@ -471,7 +438,8 @@ export function CreateSessionPane({
   } = useSessionAttachments({
     client,
     sessionToken,
-    sessionDaemonInstanceId: effectiveDaemonInstanceId,
+    sessionDaemonInstanceId: daemonInstanceId,
+    initialAttachments: initialValues?.attachments,
   });
 
   const isSubmitEnabled = (() => {
@@ -482,9 +450,9 @@ export function CreateSessionPane({
     // A model is always required and comes from the daemon-advertised catalog; a failed/loading
     // probe leaves `model` empty, which disables Create (no fallback).
     if (sessionType === "tool") {
-      return Boolean(effectiveProjectId && selectedAgentId && toolPath && model);
+      return Boolean(projectId && selectedAgentId && toolPath && model);
     }
-    return Boolean(effectiveProjectId && model);
+    return Boolean(projectId && model);
   })();
 
   /**
@@ -496,24 +464,18 @@ export function CreateSessionPane({
     branchOverrides: BranchFieldOverrides | null,
     requestAttachments: SessionAttachmentInit[],
   ): StartSessionRequestInit => {
-    // In peer mode the new session runs on the SAME worktree as the orchestrating session
-    // (via repo_path), so no git worktree is created and no branch is checked out — branch fields
-    // are irrelevant and kept empty.
-    const peerRepoPath = peerMode ? (initialValues?.repoPath ?? "") : "";
     const commonParams = {
       sessionToken,
-      projectId: effectiveProjectId,
-      branchWorktreeIntent: peerMode ? "" : branchIntent,
-      newBranchName: peerMode ? "" : newBranchName,
-      createRemoteBranch: peerMode ? false : createRemoteBranch,
-      selectedIntegrationBaseRef: peerMode ? "" : selectedBaseBranch,
-      selectedBranchToWorkOn: peerMode ? "" : selectedBranchToWorkOn,
-      daemonInstanceId: effectiveDaemonInstanceId,
-      repoPath: peerRepoPath,
+      projectId,
+      branchWorktreeIntent: branchIntent,
+      newBranchName,
+      createRemoteBranch,
+      selectedIntegrationBaseRef: selectedBaseBranch,
+      selectedBranchToWorkOn,
+      daemonInstanceId,
       // Ask to be refused rather than silently given `<branch>-1` when another session owns the
-      // branch: this form has an operator to prompt. A peer creates no branch at all, so there is
-      // nothing to conflict over. See docs/ft/daemon/session-branch-conflict.md.
-      onBranchConflict: peerMode ? "" : "reject",
+      // branch: this form has an operator to prompt. See docs/ft/daemon/session-branch-conflict.md.
+      onBranchConflict: "reject",
       // Documents the daemon materializes before the agent starts. Empty for a form with nothing
       // attached, which is byte-for-byte the request this pane has always sent.
       attachments: requestAttachments,
@@ -592,8 +554,7 @@ export function CreateSessionPane({
       semanticIndex,
       // A remote worktree is reachable only through the mcp__tddy-tools__* proxy that managed
       // codebase installs, so a placement chosen before the toggle was switched off would name a
-      // combination the daemon refuses. `isSplitCodebase` also covers peer mode, where the worktree
-      // being joined already decides where the codebase lives.
+      // combination the daemon refuses.
       codebaseDaemonInstanceId: isSplitCodebase ? codebaseDaemonInstanceId : "",
     };
   };
@@ -786,9 +747,8 @@ export function CreateSessionPane({
         </button>
       </div>
 
-      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons.
-          Hidden in peer mode: the peer runs on the orchestrator's host (locked via initialValues). */}
-      {daemons.length > 0 && !peerMode && (
+      {/* Host — which daemon runs the session. Only shown when the common room advertises daemons. */}
+      {daemons.length > 0 && (
         <div>
           <label className={labelClass} htmlFor="create-session-host">
             Host
@@ -809,31 +769,27 @@ export function CreateSessionPane({
         </div>
       )}
 
-      {/* Project — hidden in peer mode: the peer runs on the orchestrator's worktree, so its project
-          is locked to the orchestrator's (frozen via initialValues, sent as `effectiveProjectId`). */}
-      {!peerMode && (
-        <div>
-          <label className={labelClass} htmlFor="create-session-project">
-            Project
-          </label>
-          <select
-            id="create-session-project"
-            data-testid="create-session-project-select"
-            className={inputClass}
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            <option value="" disabled>
-              {projects.length === 0 ? "No projects available" : "Select a project…"}
+      <div>
+        <label className={labelClass} htmlFor="create-session-project">
+          Project
+        </label>
+        <select
+          id="create-session-project"
+          data-testid="create-session-project-select"
+          className={inputClass}
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+        >
+          <option value="" disabled>
+            {projects.length === 0 ? "No projects available" : "Select a project…"}
+          </option>
+          {projectOptions.map((option) => (
+            <option key={option.projectId} value={option.projectId}>
+              {option.label}
             </option>
-            {projectOptions.map((option) => (
-              <option key={option.projectId} value={option.projectId}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+          ))}
+        </select>
+      </div>
 
       {/* Tool session fields */}
       {sessionType === "tool" && (
@@ -845,9 +801,7 @@ export function CreateSessionPane({
             selectedValue={selectedAgentValue}
             onPick={(picked) => {
               setAgent(picked.id);
-              // The session runs where its agent is resolvable, so picking one names its host. In
-              // peer mode every option already belongs to the frozen host, so this can only ever
-              // write that host back.
+              // The session runs where its agent is resolvable, so picking one names its host.
               setDaemonInstanceId(picked.daemonInstanceId);
             }}
           />
@@ -874,9 +828,8 @@ export function CreateSessionPane({
           {/* Base the stack on — seeds the new orchestrator's stack with one existing session's
               branch as its single root node, instead of leaving the agent to plan a stack it cannot
               know about. Hangs off the recipe rather than the branch mode: an orchestrator has no
-              branch of its own, so there is no branch mode for the control to qualify. Hidden in peer
-              mode, where the pane creates a peer on another session's worktree, not an orchestrator. */}
-          {recipe === "pr-stack" && !peerMode && (
+              branch of its own, so there is no branch mode for the control to qualify. */}
+          {recipe === "pr-stack" && (
             <div>
               <label className={labelClass} htmlFor="create-session-pr-stack-base-session">
                 Base the stack on
@@ -1172,9 +1125,8 @@ export function CreateSessionPane({
         </>
       )}
 
-      {/* PR stack parent picker — shown for both session types when orchestrators are available.
-          Hidden in peer mode: the peer's parent is locked to the orchestrating session. */}
-      {stackParentOptions.length > 0 && !peerMode && (
+      {/* PR stack parent picker — shown for both session types when orchestrators are available. */}
+      {stackParentOptions.length > 0 && (
         <div>
           <label className={labelClass} htmlFor="create-session-stack-parent">
             PR stack parent
@@ -1196,109 +1148,103 @@ export function CreateSessionPane({
         </div>
       )}
 
-      {/* Branch intent — hidden in peer mode: the peer runs on the orchestrator's worktree via
-          repo_path, so no git worktree is created and no branch is checked out. */}
-      {!peerMode && (
-        <>
-          <div>
-            <label className={labelClass} htmlFor="create-session-branch-intent">
-              Branch mode
-            </label>
-            <select
-              id="create-session-branch-intent"
-              data-testid="create-session-branch-intent-select"
-              className={inputClass}
-              value={branchIntent}
-              onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
-            >
-              <option value="new_branch_from_base">
-                {`New branch from base${
-                  initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
-                }`}
+      <div>
+        <label className={labelClass} htmlFor="create-session-branch-intent">
+          Branch mode
+        </label>
+        <select
+          id="create-session-branch-intent"
+          data-testid="create-session-branch-intent-select"
+          className={inputClass}
+          value={branchIntent}
+          onChange={(e) => setBranchIntent(e.target.value as BranchIntent)}
+        >
+          <option value="new_branch_from_base">
+            {`New branch from base${
+              initialValues?.baseBranchLabel ? `: ${initialValues.baseBranchLabel}` : ""
+            }`}
+          </option>
+          <option value="work_on_selected_branch">Work on existing branch</option>
+        </select>
+      </div>
+
+      {initialValues?.stackParent && baseBranchOptions.length > 0 && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-base-branch">
+            Base branch
+          </label>
+          <select
+            id="create-session-base-branch"
+            data-testid="create-session-base-branch-select"
+            className={inputClass}
+            value={selectedBaseBranch}
+            onChange={(e) => setSelectedBaseBranch(e.target.value)}
+          >
+            {baseBranchOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
-              <option value="work_on_selected_branch">Work on existing branch</option>
-            </select>
-          </div>
+            ))}
+          </select>
+        </div>
+      )}
 
-          {!peerMode && initialValues?.stackParent && baseBranchOptions.length > 0 && (
-            <div>
-              <label className={labelClass} htmlFor="create-session-base-branch">
-                Base branch
-              </label>
-              <select
-                id="create-session-base-branch"
-                data-testid="create-session-base-branch-select"
-                className={inputClass}
-                value={selectedBaseBranch}
-                onChange={(e) => setSelectedBaseBranch(e.target.value)}
-              >
-                {baseBranchOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {branchIntent === "new_branch_from_base" && (
-            <div>
-              <label className={labelClass} htmlFor="create-session-new-branch-name">
-                New branch name
-              </label>
+      {branchIntent === "new_branch_from_base" && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-new-branch-name">
+            New branch name
+          </label>
+          <input
+            id="create-session-new-branch-name"
+            data-testid="create-session-new-branch-name-input"
+            type="text"
+            className={inputClass}
+            value={newBranchName}
+            onChange={(e) => setNewBranchName(e.target.value)}
+            placeholder="e.g. feature/my-work"
+          />
+          {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
+              it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
+              the toggle there rather than show a checked box that silently does nothing. */}
+          {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <input
-                id="create-session-new-branch-name"
-                data-testid="create-session-new-branch-name-input"
-                type="text"
-                className={inputClass}
-                value={newBranchName}
-                onChange={(e) => setNewBranchName(e.target.value)}
-                placeholder="e.g. feature/my-work"
+                data-testid="create-session-create-remote-branch-toggle"
+                type="checkbox"
+                className="h-4 w-4"
+                checked={createRemoteBranch}
+                onChange={(e) => setCreateRemoteBranch(e.target.checked)}
               />
-              {/* Only the claude-cli / cursor-cli spawn paths create the worktree in-daemon and can push
-                  it; a "tool" session spawns tddy-coder, which owns its own worktree — so we don't offer
-                  the toggle there rather than show a checked box that silently does nothing. */}
-              {(sessionType === "claude-cli" || sessionType === "cursor-cli") && (
-                <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    data-testid="create-session-create-remote-branch-toggle"
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={createRemoteBranch}
-                    onChange={(e) => setCreateRemoteBranch(e.target.checked)}
-                  />
-                  Create Remote Branch
-                </label>
-              )}
-            </div>
+              Create Remote Branch
+            </label>
           )}
+        </div>
+      )}
 
-          {branchIntent === "work_on_selected_branch" && (
-            <div>
-              <label className={labelClass} htmlFor="create-session-branch-to-work-on">
-                Branch to work on
-              </label>
-              <select
-                id="create-session-branch-to-work-on"
-                data-testid="create-session-branch-to-work-on-select"
-                className={inputClass}
-                value={selectedBranchToWorkOn}
-                onChange={(e) => setSelectedBranchToWorkOn(e.target.value)}
-              >
-                {remoteBranches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </>
+      {branchIntent === "work_on_selected_branch" && (
+        <div>
+          <label className={labelClass} htmlFor="create-session-branch-to-work-on">
+            Branch to work on
+          </label>
+          <select
+            id="create-session-branch-to-work-on"
+            data-testid="create-session-branch-to-work-on-select"
+            className={inputClass}
+            value={selectedBranchToWorkOn}
+            onChange={(e) => setSelectedBranchToWorkOn(e.target.value)}
+          >
+            {remoteBranches.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
 
       {/* Attachments — documents the daemon materializes into artifacts/attachments/ before the
-          agent starts. Shown for every session type and in peer mode, because the daemon
-          materializes them for all of them. See docs/ft/coder/session-attachments.md. */}
+          agent starts. Shown for every session type, because the daemon materializes them for all
+          of them. See docs/ft/coder/session-attachments.md. */}
       <AttachmentDropZone
         onFilesPicked={attachFiles}
         onPickHostDocument={openHostDocPicker}
@@ -1326,7 +1272,7 @@ export function CreateSessionPane({
             client={client}
             sessionToken={sessionToken}
             browsedDaemonInstanceId={stagingDaemonInstanceId}
-            project={projects.find((p) => p.projectId === effectiveProjectId)}
+            project={projects.find((p) => p.projectId === projectId)}
             onPick={attachHostDocument}
             onClose={closeHostDocPicker}
           />

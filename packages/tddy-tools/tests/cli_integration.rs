@@ -22,6 +22,7 @@ const REGISTERED_GOALS: &[&str] = &[
     "refactor",
     "update-docs",
     "validate",
+    "write-stack-docs",
     "write-stack-plan",
 ];
 
@@ -44,6 +45,7 @@ fn expected_schema_id_for_goal(goal: &str) -> &'static str {
         "merge-pr-analyze" => "urn:tddy:goal/merge-pr-analyze",
         "merge-pr-report" => "urn:tddy:goal/merge-pr-report",
         "write-stack-plan" => "urn:tddy:goal/write-stack-plan",
+        "write-stack-docs" => "urn:tddy:goal/write-stack-docs",
         _ => panic!("unexpected goal: {goal}"),
     }
 }

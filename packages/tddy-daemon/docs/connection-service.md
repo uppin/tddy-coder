@@ -61,7 +61,7 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 
 | Scope | Root | `relative_path` shape |
 |-------|------|-----------------------|
-| `SESSION_ARTIFACT` | `{session_dir}/artifacts/` | A `SessionContextDoc`'s basename for a `MANIFEST`-kind doc; **`attachments/<basename>`** for an `ATTACHMENT`-kind one |
+| `SESSION_ARTIFACT` | `{session_dir}/artifacts/` | A `SessionContextDoc`'s **`relative_path`** — its basename for a stack-level `MANIFEST` doc, **`prs/<node_id>/<basename>`** for a per-PR one, **`attachments/<basename>`** for an `ATTACHMENT`. The scope resolves a full relative path (`resolve_host_document` joins it behind a canonicalize-and-contain guard), so a nested source is legal; only the final segment is name-validated |
 | `SESSION_UPLOAD` | `{session_dir}/uploads/` | Exactly `"<upload_id>/<file_name>"` (see `SessionUploadEntry`) |
 | `SESSION_WORKTREE` | The session's git worktree | A path surfaced by `ListWorktreeDirectory`, re-gated against `git_listed_files` on read |
 | `PROJECT_REPO` | `ProjectEntry.main_repo_path` | A checked-in path, e.g. `docs/ft/*.md` |
@@ -218,7 +218,9 @@ For each session directory, the daemon merges **`.session.yaml`** with optional 
 
 If the changeset is missing, unreadable, or has no matching session row, the corresponding fields use **placeholders** (em dash) or partial data as implemented in **`session_list_enrichment`**.
 
-**`context_docs`** (proto field 27): enrichment also fills `SessionEntry.context_docs` from **`session_context_docs::context_docs_for_session`** — recipe-manifest planning docs (`kind = MANIFEST`) followed by files under **`artifacts/attachments/`** (`kind = ATTACHMENT`), each with `size_bytes`. Attachments are listed even when the recipe is blank or unknown. Host-side store: **`session_attachments`** (`list_session_attachments`, `copy_attachment_into_session`, `write_attachment_bytes`); path helpers live in **`tddy-workflow`**. Product contract: [session-attachments.md](../../../docs/ft/coder/session-attachments.md).
+**`context_docs`** (proto field 27): enrichment also fills `SessionEntry.context_docs` from **`session_context_docs::context_docs_for_session`** — recipe-manifest planning docs (`kind = MANIFEST`), then a `pr-stack` orchestrator's **per-PR documents** scanned from `artifacts/prs/*/` (also `kind = MANIFEST`: they are recipe-authored, not user-attached), then files under **`artifacts/attachments/`** (`kind = ATTACHMENT`), each with `size_bytes` and a **`relative_path`** (field 8) naming how a client addresses it. Attachments are listed even when the recipe is blank or unknown.
+
+The per-PR rows are a **scan**, not a manifest entry: `SessionArtifactManifest::known_artifacts()` returns `&'static` basenames and cannot enumerate N per-node files, so they join the list exactly as attachment rows already do, and only `PRD.md` / `changeset.md` are surfaced — a stray file in a node directory is not a document. `relative_path` exists because a client cannot derive it: the old `kind`-based reconstruction could express `PRD.md` and `attachments/PRD.md` but never `prs/n1/PRD.md`, and the server has known the path all along. Host-side store: **`session_attachments`** (`list_session_attachments`, `copy_attachment_into_session`, `write_attachment_bytes`); path helpers live in **`tddy-workflow`**. Product contract: [session-attachments.md](../../../docs/ft/coder/session-attachments.md).
 
 The directory listing and enrichment execute inside **`spawn_blocking_with_timeout`** so the async RPC handler does not block the Tokio runtime on disk I/O.
 

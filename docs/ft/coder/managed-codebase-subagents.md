@@ -24,7 +24,8 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 |---------------------------------------------------|----------------------------------------------------------------------|
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
-| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock] }` |
+| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
+| *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
 | `session/cancel`                                  | `subagent_cancel` — input `{ sessionId }` |
@@ -100,6 +101,65 @@ subagent's `model`/`base_url`/`max_turns`) — all of it comes exclusively from 
 YAML def (or the builtin `fastcontext` def); the earlier `--fastcontext-url`/`--fastcontext-model`/
 `--fastcontext-max-turns`/`--subagent-replaces` flags and their `StartSessionRequest`/
 `SessionMetadata` equivalents were removed (see criterion 24).
+
+## Long turns: a grace period, a response id, and `subagent_await`
+
+`subagent_prompt` blocks until the subagent yields. That is the right shape for the calls it was
+designed around — a discovery question a 7B model answers in seconds — and the wrong one for what
+the roster made addressable: a full coding agent on another host, whose turn is measured in minutes.
+The main agent has one tool call in flight and no way to abandon it, so a long turn is
+indistinguishable from a hung one, and a client-side deadline anywhere along the path (Claude Code's
+own tool timeout, an MCP transport, the LiveKit RPC engine) ends the call while the turn keeps
+running — the work is done, the answer is unreachable, and nothing says so.
+
+The fix is to bound the *wait*, not the turn.
+
+**A grace period.** `subagent_prompt` blocks for up to `graceMs` (default
+`SUBAGENT_PROMPT_GRACE`, 25 s). A turn that yields inside it returns exactly what it returns today —
+`{stopReason, content, usage}`, no new fields — so every fast call, and every existing caller of
+one, is untouched. This is deliberately not a timeout: nothing is cancelled at the threshold.
+
+**A response id.** A turn still running at the threshold returns `{responseId, pending: true}`. The
+turn continues in the background; its outcome is stored under that id in the same process-wide table
+the conversations live in.
+
+**`subagent_await`.** `{responseId, timeoutMs?}` blocks until that turn's outcome is ready or its own
+timeout elapses. Ready returns the outcome verbatim — the identical shape `subagent_prompt` would
+have returned had it been fast. Not ready returns `{responseId, pending: true}` again, and the agent
+calls it again. A polling loop the agent drives, with no deadline of its own to trip over.
+
+### Why these choices
+
+**The dual return shape, rather than always returning a `responseId`.** A single shape would be
+tidier, and would break every caller of the fast path and cost every discovery question a second
+round trip. The shapes are distinguishable by a key that only ever appears on one of them
+(`pending`), and the tool description names both.
+
+**`graceMs` per call, not an environment variable.** How long a caller can afford to block is the
+caller's fact, not the host's: a workflow step waiting on a coding agent and a discovery question
+mid-edit want different numbers, and both run in the same process.
+
+**Queueing, not refusing, a prompt that arrives mid-turn.** A conversation's history is a single
+sequence; two turns running against it concurrently would interleave into it. The second prompt
+therefore waits for the first to finish and then runs — and its own `graceMs` covers that wait, so
+the queue costs the caller nothing beyond the blocking budget it already named.
+
+**A result stays claimable.** `subagent_await` does not consume the outcome; repeated calls on the
+same `responseId` return the same answer. A tool result lost between this process and the main
+agent — a truncated transport frame, a compaction, a restarted client — is otherwise an answer that
+was computed, paid for, and permanently unreachable.
+
+**Cancelling resolves what is pending.** `subagent_cancel`, and a detach that cancels a conversation
+underneath it, close the conversation immediately as they do today, and resolve every pending
+response of that conversation as cancelled. An `await` for a turn nobody will ever finish has to
+answer, not wait.
+
+### What does not change
+
+The daemon. A remote agent's turn already arrives as a server stream
+(`PromptAgentConversation`), consumed to completion by `AgentConversationLink::prompt`; the
+background task drives exactly that call. Nothing about the wire, the frame contract, or the
+truncation rule moves — only which task is awaiting it.
 
 ## Acceptance Criteria
 
@@ -240,12 +300,50 @@ fully migrated onto the array model.
     `TDDY_SUBAGENTS_JSON` (criterion 9). This closes out `docs/ft/coder/specialized-subagents.md`
     ACs 11-12 (previously tracked as unimplemented in `docs/dev/TODO.md`).
 
+### Asynchronous prompt turns (`tddy-tools`)
+
+25. `subagent_prompt` blocks for at most a grace threshold — `graceMs` when the call names one,
+    otherwise `SUBAGENT_PROMPT_GRACE` (25 s). A turn that yields inside the threshold returns
+    `{stopReason, content, usage}` with no `responseId` and no `pending` key: a fast call is
+    byte-for-byte what it is today, and a caller written against that shape needs no change.
+26. A turn still running at the threshold returns `{responseId, pending: true}` and is **not**
+    cancelled — the turn continues in the background and its outcome is stored under `responseId`.
+27. `subagent_await` takes `{responseId, timeoutMs?}` and blocks until that turn's outcome is ready
+    or its own timeout elapses (`timeoutMs` when named, else the same 25 s default). Ready returns
+    the outcome in the identical `{stopReason, content, usage}` shape `subagent_prompt` returns;
+    not ready returns `{responseId, pending: true}`, so the agent retries rather than treating the
+    turn as lost.
+28. A turn that *fails* is stored as its failure: `subagent_await` returns the
+    `{error, is_error: true}` result the synchronous call would have returned, rather than reporting
+    a turn that will never produce an answer as forever pending.
+29. Awaiting is non-destructive and repeatable: two `subagent_await` calls on the same `responseId`
+    return the same outcome. An unknown `responseId` is an error naming it — never a hang.
+30. A `subagent_prompt` that arrives while a turn is already running on that `sessionId` **queues**
+    behind it and runs after it, in call order. The queued call's own grace threshold covers the
+    wait, so a call that does not reach the front in time returns `{responseId, pending: true}` like
+    any other slow turn.
+31. `subagent_cancel` on a conversation with a turn in flight closes it immediately, as it does
+    today, and resolves every pending response of that conversation as cancelled — so a later
+    `subagent_await` on one of those ids answers instead of waiting for a turn nobody will finish.
+    A conversation cancelled because its agent was detached resolves its pending responses the same
+    way.
+32. Token accounting is unchanged by *where* a turn ran: once a background turn ends, `subagent_list`
+    and the accounting file report its usage and its increment to `turns`. While it is in flight they
+    report the conversation's pre-turn totals — never a partial turn's.
+33. The sandboxed Claude CLI's `--allowedTools` includes `mcp__tddy-tools__subagent_await` exactly
+    when it includes `mcp__tddy-tools__subagent_prompt`. An agent that can be handed a `responseId`
+    and cannot call `subagent_await` has been given a receipt it can never redeem.
+34. The advertised `subagent_prompt` description states both return shapes and names
+    `subagent_await` as what collects the pending one — the schema is the only place the main agent
+    can learn that a `responseId` is not an error.
+
 ## Non-goals (out of scope for v1)
 
 - Live catalog fetch of subagent tool schemas over the transport (mirrors the existing
   `exec_tool_catalog()` limitation — see remote-codebase-mode.md AC16).
-- Streaming partial subagent output back to the main agent mid-turn (a `subagent_prompt` call
-  returns only once the subagent yields).
+- Streaming partial subagent output back to the main agent mid-turn. A turn still yields exactly
+  once, as a whole answer; what "Long turns" below adds is a way to stop *waiting* for it, not a
+  way to watch it arrive.
 - ~~Subagents other than FastContext~~ — addressed by
   [specialized-subagents.md](specialized-subagents.md): the registry now resolves any number of
   YAML-defined agents (`<tddyhome>/agents/*.yaml`), not just the hardcoded `"fastcontext"` factory.

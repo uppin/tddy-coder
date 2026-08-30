@@ -10,6 +10,26 @@
 - **A failed guidance fetch fails the session** rather than starting an agent that silently has no project rules.
 - ⚠️ **Not yet continuous.** The directory is built at start and resume and is not updated again for the life of the session; the re-sync trigger is unwired and tracked in [docs/dev/TODO.md](../../dev/TODO.md).
 - ⚠️ **Both halves of a split placement must be upgraded together** — start and resume now make two mandatory peer calls that an older codebase daemon cannot answer.
+## 2026-08-30 — Session notifications became a bus, and Telegram one subscriber on it
+
+- **Telegram was not *a* notification surface, it was *the* notification system** — one method classified the event, rendered the copy, resolved recipients and sent, so a second consumer could not be added without reaching into it.
+- **A session notification is now a published event** carrying `{session_id, label, kind, source, text, at_unix_ms, os_user}`; subscribers declare which kinds they want, and the copy is rendered once at publish so every surface reads the same sentence.
+- **Telegram takes only attention-worthy activity-status events**, so chat traffic did not grow: `ACTIVITY` exists for indicators, and presenter elicitations keep their own keyboard-bearing surface.
+- **Activity alerts name a session the way the web drawer does** — repo basename → workflow goal → short id — so a chat message and a drawer row are finally matchable. The other Telegram surfaces still use the short-id label.
+- **`StreamSessionNotifications`** is a daemon-level feed: one subscription serves a drawer of any size, live-only, and scoped to the caller's OS user — the bus is host-wide, so the relay is the only thing between one operator and another's sessions.
+- ⚠️ **Removed `TelegramSessionWatcher::on_claude_cli_activity_status_changed`** and its dedupe field; every behaviour they pinned is re-pinned against the new subscriber and the existing acceptance suite passes unmodified.
+- **Known limitation:** a workflow session *started from Telegram* does not yet publish presenter events; web-started and resumed sessions do.
+- See [session-notifications.md](session-notifications.md).
+
+## 2026-08-29 — A peer agent session's row says what its agent is doing
+
+- **`SessionEntry` gains `agent_status` and `last_activity`**, inferred from the session's own conversation. They reuse the agent roster's `SessionAgentStatus` / `SessionAgentActivity` verbatim, so one badge renders a roster agent and a peer agent session alike, and they ride `ListSessions` rather than a second stream a reader would have to correlate against a row.
+- **Neither is a new source.** The resolved transcript (`acp-transcript.jsonl` merged with `agent-activity.jsonl` — the view `StreamAcpReplay` already replays) seeds the newest signal once per session; the per-session `AgentActivityHub` broadcast keeps it current.
+- **A live record and its replayed frame go through one mapper**, so a row cannot word the same call differently from the replay of it — which would surface as a session that rewords its own status when the daemon restarts.
+- **A hook word of `Done` outranks a tool call left in flight.** A `running` row whose terminal record never arrived would otherwise pin the badge at `EXECUTING_TOOL` for the rest of the session's life. Otherwise a call in flight outranks the hook's `Running`: it is strictly more precise, and the only source of the call's name.
+- **`UNSPECIFIED` stays "this daemon has nothing to say", never "idle"** — and is what every session type that runs no agent reports. Only `claude-cli` and `cursor-cli` sessions are tailed, the gate `ReportSessionStatus` already applies.
+- **`activity_status` is unchanged** and keeps its own field: it is the raw hook word a worktree reports, and this is an inference built partly on top of it.
+- Known: a seed that fails to read is not retried, the seed is read once per daemon lifetime per session, there is no cross-daemon inference, and `WAITING_FOR_INPUT` still has no producer but the hook word. See [agent-session-status.md](agent-session-status.md).
 
 ## 2026-08-29 — A tick attributes only the calls its measurement could have seen
 
