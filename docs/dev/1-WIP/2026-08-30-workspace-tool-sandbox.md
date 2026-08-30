@@ -203,6 +203,8 @@ the draft at step 3.
 - [x] Create changeset
 - [x] Acceptance tests (failing)
 - [x] Unit/integration tests (failing)
-- [ ] Implementation steps 1–3 (`/green`)
-- [ ] Open draft PR — dependents branch off this ref
-- [ ] Implementation steps 4–5 (`/green`, same PR)
+- [x] Implementation steps 1–3 (`/green`)
+- [x] Open draft PR — dependents branch off this ref (#427)
+- [x] Step 5 — ship `tddy-sandbox-runner` from `release` / `install` / `publish.sh`
+- [ ] Step 4 — real jail provisioning, `in_jail_tool_*` frames, runner in-jail execution
+- [ ] Mark PR ready for review
