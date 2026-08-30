@@ -6,8 +6,13 @@ description = "Cross-platform sandbox abstraction for running confined agent pro
 
 [dependencies]
 anyhow = "1"
+glob = "0.3"
+log = "0.4"
+sha2 = "0.10"
 tempfile = "3"
-walkdir = "2"
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
 tempfile = "3"
+walkdir = "2"

@@ -432,6 +432,13 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         &format!("preparing context from {} …", repo.display()),
     );
     let repo_for_context = repo.clone();
+    // The jail's cwd carries what *this* agent reads for guidance and nothing else: `--agent-kind`
+    // is already spelled the way tddy-core's per-backend table is keyed, so no mapping is needed
+    // here (unlike the daemon, which dispatches on session types).
+    let context_globs = tddy_core::backend::context_globs_for_agent(match params.agent_kind {
+        AgentKind::Claude => "claude",
+        AgentKind::Cursor => "cursor",
+    });
     let specialized_defs = params.specialized_defs;
     let replacement_pairs = specialized_agent_replacement_pairs(&specialized_defs);
     let ctx: SandboxContextDir = tokio::task::spawn_blocking(move || {
@@ -447,7 +454,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
                 replaced: refs,
             })
             .collect();
-        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements)
+        SandboxContextDir::create_with_subagent(&repo_for_context, &replacements, context_globs)
     })
     .await
     .context("context prep task join")??;

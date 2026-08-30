@@ -470,18 +470,27 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     tddy_sandbox::copy_tree(src, dst).map_err(|e| e.to_string())
 }
 
-/// Prepare read-only context dir from worktree docs/skills.
-pub fn prepare_context_dir(worktree_path: &Path) -> Result<SandboxContextDir, String> {
-    SandboxContextDir::create(worktree_path).map_err(|e| e.to_string())
+/// Prepare the jail's context dir from the worktree's agent configuration.
+///
+/// `globs` is the session backend's allow-list
+/// ([`crate::context_files::context_globs_for_session_type`]), so a Cursor session gets `.cursor/`
+/// and a Claude one does not, and neither gets this repo's `docs/` conventions.
+pub fn prepare_context_dir(
+    worktree_path: &Path,
+    globs: &[&str],
+) -> Result<SandboxContextDir, String> {
+    SandboxContextDir::create(worktree_path, globs).map_err(|e| e.to_string())
 }
 
-/// Like [`prepare_context_dir`], but the appended appendix names each entry in `replacements`
+/// Like [`prepare_context_dir`], but the prepended preamble names each entry in `replacements`
 /// next to the exec tools it replaces for this session.
 pub fn prepare_context_dir_with_subagent(
     worktree_path: &Path,
     replacements: &[tddy_sandbox::SubagentReplacement<'_>],
+    globs: &[&str],
 ) -> Result<SandboxContextDir, String> {
-    SandboxContextDir::create_with_subagent(worktree_path, replacements).map_err(|e| e.to_string())
+    SandboxContextDir::create_with_subagent(worktree_path, replacements, globs)
+        .map_err(|e| e.to_string())
 }
 
 /// Resolve the `tddy-tools` binary for sandbox MCP and hook wiring.

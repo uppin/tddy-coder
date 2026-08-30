@@ -5,6 +5,7 @@
 
 pub mod builder;
 mod context_dir;
+mod context_manifest;
 mod error;
 pub mod exec_reads;
 mod log;
@@ -19,8 +20,14 @@ pub use builder::{
     SymlinkSpec,
 };
 pub use context_dir::{
-    copy_context_from_repo, copy_tree, copy_tree_within_root, sandbox_remote_appendix,
-    SandboxContextDir, SubagentReplacement, SANDBOX_REMOTE_APPENDIX,
+    clear_context_stale, copy_context_from_repo, copy_tree, copy_tree_within_root,
+    managed_codebase_preamble, mark_context_stale, prepend_preamble, with_stale_marker,
+    without_stale_marker, SandboxContextDir, SubagentReplacement, MANAGED_CODEBASE_PREAMBLE,
+    PREAMBLE_FILES,
+};
+pub use context_manifest::{
+    diff_manifests, matches_context_globs, normalized_context_path, root_relative, sha256_hex,
+    ContextEntry, ContextManifest, ManifestDiff, CONTEXT_EXCLUDE_GLOBS,
 };
 pub use error::SandboxError;
 pub use exec_reads::{

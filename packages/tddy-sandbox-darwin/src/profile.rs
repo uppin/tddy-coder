@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tddy_sandbox::{MachPolicy, NetworkSpec, ReadKind, ReadSpec, SandboxError, SandboxPlan};
 
@@ -7,6 +7,11 @@ use tddy_sandbox::{MachPolicy, NetworkSpec, ReadKind, ReadSpec, SandboxError, Sa
 /// Emits explicit read rules (`plan.reads`, always including the `(literal "/")` dyld-cache root),
 /// process-exec rules (`plan.policy.exec_paths` + exec reads), the policy block, and the network
 /// policy — and **never** the blanket `(allow file-read*)` wildcard.
+///
+/// Rule order is load-bearing, not cosmetic: Seatbelt evaluates a profile top-to-bottom and the
+/// **last matching rule wins**. That is why the blanket `(deny file-write*)` can be followed by
+/// targeted allows, and equally why the agent context-dir carve-out below must be emitted *after*
+/// the project-root allow it overrides.
 pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     let spec = &plan.spec;
     let project_root = canonical_rule_path(&spec.project_root);
@@ -49,6 +54,22 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
          (literal \"/dev/ptmx\")\n  (regex #\"^/dev/tty.*\")\n  (regex #\"^/dev/ttys[0-9]+$\")\n  \
          (regex #\"^/dev/fd/[0-9]+$\"))\n\n",
     );
+
+    // The jail's agent-context dir is carved back out of the writable tree it lives in.
+    if let Some(context_dir) = context_dir_from_runner_argv(&spec.command) {
+        out.push_str(
+            ";; The agent's context dir is read-only *inside* the jail: it holds the guidance\n\
+             ;; files (CLAUDE.md / AGENTS.md and their managed-codebase preamble) that tell the\n\
+             ;; confined agent where the real codebase is. It sits under the project root, so the\n\
+             ;; allow above would otherwise let the agent rewrite its own instructions. This deny\n\
+             ;; comes last, so it wins. The host-side context syncer runs outside the jail and is\n\
+             ;; unaffected — that asymmetry is the whole point.\n",
+        );
+        out.push_str(&format!(
+            "(deny file-write* (subpath \"{}\"))\n\n",
+            canonical_rule_path(&context_dir)
+        ));
+    }
 
     // Explicit read allow-list — the writable tree plus every declared read. No wildcard.
     out.push_str("(allow file-read*\n");
@@ -122,6 +143,37 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     out.push_str(&render_network(&plan.network, spec.ipc_socket.as_deref()));
 
     Ok(out)
+}
+
+/// The agent-context directory the confined process will use, read off the command line the plan
+/// launches (`plan.spec.command`).
+///
+/// Why derive it from argv instead of carrying it as its own plan field: `--context-dir <path>` is
+/// how the path reaches the sandboxed process in the first place — every launcher (the daemon's
+/// Claude/Cursor/split session paths, its plan builder, and `tddy-sandbox-app`) spells it exactly
+/// that way, and `tddy-sandbox-runner` learns the directory from nowhere else. Reading the same
+/// argv the child is executed with makes it impossible for the profile's carve-out to name a
+/// different directory than the one the agent actually reads its guidance from; a parallel field
+/// could silently drift. [`crate::spawn::spawn_plan`] already inspects this argv the same way to
+/// detect `--stdio`.
+///
+/// Plans that run something other than the runner (action orchestration, plain shells) carry no
+/// such flag and therefore get no carve-out — they have no context dir to protect. An empty value
+/// is treated as absent rather than rendered as `(subpath "")`, which would be a rule matching
+/// nothing useful in a profile that must stay strict.
+fn context_dir_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
+    for (index, arg) in argv.iter().enumerate() {
+        if let Some(inline) = arg.strip_prefix("--context-dir=") {
+            return (!inline.is_empty()).then(|| PathBuf::from(inline));
+        }
+        if arg == "--context-dir" {
+            return argv
+                .get(index + 1)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from);
+        }
+    }
+    None
 }
 
 /// Render a single read grant as its SBPL rule.
@@ -351,6 +403,115 @@ mod tests {
 
         // Then
         assert!(profile.contains("(literal \"/\")"), "{profile}");
+    }
+
+    /// Project tree for the context-dir carve-out tests. Deliberately a path that is never created
+    /// on disk: [`canonical_rule_path`] leaves a non-existent path spelled exactly as given, so the
+    /// rules asserted below are stable and unaffected by the `/tmp` → `/private/tmp` symlink.
+    const A_PROJECT_ROOT_NOT_ON_DISK: &str = "/tmp/tddy-context-deny-test-not-on-disk";
+    const ITS_CONTEXT_DIR: &str = "/tmp/tddy-context-deny-test-not-on-disk/context";
+
+    /// A plan shaped like every real sandboxed agent session: the confined command is a
+    /// `tddy-sandbox-runner` argv that tells the runner which directory holds the agent's guidance
+    /// files, and that directory lives inside the project root.
+    fn a_runner_plan_told_its_context_dir() -> SandboxPlan {
+        let mut plan = a_plan(
+            vec![ReadSpec::literal("/", ReadReason::DyldRoot)],
+            NetworkSpec::default(),
+        );
+        plan.spec.project_root = PathBuf::from(A_PROJECT_ROOT_NOT_ON_DISK);
+        plan.spec.scratch_dir = PathBuf::from(A_PROJECT_ROOT_NOT_ON_DISK).join(".work");
+        plan.spec.egress_dir = PathBuf::from(A_PROJECT_ROOT_NOT_ON_DISK).join("out");
+        plan.spec.command = vec![
+            "/usr/local/bin/tddy-sandbox-runner".into(),
+            "--context-dir".into(),
+            ITS_CONTEXT_DIR.into(),
+        ];
+        plan
+    }
+
+    #[test]
+    fn rendered_profile_denies_writes_under_the_context_dir_the_runner_was_told_to_use() {
+        // Given
+        let plan = a_runner_plan_told_its_context_dir();
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        assert!(
+            profile.contains(&format!(
+                "(deny file-write* (subpath \"{ITS_CONTEXT_DIR}\"))"
+            )),
+            "the context dir must be carved out of the writable tree:\n{profile}"
+        );
+    }
+
+    /// Seatbelt resolves conflicting rules by **last match wins**, so a carve-out that precedes the
+    /// allow it contradicts is silently useless. Pinning the order is pinning the protection.
+    #[test]
+    fn rendered_profile_places_the_context_dir_deny_after_the_project_root_allow() {
+        // Given
+        let plan = a_runner_plan_told_its_context_dir();
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        let project_root_allow = profile
+            .find(&format!("(subpath \"{A_PROJECT_ROOT_NOT_ON_DISK}\")"))
+            .expect("the project root must be granted write access");
+        let context_dir_deny = profile
+            .find(&format!(
+                "(deny file-write* (subpath \"{ITS_CONTEXT_DIR}\"))"
+            ))
+            .expect("the context dir must be denied write access");
+        assert!(
+            project_root_allow < context_dir_deny,
+            "the context-dir deny must come after the project-root allow to win, but the allow is \
+             at byte {project_root_allow} and the deny at byte {context_dir_deny}:\n{profile}"
+        );
+    }
+
+    /// The carve-out must not cost the agent its working tree: everything in the project root that
+    /// is not the context dir stays writable.
+    #[test]
+    fn rendered_profile_keeps_the_rest_of_the_project_root_writable() {
+        // Given
+        let plan = a_runner_plan_told_its_context_dir();
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        let write_grants = profile
+            .split("(deny file-write* (subpath")
+            .next()
+            .expect("the write-allow section precedes the context-dir deny");
+        assert!(
+            write_grants.contains(&format!("(subpath \"{A_PROJECT_ROOT_NOT_ON_DISK}\")")),
+            "the project root must still be writable:\n{profile}"
+        );
+    }
+
+    /// A plan that runs something other than the sandbox runner has no agent guidance to protect,
+    /// so it must not acquire a phantom deny rule.
+    #[test]
+    fn rendered_profile_emits_no_context_dir_deny_when_the_command_declares_none() {
+        // Given
+        let plan = a_plan(
+            vec![ReadSpec::literal("/", ReadReason::DyldRoot)],
+            NetworkSpec::default(),
+        );
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        assert!(
+            !profile.contains("(deny file-write* (subpath"),
+            "a plan with no --context-dir must render no context-dir carve-out:\n{profile}"
+        );
     }
 
     #[test]

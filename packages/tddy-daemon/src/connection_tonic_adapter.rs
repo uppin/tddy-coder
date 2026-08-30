@@ -37,6 +37,7 @@ use tddy_service::proto::connection::{
     CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
     CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry, ContextManifestRequest,
     CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
     DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
@@ -54,19 +55,19 @@ use tddy_service::proto::connection::{
     ListWorktreesForProjectResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
     MintLocalTokenResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,
     PromptAgentConversationRequest, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
-    RemoveWorktreeRequest, RemoveWorktreeResponse, ReorderPlannedPrRequest,
-    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
-    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
-    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster, SessionNotificationEvent,
-    SessionTerminalInput, SessionTerminalOutput, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
-    StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopDemoVmRequest,
-    StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    QueryBranchRequest, QueryBranchResponse, ReadContextFileBatchRequest, ReadContextFileRequest,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
+    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
+    SessionNotificationEvent, SessionTerminalInput, SessionTerminalOutput,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SignalSessionRequest,
+    SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
+    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
     StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest,
     StreamSessionActivityRequest, StreamSessionAgentsRequest, StreamSessionNotificationsRequest,
     StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
@@ -853,6 +854,68 @@ where
         request: tonic::Request<AgentActivityDeltaRequest>,
     ) -> Result<tonic::Response<Self::StreamAgentActivityDeltaStream>, tonic::Status> {
         let resp = RpcConnectionService::stream_agent_activity_delta(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: the agent context allow-list (docs/ft/daemon/agent-context-sync.md).
+    type StreamContextManifestStream =
+        Pin<Box<dyn Stream<Item = Result<ContextManifestEntry, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_context_manifest(
+        &self,
+        request: tonic::Request<ContextManifestRequest>,
+    ) -> Result<tonic::Response<Self::StreamContextManifestStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_context_manifest(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: one allow-listed context file (docs/ft/daemon/agent-context-sync.md).
+    type StreamReadContextFileStream =
+        Pin<Box<dyn Stream<Item = Result<ContextFileChunk, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_read_context_file(
+        &self,
+        request: tonic::Request<ReadContextFileRequest>,
+    ) -> Result<tonic::Response<Self::StreamReadContextFileStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_read_context_file(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: several allow-listed context files in one call
+    /// (docs/ft/daemon/agent-context-sync.md) — the setup sync's prefetch, which would otherwise
+    /// cost one peer round trip per file before the agent process exists.
+    type StreamReadContextFileBatchStream =
+        Pin<Box<dyn Stream<Item = Result<ContextFileBatchChunk, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_read_context_file_batch(
+        &self,
+        request: tonic::Request<ReadContextFileBatchRequest>,
+    ) -> Result<tonic::Response<Self::StreamReadContextFileBatchStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_read_context_file_batch(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

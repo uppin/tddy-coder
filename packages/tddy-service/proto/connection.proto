@@ -93,6 +93,26 @@ service ConnectionService {
   // a PNG or a file in any encoding round-trips intact, and oversized files are REFUSED before the
   // first frame rather than truncated — a truncated mirror is a wrong mirror.
   rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
+  // The agent context sync (docs/ft/daemon/agent-context-sync.md). Sibling of
+  // StreamReadWorktreeFile, sharing its traversal and containment guards and deliberately NOT its
+  // git-listing gate: agent configuration is routinely gitignored (`.claude/settings.local.json`,
+  // `**/.cursor/mcp.json`), so a sync built on the git-gated reader would omit exactly the files an
+  // agent reads. What replaces the gate is the per-backend allow-list compiled into tddy-core,
+  // selected by the SERVING daemon from the session's own persisted `session_type` — never by the
+  // request. The `agent` field a caller sends is advisory only; see ContextManifestRequest.agent.
+  //
+  // The manifest STREAMS its entries rather than returning a repeated field, so a repo with a large
+  // `.claude/` tree never produces a message that has to be chunk-framed.
+  rpc StreamContextManifest(ContextManifestRequest) returns (stream ContextManifestEntry);
+  rpc StreamReadContextFile(ReadContextFileRequest) returns (stream ContextFileChunk);
+  // The same bytes, for several paths, in ONE call. Setup sync reads every allow-listed path before
+  // the agent process exists, and doing that one round trip at a time made a 120-file
+  // `.claude/skills/` tree into 121 sequential peer calls — around eighteen seconds of dead time on
+  // a 150 ms link, and 121 separate chances to trip PEER_FORWARD_TIMEOUT, where an ordinary split
+  // start used to make no extra peer calls at all. Same auth, same allow-list gate, same per-file
+  // and aggregate size refusals and the same 48 KiB framing as the single-file read, which stays:
+  // this is an addition for the batch case, not a replacement.
+  rpc StreamReadContextFileBatch(ReadContextFileBatchRequest) returns (stream ContextFileBatchChunk);
   rpc StreamSessionTerminalIO(stream SessionTerminalInput) returns (stream SessionTerminalOutput);
   // Browser-compatible alternative: server-streaming output + separate unary input.
   // (connect-web fetch transport cannot send streaming request bodies required for bidi streaming.)
@@ -1202,6 +1222,105 @@ message WorktreeFileChunk {
   bytes data = 1;
   // The file's full size, repeated on every frame so a reader knows the total from the first one.
   uint64 total_byte_size = 2;
+}
+
+// --- Agent context sync (docs/ft/daemon/agent-context-sync.md) ---
+//
+// Addressed by session rather than by (project_id, worktree_path) the way ReadWorktreeFileRequest
+// is, because the caller is an agent host that holds no path on the codebase host: a split session
+// knows the paired `workspace` session's id and nothing else about its filesystem. Same addressing
+// as GetWorktreeSnapshot and ExecuteTool, which the same host already reaches the same checkout
+// through.
+
+message ContextManifestRequest {
+  string session_token = 1;
+  // The session whose checkout is measured — on a split session, the `workspace` session holding
+  // the codebase, never the agent's own id.
+  string session_id = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+  // Which compiled-in allow-list the caller BELIEVES it is reading, by agent name ("claude",
+  // "cursor", "codex", ...). Advisory: carried for logging, and NOT authoritative.
+  //
+  // The serving daemon derives the row it actually serves from the session it has already looked
+  // up — its persisted `session_type`, or Claude's row when the session records a paired split
+  // agent (tddy_daemon::context_files::context_agent_for_session). It has to: authorization here is
+  // per OS user rather than per session, so a caller holding a valid token for a `codex` session
+  // could otherwise name `cursor` and be served that checkout's `.claude/**`, `.cursor/**` and
+  // `.mcp.json` — the files that carry API tokens in MCP `env` blocks, and exactly the gitignored
+  // ones the git-listing gate used to refuse. Trusting the field would make the enforced bound the
+  // union of every table row instead of the session's own. When the two disagree the daemon logs at
+  // debug and serves the session's.
+  string agent = 4;
+}
+
+// One allow-listed path as the manifest advertises it.
+message ContextManifestEntry {
+  // Worktree-root-relative, forward-slash separated.
+  string rel_path = 1;
+  // Lowercase hex SHA-256 of the file's bytes. The sole authority on whether a file moved: a syncer
+  // that compared sizes would re-read on every same-length edit and miss none of them.
+  string sha256 = 2;
+  // Rides the entry so a client refuses an over-cap file *before* spending a read on it.
+  uint64 size_bytes = 3;
+}
+
+message ReadContextFileRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // Advisory, exactly as ContextManifestRequest.agent is: the row served is the session's own, and
+  // this field is carried for logging. See that comment for why trusting it would widen the gate.
+  string agent = 4;
+  // The file to read, relative to the worktree root. No traversal, no absolute paths, and refused
+  // identically whether or not a file exists there when the allow-list does not name it — answering
+  // "does it exist?" before "may you see it?" would hand out the existence map.
+  string rel_path = 5;
+}
+
+// One frame of StreamReadContextFile. Mirrors WorktreeFileChunk: raw bytes with no encoding applied
+// anywhere on the path, so a `.claude/` tree holding a PNG round-trips intact, and a zero-byte file
+// yields exactly one frame with empty `data` so "the file is empty" stays distinguishable from "the
+// stream failed".
+message ContextFileChunk {
+  bytes data = 1;
+  // The file's full size, repeated on every frame so a reader knows the total from the first one.
+  uint64 total_byte_size = 2;
+}
+
+message ReadContextFileBatchRequest {
+  string session_token = 1;
+  string session_id = 2;
+  string daemon_instance_id = 3;
+  // Advisory, exactly as ContextManifestRequest.agent is.
+  string agent = 4;
+  // The files to read, each relative to the worktree root, under the same shape rules as
+  // ReadContextFileRequest.rel_path. Every path is gated individually and the WHOLE call is refused
+  // if any one of them is: a partially served batch would leave the caller unable to tell "the
+  // project does not ship that file" from "this host would not serve it", and the setup sync it
+  // exists for must fail loudly rather than start an agent against incomplete guidance. An empty
+  // list is INVALID_ARGUMENT — a caller with nothing to read must not spend a round trip.
+  repeated string rel_paths = 5;
+}
+
+// One frame of StreamReadContextFileBatch. Frames for one file arrive in order and consecutively;
+// `rel_path` says which file, so a client reassembles without tracking the request's ordering.
+//
+// Every file yields AT LEAST ONE frame, and the last frame of each file sets `end_of_file`. That is
+// what keeps a zero-byte file (one frame: empty `data`, `total_byte_size` 0, `end_of_file` true)
+// distinguishable from a file whose bytes never arrived — the rule the single-file read already
+// follows, restated here because a batch has the extra failure mode of ending early with the
+// remaining files simply absent.
+message ContextFileBatchChunk {
+  // Worktree-root-relative, forward-slash separated: the file this frame carries bytes of, spelled
+  // exactly as the request asked for it.
+  string rel_path = 1;
+  bytes data = 2;
+  // This file's full size, repeated on every one of its frames — the same contract as
+  // ContextFileChunk.total_byte_size, per file rather than per stream.
+  uint64 total_byte_size = 3;
+  // True on the last frame of this file, and on the only frame of an empty one.
+  bool end_of_file = 4;
 }
 
 // --- Project branch listing (for claude-cli branch selection dropdown) ---

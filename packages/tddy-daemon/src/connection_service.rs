@@ -25,7 +25,8 @@ use tddy_service::proto::connection::{
     CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
     CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
     CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
-    ConnectionService as ConnectionServiceTrait, CreateProjectRequest, CreateProjectResponse,
+    ConnectionService as ConnectionServiceTrait, ContextFileBatchChunk, ContextFileChunk,
+    ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, ListAgentModelsRequest,
@@ -39,22 +40,22 @@ use tddy_service::proto::connection::{
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     OpenAgentConversationRequest, OpenAgentConversationResponse, ProjectEntry as ProtoProjectEntry,
-    PromptAgentConversationRequest, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest, ReadWorktreeFileResponse,
-    RemoveWorktreeRequest, RemoveWorktreeResponse, ReportSessionStatusRequest,
-    ReportSessionStatusResponse, RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
-    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
-    SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
-    SignalSessionRequest, SignalSessionResponse, SplitAgentPlacement, StartSessionRequest,
-    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
-    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamSessionAgentsRequest,
-    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent,
-    TerminalHistoryChunk, TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest,
-    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
-    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest, WorkflowFileEntry,
-    WorktreeDirEntry, WorktreeRow, WorktreeSizeStatus as ProtoWorktreeSizeStatus,
-    WorktreeStatsEvent,
+    PromptAgentConversationRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
+    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
+    ReportSessionStatusRequest, ReportSessionStatusResponse, RestoreSessionWorktreeRequest,
+    RestoreSessionWorktreeResponse, ResumeSessionRequest, ResumeSessionResponse,
+    SendTerminalInputResponse, SessionAgentRoster, SessionEntry as ProtoSessionEntry,
+    SessionTerminalInput, SessionTerminalOutput, SessionUploadEntry,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal, SignalSessionRequest,
+    SignalSessionResponse, SplitAgentPlacement, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
+    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
+    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
+    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
+    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
 use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
@@ -5826,6 +5827,7 @@ impl ConnectionServiceImpl {
         let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
             &worktree_path,
             &replacements,
+            crate::context_files::context_globs_for_session_type("claude-cli"),
         )
         .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
@@ -6330,6 +6332,7 @@ impl ConnectionServiceImpl {
         let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
             &worktree_path,
             &replacements,
+            crate::context_files::context_globs_for_session_type("cursor-cli"),
         )
         .map_err(Status::internal)?;
         crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
@@ -6738,6 +6741,22 @@ impl ConnectionServiceImpl {
             .split_withdrawals_from_codebase_host(session_token, codebase_session, codebase_daemon)
             .await?;
 
+        // Split placement is `claude-cli` only (PRD § Why claude-cli only), so the allow-list is
+        // that backend's. Re-fetched on resume rather than trusted from the directory the previous
+        // process left behind: the repository moved on while the session was stopped, and a resumed
+        // agent reading a snapshot from before the stop is reading rules that may have been
+        // retracted.
+        let agent = crate::context_files::context_agent_for_session_type("claude-cli");
+        let context = self
+            .split_context_from_codebase_host(
+                session_token,
+                codebase_session,
+                codebase_daemon,
+                agent,
+                "resume",
+            )
+            .await?;
+
         let wiring = crate::split_session::prepare_split_agent_wiring(
             &self.config,
             session_dir,
@@ -6749,6 +6768,8 @@ impl ConnectionServiceImpl {
                 session_token,
             },
             &withdrawals,
+            tddy_core::backend::context_globs_for_agent(agent),
+            &context,
         )?;
         log::info!(
             "ResumeSession: re-wired split session {session_id} to workspace session {codebase_session} on daemon {codebase_daemon}"
@@ -6794,6 +6815,236 @@ impl ConnectionServiceImpl {
         Ok(crate::split_session::wire_roster_withdrawals(
             &roster.agents,
         ))
+    }
+
+    /// The project's own guidance, fetched from the daemon that holds the codebase.
+    ///
+    /// Routed through this daemon's own handlers, exactly as
+    /// [`Self::split_withdrawals_from_codebase_host`] routes the roster read, and subject to the
+    /// same rule: **a failure is a refusal, never an empty result**. "The codebase host is
+    /// unreachable" and "the project has no `CLAUDE.md`" would otherwise produce the same context
+    /// dir, and the agent would work an entire session against rules it was never shown, with
+    /// nothing anywhere saying so.
+    ///
+    /// Everything is fetched up front rather than lazily because populating an empty directory
+    /// reads every allow-listed path anyway; what it buys is that the synchronous builder never has
+    /// to reach a peer (`context_sync::PrefetchedContext`).
+    ///
+    /// `verb` is what the caller is doing — `"start"` or `"resume"`. It is a parameter rather than a
+    /// word in the message because both paths reach this: a resume that cannot read its project's
+    /// guidance re-fetches for the same reason a start does (the repository moved on while the
+    /// session was stopped), and an operator reading "cannot start" about a session that was already
+    /// running is being told to look in the wrong place.
+    async fn split_context_from_codebase_host(
+        &self,
+        session_token: &str,
+        codebase_session: &str,
+        codebase_daemon: &str,
+        agent: &str,
+        verb: &str,
+    ) -> Result<crate::context_sync::PrefetchedContext, Status> {
+        let refusal = |what: &str, status: Status| Status {
+            code: status.code(),
+            message: format!(
+                "cannot {verb} a split session without the guidance held beside its codebase: \
+                 {what} from session {codebase_session} on daemon {codebase_daemon} failed: {}",
+                status.message()
+            ),
+        };
+
+        let mut manifest = self
+            .stream_context_manifest(Request::new(ContextManifestRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session.to_string(),
+                daemon_instance_id: codebase_daemon.to_string(),
+                agent: agent.to_string(),
+            }))
+            .await
+            .map_err(|status| refusal("reading the context manifest", status))?
+            .into_inner();
+
+        let mut entries: Vec<tddy_sandbox::ContextEntry> = Vec::new();
+        while let Some(entry) = manifest.next().await {
+            let entry = entry.map_err(|status| refusal("reading the context manifest", status))?;
+            entries.push(tddy_sandbox::ContextEntry {
+                rel_path: entry.rel_path,
+                sha256: entry.sha256,
+                size_bytes: entry.size_bytes,
+            });
+        }
+
+        // Every number below is the *peer's*, and the whole set is about to be held in memory at
+        // once. `size_bytes` rides the manifest precisely so a client can refuse before spending a
+        // read (PRD § Design), so it is spent here rather than trusted: this host's own
+        // `max_attachment_bytes` bounds both one file and the tree, and the refusal happens before
+        // the first byte is requested. Without it a peer's manifest is an instruction to allocate.
+        let max_bytes = self.config.max_attachment_bytes;
+        if let Some(oversized) = entries.iter().find(|entry| entry.size_bytes > max_bytes) {
+            return Err(refusal(
+                &format!(
+                    "the manifest offered {} at {} bytes, over this host's {max_bytes} byte cap; \
+                     reading it",
+                    oversized.rel_path, oversized.size_bytes
+                ),
+                Status::invalid_argument("context file over the attachment cap"),
+            ));
+        }
+        let total_bytes: u64 = entries.iter().map(|entry| entry.size_bytes).sum();
+        if total_bytes > max_bytes {
+            return Err(refusal(
+                &format!(
+                    "the manifest offered {} path(s) totalling {total_bytes} bytes, over this \
+                     host's {max_bytes} byte cap; reading them",
+                    entries.len()
+                ),
+                Status::invalid_argument("context manifest over the attachment cap"),
+            ));
+        }
+
+        // A repository that ships no agent configuration at all is served an empty manifest, and
+        // there is nothing to ask for: the batch read refuses an empty path list rather than let a
+        // caller spend a round trip on nothing, so the call is not made.
+        if entries.is_empty() {
+            log::info!(
+                "split context: session {codebase_session} on daemon {codebase_daemon} serves no \
+                 allow-listed path; the context dir will hold the managed-codebase preamble alone"
+            );
+            return crate::context_sync::PrefetchedContext::new(entries, Default::default());
+        }
+
+        // **One** call for the whole set, not one per path. Every byte here is fetched before the
+        // agent process exists, so the round trips are dead time the operator waits through: a
+        // 120-file `.claude/skills/` tree read one file at a time is 121 sequential peer calls,
+        // ~18s on a 150 ms link, and 121 separate chances to trip `PEER_FORWARD_TIMEOUT`. Batched,
+        // a split start costs two peer calls whatever the tree's size.
+        let mut frames = self
+            .stream_read_context_file_batch(Request::new(ReadContextFileBatchRequest {
+                session_token: session_token.to_string(),
+                session_id: codebase_session.to_string(),
+                daemon_instance_id: codebase_daemon.to_string(),
+                agent: agent.to_string(),
+                rel_paths: entries.iter().map(|e| e.rel_path.clone()).collect(),
+            }))
+            .await
+            .map_err(|status| refusal("reading the context files", status))?
+            .into_inner();
+
+        let advertised: std::collections::BTreeMap<&str, u64> = entries
+            .iter()
+            .map(|entry| (entry.rel_path.as_str(), entry.size_bytes))
+            .collect();
+        let mut files: std::collections::BTreeMap<String, Vec<u8>> =
+            std::collections::BTreeMap::new();
+        let mut complete: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut received_bytes: u64 = 0;
+        while let Some(frame) = frames.next().await {
+            let frame = frame.map_err(|status| refusal("reading the context files", status))?;
+            // The peer names the file each frame belongs to, and a name that was never asked for is
+            // a path this host is about to create in the agent's working directory. Refused here
+            // rather than filtered, for the reason `context_sync::refuse_unlisted_paths` gives: a
+            // peer serving something outside the set is a defect on one side or the other, and
+            // dropping it silently leaves the two halves disagreeing about what the agent reads.
+            let Some(&size_bytes) = advertised.get(frame.rel_path.as_str()) else {
+                return Err(refusal(
+                    &format!(
+                        "the batch carried {:?}, which its manifest never advertised; reading it",
+                        frame.rel_path
+                    ),
+                    Status::permission_denied("context file outside the manifest"),
+                ));
+            };
+            if complete.contains(&frame.rel_path) {
+                return Err(refusal(
+                    &format!(
+                        "the batch carried more frames for {:?} after declaring it finished; \
+                         reading it",
+                        frame.rel_path
+                    ),
+                    Status::invalid_argument("context file framed twice"),
+                ));
+            }
+            // Bounded as it arrives, because the advertised size is not a promise about how many
+            // frames follow it — per file *and* in aggregate, since a batch's whole set is held in
+            // memory at once.
+            received_bytes = received_bytes.saturating_add(frame.data.len() as u64);
+            let bytes = files
+                .entry(frame.rel_path.clone())
+                // Clamped, because the reservation is a peer-supplied number and an honest one is
+                // already under the cap; a dishonest one must not name this host's allocation size.
+                .or_insert_with(|| Vec::with_capacity(size_bytes.min(max_bytes) as usize));
+            if bytes.len() as u64 + frame.data.len() as u64 > max_bytes
+                || received_bytes > max_bytes
+            {
+                return Err(refusal(
+                    &format!(
+                        "{} streamed more than this host's {max_bytes} byte cap; reading it",
+                        frame.rel_path
+                    ),
+                    Status::invalid_argument("context file over the attachment cap"),
+                ));
+            }
+            bytes.extend_from_slice(&frame.data);
+            if frame.end_of_file {
+                complete.insert(frame.rel_path);
+            }
+        }
+
+        // A stream that ended without saying a file was finished is a truncated file, and a
+        // truncated `CLAUDE.md` is a wrong `CLAUDE.md`: it drops the project's last rule with
+        // nothing downstream able to tell. `end_of_file` is what makes that detectable at all —
+        // a byte count alone cannot separate "empty" from "never arrived".
+        if let Some(missing) = entries
+            .iter()
+            .find(|entry| !complete.contains(&entry.rel_path))
+        {
+            return Err(refusal(
+                &format!(
+                    "the batch never finished {:?}; reading it",
+                    missing.rel_path
+                ),
+                Status::internal("context file stream ended before the file did"),
+            ));
+        }
+
+        // `end_of_file` is the peer's word for it, and on its own that is all truncation detection
+        // rests on — a peer that sets the flag early yields a short `CLAUDE.md` this host accepts,
+        // writes, and then records in `SyncState` under the *manifest's* hash. The record would
+        // then describe bytes that are not on disk, so every later tick sees held == served and
+        // never repairs it: one wrong flag, and the agent reads a `CLAUDE.md` missing its last rule
+        // for the life of the session.
+        //
+        // The manifest this host already holds says what the bytes must be, and the bytes are
+        // already in memory, so both halves of that claim are checked rather than taken on trust.
+        // The size first, because it names the defect precisely (a truncated stream) where a hash
+        // mismatch could be either that or corruption in flight.
+        for entry in &entries {
+            let bytes = files.get(&entry.rel_path).map(Vec::as_slice).unwrap_or(&[]);
+            if bytes.len() as u64 != entry.size_bytes {
+                return Err(refusal(
+                    &format!(
+                        "the batch served {} byte(s) of {:?}, which its manifest advertised at {} \
+                         byte(s); reading it",
+                        bytes.len(),
+                        entry.rel_path,
+                        entry.size_bytes
+                    ),
+                    Status::internal("context file stream ended before the file did"),
+                ));
+            }
+            let received = tddy_sandbox::sha256_hex(bytes);
+            if received != entry.sha256 {
+                return Err(refusal(
+                    &format!(
+                        "the batch served {:?} hashing {received}, which its manifest advertised \
+                         as {}; reading it",
+                        entry.rel_path, entry.sha256
+                    ),
+                    Status::internal("context file content does not match its manifest entry"),
+                ));
+            }
+        }
+
+        crate::context_sync::PrefetchedContext::new(entries, files)
     }
 
     /// Re-spawn and re-dial a sandboxed claude-cli session.
@@ -6931,9 +7182,14 @@ impl ConnectionServiceImpl {
                 replaced: refs,
             })
             .collect();
-        let ctx =
-            crate::sandbox_session::prepare_context_dir_with_subagent(worktree_path, &replacements)
-                .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
+        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+            worktree_path,
+            &replacements,
+            // The relaunch path serves `claude-cli` alone (`resume_sandboxed_claude_cli_session` is
+            // its only caller), so the agent's allow-list is that backend's.
+            crate::context_files::context_globs_for_session_type("claude-cli"),
+        )
+        .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
         if context_dir.exists() {
             std::fs::remove_dir_all(&context_dir)
                 .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
@@ -8383,6 +8639,45 @@ impl ConnectionServiceImpl {
         Ok((sessions_base, worktree_root))
     }
 
+    /// The context allow-list a session is served — **its own row, not the one the request named**.
+    ///
+    /// The three context RPCs all carry an `agent` field, and it is advisory. Authorization on this
+    /// path is per OS user rather than per session
+    /// ([`Self::authorize_exec_tool_caller`]), so a caller holding a valid token for one of its
+    /// sessions can name any other session of the same user — and if the field decided the row, it
+    /// could also name any row. A `codex` session asking as `cursor` would be served that
+    /// checkout's `.claude/**`, `.cursor/**` and `.mcp.json`: the files that routinely carry API
+    /// tokens in MCP `env` blocks, and exactly the gitignored ones the git-listing gate this reader
+    /// replaces used to refuse. Trusting the field makes the enforced bound the union of every
+    /// table row instead of the session's own.
+    ///
+    /// So the row comes from what this daemon persisted about the session
+    /// ([`crate::context_files::context_agent_for_session`]), which it has already read to resolve
+    /// the worktree. A disagreement is logged at `debug` and the session's row wins: the field is
+    /// still worth carrying, because "the agent host believed it was reading Cursor's list" is the
+    /// first thing anyone debugging a missing `.cursor/` will want in the log.
+    fn context_globs_for_session(
+        &self,
+        rpc_name: &str,
+        sessions_base: &Path,
+        session_id: &str,
+        requested_agent: &str,
+    ) -> Result<&'static [&'static str], Status> {
+        let session_dir = unified_session_dir_path(sessions_base, session_id);
+        let meta = tddy_core::read_session_metadata(&session_dir).map_err(|e| {
+            log::warn!("{rpc_name}: session {session_id} has no readable .session.yaml: {e}");
+            Status::failed_precondition("session not found or .session.yaml missing")
+        })?;
+        let agent = crate::context_files::context_agent_for_session(&meta);
+        if agent != requested_agent.trim() {
+            log::debug!(
+                "{rpc_name}: session {session_id} was asked for the {requested_agent:?} context \
+                 allow-list; serving {agent:?}, the row its own persisted session_type names"
+            );
+        }
+        Ok(tddy_core::backend::context_globs_for_agent(agent))
+    }
+
     /// Run one tool call in `worktree_root` and durably record it.
     ///
     /// A tool failure is carried in the returned response, never raised as an RPC error: only
@@ -9114,8 +9409,26 @@ impl ConnectionServiceImpl {
                 .await?
             }
         };
-        let context_dir =
-            crate::split_session::build_split_context_dir(&session_dir, &withdrawals)?;
+        // The agent's working directory is populated **before** the agent process exists (AC23): a
+        // split agent that starts, reads its cwd and finds only the notice has already missed the
+        // project's rules for its first turn. A fetch that fails fails the start, and the caller
+        // tears down the worktree this start created on the codebase daemon (AC24).
+        let agent = crate::context_files::context_agent_for_session_type("claude-cli");
+        let context = self
+            .split_context_from_codebase_host(
+                &req.session_token,
+                codebase_session_id,
+                codebase_instance_id,
+                agent,
+                "start",
+            )
+            .await?;
+        let context_dir = crate::split_session::build_split_context_dir(
+            &session_dir,
+            &withdrawals,
+            tddy_core::backend::context_globs_for_agent(agent),
+            &context,
+        )?;
         let extra_args = crate::split_session::split_claude_extra_args(
             &session_dir,
             &tddy_tools_path.to_string_lossy(),
@@ -12383,6 +12696,232 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             // The whole file is already in memory and the channel is unbounded, so this cannot
             // block; a send only fails once the client has gone, and then there is nothing left to
             // send it to.
+            if tx.send(Ok(frame)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    type StreamContextManifestStream = MpscResultStream<ContextManifestEntry>;
+
+    /// Every allow-listed path in a session's checkout, with the hash that says whether it moved —
+    /// AC15-AC17 of `docs/ft/daemon/agent-context-sync.md`.
+    ///
+    /// Routed on `daemon_instance_id` before anything else, exactly as `GetWorktreeSnapshot` is and
+    /// for the same reason: the caller is usually a split session's *agent* host asking the host
+    /// that holds the codebase, and answered locally this would report the agent host's own empty
+    /// session directory as the project's guidance.
+    ///
+    /// The gate is the compiled-in allow-list rather than git's listing — see
+    /// [`crate::context_files`] for why that is safe and why it is necessary.
+    async fn stream_context_manifest(
+        &self,
+        request: Request<ContextManifestRequest>,
+    ) -> Result<Response<Self::StreamContextManifestStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(rx) = self
+            .stream_served_by_peer("StreamContextManifest", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let (sessions_base, worktree_root) =
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: req.session_token.clone(),
+                session_id: req.session_id.clone(),
+                tool_name: "StreamContextManifest".to_string(),
+                args_json: String::new(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+            })?;
+
+        let globs = self.context_globs_for_session(
+            "StreamContextManifest",
+            &sessions_base,
+            &req.session_id,
+            &req.agent,
+        )?;
+        let max_bytes = self.config.max_attachment_bytes;
+        let timeout = self.config.spawn_worker_request_timeout();
+        // Hashing every allow-listed file is filesystem work, so it runs off the async runtime the
+        // way the neighbouring readers' does, and it can fail the call outright — which is why it
+        // happens here rather than inside the stream, where a refusal would have to be told apart
+        // from a mid-stream error.
+        let join = tokio::task::spawn_blocking(move || {
+            crate::context_files::context_manifest(&worktree_root, globs, max_bytes)
+        });
+        let entries = match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(entries))) => entries,
+            Ok(Ok(Err(status))) => return Err(status),
+            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => {
+                let secs = timeout.as_secs();
+                return Err(Status::deadline_exceeded(format!(
+                    "StreamContextManifest: timed out after {secs}s \
+                     (spawn_worker_request_timeout_secs)"
+                )));
+            }
+        };
+
+        let (tx, rx) =
+            tokio::sync::mpsc::unbounded_channel::<Result<ContextManifestEntry, Status>>();
+        for entry in entries {
+            if tx.send(Ok(entry)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    type StreamReadContextFileStream = MpscResultStream<ContextFileChunk>;
+
+    /// The bytes of one allow-listed path — AC18-AC22 of `docs/ft/daemon/agent-context-sync.md`.
+    ///
+    /// Same addressing, same routing and the same allow-list gate as
+    /// [`Self::stream_context_manifest`]; what differs is that this one carries content, framed at
+    /// [`crate::context_files::CONTEXT_FILE_FRAME_BYTES`] so it never engages the transport's
+    /// chunking codec. An over-cap file is refused **before the first frame** rather than shortened,
+    /// because a truncated `CLAUDE.md` silently drops the project's last rule and nothing
+    /// downstream could tell.
+    async fn stream_read_context_file(
+        &self,
+        request: Request<ReadContextFileRequest>,
+    ) -> Result<Response<Self::StreamReadContextFileStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(rx) = self
+            .stream_served_by_peer("StreamReadContextFile", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let (sessions_base, worktree_root) =
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: req.session_token.clone(),
+                session_id: req.session_id.clone(),
+                tool_name: "StreamReadContextFile".to_string(),
+                args_json: String::new(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+            })?;
+
+        let globs = self.context_globs_for_session(
+            "StreamReadContextFile",
+            &sessions_base,
+            &req.session_id,
+            &req.agent,
+        )?;
+        let rel_path = req.rel_path.clone();
+        let max_bytes = self.config.max_attachment_bytes;
+        let timeout = self.config.spawn_worker_request_timeout();
+        let join = tokio::task::spawn_blocking(move || {
+            crate::context_files::read_context_file_bytes(
+                &worktree_root,
+                &rel_path,
+                globs,
+                max_bytes,
+            )
+        });
+        let bytes = match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(bytes))) => bytes,
+            Ok(Ok(Err(status))) => return Err(status),
+            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => {
+                let secs = timeout.as_secs();
+                return Err(Status::deadline_exceeded(format!(
+                    "StreamReadContextFile: timed out after {secs}s \
+                     (spawn_worker_request_timeout_secs)"
+                )));
+            }
+        };
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<ContextFileChunk, Status>>();
+        for frame in crate::context_files::context_file_frames(&bytes) {
+            if tx.send(Ok(frame)).is_err() {
+                break;
+            }
+        }
+        Ok(Response::new(MpscResultStream { rx }))
+    }
+
+    type StreamReadContextFileBatchStream = MpscResultStream<ContextFileBatchChunk>;
+
+    /// The bytes of several allow-listed paths in one call — the setup sync's prefetch.
+    ///
+    /// Everything about the single-file read applies unchanged: the same routing, the same
+    /// session-derived allow-list, the same `spawn_blocking` and timeout, the same 48 KiB framing,
+    /// and the same refusals before the first frame. What differs is the round-trip count, and that
+    /// is the entire point. Populating a split session's context directory reads every allow-listed
+    /// path *before* the agent process exists, and one call per file made a 120-file
+    /// `.claude/skills/` tree into 121 sequential peer calls: around eighteen seconds of dead time
+    /// on a 150 ms link and 121 separate chances to trip `PEER_FORWARD_TIMEOUT`, where an ordinary
+    /// split start used to make no extra peer calls at all.
+    ///
+    /// **One refusal fails the whole batch**, before any bytes are read
+    /// ([`crate::context_files::read_context_files_bytes`]). Serving what it can would leave the
+    /// caller unable to tell "the project does not ship that file" from "this host would not serve
+    /// it", and setup sync must fail loudly rather than start an agent against guidance with a hole
+    /// in it.
+    async fn stream_read_context_file_batch(
+        &self,
+        request: Request<ReadContextFileBatchRequest>,
+    ) -> Result<Response<Self::StreamReadContextFileBatchStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(rx) = self
+            .stream_served_by_peer("StreamReadContextFileBatch", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscResultStream { rx }));
+        }
+
+        let (sessions_base, worktree_root) =
+            self.resolve_exec_tool_worktree(&ExecuteToolRequest {
+                session_token: req.session_token.clone(),
+                session_id: req.session_id.clone(),
+                tool_name: "StreamReadContextFileBatch".to_string(),
+                args_json: String::new(),
+                daemon_instance_id: req.daemon_instance_id.clone(),
+            })?;
+
+        let globs = self.context_globs_for_session(
+            "StreamReadContextFileBatch",
+            &sessions_base,
+            &req.session_id,
+            &req.agent,
+        )?;
+        let rel_paths = req.rel_paths.clone();
+        let max_bytes = self.config.max_attachment_bytes;
+        let timeout = self.config.spawn_worker_request_timeout();
+        let join = tokio::task::spawn_blocking(move || {
+            crate::context_files::read_context_files_bytes(
+                &worktree_root,
+                &rel_paths,
+                globs,
+                max_bytes,
+            )
+        });
+        let files = match tokio::time::timeout(timeout, join).await {
+            Ok(Ok(Ok(files))) => files,
+            Ok(Ok(Err(status))) => return Err(status),
+            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
+            Err(_elapsed) => {
+                let secs = timeout.as_secs();
+                return Err(Status::deadline_exceeded(format!(
+                    "StreamReadContextFileBatch: timed out after {secs}s \
+                     (spawn_worker_request_timeout_secs)"
+                )));
+            }
+        };
+
+        let (tx, rx) =
+            tokio::sync::mpsc::unbounded_channel::<Result<ContextFileBatchChunk, Status>>();
+        for frame in crate::context_files::context_file_batch_frames(&files) {
             if tx.send(Ok(frame)).is_err() {
                 break;
             }
@@ -16104,6 +16643,12 @@ const FRAME_ENVELOPE_HEADROOM: usize = 8 * 1024;
 /// (`docs/ft/coder/rpc-multi-transport.md`). A build failure here is the point: the doc comment above
 /// asserts "without its own chunk framing", and raising the frame size to 64 KiB would silently make
 /// that false. One assert covers [`EXEC_TOOL_FRAME_BYTES`] too, which is this same constant.
+///
+/// [`FRAME_ENVELOPE_HEADROOM`] is a *shared* budget, not a per-field one, and one frame type spends
+/// more of it than the rest: `ContextFileBatchChunk` repeats `rel_path` on every frame, so a deeply
+/// nested `.claude/skills/…/SKILL.md` eats path-length bytes out of the same 8 KiB the RPC envelope
+/// uses. 8 KiB against a path bounded by `PATH_MAX` leaves that comfortable today — this is a note
+/// for whoever narrows the headroom or adds a frame field, not a live risk.
 const _: () = assert!(
     HOST_DOCUMENT_FRAME_BYTES + FRAME_ENVELOPE_HEADROOM
         <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,

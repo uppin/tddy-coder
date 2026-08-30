@@ -316,3 +316,139 @@ fn a_strict_profile_denies_reading_a_path_not_on_the_allow_list() {
 
     let _ = std::fs::remove_file(&probe);
 }
+
+// ─── agent context dir: writable from the host, read-only inside the jail ───────────────────
+
+/// The guidance file the managed-codebase preamble lives in. Overwriting it is the concrete attack
+/// the context-dir carve-out exists to stop: an agent that rewrites its own `CLAUDE.md` erases the
+/// one instruction telling it the real codebase is somewhere else.
+const AGENT_GUIDANCE_FILE: &str = "CLAUDE.md";
+const AGENT_GUIDANCE_TEXT: &str = "# Managed codebase\nThe codebase is not in this directory.\n";
+
+/// A project tree on `/private/tmp` rather than under `TMPDIR`. The profile grants the whole
+/// `/var/folders` tree (the OS per-user scratch base) write access, so a project root inside it
+/// would be writable no matter what the project-root rule said — and these tests must observe the
+/// context-dir deny beating the *project-root* allow specifically.
+fn a_project_tree_outside_the_os_scratch_base(name: &str) -> PathBuf {
+    let root = PathBuf::from("/private/tmp").join(name);
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("project")).expect("create project root");
+    root
+}
+
+/// Seed the agent's context dir with its guidance file, the way the host-side context syncer does
+/// before the jail starts.
+fn a_context_dir_holding_agent_guidance(project_root: &Path) -> PathBuf {
+    let context_dir = project_root.join("context");
+    std::fs::create_dir_all(&context_dir).expect("create context dir");
+    std::fs::write(context_dir.join(AGENT_GUIDANCE_FILE), AGENT_GUIDANCE_TEXT)
+        .expect("seed agent guidance");
+    context_dir
+}
+
+/// Like [`strict_system_plan`], but the confined command also carries `--context-dir <path>` — the
+/// flag every real `tddy-sandbox-runner` argv uses to name the agent's context dir, and the one the
+/// profile renderer derives its carve-out from. `/bin/sh -c <script>` assigns trailing operands to
+/// `$0`/`$1` and still runs the script unchanged, so the flag rides along without altering the probe.
+fn strict_system_plan_declaring_a_context_dir(
+    project_root: &Path,
+    egress: &Path,
+    script: String,
+    context_dir: &Path,
+) -> SandboxPlan {
+    strict_system_plan(
+        project_root,
+        egress,
+        vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            script,
+            "--context-dir".into(),
+            context_dir.to_string_lossy().into_owned(),
+        ],
+    )
+}
+
+/// **seatbelt_denies_a_confined_process_overwriting_the_guidance_in_its_context_dir**: the context
+/// dir is inside the project root's writable subpath, so only the explicit carve-out stops the
+/// agent from rewriting its own instructions. The file stays byte-for-byte as the host wrote it.
+#[test]
+fn seatbelt_denies_a_confined_process_overwriting_the_guidance_in_its_context_dir() {
+    // Given
+    let tree = a_project_tree_outside_the_os_scratch_base("tddy-context-deny-overwrite");
+    let project_root = tree.join("project");
+    let egress = tree.join("egress");
+    let context_dir = a_context_dir_holding_agent_guidance(&project_root);
+    let guidance = context_dir.join(AGENT_GUIDANCE_FILE);
+    let plan = strict_system_plan_declaring_a_context_dir(
+        &project_root,
+        &egress,
+        format!("echo overwritten > '{}'", guidance.display()),
+        &context_dir,
+    );
+
+    // When
+    let mut handle = tddy_sandbox_darwin::spawn_plan(plan).expect("sandbox spawn must succeed");
+    let exit = handle
+        .child_mut()
+        .wait()
+        .expect("wait for sandbox child")
+        .code()
+        .unwrap_or(1);
+
+    // Then
+    assert_sandbox_exit(
+        &egress,
+        exit,
+        false,
+        "seatbelt_denies_a_confined_process_overwriting_the_guidance_in_its_context_dir",
+    );
+    assert_eq!(
+        std::fs::read_to_string(&guidance).expect("guidance file must survive"),
+        AGENT_GUIDANCE_TEXT,
+        "the agent must not be able to rewrite {}",
+        guidance.display()
+    );
+}
+
+/// **seatbelt_still_lets_a_confined_process_write_beside_the_context_dir**: the carve-out is
+/// surgical — the rest of the project root the context dir sits in stays writable, so the deny
+/// cannot be mistaken for a blanket loss of the agent's working tree.
+#[test]
+fn seatbelt_still_lets_a_confined_process_write_beside_the_context_dir() {
+    // Given
+    let tree = a_project_tree_outside_the_os_scratch_base("tddy-context-deny-sibling");
+    let project_root = tree.join("project");
+    let egress = tree.join("egress");
+    let context_dir = a_context_dir_holding_agent_guidance(&project_root);
+    let sibling = project_root.join("scratch-note.txt");
+    let plan = strict_system_plan_declaring_a_context_dir(
+        &project_root,
+        &egress,
+        format!("echo written > '{}'", sibling.display()),
+        &context_dir,
+    );
+
+    // When
+    let mut handle = tddy_sandbox_darwin::spawn_plan(plan).expect("sandbox spawn must succeed");
+    let exit = handle
+        .child_mut()
+        .wait()
+        .expect("wait for sandbox child")
+        .code()
+        .unwrap_or(1);
+
+    // Then
+    assert_sandbox_exit(
+        &egress,
+        exit,
+        true,
+        "seatbelt_still_lets_a_confined_process_write_beside_the_context_dir",
+    );
+    assert_eq!(
+        std::fs::read_to_string(&sibling).expect("sibling file must be created"),
+        "written\n",
+        "the project root beside the context dir must stay writable: {}",
+        sibling.display()
+    );
+}

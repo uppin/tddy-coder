@@ -15,6 +15,8 @@ pub mod codex_oauth_relay;
 pub mod config;
 pub mod connection_service;
 pub mod connection_tonic_adapter;
+pub mod context_files;
+pub mod context_sync;
 pub mod cursor_cli_spawn;
 pub mod elicitation;
 pub mod github_pr_credentials;

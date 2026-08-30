@@ -297,7 +297,11 @@ fn on_disk_size_bytes(path: &Path) -> u64 {
 }
 
 /// Canonicalizes the worktree root, rejecting a missing/inaccessible directory.
-fn canonicalize_root(worktree_root: &Path) -> Result<PathBuf, Status> {
+///
+/// `pub(crate)` because [`crate::context_files`] contains its reads against the very same root with
+/// the very same rule; two spellings of "is this inside the worktree" is how one of them ends up
+/// being the lenient one.
+pub(crate) fn canonicalize_root(worktree_root: &Path) -> Result<PathBuf, Status> {
     worktree_root.canonicalize().map_err(|e| {
         log::debug!(
             "canonicalize_root: canonicalize {:?} failed: {}",
@@ -312,38 +316,7 @@ fn canonicalize_root(worktree_root: &Path) -> Result<PathBuf, Status> {
 /// returns the directory prefix (empty for the root) with forward-slash separators. Also confirms
 /// the resolved path stays under the canonicalized worktree root.
 fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Status> {
-    if rel_path.starts_with('/') || rel_path.starts_with('\\') {
-        log::debug!(
-            "validate_rel_path: rejected leading separator: {:?}",
-            rel_path
-        );
-        return Err(Status::invalid_argument("rel_path must be relative"));
-    }
-    // The traversal check reads the path with backslashes already taken as separators, the way
-    // every use of it below does. On Unix `..\secret.txt` is one legal filename rather than a
-    // traversal, so checking the raw form here and the slashed form afterwards is how a request
-    // gets refused for one reason while being looked up as something else entirely.
-    let rel_slashed = rel_path.replace('\\', "/");
-    let rel = Path::new(&rel_slashed);
-    for comp in rel.components() {
-        match comp {
-            Component::ParentDir => {
-                log::debug!(
-                    "validate_rel_path: rejected traversal segment: {:?}",
-                    rel_path
-                );
-                return Err(Status::invalid_argument("rel_path must not contain '..'"));
-            }
-            Component::Prefix(_) | Component::RootDir => {
-                log::debug!(
-                    "validate_rel_path: rejected absolute component: {:?}",
-                    rel_path
-                );
-                return Err(Status::invalid_argument("rel_path must be relative"));
-            }
-            _ => {}
-        }
-    }
+    let rel_slashed = validate_rel_path_shape(rel_path)?;
 
     let canonical_root = canonicalize_root(worktree_root)?;
     if !rel_slashed.is_empty() {
@@ -359,6 +332,51 @@ fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Sta
                     "resolved path escapes worktree root",
                 ));
             }
+        }
+    }
+
+    Ok(rel_slashed)
+}
+
+/// The half of [`validate_rel_path`] that reads only the string: absolute paths, leading separators
+/// and `..` traversal are refused, and what comes back is the forward-slash spelling every caller
+/// below looks the path up as.
+///
+/// Split out and `pub(crate)` so [`crate::context_files`] can apply it *before* its allow-list gate.
+/// That reader's refusals must not depend on the filesystem — a path outside the allow-list is
+/// refused identically whether or not a file exists there — so it needs the syntactic guard on its
+/// own, with containment applied after the gate rather than before it.
+pub(crate) fn validate_rel_path_shape(rel_path: &str) -> Result<String, Status> {
+    if rel_path.starts_with('/') || rel_path.starts_with('\\') {
+        log::debug!(
+            "validate_rel_path_shape: rejected leading separator: {:?}",
+            rel_path
+        );
+        return Err(Status::invalid_argument("rel_path must be relative"));
+    }
+    // The traversal check reads the path with backslashes already taken as separators, the way
+    // every use of it below does. On Unix `..\secret.txt` is one legal filename rather than a
+    // traversal, so checking the raw form here and the slashed form afterwards is how a request
+    // gets refused for one reason while being looked up as something else entirely.
+    let rel_slashed = rel_path.replace('\\', "/");
+    let rel = Path::new(&rel_slashed);
+    for comp in rel.components() {
+        match comp {
+            Component::ParentDir => {
+                log::debug!(
+                    "validate_rel_path_shape: rejected traversal segment: {:?}",
+                    rel_path
+                );
+                return Err(Status::invalid_argument("rel_path must not contain '..'"));
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                log::debug!(
+                    "validate_rel_path_shape: rejected absolute component: {:?}",
+                    rel_path
+                );
+                return Err(Status::invalid_argument("rel_path must be relative"));
+            }
+            _ => {}
         }
     }
 

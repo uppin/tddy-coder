@@ -71,6 +71,39 @@ const SEEDED_CONTENTS: &str = "one\ntwo\n";
 /// A cold LiveKit container has to accept every participant before any of this can happen, and the
 /// daemon shells out to git on a blocking pool for each poll. Sized for the worst machine that will
 /// run it; the polling decides when to stop.
+/// The allow-list a Claude session syncs, spelled out here so this suite stays independent of
+/// tddy-core's per-backend table.
+const CLAUDE_CONTEXT_GLOBS: &[&str] = &[
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/**",
+    ".mcp.json",
+    ".agents/**",
+];
+
+/// The `max_attachment_bytes` a co-located context read is bounded by. Named rather than compiled
+/// into the source, because it is an operator setting on both halves of a split session.
+const A_GENEROUS_CONTEXT_CAP: u64 = 64 * 1024 * 1024;
+
+/// A codebase whose repository carries no agent guidance at all.
+///
+/// The wiring these tests exercise is the LiveKit room and the token it mints; the context sync
+/// that rides along with it is another suite's subject (`context_sync_acceptance.rs`). A local
+/// source over an empty repo is the honest stand-in: the fetch really runs and really succeeds,
+/// and it has nothing to copy.
+fn a_codebase_holding_no_agent_guidance() -> (
+    tempfile::TempDir,
+    tddy_daemon::context_sync::LocalWorktreeSource,
+) {
+    let repo = tempfile::tempdir().expect("tempdir");
+    let source = tddy_daemon::context_sync::LocalWorktreeSource::new(
+        repo.path().to_path_buf(),
+        CLAUDE_CONTEXT_GLOBS,
+        A_GENEROUS_CONTEXT_CAP,
+    );
+    (repo, source)
+}
+
 const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(30);
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -674,6 +707,7 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
     let daemon = FacilitatingDaemon::with_livekit().await;
     let started = daemon.start_agent_session().await;
     let session_dir = unified_session_dir_path(&daemon.sessions_base, &started.session_id);
+    let a_project_with_no_guidance = a_codebase_holding_no_agent_guidance();
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_daemon::split_session::prepare_split_agent_wiring(
@@ -687,6 +721,8 @@ async fn a_split_agent_is_wired_to_the_session_room_rather_than_the_lobby() {
             session_token: &a_caller_token_signed_with_the_deployment_secret(),
         },
         &[],
+        CLAUDE_CONTEXT_GLOBS,
+        &a_project_with_no_guidance.1,
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();
@@ -724,6 +760,7 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
     let daemon = FacilitatingDaemon::with_livekit().await;
     let started = daemon.start_agent_session().await;
     let session_dir = unified_session_dir_path(&daemon.sessions_base, &started.session_id);
+    let a_project_with_no_guidance = a_codebase_holding_no_agent_guidance();
 
     // When its agent's remote-tool wiring is prepared, with the checkout placed on another daemon
     let wiring = tddy_daemon::split_session::prepare_split_agent_wiring(
@@ -737,6 +774,8 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
             session_token: &a_caller_token_signed_with_the_deployment_secret(),
         },
         &[],
+        CLAUDE_CONTEXT_GLOBS,
+        &a_project_with_no_guidance.1,
     )
     .expect("split agent wiring must be preparable for an agent session");
     let env: std::collections::HashMap<String, String> = wiring.env.into_iter().collect();

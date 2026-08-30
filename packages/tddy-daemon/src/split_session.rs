@@ -121,35 +121,59 @@ pub fn split_context_dir(session_dir: &Path) -> PathBuf {
     session_dir.join("context")
 }
 
-/// Build the agent's working directory.
+/// Build the agent's working directory, populated from the repository it stands in for.
 ///
-/// The agent has no repository here, so the directory carries the managed-codebase notice telling it
-/// the codebase is elsewhere and reachable only through `mcp__tddy-tools__*`. Unlike the sandboxed
+/// The agent has no repository here, so the directory carries the managed-codebase preamble telling
+/// it the codebase is elsewhere and reachable only through `mcp__tddy-tools__*` — and, beneath that,
+/// the project's own guidance: everything `globs` names, fetched from `source`. Unlike the sandboxed
 /// context dir, it is not made read-only: there the jail mounts it read-only, while here what keeps
 /// the agent out of it is the tool disallowlist, and `claude` still needs a writable cwd.
 ///
-/// `withdrawals` names each roster agent beside the tools it took over, so the notice says where a
+/// `withdrawals` names each roster agent beside the tools it took over, so the preamble says where a
 /// withdrawn tool went. Without it the main agent is left to discover mid-turn that a tool it can
 /// see is refused, with nothing telling it which agent to ask instead. An empty slice renders the
 /// plain notice, byte for byte — the ordinary split session, which has no agents.
 ///
-/// TODO(remote-managed-worktree): sync the codebase host's `CLAUDE.md` / `AGENTS.md` / skills into
-/// this directory. Until then a split session's agent sees the notice but not the project's own
-/// guidance, which the co-located managed-codebase path does copy from the worktree.
+/// **A fetch that fails fails the build.** No partial context dir, no notice-only directory, no
+/// fallback: `StartSession` fails and the caller tears down the worktree it created on the codebase
+/// daemon. A split session that cannot read its project's rules must not start pretending it has,
+/// because nothing downstream could tell the difference — this is
+/// [`crate::connection_service`]'s rule for `split_withdrawals_from_codebase_host`, applied to the
+/// guidance for the same reason it applies to the roster.
 pub fn build_split_context_dir(
     session_dir: &Path,
     withdrawals: &[(String, Vec<String>)],
+    globs: &[&str],
+    source: &dyn crate::context_sync::ContextSource,
 ) -> Result<PathBuf, Status> {
     let context_dir = split_context_dir(session_dir);
     std::fs::create_dir_all(&context_dir)
         .map_err(|e| Status::internal(format!("failed to create split context dir: {e}")))?;
     let borrowed = borrowed_withdrawals(withdrawals);
     let replacements = subagent_replacements(withdrawals, &borrowed);
-    std::fs::write(
-        context_dir.join("CLAUDE.md"),
-        tddy_sandbox::sandbox_remote_appendix(&replacements).trim_start(),
-    )
-    .map_err(|e| Status::internal(format!("failed to write split context CLAUDE.md: {e}")))?;
+    let preamble = tddy_sandbox::managed_codebase_preamble(&replacements);
+
+    crate::context_sync::ContextSyncer::populate(&context_dir, &preamble, globs, source)?;
+
+    // Written last and unconditionally, because a repository with no `CLAUDE.md` still has to leave
+    // the agent something saying where its codebase is. `prepend_preamble` is a no-op on a file the
+    // populate step already led with the preamble, so this neither doubles the notice nor discards
+    // the project's text.
+    for filename in tddy_sandbox::PREAMBLE_FILES {
+        let path = context_dir.join(filename);
+        let body = match std::fs::read_to_string(&path) {
+            Ok(body) => body,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "failed to read split context {filename}: {e}"
+                )))
+            }
+        };
+        std::fs::write(&path, tddy_sandbox::prepend_preamble(&preamble, &body)).map_err(|e| {
+            Status::internal(format!("failed to write split context {filename}: {e}"))
+        })?;
+    }
     Ok(context_dir)
 }
 
@@ -538,12 +562,18 @@ pub struct SplitSpawnTarget<'a> {
 /// codebase daemon, since that is the host that holds it. It reaches both halves of the spawn: the
 /// context dir's appendix names the agent each tool went to, and Claude's own tool flags stop
 /// pre-approving the tools the roster took away.
+/// `globs` and `source` are the session backend's allow-list and the repository it is read from —
+/// the codebase daemon on a resume, reached through a fetch already completed by the caller. A fetch
+/// that failed has already failed this call, for the reason [`build_split_context_dir`] gives.
+#[allow(clippy::too_many_arguments)]
 pub fn prepare_split_agent_wiring(
     config: &crate::config::DaemonConfig,
     session_dir: &Path,
     tddy_tools_path: &str,
     target: &SplitSpawnTarget<'_>,
     withdrawals: &[(String, Vec<String>)],
+    globs: &[&str],
+    source: &dyn crate::context_sync::ContextSource,
 ) -> Result<SplitAgentWiring, Status> {
     let SplitSpawnTarget {
         session_id,
@@ -565,7 +595,7 @@ pub fn prepare_split_agent_wiring(
         session_token,
     )?;
     Ok(SplitAgentWiring {
-        context_dir: build_split_context_dir(session_dir, withdrawals)?,
+        context_dir: build_split_context_dir(session_dir, withdrawals, globs, source)?,
         extra_args: split_claude_extra_args(session_dir, tddy_tools_path, withdrawals)?,
         env: remote.env_pairs(),
     })
@@ -1002,13 +1032,40 @@ mod tests {
         );
     }
 
+    /// The allow-list a Claude session syncs, spelled out here so these tests stay independent of
+    /// tddy-core's per-backend table.
+    const CLAUDE_GLOBS: &[&str] = &[
+        "CLAUDE.md",
+        "AGENTS.md",
+        ".claude/**",
+        ".mcp.json",
+        ".agents/**",
+    ];
+
+    /// The `max_attachment_bytes` a co-located context read is bounded by, as these tests set it.
+    const A_GENEROUS_CONTEXT_CAP: u64 = 64 * 1024 * 1024;
+
+    /// A repository holding no agent guidance at all — the case that proves the notice is written
+    /// even when there is nothing to write it in front of.
+    fn a_repo_with_no_guidance() -> (tempfile::TempDir, crate::context_sync::LocalWorktreeSource) {
+        let repo = tempfile::tempdir().unwrap();
+        let source = crate::context_sync::LocalWorktreeSource::new(
+            repo.path().to_path_buf(),
+            CLAUDE_GLOBS,
+            A_GENEROUS_CONTEXT_CAP,
+        );
+        (repo, source)
+    }
+
     #[test]
     fn the_context_dir_tells_the_agent_its_codebase_is_elsewhere() {
         // Given
         let tmp = tempfile::tempdir().unwrap();
+        let (_repo, source) = a_repo_with_no_guidance();
 
         // When
-        let context = build_split_context_dir(tmp.path(), &[]).expect("context dir");
+        let context =
+            build_split_context_dir(tmp.path(), &[], CLAUDE_GLOBS, &source).expect("context dir");
 
         // Then — an agent that opened its cwd expecting a repository learns why it is empty
         let claude_md = std::fs::read_to_string(context.join("CLAUDE.md")).expect("CLAUDE.md");
@@ -1181,9 +1238,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // When
+        let (_repo, source) = a_repo_with_no_guidance();
         let context = build_split_context_dir(
             tmp.path(),
             &wire_roster_withdrawals(&[an_agent_on_the_roster("explorer", &["Grep"])]),
+            CLAUDE_GLOBS,
+            &source,
         )
         .expect("context dir");
 
