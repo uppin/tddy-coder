@@ -210,6 +210,30 @@ the draft at step 3.
 - [ ] **Blocker** — the darwin renderer's blanket `/var/folders` grant (see below)
 - [ ] Mark PR ready for review
 
+## Validation findings (`/pr-wrap`)
+
+Gates: `cargo fmt --check`, `clippy -p tddy-daemon -p tddy-sandbox-runner --all-targets -D warnings`,
+`check --workspace --all-targets` — all clean. No `TODO`/`FIXME` left behind, no test-only branches
+in production code, one `unwrap` (a mutex-poison unwrap on the jail handle). Suites: 5 + 13 + 9
+Seatbelt/acceptance/plan-unit, 600 daemon lib, 36 sandbox-runner, 3 + 22 + 18 e2e install — all
+passing.
+
+Two findings, neither fixed here:
+
+**1. The jail outlives its session.** `WorkspaceSandboxRegistry::remove` is never called —
+`connection_service.rs` only ever `insert`s (:4232) and `get`s (:8779). `JailedWorkspaceSandbox`
+implements `Drop`, so the jail *would* stop when its `Arc` drops, but the registry holds that `Arc`
+for the daemon's lifetime. So `DeleteSession` on a sandboxed workspace session removes the worktree
+and leaves a jailed `tddy-sandbox-runner` process running against a directory that no longer
+exists, until the daemon exits.
+
+The Out table assigns `DeleteSession` teardown to `split-sandbox-resume`, which is why it was not
+wired here. Worth reconsidering: a leaked *process* is a different class of gap from a missing
+resume, and the teardown itself already exists — it is one `remove()` call on the session-deletion
+path.
+
+**2. The `/var/folders` grant** — below.
+
 ## Known hole — the jail is not yet "the worktree and nothing else"
 
 `tddy-sandbox-darwin`'s `render_plan` grants **every** plan `(subpath "/var/folders")` for both
