@@ -18,7 +18,7 @@ Product reference: [docs/ft/web/inactive-session-activities.md](../../../docs/ft
 
 ## Liveness semantics
 
-`connectionStatusForSession` returns `"needs-input"` only when **`isActive && pendingElicitation`**. The flag is persisted and is not cleared when a process dies, so a session that died mid-elicitation used to read as live — which under the rules above left it with neither the Activities view nor a Resume button. The predicate change also reaches the drawer status dot (`SessionDrawerItem`, `SessionDrawer`), the live/remaining partition (`sessionStackGroups`) and sorting; a dead session with a stale flag now reads as disconnected everywhere.
+`connectionStatusForSession` returns `"needs-input"` only when **`isActive && pendingElicitation`**. The flag is persisted and is not cleared when a process dies, so a session that died mid-elicitation used to read as live — which under the rules above left it with neither the Activities view nor a Resume button. The predicate change also reaches the live/remaining partition (`sessionStackGroups`) and sorting; a dead session with a stale flag now reads as disconnected everywhere. The drawer status **dot** is no longer derived from `connectionStatusForSession` — it is `sessionIndicatorFor` (`src/lib/sessionIndicator.ts`), which keeps the same liveness-first rule and adds the notification-driven states (see [session-notifications](../../../docs/ft/daemon/session-notifications.md)).
 
 ## Transcript pane
 

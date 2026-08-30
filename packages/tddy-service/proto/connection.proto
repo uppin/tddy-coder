@@ -133,6 +133,13 @@ service ConnectionService {
   // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
   rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
   rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
+  // Session notifications — everything that happened in ANY of this daemon's sessions that an
+  // operator should know about (docs/ft/daemon/session-notifications.md).
+  // One subscription serves the whole session drawer: the events name the session they belong to,
+  // so a drawer of twelve rows opens one stream, not twelve. Live-only by construction — a
+  // notification describes a moment, and a replayed one would claim an agent is working now
+  // because it was working when the tab was last open.
+  rpc StreamSessionNotifications(StreamSessionNotificationsRequest) returns (stream SessionNotificationEvent);
   // The patch a call produced, scoped to that call's own files, so a participant can apply an
   // edit rather than merely learn that the checkout moved
   // (docs/ft/daemon/session-worktree-sync.md). This is the INCREMENTAL path only: a client that
@@ -1527,6 +1534,49 @@ enum StreamMode {
   // recorded order, oldest-first within the page — then tail live. Older frames are reached by
   // paging backwards with GetAcpReplayPage from the first delivered frame's `seq`.
   TAIL_THEN_LIVE     = 3;
+}
+
+// Whether a notification asks the operator for something, or merely reports progress.
+enum SessionNotificationKind {
+  // The daemon said nothing about the kind — not a claim that either applies.
+  SESSION_NOTIFICATION_KIND_UNSPECIFIED = 0;
+  // The agent is working. Drives the drawer's blinking green dot; reaches no chat.
+  SESSION_NOTIFICATION_KIND_ACTIVITY = 1;
+  // The session is blocked on the operator, or has finished a turn and is waiting for them.
+  // Drives the yellow dot, and is the only kind Telegram sends.
+  SESSION_NOTIFICATION_KIND_ATTENTION_REQUIRED = 2;
+}
+
+// Which of the daemon's inbound paths raised a notification.
+enum SessionNotificationSource {
+  SESSION_NOTIFICATION_SOURCE_UNSPECIFIED = 0;
+  // ReportSessionStatus — the per-worktree claude-cli / cursor-cli hooks.
+  SESSION_NOTIFICATION_SOURCE_ACTIVITY_STATUS = 1;
+  // ReportAgentActivity — the agent's own tool loop.
+  SESSION_NOTIFICATION_SOURCE_AGENT_TOOL_CALL = 2;
+  // PresenterObserver.ObserveEvents — a tddy-coder workflow session's presenter.
+  SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
+}
+
+message StreamSessionNotificationsRequest {
+  // The web session token. No session id: the stream is daemon-level by design (NFR1).
+  string session_token = 1;
+}
+
+// One thing that happened in one session.
+message SessionNotificationEvent {
+  string                    session_id = 1;
+  // The session's display label, derived by the one rule every surface uses
+  // (tddy_core::session_label::session_display_label), so this event and the drawer row it belongs
+  // to name the same session identically.
+  string                    label      = 2;
+  SessionNotificationKind   kind       = 3;
+  SessionNotificationSource source     = 4;
+  // Operator-facing copy, rendered verbatim (it is what Telegram sends). Never carries a secret.
+  string                    text       = 5;
+  // Unix milliseconds, stamped when the event happened. The web ages activity out of its blink
+  // window against this, so a 0 here would leave a dot blinking for as long as the tab stayed open.
+  uint64                    at_unix_ms = 6;
 }
 
 message StreamSessionActivityRequest {

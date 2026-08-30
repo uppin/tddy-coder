@@ -16,7 +16,8 @@ The **`telegram_notifier`** module implements session status notifications using
 
 | Item | Role |
 |------|------|
-| **`session_telegram_label(session_id)`** | Returns **`Some("seg0-seg1")`** when **`session_id`** splits on **`-`** into at least two parts; otherwise **`None`**. |
+| **`session_telegram_label(session_id)`** | Returns **`Some("seg0-seg1")`** when **`session_id`** splits on **`-`** into at least two parts; otherwise **`None`**. Used by the metadata tick, presenter elicitation, the **`/sessions`** list and chain-parent buttons. **Activity alerts do not use it** — those name a session with **`tddy_core::session_label::session_display_label`**, the rule the web drawer applies, so a chat message and a drawer row agree (**[session-notifications.md](session-notifications.md)**). |
+| **`TelegramSessionWatcher::chats_tracking_session(session_id)`** | **`Option<Vec<i64>>`** — the chats that have Enter-tracked the session, or **`None`** when the tracking map cannot be read. **`Some(vec![])`** ("nobody claimed it", so the caller may broadcast) and **`None`** ("unknown") are deliberately different: treating the second as the first would announce a session one operator had claimed to every configured chat. |
 | **`is_terminal_session_status(status)`** | **`true`** for **`completed`** and **`failed`** (ASCII case-insensitive); used for classification and logging. |
 | **`mask_bot_token_for_logs(token)`** | Returns a fixed-format string that does not embed the token (length-only metadata). |
 | **`send_telegram_via_teloxide(bot, chat_id, text)`** | **`Requester::send_message`**; maps teloxide errors to **`anyhow::Error`**. |
@@ -25,6 +26,10 @@ The **`telegram_notifier`** module implements session status notifications using
 | **`ElicitationSelectOptionsCache`** | **`Arc<Mutex<HashMap<session_id, Vec<String>>>>`** — one confirmation string per option index for **`Select`** elicitation. |
 | **`SharedActiveElicitationCoordinator`** / **`ActiveElicitationCoordinator`** | **`packages/tddy-daemon/src/active_elicitation.rs`**: per-chat **FIFO** of session ids awaiting elicitation; **`active_session_for_chat`**, **`elicitation_callback_permitted`**, **`register_elicitation_surface_request`**, **`advance_after_elicitation_completion`**. Helpers **`should_emit_primary_elicitation_keyboard`** decide whether the full **`eli:s:`** keyboard is attached for a given (**`chat_id`**, **`session_id`**) pair. |
 | **`SharedTelegramTrackedSessionCoordinator`** / **`TelegramTrackedSessionCoordinator`** | **`packages/tddy-daemon/src/telegram_tracked_session.rs`**: per-chat map Telegram **`chat_id`** → workflow **`session_id`** after **Enter session** or after **`handle_start_workflow`** from that chat; **`should_suppress_workflow_keyboards_for_session`** encodes **no tracking** and **wrong-session** suppression. **`TelegramSessionWatcher::bind_telegram_tracked_session_for_chat`** supports tests and harnesses that assert full keyboards without driving **Enter** in a scenario. |
+
+## Activity alerts moved to the notification bus
+
+The **`WaitingForInput`** / **`Done`** alert path no longer lives in this module. **`ReportSessionStatus`** publishes onto **`SessionNotificationBus`**, and **`TelegramNotificationSubscriber`** is one subscriber on it — see **[session-notifications.md](session-notifications.md)**. This module keeps the metadata tick, the presenter **`ServerMessage`** surface, and everything keyboard-bearing.
 
 ## Telegram-tracked session gate (`telegram_tracked_session`)
 

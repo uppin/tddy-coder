@@ -68,6 +68,7 @@ import {
 } from "./responses";
 import { acpReplayHandlers, type AcpReplayScenario } from "./acpReplay";
 import { aSessionAgentRosterFake, type RosterScenario } from "./sessionAgentRosterBackend";
+import { type SessionNotificationFeed } from "./sessionNotificationFeed";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -246,6 +247,10 @@ export interface ConnectionServiceScenario {
    *  `ListSubagents`) — what the inspector's Agents tab shows. Default: unimplemented, so a screen
    *  that never opens that tab is unaffected. */
   sessionAgents?: RosterScenario;
+  /** The daemon-level session-notification feed, served by `StreamSessionNotifications` — one
+   *  stream carrying every session's activity and attention events (see `./sessionNotificationFeed`).
+   *  Default: unimplemented, so a screen that never subscribes is unaffected. */
+  sessionNotifications?: SessionNotificationFeed;
 }
 
 export interface ConnectionServiceBackend extends InMemoryRpcBackend {
@@ -392,6 +397,9 @@ export function aConnectionServiceBackend(
       // `.implement(ConnectionService, …)` per backend, since Connect's router fills every omitted
       // method of a registered service with an `Unimplemented` handler.
       ...(scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents).handlers : {}),
+      // The daemon's session-notification feed. Spread for the same reason as the two above: one
+      // `.implement(ConnectionService, …)` per backend.
+      ...(scenario.sessionNotifications ? scenario.sessionNotifications.handlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"
