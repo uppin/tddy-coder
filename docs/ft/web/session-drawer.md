@@ -48,12 +48,30 @@ the list is split into an **Active** and a **Remaining** partition (see
 [Active / Remaining Partition Separator](#active--remaining-partition-separator)); there is no
 per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
-## Connection Status Token
+## Indicator Token
 
-`connectionStatusForSession(entry)` maps proto fields to one of:
-- `"connected"` — `isActive: true` and `pendingElicitation: false`
-- `"needs-input"` — `pendingElicitation: true` (takes precedence over `isActive`)
-- `"disconnected"` — `isActive: false` and `pendingElicitation: false`
+The row's dot (`SessionIndicatorDot`, shared by the expanded list and the collapsed strip) shows one
+of **four** states, derived by `sessionIndicatorFor(entry, notificationState, nowMs)`
+(`src/lib/sessionIndicator.ts`) from the session's proto fields plus its live notification feed:
+
+- `"disconnected"` — grey, steady. `isActive: false`, whatever else is recorded.
+- `"needs-input"` — yellow, steady. `pendingElicitation: true`, **or** an `ATTENTION_REQUIRED`
+  notification newer than the last time the operator opened the session.
+- `"working"` — green, **fading in and out**. An `ACTIVITY` notification newer than the last view,
+  within a 30-second blink window.
+- `"connected"` — green, steady. Alive with nothing outstanding.
+
+Notifications arrive on one daemon-level `StreamSessionNotifications` subscription per drawer
+(`useSessionNotifications`) and are held per session in `sessionNotificationRegistry`. Selecting a
+row marks it seen, which clears the notification-driven yellow and settles a blink — but **not** a
+`pendingElicitation`, which stays yellow until the gate is actually answered. See
+[session-notifications-as-indicators](../daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md).
+
+`connectionStatusForSession(entry)` still exists and still maps proto fields to
+`connected | needs-input | disconnected`, but it no longer drives the dot. Its remaining callers ask
+a narrower question — *is this session dormant?* — for the Active/Remaining partition
+(`sessionStackGroups.ts`) and base-view selection (`sessionBaseView.ts`), both of which must stay
+blind to activity: a row must not change partition because an agent ran a tool.
 
 ## Active / Remaining Partition Separator
 

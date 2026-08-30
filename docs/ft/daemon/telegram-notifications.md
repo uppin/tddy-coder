@@ -2,7 +2,11 @@
 
 ## Purpose
 
-Operators receive short Telegram messages when a **coding session’s recorded status** moves from one value to another, for sessions that are **active** (tool process alive) and **in progress**. Messages identify the session with the **first two hyphen-separated segments** of the session id (for example `018f1234-5678` for a UUID-shaped id), so many concurrent sessions remain distinguishable in a chat.
+Operators receive short Telegram messages when a **coding session’s recorded status** moves from one value to another, for sessions that are **active** (tool process alive) and **in progress**.
+
+**Activity alerts** (the `WaitingForInput` / `Done` path) identify a session by the **same label the `tddy-web` session drawer shows it under** — the basename of its `repo_path`, falling back to its `workflow_goal`, falling back to the first eight characters of its id. One rule, `tddy_core::session_label::session_display_label`, serves both surfaces, so a chat message and a drawer row name the same session identically. See [session-notifications-as-indicators](1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md).
+
+**Every other Telegram surface** — the metadata-tick status line, presenter elicitation, the `/sessions` list, chain-parent buttons — still uses the **short id label**: the first two hyphen-separated segments of the session id (for example `018f1234-5678`). Unifying those is tracked as a follow-up.
 
 ## Configuration
 
@@ -30,7 +34,7 @@ After the YAML file is loaded, **`tddy-daemon`** merges optional process environ
 
 Each notification is plain text. It includes:
 
-- A **short session label** derived from **`session_id`**: the first two segments split on **`-`**, joined with **`-`** (for example `018f1234-5678-7abc-8def-123456789abc` → **`018f1234-5678`**).
+- A **session label**: the drawer label for activity alerts, otherwise the short id derived from **`session_id`** (first two segments split on **`-`** — for example `018f1234-5678-7abc-8def-123456789abc` → **`018f1234-5678`**). See **Purpose** for which surface uses which.
 - A **human-readable transition**: previous status and new status after a change is detected.
 
 ## Behavior (library contract)
@@ -77,7 +81,7 @@ change in between) does **not** send a second message. Only a genuine transition
 - **`WaitingForInput`**: `"🔔 Session <label>: Claude Code needs your input (permission, question, or your next prompt). Attach via the web UI or \`tddy-tools pty-relay\`."`
 - **`Done`**: `"✅ Session <label>: Claude Code finished this turn. Attach to continue."`
 
-`<label>` is the first two hyphen-separated segments of the session id (e.g. `018f1234-5678`).
+`<label>` is the session's **drawer label** — the basename of its `repo_path`, else its `workflow_goal`, else the first eight characters of its id (`tddy_core::session_label::session_display_label`). A session working in `/home/dev/my-feature-branch` reads as `Session my-feature-branch`.
 
 ### Routing
 
@@ -97,11 +101,20 @@ No PTY/ANSI scraping is involved.
 
 ### Implementation surface
 
-**`TelegramSessionWatcher::on_claude_cli_activity_status_changed`** — called from
-**`connection_service::report_session_status`** after `update_activity_status` succeeds, when
-`self.telegram` is configured. Holds `last_activity_status: HashMap<session_id, String>` to detect
-transitions. It takes the `DaemonConfig` and resolves recipients tracked-first: `chats_tracking_session(session_id)`
-on the shared tracked coordinator when non-empty, otherwise the enabled `telegram.chat_ids` broadcast list.
+**`TelegramNotificationSubscriber`** (`tddy_daemon::session_notification_subscribers`) — one
+subscriber on the daemon's **session-notification bus**, which
+**`connection_service::report_session_status`** publishes to after `update_activity_status`
+succeeds. It takes only `AttentionRequired` notifications from the activity-status path (declining
+`Activity`, so no new Telegram traffic, and declining presenter-sourced events, which keep their own
+keyboard-bearing surface below). It holds a per-session record of the last line delivered to detect
+transitions, and resolves recipients tracked-first: `chats_tracking_session(session_id)` on the
+shared tracked coordinator when it reports chats, otherwise the enabled `telegram.chat_ids`
+broadcast list. When that lookup cannot be read at all it sends **nothing** rather than falling back
+to the broadcast, so an unreadable tracking map cannot turn a targeted alert into an announcement.
+
+The bus and its other subscriber — the `StreamSessionNotifications` feed that drives the web's
+per-session indicators — are described in
+**[session-notifications-as-indicators](1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md)**.
 
 ## Presenter stream: elicitation (`ModeChanged`)
 

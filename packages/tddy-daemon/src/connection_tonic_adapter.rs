@@ -61,17 +61,17 @@ use tddy_service::proto::connection::{
     ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
     ReportSessionStatusResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
     RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
-    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster, SessionTerminalInput,
-    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
-    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
-    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
-    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamSessionActivityRequest,
-    StreamSessionAgentsRequest, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
-    TerminalControlEvent, TerminalHistoryChunk, UploadSessionFileChunkRequest,
-    UploadSessionFileChunkResponse, WatchTerminalControlRequest, WorktreeFileChunk,
-    WorktreeStatsEvent,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster, SessionNotificationEvent,
+    SessionTerminalInput, SessionTerminalOutput, SetProjectDefaultBranchRequest,
+    SetProjectDefaultBranchResponse, SignalSessionRequest, SignalSessionResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest, StartSessionResponse,
+    StartTerminalSessionRequest, StartTerminalSessionResponse, StopDemoVmRequest,
+    StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest,
+    StreamSessionActivityRequest, StreamSessionAgentsRequest, StreamSessionNotificationsRequest,
+    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
+    TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    WatchTerminalControlRequest, WorktreeFileChunk, WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
@@ -183,6 +183,7 @@ where
     T::GetTerminalHistoryStream: 'static,
     T::WatchTerminalControlStream: 'static,
     T::StreamSessionActivityStream: 'static,
+    T::StreamSessionNotificationsStream: 'static,
     T::StreamAcpReplayStream: 'static,
     T::StreamSessionAgentsStream: 'static,
     T::PromptAgentConversationStream: 'static,
@@ -888,6 +889,27 @@ where
         request: tonic::Request<StreamSessionActivityRequest>,
     ) -> Result<tonic::Response<Self::StreamSessionActivityStream>, tonic::Status> {
         let resp = RpcConnectionService::stream_session_activity(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    /// Server streaming: every session notification this daemon raises (one subscription for the
+    /// whole session drawer).
+    type StreamSessionNotificationsStream =
+        Pin<Box<dyn Stream<Item = Result<SessionNotificationEvent, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_session_notifications(
+        &self,
+        request: tonic::Request<StreamSessionNotificationsRequest>,
+    ) -> Result<tonic::Response<Self::StreamSessionNotificationsStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_session_notifications(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

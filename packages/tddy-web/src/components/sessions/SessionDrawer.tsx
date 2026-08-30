@@ -9,16 +9,11 @@ import {
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { SessionDrawerItem } from "./SessionDrawerItem";
+import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerSeparator } from "./SessionDrawerSeparator";
+import { SESSION_INDICATOR_DOT_STYLES } from "./sessionIndicatorDotStyles";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
-import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
 import { cn } from "../../lib/utils";
-
-const STATUS_COLOR: Record<string, string> = {
-  connected: "bg-green-500",
-  disconnected: "bg-gray-400",
-  "needs-input": "bg-yellow-500",
-};
 
 /**
  * Owning-host attribution passed down so each row can badge cross-host sessions. A session's owning
@@ -146,6 +141,42 @@ function SessionStackGroup({
   );
 }
 
+/**
+ * One row of the collapsed (12px-wide) strip: the session's indicator dot and nothing else, with the
+ * drawer label as its tooltip. It is a component rather than an inline `map` body because the
+ * indicator is read through a per-session store subscription, which only a component can hold.
+ */
+function CollapsedSessionDot({
+  session,
+  isSelected,
+  onSelectSession,
+}: {
+  session: SessionEntry;
+  isSelected: boolean;
+  onSelectSession: (sessionId: string) => void;
+}) {
+  const label = sessionDrawerLabel(session);
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => onSelectSession(session.sessionId)}
+          className={cn(
+            "h-8 w-8 flex items-center justify-center rounded-md transition-colors",
+            isSelected ? "bg-accent" : "hover:bg-muted",
+          )}
+          title={label}
+        >
+          <SessionIndicatorDot session={session} sizeClassName="h-2.5 w-2.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Renders one partition's stack groups followed by its flat rows. */
 function SessionPartitionBody({
   partition,
@@ -228,6 +259,7 @@ export function SessionDrawer({
         data-drawer-state="closed"
         className="hidden md:flex flex-col h-full border-r border-border bg-background flex-shrink-0 w-12"
       >
+        <style>{SESSION_INDICATOR_DOT_STYLES}</style>
         {/* Open button */}
         <div className="border-b border-border flex items-center justify-center py-2">
           <button
@@ -243,34 +275,14 @@ export function SessionDrawer({
 
         {/* Status dots — one per session, clickable */}
         <div className="py-2 flex flex-col items-center gap-2 overflow-y-auto">
-          {sessions.map((session) => {
-            const status = connectionStatusForSession(session);
-            const label = sessionDrawerLabel(session);
-            const isSelected = session.sessionId === selectedSessionId;
-            return (
-              <Tooltip key={session.sessionId}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => onSelectSession(session.sessionId)}
-                    className={cn(
-                      "h-8 w-8 flex items-center justify-center rounded-md transition-colors",
-                      isSelected ? "bg-accent" : "hover:bg-muted",
-                    )}
-                    title={label}
-                  >
-                    <span
-                      className={cn(
-                        "h-2.5 w-2.5 rounded-full flex-shrink-0",
-                        STATUS_COLOR[status] ?? "bg-gray-400",
-                      )}
-                    />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">{label}</TooltipContent>
-              </Tooltip>
-            );
-          })}
+          {sessions.map((session) => (
+            <CollapsedSessionDot
+              key={session.sessionId}
+              session={session}
+              isSelected={session.sessionId === selectedSessionId}
+              onSelectSession={onSelectSession}
+            />
+          ))}
         </div>
       </div>
     );
@@ -304,6 +316,7 @@ export function SessionDrawer({
       )}
       style={isMobile ? { position: "absolute", inset: 0, width: "100%", zIndex: 30 } : undefined}
     >
+      <style>{SESSION_INDICATOR_DOT_STYLES}</style>
       <div className="px-3 py-2 border-b border-border flex items-center gap-1">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex-1">
           Sessions
