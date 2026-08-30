@@ -1,7 +1,7 @@
 /**
  * In-memory backend for a conversation with a roster agent — `OpenAgentConversation`,
  * `PromptAgentConversation`, `CancelAgentConversation`
- * (docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md).
+ * (docs/ft/web/session-drawer.md § Add agent).
  *
  * Modelled on `sessionAgentRosterBackend.ts`, and for the same reason: `PromptAgentConversation` is
  * server-streaming, so what the pane must do with a *sequence* of frames cannot be expressed by a

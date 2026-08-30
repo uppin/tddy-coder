@@ -652,6 +652,25 @@ or the [agent activity pane](agent-activity-pane.md), which replay a *session's*
 transcript: a roster agent has no session directory and no transcript, so the main agent's own use
 of its sub-agents stays visible only as the roster row's status badge and last-activity line.
 
+"Switching sessions tears nothing down" rests on the runtime layer keeping **one slot in the element
+tree** in every base-view case — shown, hidden behind a workflow view or a dormant session's
+transcript, or absent only because nothing is attached. React unmounts a subtree that moves, and
+unmounting a conversation's body cancels its conversation. See
+[session-agent-conversation.md](../../../packages/tddy-web/docs/session-agent-conversation.md) for
+the invariant a refactor here has to preserve.
+
+#### Known limitations
+
+- **Opening the create-session pane still ends every open conversation.** That path replaces the
+  whole session-detail block rather than the base view, so the runtime layer — and every conversation
+  body under it — unmounts. The tabs survive in state and re-open under ids the daemon has already
+  cancelled. Switching *sessions* is unaffected.
+- **The button is offered where there is no tab strip.** A workflow, PR-Stack or dormant session has
+  no runtime area to put a tab in, so the attach succeeds and nothing visible happens. The agent *is*
+  attached — it shows in the Inspector's Agent roster — there is just no way to talk to it there.
+
+Both are tracked in [docs/dev/TODO.md](../../dev/TODO.md).
+
 ### Session agents section
 
 `SessionAgentsSection` (`src/components/sessions/SessionAgentsSection.tsx`) mounts below the

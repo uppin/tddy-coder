@@ -338,40 +338,54 @@ export function SessionMainPane({
   // The base view (custom workflow view / recorded activities / mounted terminals / placeholder).
   // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
   // open — never unmounted between the two so terminals stay attached.
-  const baseView = customView ? (
-    // Custom per-workflow view — renders in place of the terminal regardless of attachment
-    // status; the workflow owns its own chrome.
-    customView
-  ) : baseViewMode === "activities" && selectedSession ? (
-    // Dormant session — its recorded ACP transcript is the pane. A runtime attached earlier stays
-    // mounted behind it (background streaming preserved, a later resume is instant) but unfocused,
-    // so the transcript is what shows.
+  // What covers the runtimes, when anything does: a custom per-workflow view, or a dormant session's
+  // recorded transcript. Null means the runtimes themselves are the pane.
+  const overlay: React.ReactNode =
+    customView ??
+    (baseViewMode === "activities" && selectedSession ? (
+      <SessionActivitiesPane
+        sessionId={selectedSession.sessionId}
+        sessionToken={sessionToken}
+        client={buildSessionClient?.() ?? client}
+      />
+    ) : null);
+
+  // The base view: the mounted runtimes, with an overlay over them when one owns the pane.
+  //
+  // The runtime layer sits in the **same slot in the element tree in every case** — shown, hidden
+  // behind an overlay, or absent only because nothing is attached. That is load-bearing, not tidiness:
+  // React unmounts a subtree that changes position, and unmounting a runtime unmounts the bodies of
+  // its open agent conversations, each of which cancels its conversation on the daemon as it goes.
+  // Selecting a workflow session used to do exactly that — swapping the layer out for the workflow's
+  // own view — so an operator who glanced at a PR-Stack session came back to tabs whose conversations
+  // the daemon had already dropped. Only closing a tab may end a conversation.
+  //
+  // Rendered on its own when the Code pane is closed, or as the left panel of the split when it is
+  // open — never unmounted between the two, so terminals stay attached.
+  const baseView = (
     <div className="flex-1 min-h-0 relative overflow-hidden">
-      {hasRuntimes && <div className="absolute inset-0 flex flex-col">{runtimeLayer}</div>}
-      <div className="absolute inset-0 flex flex-col">
-        <SessionActivitiesPane
-          sessionId={selectedSession.sessionId}
-          sessionToken={sessionToken}
-          client={buildSessionClient?.() ?? client}
-        />
-      </div>
-    </div>
-  ) : hasRuntimes ? (
-    runtimeLayer
-  ) : isConnected ? (
-    // Connected but the runtime hasn't been registered yet (brief window before the attach
-    // effect runs) — keep the terminal container marker so existing acceptance contracts hold
-    // during the transition.
-    <div
-      data-testid="sessions-detail-terminal-container"
-      className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
-    />
-  ) : (
-    // Disconnected / idle — simple placeholder
-    <div className="flex-1 min-h-0 relative overflow-hidden">
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        Select Resume to reconnect
-      </div>
+      {hasRuntimes && (
+        <div className={overlay !== null ? "hidden" : "absolute inset-0 flex flex-col"}>
+          {runtimeLayer}
+        </div>
+      )}
+      {overlay !== null && <div className="absolute inset-0 flex flex-col">{overlay}</div>}
+      {!hasRuntimes &&
+        overlay === null &&
+        (isConnected ? (
+          // Connected but the runtime hasn't been registered yet (brief window before the attach
+          // effect runs) — keep the terminal container marker so existing acceptance contracts hold
+          // during the transition.
+          <div
+            data-testid="sessions-detail-terminal-container"
+            className="absolute inset-0 flex flex-col overflow-hidden"
+          />
+        ) : (
+          // Disconnected / idle — simple placeholder
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Select Resume to reconnect
+          </div>
+        ))}
     </div>
   );
 

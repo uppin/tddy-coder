@@ -363,7 +363,7 @@ export const TEST_IDS = {
   agentRosterDetachConfirmBtn: "agent-roster-detach-confirm-btn",
 
   // Agent conversation — attaching a roster agent from the session header and talking to it in a
-  // tab (docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md).
+  // tab (docs/ft/web/session-drawer.md § Add agent).
   /** The "Add agent" button in the session-detail header. Attaches a roster agent to the CURRENT
    *  session — it does not spawn a peer session, which is what it used to do. */
   sessionAgentAttachBtn: "session-agent-attach-btn",

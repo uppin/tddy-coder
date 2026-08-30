@@ -1,6 +1,6 @@
 /**
  * Page object for attaching a roster agent from the session header and talking to it in a tab
- * (docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md).
+ * (docs/ft/web/session-drawer.md § Add agent).
  *
  * The picker half is keyed by the agent's *qualified* id, for the reason `sessionAgentRosterPage`
  * gives: a bare name is ambiguous the moment two hosts offer one. The tab half is keyed by the

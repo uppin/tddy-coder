@@ -16,7 +16,7 @@ import { useAvailableAgents, type AvailableAgent } from "./useAvailableAgents";
  * catalog has been told one wrong thing.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md § Web UI (AC48-AC51);
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md (AC1-AC3).
+ * Feature: docs/ft/web/session-drawer.md § Add agent.
  */
 
 export interface AgentPickerProps {

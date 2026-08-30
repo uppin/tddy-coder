@@ -7,7 +7,7 @@ import {
 
 /**
  * The pure projection behind an agent conversation tab: `AgentConversationChunk` frames folded into
- * turns (docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md, AC6-AC8).
+ * turns (docs/ft/web/session-drawer.md § Add agent).
  *
  * The daemon's contract is that an answer arrives as one or more frames, only the last of which is
  * marked `last` and carries `stop_reason`, and that an empty answer still yields exactly one frame

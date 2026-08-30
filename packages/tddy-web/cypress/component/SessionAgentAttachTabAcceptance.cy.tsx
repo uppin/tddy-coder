@@ -2,8 +2,8 @@
  * Acceptance: the session header's "Add agent" attaches a roster agent to the session the operator
  * is already looking at, and opens a conversation tab with it.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md (AC1-AC4, AC10-AC12)
- * Changeset: docs/dev/1-WIP/CS-2026-08-29-session-agent-conversation-tab.md
+ * Feature: docs/ft/web/session-drawer.md § Add agent
+ * Invariants: packages/tddy-web/docs/session-agent-conversation.md
  *
  * Driven through `SessionsDrawerScreen` rather than through `SessionMainPane` alone, because the
  * property under test spans three collaborators that a narrower mount would let disagree silently:
@@ -70,6 +70,36 @@ function aBackendOffering(
     connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
     sessionAgents: { sessionId: SESSION.sessionId, initial: [], rev: 0, offers },
     agentConversations: { answerChunks: answer, stopReason: "EndTurn" },
+  });
+}
+
+/**
+ * A workflow session on the same host: `tool` + a non-empty recipe, which is what makes
+ * `resolveWorkflowView` hand the main pane a custom view instead of the terminal runtime.
+ */
+const WORKFLOW_SESSION = {
+  sessionId: "agent-tab-bbbbbbbb-0000-0000-0000-000000000002",
+  createdAt: "2026-08-29T09:05:00Z",
+  status: "active",
+  repoPath: "/home/dev/feature-alpha",
+  pid: 90002,
+  isActive: true,
+  projectId: "proj-agent-tab-1",
+  daemonInstanceId: HOST,
+  sessionType: "tool",
+  recipe: "grill-me",
+  pendingElicitation: false,
+};
+
+/** The session plus a workflow session to switch away to, both offering `offers`. */
+function aBackendWithAWorkflowSessionToo(
+  offers: ReturnType<typeof anAvailableAgent>[],
+): ConnectionServiceBackend {
+  return aConnectionServiceBackend({
+    sessions: [SESSION, WORKFLOW_SESSION],
+    connectSession: () => ({ livekitRoom: "", livekitUrl: "", livekitServerIdentity: "" }),
+    sessionAgents: { sessionId: SESSION.sessionId, initial: [], rev: 0, offers },
+    agentConversations: { answerChunks: ["ready"], stopReason: "EndTurn" },
   });
 }
 
@@ -320,6 +350,50 @@ describe("Add agent — attach a roster agent and open a conversation with it", 
     // drop one it never had is a request that can only ever fail
     page.tabs().should("not.exist");
     cy.wrap(null).should(() => {
+      expect(backend.cancelledConversationIds()).to.deep.equal([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // NFR — only closing a tab ends a conversation
+  //
+  // A workflow session's view replaces the terminal runtime in the main pane. It must not replace
+  // the *mounted* runtimes underneath it: a conversation's body owns its cancel, so unmounting the
+  // body ends the conversation on the daemon while its tab survives in the screen's state.
+  // -------------------------------------------------------------------------
+
+  it("keeps a conversation open when a workflow session is selected instead", () => {
+    // Given a conversation open on a terminal session
+    const backend = aBackendWithAWorkflowSessionToo([anAvailableAgent("explorer", HOST)]);
+    attachSession(backend);
+    page.attachAgent(EXPLORER);
+    page.tabs().should("have.length", 1);
+
+    // When the operator selects a workflow session, whose view owns the whole pane
+    sessionsDrawerPage.drawerItem(WORKFLOW_SESSION.sessionId).click();
+
+    // Then nothing was cancelled — selecting another session is not closing a tab
+    cy.wrap(null).should(() => {
+      expect(backend.cancelledConversationIds()).to.deep.equal([]);
+    });
+  });
+
+  it("still shows the conversation after coming back from a workflow session", () => {
+    // Given a conversation open on a terminal session
+    const backend = aBackendWithAWorkflowSessionToo([anAvailableAgent("explorer", HOST)]);
+    attachSession(backend);
+    page.attachAgent(EXPLORER);
+    page.tabs().should("have.length", 1);
+
+    // When the operator visits a workflow session and comes back
+    sessionsDrawerPage.drawerItem(WORKFLOW_SESSION.sessionId).click();
+    sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+
+    // Then the tab is the one that was already open — not a second conversation opened in its
+    // place, which is what a remount would have produced
+    page.tabs().should("have.length", 1);
+    cy.wrap(null).should(() => {
+      expect(backend.openedConversations()).to.have.length(1);
       expect(backend.cancelledConversationIds()).to.deep.equal([]);
     });
   });

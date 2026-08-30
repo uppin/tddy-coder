@@ -13,7 +13,7 @@ import { useAgentConversation } from "./useAgentConversation";
  * *session's* recorded ACP transcript. A roster agent has no such transcript, so this is a live
  * conversation and never a replay (PRD § What is deliberately not being built).
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md (AC5-AC9).
+ * Feature: docs/ft/web/session-drawer.md § Add agent; invariants: packages/tddy-web/docs/session-agent-conversation.md.
  */
 
 export interface SessionAgentConversationPaneProps {

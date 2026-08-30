@@ -8,7 +8,7 @@ import {
 
 /**
  * The pure tab-list algebra behind a session's agent conversation tabs
- * (docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md, AC11).
+ * (docs/ft/web/session-drawer.md § Add agent).
  *
  * The rule worth pinning here is that attaching an agent twice must not open a second tab:
  * `AttachSessionAgent` is a no-op on the roster the second time (session-agent-roster.md AC2), so a

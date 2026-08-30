@@ -2,8 +2,8 @@
  * Acceptance: the session tab strip's fourth tab kind — a conversation with an agent attached to
  * the session, alongside the fixed Agent tab, the bash tabs and the spawned child-conversation tabs.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md (AC4, AC10, AC11)
- * Changeset: docs/dev/1-WIP/CS-2026-08-29-session-agent-conversation-tab.md
+ * Feature: docs/ft/web/session-drawer.md § Add agent
+ * Invariants: packages/tddy-web/docs/session-agent-conversation.md
  *
  * The strip is mounted on its own, without RPC: what it does with the conversations it is handed is
  * a rendering question, and driving it through a whole attached session would only make a failure

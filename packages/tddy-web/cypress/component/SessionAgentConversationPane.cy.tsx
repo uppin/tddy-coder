@@ -2,8 +2,8 @@
  * Acceptance: the body of an agent conversation tab — the operator prompting an agent attached to
  * the session, and the agent's answer streaming back into the transcript.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-29-session-agent-conversation-tab.md (AC5-AC9)
- * Changeset: docs/dev/1-WIP/CS-2026-08-29-session-agent-conversation-tab.md
+ * Feature: docs/ft/web/session-drawer.md § Add agent
+ * Invariants: packages/tddy-web/docs/session-agent-conversation.md
  *
  * The answer is served by the in-memory backend as a *sequence* of `AgentConversationChunk` frames
  * rather than one stubbed value, because the property under test is what the pane does with a
