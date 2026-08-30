@@ -22,9 +22,7 @@ import {
   type AgentConversation,
 } from "./agentConversationTabs";
 import { randomUuid } from "../../lib/randomId";
-import { SessionAgentsSection } from "./SessionAgentsSection";
 import { SessionRuntime } from "./SessionRuntime";
-import { sessionPeers } from "../../utils/sessionPeers";
 import { resolveWorkflowView } from "./workflowViews";
 import { WorktreeCodePane } from "../session/WorktreeCodePane";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -65,8 +63,8 @@ interface SessionMainPaneProps {
     orchestratorSessionId: string;
     projectId: string;
   }) => void;
-  /** Fired when the operator clicks a peer's "Switch" button in the Session agents section — the
-   *  parent selects that peer session in the drawer (focuses its runtime). No transport of its own. */
+  /** Fired when the operator clicks a subagent session's "Switch" in the Inspector's Agents tab —
+   *  the parent selects that session in the drawer (focuses its runtime). No transport of its own. */
   onSwitchPeer?: (sessionId: string) => void;
   /** Inspector I/O traffic (req 5 dual source): live runtime counters for active sessions,
    *  daemon-sourced `SessionEntry` fields for inactive / non-LiveKit sessions. */
@@ -150,12 +148,6 @@ export function SessionMainPane({
     [codeOpen, setParams],
   );
   const codePaneEnabled = Boolean(client && selectedSession);
-
-  // The selected session's peers — child sessions whose `orchestratorSessionId` is this session.
-  const peers = React.useMemo(
-    () => (selectedSession ? sessionPeers([...sessions], selectedSession.sessionId) : []),
-    [sessions, selectedSession],
-  );
 
   // The worktree RPCs require a non-empty `project_id`. Scoped sessions carry their own; unscoped
   // sessions (empty `projectId`) resolve to the registered project whose main repo is the longest
@@ -484,16 +476,6 @@ export function SessionMainPane({
             </div>
           )}
 
-          {/* Session agents section — lists the selected session's peers (children via
-              orchestratorSessionId). Always mounted when a session is selected so the empty state
-              is consistent; the section itself renders an empty-state message when there are none. */}
-          {selectedSession && (
-            <SessionAgentsSection
-              peers={peers}
-              onSwitchPeer={(sessionId) => onSwitchPeer?.(sessionId)}
-            />
-          )}
-
           {!selectedSession ? (
             // No session selected
             <div className="flex items-center justify-center flex-1 text-muted-foreground text-sm">
@@ -545,6 +527,7 @@ export function SessionMainPane({
                 key={`inspector-${selectedSession.sessionId}`}
                 state={inspectorState}
                 session={selectedSession}
+                sessions={sessions}
                 onClose={onInspectorClose}
                 onExpand={onInspectorExpand}
                 onRestore={onInspectorRestore}
@@ -562,6 +545,7 @@ export function SessionMainPane({
                 traffic={traffic}
                 buildSessionClient={buildSessionClient}
                 onInsertPathIntoTerminal={onInsertPathIntoTerminal}
+                onSwitchPeer={onSwitchPeer}
               />
             </div>
           )}

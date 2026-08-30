@@ -23,7 +23,9 @@
  */
 
 import React from "react";
+import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { SessionEntrySchema } from "../../src/gen/connection_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
 import {
@@ -50,6 +52,27 @@ const CODEBASE_HOST: DaemonHost = { instanceId: "codebase-2", label: "codebase-2
 const EXPLORER_CONNECTED = "explorer@gateway-1";
 const FASTCONTEXT_CODEBASE = "fastcontext@codebase-2";
 
+/**
+ * The split session itself: the agent runs on the connected host, while the worktree, the codebase
+ * and the roster live on `CODEBASE_HOST` under `SESSION_ID`. The pane derives that roster half
+ * itself, so this fixture states the split rather than the answer to it.
+ */
+const SPLIT_SESSION = create(SessionEntrySchema, {
+  sessionId: "1780828020298-split-agent-half",
+  createdAt: "2026-08-29T09:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 90001,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: CONNECTED_HOST.instanceId,
+  sessionType: "claude-cli",
+  agent: "claude",
+  model: "opus-4",
+  codebaseSessionId: SESSION_ID,
+  codebaseDaemonInstanceId: CODEBASE_HOST.instanceId,
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -70,10 +93,11 @@ function mountPaneForASplitSession(
   return mountWithPerDaemonLiveKitRpc(
     withSelectedDaemonServedBy(
       <SessionAgentRosterPane
-        sessionId={SESSION_ID}
+        session={SPLIT_SESSION}
+        sessions={[SPLIT_SESSION]}
         sessionToken="tok"
-        daemonInstanceId={CODEBASE_HOST.instanceId}
         daemonConnected
+        onSwitchSubagent={cy.stub().as("switchSubagent")}
       />,
       [CONNECTED_HOST, CODEBASE_HOST],
       CONNECTED_HOST.instanceId,

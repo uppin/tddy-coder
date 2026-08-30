@@ -19,7 +19,8 @@
  */
 
 import React from "react";
-import { SessionAgentStatus } from "../../src/gen/connection_pb";
+import { create } from "@bufbuild/protobuf";
+import { SessionAgentStatus, SessionEntrySchema } from "../../src/gen/connection_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import {
@@ -38,6 +39,21 @@ const REVIEWER = "reviewer@workstation-1";
 const LINTER_REMOTE = "linter@server-2";
 
 const HOST_A: DaemonHost = { instanceId: "workstation-1", label: "workstation-1 (this daemon)" };
+
+/** The co-located session the pane is mounted for — its roster half is the session itself. */
+const SESSION = create(SessionEntrySchema, {
+  sessionId: SESSION_ID,
+  createdAt: "2026-08-29T09:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 90001,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: HOST_A.instanceId,
+  sessionType: "claude-cli",
+  agent: "claude",
+  model: "opus-4",
+});
 
 /** A fixed "now", so an age in the rendered text is a fact about the fixture, not about the clock. */
 const NOW_MS = 1_780_828_020_298;
@@ -62,10 +78,11 @@ function publish(
 function mountPane(roster: RosterBackend) {
   cy.mountWithRpc(
     <SessionAgentRosterPane
-      sessionId={SESSION_ID}
+      session={SESSION}
+      sessions={[SESSION]}
       sessionToken="tok"
-      daemonInstanceId={HOST_A.instanceId}
       daemonConnected
+      onSwitchSubagent={cy.stub().as("switchSubagent")}
     />,
     roster.backend,
   );

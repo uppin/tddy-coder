@@ -32,6 +32,8 @@ export type InspectorDrawerState = "closed" | "open" | "expanded";
 interface SessionInspectorDrawerProps {
   state: InspectorDrawerState;
   session: SessionEntry | null;
+  /** The drawer's full session list — the Agents tab folds this session's subagents out of it. */
+  sessions?: ReadonlyArray<SessionEntry>;
   onClose: () => void;
   onExpand: () => void;
   onRestore: () => void;
@@ -55,33 +57,9 @@ interface SessionInspectorDrawerProps {
   /** Inserts an uploaded file's host path into the focused session's terminal (Files tab → Insert
    *  / tap). Defaults to a no-op when the host does not route terminal input. */
   onInsertPathIntoTerminal?: (hostPath: string) => void;
-}
-
-// ---------------------------------------------------------------------------
-// Which session the roster belongs to
-// ---------------------------------------------------------------------------
-
-/**
- * The half of a session whose roster governs its agent.
- *
- * A split session is two sessions — the agent runs on one host, the worktree and codebase live on
- * another — and only the codebase half keeps the roster. That is the copy the agent's own tooling
- * subscribes to: a split agent is launched pointed at `codebase_session_id` on
- * `codebase_daemon_instance_id` (`split_session::split_remote_tool_env`), and its withdrawn tools
- * are derived from the roster held there. The agent half would answer a roster read too, with an
- * empty list beside the real one — and an attach made against it would report a withdrawal no
- * process performs.
- *
- * Both fields are written together or not at all, so a session with neither is co-located and
- * addresses itself.
- */
-function rosterHalfOf(session: SessionEntry): { sessionId: string; daemonInstanceId: string } {
-  const codebaseHost = session.codebaseDaemonInstanceId.trim();
-  const codebaseSession = session.codebaseSessionId.trim();
-  if (codebaseHost === "" || codebaseSession === "") {
-    return { sessionId: session.sessionId, daemonInstanceId: session.daemonInstanceId };
-  }
-  return { sessionId: codebaseSession, daemonInstanceId: codebaseHost };
+  /** Fired when a subagent session's "Switch" is clicked in the Agents tab — the host selects that
+   *  session in the drawer (focuses its runtime). No transport of its own. */
+  onSwitchPeer?: (sessionId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +83,7 @@ function MetaRow({ label, value }: { label: string; value: string | number | und
 export function SessionInspectorDrawer({
   state,
   session,
+  sessions = [],
   onClose,
   onExpand,
   onRestore,
@@ -118,6 +97,7 @@ export function SessionInspectorDrawer({
   traffic = null,
   buildSessionClient,
   onInsertPathIntoTerminal,
+  onSwitchPeer,
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
@@ -380,15 +360,15 @@ export function SessionInspectorDrawer({
           </ScrollArea>
         ) : tab === "agents" ? (
           <ScrollArea className="flex-1 min-h-0">
-            {/* The roster is served by the daemon facilitating the session; an empty
-                `daemonInstanceId` addresses the daemon this drawer is talking to, the same
-                convention the Tools tab's calls use. `client` is this drawer's live daemon
-                connection, so its absence is exactly "not connected to that host". */}
+            {/* The pane derives the roster's address from the session itself (`rosterHalfOf`), so
+                the entry and the host it is read on cannot disagree. `client` is this drawer's live
+                daemon connection, so its absence is exactly "not connected to that host". */}
             <SessionAgentRosterPane
-              sessionId={rosterHalfOf(session).sessionId}
+              session={session}
+              sessions={sessions}
               sessionToken={sessionToken ?? ""}
-              daemonInstanceId={rosterHalfOf(session).daemonInstanceId}
               daemonConnected={client !== undefined}
+              onSwitchSubagent={(sessionId) => onSwitchPeer?.(sessionId)}
             />
           </ScrollArea>
         ) : tab === "usage" ? (

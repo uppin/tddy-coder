@@ -73,7 +73,7 @@ Three existing terms are already spoken for and are **not** what this document m
 | Existing term | What it is | Not this |
 |---|---|---|
 | **Agent** (`ListAgents`) | A *coding backend*: `claude`, `cursor`, `codex-acp` | — |
-| **Session agents** (`SessionAgentsSection.tsx`) | Peer *sessions* spawned under an orchestrator | The web section this feature adds is **"Agent roster"** |
+| **Subagent sessions** | Peer *sessions* spawned under an orchestrator, linked by `orchestrator_session_id` | Not roster entries. They share the Agents tab's tree with roster agents, and the same `SessionAgentStatus` badge, but a daemon runs no loop for them |
 | **Assistant** (`models.proto`) | A registry row: model + prompt + tools, projected to a `SpecializedAgentDef` | One *source* of a roster agent, not the roster entry itself |
 
 This document's terms:
