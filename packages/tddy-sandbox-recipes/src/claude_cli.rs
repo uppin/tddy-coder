@@ -309,7 +309,13 @@ pub fn append_claude_mcp_args(
     Ok(())
 }
 
-/// Writable directory for sandbox MCP config (context dir is read-only).
+/// Writable directory for the sandbox MCP config.
+///
+/// It must not be the agent's context dir: the sandbox profile carves that directory back out of
+/// the jail's writable tree with an explicit deny (see `tddy_sandbox_darwin::render_plan`), so the
+/// guidance files the host syncs in cannot be rewritten from inside. `TMPDIR` is set for every
+/// jailed process (`tddy_sandbox::runner_env`) and points into the session scratch tree, which is
+/// writable — that is the directory this returns in practice.
 pub fn claude_scratch_mcp_dir(fallback: &Path) -> PathBuf {
     std::env::var("TMPDIR")
         .ok()

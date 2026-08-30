@@ -292,13 +292,20 @@ fn a_stopped_split_session() -> SessionMetadata {
 
 /// The workspace session on the codebase daemon that holds the split session's worktree — and its
 /// agent roster.
-fn a_workspace_session_holding(agents: Vec<SessionAgentRecord>) -> SessionMetadata {
+///
+/// `repo_path` is a real directory, because a resume reads the project's guidance out of it before
+/// it relaunches the agent: a split session whose codebase host cannot be reached does not resume,
+/// exactly as it does not start (`docs/ft/daemon/agent-context-sync.md` AC24).
+fn a_workspace_session_holding(
+    agents: Vec<SessionAgentRecord>,
+    worktree: &Path,
+) -> SessionMetadata {
     let agents_rev = agents.len() as u64;
     SessionMetadata {
         session_id: CODEBASE_SESSION_ID.to_string(),
         session_type: Some("workspace".to_string()),
         status: "active".to_string(),
-        repo_path: None,
+        repo_path: Some(worktree.to_string_lossy().into_owned()),
         agents,
         agents_rev,
         codebase_daemon_instance_id: None,
@@ -414,7 +421,19 @@ async fn resume_a_split_session_whose_roster_holds(
     let codebase_base = codebase_sessions.path().join(current_os_user());
     let codebase_session_dir = codebase_base.join("sessions").join(CODEBASE_SESSION_ID);
     std::fs::create_dir_all(&codebase_session_dir).unwrap();
-    write_session_metadata(&codebase_session_dir, &a_workspace_session_holding(agents)).unwrap();
+    // The checkout the agent works in, holding the one file its guidance sync reads.
+    let codebase_worktree = codebase_session_dir.join("worktree");
+    std::fs::create_dir_all(&codebase_worktree).unwrap();
+    std::fs::write(
+        codebase_worktree.join("CLAUDE.md"),
+        "# Project rules\n\nAlways run ./test.\n",
+    )
+    .unwrap();
+    write_session_metadata(
+        &codebase_session_dir,
+        &a_workspace_session_holding(agents, &codebase_worktree),
+    )
+    .unwrap();
     let (codebase_config_dir, codebase_config) =
         a_daemon_config(&ws_url, CODEBASE_INSTANCE_ID, &claude_stub);
     let codebase_service = a_service(codebase_config, codebase_base);

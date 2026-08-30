@@ -10004,6 +10004,7 @@ dependencies = [
  "tddy-actions",
  "tddy-graph",
  "tddy-rpc",
+ "tddy-sandbox",
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
@@ -10435,6 +10436,11 @@ name = "tddy-sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "glob",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "sha2 0.10.9",
  "tempfile",
  "walkdir",
 ]

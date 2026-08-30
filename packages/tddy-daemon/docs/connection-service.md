@@ -242,6 +242,53 @@ metadata dir — powers the web [Code pane](../../../docs/ft/web/session-code-pa
 - **Reading** (`ReadWorktreeFile`): refuses any path not surfaced by the listing (so `.git` and ignored files, e.g. `.env`, cannot be read), applies traversal rejection (`..`/absolute) plus canonicalize-and-contain under the worktree root, and caps content at **`MAX_WORKTREE_FILE_BYTES`** (1 MiB) with a `truncated` flag and full `byte_size`.
 - **Tests**: unit coverage in **`worktree_files`** (`#[cfg(test)]`); integration coverage in **`worktree_files_rpc`**.
 
+## Agent context file RPCs
+
+Serve the target repo's **agent configuration** — whatever the session's backend reads — so a
+managed session's context directory can be built from it. Product contract:
+[agent-context-sync.md](../../../docs/ft/daemon/agent-context-sync.md).
+
+- **A separate reader from the Code pane's, deliberately.** Policy lives in **`context_files`**, not
+  `worktree_files`. `ReadWorktreeFile` gates on git's listing, which exists to keep `.gitignore`d
+  paths (`.env`, a key a build wrote) unreadable — but agent config is routinely gitignored
+  (`.claude/settings.local.json`, `**/.cursor/mcp.json`), so that gate cannot serve this. The two
+  **never share a gate**; they share only the traversal and containment guards
+  (`validate_rel_path_shape`, `canonicalize_root`, both `pub(crate)` in `worktree_files`).
+- **The gate is a compiled-in allow-list**, keyed by agent (`tddy_core::backend::context_globs_for_agent`)
+  and narrowed by **`CONTEXT_EXCLUDE_GLOBS`**. Three properties make replacing the git gate safe, and
+  all three are load-bearing: **no caller supplies globs** (a request names a table row, never a path
+  set); **no caller chooses the row** — the serving daemon derives it from persisted session state
+  via **`context_agent_for_session`**, so the bound is the session's row and not the union of every
+  row; and a resolved **symlink's target must itself be allow-listed**, or `.claude/creds -> ../.env`
+  would publish `.env`'s bytes under an allow-listed name.
+- **Row derivation** (`context_agent_for_session`): a session recording a paired split agent
+  (`split_session::paired_agent`) gets Claude's row — the codebase half of a split placement is
+  persisted as `workspace` but stands in for a `claude-cli` agent on another daemon, so
+  `session_type` alone would wrongly reduce it to the shared base. Otherwise the row comes from the
+  session's own `session_type`. `ContextManifestRequest.agent` is **advisory**, logged when it
+  disagrees.
+- **`StreamContextManifest`**: one **`ContextManifestEntry`** (`rel_path`, `sha256`, `size_bytes`) per
+  allow-listed path. Streams rather than returning a repeated field so a large manifest never needs
+  the transport's chunk codec. Hashing is streamed through a `BufReader`, and an over-cap file is
+  left **out** of the manifest — advertising something the reader would then refuse makes a session
+  unstartable.
+- **`StreamReadContextFile`**: raw bytes, no encoding applied, framed at **`CONTEXT_FILE_FRAME_BYTES`**
+  (defined *as* `HOST_DOCUMENT_FRAME_BYTES`, 48 KiB — under `MAX_CHUNK_FRAME_BYTES`, so a context read
+  never engages chunking). Over-cap is refused **before the first frame**, never truncated. A
+  non-allow-listed path is refused identically whether or not a file exists there, preserving the
+  existence-map property `resolve_listed_worktree_file` protects.
+- **`StreamReadContextFileBatch`**: several allow-listed files in one call, so a split start costs
+  **2** peer round trips rather than 1 + N. Frames carry `rel_path` and `end_of_file`, so every file
+  yields at least one frame and a zero-byte file stays distinguishable from a failure. Same gate,
+  auth, per-file cap and aggregate cap as the single-file reader — the sizing check is shared
+  (`sized_context_file`) so the two cannot drift.
+- **Consumer**: `split_context_from_codebase_host` builds a split session's context directory from
+  these at start *and* resume. A failed fetch is a **refusal, never an empty result** — a split
+  session that cannot read its project's guidance does not start.
+- **Tests**: `context_files_acceptance` (gate, caps, byte-exactness, batch), `context_file_frames_unit`
+  (framing against the chunk budget), `context_rpc_session_scope_acceptance` (row derivation over the
+  real handlers), `context_sync_acceptance` (setup and diff).
+
 ## DeleteSession behavior
 
 - **Auth**: Same `session_token` → GitHub user → mapped OS user → `sessions_base` as `ListSessions`.

@@ -38,6 +38,13 @@ tddy-stdio = { path = "../tddy-stdio" }
 
 [dev-dependencies]
 async-trait = "0.1"
+# The context-glob table is compiled in and matched by `tddy-sandbox`, which parses every pattern
+# with `glob::Pattern` and treats an unparsable one as matching nothing. Both are dev-only here so
+# `context_globs_acceptance` can prove the table (and the exclusion list beside the matcher) parses
+# at all — the one failure mode that otherwise disables a whole tree with nothing logged.
+# `tddy-sandbox` depends on no workspace crate, so this direction adds no cycle.
+glob = "0.3"
+tddy-sandbox = { path = "../tddy-sandbox" }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 serial_test = "3"

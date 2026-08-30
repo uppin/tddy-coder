@@ -1,12 +1,40 @@
-//! Managed-codebase mode constants and helpers.
+//! Managed-codebase mode constants and helpers for `tddy-coder --remote`.
 //!
 //! When `--remote` is passed to tddy-coder, the agent operates against a managed (remote)
 //! worktree via the `mcp__tddy-tools__*` MCP tools instead of native Claude Code filesystem tools.
+//!
+//! # This is not what the daemon writes
+//!
+//! Everything below is a **legacy duplicate** of the managed-codebase context dir, kept only
+//! because `remote_bootstrap_acceptance` and `remote_mode_acceptance` still exercise it. No `src/`
+//! in the workspace calls any of it. The path the daemon actually takes is
+//! [`tddy_sandbox::MANAGED_CODEBASE_PREAMBLE`] and [`tddy_sandbox::SandboxContextDir`], and the two
+//! have diverged in ways that matter — see [`REMOTE_APPENDIX`]. Read the `tddy-sandbox` one to learn
+//! how managed sessions behave; this one will mislead you.
+//!
+//! `tddy-coder` does not depend on `tddy-sandbox`, so this cannot simply delegate without adding
+//! that dependency. Deleting it (with its two acceptance tests, its only callers) is the better
+//! answer and needs the developer's consent per AGENTS.md's ASK rule.
 
 use std::path::Path;
 
-/// Appended to CLAUDE.md and AGENTS.md in the managed-codebase context dir, and to the agent
-/// system prompt.
+/// Appended to CLAUDE.md and AGENTS.md by [`RemoteContextDir`], and to the agent system prompt.
+///
+/// # Do not read this as a description of managed sessions
+///
+/// Two of its claims are false of what the daemon ships, and both were true when it was written:
+///
+/// - *"read-only"* — the context dir is deliberately writable now. Continuous re-sync writes into
+///   it, and the jailed agent is held out by a seatbelt `(deny file-write* …)` rule plus the native
+///   tool disallowlist, neither of which is a file mode.
+/// - *"contains only documentation and synced skills"* — it carries the target repo's **agent
+///   configuration**, chosen by a per-backend glob allow-list. `docs/` and `skills/` are
+///   deliberately *not* synced; they are this project's own conventions, not agent-tool ones.
+///
+/// It is also *appended*, where the shipped preamble is **prepended**, so the agent reads the rule
+/// before the project's own instructions rather than after them.
+///
+/// See `docs/ft/daemon/agent-context-sync.md`.
 pub const REMOTE_APPENDIX: &str = r#"
 
 ## Appendix: Managed Codebase
@@ -21,9 +49,13 @@ Do not use native tools to interact with the codebase.
 
 /// RAII wrapper for the temporary read-only context directory used in managed-codebase mode.
 ///
-/// Created by copying source_dir contents into a new tempdir, appending REMOTE_APPENDIX
+/// Created by copying source_dir contents into a new tempdir, appending [`REMOTE_APPENDIX`]
 /// to CLAUDE.md and AGENTS.md, then making all files read-only (mode 0o444 on Unix).
 /// Cleaned up on Drop.
+///
+/// **Legacy.** No `src/` caller exists; the daemon uses [`tddy_sandbox::SandboxContextDir`], which
+/// copies by glob allow-list, prepends the preamble, and leaves the tree writable. See the module
+/// docs.
 pub struct RemoteContextDir {
     dir: tempfile::TempDir,
 }
