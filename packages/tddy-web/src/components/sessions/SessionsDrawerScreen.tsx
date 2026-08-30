@@ -24,6 +24,7 @@ import { useSessionManager } from "./sessionManager";
 import {
   attachActionForSnapshot,
   claimAfterFeedEnd,
+  shouldResetAttachmentOnFeedEnd,
   type AttachClaim,
 } from "./attachClaim";
 import {
@@ -326,28 +327,29 @@ export function SessionsDrawerScreen({
     [sortedSessions, selectedSessionId],
   );
 
-  // Disconnect a runtime terminal. Evicts the session's runtime; if it is the focused/attached
-  // session, also resets the attachment so the screen re-evaluates state for the next selection.
+  // Disconnect a runtime terminal. Evicts the session's runtime; what the claim and the attachment
+  // owe that eviction is `claimAfterFeedEnd`'s and `shouldResetAttachmentOnFeedEnd`'s to say, read
+  // off the same session list the liveness effect below reads.
   //
-  // Whether the claim goes with the runtime is `claimAfterFeedEnd`'s to decide, off the same session
-  // list the liveness effect below reads. For a terminal session the feed *is* the attach: a feed can
-  // drop under a session the daemon still reports alive (a `pty_done` on a live agent), and holding a
-  // claim for an attach that no longer exists is what would strand the pane on the reconnect
-  // placeholder — that effect returns early on the claim, and a live session offers no Resume button
-  // to recover by hand. For a workflow-owned session the feed is the hidden runtime layer's, which
-  // has no PTY to stream and ends at once; releasing on it would have that effect re-attach on every
-  // list snapshot for as long as the session lives.
+  // For a terminal session the feed *is* the attach: it can drop under a session the daemon still
+  // reports alive (a `pty_done` on a live agent), so the claim goes with it — holding a claim for an
+  // attach that no longer exists is what would strand the pane on the reconnect placeholder, since
+  // that effect returns early on the claim and a live session offers no Resume button to recover by
+  // hand — and resetting the attachment is how the screen re-evaluates state for the next selection.
+  // For a workflow-owned session the ended feed is the hidden runtime layer's, which has no PTY to
+  // stream: neither the claim nor the attachment it says anything about belongs to it.
   const onSessionDisconnect = useCallback(
     (sessionId: string) => {
       runtimeRegistry.disconnect(sessionId);
       const session = sortedSessions.find((s) => s.sessionId === sessionId);
-      if (session) {
-        attachClaimRef.current = claimAfterFeedEnd({ claim: attachClaimRef.current, session });
-      } else if (attachClaimRef.current?.sessionId === sessionId) {
-        // The list no longer carries the session, so there is no pane to hold the attach for.
-        attachClaimRef.current = null;
+      if (!session) {
+        // The list no longer carries the session, so there is no pane to hold an attach for.
+        if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
+        if (sessionId === connectedSessionId) resetAttachment();
+        return;
       }
-      if (sessionId === connectedSessionId) resetAttachment();
+      attachClaimRef.current = claimAfterFeedEnd({ claim: attachClaimRef.current, session });
+      if (shouldResetAttachmentOnFeedEnd({ session, connectedSessionId })) resetAttachment();
     },
     [runtimeRegistry, sortedSessions, connectedSessionId, resetAttachment],
   );

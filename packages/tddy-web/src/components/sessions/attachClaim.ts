@@ -96,3 +96,25 @@ export function attachActionForSnapshot({
   }
   return claimsThisSession ? "hold" : "attach";
 }
+
+/**
+ * Whether a terminal feed ending under `session` should reset the session attachment.
+ *
+ * The attachment is what a workflow surface talks over, not just what the terminal streams on:
+ * `PrStackScreen` derives its LiveKit room from it through `usePresenterLiveKitRoom`, which drops
+ * the room the moment the attachment leaves a connected status and rejoins under a freshly minted
+ * `browser-presenter-*` identity when it returns. So resetting on the hidden layer's feed ending
+ * takes the chat's room down with it — either churning it once per re-attach, or, once the claim is
+ * held, leaving it down with nothing to bring it back. A terminal-owned session has no such second
+ * surface: there the feed is the attachment, and the reset is how the screen re-evaluates state.
+ */
+export function shouldResetAttachmentOnFeedEnd({
+  session,
+  connectedSessionId,
+}: {
+  session: AttachCandidate;
+  connectedSessionId: string | null;
+}): boolean {
+  if (connectedSessionId !== session.sessionId) return false;
+  return !sessionPaneIsWorkflowView(session);
+}

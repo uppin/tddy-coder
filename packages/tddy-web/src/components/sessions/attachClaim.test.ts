@@ -3,6 +3,7 @@ import {
   attachActionForSnapshot,
   claimAfterFeedEnd,
   sessionPaneIsWorkflowView,
+  shouldResetAttachmentOnFeedEnd,
   type AttachCandidate,
   type AttachClaim,
 } from "./attachClaim";
@@ -232,5 +233,52 @@ describe("attachActionForSnapshot", () => {
 
     // Then the poll issues no ConnectSession — the re-attach loop is closed
     expect(action).toBe("hold");
+  });
+});
+
+describe("shouldResetAttachmentOnFeedEnd", () => {
+  it("resets the attachment when a terminal-owned connected session's feed ends", () => {
+    // Given the connected session is the claude-cli one whose terminal just ended
+    const session = aSession();
+
+    // When the reset is decided
+    const reset = shouldResetAttachmentOnFeedEnd({ session, connectedSessionId: TERMINAL_SESSION });
+
+    // Then the screen re-evaluates state for the next selection, as it always has
+    expect(reset).toBe(true);
+  });
+
+  it("keeps the attachment when a workflow-owned connected session's feed ends", () => {
+    // Given the connected session is the pr-stack one, whose hidden terminal ended while its chat
+    // surface derives its LiveKit room from that very attachment
+    const session = aPrStackSession();
+
+    // When the reset is decided
+    const reset = shouldResetAttachmentOnFeedEnd({ session, connectedSessionId: PR_STACK_SESSION });
+
+    // Then the chat surface keeps the room it is talking over
+    expect(reset).toBe(false);
+  });
+
+  it("keeps the attachment when the ended feed is not the connected session's", () => {
+    // Given a backgrounded terminal session's feed ends while the pr-stack session holds the attachment
+    const session = aSession();
+
+    // When the reset is decided
+    const reset = shouldResetAttachmentOnFeedEnd({ session, connectedSessionId: PR_STACK_SESSION });
+
+    // Then
+    expect(reset).toBe(false);
+  });
+
+  it("keeps the attachment when no session is connected", () => {
+    // Given nothing is attached
+    const session = aSession();
+
+    // When the reset is decided
+    const reset = shouldResetAttachmentOnFeedEnd({ session, connectedSessionId: null });
+
+    // Then
+    expect(reset).toBe(false);
   });
 });
