@@ -326,19 +326,7 @@ export const TEST_IDS = {
   branchConflictRenameBtn: "branch-conflict-rename-btn",
   branchConflictCancelBtn: "branch-conflict-cancel-btn",
 
-  // Session agents — peer agent sessions section in SessionMainPane
-  /** The collapsible "Session agents" section listing the current session's peers. */
-  sessionAgentsSection: "session-agents-section",
-  /** Empty-state message shown when the current session has no peers. */
-  sessionAgentsEmpty: "session-agents-empty",
-  /** One row per peer, keyed by the peer's session id. */
-  sessionAgentsRow: "session-agents-row",
-  /** The "switch" action on a peer row — focuses that peer's runtime. */
-  sessionAgentsSwitchBtn: "session-agents-switch-btn",
-
   // Agent roster — the specialized agents attached to a session (docs/ft/daemon/session-agent-roster.md).
-  // Deliberately NOT the `sessionAgents*` ids above: those are peer child *sessions*, a different
-  // concept that happens to share the word "agent".
   /** The roster pane in the session inspector. */
   agentRosterPane: "agent-roster-pane",
   /** Rendered while the first roster frame has not arrived. */
@@ -361,6 +349,20 @@ export const TEST_IDS = {
   agentRosterDetachConfirm: "agent-roster-detach-confirm",
   /** Accepts `agentRosterDetachConfirm`. */
   agentRosterDetachConfirmBtn: "agent-roster-detach-confirm-btn",
+
+  // Agent tree — the Agents tab as a hierarchy: the session's main agent at the root, its roster
+  // agents and its subagent sessions beneath it
+  // (docs/ft/daemon/session-agent-roster.md § The Agents tab).
+  /** The tree's outermost list. Replaces the roster pane's flat `<ul>`. */
+  agentTree: "agent-tree",
+  /** The root row — the session's own main agent. */
+  agentTreeRoot: "agent-tree-root",
+  /** What the main agent is doing; carries `data-agent-status`. */
+  agentTreeRootStatus: "agent-tree-root-status",
+  /** The main agent's last observed activity. Absent when nothing has been observed of it. */
+  agentTreeRootLastActivity: "agent-tree-root-last-activity",
+  /** The list holding the main agent's children — its roster agents and its subagent sessions. */
+  agentTreeRootChildren: "agent-tree-root-children",
 
   // Agent conversation — attaching a roster agent from the session header and talking to it in a
   // tab (docs/ft/web/session-drawer.md § Add agent).
@@ -958,14 +960,6 @@ export const sessionAgentPickerOption = (agentId: string) =>
 export const sessionAgentPickerOptionHost = (agentId: string) =>
   `${sessionAgentPickerOption(agentId)}-host`;
 
-/** `[data-testid="session-agents-row-<sessionId>"]` — one row in the Session agents section, keyed
- *  by the peer's session id. */
-export const sessionAgentsRow = (sessionId: string) => `session-agents-row-${sessionId}`;
-
-/** `[data-testid="session-agents-switch-btn-<sessionId>"]` — the switch action on a peer row. */
-export const sessionAgentsSwitchBtn = (sessionId: string) =>
-  `session-agents-switch-btn-${sessionId}`;
-
 // ---------------------------------------------------------------------------
 // Tasks drawer screen dynamic helpers
 // ---------------------------------------------------------------------------
@@ -1495,6 +1489,47 @@ export const agentRosterRowLastActivity = (agentId: string) =>
 /** The detach action on an attached agent's row. */
 export const agentRosterRowDetachBtn = (agentId: string) =>
   `${agentRosterRow(agentId)}-detach-btn`;
+
+// --- Agent tree --------------------------------------------------------------------------------
+// A subagent session's ids are keyed by its *session* id, not by an agent id: it is a session of its
+// own, spawned by the main agent, and it has no roster entry to be named by.
+
+/** One subagent session's row in the tree. */
+export const agentTreeSession = (sessionId: string) =>
+  `agent-tree-session-${safeTestIdPart(sessionId)}`;
+
+/**
+ * What a subagent session's agent is doing, inferred by the daemon from that session's own
+ * conversation (`SessionEntry.agent_status`). Carries the same `data-agent-status` tokens a roster
+ * row does, because it is the same enum.
+ */
+export const agentTreeSessionStatus = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-status`;
+
+/** A subagent session's last observed activity. Absent when nothing has been observed of it. */
+export const agentTreeSessionLastActivity = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-last-activity`;
+
+/** Focuses a subagent session's runtime. A subagent session has no detach — there is no roster
+ *  entry behind it. */
+export const agentTreeSessionSwitchBtn = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-switch-btn`;
+
+/** Expands or collapses a subagent session's own children. Collapsed nodes hold no roster stream. */
+export const agentTreeSessionToggleBtn = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-toggle-btn`;
+
+/** The list holding a subagent session's children — its roster agents and its own subagents. */
+export const agentTreeSessionChildren = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-children`;
+
+/**
+ * Why an expanded subagent session's roster could not be read. Absent while it reads fine — and it
+ * is not the same thing as the node having no roster agents, which is what makes it worth a row of
+ * its own.
+ */
+export const agentTreeSessionRosterError = (sessionId: string) =>
+  `${agentTreeSession(sessionId)}-roster-error`;
 
 /** One selectable agent in the fanned-out picker. */
 export const agentRosterPickerOption = (agentId: string) =>

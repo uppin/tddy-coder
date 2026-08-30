@@ -105,6 +105,25 @@ export interface RosterScenario {
   /** When set, the stream never produces a frame — the "loading" state. */
   neverAnswers?: boolean;
   /**
+   * Rosters belonging to sessions *other* than `sessionId`, keyed by session id.
+   *
+   * The Agents tab is a tree, and a subagent session carries a roster of its own; a fake that
+   * answered every `StreamSessionAgents` with one list could not tell a roster agent nested under
+   * the right parent from one nested under the wrong one. A session named here is served its own
+   * snapshot; every session not named falls through to `initial`, which is what keeps every
+   * existing spec answering exactly as it did.
+   */
+  rostersBySession?: Record<string, SessionAgentEntry[]>;
+  /**
+   * Sessions whose roster read *fails*, keyed by session id, with the message the daemon gives.
+   *
+   * Separate from `failBeforeSnapshot`, which fails every read: a tree holds one stream per expanded
+   * node, and the case worth pinning is one node's host being unreachable while the rest of the tree
+   * reads fine. A scenario that could only fail all of them could not tell an error shown on the
+   * right row from one shown on every row.
+   */
+  rosterFailuresBySession?: Record<string, string>;
+  /**
    * What this daemon offers when the picker asks it — this host's own answer, never a peer's. A
    * spec whose subject *is* the fan-out gives every other host its own backend
    * (`aDaemonOfferingAgents` / `aDaemonThatCannotBeReached` behind `mountWithPerDaemonLiveKitRpc`),
@@ -179,6 +198,21 @@ export function aSessionAgentRosterFake(scenario: RosterScenario): SessionAgentR
       }
       if (scenario.neverAnswers === true) {
         // Never yields and never returns — the pane must show "loading", not "empty".
+        await new Promise<never>(() => {});
+      }
+      const ownFailure = scenario.rosterFailuresBySession?.[req.sessionId];
+      if (ownFailure !== undefined) {
+        throw new ConnectError(ownFailure, Code.Unavailable);
+      }
+      // A session with a roster of its own answers with it and then holds the stream open with
+      // nothing further to say; every other session is served the scenario's own roster.
+      const own = scenario.rostersBySession?.[req.sessionId];
+      if (own !== undefined) {
+        yield create(SessionAgentRosterSchema, {
+          sessionId: req.sessionId,
+          rev: BigInt(own.length),
+          agents: own,
+        });
         await new Promise<never>(() => {});
       }
       yield create(SessionAgentRosterSchema, {

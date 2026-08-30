@@ -689,25 +689,27 @@ the invariant a refactor here has to preserve.
 
 Both are tracked in [docs/dev/TODO.md](../../dev/TODO.md).
 
-### Session agents section
+### Where a session's subagents are listed
 
-`SessionAgentsSection` (`src/components/sessions/SessionAgentsSection.tsx`) mounts below the
-header and lists the selected session's peers — sessions with
-`orchestratorSessionId === selectedSession.sessionId`, derived by the pure
-`sessionPeers(sessions, currentSessionId)` util (`src/utils/sessionPeers.ts`). Each row shows the
-peer's `sessionId` / `agent` / `model` / `status` and a **switch** button
-(`data-testid="session-agents-switch-<peerSessionId>"`) that selects the peer in the drawer
-(focusing its runtime). An empty-state message is shown when there are no peers, so a session
-without peers sees no list noise.
+The detail pane carries **no** peer list of its own. A session's subagents — the sessions with
+`orchestratorSessionId === selectedSession.sessionId` — are a branch of the tree in the Inspector's
+**Agents** tab, beside the roster agents attached to the same main agent
+([session-agent-roster.md](../daemon/session-agent-roster.md) § Web UI). The tab is the one place the
+question "who is working for this agent?" is answered, and it answers it with the *inferred*
+`SessionEntry.agent_status` — what the agent inside that session is doing — rather than with
+`SessionEntry.status`, which is the session's lifecycle string and says nothing about its agent.
 
-> A peer and a PR-stack child are indistinguishable in the section today (both are children via
+`SessionMainPane` still owns the **Switch** wiring: a subagent row's Switch reaches it as
+`onSwitchPeer`, and it selects that session in the drawer exactly as before, focusing its runtime.
+
+> A peer and a PR-stack child are still indistinguishable in the tree (both are children via
 > `orchestratorSessionId`). A future filter could distinguish by recipe.
 
 ### Reused infrastructure
 
 - `SessionEntry.orchestratorSessionId` (proto field 21) — the back-reference from a child to its
-  orchestrator, which is the whole of how the peer list is discovered: no new RPC, just the
-  `ListSessions` poll the drawer already runs.
+  orchestrator, which is the whole of how the subagent tree is discovered: no new RPC, just the
+  `ListSessions` poll the drawer already runs, folded recursively by `agentTree.ts`.
 - `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay, so a child spawned
   from the PR-Stack screen appears without waiting for the next poll.
 - `AttachSessionAgent` / `OpenAgentConversation` / `PromptAgentConversation` /

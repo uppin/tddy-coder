@@ -304,6 +304,18 @@ its own failure message, none from that branch. New entries beyond the list abov
 - Collapse to one `useChildSessions(sessionId, sessions)` returning `SessionEntry[]`, let each surface
   project what it needs, and delete `src/utils/sessionPeers.ts`. Two call sites and folding
   `sessionPeers.test.ts` into the other's tests.
+### The Agents tab tree can only see subagents the browser already lists (source: agents-tab-subagent-tree changeset, 2026-08-30)
+
+- The tree's non-managed branch is folded from the drawer's `ListSessions` list by
+  `orchestrator_session_id`. A subagent session spawned on a host the browser is not aggregating —
+  or one whose orchestrator row is missing from the list — is dropped rather than shown, because an
+  orphan promoted to the root would claim the main agent spawned it (`agentTree.ts`).
+- The operator therefore sees a *complete* tree only when the session list is complete. Nothing on
+  screen says the tree may be partial, and there is no signal on the wire that would let it: a
+  `SessionEntry` says who spawned it, never how many it spawned.
+- A fix wants a child count on the parent — `SessionEntry.subagent_count`, stamped by the daemon that
+  owns the parent — so a node can say "3 subagents, 1 not listed here" instead of quietly rendering
+  two. That is a proto and daemon change, which is why it is not in the web-only changeset.
 
 ### A roster agent's own turns are unobservable from the web (source: session-agent-conversation-tab changeset, 2026-08-29)
 
@@ -363,8 +375,11 @@ its own failure message, none from that branch. New entries beyond the list abov
   `orchestrator_session_id: String::new()` before `changeset.yaml` is ever read
   (`packages/tddy-daemon/src/session_list_enrichment.rs:177`). The claude-cli arm above it does the
   same, and for claude-cli that is correct — it writes no changeset.
-- Consequence: `sessionPeers.ts` finds no peers for a cursor-cli child, so a cursor peer never
-  appears in the web's *Session agents* section however healthy it is. The
+- Consequence: `agentTree.ts` folds the subagent tree out of `orchestrator_session_id`, so a
+  cursor-cli child is not a node of it however healthy it is. **Raised stakes as of the
+  agents-tab-subagent-tree changeset (2026-08-30):** the Agents tab's tree is now the *only* surface
+  listing a session's subagents — `SessionAgentsSection` and `sessionPeers.ts` are gone — so a
+  cursor-cli subagent is not merely missing from one section, it is invisible in the product. The
   [agent session status](../ft/daemon/agent-session-status.md) work populates the status such a row
   would display, and is deliberately independent of it — the status lands on every agent session's
   `SessionEntry`, whoever groups them.

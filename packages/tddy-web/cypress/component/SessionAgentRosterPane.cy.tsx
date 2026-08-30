@@ -1,12 +1,13 @@
 /**
- * Acceptance: the Agent roster pane — the live list of specialized agents attached to a session,
- * with an Add flow that says what the main agent loses and a Detach flow that confirms before
- * deleting a checkout on another host.
+ * Acceptance: the Agent roster pane — the **managed** agents attached to a session, with an Add
+ * flow that says what the main agent loses and a Detach flow that confirms before deleting a
+ * checkout on another host.
  *
  * Feature: docs/ft/daemon/session-agent-roster.md (AC49-AC53)
  *
- * Not to be confused with `SessionAgentsSection.cy.tsx`, which covers peer child *sessions* — a
- * different concept that shares the word "agent".
+ * Scoped to the roster half of the pane. The tree it now renders into — the main agent at the root
+ * and the subagent *sessions* beneath it — is `SessionAgentSubagentTree.cy.tsx`'s subject; the two
+ * populations share the word "agent" and nothing else.
  *
  * Roster frames are pushed by the in-memory backend rather than stubbed once, because the property
  * under test is that the pane follows a roster changed *elsewhere*: a `cy.intercept` snapshot could
@@ -14,8 +15,13 @@
  */
 
 import React from "react";
+import { create } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { AgentCloneState, ConnectionService } from "../../src/gen/connection_pb";
+import {
+  AgentCloneState,
+  ConnectionService,
+  SessionEntrySchema,
+} from "../../src/gen/connection_pb";
 import { SessionAgentRosterPane } from "../../src/components/sessions/SessionAgentRosterPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
 import {
@@ -40,6 +46,24 @@ const HOST_A: DaemonHost = { instanceId: "workstation-1", label: "workstation-1 
 /** A peer host in the common room, reached only by the picker's fan-out. */
 const HOST_B: DaemonHost = { instanceId: "server-2", label: "server-2" };
 
+/**
+ * The session the pane is mounted for. Co-located, so the roster half it addresses is the session
+ * itself — the split case is `SessionAgentRosterSplitSession.cy.tsx`.
+ */
+const SESSION = create(SessionEntrySchema, {
+  sessionId: SESSION_ID,
+  createdAt: "2026-08-29T09:00:00Z",
+  status: "active",
+  repoPath: "/home/dev/project",
+  pid: 90001,
+  isActive: true,
+  projectId: "proj-1",
+  daemonInstanceId: HOST_A.instanceId,
+  sessionType: "claude-cli",
+  agent: "claude",
+  model: "opus-4",
+});
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -60,10 +84,11 @@ function publish(roster: RosterBackend, agents: Parameters<typeof roster.pushRos
 function mountPane(roster: RosterBackend, options: { connected?: boolean } = {}) {
   cy.mountWithRpc(
     <SessionAgentRosterPane
-      sessionId={SESSION_ID}
+      session={SESSION}
+      sessions={[SESSION]}
       sessionToken="tok"
-      daemonInstanceId={HOST_A.instanceId}
       daemonConnected={options.connected ?? true}
+      onSwitchSubagent={cy.stub().as("switchSubagent")}
     />,
     roster.backend,
   );
@@ -78,10 +103,11 @@ function mountPaneAcrossHosts(roster: RosterBackend, hostB: InMemoryRpcBackend) 
   mountWithPerDaemonLiveKitRpc(
     withSelectedDaemon(
       <SessionAgentRosterPane
-        sessionId={SESSION_ID}
+        session={SESSION}
+        sessions={[SESSION]}
         sessionToken="tok"
-        daemonInstanceId={HOST_A.instanceId}
         daemonConnected
+        onSwitchSubagent={cy.stub().as("switchSubagent")}
       />,
       [HOST_A, HOST_B],
     ),
