@@ -2,7 +2,9 @@
 
 ## Scope
 
-**`tddy-livekit`** composes JSON strings for **`LocalParticipant::set_metadata`** on server participants: **Codex OAuth** file polling, optional **project registry** row counts, optional **`session`** presence from **`tddy-coder`**, and optional **`watch::Receiver<String>`** payloads from **`tddy-coder`**. All paths produce **one merged object** per write so top-level keys are not dropped between publishers.
+**`tddy-livekit`** composes JSON strings for **`LocalParticipant::set_metadata`** on server participants: **Codex OAuth** file polling, optional **project registry** row counts, optional **`session`** presence, and optional **`watch::Receiver<String>`** payloads. All paths produce **one merged object** per write so top-level keys are not dropped between publishers.
+
+The **`session`** block has **two** publishers — **`tddy-coder`** for the sessions it runs, and **`tddy-daemon`** for a **`claude-cli`** session, whose bridge previously published nothing. Because the merge is **shallow**, a partial **`session`** object from either would *replace* the other's rather than merge with it, so the block's shape is owned by one type, **`tddy_core::session_participant_metadata::SessionParticipantMetadata`**, and every key is always emitted — empty where the publisher has nothing to say.
 
 ## Public API
 
@@ -14,7 +16,7 @@
 
 ## `session` metadata key
 
-**`tddy-coder`**'s participant publishes a **`session`** object (sibling of **`owned_project_count`** / **`codex_oauth`**) on workflow-state transitions, shallow-merged via **`merge_participant_metadata_json`** so all keys coexist. Schema:
+A participant publishes a **`session`** object (sibling of **`owned_project_count`** / **`codex_oauth`**), shallow-merged via **`merge_participant_metadata_json`** so all keys coexist. **`tddy-coder`** republishes it on every workflow-state transition; **`tddy-daemon`** publishes it for a **`claude-cli`** session at spawn and re-sends it unchanged every **30 seconds**, since that session has no transition stream to ride and a single failed **`set_metadata`** would otherwise cost it the block for its whole life. Schema:
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -28,8 +30,15 @@
 | `recipe` | string | workflow recipe (e.g. `tdd`) |
 | `repo_path` | string | session worktree / repo path |
 | `pending_elicitation` | bool | true when the workflow blocks on operator input |
+| `orchestrator_session_id` | string | the pr-stack orchestrator that spawned this session; empty when it is nobody's stack child |
+| `stack_node_id` | string | the planned node this session materializes; empty is **no association**, never a wildcard |
+| `branch` | string | the branch this session created — the branch that exists, not a planned name |
 
 The key is **tolerated as absent** on older participants; consumers treat missing/empty/invalid JSON as no overlay. Field shapes mirror the daemon's **`SessionListStatusDisplay`** enrichment so the web renders them identically whether sourced from presence or from `ListSessions`.
+
+The last three fields are the session's **stack association**, and presence is the only signal carrying them across a host boundary: `ListSessions` answers for one daemon's own sessions tree and does not fan out. They are what lets the PR-Stack view join a child running on another host back to the planned PR it is working — see [PR-Stack live status § Cross-host planned PRs](../../../../docs/ft/coder/pr-stack-live-status.md). `stack_node_id` exists **only** here: it is deliberately not a `SessionEntry` field, because it is needed exactly where a participant is live.
+
+A daemon-published block carries the identity, the association and the static fields (`agent`, `model`, `recipe`, `repo_path`); the live workflow fields stay empty for such a session. A **sandboxed** claude-cli session joins no LiveKit room at all, so it publishes no block.
 
 ## `LiveKitParticipant` wiring
 

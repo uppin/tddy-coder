@@ -18,6 +18,12 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+        // Advice, not a refusal: the control still works, and the colour says pressing it goes
+        // against something the surface already told the operator. Reuses the amber palette the
+        // PR-Stack row's own warning box uses, so a button and the box explaining it read as one
+        // statement rather than two unrelated ones.
+        warning:
+          "bg-amber-100 text-amber-800 hover:bg-amber-200 focus-visible:border-amber-500/40 focus-visible:ring-amber-500/20 dark:bg-amber-900 dark:text-amber-100 dark:hover:bg-amber-800 dark:focus-visible:ring-amber-500/40",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

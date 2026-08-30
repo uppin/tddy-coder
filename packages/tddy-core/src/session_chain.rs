@@ -120,23 +120,44 @@ pub fn parent_is_pr_stack_orchestrator(sessions_base: &Path, parent_session_id: 
     }
 }
 
-/// Locate the planned stack node a child spawn belongs to: the node in `stack_parent`'s stack
-/// that owns the branch the child is about to create.
+/// Locate the planned stack node a child spawn belongs to: the node `stack_node_id` names, or —
+/// when the spawn names none — the node in `stack_parent`'s stack that owns the branch the child is
+/// about to create.
+///
+/// The id wins because it is the one fact that is *exact* (D34). The branch-derived lookup matches
+/// on `new_branch_name`, which the operator may edit in the create dialog before confirming, and
+/// which a planned node may not carry at all until someone types one; either way the lookup finds
+/// nothing, and every caller then reads "no node" as "this spawn belongs to no stack" — so
+/// [`resolve_chain_base_ref`] runs no ordering gate and the child is cut from the project default,
+/// silently, for a node whose non-merged parent owns no branch.
+///
+/// A named node the plan does not hold resolves to `None` rather than falling back to the branch:
+/// naming a node states an exact identity, and answering with a *different* node derived from the
+/// branch is precisely the guess D34 exists to remove.
+///
+/// A spawn that names no node keeps the branch-derived lookup unchanged — that is the orchestrator
+/// agent's own `spawn-child`, which always runs on the orchestrator's host.
 pub fn pr_stack_node_for_spawn(
     sessions_base: &Path,
     stack_parent: &str,
+    stack_node_id: &str,
     new_branch_name: &str,
 ) -> Option<(PathBuf, crate::changeset::Stack, String)> {
     if !parent_is_pr_stack_orchestrator(sessions_base, stack_parent) {
         return None;
     }
+    let node_id = stack_node_id.trim();
     let branch = new_branch_name.trim();
-    if branch.is_empty() {
+    if node_id.is_empty() && branch.is_empty() {
         return None;
     }
     let parent_dir = unified_session_dir_path(sessions_base, stack_parent);
     let stack =
         crate::changeset::read_stack_with_resolved_branches(sessions_base, stack_parent).ok()??;
+    if !node_id.is_empty() {
+        let named = stack.node(node_id).map(|n| n.node_id.clone())?;
+        return Some((parent_dir, stack, named));
+    }
     let node_id = stack
         .nodes
         .iter()
@@ -157,17 +178,26 @@ pub fn pr_stack_node_for_spawn(
 /// [`crate::changeset::Stack::base_ref_for_spawn`]. A regular code-session parent bases off
 /// `origin/<parent-branch>`. When there is no `stack_parent`, returns `Ok(None)` so the caller
 /// uses the default integration base.
+///
+/// `stack_node_id` is how the spawn names the planned node it materializes, and it takes precedence
+/// over the branch (D34) — see [`pr_stack_node_for_spawn`]. It is load-bearing rather than a
+/// convenience: with no node found this returns `Ok(None)`, the caller applies the project default,
+/// and the ordering gate `base_ref_for_spawn` performs never runs at all — so a renamed branch would
+/// cut the child's worktree from `origin/<default>` for a node whose non-merged parent owns no
+/// branch, and nothing would say so.
 pub fn resolve_chain_base_ref(
     sessions_base: &Path,
     stack_parent: Option<&str>,
     repo_root: &Path,
+    stack_node_id: &str,
     new_branch_name: &str,
 ) -> Result<Option<String>, String> {
     let Some(sp) = stack_parent else {
         return Ok(None);
     };
     if parent_is_pr_stack_orchestrator(sessions_base, sp) {
-        let Some((_, stack, node_id)) = pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
+        let Some((_, stack, node_id)) =
+            pr_stack_node_for_spawn(sessions_base, sp, stack_node_id, new_branch_name)
         else {
             return Ok(None);
         };
@@ -257,11 +287,18 @@ pub fn resolve_chain_base_for_session_spawn(
     sessions_base: &Path,
     stack_parent: Option<&str>,
     repo_root: &Path,
+    stack_node_id: &str,
     new_branch_name: &str,
     persisted_worktree_integration_base_ref: Option<&str>,
 ) -> Result<Option<String>, String> {
     if let Some(sp) = stack_parent {
-        return resolve_chain_base_ref(sessions_base, Some(sp), repo_root, new_branch_name);
+        return resolve_chain_base_ref(
+            sessions_base,
+            Some(sp),
+            repo_root,
+            stack_node_id,
+            new_branch_name,
+        );
     }
     if let Some(persisted) = persisted_worktree_integration_base_ref {
         return Ok(Some(persisted.to_string()));

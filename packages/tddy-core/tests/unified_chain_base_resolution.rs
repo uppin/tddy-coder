@@ -133,7 +133,13 @@ fn resolve_chain_base_ref_returns_stack_node_base_for_pr_stack_orchestrator_pare
     );
 
     // When
-    let result = resolve_chain_base_ref(&sessions_base, Some(orchestrator_id), &repo, child_branch);
+    let result = resolve_chain_base_ref(
+        &sessions_base,
+        Some(orchestrator_id),
+        &repo,
+        "",
+        child_branch,
+    );
 
     // Then
     assert_eq!(
@@ -174,6 +180,7 @@ fn resolve_chain_base_ref_returns_none_for_branchless_pr_stack_orchestrator() {
         &sessions_base,
         Some("orchestrator-1"),
         &repo,
+        "",
         "feature/unmatched",
     );
 
@@ -213,6 +220,7 @@ fn resolve_chain_base_ref_errors_for_branchless_code_session_parent() {
         &sessions_base,
         Some("code-session-1"),
         &repo,
+        "",
         "feature/some-branch",
     );
 
@@ -244,6 +252,7 @@ fn spawn_returns_none_when_no_stack_parent_and_no_persisted_field() {
         &base.join("sessions"),
         None,
         &repo,
+        "",
         "feature/any",
         None,
     );
@@ -274,6 +283,7 @@ fn spawn_returns_persisted_field_when_no_stack_parent() {
         &base.join("sessions"),
         None,
         &repo,
+        "",
         "feature/any",
         Some("origin/feature/persisted"),
     );
@@ -324,6 +334,7 @@ fn spawn_stack_parent_takes_precedence_over_persisted_field() {
         &sessions_base,
         Some(orchestrator_id),
         &repo,
+        "",
         child_branch,
         Some("origin/feature/stale-persisted"),
     );
@@ -333,6 +344,155 @@ fn spawn_stack_parent_takes_precedence_over_persisted_field() {
         result.expect("both inputs must resolve"),
         Some(format!("origin/{parent_branch}")),
         "stack_parent resolution must take precedence over the persisted field"
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// The node id the Start-session surface sent decides which planned node the spawn belongs to, even
+/// when the operator renamed the branch in the create dialog before confirming (D34).
+///
+/// Keyed on the branch alone, the rename matches no node at all: `resolve_chain_base_ref` answers
+/// `Ok(None)`, the ordering gate never runs, and the child's worktree is cut from the project
+/// default for a node whose non-merged parent owns no branch — silently, and with the row still
+/// showing a healthy status chip.
+#[test]
+fn bases_a_child_on_the_node_named_by_id_when_the_operator_renamed_its_branch() {
+    // Given — a two-node stack, and a spawn of `child` under a branch name matching no node
+    let base = scratch("node-id-renamed-branch");
+    let repo = base.join("repo");
+    init_repo_with_origin_master(&repo);
+    let parent_branch = "feature/stack/parent";
+    push_branch(&repo, parent_branch);
+
+    let sessions_base = base.join("sessions");
+    write_parent_changeset(
+        &sessions_base,
+        "orchestrator-1",
+        Changeset {
+            recipe: Some("pr-stack".to_string()),
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![
+                    a_materialized_node("bottom", parent_branch, &[]),
+                    a_planned_child_node("child", "feature/stack/child", &["bottom"]),
+                ],
+            }),
+            ..Changeset::default()
+        },
+    );
+
+    // When
+    let result = resolve_chain_base_ref(
+        &sessions_base,
+        Some("orchestrator-1"),
+        &repo,
+        "child",
+        "feature/renamed-in-the-dialog",
+    );
+
+    // Then — the gate runs on the node the operator started, not on the name they typed
+    assert_eq!(
+        result.expect("a node named by id must resolve"),
+        Some(format!("origin/{parent_branch}")),
+        "the named node's base must be resolved regardless of the branch name the spawn carries"
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// A node id that agrees with the branch resolves the same base the branch-derived lookup does —
+/// the id is a stricter key, never a different answer.
+#[test]
+fn bases_a_child_on_the_node_named_by_id_when_the_branch_still_matches_it() {
+    // Given
+    let base = scratch("node-id-matching-branch");
+    let repo = base.join("repo");
+    init_repo_with_origin_master(&repo);
+    let parent_branch = "feature/stack/parent";
+    let child_branch = "feature/stack/child";
+    push_branch(&repo, parent_branch);
+
+    let sessions_base = base.join("sessions");
+    write_parent_changeset(
+        &sessions_base,
+        "orchestrator-1",
+        Changeset {
+            recipe: Some("pr-stack".to_string()),
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![
+                    a_materialized_node("bottom", parent_branch, &[]),
+                    a_planned_child_node("child", child_branch, &["bottom"]),
+                ],
+            }),
+            ..Changeset::default()
+        },
+    );
+
+    // When
+    let result = resolve_chain_base_ref(
+        &sessions_base,
+        Some("orchestrator-1"),
+        &repo,
+        "child",
+        child_branch,
+    );
+
+    // Then
+    assert_eq!(
+        result.expect("a node named by id must resolve"),
+        Some(format!("origin/{parent_branch}")),
+        "naming the node must not change the base the branch would have resolved"
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// A node id the plan does not hold resolves nothing — the branch is **not** consulted as a second
+/// chance. A caller that names a node is stating an exact identity; guessing another node from the
+/// branch would base the child onto an ancestor nobody chose, which is the guess D34 removes.
+#[test]
+fn resolves_no_base_for_a_node_id_the_plan_does_not_hold() {
+    // Given
+    let base = scratch("node-id-unknown");
+    let repo = base.join("repo");
+    init_repo_with_origin_master(&repo);
+    let parent_branch = "feature/stack/parent";
+    let child_branch = "feature/stack/child";
+    push_branch(&repo, parent_branch);
+
+    let sessions_base = base.join("sessions");
+    write_parent_changeset(
+        &sessions_base,
+        "orchestrator-1",
+        Changeset {
+            recipe: Some("pr-stack".to_string()),
+            stack: Some(Stack {
+                version: 1,
+                nodes: vec![
+                    a_materialized_node("bottom", parent_branch, &[]),
+                    a_planned_child_node("child", child_branch, &["bottom"]),
+                ],
+            }),
+            ..Changeset::default()
+        },
+    );
+
+    // When — the branch would match `child`, but the id names a node that is not in the plan
+    let result = resolve_chain_base_ref(
+        &sessions_base,
+        Some("orchestrator-1"),
+        &repo,
+        "no-such-node",
+        child_branch,
+    );
+
+    // Then
+    assert_eq!(
+        result.expect("an unknown node must resolve, not error"),
+        None,
+        "a node id the plan does not hold must not fall back to the branch-derived node"
     );
 
     let _ = fs::remove_dir_all(&base);

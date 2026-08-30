@@ -4,7 +4,7 @@ Wrapped changeset history for tddy-coder.
 
 **Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
 
-
+- **2026-08-30** [Bug Fix + Feature] **cross-host planned-PR visibility** — the `session` participant block's shape moves to `tddy_core::session_participant_metadata` (two crates publish it now, and the merge is shallow), and the seed gains the session's stack association from a new `--stack-node-id` flag plus `--stack-parent` and the changeset's branch, so the first publish already carries it; a changeset read error on that path is logged rather than silently yielding an empty branch.
 - **2026-08-29** [Bug Fix] **a seeded stack skips the docs pass** — the stack-seeding path records `STATE_STACK_DOCS_WRITTEN` where it recorded `STATE_STACK_PLANNED`, because that state now routes to the new `write-stack-docs` goal and a seeded node is bound to a session whose work already exists, so a retroactive PRD would document a decision nobody is about to make. The two seed acceptance tests already pinned the documented behaviour (a seeded orchestrator comes up in `orchestrate`) and needed no edit.
 - **2026-08-29** [Feature] **coder-hosted sessions are not a worktree-sync blind spot** — `session_participant` surfaces the agent's own tool calls so a coder-hosted session's activity reaches the room like a daemon-hosted one's. No new coder credential and no new channel: the durable `agent-activity.jsonl` the coder already writes is what the daemon's poll loop tails, which is why the originally-planned `ReportAgentActivity` transport from the coder was never built. Feature [session-worktree-sync.md](../../../docs/ft/daemon/session-worktree-sync.md).
 

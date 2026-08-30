@@ -870,6 +870,7 @@ export function SessionsDrawerScreen({
               buildSessionClient={buildSessionClient}
               liveKitFactory={liveKitFactory}
               liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
+              sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
           )}
         </div>

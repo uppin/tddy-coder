@@ -9,6 +9,13 @@ export interface PlannedPrRowBadgesProps {
   inProgress: boolean;
   /** The branch's live GitHub PR, from the row's one branch resolution. */
   pr?: BranchResolution["pr"];
+  /**
+   * The GitHub PR found for the node's **planned** branch name, for a node that owns no branch —
+   * the `pr` leg alone of its `branch_suggestion`'s resolution (D41). Rendered exactly as {@link pr}
+   * is: a PR is a PR whichever name found it, and the row that plans the branch is the only place it
+   * can be shown. The two are never both present, because a node either owns a branch or does not.
+   */
+  plannedPr?: BranchResolution["pr"];
   /** How the branch stands against the base the daemon actually compared it to. */
   baseSync: BaseSyncView;
 }
@@ -32,11 +39,23 @@ const MUTED_BADGE_CLASS = `${BADGE_CLASS} bg-muted text-muted-foreground`;
  * and of its CTA, sharing the header's flex row. Nesting them inside the toggle would put interactive
  * content in a button and swallow the CTA's own click.
  */
-export function PlannedPrRowBadges({ node, inProgress, pr, baseSync }: PlannedPrRowBadgesProps) {
-  const hasPr = Boolean(pr?.exists);
+export function PlannedPrRowBadges({
+  node,
+  inProgress,
+  pr,
+  plannedPr,
+  baseSync,
+}: PlannedPrRowBadgesProps) {
+  // A node owns a branch or it plans one, never both, so one of the two legs answers and the other is
+  // absent — the row states whichever PR was actually found.
+  const foundPr = pr?.exists ? pr : plannedPr?.exists ? plannedPr : undefined;
+  const hasPr = foundPr !== undefined;
   // "Could not look up" is deliberately distinct from "this branch has no PR": conflating the two is
   // why a live open PR stayed invisible while the daemon held no GitHub credential.
-  const prUnavailable = Boolean(pr?.unavailable);
+  const prUnavailable = Boolean(pr?.unavailable) || Boolean(plannedPr?.unavailable);
+  const unavailableReason = pr?.unavailable
+    ? pr.unavailableReason
+    : (plannedPr?.unavailableReason ?? "");
 
   return (
     <>
@@ -51,23 +70,23 @@ export function PlannedPrRowBadges({ node, inProgress, pr, baseSync }: PlannedPr
       {hasPr && (
         <a
           data-testid={`pr-stack-pr-link-${node.nodeId}`}
-          href={pr!.url}
+          href={foundPr.url}
           target="_blank"
           rel="noreferrer"
           className="flex-shrink-0 text-xs text-blue-600 hover:underline dark:text-blue-400"
         >
-          #{pr!.number.toString()}
+          #{foundPr.number.toString()}
         </a>
       )}
       {hasPr && (
         <span data-testid={`pr-stack-pr-state-${node.nodeId}`} className={MUTED_BADGE_CLASS}>
-          {pr!.state}
+          {foundPr.state}
         </span>
       )}
       {prUnavailable && (
         <span
           data-testid={`pr-stack-pr-unavailable-${node.nodeId}`}
-          title={pr!.unavailableReason}
+          title={unavailableReason}
           className={MUTED_BADGE_CLASS}
         >
           PR status unavailable

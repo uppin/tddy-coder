@@ -542,6 +542,11 @@ pub struct Args {
     /// Sets orchestrator_session_id on the child's changeset.
     pub stack_parent: Option<String>,
 
+    /// The orchestrator's planned node this session materializes, when the surface that started it
+    /// knew which one (D34). Published in the participant's `session` metadata block, which is how
+    /// a PR-Stack view on another host recognizes this session as that node's child at all.
+    pub stack_node_id: Option<String>,
+
     /// Base-branch source session id for this stack child.
     /// Defaults to stack_parent when omitted.
     /// Sets `previous_session_id`. TODO: wire worktree integration base via spawn_chain_child_worktree.
@@ -763,6 +768,12 @@ pub struct CoderArgs {
     /// Sets orchestrator_session_id on the child's changeset.
     #[arg(long)]
     pub stack_parent: Option<String>,
+
+    /// The orchestrator's planned node this session materializes (D34). Published in the
+    /// participant's `session` metadata block, which is how a PR-Stack view on another host
+    /// recognizes this session as that node's child.
+    #[arg(long)]
+    pub stack_node_id: Option<String>,
 
     /// Base-branch source session id for this stack child.
     /// Defaults to stack_parent when omitted.
@@ -1011,6 +1022,7 @@ impl From<CoderArgs> for Args {
             remote_session_token: a.remote_session_token,
             remote_daemon_id: a.remote_daemon_id,
             stack_parent: a.stack_parent,
+            stack_node_id: a.stack_node_id,
             stack_base: a.stack_base,
             stack_seed_base_session: a.stack_seed_base_session,
         }
@@ -1067,6 +1079,7 @@ impl From<DemoArgs> for Args {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         }
@@ -2104,6 +2117,30 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
                 repo_path: std::env::current_dir()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default(),
+                // The stack association, seeded from what started this session. It is what a
+                // PR-Stack view on another host joins this session's synthesized row onto its
+                // planned node with — presence is the only cross-host signal it has (D37).
+                session_id: args.session_id.clone().unwrap_or_default(),
+                orchestrator_session_id: args.stack_parent.clone().unwrap_or_default(),
+                stack_node_id: args.stack_node_id.clone().unwrap_or_default(),
+                // The branch is read from the changeset the session start just wrote rather than
+                // from git: it is the branch this session *owns*, which is the one a planned node
+                // records, and a detached or later-switched HEAD would answer a different question.
+                //
+                // An unreadable changeset is warned about rather than swallowed: a truncated
+                // `.session.yaml` is a failure this repo has hit before, and with the branch empty
+                // the PR-stack join silently falls through to its weakest leg (branch ownership)
+                // for a session that in fact owns one.
+                branch: match tddy_core::read_changeset(&session_artifact_dir) {
+                    Ok(cs) => cs.branch.unwrap_or_default(),
+                    Err(e) => {
+                        log::warn!(
+                            "could not read {} to learn this session's branch ({e}); its participant will advertise none, so a PR-Stack view cannot join it to its planned node by branch",
+                            session_artifact_dir.display()
+                        );
+                        String::new()
+                    }
+                },
             };
             if let Some(event_tx) = usage_event_tx.clone() {
                 let _metadata_tap_handle = crate::session_participant::spawn_session_metadata_tap(
@@ -4376,6 +4413,7 @@ mod resume_session_config_tests {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         };
@@ -4448,6 +4486,7 @@ mod resume_session_identity_tests {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         };
@@ -4521,6 +4560,7 @@ mod session_dir_sync_tests {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         };
@@ -4610,6 +4650,7 @@ mod changeset_agent_resume_tests {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         };
@@ -4716,6 +4757,7 @@ mod post_tui_workflow_exit_tests {
             remote_session_token: None,
             remote_daemon_id: None,
             stack_parent: None,
+            stack_node_id: None,
             stack_base: None,
             stack_seed_base_session: None,
         }

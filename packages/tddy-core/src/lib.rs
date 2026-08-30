@@ -28,6 +28,7 @@ pub mod session_chain;
 pub mod session_label;
 pub mod session_lifecycle;
 pub mod session_metadata;
+pub mod session_participant_metadata;
 pub mod source_path;
 pub mod stdio_safety;
 pub mod stream;

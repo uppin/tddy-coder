@@ -20,6 +20,7 @@ fn a_session_metadata() -> SessionMetadata {
         repo_path: "/home/dev/feature".to_string(),
         elapsed_display: "3m".to_string(),
         pending_elicitation: false,
+        ..SessionMetadata::default()
     }
 }
 
@@ -117,7 +118,81 @@ fn a_seed() -> super::SessionMetadataSeed {
         model: "sonnet-4".to_string(),
         recipe: "tdd".to_string(),
         repo_path: "/home/dev/feature".to_string(),
+        ..super::SessionMetadataSeed::default()
     }
+}
+
+/// A seed for a session started as the child of a pr-stack orchestrator's planned node — what
+/// `--stack-parent`, `--stack-node-id` and the session's own changeset supply at spawn.
+fn a_seed_of_a_planned_prs_child() -> super::SessionMetadataSeed {
+    super::SessionMetadataSeed {
+        session_id: "019f9fdb-cf83-70d2-aef5-0000000000b2".to_string(),
+        orchestrator_session_id: "019f9dd5-716d-7071-96ac-464ff7b98c2a".to_string(),
+        stack_node_id: "attach-store".to_string(),
+        branch: "feature/attach-docs/attach-store".to_string(),
+        ..a_seed()
+    }
+}
+
+#[test]
+fn a_default_session_metadata_carries_the_stack_association_the_session_was_started_with() {
+    // Given
+    let seed = a_seed_of_a_planned_prs_child();
+
+    // When
+    let meta = a_default_session_metadata(&seed);
+
+    // Then — these four are what a PR-Stack view one host over joins this session's row onto its
+    // planned node with; presence is the only cross-host signal it has (D37)
+    assert_eq!(
+        (
+            meta.session_id.as_str(),
+            meta.orchestrator_session_id.as_str(),
+            meta.stack_node_id.as_str(),
+            meta.branch.as_str()
+        ),
+        (
+            "019f9fdb-cf83-70d2-aef5-0000000000b2",
+            "019f9dd5-716d-7071-96ac-464ff7b98c2a",
+            "attach-store",
+            "feature/attach-docs/attach-store"
+        )
+    );
+}
+
+#[test]
+fn a_workflow_transition_keeps_the_stack_association_it_says_nothing_about() {
+    // Given — a planned PR's child mid-workflow
+    let meta = a_default_session_metadata(&a_seed_of_a_planned_prs_child());
+
+    // When — the tap republishes the whole snapshot on every change, and the merge into participant
+    // metadata is shallow, so an association dropped here is erased on the wire (D37)
+    let next = apply_session_metadata_event(
+        &meta,
+        &PresenterEvent::StateChanged {
+            from: "Planning".into(),
+            to: "Red".into(),
+        },
+    )
+    .expect("StateChanged must change the snapshot");
+
+    // Then
+    assert_eq!(
+        (
+            next.state.as_str(),
+            next.session_id.as_str(),
+            next.orchestrator_session_id.as_str(),
+            next.stack_node_id.as_str(),
+            next.branch.as_str()
+        ),
+        (
+            "Red",
+            "019f9fdb-cf83-70d2-aef5-0000000000b2",
+            "019f9dd5-716d-7071-96ac-464ff7b98c2a",
+            "attach-store",
+            "feature/attach-docs/attach-store"
+        )
+    );
 }
 
 #[test]

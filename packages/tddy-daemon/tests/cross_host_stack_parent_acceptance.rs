@@ -116,6 +116,8 @@ impl ADaemonInTheCommonRoom {
                 stack_parent: ORCHESTRATOR_SESSION.to_string(),
                 project_id: PROJECT.to_string(),
                 new_branch_name: CHILD_BRANCH.to_string(),
+                // This spawn names no planned node, so the branch-derived lookup applies.
+                stack_node_id: String::new(),
             }))
             .await
             .map(|r| r.into_inner().base_ref)

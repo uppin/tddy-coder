@@ -233,6 +233,15 @@ service ConnectionService {
   // its already-spawned child sessions and a checkout of the same logical project exist together,
   // which is exactly what the answer is assembled from. See docs/ft/coder/pr-stacking.md.
   rpc ResolveStackBase(ResolveStackBaseRequest) returns (ResolveStackBaseResponse);
+  // Record, on the daemon that **owns** a PR-stack orchestrator, that one of its planned nodes has
+  // been materialized: which child session did it, and which branch that session created.
+  //
+  // The write half of `ResolveStackBase`, routed for the same reason. A planned node lives in its
+  // orchestrator's own `changeset.yaml`, so a child spawned on another host writing its own sessions
+  // tree writes nothing at all — the node keeps neither a branch nor a child, and every descendant
+  // stays unspawnable because `Stack::base_ref_for_spawn` gates on a parent owning a branch. See
+  // docs/ft/coder/pr-stack-live-status.md (D35).
+  rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
   // One measurement of a session's checkout, for the daemon hosting that session's room.
   //
   // A session room lives on the daemon running the session's agent; when the repo is remote that
@@ -950,6 +959,16 @@ message StartSessionRequest {
   // Routing only: the child session itself is still created by the daemon this request names in
   // `daemon_instance_id`, and still records `stack_parent` as its orchestrator.
   string stack_parent_daemon_instance_id = 36;
+  // The planned pr-stack node this child materializes, sent by the surface that rendered the
+  // Start-session control. The daemon records the spawn on exactly this node instead of re-deriving
+  // one from the branch (D34): the branch is `new_branch_name`, which the operator can edit in the
+  // create dialog before confirming, so a rename silently unlinks the node from the row that started
+  // it — and a daemon that does not hold the orchestrator cannot look the node up at all.
+  //
+  // Empty keeps the branch-derived local lookup, which is what the orchestrator agent's own
+  // `spawn-child` uses: it always runs on the orchestrator's host, where that lookup is correct.
+  // Meaningful only together with `stack_parent`, which names the orchestrator holding the node.
+  string stack_node_id = 37;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved
@@ -2020,8 +2039,16 @@ message ResolveStackBaseRequest {
   // repository from the id the child's host sent: the base is a remote-tracking ref, so the two
   // checkouts need only share an origin, not a path.
   string project_id = 4;
-  // The branch the child spawn is about to create — how the planned node it belongs to is found.
+  // The branch the child spawn is about to create — how the planned node it belongs to is found
+  // when, and only when, `stack_node_id` is empty.
   string new_branch_name = 5;
+  // The planned node the child spawn materializes, as the surface that started it named it. Takes
+  // precedence over `new_branch_name` (D34): the branch is the operator's to edit in the create
+  // dialog before confirming, and a node carrying no `branch_suggestion` never matched a typed name
+  // at all — either way the branch-derived lookup finds no node, and "no node" means no ordering
+  // gate runs and the child is cut from the project default for a node whose non-merged parent owns
+  // no branch. Empty keeps the branch-derived lookup.
+  string stack_node_id = 6;
 }
 message ResolveStackBaseResponse {
   // The remote-tracking ref the child's worktree is cut from (e.g. `origin/feature/token-store`).
@@ -2030,6 +2057,28 @@ message ResolveStackBaseResponse {
   // error, and is deliberately distinct from one: a spawn refused here reports the owner's own
   // refusal verbatim.
   string base_ref = 1;
+}
+
+// Record a child session and its branch on a planned node of a pr-stack orchestrator, on the daemon
+// that owns that orchestrator.
+message LinkStackNodeRequest {
+  string session_token = 1;
+  // The daemon whose sessions tree holds `orchestrator_session_id`. Empty or matching the local
+  // instance = this daemon answers from its own disk.
+  string daemon_instance_id = 2;
+  // The pr-stack orchestrator whose plan holds the node.
+  string orchestrator_session_id = 3;
+  // The planned node to link. Required — a link is never derived from the branch on this path (D34).
+  string node_id = 4;
+  // The child session that materialized the node.
+  string child_session_id = 5;
+  // The branch that session created. Recorded as the node's `branch`, which is what makes the
+  // node's descendants spawnable.
+  string branch = 6;
+}
+message LinkStackNodeResponse {
+  // The plan as it stands after the link, so a caller that renders it does not re-read.
+  string stack_plan_json = 1;
 }
 
 // Everything the PR-Stack view needs about one branch, resolved server-side by branch name.

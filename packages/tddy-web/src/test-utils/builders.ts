@@ -30,6 +30,7 @@ import {
   type ProjectEntry,
   type SessionEntry,
 } from "../gen/connection_pb";
+import type { StackChildSession } from "../components/sessions/prstack/stackChildSessions";
 import type { StackNode } from "../components/sessions/prstack/stackPlan";
 import type { ViewRect } from "../lib/terminalStatusBarLayout";
 import type { TransitionCounters } from "../components/connection/terminalPresentation";
@@ -122,6 +123,34 @@ export function aStackNode(overrides: Partial<StackNode> = {}): StackNode {
     childRecipe: "tdd",
     internalStatus: null,
     displayOrder: null,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// StackChildSession (a session working a planned PR)
+// ---------------------------------------------------------------------------
+
+/**
+ * A live child session of a pr-stack orchestrator, in the shape the view joins on
+ * (`stackChildSessions`). Every field present: the association is a set of identities, and "absent"
+ * and "empty" are the same value here but never the same *statement* — an empty `stackNodeId` means
+ * "claims no node" and must never read as a wildcard.
+ *
+ * Defaults describe the ordinary case: a live child that names both its orchestrator and its node,
+ * and owns the branch it created. A scenario states only the identity it is about — which is what
+ * separates the three join legs from each other, since each is defined by which of these fields the
+ * child does *not* carry.
+ */
+export function aStackChildSession(
+  overrides: Partial<StackChildSession> = {},
+): StackChildSession {
+  return {
+    sessionId: "child-session-1",
+    orchestratorSessionId: "pr-stack-session-1",
+    stackNodeId: "n1",
+    branch: "feature/stack/n1",
+    isActive: true,
     ...overrides,
   };
 }

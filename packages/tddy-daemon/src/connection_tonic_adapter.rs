@@ -43,13 +43,14 @@ use tddy_service::proto::connection::{
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
     GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, HostStatsEvent, ListAgentModelsRequest, ListAgentModelsResponse,
-    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    GetWorktreeSnapshotResponse, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
+    ListExecToolsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
@@ -1144,6 +1145,19 @@ where
         request: tonic::Request<ResolveStackBaseRequest>,
     ) -> Result<tonic::Response<ResolveStackBaseResponse>, tonic::Status> {
         let resp = RpcConnectionService::resolve_stack_base(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn link_stack_node(
+        &self,
+        request: tonic::Request<LinkStackNodeRequest>,
+    ) -> Result<tonic::Response<LinkStackNodeResponse>, tonic::Status> {
+        let resp = RpcConnectionService::link_stack_node(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

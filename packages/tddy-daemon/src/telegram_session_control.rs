@@ -1245,6 +1245,7 @@ fn telegram_spawn_options<'a>(
         mouse: inputs.mouse,
         recipe: inputs.recipe.as_deref(),
         stack_parent: None,
+        stack_node_id: None,
         // A Telegram spawn names no PR-stack base session: it has no orchestrator to seed.
         stack_seed_base_session: None,
         model: None,
@@ -3064,6 +3065,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             &self.sessions_base,
             None,
             repo_root,
+            // The Telegram start names no planned node: it starts a session, never a pr-stack
+            // node, so there is nothing for the node-keyed lookup to prefer.
+            "",
             new_branch_name,
             cs.worktree_integration_base_ref.as_deref(),
         )
@@ -3162,6 +3166,18 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
                 &lk.api_key,
                 &lk.api_secret,
                 &server_identity,
+                // A Telegram-started session is part of no stack, so its block carries the identity
+                // and static fields only — published all the same, so the drawer names it the same
+                // way it names every other session (D37).
+                Some(
+                    tddy_core::session_participant_metadata::SessionParticipantMetadata {
+                        agent: "claude".to_string(),
+                        model: model.clone(),
+                        repo_path: worktree_path.to_string_lossy().to_string(),
+                        session_id: session_id.to_string(),
+                        ..Default::default()
+                    },
+                ),
             )
             .await
             {
@@ -3264,6 +3280,9 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             &self.sessions_base,
             None,
             repo_root,
+            // The Telegram start names no planned node: it starts a session, never a pr-stack
+            // node, so there is nothing for the node-keyed lookup to prefer.
+            "",
             new_branch_name,
             cs.worktree_integration_base_ref.as_deref(),
         )

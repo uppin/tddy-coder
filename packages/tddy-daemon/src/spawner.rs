@@ -417,6 +417,11 @@ pub struct SpawnOptions<'a> {
     pub recipe: Option<&'a str>,
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     pub stack_parent: Option<&'a str>,
+    /// The planned node of that orchestrator's stack this session materializes. Passed as
+    /// `--stack-node-id <id>`, and published by the child in its participant metadata — which is
+    /// the only way a PR-Stack view on another host can tell this session apart from any other
+    /// session of the same orchestrator (D37).
+    pub stack_node_id: Option<&'a str>,
     /// Existing session whose branch seeds a new `pr-stack` orchestrator's stack as its single root
     /// node. Passed as `--stack-seed-base-session <id>`.
     pub stack_seed_base_session: Option<&'a str>,
@@ -438,10 +443,12 @@ pub struct SpawnOptions<'a> {
 /// A blank value is treated as unset, because proto3 carries "unset" as the empty string.
 pub fn pr_stack_spawn_args(
     stack_parent: Option<&str>,
+    stack_node_id: Option<&str>,
     stack_seed_base_session: Option<&str>,
 ) -> Vec<String> {
     [
         ("--stack-parent", stack_parent),
+        ("--stack-node-id", stack_node_id),
         ("--stack-seed-base-session", stack_seed_base_session),
     ]
     .into_iter()
@@ -1119,7 +1126,11 @@ pub fn plan_session_child(
         }
     }
 
-    let stack_args = pr_stack_spawn_args(opts.stack_parent, opts.stack_seed_base_session);
+    let stack_args = pr_stack_spawn_args(
+        opts.stack_parent,
+        opts.stack_node_id,
+        opts.stack_seed_base_session,
+    );
     if !stack_args.is_empty() {
         log::debug!("spawner: passing stack flags {:?}", stack_args);
         args.extend(stack_args);

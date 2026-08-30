@@ -155,7 +155,7 @@ impl Refusal {
 #[test]
 fn passes_the_stack_base_session_to_the_spawned_coder() {
     // Given / When a spawn that seeds its stack on an existing session
-    let args = pr_stack_spawn_args(None, Some(BASE_SESSION));
+    let args = pr_stack_spawn_args(None, None, Some(BASE_SESSION));
 
     // Then
     assert_eq!(
@@ -170,7 +170,7 @@ fn passes_the_stack_base_session_to_the_spawned_coder() {
 #[test]
 fn omits_the_flag_when_no_stack_base_session_was_requested() {
     // Given / When an ordinary spawn
-    let args = pr_stack_spawn_args(None, None);
+    let args = pr_stack_spawn_args(None, None, None);
 
     // Then — the request an unseeded orchestrator has always sent
     assert_eq!(args, Vec::<String>::new());
@@ -179,7 +179,7 @@ fn omits_the_flag_when_no_stack_base_session_was_requested() {
 #[test]
 fn omits_the_flag_for_a_blank_stack_base_session() {
     // Given / When — proto3 carries "unset" as the empty string, so blank must mean unset here too
-    let args = pr_stack_spawn_args(None, Some("   "));
+    let args = pr_stack_spawn_args(None, None, Some("   "));
 
     // Then
     assert_eq!(args, Vec::<String>::new());
@@ -189,7 +189,7 @@ fn omits_the_flag_for_a_blank_stack_base_session() {
 fn omits_the_flag_for_a_blank_stack_parent() {
     // Given / When — `stack_parent` reaches this from the same proto3 string field, so blank must
     // mean unset for it too
-    let args = pr_stack_spawn_args(Some("  "), None);
+    let args = pr_stack_spawn_args(Some("  "), None, None);
 
     // Then
     assert_eq!(args, Vec::<String>::new());
@@ -199,7 +199,7 @@ fn omits_the_flag_for_a_blank_stack_parent() {
 fn trims_a_padded_stack_parent() {
     // Given / When — a padded id names a real session, so it is trimmed rather than refused; the
     // coder receives an id it can resolve to a directory
-    let args = pr_stack_spawn_args(Some(" orchestrator-1 "), None);
+    let args = pr_stack_spawn_args(Some(" orchestrator-1 "), None, None);
 
     // Then
     assert_eq!(
@@ -211,7 +211,7 @@ fn trims_a_padded_stack_parent() {
 #[test]
 fn trims_a_padded_stack_base_session() {
     // Given / When
-    let args = pr_stack_spawn_args(None, Some(" session-auth-store "));
+    let args = pr_stack_spawn_args(None, None, Some(" session-auth-store "));
 
     // Then
     assert_eq!(
@@ -227,7 +227,7 @@ fn trims_a_padded_stack_base_session() {
 fn passes_a_stack_parent_and_a_stack_base_session_together() {
     // Given / When both are set — a child spawn is keyed on its parent, a seed on its base, and
     // neither flag may displace the other
-    let args = pr_stack_spawn_args(Some("orchestrator-1"), Some(BASE_SESSION));
+    let args = pr_stack_spawn_args(Some("orchestrator-1"), None, Some(BASE_SESSION));
 
     // Then
     assert_eq!(
@@ -237,6 +237,66 @@ fn passes_a_stack_parent_and_a_stack_base_session_together() {
             "orchestrator-1".to_string(),
             "--stack-seed-base-session".to_string(),
             BASE_SESSION.to_string(),
+        ]
+    );
+}
+
+#[test]
+fn passes_the_planned_node_id_to_the_spawned_coder() {
+    // Given / When — a child spawn for a planned node, which the coder publishes as its stack
+    // association so the PR-Stack view can join a cross-host child back to the row that started it
+    let args = pr_stack_spawn_args(Some("orchestrator-1"), Some("n2"), None);
+
+    // Then — the node id is the surface's own, never re-derived from the branch (D34)
+    assert_eq!(
+        args,
+        vec![
+            "--stack-parent".to_string(),
+            "orchestrator-1".to_string(),
+            "--stack-node-id".to_string(),
+            "n2".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn omits_the_node_flag_for_a_spawn_that_names_no_planned_node() {
+    // Given / When — the orchestrator agent's own `spawn-child`, which always runs on the
+    // orchestrator's host and is linked by the branch-derived local write
+    let args = pr_stack_spawn_args(Some("orchestrator-1"), None, None);
+
+    // Then
+    assert_eq!(
+        args,
+        vec!["--stack-parent".to_string(), "orchestrator-1".to_string()]
+    );
+}
+
+#[test]
+fn omits_the_node_flag_for_a_blank_planned_node_id() {
+    // Given / When — proto3 carries "unset" as the empty string, so blank must mean unset here too
+    let args = pr_stack_spawn_args(Some("orchestrator-1"), Some("   "), None);
+
+    // Then — a blank `--stack-node-id` would reach the coder as an association it cannot publish
+    assert_eq!(
+        args,
+        vec!["--stack-parent".to_string(), "orchestrator-1".to_string()]
+    );
+}
+
+#[test]
+fn trims_a_padded_planned_node_id() {
+    // Given / When
+    let args = pr_stack_spawn_args(Some("orchestrator-1"), Some(" n2 "), None);
+
+    // Then
+    assert_eq!(
+        args,
+        vec![
+            "--stack-parent".to_string(),
+            "orchestrator-1".to_string(),
+            "--stack-node-id".to_string(),
+            "n2".to_string(),
         ]
     );
 }

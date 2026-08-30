@@ -25,6 +25,7 @@ import {
   prStackPlannedBranch,
   prStackBaseBranch,
   prStackStartWarning,
+  prStackStartSessionBlockedIcon,
   prStackRepointError,
   prStackPrUnavailable,
   prStackRowToggle,
@@ -295,9 +296,16 @@ export const prStackScreenPage = {
   baseBranch: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackBaseBranch(nodeId), { timeout: 5000, ...options }),
 
-  /** The warning listing every reason a row cannot be started — shown beside its disabled CTA. */
+  /** The warning listing every reason a row's spawn may not succeed — shown beside its marked CTA. */
   startWarning: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(prStackStartWarning(nodeId), { timeout: 5000, ...options }),
+
+  /**
+   * The alert icon on a blocked row's Start-session button. The button itself stays pressable — a
+   * blocker is advice, not a refusal — so this icon is what marks the difference.
+   */
+  startSessionBlockedIcon: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(prStackStartSessionBlockedIcon(nodeId), { timeout: 5000, ...options }),
 
   /** The inline error shown on a row whose repoint the daemon refused. */
   repointError: (nodeId: string, options?: Parameters<typeof cy.get>[1]) =>

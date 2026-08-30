@@ -1,9 +1,10 @@
 import React from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import { Button } from "../../ui/button";
 import type { BranchResolution } from "../../../gen/connection_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
+import type { StackChildSession } from "./stackChildSessions";
 import { PlannedPrRowBadges } from "./PlannedPrRowBadges";
 import { PlannedPrRowDetails } from "./PlannedPrRowDetails";
 import type { StartBlocker } from "./startBlockers";
@@ -70,10 +71,10 @@ export interface PlannedPrRowProps {
    */
   syncError?: string;
   /**
-   * Every reason a spawn cannot succeed right now, each with the text to show. Non-empty *disables*
-   * the Start-session button — it never replaces it, and never suppresses any of the row's own
-   * information (D16): the row is the only place a planned PR's title, description, branch, base and
-   * PR live, and a blocked operator needs all of it.
+   * Every reason a spawn cannot succeed right now, each with the text to show. It never replaces the
+   * Start-session button and never suppresses any of the row's own information (D16): the row is the
+   * only place a planned PR's title, description, branch, base and PR live, and a blocked operator
+   * needs all of it. Nor does it *disable* the button any more (D42) — see the button itself.
    */
   blockers?: StartBlocker[];
   /** The base branch the row states its child worktree would be created from. */
@@ -92,6 +93,42 @@ export interface PlannedPrRowProps {
   boundSessionId?: string;
   /** Select and attach {@link boundSessionId}, exactly as clicking that session in the drawer does. */
   onOpenSession?: (sessionId: string) => void;
+  /**
+   * The GitHub PR found for this node's **planned** branch name, for a node that owns no branch —
+   * the `pr` leg, and only that leg, of its `branch_suggestion`'s resolution (D41).
+   *
+   * The `pr` leg asks the GitHub API by head branch, so it is the one leg of `QueryBranch` that
+   * survives the host boundary and the one that can answer for a branch this daemon cannot see. The
+   * other legs of that resolution describe a ref that does not exist and never reach the row, which
+   * is why this prop carries the leg rather than the whole resolution: a suggestion is a planned
+   * name, not a ref (D1), and letting it feed the base line, the blockers or the branch line would
+   * unblock a spawn onto something nothing created.
+   */
+  plannedPr?: BranchResolution["pr"];
+  /**
+   * The child session working this node, resolved over the whole fleet by `nodeChildSession` — the
+   * session the row's status chip names, opens, and reads its in-progress badge from.
+   *
+   * Present for a child on **any** host, which is what makes it authoritative where `resolution` is
+   * not: `QueryBranch`'s session leg only reads the queried daemon's own sessions directory, so it
+   * reports `exists = false` for a live cross-host child (D40).
+   *
+   * Its third leg is "whoever owns this branch right now", which answers a question about the
+   * *branch*, not about the node's own child — so it is deliberately not what the orphan verdict
+   * reads. See {@link identityChildSession}.
+   */
+  childSession?: StackChildSession;
+  /**
+   * The child session that claims **this node** — `nodeChildSessionByIdentity`, the same join
+   * without its branch-ownership leg — and the only evidence the orphan verdict is entitled to.
+   *
+   * A resolution reporting `session.exists = false` means "not on the daemon I asked", so presence is
+   * what overrides it (D40, amending D7). But only a positive claim on this node proves *this node's*
+   * child exists: a fresh session picking up the branch after the recorded child was deleted is the
+   * very D7 orphan the recovery CTA exists for, and reading it as proof would leave the row claiming a
+   * child it no longer has, with no control left to start a new one.
+   */
+  identityChildSession?: StackChildSession;
 }
 
 /**
@@ -107,8 +144,9 @@ export interface PlannedPrRowProps {
  *   it is the row itself, not the detail body, that renders them.
  *
  * The CTA slot holds either the live child's status chip — clickable when a bound session resolves —
- * or the Start-session button, disabled with a warning naming each blocker when a spawn cannot
- * succeed (D16, which reverses the earlier indicator that replaced the row's contents).
+ * or the Start-session button, which stays pressable and takes a warning colour when a spawn is
+ * blocked (D42, amending D16; D16 itself reversed the earlier indicator that replaced the row's
+ * contents).
  */
 export function PlannedPrRow({
   node,
@@ -135,19 +173,26 @@ export function PlannedPrRow({
   parentTitles = [],
   boundSessionId = "",
   onOpenSession,
+  plannedPr,
+  childSession,
+  identityChildSession,
 }: PlannedPrRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
-  const isSpawned = Boolean(node.sessionId) && !isNodeOrphaned(node, resolution);
-  // A session is in progress when either source says so: `QueryBranch` resolves it server-side by
-  // branch, while `inProgress` comes from the session list the caller already holds.
+  const isSpawned = Boolean(node.sessionId) && !isNodeOrphaned(node, resolution, identityChildSession);
+  // A session is in progress when any source says so: `QueryBranch` resolves it server-side by branch
+  // on one host, `inProgress` comes from the session list the caller already holds, and
+  // `childSession` is the one that crosses the host boundary.
   const inProgressEffective =
-    inProgress || Boolean(resolution?.session?.exists && resolution.session.isActive);
-  // The blockers explain a Start-session button that cannot be pressed, so they are silent for a node
-  // that has already been spawned: its child exists, and nothing about a base it will never be created
+    inProgress ||
+    Boolean(childSession?.isActive) ||
+    Boolean(resolution?.session?.exists && resolution.session.isActive);
+  // The blockers advise a Start-session button that still works, so they are silent for a node that
+  // has already been spawned: its child exists, and nothing about a base it will never be created
   // from is news.
   const isBlocked = !isSpawned && blockers.length > 0;
-  // The same reasons as the warning, on the button itself, so hovering the disabled control answers why.
+  // The same reasons as the warning, on the button itself, so hovering the control answers why it is
+  // marked before it is pressed.
   const blockerSummary = blockers.map((b) => b.message).join("; ");
   // The chip becomes a control only when there is a session to select *and* a way to select it.
   const canOpenBoundSession = Boolean(boundSessionId) && Boolean(onOpenSession);
@@ -200,6 +245,7 @@ export function PlannedPrRow({
           node={node}
           inProgress={inProgressEffective}
           pr={resolution?.pr}
+          plannedPr={plannedPr}
           baseSync={baseSync}
         />
         {canRepoint && (
@@ -217,7 +263,8 @@ export function PlannedPrRow({
           </Button>
         )}
         {/* One CTA slot, two occupants: the live child's status chip, or the Start-session button —
-            disabled when blocked rather than replaced, since it is the control a repoint re-enables. */}
+            marked when blocked rather than replaced or disabled, since it is the control that
+            recovers a node the blockers may only *believe* is unstartable. */}
         {isSpawned ? (
           canOpenBoundSession ? (
             // The chip is wrapped rather than relabelled, so its own contract is untouched: it still
@@ -239,13 +286,25 @@ export function PlannedPrRow({
             statusChip
           )
         ) : (
+          // Never disabled by a blocker (D42, amending D16). Two of the three blocker kinds are
+          // derived from local-only false negatives — `remote.exists` reads absent for any branch
+          // pushed from another host until this clone fetches, and `parent-has-no-branch` is true
+          // for every parent whose node link was written on the wrong host — so a gate that cannot
+          // see half the fleet has to advise rather than refuse. The daemon still enforces its own
+          // spawn gate, and fails a genuinely impossible spawn there with the real reason, which is
+          // strictly more informative than a button that cannot be pressed. `starting` still
+          // disables it: that is this row's own in-flight state, not a verdict about the fleet.
           <Button
             data-testid={`pr-stack-start-session-${node.nodeId}`}
             size="sm"
-            disabled={starting || isBlocked}
+            variant={isBlocked ? "warning" : "default"}
+            disabled={starting}
             title={blockerSummary || undefined}
             onClick={() => onStartSession(node)}
           >
+            {isBlocked && (
+              <TriangleAlert data-testid={`pr-stack-start-session-blocked-icon-${node.nodeId}`} />
+            )}
             Start session
           </Button>
         )}
@@ -267,7 +326,7 @@ export function PlannedPrRow({
         reordering={reordering}
         onReorder={onReorder}
       />
-      {/* Each blocking issue in full, on its own line — the disabled button's reason, in the row
+      {/* Each blocking issue in full, on its own line — the marked button's reason, in the row
           rather than only in a tooltip. Outside the collapse boundary (D22). */}
       {isBlocked && (
         <div

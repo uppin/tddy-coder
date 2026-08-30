@@ -84,6 +84,12 @@ export function owningHostForSession(session: SessionEntry, fallbackInstanceId: 
  * owning-host badge, and its `session` metadata (repo/goal/agent/… published by the coder
  * participant) is hydrated onto the row so it renders a real name and inspector fields. A live
  * participant with no metadata block yet keeps the short-session-id label fallback.
+ *
+ * `branch` and `orchestratorSessionId` are hydrated out of the same block and for the same reason:
+ * they are the two keys every PR-stack join uses, they are already `SessionEntry` fields, and a
+ * session on another host reaches the drawer only as presence — so without them a cross-host stack
+ * child is filed as an unrelated flat row, and the planned PR it materializes keeps offering to
+ * start work that is already running (D38).
  */
 export function mergeActiveAndFetchedSessions(
   selectedHostSessions: SessionEntry[],
@@ -110,6 +116,8 @@ export function mergeActiveAndFetchedSessions(
         recipe: m?.recipe ?? "",
         elapsedDisplay: m?.elapsedDisplay ?? "",
         pendingElicitation: m?.pendingElicitation ?? false,
+        branch: m?.branch ?? "",
+        orchestratorSessionId: m?.orchestratorSessionId ?? "",
       }),
     );
   }

@@ -98,13 +98,13 @@ use tddy_service::proto::connection::{
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
     GetDemoVmStatusRequest, GetDemoVmStatusResponse, GetPrStatusRequest, GetPrStatusResponse,
     GetTerminalHistoryRequest, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
-    HostCpuStats, HostDiskStats, HostStatsEvent, ListExecToolsRequest, ListExecToolsResponse,
-    ListSessionToolCallsRequest, ListSessionToolCallsResponse, LiveKitRoomsEvent,
-    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse,
-    SessionNotificationEvent as ProtoSessionNotificationEvent,
+    HostCpuStats, HostDiskStats, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, LiveKitRoomsEvent, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse, SessionNotificationEvent as ProtoSessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource, StartDemoVmRequest,
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
@@ -1326,8 +1326,41 @@ pub struct StackBaseLookup<'a> {
     pub sessions_base: &'a Path,
     /// This daemon's checkout of `project_id`.
     pub repo_root: &'a Path,
-    /// The branch the child spawn is about to create — how the planned node it belongs to is found.
+    /// The branch the child spawn is about to create — how the planned node it belongs to is found
+    /// when, and only when, `stack_node_id` is empty.
     pub new_branch_name: &'a str,
+    /// The planned node the spawn materializes, as the surface that started it named it. Preferred
+    /// over the branch (D34) — see [`tddy_core::pr_stack_node_for_spawn`]: a renamed branch matches
+    /// no node, and a node matched by nothing means no ordering gate runs at all.
+    pub stack_node_id: &'a str,
+}
+
+/// A spawn's link back onto the planned node it materializes, as the daemon that records it needs
+/// to see it.
+///
+/// Carried as one value for the same reason [`StackBaseLookup`] is: `orchestrator_session_id` alone
+/// says nothing about *which disk* holds the plan it names, and recording the link on the wrong one
+/// is exactly the bug this type exists to close. `sessions_base` is this daemon's own tree, read
+/// only on the branch-derived local path — a spawn that names no node, which is the orchestrator
+/// agent's own `spawn-child` and always runs on the orchestrator's host.
+pub struct StackNodeLink<'a> {
+    /// Authenticates the write wherever it is performed. A peer verifies the same stateless token
+    /// with the `livekit.api_secret` both daemons share.
+    pub session_token: &'a str,
+    /// The pr-stack orchestrator whose plan holds the node.
+    pub orchestrator_session_id: &'a str,
+    /// The daemon whose sessions tree holds that orchestrator. Empty = this one.
+    pub orchestrator_daemon_instance_id: &'a str,
+    /// The planned node the spawn materializes. Empty = the caller named none, and the node is
+    /// looked up locally by the branch instead (D34).
+    pub node_id: &'a str,
+    /// The session that materialized the node.
+    pub child_session_id: &'a str,
+    /// The branch that session created — the load-bearing half, since a node owning no branch
+    /// refuses every descendant.
+    pub branch: &'a str,
+    /// This daemon's sessions tree, for the branch-derived local write.
+    pub sessions_base: &'a Path,
 }
 
 /// This daemon in its capacity as the resolver of a spawn's PR-stack parent.
@@ -1341,6 +1374,10 @@ pub trait StackParentHost: Send + Sync {
     /// The ref the child's worktree is cut from, or `None` when the parent names no chain base and
     /// the project default applies.
     async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status>;
+
+    /// Record the spawn's session and branch on the planned node it materializes, wherever that
+    /// node's orchestrator lives.
+    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status>;
 }
 
 /// A spawn's PR-stack parent as the co-located spawn paths carry it: which session, whose sessions
@@ -1360,6 +1397,11 @@ pub enum SpawnStackParent<'a> {
         session_id: &'a str,
         /// The daemon whose sessions tree holds it. Empty = this one.
         daemon_instance_id: &'a str,
+        /// The planned node of that parent's stack this spawn materializes, as the surface that
+        /// started it named it. Empty when the caller named none — the orchestrator agent's own
+        /// `spawn-child`, which runs on the orchestrator's host where the node can be found from
+        /// the branch instead (D34).
+        stack_node_id: &'a str,
         /// The credential a peer verifies the forwarded question with. Empty when the parent is
         /// this daemon's own session — an agent-driven spawn is made by the orchestrator's own
         /// process, has no caller token, and asks nothing of any peer.
@@ -1378,6 +1420,24 @@ impl<'a> SpawnStackParent<'a> {
         }
     }
 
+    /// The daemon whose sessions tree holds the parent, for logging what a failed link addressed.
+    pub fn daemon_instance_id(&self) -> Option<&'a str> {
+        match self {
+            Self::NoParent => None,
+            Self::OwnedBy {
+                daemon_instance_id, ..
+            } => Some(daemon_instance_id),
+        }
+    }
+
+    /// The planned node this spawn materializes, as the caller named it.
+    pub fn stack_node_id(&self) -> Option<&'a str> {
+        match self {
+            Self::NoParent => None,
+            Self::OwnedBy { stack_node_id, .. } => Some(stack_node_id),
+        }
+    }
+
     /// What the child's worktree is cut from, resolved by whichever daemon owns the parent, or
     /// `None` when there is no parent — or the parent named no base for this branch, which leaves
     /// the project default to apply.
@@ -1391,6 +1451,7 @@ impl<'a> SpawnStackParent<'a> {
         let Self::OwnedBy {
             session_id,
             daemon_instance_id,
+            stack_node_id,
             session_token,
             host,
         } = self
@@ -1405,8 +1466,74 @@ impl<'a> SpawnStackParent<'a> {
             sessions_base,
             repo_root,
             new_branch_name,
+            stack_node_id,
         })
         .await
+    }
+
+    /// Record this spawn's session and branch on the planned node it materializes, on whichever
+    /// daemon owns the orchestrator. `Ok(())` for a spawn that is part of no stack.
+    ///
+    /// Called once the child's branch exists — that is precisely the condition
+    /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] gates descendants on.
+    pub async fn link_spawned_branch(
+        &self,
+        sessions_base: &Path,
+        branch: &str,
+        child_session_id: &str,
+    ) -> Result<(), Status> {
+        let Self::OwnedBy {
+            session_id,
+            daemon_instance_id,
+            stack_node_id,
+            session_token,
+            host,
+        } = self
+        else {
+            return Ok(());
+        };
+        host.link_spawned_branch(&StackNodeLink {
+            session_token,
+            orchestrator_session_id: session_id,
+            orchestrator_daemon_instance_id: daemon_instance_id,
+            node_id: stack_node_id,
+            child_session_id,
+            branch,
+            sessions_base,
+        })
+        .await
+    }
+
+    /// [`Self::link_spawned_branch`], with the refusal logged instead of raised (D36).
+    ///
+    /// The link lands *after* the worktree, the branch and the session already exist, so failing the
+    /// spawn here would leave an orphan session on this host and still no branch on the
+    /// orchestrator's — strictly worse than a node the operator can re-link by restarting it. The
+    /// live association still travels in participant metadata (D37), and the daemon's own spawn gate
+    /// is unaffected: a descendant of an unlinked node is refused for the real reason.
+    ///
+    /// One named seam rather than an `if let Err` at each spawn path, because "a failed link is
+    /// survivable" is a decision, not an incident — and a decision no spawn path is driveable enough
+    /// to assert on where it is written inline.
+    pub async fn link_spawned_branch_without_failing_the_spawn(
+        &self,
+        sessions_base: &Path,
+        branch: &str,
+        child_session_id: &str,
+    ) {
+        if let Err(status) = self
+            .link_spawned_branch(sessions_base, branch, child_session_id)
+            .await
+        {
+            log::error!(
+                target: "tddy_daemon::connection_service",
+                "session {child_session_id}: could not record its branch '{branch}' on pr-stack orchestrator {:?} (node {:?}, daemon {:?}): {}; the node keeps no branch and its descendants stay unspawnable until it is re-linked",
+                self.session_id().unwrap_or_default(),
+                self.stack_node_id().unwrap_or_default(),
+                self.daemon_instance_id().unwrap_or_default(),
+                status.message()
+            );
+        }
     }
 }
 
@@ -1414,6 +1541,10 @@ impl<'a> SpawnStackParent<'a> {
 impl StackParentHost for ConnectionServiceImpl {
     async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status> {
         self.resolve_chain_base_ref_status(lookup).await
+    }
+
+    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
+        self.record_spawn_on_stack_node(link).await
     }
 }
 
@@ -2161,6 +2292,7 @@ impl ConnectionServiceImpl {
                 lookup.sessions_base,
                 lookup.stack_parent,
                 lookup.repo_root,
+                lookup.stack_node_id,
                 lookup.new_branch_name,
             )
             .map_err(Status::failed_precondition),
@@ -2173,6 +2305,10 @@ impl ConnectionServiceImpl {
                         stack_parent: lookup.stack_parent.unwrap_or_default().trim().to_string(),
                         project_id: lookup.project_id.trim().to_string(),
                         new_branch_name: lookup.new_branch_name.trim().to_string(),
+                        // Travels with the question: the owner runs the same node-keyed lookup this
+                        // daemon would, so a renamed branch does not lose the node one host over
+                        // either (D34).
+                        stack_node_id: lookup.stack_node_id.trim().to_string(),
                     }),
                 )
                 .await?
@@ -2197,11 +2333,11 @@ impl ConnectionServiceImpl {
     /// already owns repoints the fallback to it (last writer wins): the branch is what the stack is
     /// built on, and sessions on it come and go (restart, re-attach) without changing that.
     ///
-    /// TODO(cross-host-pr-stack): writes to *this* daemon's sessions tree only. A child spawned
-    /// under an orchestrator on another host now resolves its base there
-    /// ([`Self::resolve_chain_base_ref_status`]) but records nothing back on that host's node, so
-    /// the planned node keeps no branch and its own descendants stay unspawnable. Closing it means
-    /// an RPC to the owning daemon, the write half of `ResolveStackBase`.
+    /// Writes **this** daemon's sessions tree, and is therefore only correct where the orchestrator
+    /// is this daemon's own session: the branch-derived lookup it performs needs the plan on disk.
+    /// That is the orchestrator agent's own `spawn-child`, which always runs on the orchestrator's
+    /// host and names no node. A spawn that *does* name one is routed to the owner instead
+    /// ([`Self::record_spawn_on_stack_node`], D34/D35).
     fn link_stack_node_to_spawned_branch(
         sessions_base: &std::path::Path,
         stack_parent: Option<&str>,
@@ -2212,7 +2348,7 @@ impl ConnectionServiceImpl {
             return Ok(());
         };
         let Some((parent_dir, _stack, node_id)) =
-            tddy_core::pr_stack_node_for_spawn(sessions_base, sp, new_branch_name)
+            tddy_core::pr_stack_node_for_spawn(sessions_base, sp, "", new_branch_name)
         else {
             return Ok(());
         };
@@ -2235,6 +2371,46 @@ impl ConnectionServiceImpl {
             sp,
             child_session_id
         );
+        Ok(())
+    }
+
+    /// Record a spawn on the planned node it materializes, on the daemon that owns the
+    /// orchestrator.
+    ///
+    /// Two paths, and which one applies is decided by whether the caller **named a node**:
+    ///
+    /// - A named node travels as a `LinkStackNode` call, taken through this daemon's own handler so
+    ///   a forwarded link follows precisely the path a client's would — peer routing and refusals
+    ///   included. This is the only path that works when the orchestrator lives one host over,
+    ///   where its plan is not on this disk to be read or written at all (D35).
+    /// - No node named keeps the branch-derived local write. That is the orchestrator agent's own
+    ///   `spawn-child`, which runs in the orchestrator's own process on the orchestrator's host.
+    ///
+    /// The node is never derived from the branch on the routed path (D34): `new_branch_name` is the
+    /// operator's to edit in the create dialog before confirming, so a rename would silently link
+    /// nothing — or link the wrong node.
+    async fn record_spawn_on_stack_node(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
+        let node_id = link.node_id.trim();
+        if node_id.is_empty() {
+            return Self::link_stack_node_to_spawned_branch(
+                link.sessions_base,
+                Some(link.orchestrator_session_id),
+                link.branch,
+                link.child_session_id,
+            );
+        }
+        ConnectionServiceTrait::link_stack_node(
+            self,
+            Request::new(LinkStackNodeRequest {
+                session_token: link.session_token.to_string(),
+                daemon_instance_id: link.orchestrator_daemon_instance_id.trim().to_string(),
+                orchestrator_session_id: link.orchestrator_session_id.trim().to_string(),
+                node_id: node_id.to_string(),
+                child_session_id: link.child_session_id.trim().to_string(),
+                branch: link.branch.trim().to_string(),
+            }),
+        )
+        .await?;
         Ok(())
     }
 
@@ -2397,6 +2573,9 @@ impl ConnectionServiceImpl {
         // The daemon whose sessions tree holds `stack_parent` (empty = this one), and the caller's
         // token, which is what that daemon verifies the forwarded question with.
         stack_parent_daemon_instance_id: &str,
+        // The planned node of that parent's stack this child materializes, named by the surface
+        // that started it. Empty = derive the node from the branch, locally (D34).
+        stack_node_id: &str,
         session_token: &str,
         // When `Some`, the session is launched workflow-aware: the recipe's orchestration prompt is
         // injected and its `transition` tool advances a per-session `WorkflowController`.
@@ -2462,6 +2641,7 @@ impl ConnectionServiceImpl {
                 Some(session_id) => SpawnStackParent::OwnedBy {
                     session_id,
                     daemon_instance_id: stack_parent_daemon_instance_id,
+                    stack_node_id,
                     session_token,
                     host: self,
                 },
@@ -2693,6 +2873,109 @@ pub fn effective_spawn_branch<'a>(
             tddy_core::worktree::local_branch_name_for_remote(selected_branch_to_work_on, remote)
         }
         _ => new_branch_name.trim(),
+    }
+}
+
+/// A claude-cli session as it stands the moment its LiveKit participant is created: everything the
+/// daemon knows about it, and nothing it would have to ask anyone for.
+///
+/// One value rather than six arguments because the association half of it is meaningless piecewise
+/// — a `stack_node_id` without the orchestrator that holds it names nothing — and because the whole
+/// point of naming this input is that what the participant advertises can be asserted.
+pub struct StartingClaudeCliSession<'a> {
+    /// The session's own id. The web recovers it from the participant identity too, but a block
+    /// that does not name itself cannot be checked against that.
+    pub session_id: &'a str,
+    /// The model the agent runs.
+    pub model: &'a str,
+    /// The managed workflow recipe, empty for an unmanaged session.
+    pub recipe: &'a str,
+    /// The checkout the session works in.
+    pub worktree_path: &'a Path,
+    /// The branch the session created, as its own changeset records it — see
+    /// [`spawned_branch_of_session`].
+    pub branch: &'a str,
+    /// The pr-stack orchestrator this session was spawned under, if any.
+    pub stack_parent: &'a SpawnStackParent<'a>,
+}
+
+/// The `session` block a claude-cli session's LiveKit participant publishes about itself.
+///
+/// A claude-cli session published **no** participant metadata at all, and planned-PR children are
+/// claude-cli sessions: a child started on another host therefore arrived in the drawer as a
+/// synthesized row carrying no `branch` and no `orchestrator_session_id` — the two keys every
+/// PR-stack join uses. Presence is the only cross-host signal the web has, because `ListSessions`
+/// does not fan out (D37).
+///
+/// Static fields only. The live workflow fields (`goal`, `state`, `activity_status`,
+/// `elapsed_display`, `pending_elicitation`) stay empty for a claude-cli session, exactly as they
+/// were when nothing was published: filling them needs a workflow tap the way `tddy-coder` has one,
+/// which is logged in `docs/dev/TODO.md` rather than closed here.
+///
+/// A session that belongs to no stack publishes the association keys **empty, never absent**: the
+/// merge into participant metadata is shallow, so an omitted key would erase a sibling publisher's
+/// value rather than leave it alone — and empty is a fact ("this session is nobody's stack child")
+/// that a reader can act on, where a missing key is indistinguishable from an older publisher.
+#[must_use]
+pub fn claude_cli_participant_metadata(
+    session: &StartingClaudeCliSession<'_>,
+) -> tddy_core::session_participant_metadata::SessionParticipantMetadata {
+    tddy_core::session_participant_metadata::SessionParticipantMetadata {
+        agent: "claude".to_string(),
+        model: session.model.to_string(),
+        recipe: session.recipe.to_string(),
+        repo_path: session.worktree_path.to_string_lossy().to_string(),
+        session_id: session.session_id.to_string(),
+        orchestrator_session_id: session
+            .stack_parent
+            .session_id()
+            .unwrap_or_default()
+            .to_string(),
+        stack_node_id: session
+            .stack_parent
+            .stack_node_id()
+            .unwrap_or_default()
+            .to_string(),
+        branch: session.branch.to_string(),
+        ..Default::default()
+    }
+}
+
+/// The branch a spawn's child session **actually** ended up on: the one its worktree setup recorded
+/// in `changeset.yaml`, falling back to `requested_branch` only when the session recorded none.
+///
+/// [`effective_spawn_branch`] answers which branch the *request* asked for, and that is not always
+/// what exists. `create_worktree_with_retry` appends `-1`, `-2`, … when the name is already taken —
+/// the **default** conflict behaviour (`on_branch_conflict = ""`), and one that also fires for a
+/// collision with a branch no session owns, which the `reject` guard does not cover — and writes the
+/// suffixed name into the session's changeset.
+///
+/// Recording the requested name on a planned node would advertise a branch nobody has: the node's
+/// descendants base onto `<remote>/<requested>`, which does not exist, and the cross-host row
+/// synthesized from the child's participant metadata names a branch no host can resolve.
+/// [`push_new_branch_to_origin_if_requested`] already reads the branch back for exactly this reason.
+///
+/// The fallback is not a guess: a spawn against a client-supplied `repo_path` creates no worktree
+/// and writes no branch, and there the requested name is the only answer there is. An unreadable
+/// changeset is logged rather than swallowed — the branch it holds is what the whole link is keyed
+/// on, so losing it silently is the failure this function exists to prevent.
+#[must_use]
+pub fn spawned_branch_of_session(session_dir: &Path, requested_branch: &str) -> String {
+    match tddy_core::read_changeset(session_dir) {
+        Ok(cs) => cs
+            .branch
+            .map(|b| b.trim().to_string())
+            .filter(|b| !b.is_empty())
+            .unwrap_or_else(|| requested_branch.trim().to_string()),
+        Err(e) => {
+            log::warn!(
+                target: "tddy_daemon::connection_service",
+                "could not read the changeset at {} to learn the branch the spawn created ({e}); keying the pr-stack link on the requested name '{}' instead, which is wrong if the branch was suffixed on a name collision",
+                session_dir.display(),
+                requested_branch.trim()
+            );
+            requested_branch.trim().to_string()
+        }
     }
 }
 
@@ -3308,22 +3591,32 @@ async fn spawn_claude_cli_session_inner(
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack
     // orchestrator's planned node can record it — which is what lets this node's descendants be
-    // spawned at all, since they base onto `<remote>/<branch>`. Keyed on the effective branch, so a
-    // session resuming the branch a node already owns re-links to that node.
+    // spawned at all, since they base onto `<remote>/<branch>`. A spawn naming a node links that
+    // node on whichever daemon owns the orchestrator; one naming none keeps the branch-derived
+    // local write, so a session resuming the branch a node already owns re-links to that node.
     let remote =
         project_storage::effective_remote_name_for_project(&projects_dir, project_id, &repo_root)
             .map_err(|e| Status::internal(e.to_string()))?;
-    ConnectionServiceImpl::link_stack_node_to_spawned_branch(
-        &sessions_base,
-        stack_parent.session_id(),
+    // Resolved once: the same branch is what the node records and what this session publishes about
+    // itself on its participant. Read back from the changeset the worktree setup just wrote rather
+    // than taken from the request — the branch may carry a collision suffix, and a node recording a
+    // name nobody created leaves every descendant basing onto a ref that does not exist.
+    let spawned_branch = spawned_branch_of_session(
+        &session_dir,
         effective_spawn_branch(
             branch_worktree_intent,
             new_branch_name,
             selected_branch_to_work_on,
             &remote,
         ),
-        session_id,
-    )?;
+    );
+    // A link that fails does **not** fail the spawn (D36): it lands after the worktree, the branch
+    // and the session already exist, so failing here would leave an orphan session on this host and
+    // still no branch on the orchestrator's — strictly worse than a node the operator can re-link by
+    // restarting it. The live association still travels in participant metadata (D37).
+    stack_parent
+        .link_spawned_branch_without_failing_the_spawn(&sessions_base, &spawned_branch, session_id)
+        .await;
 
     let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
         config
@@ -3508,6 +3801,20 @@ async fn spawn_claude_cli_session_inner(
             &lk.api_key,
             &lk.api_secret,
             &server_identity,
+            // What this session tells the fleet about itself. The stack association is the load-
+            // bearing part: a PR-Stack view on another host has no other way to learn that this
+            // session is the planned node's child (D37).
+            Some(claude_cli_participant_metadata(&StartingClaudeCliSession {
+                session_id,
+                model,
+                recipe: managed_recipe
+                    .as_ref()
+                    .map(|r| r.name())
+                    .unwrap_or_default(),
+                worktree_path: &worktree_path,
+                branch: &spawned_branch,
+                stack_parent: &stack_parent,
+            })),
         )
         .await
         {
@@ -5640,6 +5947,9 @@ impl ConnectionServiceImpl {
         stack_parent: Option<&str>,
         // The daemon whose sessions tree holds `stack_parent` (empty = this one).
         stack_parent_daemon_instance_id: &str,
+        // The planned node of that parent's stack this child materializes (empty = derive it from
+        // the branch, locally — see `record_spawn_on_stack_node`).
+        stack_node_id: &str,
         // Specialized subagents (see docs/ft/coder/specialized-subagents.md). This sandboxed path
         // already never mounts the repo (`mounts: vec![]` below, unconditionally) —
         // `managed_codebase` is accepted for request-shape/UI-intent clarity, not to toggle mount
@@ -5765,6 +6075,7 @@ impl ConnectionServiceImpl {
                         sessions_base: &sessions_base,
                         repo_root: &repo_root,
                         new_branch_name,
+                        stack_node_id,
                     })
                     .await?;
                 let worktree_base_ref = tddy_core::select_worktree_base_ref(
@@ -5805,17 +6116,39 @@ impl ConnectionServiceImpl {
                     &repo_root,
                 )
                 .map_err(|e| Status::internal(e.to_string()))?;
-                Self::link_stack_node_to_spawned_branch(
-                    &sessions_base,
-                    stack_parent,
+                let spawned_branch = spawned_branch_of_session(
+                    &session_dir,
                     effective_spawn_branch(
                         branch_worktree_intent,
                         new_branch_name,
                         selected_branch_to_work_on,
                         &remote,
                     ),
-                    session_id,
-                )?;
+                );
+                // A failed link never fails the spawn (D36) — see the same call in
+                // `spawn_claude_cli_session_inner`.
+                if let Some(orchestrator) = stack_parent {
+                    if let Err(status) = self
+                        .record_spawn_on_stack_node(&StackNodeLink {
+                            session_token,
+                            orchestrator_session_id: orchestrator,
+                            orchestrator_daemon_instance_id: stack_parent_daemon_instance_id,
+                            node_id: stack_node_id,
+                            child_session_id: session_id,
+                            // The branch as the session recorded it, suffix and all — see
+                            // `spawned_branch_of_session`.
+                            branch: &spawned_branch,
+                            sessions_base: &sessions_base,
+                        })
+                        .await
+                    {
+                        log::error!(
+                            target: "tddy_daemon::connection_service",
+                            "session {session_id}: could not record its branch on pr-stack orchestrator {orchestrator} (node {stack_node_id:?}, daemon {stack_parent_daemon_instance_id:?}): {}; the node keeps no branch and its descendants stay unspawnable until it is re-linked",
+                            status.message()
+                        );
+                    }
+                }
                 wt
             }
             WorktreeSource::RepoPath(path) => {
@@ -6223,6 +6556,9 @@ impl ConnectionServiceImpl {
         stack_parent: Option<&str>,
         // The daemon whose sessions tree holds `stack_parent` (empty = this one).
         stack_parent_daemon_instance_id: &str,
+        // The planned node of that orchestrator's stack this spawn materializes, as the surface
+        // that started it named it. Preferred over the branch when the base is resolved (D34).
+        stack_node_id: &str,
         initial_prompt: &str,
         _managed_codebase: bool,
         specialized_agents: &[String],
@@ -6316,6 +6652,7 @@ impl ConnectionServiceImpl {
                 sessions_base: &sessions_base,
                 repo_root: &repo_root,
                 new_branch_name,
+                stack_node_id,
             })
             .await?;
         let worktree_base_ref =
@@ -7681,6 +8018,9 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             SpawnStackParent::OwnedBy {
                 session_id: &self.orchestrator_session_id,
                 daemon_instance_id: &local_instance_id_for_config(&self.config),
+                // The orchestrator agent spawns by branch, in its own process on its own host, so
+                // the node is found from the branch here exactly as it always was (D34).
+                stack_node_id: "",
                 session_token: "",
                 host: self.stack_parent_host.as_ref(),
             },
@@ -8251,6 +8591,9 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             SpawnStackParent::OwnedBy {
                 session_id: &self.orchestrator_session_id,
                 daemon_instance_id: &local_instance_id_for_config(&self.config),
+                // The orchestrator agent spawns by branch, in its own process on its own host, so
+                // the node is found from the branch here exactly as it always was (D34).
+                stack_node_id: "",
                 session_token: "",
                 host: self.stack_parent_host.as_ref(),
             },
@@ -10218,6 +10561,7 @@ impl ConnectionServiceImpl {
                         req.dangerously_skip_permissions,
                         stack_parent_for_claude_cli.as_deref(),
                         req.stack_parent_daemon_instance_id.trim(),
+                        req.stack_node_id.trim(),
                         req.managed_codebase,
                         &req.specialized_agents,
                         managed_recipe,
@@ -10242,6 +10586,7 @@ impl ConnectionServiceImpl {
                     req.dangerously_skip_permissions,
                     stack_parent_for_claude_cli.as_deref(),
                     req.stack_parent_daemon_instance_id.trim(),
+                    req.stack_node_id.trim(),
                     &req.session_token,
                     managed_recipe,
                     req.semantic_index,
@@ -10300,6 +10645,7 @@ impl ConnectionServiceImpl {
                         req.selected_branch_to_work_on.trim(),
                         Some(req.stack_parent.trim()).filter(|s| !s.is_empty()),
                         req.stack_parent_daemon_instance_id.trim(),
+                        req.stack_node_id.trim(),
                         &initial_prompt,
                         req.managed_codebase,
                         &req.specialized_agents,
@@ -10333,6 +10679,7 @@ impl ConnectionServiceImpl {
                     Some(session_id) => SpawnStackParent::OwnedBy {
                         session_id,
                         daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
+                        stack_node_id: req.stack_node_id.trim(),
                         session_token: &req.session_token,
                         host: self,
                     },
@@ -10411,6 +10758,16 @@ impl ConnectionServiceImpl {
         };
         let stack_parent_for_spawn: Option<String> = {
             let t = req.stack_parent.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        };
+        // The planned node the surface that rendered Start-session named. Carried to the child as
+        // `--stack-node-id`, which is what puts the association in its participant metadata (D37).
+        let stack_node_id_for_spawn: Option<String> = {
+            let t = req.stack_node_id.trim();
             if t.is_empty() {
                 None
             } else {
@@ -10500,6 +10857,7 @@ impl ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: recipe_for_spawn.as_deref(),
                         stack_parent: stack_parent_for_spawn.as_deref(),
+                        stack_node_id: stack_node_id_for_spawn.as_deref(),
                         stack_seed_base_session: stack_seed_base_session_for_spawn.as_deref(),
                         model: model_for_spawn.as_deref(),
                         host_session_socket: host_session_socket.as_deref(),
@@ -10526,6 +10884,7 @@ impl ConnectionServiceImpl {
                     let agent_def = agent_def_for_spawn.as_deref();
                     let recipe = recipe_for_spawn.as_deref();
                     let stack_parent = stack_parent_for_spawn.as_deref();
+                    let stack_node_id = stack_node_id_for_spawn.as_deref();
                     let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
                     let model = model_for_spawn.as_deref();
                     let new_session_id = pre_session_id.as_deref();
@@ -10548,6 +10907,7 @@ impl ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
+                                stack_node_id,
                                 stack_seed_base_session,
                                 model,
                                 host_session_socket: host_socket,
@@ -10575,6 +10935,7 @@ impl ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe,
                                 stack_parent,
+                                stack_node_id,
                                 stack_seed_base_session,
                                 model,
                                 host_session_socket: host_socket,
@@ -12385,6 +12746,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         mouse: spawn_mouse,
                         recipe: resume_recipe.as_deref(),
                         stack_parent: None,
+                        stack_node_id: None,
                         // Seeding a stack is a creation-time act; a resumed orchestrator already has
                         // whatever stack it was created with.
                         stack_seed_base_session: None,
@@ -12428,6 +12790,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
+                                stack_node_id: None,
                                 // Seeding a stack is a creation-time act; a resumed orchestrator
                                 // already has whatever stack it was created with.
                                 stack_seed_base_session: None,
@@ -12458,6 +12821,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                                 mouse: spawn_mouse,
                                 recipe: resume_recipe.as_deref(),
                                 stack_parent: None,
+                                stack_node_id: None,
                                 // Seeding a stack is a creation-time act; a resumed orchestrator
                                 // already has whatever stack it was created with.
                                 stack_seed_base_session: None,
@@ -15691,6 +16055,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             &sessions_base,
             Some(stack_parent),
             &repo_root,
+            req.stack_node_id.trim(),
             req.new_branch_name.trim(),
         )
         .map_err(Status::failed_precondition)?;
@@ -15702,6 +16067,112 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         );
         Ok(Response::new(ResolveStackBaseResponse {
             base_ref: base_ref.unwrap_or_default(),
+        }))
+    }
+
+    /// Record a child session and the branch it created on a planned node of a pr-stack
+    /// orchestrator, answered by the daemon that owns that orchestrator.
+    ///
+    /// The write half of [`Self::resolve_stack_base`], and routed for the same reason: a planned
+    /// node lives in its orchestrator's own `changeset.yaml`, so only the daemon holding that
+    /// session can write it. A child spawned on another host writing its *own* sessions tree finds
+    /// no such session and writes nothing at all — the node keeps neither a branch nor a child, and
+    /// every descendant then stays unspawnable because
+    /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] gates on a parent owning a branch (D35).
+    ///
+    /// Routed **before** the caller is authenticated, like every other peer-routed RPC: a token is
+    /// verified by the daemon that serves the call, and a peer's user mapping is not this one's to
+    /// judge.
+    ///
+    /// Nothing here is guessed. An unnamed node is refused rather than derived from the branch
+    /// (D34), and a node the plan does not hold is `not_found` with nothing written — silently
+    /// succeeding against an unchanged plan is precisely the bug this RPC exists to remove.
+    async fn link_stack_node(
+        &self,
+        request: Request<LinkStackNodeRequest>,
+    ) -> Result<Response<LinkStackNodeResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        if let Some(answered) = self
+            .rpc_served_by_peer("LinkStackNode", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let node_id = req.node_id.trim();
+        if node_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "node_id is required: a planned node is never derived from the branch a spawn creates, which the operator can rename before confirming",
+            ));
+        }
+        let child_session_id = req.child_session_id.trim();
+        if child_session_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "child_session_id is required: a link names the session that materialized the node",
+            ));
+        }
+        // Refused for the same reason `node_id` is. A blank branch leaves `node.branch` untouched —
+        // `link_stack_node_to_child_session` takes `None` and writes nothing there — while the RPC
+        // answers `Ok`, so the node still refuses every descendant and nothing said so. That is the
+        // "reports success, changes nothing" shape D35 exists to remove, and it is reachable
+        // whenever `effective_spawn_branch` yields an empty name.
+        let branch = req.branch.trim();
+        if branch.is_empty() {
+            return Err(Status::invalid_argument(
+                "branch is required: the branch is what makes the node's descendants spawnable, so a link that records none changes nothing",
+            ));
+        }
+
+        let os_user = self.resolve_os_user(&req.session_token)?;
+        let sessions_base =
+            crate::user_sessions_path::sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        validate_session_id_segment(&req.orchestrator_session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let session_dir = unified_session_dir_path(&sessions_base, &req.orchestrator_session_id);
+        require_pr_stack_orchestrator(&session_dir)?;
+
+        // Checked before the write, because `link_stack_node_to_child_session` leaves an unknown
+        // node alone and reports success — which reads to the caller exactly like a link that
+        // landed, and is the failure mode this whole path exists to make visible.
+        let changeset =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        if changeset
+            .stack
+            .as_ref()
+            .is_none_or(|stack| stack.node(node_id).is_none())
+        {
+            return Err(Status::not_found(format!(
+                "planned node '{node_id}' is not in the stack of orchestrator {}",
+                req.orchestrator_session_id.trim()
+            )));
+        }
+
+        tddy_core::changeset::link_stack_node_to_child_session(
+            &session_dir,
+            node_id,
+            child_session_id,
+            Some(branch.to_string()),
+        )
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to link stack node '{node_id}' to child session {child_session_id}: {e}"
+            ))
+        })?;
+        log::info!(
+            "LinkStackNode: orchestrator {} node '{node_id}' now records child session {child_session_id} on branch '{branch}'",
+            req.orchestrator_session_id.trim()
+        );
+
+        // Re-read and serialize through the same path `AddPlannedPr` / `RepointPlannedPr` /
+        // `ReorderPlannedPr` answer with, so a caller that renders the plan reuses `parseStackPlan`
+        // and does not re-read what this call already knows.
+        let linked =
+            tddy_core::read_changeset(&session_dir).map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(LinkStackNodeResponse {
+            stack_plan_json: session_list_enrichment::stack_plan_json_for_changeset(&linked),
         }))
     }
 
@@ -20041,7 +20512,7 @@ mod stack_child_link_tests {
 
         // When — `top` is spawned and the daemon resolves the node it materializes
         let (_dir, stack, node_id) =
-            tddy_core::pr_stack_node_for_spawn(tmp.path(), "orchestrator-1", "feature/top")
+            tddy_core::pr_stack_node_for_spawn(tmp.path(), "orchestrator-1", "", "feature/top")
                 .expect("the planned node for the spawned branch must resolve");
 
         // Then — the session fallback supplies the parent's branch, so `top` is not blocked

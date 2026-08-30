@@ -61,6 +61,10 @@ pub struct SpawnRequest {
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
     #[serde(default)]
     pub stack_parent: Option<String>,
+    /// The planned node of that orchestrator's stack the session materializes. Passed as
+    /// `--stack-node-id <id>`.
+    #[serde(default)]
+    pub stack_node_id: Option<String>,
     /// Existing session whose branch seeds a new `pr-stack` orchestrator's stack as its single root
     /// node. Passed as `--stack-seed-base-session <id>`.
     #[serde(default)]
@@ -343,6 +347,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         mouse: req.mouse,
                         recipe: req.recipe.as_deref(),
                         stack_parent: req.stack_parent.as_deref(),
+                        stack_node_id: req.stack_node_id.as_deref(),
                         stack_seed_base_session: req.stack_seed_base_session.as_deref(),
                         model: req.model.as_deref(),
                         // The reverse `spawn_conversation` channel is a per-session unix socket whose
@@ -451,6 +456,7 @@ pub fn build_spawn_request(
         daemon_instance_id: livekit.daemon_instance_id.clone(),
         recipe: opts.recipe.map(String::from),
         stack_parent: opts.stack_parent.map(String::from),
+        stack_node_id: opts.stack_node_id.map(String::from),
         stack_seed_base_session: opts.stack_seed_base_session.map(String::from),
         model: opts.model.map(String::from),
         host_session_socket: opts.host_session_socket.map(String::from),

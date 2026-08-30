@@ -39,6 +39,10 @@ function aSessionMetadata(overrides: Partial<SessionMetadata> = {}): SessionMeta
     repoPath: "/home/alice/acme-web",
     elapsedDisplay: "3m 20s",
     pendingElicitation: false,
+    sessionId: SID_B,
+    orchestratorSessionId: "",
+    stackNodeId: "",
+    branch: "",
     ...overrides,
   };
 }
@@ -177,6 +181,48 @@ describe("mergeActiveAndFetchedSessions", () => {
 
     const synthesized = merged.find((s) => s.sessionId === SID_B);
     expect(synthesized?.activityStatus).toBe("Running");
+  });
+
+  it("hydrates a synthesized cross-host row with the branch its participant reports", () => {
+    // Given — the branch is the PR-Stack view's durable join key, and a session on another host
+    // reaches the drawer only as presence
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ branch: "feature/attach-docs/attach-store" }),
+    });
+
+    // When
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    // Then
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.branch).toBe("feature/attach-docs/attach-store");
+  });
+
+  it("hydrates a synthesized cross-host row with the orchestrator that spawned it", () => {
+    // Given — without it the drawer files a cross-host stack child as an unrelated flat row
+    const participant = aLiveParticipant({
+      sessionMetadata: aSessionMetadata({ orchestratorSessionId: "pr-stack-session-1" }),
+    });
+
+    // When
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    // Then
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.orchestratorSessionId).toBe("pr-stack-session-1");
+  });
+
+  it("leaves the branch and orchestrator empty for a participant that reports no stack association", () => {
+    // Given — an ordinary session that is nobody's stack child
+    const participant = aLiveParticipant({ sessionMetadata: aSessionMetadata() });
+
+    // When
+    const merged = mergeActiveAndFetchedSessions([], [participant], SELECTED);
+
+    // Then
+    const synthesized = merged.find((s) => s.sessionId === SID_B);
+    expect(synthesized?.branch).toBe("");
+    expect(synthesized?.orchestratorSessionId).toBe("");
   });
 
   it("keeps the short-session-id fallback when a live participant carries no metadata", () => {

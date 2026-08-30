@@ -6,12 +6,21 @@
  * branch: <deleted branch>" with no Start-session button and no Repoint control (which was gated on the
  * recorded `merged` phase), and the node was unrecoverable.
  *
- * Two things change here. A blocked row keeps its **full information** and a **disabled** Start-session
- * button beside a warning naming each blocking issue — never a bare indicator in place of everything
- * (D16). And Repoint is offered for **any** unresolvable base, labelled with the branch the node will
- * land on, which is also the `target_base_branch` sent with the click (D17, D18, D20).
+ * Two things change here. A blocked row keeps its **full information** and its Start-session button
+ * beside a warning naming each blocking issue — never a bare indicator in place of everything (D16).
+ * And Repoint is offered for **any** unresolvable base, labelled with the branch the node will land
+ * on, which is also the `target_base_branch` sent with the click (D17, D18, D20).
  *
- * PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D16–D20).
+ * That button is no longer *disabled* while blocked (D42, amending D16): the blocker below is read
+ * off this daemon's own remote-tracking refs, so a branch pushed from another host reads absent until
+ * this clone fetches, and a gate that cannot see half the fleet must advise rather than refuse. It
+ * therefore takes the warning colour and stays pressable, and the daemon's own spawn gate is what
+ * fails a genuinely impossible spawn, with the real reason. None of that changes what Repoint is for:
+ * it is still how the operator changes the base the row is stuck on, and a recovered row is the one
+ * that carries no warning and no marked button at all.
+ *
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D16–D20),
+ * § Cross-host planned PRs (D42).
  * Changeset: docs/dev/changesets.md (2026-07-26, pr-stack-repoint-dead-end).
  */
 
@@ -218,8 +227,9 @@ it("makes the node startable once the repoint has dropped its dead parent", () =
   // When
   prStackScreenPage.clickRepoint("n2");
 
-  // Then — the returned plan re-renders the row unblocked, with nothing left to warn about
-  prStackScreenPage.startSessionBtn("n2").should("be.enabled");
+  // Then — the returned plan re-renders the row unblocked, with nothing left to warn about and
+  // nothing left to mark the CTA for
+  prStackScreenPage.startSessionBtn("n2").should("have.attr", "data-variant", "default");
   prStackScreenPage.startWarning("n2").should("not.exist");
 });
 
@@ -287,7 +297,7 @@ it("offers no Repoint control on a node whose base branch is on origin", () => {
 
   // Then — the control must not become ambient noise on a healthy stack
   prStackScreenPage.repointBtn("n2").should("not.exist");
-  prStackScreenPage.startSessionBtn("n2").should("be.enabled");
+  prStackScreenPage.startSessionBtn("n2").should("have.attr", "data-variant", "default");
 });
 
 // ---------------------------------------------------------------------------
@@ -310,22 +320,24 @@ it("keeps its title, description, planned branch and base branch on a row that c
   prStackScreenPage.baseBranch("n2").should("have.text", `base: ${DELETED_BASE_BRANCH}`);
 });
 
-it("disables Start session and warns that the base branch is not on origin", () => {
+it("marks Start session and warns that the base branch is not on origin", () => {
   // Given / When
   openPrStackScreen({ nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE });
 
-  // Then — the CTA is disabled with the reason, not replaced by it
-  prStackScreenPage.startSessionBtn("n2").should("be.disabled");
+  // Then — the CTA carries the reason rather than being replaced by it, and rather than being taken
+  // away: this host's `origin` refs cannot answer for a branch pushed from another one, so the row
+  // marks a control that still works (D42)
+  prStackScreenPage.startSessionBtn("n2").should("have.attr", "data-variant", "warning");
   prStackScreenPage
     .startWarning("n2")
     .should("have.text", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
 });
 
-it("carries every blocker message as the disabled Start-session button's tooltip", () => {
+it("carries every blocker message as the marked Start-session button's tooltip", () => {
   // Given / When
   openPrStackScreen({ nodes: A_STRANDED_DEPENDENT, resolutionByBranch: A_DELETED_BASE });
 
-  // Then — hovering the control that cannot be pressed answers why, without hunting for the warning
+  // Then — hovering the marked control answers why it is marked, without hunting for the warning
   prStackScreenPage
     .startSessionBtn("n2")
     .should("have.attr", "title", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
@@ -432,7 +444,7 @@ it("surfaces the daemon's reason when a repoint is refused", () => {
   prStackScreenPage.repointError("n2").should("contain.text", A_REJECTED_TARGET_REASON);
 });
 
-it("leaves the row blocked when the repoint was refused", () => {
+it("leaves the row warning about its base when the repoint was refused", () => {
   // Given
   openPrStackScreenWithRefusedRepoint(
     "could not resolve default branch: no origin/master, origin/main, or origin/HEAD",
@@ -442,8 +454,9 @@ it("leaves the row blocked when the repoint was refused", () => {
   // When
   prStackScreenPage.clickRepoint("n2");
 
-  // Then — nothing was persisted, so the row must not read as recovered
-  prStackScreenPage.startSessionBtn("n2").should("be.disabled");
+  // Then — nothing was persisted, so the row must not read as recovered: it still names the base it
+  // is waiting on, and its CTA is still marked rather than plain
+  prStackScreenPage.startSessionBtn("n2").should("have.attr", "data-variant", "warning");
   prStackScreenPage
     .startWarning("n2")
     .should("have.text", `Base branch ${DELETED_BASE_BRANCH} is not on origin`);
