@@ -1,7 +1,7 @@
 //! VM-backed acceptance: what a Linux workspace tool jail needs from a real host.
 //!
 //! PRD: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
-//! Changeset: `docs/dev/1-WIP/2026-08-30-workspace-tool-sandbox.md`.
+//! Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
 //!
 //! The macOS half of the confinement claim runs against a real Seatbelt jail in
 //! `tddy-daemon/tests/workspace_tool_sandbox_seatbelt_acceptance.rs`, in-process. Linux has no

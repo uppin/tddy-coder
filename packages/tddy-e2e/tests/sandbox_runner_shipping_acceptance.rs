@@ -1,6 +1,6 @@
 //! Acceptance: the three scripts that put binaries on a host must ship `tddy-sandbox-runner`.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-08-30-workspace-tool-sandbox.md`.
+//! Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
 //!
 //! Every jail this project spawns runs `tddy-sandbox-runner` inside itself — the sandboxed
 //! `claude-cli` and `cursor-cli` sessions today, and the workspace tool jail this changeset adds.
