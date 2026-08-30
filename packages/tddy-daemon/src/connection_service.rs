@@ -12630,6 +12630,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             sandbox.stop();
         }
         let _ = self.sandbox_manager.remove(session_id).await;
+        // The workspace jail goes the same way, and *before* the directory does: the jail is a live
+        // process holding the worktree open, so a jail left registered would go on running against
+        // a checkout that no longer exists — for the rest of this daemon's life, since the registry
+        // is the only thing holding it. Dropping the last handle stops it.
+        if let Some(jail) = self.workspace_sandboxes.remove(session_id).await {
+            jail.stop();
+        }
         session_deletion::close_session_room(&self.session_rooms, session_id);
         session_deletion::delete_session_directory(
             &sessions_base,

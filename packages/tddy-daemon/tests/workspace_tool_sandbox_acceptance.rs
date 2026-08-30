@@ -27,8 +27,8 @@ use tddy_daemon::workspace_tool_sandbox::{
 use tddy_rpc::{Code, Request, Status};
 use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
+    ExecuteToolResponse, StartSessionRequest,
 };
 
 const PROJECT_ID: &str = "019d105b-ac0f-78d3-9a89-409731145a40";
@@ -61,6 +61,10 @@ struct RecordingSandbox {
 impl RecordingSandbox {
     fn calls(&self) -> Vec<JailedCall> {
         self.calls.lock().unwrap().clone()
+    }
+
+    fn stops(&self) -> usize {
+        self.stops.load(Ordering::SeqCst)
     }
 }
 
@@ -720,4 +724,70 @@ async fn an_unsandboxed_workspace_session_still_serves_its_tools_after_a_daemon_
         .worktree_of(&session_id)
         .join("after-restart.txt")
         .exists());
+}
+
+/// The jail is a live process holding the worktree open, and the registry is the only thing keeping
+/// it alive — so a jail still registered after its session is gone runs on against a deleted
+/// checkout for the rest of the daemon's life. Deleting the session has to take it too.
+#[tokio::test]
+async fn deleting_a_sandboxed_workspace_session_stops_its_jail() {
+    // Given
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let host = CodebaseHost::with_provisioner(Arc::clone(&provisioner) as Arc<_>);
+    let session_id = host
+        .start_workspace(true)
+        .await
+        .expect("start must succeed");
+    assert_eq!(
+        provisioner.sandbox.stops(),
+        0,
+        "a jail serving a live session must not have been stopped"
+    );
+
+    // When
+    host.service
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("DeleteSession must succeed");
+
+    // Then
+    assert_eq!(provisioner.sandbox.stops(), 1);
+}
+
+/// And the jail is forgotten, not merely stopped: a tool call arriving after the delete must not
+/// find a registered jail whose process is gone.
+#[tokio::test]
+async fn a_deleted_sandboxed_workspace_session_no_longer_serves_tools_from_its_jail() {
+    // Given
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let host = CodebaseHost::with_provisioner(Arc::clone(&provisioner) as Arc<_>);
+    let session_id = host
+        .start_workspace(true)
+        .await
+        .expect("start must succeed");
+    host.service
+        .delete_session(Request::new(DeleteSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
+        .await
+        .expect("DeleteSession must succeed");
+
+    // When
+    let answered = host
+        .service
+        .execute_tool(Request::new(a_tool_request(
+            &session_id,
+            "Write",
+            r#"{"path":"after-delete.txt","contents":"hello"}"#,
+        )))
+        .await;
+
+    // Then — the session is gone, so its worktree no longer resolves and the call is refused
+    // outright; either way no tool reached the jail that used to serve it.
+    assert!(answered.is_err() || answered.expect("checked").into_inner().is_error);
+    assert_eq!(provisioner.sandbox.calls(), vec![]);
 }
