@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Minimize2 } from "lucide-react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
@@ -18,6 +19,11 @@ import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import { useSessionClientCache } from "./sessionClientCache";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
+import {
+  exitDocumentFullscreen,
+  isTargetInActiveFullscreen,
+  requestFullscreenForConnectedTerminal,
+} from "../../lib/browserFullscreen";
 import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
 
@@ -84,6 +90,11 @@ export interface SessionRuntimeProps {
  * others are `display:none` but keep streaming — so switching tabs (or backgrounding the whole
  * session) never tears a terminal down. The focused runtime additionally carries the
  * `sessions-detail-terminal-container` marker and the `TerminalControlOverlay`.
+ *
+ * The tab strip's trailing ⛶ control puts the active pane into browser full screen (the pane stack
+ * is the Fullscreen API target — see the comment at `paneStackRef`). Full screen is a view mode
+ * only: nothing unmounts, so a terminal keeps its stream and its control lease across the
+ * transition, and the grid re-fits itself through the terminal's own `ResizeObserver`.
  *
  * Feature: `docs/ft/web/session-terminal-tabs.md`, `docs/ft/web/session-drawer.md#fast-session-change`.
  */
@@ -284,6 +295,62 @@ export function SessionRuntime({
     return () => document.removeEventListener("focusin", onFocusIn, true);
   }, [focused, agentPaneActive]);
 
+  // Full screen — the pane stack (not an individual pane) is the Fullscreen API target. Only one
+  // pane is ever visible, so fullscreening the stack shows exactly the active pane, and it keeps the
+  // terminal-control mutex and connection overlays — both siblings of the panes — on screen. Taking
+  // a single pane instead would drop the "Claim terminal" CTA behind the fullscreen layer and leave
+  // a session whose control another screen holds looking interactive while swallowing every key.
+  // The tab strip is deliberately left behind: full screen is the whole viewport for one terminal.
+  const paneStackRef = useRef<HTMLDivElement>(null);
+  // `active` is containment-based (this stack IS or CONTAINS the fullscreen element) so a parent
+  // runtime whose nested child conversation went fullscreen still offers the exit. `owned` is exact,
+  // and gates the floating exit control — otherwise a fullscreen child pane would draw its own exit
+  // button and its parent's on top of each other.
+  const [fullscreenActive, setFullscreenActive] = useState(false);
+  const [fullscreenOwned, setFullscreenOwned] = useState(false);
+
+  useEffect(() => {
+    const sync = () => {
+      const target = paneStackRef.current;
+      setFullscreenActive(isTargetInActiveFullscreen(target));
+      setFullscreenOwned(target !== null && document.fullscreenElement === target);
+    };
+    sync();
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.removeEventListener("webkitfullscreenchange", sync as EventListener);
+    };
+  }, []);
+
+  // A fullscreen transition re-lays-out the terminal and can drop keyboard focus on the way in or
+  // out; the focus-on-select effect above is keyed on selection, so it never fires here. Replay it
+  // so a terminal that fills the screen is immediately typeable.
+  useEffect(() => {
+    if (focused && agentPaneActive) focusAgentTerminalRef.current?.();
+  }, [fullscreenActive, focused, agentPaneActive]);
+
+  // Selecting another session (or another tab, for a child runtime) hides this runtime behind
+  // `display:none`. Browsers generally drop out of fullscreen when an ancestor is hidden, but not
+  // uniformly — and a top-layer element left over a hidden ancestor is a black screen the operator
+  // cannot navigate out of. Exit deliberately instead of relying on that, but only from the runtime
+  // that actually owns fullscreen: `exitDocumentFullscreen` is document-global.
+  useEffect(() => {
+    if (!focused && fullscreenOwned) void exitDocumentFullscreen().catch(() => undefined);
+  }, [focused, fullscreenOwned]);
+
+  const toggleFullscreen = useCallback(() => {
+    const target = paneStackRef.current;
+    if (isTargetInActiveFullscreen(target)) {
+      void exitDocumentFullscreen().catch(() => undefined);
+      return;
+    }
+    // The request rejects when the browser refuses (an iframe without `allowfullscreen`, a gesture
+    // the UA does not count as user-activated). Nothing to recover — the pane stays inline.
+    void requestFullscreenForConnectedTerminal(target).catch(() => undefined);
+  }, []);
+
   // A terminal pane (Agent/bash) is visible only when its tab is active AND nothing else holds the
   // pane — a selected child or agent conversation overlays the terminal stack.
   const paneClass = (terminalId: string) =>
@@ -316,13 +383,22 @@ export function SessionRuntime({
         activeAgentConversationId={activeAgentConversationId}
         onSelectAgentConversation={onSelectAgentConversation}
         onCloseAgentConversation={onCloseAgentConversation}
+        fullscreenActive={fullscreenActive}
+        onToggleFullscreen={toggleFullscreen}
       />
 
       {/* The pane stack. Its `position` is stated inline as well as in the utility class because
           every pane below is positioned against it, and the terminal panes carry their own inline
           stacking (`terminal-live-pane` takes z-index 2) — a containing block that resolved
-          anywhere else would let a pane cover the tab strip that switches it. */}
-      <div className="relative min-h-0 flex-1" style={{ position: "relative" }}>
+          anywhere else would let a pane cover the tab strip that switches it.
+          It is also the Fullscreen API target (see `paneStackRef`), which is why it paints its own
+          background: a transparent fullscreen element shows the UA's black backdrop through it. */}
+      <div
+        ref={paneStackRef}
+        data-testid={`sessions-terminal-pane-stack-${runtime.sessionId}`}
+        className="relative min-h-0 flex-1 bg-background"
+        style={{ position: "relative" }}
+      >
         {/* Agent pane — the reserved "main" terminal. LiveKit sessions render the VirtualTui
             terminal; gRPC sessions render the direct terminal stream (terminalId ""). */}
         <div data-testid={`sessions-terminal-pane-${AGENT_TERMINAL_ID}`} className={paneClass(AGENT_TERMINAL_ID)}>
@@ -469,6 +545,22 @@ export function SessionRuntime({
             panes become interactive. LiveKit-only: the `connected-grpc` path has no such handshake. */}
         {runtime.status === "connected-livekit" && (
           <SessionConnectionOverlay status={liveKitStatus} />
+        )}
+
+        {/* The tab strip — and with it the strip's own toggle — is outside the fullscreen element,
+            so full screen needs its own way back. Rendered only by the stack that actually holds
+            fullscreen, and only while it does. Esc still works; this is the in-app equivalent. */}
+        {fullscreenOwned && (
+          <button
+            type="button"
+            data-testid="sessions-terminal-fullscreen-exit"
+            aria-label="Exit full screen"
+            title="Exit full screen"
+            onClick={toggleFullscreen}
+            className="absolute right-2 top-2 z-20 rounded border border-border bg-background/80 p-1.5 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 hover:text-foreground"
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
     </div>

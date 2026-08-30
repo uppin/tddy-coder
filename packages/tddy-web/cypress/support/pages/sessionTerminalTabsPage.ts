@@ -9,6 +9,7 @@ import {
   sessionsTerminalTab,
   sessionsTerminalTabClose,
   sessionsTerminalPane,
+  sessionsTerminalPaneStack,
   sessionsChildTab,
   sessionsChildPane,
   sessionsAgentTab,
@@ -29,6 +30,18 @@ export const sessionTerminalTabsPage = {
   /** The "+" new-terminal button. */
   newTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsTerminalTabNew, { timeout: 10000, ...options }),
+
+  /** The trailing ⛶ full-screen toggle — acts on whichever pane is active. */
+  fullscreenToggle: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsTerminalFullscreen, { timeout: 10000, ...options }),
+
+  /** The floating "exit full screen" control, drawn only while a pane stack holds fullscreen. */
+  fullscreenExit: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsTerminalFullscreenExit, { timeout: 10000, ...options }),
+
+  /** One session runtime's pane stack — the element handed to the Fullscreen API. */
+  paneStack: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(sessionsTerminalPaneStack(sessionId), { timeout: 10000, ...options }),
 
   /** A single bash terminal tab, keyed by terminal id. */
   tab: (terminalId: string, options?: Parameters<typeof cy.get>[1]) =>
