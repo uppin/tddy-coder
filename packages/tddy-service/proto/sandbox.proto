@@ -48,6 +48,17 @@ message SessionFrame {
     // many frames followed by `end_of_stream = true`, or a single frame with `error` set, which ends
     // the stream the same way.
     RpcStreamFrame rpc_stream_frame = 15;
+    // Host → sandbox: run this tool call INSIDE the jail. The mirror image of `tool_request`:
+    // there the in-jail agent asks the host to reach the worktree for it, here the host — which
+    // holds the worktree but must not touch it unconfined — asks the jail to. This is what a
+    // sandboxed `workspace` session dispatches through, so the confinement around a tool call is
+    // the kernel's rather than the tool engine's path checks
+    // (docs/ft/daemon/remote-codebase-mode.md § Workspace tool sandbox).
+    connection.ExecuteToolRequest in_jail_tool_request = 16;
+    // Sandbox → host: the result of the `in_jail_tool_request` the host is waiting on. Carries no
+    // request id because the host keeps exactly one in-jail call outstanding at a time, the same
+    // one-at-a-time discipline `tool_request`/`tool_response` already use.
+    connection.ExecuteToolResponse in_jail_tool_response = 17;
   }
 }
 

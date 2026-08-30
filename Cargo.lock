@@ -10574,6 +10574,8 @@ dependencies = [
  "tddy-sandbox-recipes",
  "tddy-service",
  "tddy-stdio",
+ "tddy-task",
+ "tddy-tool-engine",
  "tempfile",
  "tokio",
  "tokio-stream",

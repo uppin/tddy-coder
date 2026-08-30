@@ -8,6 +8,12 @@ use tddy_sandbox::{MachPolicy, NetworkSpec, ReadKind, ReadSpec, SandboxError, Sa
 /// process-exec rules (`plan.policy.exec_paths` + exec reads), the policy block, and the network
 /// policy — and **never** the blanket `(allow file-read*)` wildcard.
 ///
+/// The writable tree is the plan's own `project_root`, `scratch_dir` and `egress_dir` plus its
+/// writable mounts, and nothing else. In particular it holds no part of the host's per-user temp
+/// base (`/var/folders/…`): that is shared with every other session and application on the machine,
+/// and a confined process keeps its `HOME` and `TMPDIR` inside `scratch_dir`
+/// ([`tddy_sandbox::scratch_runner_env`]) rather than there.
+///
 /// Rule order is load-bearing, not cosmetic: Seatbelt evaluates a profile top-to-bottom and the
 /// **last matching rule wins**. That is why the blanket `(deny file-write*)` can be followed by
 /// targeted allows, and equally why the agent context-dir carve-out below must be emitted *after*
@@ -17,18 +23,17 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     let project_root = canonical_rule_path(&spec.project_root);
     let scratch_dir = canonical_rule_path(&spec.scratch_dir);
     let egress_dir = canonical_rule_path(&spec.egress_dir);
-    let darwin_base = canonical_rule_path(Path::new(&darwin_user_temp_base()?));
     let writable_tree = [
         project_root.clone(),
         scratch_dir.clone(),
         egress_dir.clone(),
-        darwin_base.clone(),
     ];
 
     let mut out = String::new();
     out.push_str("(version 1)\n\n");
     out.push_str(";; Tight Seatbelt profile for sandboxed Claude Code CLI sessions.\n");
-    out.push_str(";; Write confinement: project + egress + OS per-user scratch only.\n");
+    out.push_str(";; Write confinement: the plan's own project + scratch + egress tree and its\n");
+    out.push_str(";; writable mounts only — no share of the host's per-user temp base.\n");
     out.push_str(";; Read confinement: explicit allow-list (no blanket file-read*).\n\n");
 
     out.push_str("(deny file-write*)\n\n");
@@ -45,7 +50,7 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
             ));
         }
     }
-    out.push_str("  (subpath \"/var/folders\"))\n\n");
+    out.push_str(")\n\n");
 
     out.push_str(
         "(allow file-write*\n  (literal \"/dev/null\")\n  (literal \"/dev/zero\")\n  \
@@ -76,7 +81,6 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     for p in &writable_tree {
         out.push_str(&format!("  (subpath \"{p}\")\n"));
     }
-    out.push_str("  (subpath \"/var/folders\")\n");
     for r in &plan.reads {
         out.push_str(&render_read_rule(r));
     }
@@ -229,21 +233,6 @@ fn canonical_rule_path(path: &std::path::Path) -> String {
         .unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }
 
-fn darwin_user_temp_base() -> Result<String, SandboxError> {
-    let darwin_tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp/Name".to_string());
-    let path = Path::new(darwin_tmp.trim_end_matches('/'));
-    let mut base = path
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "/private/var/folders".to_string());
-    // TMPDIR=/tmp makes parent^2 collapse to `/`, which would allow writes anywhere.
-    if base == "/" || base.is_empty() {
-        base = "/private/var/folders".to_string();
-    }
-    Ok(base)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,8 +253,33 @@ mod tests {
         // Then
         assert!(profile.contains("(deny file-write*)"));
         assert!(profile.contains("/tmp/tddy-render-test"));
-        assert!(profile.contains("/var/folders"));
         assert!(profile.contains("(deny network*)"));
+    }
+
+    /// The host's per-user temp base (`/var/folders/<hash>/<hash>`, and the `/var/folders` tree it
+    /// sits in) is shared by every session on the machine and by every other application the user
+    /// runs. A jail that holds any of it holds far more than the tree its plan declares, so no
+    /// rendered profile may name it at all — not as a blanket rule, and not as the grandparent of
+    /// whatever `TMPDIR` the daemon happened to inherit. A confined process keeps its `HOME` and
+    /// `TMPDIR` inside the plan's own scratch dir ([`tddy_sandbox::scratch_runner_env`]), so it has
+    /// no business there.
+    #[test]
+    fn rendered_profile_grants_no_part_of_the_host_per_user_temp_base() {
+        // Given
+        let plan = a_plan(
+            vec![ReadSpec::literal("/", ReadReason::DyldRoot)],
+            NetworkSpec::default(),
+        );
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        assert!(
+            !profile.contains("/var/folders"),
+            "a plan that declares no path under the host per-user temp base must render no grant \
+             for it:\n{profile}"
+        );
     }
 
     use tddy_sandbox::{

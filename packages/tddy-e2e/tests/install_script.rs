@@ -147,6 +147,9 @@ fn write_fake_release_binaries(root: &Path) {
         "tddy-tools",
         "tddy-remote-git-repo",
         "tddy-session-sync",
+        // Runs inside every jail the daemon spawns, so `install` requires it exactly as it
+        // requires the daemon. A fixture missing it fails the preflight before any assertion runs.
+        "tddy-sandbox-runner",
     ] {
         let p = rel.join(name);
         fs::write(&p, b"fake-binary\n").unwrap();

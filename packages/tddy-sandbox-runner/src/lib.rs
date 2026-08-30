@@ -15,7 +15,7 @@ pub use host_relay::{
 };
 pub use runner::{
     connect_sandbox_client, connect_sandbox_client_uds, connect_uds_channel, resolve_secret_envs,
-    run_sandbox_runner, SandboxRunnerArgs,
+    run_sandbox_runner, run_workspace_tool_runner, SandboxRunnerArgs,
 };
 
 /// Re-exported so host-relay callers can implement [`HostToolHandler`] without depending on

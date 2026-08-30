@@ -40,6 +40,13 @@ pub fn process_exec_reads(binary: &Path) -> Vec<ReadSpec> {
 }
 
 /// The always-needed OS read set for a CLI under the jail.
+///
+/// Deliberately absent: `/private/var/folders`, the host's per-user temp and cache base. It is
+/// shared by every session on the machine and by every other application the user runs, so a jail
+/// holding it holds far more than the tree its plan declares. A confined process has its `HOME` and
+/// `TMPDIR` pointed inside the plan's own scratch dir ([`crate::scratch_runner_env`]), and the
+/// jails this baseline serves — the workspace tool runner, the confined shell, and `claude` itself
+/// — all start and work without it.
 #[cfg(target_os = "macos")]
 pub fn system_baseline_reads() -> Vec<ReadSpec> {
     let exec_subpath = |p: &str| ReadSpec::subpath(p, ReadReason::SystemLibs).executable();
@@ -56,7 +63,6 @@ pub fn system_baseline_reads() -> Vec<ReadSpec> {
         exec_subpath("/usr/bin"),
         exec_subpath("/bin"),
         exec_subpath("/sbin"),
-        cache("/private/var/folders"),
         cache("/usr/share/zoneinfo"),
         cache("/private/var/db/timezone"),
         subpath("/private/var/select"),

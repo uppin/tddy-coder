@@ -151,6 +151,50 @@ injected by tddy — pass them explicitly when using print mode.
 
 Details: [cursor-cli-session.md](cursor-cli-session.md#sandbox-mode).
 
+## Workspace tool sandbox (`session_type:"workspace"`, `sandbox:true`)
+
+The sibling above confines **the agent** and lets it reach the host worktree by asking the host to
+run each tool for it. This one is the other half: it confines **tool execution itself**, on the
+daemon that holds the worktree.
+
+A `workspace` session started with `sandbox = true` gets a per-session jail rooted at
+`<session_dir>/sandbox`, with the session's worktree mounted read-write and nothing else of that
+host inside it. Every exec tool the daemon serves for that session runs in the jail.
+
+| | Confines | Tool runs | Entry point |
+|---|---|---|---|
+| Local sandbox sibling | the agent process | on the host worktree, unconfined | `claude-cli` + `sandbox` |
+| **Workspace tool sandbox** | **each tool call** | **inside the jail** | **`workspace` + `sandbox`** |
+
+**Why it exists.** The tool engine bounds a path to the worktree; it does not bound a `Shell`. On a
+co-located session the agent's own jail covers that gap. Once the codebase moves to another daemon
+the agent's jail is on a host with no repository, so on the host that *has* the repository nothing
+bounds anything. Confining the codebase-side tool path is what lets an agent stay unsandboxed
+somewhere else while repo-side work stays inside a declared boundary.
+
+**Scope.** This is a property of `session_type:"workspace"` alone. `claude-cli` and `cursor-cli`
+sandbox semantics are unchanged, and a `workspace` session started without `sandbox` still runs its
+tools directly on the host worktree.
+
+### Behavior
+
+1. `sandbox: Some(true)` is persisted in the workspace `.session.yaml`.
+2. The jail is provisioned **after** the worktree is cut, the roster is seeded and — when
+   `semantic_index = true` — the index is built. Indexing reads the host worktree, so it runs
+   before the jail exists rather than through it.
+3. `ExecuteTool`, `StreamExecuteTool` and roster agents' `local_agent_codebase_access` all reach
+   the jail, because all three dispatch through `run_exec_tool_locally`.
+4. Host → jail tool calls travel on the existing `SessionChannel` as `in_jail_tool_request` /
+   `in_jail_tool_response`; the runner executes them against the worktree as mounted inside the
+   jail, so the boundary enforced is the kernel's.
+5. A platform with no sandbox backend is refused with `failed_precondition`, and a jail that will
+   not provision leaves no session behind. **Neither falls back to direct host execution** — a
+   session that came up unconfined is indistinguishable from the one that was asked for.
+
+Split placement (`codebase_daemon_instance_id` together with `sandbox`) is still refused; see
+[remote-managed-worktree.md](remote-managed-worktree.md) § What a split session cannot also ask
+for. This section is the primitive that refusal is waiting on, not its removal.
+
 ## Extension: placing the codebase on another daemon
 
 This document assumes the worktree lives on whichever daemon the caller addressed.
