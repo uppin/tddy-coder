@@ -22,6 +22,11 @@ import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
 import { useSessionManager } from "./sessionManager";
 import {
+  attachActionForSnapshot,
+  claimAfterFeedEnd,
+  type AttachClaim,
+} from "./attachClaim";
+import {
   SessionRuntimeRegistry,
   makeByteTap,
   type ByteDelta,
@@ -57,17 +62,6 @@ import { resolveShortcutsForSession } from "../../lib/toolShortcuts";
 import { joinQuotedPaths } from "../../lib/shellQuote";
 import { isCliTerminalSession } from "../../constants/claudeCliModels";
 import { PanelLeftOpen } from "lucide-react";
-
-/**
- * An attach already taken for one session, stamped with the session-list snapshot it was taken
- * under. The stamp is what lets a dormant reading be judged as evidence or as staleness: a list
- * snapshot the claim predates has genuinely observed the session die, while the snapshot the claim
- * was made under simply has not caught up with it yet.
- */
-interface AttachClaim {
-  readonly sessionId: string;
-  readonly listGeneration: number;
-}
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -305,25 +299,6 @@ export function SessionsDrawerScreen({
     [runtimeRegistry],
   );
 
-  // Disconnect a runtime terminal. Evicts the session's runtime; if it is the focused/attached
-  // session, also resets the attachment so the screen re-evaluates state for the next selection.
-  //
-  // The attach the claim records dies with the runtime, so the claim goes with it. A feed can drop
-  // under a session the daemon still reports alive (a `pty_done` on a live agent), and holding a
-  // claim for an attach that no longer exists is what would strand the pane on the reconnect
-  // placeholder — the liveness effect below returns early on the claim, and a live session offers no
-  // Resume button to recover by hand. Releasing it hands the re-attach back to that effect, which
-  // re-attaches on the next list snapshot *if the session is still alive*: a session that has
-  // genuinely gone reads dormant there and is left alone rather than attached over and over.
-  const onSessionDisconnect = useCallback(
-    (sessionId: string) => {
-      runtimeRegistry.disconnect(sessionId);
-      if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
-      if (sessionId === connectedSessionId) resetAttachment();
-    },
-    [runtimeRegistry, connectedSessionId, resetAttachment],
-  );
-
   // Fold a session's terminal I/O bytes into its runtime counters as the terminal fires them (per
   // output chunk / input yield). The registry's `notify()` re-renders the screen (via
   // `useSyncExternalStore`), so the inspector's byte meter ticks live — even for a backgrounded session.
@@ -349,6 +324,32 @@ export function SessionsDrawerScreen({
   const selectedSession = useMemo(
     () => sortedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
     [sortedSessions, selectedSessionId],
+  );
+
+  // Disconnect a runtime terminal. Evicts the session's runtime; if it is the focused/attached
+  // session, also resets the attachment so the screen re-evaluates state for the next selection.
+  //
+  // Whether the claim goes with the runtime is `claimAfterFeedEnd`'s to decide, off the same session
+  // list the liveness effect below reads. For a terminal session the feed *is* the attach: a feed can
+  // drop under a session the daemon still reports alive (a `pty_done` on a live agent), and holding a
+  // claim for an attach that no longer exists is what would strand the pane on the reconnect
+  // placeholder — that effect returns early on the claim, and a live session offers no Resume button
+  // to recover by hand. For a workflow-owned session the feed is the hidden runtime layer's, which
+  // has no PTY to stream and ends at once; releasing on it would have that effect re-attach on every
+  // list snapshot for as long as the session lives.
+  const onSessionDisconnect = useCallback(
+    (sessionId: string) => {
+      runtimeRegistry.disconnect(sessionId);
+      const session = sortedSessions.find((s) => s.sessionId === sessionId);
+      if (session) {
+        attachClaimRef.current = claimAfterFeedEnd({ claim: attachClaimRef.current, session });
+      } else if (attachClaimRef.current?.sessionId === sessionId) {
+        // The list no longer carries the session, so there is no pane to hold the attach for.
+        attachClaimRef.current = null;
+      }
+      if (sessionId === connectedSessionId) resetAttachment();
+    },
+    [runtimeRegistry, sortedSessions, connectedSessionId, resetAttachment],
   );
 
   // Count each session-list snapshot as it arrives. Done during render (not in an effect) so a claim
@@ -568,22 +569,26 @@ export function SessionsDrawerScreen({
    * Releasing on death matters just as much: the same session can be resumed again without the
    * selection ever changing, and that resume owes a fresh `ConnectSession`. Holding the claim past
    * the death would silently swallow every resume after the first.
+   *
+   * Which of the three the snapshot owes is `attachActionForSnapshot`'s to decide — including why a
+   * dormant reading on the claim's own snapshot is not yet evidence of death.
    */
   useEffect(() => {
     if (!selectedSession) return;
-    const claim = attachClaimRef.current;
-    const claimsThisSession = claim?.sessionId === selectedSession.sessionId;
-    if (!selectedSession.isActive) {
-      // Release only on a snapshot the claim predates. `ResumeSession` returns before the daemon's
-      // next `ListSessions`, so the snapshot the resume was made under still reports the session
-      // dormant — releasing on that reading would hand the duplicate `ConnectSession` straight back.
-      // A *later* snapshot saying the same thing is real evidence the session died.
-      if (claimsThisSession && listGeneration > claim.listGeneration) {
+    const action = attachActionForSnapshot({
+      session: selectedSession,
+      claim: attachClaimRef.current,
+      listGeneration,
+    });
+    switch (action) {
+      case "hold":
+        return;
+      case "release":
         attachClaimRef.current = null;
-      }
-      return;
+        return;
+      case "attach":
+        break;
     }
-    if (claimsThisSession) return;
     const owningClient = clientForHost(
       owningHostForSession(selectedSession, selectedInstanceId ?? ""),
     );
