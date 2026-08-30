@@ -523,6 +523,10 @@ export const TEST_IDS = {
   sessionsTerminalTabAgent: "sessions-terminal-tab-agent",
   /** The "+" button that opens a new bash terminal. */
   sessionsTerminalTabNew: "sessions-terminal-tab-new",
+  /** The trailing ⛶ control that puts the active pane into browser full screen. */
+  sessionsTerminalFullscreen: "sessions-terminal-fullscreen",
+  /** The floating "exit full screen" control drawn over a pane stack that holds fullscreen. */
+  sessionsTerminalFullscreenExit: "sessions-terminal-fullscreen-exit",
 
   // Session connection overlay — covers the runtime's panes until LiveKit is connected
   sessionConnectionOverlay: "session-connection-overlay",
@@ -910,6 +914,11 @@ export const sessionsTerminalTabClose = (terminalId: string) =>
  *  uses `terminalId = "main"`. */
 export const sessionsTerminalPane = (terminalId: string) =>
   `sessions-terminal-pane-${terminalId}`;
+
+/** `[data-testid="sessions-terminal-pane-stack-<sessionId>"]` — one runtime's stack of mounted
+ *  terminal panes. This is the element handed to the Fullscreen API by the tab strip's ⛶ control. */
+export const sessionsTerminalPaneStack = (sessionId: string) =>
+  `sessions-terminal-pane-stack-${sessionId}`;
 
 /** `[data-testid="sessions-child-tab-<sessionId>"]` — a tab for a spawned child conversation
  *  (a child session whose `orchestratorSessionId` is the parent runtime's session). */
