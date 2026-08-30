@@ -4,6 +4,15 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-30 — A workflow session stops re-attaching itself every two seconds
+
+- **A `pr-stack` or workflow chat session no longer reconnects once per session-list poll.** Opening one used to issue a `ConnectSession` every two seconds for as long as the session stayed alive, each one joining and leaving the room under a fresh identity — visible as a session that looked like it was restarting, and as a browser participant churning in the LiveKit roster.
+- **The cause was the hidden terminal, not the chat surface.** A workflow view renders over a still-mounted runtime layer (unmounting it would cancel the session's agent conversations on the daemon), so a terminal attaches to a session whose real surface is ACP chat, finds no PTY to stream, and reports the remote session ended. That report released the attach, and the next list snapshot took it again.
+- **A terminal feed ending now only releases the attach for a session a terminal actually owns.** For a workflow-owned pane the feed is the hidden layer's and says nothing about the attach the chat is using.
+- **The chat keeps the attachment it talks over.** The same feed-end also reset the session attachment, and `PrStackScreen` derives its LiveKit room from exactly that — so the presenter room went down with the hidden terminal and rejoined under a fresh `browser-presenter-*` identity on each re-attach. Resetting now happens only for a session a terminal actually owns; without that half, closing the loop would have left the chat reporting "no connection to the presenter yet" with nothing to restore it.
+- **The loop stopped by itself when the session was terminated and came back on resume**, which is why it read as a restart: a dormant session is never attached.
+- **One definition of "this pane is a workflow view".** The drawer's attach rules and the view resolver read the same predicate, so a session cannot be treated as chat by one and as a terminal by the other.
+
 ## 2026-08-30 — Subagents as children of the main agent in the Agents tab
 
 - **The Agents tab is now a tree.** The session's own main agent sits at the root, with everything working for it beneath: the specialized agents attached to it *and* the sessions it spawned.

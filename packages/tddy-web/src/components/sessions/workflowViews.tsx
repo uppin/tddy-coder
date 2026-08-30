@@ -2,6 +2,7 @@ import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
+import { sessionPaneIsWorkflowView } from "./attachClaim";
 import { PrStackScreen } from "./prstack/PrStackScreen";
 import { WorkflowChatScreen } from "./WorkflowChatScreen";
 
@@ -55,16 +56,17 @@ export interface WorkflowViewContext {
  * existing terminal / placeholder rendering in that case.
  *
  * `pr-stack` gets its own two-pane screen (planned-PR list + chat). Every other tddy-coder workflow
- * (`tool`) session gets the single-pane full-screen {@link WorkflowChatScreen}. The gate is
- * `session_type` ∈ {"", "tool"} plus a non-empty `recipe`: only tddy-coder `tool` sessions run a
- * Presenter/ACP surface the chat can reach, so `claude-cli` / `cursor-cli` PTY sessions (which have
- * no Presenter, even when they carry a managed `recipe`) fall through to the terminal.
+ * (`tool`) session gets the single-pane full-screen {@link WorkflowChatScreen}. Which sessions those
+ * are is {@link sessionPaneIsWorkflowView}'s to say: the sessions drawer's attach rules read the same
+ * predicate to know a session's pane is not a terminal, and a second copy of the gate here could
+ * drift from it — leaving a session the drawer treats as chat rendering a terminal, or the reverse.
  */
 export function resolveWorkflowView(
   session: SessionEntry | null,
   context: WorkflowViewContext = {},
 ): React.ReactNode | null {
   if (!session) return null;
+  if (!sessionPaneIsWorkflowView(session)) return null;
   if (session.recipe === "pr-stack") {
     return (
       <PrStackScreen
@@ -81,15 +83,12 @@ export function resolveWorkflowView(
       />
     );
   }
-  const isToolSession = session.sessionType === "" || session.sessionType === "tool";
-  if (isToolSession && session.recipe !== "") {
-    return (
-      <WorkflowChatScreen
-        key={session.sessionId}
-        session={session}
-        attachment={context.attachment}
-      />
-    );
-  }
-  return null;
+  // Past the gate and not `pr-stack`: a tddy-coder workflow session, which the chat screen owns.
+  return (
+    <WorkflowChatScreen
+      key={session.sessionId}
+      session={session}
+      attachment={context.attachment}
+    />
+  );
 }
