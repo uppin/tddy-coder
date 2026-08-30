@@ -68,6 +68,11 @@ import {
 } from "./responses";
 import { acpReplayHandlers, type AcpReplayScenario } from "./acpReplay";
 import { aSessionAgentRosterFake, type RosterScenario } from "./sessionAgentRosterBackend";
+import {
+  anAgentConversationFake,
+  type AgentConversationControls,
+  type AgentConversationScenario,
+} from "./agentConversationBackend";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -246,9 +251,20 @@ export interface ConnectionServiceScenario {
    *  `ListSubagents`) — what the inspector's Agents tab shows. Default: unimplemented, so a screen
    *  that never opens that tab is unaffected. */
   sessionAgents?: RosterScenario;
+  /** Conversations with the session's attached agents, served by `OpenAgentConversation` /
+   *  `PromptAgentConversation` / `CancelAgentConversation` — what an agent conversation tab talks
+   *  to. Default: unimplemented, so a screen that opens no such tab is unaffected. */
+  agentConversations?: AgentConversationScenario;
 }
 
-export interface ConnectionServiceBackend extends InMemoryRpcBackend {
+export interface ConnectionServiceBackend
+  extends InMemoryRpcBackend,
+    AgentConversationControls {
+  /** Qualified `agent_id`s passed to `AttachSessionAgent`, in call order. Empty unless the scenario
+   *  declared a `sessionAgents` roster. */
+  readonly attachedAgentIds: () => string[];
+  /** What each `AttachSessionAgent` addressed — the routing half of the write. */
+  readonly attachesAddressed: () => { sessionId: string; daemonInstanceId: string }[];
   /** Every `sessionId` passed to `DeleteSession`, in call order. */
   readonly deletedSessionIds: string[];
   /** Every `{ sessionId, signal }` passed to `SignalSession`, in call order. */
@@ -337,6 +353,13 @@ export function aConnectionServiceBackend(
       ? [{ daemonInstanceId: (daemons.find((d) => d.isLocal) ?? daemons[0])?.instanceId ?? "" }]
       : [{}]);
 
+  // Built once and kept, not inlined into the spread below: these fakes carry the call recorders a
+  // spec asserts on, and building them twice would record into a copy nothing can read.
+  const rosterFake = scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents) : null;
+  const conversationFake = scenario.agentConversations
+    ? anAgentConversationFake(scenario.agentConversations)
+    : null;
+
   const backend = anInMemoryRpcBackend()
     .implement(AuthService, {
       getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
@@ -391,7 +414,9 @@ export function aConnectionServiceBackend(
       // The session's agent roster. Spread for the same reason as the replay handlers: one
       // `.implement(ConnectionService, …)` per backend, since Connect's router fills every omitted
       // method of a registered service with an `Unimplemented` handler.
-      ...(scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents).handlers : {}),
+      ...(rosterFake ? rosterFake.handlers : {}),
+      // The agent conversations behind the session's agent tabs, spread for the same reason.
+      ...(conversationFake ? conversationFake.handlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"
@@ -609,6 +634,26 @@ export function aConnectionServiceBackend(
     worktreeStatsStreamCount: () => worktreeStatsStreamOpens,
     worktreeStatsRecalculateAllFlags,
     calculatedWorktreePaths,
+    // A scenario that declared no roster / no conversations still answers these, with nothing —
+    // a spec asserting "never attached" must not have to know whether a fake was built.
+    attachedAgentIds: () => (rosterFake ? rosterFake.attachedAgentIds() : []),
+    attachesAddressed: () => (rosterFake ? rosterFake.attachesAddressed() : []),
+    openedConversations: () => (conversationFake ? conversationFake.openedConversations() : []),
+    promptsSent: () => (conversationFake ? conversationFake.promptsSent() : []),
+    cancelledConversationIds: () =>
+      conversationFake ? conversationFake.cancelledConversationIds() : [],
+    releaseAnswer: () => conversationFake?.releaseAnswer(),
+    // Throws rather than no-opping when the scenario declared no `agentConversations`: the getters
+    // above can honestly answer "nothing happened", but a *setter* that silently discards its setup
+    // would leave a spec asserting on a failure that was never armed, and passing.
+    failNextPrompt: (message: string) => {
+      if (conversationFake === null) {
+        throw new Error(
+          "failNextPrompt: this backend declared no `agentConversations` scenario, so there is no conversation to fail.",
+        );
+      }
+      conversationFake.failNextPrompt(message);
+    },
   });
 }
 
