@@ -331,7 +331,7 @@ pub async fn connect_sandbox_session_client(
 /// The runner never initiates calls into the daemon over the stdio-served `SessionChannel` — it
 /// only sends frames within the bidi call the daemon itself opens. This exists purely to satisfy
 /// [`bridge_sandbox_stdio`]'s hosting requirement; any inbound request here is a bug.
-struct NoCallbackSandboxService;
+pub struct NoCallbackSandboxService;
 
 #[async_trait]
 impl tddy_rpc::RpcService for NoCallbackSandboxService {
@@ -813,29 +813,43 @@ pub fn qemu_backend_requested() -> bool {
     std::env::var("TDDY_SANDBOX_BACKEND").as_deref() == Ok("qemu")
 }
 
-/// Spawn sandbox-runner inside Seatbelt jail (or the QEMU VM backend, if requested).
+/// Spawn an already-assembled [`SandboxPlan`] on this host's backend: Seatbelt on macOS,
+/// cgroups + namespaces on Linux, or the QEMU VM backend when explicitly requested.
+///
+/// The seam for a caller that builds its own plan rather than a runner spawn's
+/// ([`crate::workspace_tool_sandbox::build_workspace_tool_plan`] does, because a workspace tool
+/// jail holds a different recipe and a different mount set).
 #[cfg(target_os = "macos")]
-pub fn spawn_sandbox_runner(
-    params: SandboxRunnerSpawn,
-) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    let plan = build_sandbox_plan(params)?;
+pub fn spawn_sandbox_plan(plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     if qemu_backend_requested() {
         return tddy_sandbox_qemu::spawn_plan(plan);
     }
     tddy_sandbox_darwin::spawn_plan(plan)
 }
 
-/// Spawn sandbox-runner inside a rootless cgroups + namespaces jail (or the QEMU VM backend, if
-/// requested) on Linux.
 #[cfg(target_os = "linux")]
-pub fn spawn_sandbox_runner(
-    params: SandboxRunnerSpawn,
-) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
-    let plan = build_sandbox_plan(params)?;
+pub fn spawn_sandbox_plan(plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
     if qemu_backend_requested() {
         return tddy_sandbox_qemu::spawn_plan(plan);
     }
     tddy_sandbox_cgroups::spawn_plan(plan)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn spawn_sandbox_plan(_plan: SandboxPlan) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
+    Err(SandboxError::Unsupported {
+        platform: std::env::consts::OS.to_string(),
+        message: "platform sandboxes are not available on this OS".to_string(),
+    })
+}
+
+/// Spawn sandbox-runner inside the platform jail (Seatbelt on macOS, cgroups + namespaces on
+/// Linux, or the QEMU VM backend when requested).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn spawn_sandbox_runner(
+    params: SandboxRunnerSpawn,
+) -> Result<tddy_sandbox::SandboxHandle, SandboxError> {
+    spawn_sandbox_plan(build_sandbox_plan(params)?)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

@@ -16,12 +16,19 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::{Stream, StreamExt};
 use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
+use tddy_sandbox_runner::SessionChannelClient;
 use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
-use tokio::sync::Mutex;
+use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
+use tddy_service::proto::sandbox::SessionFrame;
+use tokio::sync::{mpsc, Mutex};
+use tokio_stream::wrappers::ReceiverStream;
 
 /// A live jail serving one sandboxed workspace session.
 #[async_trait]
@@ -75,7 +82,10 @@ pub struct WorkspaceSandboxLayout {
     pub ready_marker: PathBuf,
     /// The generated backend profile (SBPL on macOS).
     pub profile_path: PathBuf,
-    /// The AF_UNIX socket the runner binds for tool IPC.
+    /// Where the runner's tool-IPC socket would live. A workspace jail hosts no agent, so nothing
+    /// inside it ever calls back out and nothing binds this — it is declared with the rest of the
+    /// jail's tree so a jail that one day does bind one keeps it inside the session's own
+    /// directory.
     pub tool_ipc_socket: PathBuf,
 }
 
@@ -127,9 +137,9 @@ pub fn build_workspace_tool_plan(
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");
 
-    // TODO(workspace-tool-sandbox step 4): the runner still requires `--model` and spawns an agent;
-    // teaching it to serve `in_jail_tool_request` with no agent at all is what makes this argv
-    // spawnable.
+    // `--workspace-tools` is what makes this a jail with no agent in it: the runner serves the
+    // host's `in_jail_tool_request`s against the worktree as mounted here, and spawns no PTY, no
+    // in-jail `tddy-tools --mcp` server and no egress shim for one to reach the network through.
     let runner_argv = vec![
         runner_path,
         "--session-id".to_string(),
@@ -142,6 +152,8 @@ pub fn build_workspace_tool_plan(
         tddy_tools_path,
         "--ready-marker".to_string(),
         layout.ready_marker.to_string_lossy().to_string(),
+        "--workspace-tools".to_string(),
+        worktree_path.to_string_lossy().to_string(),
         "--stdio".to_string(),
     ];
 
@@ -153,6 +165,7 @@ pub fn build_workspace_tool_plan(
         &layout.egress_dir,
     );
 
+    let plan_worktree = worktree_path.clone();
     let mut plan =
         tddy_sandbox_recipes::build_runner_plan(tddy_sandbox_recipes::RunnerPlanRequest {
             project_root: layout.sandbox_root.clone(),
@@ -162,7 +175,11 @@ pub fn build_workspace_tool_plan(
             runner_argv,
             env,
             loopback_allow_ports: vec![],
-            ipc_socket: Some(layout.tool_ipc_socket.clone()),
+            // No host-bound tool IPC: that socket exists for an in-jail `tddy-tools --mcp` calling
+            // *out* to the host, which a jail with no agent in it never does. Declaring one would
+            // also have to fit macOS's 104-byte `SUN_LEN` cap, which a path this deep under the
+            // session directory does not.
+            ipc_socket: None,
             // The boundary the feature sells: one mount, the session's checkout.
             mounts: vec![MountSpec::read_write(worktree_path)],
             // The jail runs the session's tools, `Shell` among them — the recipe that grants a
@@ -170,8 +187,33 @@ pub fn build_workspace_tool_plan(
             recipe: Some(tddy_sandbox_recipes::SandboxRecipe::Shell),
             host_home: None,
         })?;
+    // Path lookup for the worktree itself. Resolving `/a/b/worktree` walks `/a`, then `/a/b`, and
+    // a jail that cannot stat those cannot canonicalize its own checkout — which is the first
+    // thing every path-containing tool does. Each ancestor is granted as a `literal`, never a
+    // `subpath`: the jail may name those directories (and see what they contain) but can read
+    // nothing under them, so the only host tree it reaches into is still the worktree.
+    for ancestor in worktree_ancestors(&plan_worktree) {
+        plan.reads.push(tddy_sandbox::ReadSpec::literal(
+            ancestor,
+            tddy_sandbox::ReadReason::Custom,
+        ));
+    }
+    // The Shell recipe describes the tools this jail serves, but the process serving them is the
+    // Rust runner, whose runtime reads a sysctl to size the guard page under its main stack before
+    // `main()` runs. Denied, that read fails with `EINVAL` and the runtime aborts, so the jail
+    // never comes up at all. Nothing else of the shell policy is relaxed.
+    plan.policy.sysctl_read = true;
     plan.cgroup = cgroup;
     Ok(plan)
+}
+
+/// Every directory above `worktree`, from the filesystem root down to its parent.
+fn worktree_ancestors(worktree: &Path) -> Vec<PathBuf> {
+    worktree
+        .ancestors()
+        .skip(1)
+        .map(Path::to_path_buf)
+        .collect()
 }
 
 /// Whether this host has a sandbox backend that can hold a workspace jail.
@@ -192,6 +234,16 @@ pub fn workspace_sandbox_platform_support() -> Result<(), SandboxError> {
     })
 }
 
+/// How long the jail is given to write its ready marker before the start is failed.
+const JAIL_READY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long one in-jail tool call may take before its channel is declared lost.
+///
+/// Comfortably above the tool engine's own ceilings (a blocking `Shell` defaults to 30s and takes
+/// its limit from the caller), because a call that outlives this leaves the host unable to tell
+/// which answer belongs to which request — so the channel is torn down rather than reused.
+const IN_JAIL_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
+
 /// The production provisioner: a real jail on this host's backend.
 #[derive(Debug, Default)]
 pub struct JailedWorkspaceSandboxProvisioner;
@@ -203,18 +255,229 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
         spec: &WorkspaceSandboxSpec,
     ) -> Result<Arc<dyn WorkspaceSandbox>, SandboxError> {
         workspace_sandbox_platform_support()?;
-        // TODO(workspace-tool-sandbox step 4): spawn the plan from `build_workspace_tool_plan`,
-        // bridge its stdio, and answer `execute_tool` with an `in_jail_tool_request` frame. Until
-        // then a sandboxed workspace start is refused here rather than served unconfined — the
-        // start path turns this into `failed_precondition`.
-        Err(SandboxError::Unsupported {
-            platform: std::env::consts::OS.to_string(),
-            message: format!(
-                "the workspace tool jail for session {} is not spawned yet; refusing rather than \
-                 running its tools on the host",
-                spec.session_id
-            ),
-        })
+
+        let layout = prepare_jail_tree(&spec.session_dir)?;
+        // Seatbelt matches its rules against fully symlink-resolved paths (`/var` →
+        // `/private/var`), so the mount the jail is built around is named the way the kernel will
+        // report it.
+        let worktree_path = canonical(&spec.worktree_path);
+        let plan = build_workspace_tool_plan(WorkspaceToolPlanRequest {
+            layout: layout.clone(),
+            worktree_path: worktree_path.clone(),
+            session_id: spec.session_id.clone(),
+            runner_path: canonical_exec(&crate::sandbox_session::resolve_sandbox_runner_path()),
+            tddy_tools_path: canonical_exec(&crate::sandbox_session::resolve_tddy_tools_path(None)),
+            cgroup: CgroupConfig::default(),
+        })?;
+
+        let mut handle = crate::sandbox_session::spawn_sandbox_plan(plan)?;
+        // From here on the child exists, so a failure has to take it with it: a provision that
+        // answered with an error but left a jail running would leave a confined process behind for
+        // a session that never came up.
+        let started = start_jail_channel(&mut handle, &layout).await;
+        let (out_tx, inbound) = match started {
+            Ok(channel) => channel,
+            Err(e) => {
+                let _ = handle.child_mut().kill();
+                let _ = handle.child_mut().wait();
+                return Err(e);
+            }
+        };
+
+        log::info!(
+            target: "tddy_daemon::workspace_tool_sandbox",
+            "workspace session {} runs its tools in a jail (pid {}) holding {}",
+            spec.session_id,
+            handle.pid(),
+            worktree_path.display()
+        );
+
+        Ok(Arc::new(JailedWorkspaceSandbox {
+            session_id: spec.session_id.clone(),
+            pid: handle.pid(),
+            handle: StdMutex::new(Some(handle)),
+            channel: Mutex::new(Some(InJailChannel { out_tx, inbound })),
+        }))
+    }
+}
+
+/// Wait for the spawned jail to come up and open the `SessionChannel` the host drives it over.
+///
+/// The jail is driven over its own piped stdio: the daemon hosts no service the runner can call
+/// back into, it only sends frames within the `SessionChannel` opened here.
+async fn start_jail_channel(
+    handle: &mut tddy_sandbox::SandboxHandle,
+    layout: &WorkspaceSandboxLayout,
+) -> Result<
+    (
+        mpsc::Sender<SessionFrame>,
+        Pin<Box<dyn Stream<Item = Result<SessionFrame, String>> + Send>>,
+    ),
+    SandboxError,
+> {
+    crate::sandbox_session::wait_for_sandbox_ready(
+        handle,
+        &layout.ready_marker,
+        JAIL_READY_TIMEOUT,
+        &layout.egress_dir,
+    )
+    .await
+    .map_err(SandboxError::Io)?;
+
+    let (client, _endpoint) = crate::sandbox_session::bridge_sandbox_stdio(
+        handle,
+        crate::sandbox_session::NoCallbackSandboxService,
+    )
+    .map_err(SandboxError::Io)?;
+    let (out_tx, out_rx) = mpsc::channel::<SessionFrame>(16);
+    let inbound = tddy_sandbox_runner::StdioSandboxClient::new(client)
+        .open_session_channel(ReceiverStream::new(out_rx))
+        .await
+        .map_err(SandboxError::Io)?;
+    Ok((out_tx, inbound))
+}
+
+/// Create the jail's own tree and return the layout naming it in the canonical spelling the
+/// kernel will report accesses under.
+fn prepare_jail_tree(session_dir: &Path) -> Result<WorkspaceSandboxLayout, SandboxError> {
+    let layout = WorkspaceSandboxLayout::under_session_dir(session_dir);
+    for dir in [
+        &layout.sandbox_root,
+        &layout.scratch_dir.join("home"),
+        &layout.scratch_dir.join("tmp"),
+        &layout.context_dir,
+        &layout.egress_dir,
+    ] {
+        std::fs::create_dir_all(dir).map_err(|e| {
+            SandboxError::Io(format!("create workspace jail dir {}: {e}", dir.display()))
+        })?;
+    }
+    Ok(WorkspaceSandboxLayout::under_session_dir(&canonical(
+        session_dir,
+    )))
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Canonicalize a binary path the jail will exec, since its read allow-list is built from the
+/// symlink-resolved parent directory. A bare PATH-resolved name has no directory to resolve.
+fn canonical_exec(binary: &str) -> String {
+    if binary.contains('/') {
+        canonical(Path::new(binary)).to_string_lossy().into_owned()
+    } else {
+        binary.to_string()
+    }
+}
+
+/// The open `SessionChannel` to one jail.
+///
+/// One tool call is outstanding at a time: `in_jail_tool_response` carries no request id, so the
+/// answer belongs to the request the sender is holding the lock for. Holding the whole exchange
+/// under one lock is what makes that true.
+struct InJailChannel {
+    out_tx: mpsc::Sender<SessionFrame>,
+    inbound: Pin<Box<dyn Stream<Item = Result<SessionFrame, String>> + Send>>,
+}
+
+/// A live jail on this host, serving one sandboxed workspace session's tools.
+struct JailedWorkspaceSandbox {
+    session_id: String,
+    pid: u32,
+    /// Kept so the jail can be killed and reaped rather than left behind.
+    handle: StdMutex<Option<tddy_sandbox::SandboxHandle>>,
+    /// `None` once the channel is gone: a jail whose channel broke stays broken, because the only
+    /// alternative to answering from inside it is answering from the host it was built to avoid.
+    channel: Mutex<Option<InJailChannel>>,
+}
+
+#[async_trait]
+impl WorkspaceSandbox for JailedWorkspaceSandbox {
+    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+        // The jail runs this session's own tools and authenticates nothing, so the caller's
+        // session token stays on the host rather than crossing into the jail with the call.
+        let request = ExecuteToolRequest {
+            session_token: String::new(),
+            daemon_instance_id: String::new(),
+            session_id: self.session_id.clone(),
+            tool_name: req.tool_name.clone(),
+            args_json: req.args_json.clone(),
+        };
+
+        let mut guard = self.channel.lock().await;
+        let outcome = match guard.as_mut() {
+            Some(channel) => exchange_in_jail_tool_call(channel, request).await,
+            None => Err("its channel is closed".to_string()),
+        };
+        match outcome {
+            Ok(response) => response,
+            Err(reason) => {
+                // A channel that lost its answer cannot be reused: the next response would be
+                // matched to the wrong request.
+                *guard = None;
+                let message = format!(
+                    "session {}: the tool call could not be run in its jail ({reason}); refusing \
+                     to run it on the host worktree instead",
+                    self.session_id
+                );
+                log::warn!(target: "tddy_daemon::workspace_tool_sandbox", "{message}");
+                ExecuteToolResponse {
+                    is_error: true,
+                    error_message: message,
+                    ..Default::default()
+                }
+            }
+        }
+    }
+
+    fn stop(&self) {
+        if let Some(mut handle) = self.handle.lock().unwrap().take() {
+            let _ = handle.child_mut().kill();
+            let _ = handle.child_mut().wait();
+        } else {
+            crate::sandbox_session::terminate_sandbox_process(self.pid);
+        }
+    }
+}
+
+impl Drop for JailedWorkspaceSandbox {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Send one tool call into the jail and wait for its answer.
+async fn exchange_in_jail_tool_call(
+    channel: &mut InJailChannel,
+    request: ExecuteToolRequest,
+) -> Result<ExecuteToolResponse, String> {
+    let frame = SessionFrame {
+        payload: Some(SessionPayload::InJailToolRequest(request)),
+    };
+    channel
+        .out_tx
+        .send(frame)
+        .await
+        .map_err(|_| "the jail is no longer reading its session channel".to_string())?;
+
+    loop {
+        match tokio::time::timeout(IN_JAIL_TOOL_TIMEOUT, channel.inbound.next()).await {
+            Ok(Some(Ok(frame))) => match frame.payload {
+                Some(SessionPayload::InJailToolResponse(response)) => return Ok(response),
+                // A workspace jail sends nothing else, but a frame that is not the answer is
+                // skipped rather than mistaken for one.
+                _ => continue,
+            },
+            Ok(Some(Err(e))) => return Err(format!("its session channel failed: {e}")),
+            Ok(None) => return Err("its session channel ended".to_string()),
+            Err(_) => {
+                return Err(format!(
+                    "it did not answer within {}s",
+                    IN_JAIL_TOOL_TIMEOUT.as_secs()
+                ))
+            }
+        }
     }
 }
 

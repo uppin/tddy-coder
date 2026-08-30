@@ -206,5 +206,27 @@ the draft at step 3.
 - [x] Implementation steps 1–3 (`/green`)
 - [x] Open draft PR — dependents branch off this ref (#427)
 - [x] Step 5 — ship `tddy-sandbox-runner` from `release` / `install` / `publish.sh`
-- [ ] Step 4 — real jail provisioning, `in_jail_tool_*` frames, runner in-jail execution
+- [x] Step 4 — real jail provisioning, `in_jail_tool_*` frames, runner in-jail execution
+- [ ] **Blocker** — the darwin renderer's blanket `/var/folders` grant (see below)
 - [ ] Mark PR ready for review
+
+## Known hole — the jail is not yet "the worktree and nothing else"
+
+`tddy-sandbox-darwin`'s `render_plan` grants **every** plan `(subpath "/var/folders")` for both
+read and write (`profile.rs:48` and `:79`), plus the per-user temp base derived from `TMPDIR`.
+On a stock macOS host `TMPDIR` *is* `/var/folders/…`, so a workspace jail can read and write
+anything under it — every other session's scratch, and any other app's per-user temp files.
+
+Demonstrated, not inferred: re-running the confinement suite with
+`TMPDIR=$(getconf DARWIN_USER_TEMP_DIR)` fails
+`a_shell_tool_in_the_jail_cannot_climb_out_of_the_worktree_with_a_relative_path` with the host
+file's contents in stdout. Under the nix dev shell's `TMPDIR=/tmp/nix-shell.…` the suite passes,
+because the test's host file then lands outside the granted subpath — so **the suite is green for
+an environmental reason, and that is exactly what makes this worth fixing before the PR leaves
+draft.**
+
+The grant predates this changeset and is shared with the sandboxed `claude-cli` and `cursor-cli`
+jails, which is why it is called out here rather than quietly narrowed: tightening it is a change
+to the shared darwin renderer and needs its own decision. The options are to drop the blanket
+`/var/folders` rule in favour of the plan's own scratch/egress paths, or to keep it only for the
+recipes that demonstrably need it.

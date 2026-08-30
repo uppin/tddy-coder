@@ -280,7 +280,10 @@ pub struct SandboxRunnerArgs {
     /// Binary path for the in-jail agent when `agent_kind` is `cursor` (default: `agent`).
     #[arg(long)]
     pub agent_binary: Option<String>,
-    #[arg(long)]
+    /// Model for the in-jail agent. Empty only in a mode that hosts no agent
+    /// ([`run_workspace_tool_runner`]); the claude and cursor paths refuse an empty one rather
+    /// than launching the CLI with a meaningless `--model`.
+    #[arg(long, default_value = "")]
     pub model: String,
     #[arg(long)]
     pub ready_marker: PathBuf,
@@ -725,8 +728,13 @@ impl SandboxSessionRelay {
 
 struct SandboxRunnerService {
     session_id: String,
-    stdin_tx: std::sync::mpsc::Sender<Bytes>,
+    /// Feeds the in-jail PTY's stdin. `None` in a mode that spawns no PTY (`--workspace-tools`),
+    /// where terminal input has nowhere to go.
+    stdin_tx: Option<std::sync::mpsc::Sender<Bytes>>,
     relay: Arc<SandboxSessionRelay>,
+    /// Runs `in_jail_tool_request`s here in the jail. `Some` only for a workspace tool jail — in
+    /// every other mode tool calls travel the other way, from the in-jail agent out to the host.
+    in_jail_tools: Option<Arc<InJailToolExecutor>>,
 }
 
 #[tonic::async_trait]
@@ -745,6 +753,7 @@ impl TonicSandboxService for SandboxRunnerService {
         relay.set_outbound(out_tx.clone());
         let session_id = self.session_id.clone();
         let stdin_tx = self.stdin_tx.clone();
+        let in_jail_tools = self.in_jail_tools.clone();
 
         tokio::spawn(async move {
             while let Some(Ok(frame)) = inbound.next().await {
@@ -755,9 +764,14 @@ impl TonicSandboxService for SandboxRunnerService {
                         }
                     }
                     Some(SessionPayload::TerminalInput(input)) => {
-                        if !input.data.is_empty() {
-                            let _ = stdin_tx.send(Bytes::from(input.data));
+                        if let Some(stdin_tx) = stdin_tx.as_ref() {
+                            if !input.data.is_empty() {
+                                let _ = stdin_tx.send(Bytes::from(input.data));
+                            }
                         }
+                    }
+                    Some(SessionPayload::InJailToolRequest(req)) => {
+                        dispatch_in_jail_tool_request(in_jail_tools.as_ref(), req, &out_tx)
                     }
                     Some(SessionPayload::ToolResponse(resp)) => relay.deliver_tool_response(resp),
                     Some(SessionPayload::EgressResponse(resp)) => {
@@ -866,6 +880,7 @@ impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
         relay.set_outbound(out_tx.clone());
         let session_id = self.session_id.clone();
         let stdin_tx = self.stdin_tx.clone();
+        let in_jail_tools = self.in_jail_tools.clone();
 
         tokio::spawn(async move {
             while let Some(Ok(frame)) = inbound.next().await {
@@ -876,9 +891,14 @@ impl tddy_service::proto::sandbox::SandboxService for SandboxRunnerService {
                         }
                     }
                     Some(SessionPayload::TerminalInput(input)) => {
-                        if !input.data.is_empty() {
-                            let _ = stdin_tx.send(Bytes::from(input.data));
+                        if let Some(stdin_tx) = stdin_tx.as_ref() {
+                            if !input.data.is_empty() {
+                                let _ = stdin_tx.send(Bytes::from(input.data));
+                            }
                         }
+                    }
+                    Some(SessionPayload::InJailToolRequest(req)) => {
+                        dispatch_in_jail_tool_request(in_jail_tools.as_ref(), req, &out_tx)
                     }
                     Some(SessionPayload::ToolResponse(resp)) => relay.deliver_tool_response(resp),
                     Some(SessionPayload::EgressResponse(resp)) => {
@@ -1980,25 +2000,191 @@ fn rewrite_http_proxy_request(raw: &[u8]) -> Option<(Vec<u8>, String, u16)> {
     Some((head, host, port))
 }
 
-/// Run the sandbox gRPC server and claude PTY until shutdown.
-pub async fn run_sandbox_runner(args: SandboxRunnerArgs) -> Result<()> {
+/// Serve `SandboxService` over this process's real stdin/stdout until the pipe closes.
+///
+/// `--stdio` dedicates stdin/stdout to RPC framing (see `tddy_core::stdio_safety`) — keep stderr
+/// off the terminal but stdin/stdout live, the same discipline as `--stdio` on `tddy-coder`.
+/// Redirecting stderr is best-effort: no fallback dir means no terminal to redirect away from in
+/// the first place.
+async fn serve_over_stdio(service: SandboxRunnerService, ready_marker: &Path) -> Result<()> {
+    if let Some(fallback_dir) = BOOT_LOG_FALLBACK.get() {
+        let _ = tddy_core::stdio_safety::redirect_fd_to_file(
+            libc::STDERR_FILENO,
+            &fallback_dir.join("sandbox-runner.stdio_stderr.log"),
+        );
+    }
+    boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
+    std::fs::write(ready_marker, "stdio")
+        .context("write ready marker")
+        .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
+    sandbox_log_line("INFO", "SandboxService serving over stdio");
+    let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(
+        tddy_service::proto::sandbox::SandboxServiceServer::new(service),
+    );
+    endpoint.run().await;
+    Ok(())
+}
+
+/// Serve a sandboxed `workspace` session's tool calls (`--workspace-tools <worktree>`), and
+/// nothing else.
+///
+/// The mirror image of every other mode here: there is no agent in this jail to host, so there is
+/// no PTY, no `tddy-tools --mcp` server calling back out over the tool-IPC socket, and no egress
+/// shim for it to reach the network through. The jail exists so that the tool call itself runs
+/// under the kernel's confinement instead of on the host that holds the checkout — the host asks
+/// with `in_jail_tool_request`, this answers with `in_jail_tool_response`, and the worktree the
+/// engine is pointed at is the one mounted inside the jail.
+async fn run_workspace_tool_runner_inner(
+    args: &SandboxRunnerArgs,
+    worktree: PathBuf,
+) -> Result<()> {
+    if !args.stdio {
+        anyhow::bail!(
+            "--workspace-tools requires --stdio: the host drives a workspace tool jail over its \
+             piped stdio and has no other way to hand it a tool call"
+        );
+    }
+    init_sandbox_egress_logging();
+    boot_log(
+        "INFO",
+        &format!(
+            "boot: workspace tool mode, serving tools against {}",
+            worktree.display()
+        ),
+    );
+    let _ = std::fs::remove_file(&args.ready_marker);
+    let service = SandboxRunnerService {
+        session_id: args.session_id.clone(),
+        // No PTY in this jail, so terminal input has nowhere to go.
+        stdin_tx: None,
+        relay: Arc::new(SandboxSessionRelay::default()),
+        in_jail_tools: Some(Arc::new(InJailToolExecutor {
+            worktree,
+            session_id: args.session_id.clone(),
+            registry: tddy_task::TaskRegistry::new(),
+        })),
+    };
+    serve_over_stdio(service, &args.ready_marker).await
+}
+
+/// Runs one tool call inside the jail, against the worktree as mounted here.
+struct InJailToolExecutor {
+    worktree: PathBuf,
+    /// The session this jail serves. Used in place of whatever the request names: the jail holds
+    /// exactly one session's checkout, so a request naming another session is still that session's
+    /// tool call, and its background jobs belong in this runner's registry under this id.
+    session_id: String,
+    /// Backs `Shell`'s detached (`block_until_ms = 0`) jobs for the lifetime of the jail.
+    registry: tddy_task::TaskRegistry,
+}
+
+impl InJailToolExecutor {
+    async fn execute(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+        let outcome = tddy_tool_engine::execute_tool(
+            &self.worktree,
+            &req.tool_name,
+            &req.args_json,
+            &self.registry,
+            &self.session_id,
+        )
+        .await;
+        ExecuteToolResponse {
+            result_json: outcome.result_json,
+            is_error: outcome.is_error,
+            error_message: outcome.error_message,
+            job_id: outcome.job_id,
+            job_running: outcome.job_running,
+        }
+    }
+}
+
+/// Run the tool call the host sent and answer it on the outbound stream.
+///
+/// Spawned rather than awaited inline so a long `Shell` does not stall the frames behind it; the
+/// host keeps one in-jail call outstanding at a time, which is what lets the answer carry no
+/// request id.
+fn dispatch_in_jail_tool_request(
+    executor: Option<&Arc<InJailToolExecutor>>,
+    request: ExecuteToolRequest,
+    out_tx: &OutboundSender,
+) {
+    let out_tx = out_tx.clone();
+    let Some(executor) = executor.cloned() else {
+        // Every other runner mode hosts an agent whose tools the *host* runs; only a
+        // `--workspace-tools` jail runs them itself. Refusing loudly beats a silent drop the host
+        // would wait out as a hang.
+        let _ = out_tx.send(Ok(SessionFrame {
+            payload: Some(SessionPayload::InJailToolResponse(ExecuteToolResponse {
+                is_error: true,
+                error_message: "this sandbox runner does not serve in-jail tool calls (started \
+                                without --workspace-tools)"
+                    .to_string(),
+                ..Default::default()
+            })),
+        }));
+        return;
+    };
+    tokio::spawn(async move {
+        let response = executor.execute(&request).await;
+        let _ = out_tx.send(Ok(SessionFrame {
+            payload: Some(SessionPayload::InJailToolResponse(response)),
+        }));
+    });
+}
+
+/// An agent CLI is launched with the model it was asked for, or not at all: `--model` is optional
+/// only because the mode that hosts no agent has no use for one, so the agent paths say so here
+/// rather than exec'ing `claude --model ""`.
+fn require_model(model: &str, agent_kind: &str) -> Result<()> {
+    if model.trim().is_empty() {
+        anyhow::bail!("--model is required for {agent_kind} pty mode");
+    }
+    Ok(())
+}
+
+/// Boot-log wiring shared by every entry point: a fallback log directory beside the ready marker,
+/// the panic hook that turns an in-jail abort into a readable failure marker, and the startup
+/// environment dump.
+fn prepare_runner_boot(entry: &str, args: &SandboxRunnerArgs) {
     if let Some(parent) = args.ready_marker.parent() {
         set_boot_log_fallback(parent.to_path_buf());
     }
     install_sandbox_panic_hook();
-    boot_log("INFO", "boot: enter run_sandbox_runner");
-    log_startup_environment(&args);
+    boot_log("INFO", &format!("boot: enter {entry}"));
+    log_startup_environment(args);
+}
 
-    let result = run_sandbox_runner_inner(args).await;
+/// Record how a run ended. A failure is written to the failure marker the host reads back out of
+/// the jail's egress, since a jailed process's stderr is nobody's terminal.
+fn finish_runner_run(entry: &str, result: Result<()>) -> Result<()> {
     if let Err(ref err) = result {
         let message = format!("{err:#}");
-        boot_log_error("run_sandbox_runner", &message);
+        boot_log_error(entry, &message);
         write_failure_marker(&message);
         eprintln!("sandbox-runner failed: {message}");
     } else {
-        boot_log("INFO", "boot: run_sandbox_runner finished normally");
+        boot_log("INFO", &format!("boot: {entry} finished normally"));
     }
     result
+}
+
+/// Run the sandbox gRPC server and claude PTY until shutdown.
+pub async fn run_sandbox_runner(args: SandboxRunnerArgs) -> Result<()> {
+    prepare_runner_boot("run_sandbox_runner", &args);
+    let result = run_sandbox_runner_inner(args).await;
+    finish_runner_run("run_sandbox_runner", result)
+}
+
+/// Serve a sandboxed `workspace` session's tool calls against `worktree`, hosting no agent.
+///
+/// The counterpart to [`run_sandbox_runner`] for a jail with nothing in it but the checkout: the
+/// host sends `in_jail_tool_request` over the `SessionChannel` and this answers
+/// `in_jail_tool_response`, so the confinement around a tool call is the kernel's rather than the
+/// tool engine's path checks (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
+pub async fn run_workspace_tool_runner(args: SandboxRunnerArgs, worktree: PathBuf) -> Result<()> {
+    prepare_runner_boot("run_workspace_tool_runner", &args);
+    let result = run_workspace_tool_runner_inner(&args, worktree).await;
+    finish_runner_run("run_workspace_tool_runner", result)
 }
 
 async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
@@ -2095,6 +2281,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("tddy_tools_path is required for cursor pty mode")
             })?;
+            require_model(&args.model, "cursor")?;
             let cursor_binary = args.agent_binary.as_deref().unwrap_or("agent");
             let agent_args = if args.agent_arg.is_empty() {
                 &args.claude_arg
@@ -2124,6 +2311,7 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
             let tddy_tools_path = args.tddy_tools_path.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("tddy_tools_path is required for claude pty mode")
             })?;
+            require_model(&args.model, "claude")?;
             let pty_state = spawn_claude_pty(SpawnClaudePtyParams {
                 context_dir: &args.context_dir,
                 cwd: &cwd,
@@ -2149,31 +2337,13 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
 
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),
-        stdin_tx: pty.stdin_tx,
+        stdin_tx: Some(pty.stdin_tx),
         relay,
+        in_jail_tools: None,
     };
 
     if args.stdio {
-        // --stdio dedicates this process's real stdin/stdout to RPC framing (see
-        // `tddy_core::stdio_safety`) — keep stderr off the terminal but stdin/stdout live, same
-        // discipline as `--stdio` on `tddy-coder`. Best-effort: no fallback dir means no terminal
-        // to redirect away from in the first place.
-        if let Some(fallback_dir) = BOOT_LOG_FALLBACK.get() {
-            let _ = tddy_core::stdio_safety::redirect_fd_to_file(
-                libc::STDERR_FILENO,
-                &fallback_dir.join("sandbox-runner.stdio_stderr.log"),
-            );
-        }
-        boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
-        std::fs::write(&args.ready_marker, "stdio")
-            .context("write ready marker")
-            .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
-        sandbox_log_line("INFO", "SandboxService serving over stdio");
-        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_process_stdio(
-            tddy_service::proto::sandbox::SandboxServiceServer::new(service),
-        );
-        endpoint.run().await;
-        return Ok(());
+        return serve_over_stdio(service, &args.ready_marker).await;
     }
 
     // AF_UNIX control channel (Linux cgroups path): a UDS on a bind-mounted path crosses the jail's

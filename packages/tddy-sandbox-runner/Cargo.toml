@@ -20,6 +20,10 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-service = { path = "../tddy-service" }
 tddy-stdio = { path = "../tddy-stdio" }
+# The in-jail half of a sandboxed `workspace` session's tool call: `--workspace-tools` runs the
+# same engine the daemon would have run on the host, but from inside the jail.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-task = { path = "../tddy-task" }
 log = "0.4"
 env_logger = "0.11"
 anyhow = "1"
