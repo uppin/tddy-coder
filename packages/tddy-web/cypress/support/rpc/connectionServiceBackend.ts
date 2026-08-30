@@ -73,6 +73,7 @@ import {
   type AgentConversationControls,
   type AgentConversationScenario,
 } from "./agentConversationBackend";
+import { type SessionNotificationFeed } from "./sessionNotificationFeed";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -255,6 +256,10 @@ export interface ConnectionServiceScenario {
    *  `PromptAgentConversation` / `CancelAgentConversation` — what an agent conversation tab talks
    *  to. Default: unimplemented, so a screen that opens no such tab is unaffected. */
   agentConversations?: AgentConversationScenario;
+  /** The daemon-level session-notification feed, served by `StreamSessionNotifications` — one
+   *  stream carrying every session's activity and attention events (see `./sessionNotificationFeed`).
+   *  Default: unimplemented, so a screen that never subscribes is unaffected. */
+  sessionNotifications?: SessionNotificationFeed;
 }
 
 export interface ConnectionServiceBackend
@@ -417,6 +422,9 @@ export function aConnectionServiceBackend(
       ...(rosterFake ? rosterFake.handlers : {}),
       // The agent conversations behind the session's agent tabs, spread for the same reason.
       ...(conversationFake ? conversationFake.handlers : {}),
+      // The daemon's session-notification feed. Spread for the same reason as the two above: one
+      // `.implement(ConnectionService, …)` per backend.
+      ...(scenario.sessionNotifications ? scenario.sessionNotifications.handlers : {}),
       resumeSession: async (req) => {
         const overrides =
           typeof scenario.resumeSession === "function"

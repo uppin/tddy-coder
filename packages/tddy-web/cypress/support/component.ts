@@ -2,13 +2,16 @@ import React from "react";
 import { mount } from "cypress/react";
 import { mountWithRpc } from "./rpc/inMemory.tsx";
 import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
+import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 
-/** The Agent Activity store is an app-lifetime module singleton; component tests share one JS
- *  context across cases, so clear its per-session cache before each test to keep cases that reuse a
- *  `sessionId` isolated. */
+/** The Agent Activity and session-notification stores are app-lifetime module singletons; component
+ *  tests share one JS context across cases, so clear their per-session state before each test to keep
+ *  cases that reuse a `sessionId` isolated — a notification left behind by one spec would otherwise
+ *  light up the next spec's drawer row. */
 beforeEach(() => {
   agentActivityRegistry.reset();
+  sessionNotificationRegistry.reset();
 });
 
 /** Screens derive their selection from the URL (docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md),

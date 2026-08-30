@@ -1,7 +1,7 @@
 import React from "react";
 import type { SessionEntry } from "../../gen/connection_pb";
 import { sessionDrawerLabel } from "../../utils/sessionDrawerLabel";
-import { connectionStatusForSession } from "../../utils/connectionStatusForSession";
+import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { Tooltip, TooltipTrigger, TooltipContent } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
@@ -27,15 +27,9 @@ interface SessionDrawerItemProps {
   onToggleSelect?: (sessionId: string) => void;
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  connected: "bg-green-500",
-  disconnected: "bg-gray-400",
-  "needs-input": "bg-yellow-500",
-};
 
 export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, codebaseHostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
-  const status = connectionStatusForSession(session);
 
   return (
     <Tooltip>
@@ -64,12 +58,7 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
                 : "hover:bg-muted",
             )}
           >
-          {/* Status dot */}
-          <span
-            data-testid={`sessions-drawer-item-status-${session.sessionId}`}
-            data-status={status}
-            className={cn("flex-shrink-0 h-2 w-2 rounded-full", STATUS_COLOR[status])}
-          />
+          <SessionIndicatorDot session={session} />
           {/* Label */}
           <span
             data-testid={`sessions-drawer-item-label-${session.sessionId}`}

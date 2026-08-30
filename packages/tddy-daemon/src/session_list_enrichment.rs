@@ -140,7 +140,10 @@ fn find_session_row<'a>(changeset: &'a Changeset, session_id: &str) -> Option<&'
 pub fn session_list_status_from_session_dir(
     session_dir: &Path,
 ) -> anyhow::Result<SessionListStatusDisplay> {
-    log::info!(
+    // `debug!`, not `info!`: this is called per row of a polled session list, and now also on the
+    // label lookup behind every reported hook — at INFO a dozen busy agents would bury the daemon
+    // log in it.
+    log::debug!(
         target: "tddy_daemon::session_list_enrichment",
         "enriching session list row for {}",
         session_dir.display()

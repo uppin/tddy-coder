@@ -28,6 +28,8 @@ import {
   type SessionRuntimeConnection,
 } from "./sessionRuntimeRegistry";
 import { useSessionClientCache } from "./sessionClientCache";
+import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
+import { useSessionNotifications } from "../../rpc/useSessionNotifications";
 import { useAuthContext } from "../../hooks/authProvider";
 import { AppShell } from "../shell/AppShell";
 import { Button } from "../ui/button";
@@ -87,6 +89,12 @@ export function SessionsDrawerScreen({
   // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
   // selected host); cross-host interaction routes through `activeClient` (computed below).
   const client = useDaemonClient(ConnectionService);
+
+  // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
+  // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
+  // itself — hence the bare call.
+  useSessionNotifications();
+
   const { room, selectedInstanceId } = useSelectedDaemon();
   const daemons = useDaemons();
   const liveKitFactory = useLiveKitTransportFactory();
@@ -601,9 +609,17 @@ export function SessionsDrawerScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachment.status, selectedSessionId]);
 
-  // Selecting a session is a navigation and nothing else — the activation effect above does the
-  // inspector and attachment work, so Back and a pasted link get exactly the same treatment.
+  // Selecting a session is a navigation plus one acknowledgement — the activation effect above does
+  // the inspector and attachment work, so Back and a pasted link get the same treatment for
+  // everything that decides what the screen shows.
   const handleSelectSession = (sessionId: string) => {
+    // The exception is the row's own indicator: clicking a row is the operator *deciding* to look at
+    // what that session had to say, so its outstanding notifications settle here (FR6). It sits on
+    // the click rather than in the activation effect deliberately — a reload or a Back onto a
+    // session the operator is not reading should not silently clear a dot they never saw. Only the
+    // notification-driven half clears: a `pending_elicitation` is an unanswered gate and keeps its
+    // yellow until it is actually answered (see `sessionIndicatorFor`).
+    sessionNotificationRegistry.markSeen(sessionId, Date.now());
     // On mobile the list is a full-screen overlay — close it so the terminal is visible.
     if (isMobile) setSessionListOpen(false);
     navigate(sessionsDrawerPathForSession(sessionId));

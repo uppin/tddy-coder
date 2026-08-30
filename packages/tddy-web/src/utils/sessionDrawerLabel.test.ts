@@ -80,6 +80,29 @@ describe("sessionDrawerLabel — derived display label for drawer items", () => 
     expect(label).toBe("offline-branch");
   });
 
+  it("treats the display placeholder as an absent workflowGoal", () => {
+    // Given — `session_list_enrichment` reports a missing goal as "\u2014" and ListSessions hands
+    // that string to the browser unchanged; a row labelled "\u2014" names nothing.
+    const session = anActiveSession({ repoPath: "", workflowGoal: "\u2014", sessionId: "deadbeef-0000-0000-0000-000000000000" });
+
+    // When
+    const label = sessionDrawerLabel(session);
+
+    // Then
+    expect(label).toBe("deadbeef");
+  });
+
+  it("still prefers the repoPath basename over the display placeholder", () => {
+    // Given
+    const session = anActiveSession({ repoPath: "/home/dev/my-feature-branch", workflowGoal: "\u2014" });
+
+    // When
+    const label = sessionDrawerLabel(session);
+
+    // Then
+    expect(label).toBe("my-feature-branch");
+  });
+
   it("handles a repoPath that is just a top-level slash (no basename)", () => {
     // Given — degenerate path, falls back to workflowGoal
     const session = anActiveSession({ repoPath: "/", workflowGoal: "root session goal" });

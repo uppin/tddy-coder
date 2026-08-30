@@ -102,10 +102,13 @@ use tddy_service::proto::connection::{
     PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
     ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
     RepointPlannedPrResponse, ReportAgentActivityRequest, ReportAgentActivityResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse, StartDemoVmRequest, StartDemoVmResponse,
-    StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest, StreamHostStatsRequest,
-    StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
-    ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
+    SessionNotificationEvent as ProtoSessionNotificationEvent,
+    SessionNotificationKind as ProtoSessionNotificationKind,
+    SessionNotificationSource as ProtoSessionNotificationSource, StartDemoVmRequest,
+    StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamAcpReplayRequest,
+    StreamHostStatsRequest, StreamLiveKitRoomsRequest, StreamMode, StreamSessionActivityRequest,
+    StreamSessionNotificationsRequest, ToolCallInfo as ProtoToolCallInfo, WorktreeFileChunk,
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
@@ -557,6 +560,102 @@ impl Stream for MpscAgentActivityStream {
 }
 
 impl Unpin for MpscAgentActivityStream {}
+
+/// Stream adapter backed by an mpsc channel for [`ProtoSessionNotificationEvent`] server-streaming.
+pub struct MpscSessionNotificationStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<ProtoSessionNotificationEvent>,
+}
+
+impl Stream for MpscSessionNotificationStream {
+    type Item = Result<ProtoSessionNotificationEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscSessionNotificationStream {}
+
+/// One session notification on the wire.
+///
+/// [`SessionNotification::os_user`] is dropped here rather than carried: it is what decides
+/// *whether* a client is shown the event at all (see [`relay_session_notifications`]), and the
+/// drawer has no use for it. Putting an authorization fact on the wire would only tell a browser
+/// something about the host's other operators that it has no reason to know.
+fn session_notification_event(
+    notification: crate::session_notifications::SessionNotification,
+) -> ProtoSessionNotificationEvent {
+    use crate::session_notifications::{SessionNotificationKind, SessionNotificationSource};
+    ProtoSessionNotificationEvent {
+        session_id: notification.session_id,
+        label: notification.label,
+        kind: match notification.kind {
+            SessionNotificationKind::Activity => ProtoSessionNotificationKind::Activity,
+            SessionNotificationKind::AttentionRequired => {
+                ProtoSessionNotificationKind::AttentionRequired
+            }
+        } as i32,
+        source: match notification.source {
+            SessionNotificationSource::ActivityStatus => {
+                ProtoSessionNotificationSource::ActivityStatus
+            }
+            SessionNotificationSource::AgentToolCall => {
+                ProtoSessionNotificationSource::AgentToolCall
+            }
+            SessionNotificationSource::Presenter => ProtoSessionNotificationSource::Presenter,
+        } as i32,
+        text: notification.text,
+        at_unix_ms: notification.at_unix_ms,
+    }
+}
+
+/// Relay task for `StreamSessionNotifications`: forwards `os_user`'s session notifications to one
+/// client until it disconnects. A client that falls behind the channel's capacity loses its oldest
+/// events (`Lagged`) and keeps its stream: the newest notification is the one an indicator is
+/// derived from, so dropping the stream over a stale one would cost more than the gap.
+///
+/// The bus is daemon-wide — one channel carries every session on the host, which is what lets a
+/// drawer of any size pay for a single subscription (PRD NFR1). Scoping to one operator is
+/// therefore this relay's job: without it, a daemon serving several users would hand each of them
+/// the others' session ids, repository names and operator-facing text.
+async fn relay_session_notifications(
+    mut broadcast_rx: tokio::sync::broadcast::Receiver<
+        crate::session_notifications::SessionNotification,
+    >,
+    tx: tokio::sync::mpsc::UnboundedSender<ProtoSessionNotificationEvent>,
+    os_user: String,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match broadcast_rx.recv().await {
+            Ok(notification) => {
+                // Delivered only on a positive match of a named owner. A notification that names
+                // no owner is not a notification for everybody — it is one whose owner could not
+                // be established, and the safe answer to that is to deliver it to no one.
+                if notification.os_user.is_empty() || notification.os_user != os_user {
+                    continue;
+                }
+                if tx.send(session_notification_event(notification)).is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(missed)) => {
+                log::debug!(
+                    target: "tddy_daemon::session_notifications",
+                    "a notification stream client fell behind and missed {missed} event(s)"
+                );
+            }
+            Err(RecvError::Closed) => break,
+        }
+    }
+}
 
 /// Stream adapter backed by an mpsc channel for [`AcpReplayFrame`] server-streaming.
 pub struct MpscAcpReplayStream {
@@ -1066,6 +1165,11 @@ pub struct ConnectionServiceImpl {
     /// daemon.
     agent_conversations:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, AgentConversation>>>,
+    /// Where this daemon publishes its session notifications
+    /// (`docs/ft/daemon/session-notifications.md`). `None` means
+    /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
+    /// hand a client.
+    session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
     /// Self-reference for handing out `Arc<ConnectionServiceImpl>` from a `&self` method. Set
     /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `main.rs`;
     /// shared across `Clone`s because it is itself behind an `Arc`, so a clone tonic holds can
@@ -1504,6 +1608,21 @@ impl ConnectionServiceImpl {
         // report READY for a clone nobody built.
         let session_agent_clones =
             Arc::new(crate::session_agent_clone::SessionAgentCloneStore::new());
+        // A service given Telegram hooks and no explicit bus still notifies Telegram, because the
+        // notification bus is now the only path from `ReportSessionStatus` to a chat. Without this
+        // the hooks would be inert until a caller happened to install a bus, and "Telegram is
+        // configured" would stop meaning "Telegram is notified". `main.rs` overrides it with a bus
+        // carrying the notification stream alongside Telegram.
+        let session_notification_bus = telegram.as_ref().map(|hooks| {
+            Arc::new(
+                crate::session_notifications::SessionNotificationBus::new()
+                    .with_subscriber(Arc::new(
+                    crate::session_notification_subscribers::TelegramNotificationSubscriber::new(
+                        Arc::clone(hooks),
+                    ),
+                )),
+            )
+        });
         Self {
             config,
             sessions_base_for_user,
@@ -1549,6 +1668,7 @@ impl ConnectionServiceImpl {
             agent_conversations: Arc::new(
                 tokio::sync::Mutex::new(std::collections::HashMap::new()),
             ),
+            session_notification_bus,
             self_handle: Arc::new(std::sync::OnceLock::new()),
         }
     }
@@ -1705,6 +1825,19 @@ impl ConnectionServiceImpl {
         self.task_registry.clone()
     }
 
+    /// Substitute the session-notification bus (builder pattern).
+    ///
+    /// Replaces the Telegram-only bus [`Self::new`] builds from the hooks it was given, which is
+    /// what `main.rs` does to add the `StreamSessionNotifications` relay beside Telegram, and what
+    /// a test does to record what a publish reached.
+    pub fn with_session_notification_bus(
+        mut self,
+        bus: Arc<crate::session_notifications::SessionNotificationBus>,
+    ) -> Self {
+        self.session_notification_bus = Some(bus);
+        self
+    }
+
     /// Attach an idle-timeout tracker to this service (builder pattern).
     ///
     /// When set, every RPC handler calls `tracker.record_activity()` so the relay daemon does
@@ -1785,10 +1918,40 @@ impl ConnectionServiceImpl {
             .ok_or_else(|| Status::internal("could not resolve sessions path"))
     }
 
-    fn maybe_spawn_telegram_observer(&self, session_id: &str, grpc_port: u16) {
-        if let Some(ref tg) = self.telegram {
-            tg.spawn_presenter_observer_task(session_id, grpc_port);
-        }
+    /// Start the presenter observer for a freshly spawned workflow session: Telegram's surface when
+    /// this daemon has one, and — when it has a bus and can resolve `os_user`'s sessions directory
+    /// to read the session's label from — the notification publish that raises its indicator.
+    ///
+    /// The two are independent. Gating the observer on Telegram would leave a workflow session's
+    /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
+    /// them; `spawn_presenter_observer_task` declines only when *neither* sink exists.
+    fn maybe_spawn_presenter_observer(&self, os_user: &str, session_id: &str, grpc_port: u16) {
+        let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
+            match crate::user_sessions_path::sessions_base_for_user(
+                os_user,
+                Some(&self.tddy_data_dir),
+            ) {
+                Some(sessions_base) => {
+                    Some(crate::session_notifications::SessionNotificationPublishing {
+                        bus: Arc::clone(bus),
+                        sessions_base,
+                        os_user: os_user.to_string(),
+                    })
+                }
+                None => {
+                    log::warn!(
+                        "presenter observer for session {session_id}: no sessions base for os_user — its notifications will not be published"
+                    );
+                    None
+                }
+            }
+        });
+        crate::telegram_session_subscriber::spawn_presenter_observer_task(
+            self.telegram.clone(),
+            publishing,
+            session_id,
+            grpc_port,
+        );
     }
 
     /// PR status for one branch, resolved with the calling operator's own GitHub credential.
@@ -9736,6 +9899,9 @@ impl ConnectionServiceImpl {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
+        // The spawn closure below takes ownership; the presenter observer started afterwards needs
+        // the same user to resolve the session's label from its sessions directory.
+        let observer_os_user = os_user.clone();
         let tool_path = req.tool_path.clone();
         let tddy_data_dir_for_spawn = self.tddy_data_dir.clone();
         let repo_path = repo_path.to_path_buf();
@@ -9950,7 +10116,11 @@ impl ConnectionServiceImpl {
             "StartSession: spawn returned, session_id={}",
             result.session_id
         );
-        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
+        self.maybe_spawn_presenter_observer(
+            &observer_os_user,
+            &result.session_id,
+            result.grpc_port,
+        );
         Ok(Response::new(StartSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -11696,6 +11866,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let spawn_client = self.spawn_client.clone();
         let spawn_mouse = self.config.spawn_mouse;
         let os_user = os_user.to_string();
+        // The spawn closure below takes ownership; the presenter observer started afterwards needs
+        // the same user to resolve the session's label from its sessions directory.
+        let observer_os_user = os_user.clone();
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
@@ -11825,7 +11998,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
         };
-        self.maybe_spawn_telegram_observer(&result.session_id, result.grpc_port);
+        self.maybe_spawn_presenter_observer(
+            &observer_os_user,
+            &result.session_id,
+            result.grpc_port,
+        );
         Ok(Response::new(ResumeSessionResponse {
             session_id: result.session_id,
             livekit_room: result.livekit_room,
@@ -13510,15 +13687,29 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             req.status
         );
 
-        if let Some(ref telegram) = self.telegram {
-            let mut w = telegram.watcher.lock().await;
-            w.on_claude_cli_activity_status_changed(
-                &telegram.config,
-                &*telegram.sender,
+        // One publish, every interested subscriber: Telegram renders the attention-worthy ones,
+        // and the notification stream carries all of them to the drawer's indicators. A subscriber
+        // that fails is logged by the bus and never fails this hook (PRD NFR3).
+        //
+        // The notification names `req.os_user` as its owner — the same user whose sessions
+        // directory the hook token was just checked against — so the stream can hand it to that
+        // operator's clients and to no one else's.
+        if let Some(ref bus) = self.session_notification_bus {
+            let label = crate::session_notifications::resolve_session_label(
+                &sessions_base,
                 &req.session_id,
-                &req.status,
-            )
-            .await;
+            );
+            if let Some(notification) =
+                crate::session_notifications::notification_for_activity_status(
+                    &req.session_id,
+                    &req.os_user,
+                    &label,
+                    &req.status,
+                    now_unix_ms(),
+                )
+            {
+                bus.publish(notification).await;
+            }
         }
 
         Ok(Response::new(ReportSessionStatusResponse { ok: true }))
@@ -13639,6 +13830,25 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 req.session_id,
                 e
             );
+        }
+        // The agent's own tool loop is the other thing that means "this session is working", and
+        // the only one a cursor-cli or tool session reports at all. Owned by `req.os_user`, as at
+        // the activity-status site above: the notification stream relays it to that operator only.
+        if let Some(ref bus) = self.session_notification_bus {
+            let label = crate::session_notifications::resolve_session_label(
+                &sessions_base,
+                &req.session_id,
+            );
+            bus.publish(
+                crate::session_notifications::notification_for_agent_tool_call(
+                    &req.session_id,
+                    &req.os_user,
+                    &label,
+                    &record.tool_name,
+                    now_unix_ms(),
+                ),
+            )
+            .await;
         }
         self.agent_activity_hub.publish(&req.session_id, record);
         // The record is **not** broadcast into the session room from here, deliberately.
@@ -13961,6 +14171,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         tokio::spawn(relay_agent_activity(broadcast_rx, tx));
 
         Ok(Response::new(MpscAgentActivityStream { rx }))
+    }
+
+    // --- session notifications ---
+
+    type StreamSessionNotificationsStream = MpscSessionNotificationStream;
+
+    /// Stream every session notification this daemon raises, for as long as the client stays
+    /// connected.
+    ///
+    /// Daemon-level by design (PRD NFR1): the request names no session, because one subscription
+    /// serves a drawer of any size. It does *not* name a user either — the caller's own token
+    /// does, and the relay carries only the sessions belonging to the OS user it maps to.
+    /// Live-only: each event carries the moment it happened, and a replayed backlog would raise
+    /// indicators for turns that finished while the tab was closed.
+    async fn stream_session_notifications(
+        &self,
+        request: Request<StreamSessionNotificationsRequest>,
+    ) -> Result<Response<Self::StreamSessionNotificationsStream>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Authenticate, then authorize exactly as `stream_session_activity` does: a token that
+        // maps to no OS user owns no sessions on this host, so there is nothing it may be shown.
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
+            .to_string();
+
+        let broadcast_rx = self
+            .session_notification_bus
+            .as_ref()
+            .and_then(|bus| bus.subscribe_clients())
+            .ok_or_else(|| {
+                Status::failed_precondition("this daemon publishes no session notifications")
+            })?;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProtoSessionNotificationEvent>();
+        tokio::spawn(relay_session_notifications(broadcast_rx, tx, os_user));
+
+        Ok(Response::new(MpscSessionNotificationStream { rx }))
     }
 
     // --- ACP transcript replay ---
