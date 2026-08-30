@@ -45,6 +45,7 @@ VM_TESTS=(
   "tddy-vm-build cloud_init_cli_acceptance"
   "tddy-vm-build build_image_cli_acceptance"
   "tddy-e2e vm_cgroups_acceptance"
+  "tddy-e2e vm_workspace_tool_sandbox_acceptance"
 )
 
 if [[ "${1:-}" == "--list" ]]; then
