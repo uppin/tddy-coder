@@ -73,6 +73,15 @@ export type CreateSessionInitialValues = Partial<{
   permissionMode: string;
   dangerouslySkipPermissions: boolean;
   stackParent: string;
+  /**
+   * The planned node in {@link stackParent}'s stack that this session materializes. Sent as
+   * `StartSessionRequest.stack_node_id` so the daemon links the node by identity instead of matching
+   * on the branch the spawn creates (D34) — the operator can rename that branch in this very form
+   * before confirming, and a daemon on another host than the orchestrator cannot read its stack to
+   * derive anything from it. Empty for every other caller, which keeps the branch-derived local
+   * lookup the agent's own `spawn-child` relies on.
+   */
+  stackNodeId: string;
   branchIntent: BranchIntent;
   newBranchName: string;
   /**
@@ -140,6 +149,18 @@ export function CreateSessionPane({
   const [agent, setAgent] = useState("");
   const [recipe, setRecipe] = useState(initialValues?.recipe ?? "tdd");
   const [stackParent, setStackParent] = useState(initialValues?.stackParent ?? "");
+  // The planned node the caller opened this form for. Not state of its own: the operator picks a
+  // stack parent here, never a node — so the id is derived from whether the parent is still the one
+  // the node belongs to, and dropped the moment it is not.
+  //
+  // A node id names a node in exactly one orchestrator's plan. Sent beside a different parent, the
+  // daemon's `LinkStackNode` answers `not_found` and — per D36, so a failed link never fails a spawn
+  // that already created the worktree — only logs it: the node would stay branchless and childless,
+  // which is the very bug the id exists to fix, with nothing said to the operator. An empty id falls
+  // the daemon back to its branch-derived local lookup, which is correct for a same-host spawn and is
+  // what every spawn used before the id existed (D34).
+  const stackNodeId =
+    stackParent === (initialValues?.stackParent ?? "") ? (initialValues?.stackNodeId ?? "") : "";
   // The existing session whose branch seeds a new pr-stack orchestrator's stack as its single root
   // node. Empty leaves the stack unseeded, which is what every caller sent before this control
   // existed — the agent then plans it.
@@ -490,6 +511,7 @@ export function CreateSessionPane({
         agent: selectedAgentId,
         recipe,
         stackParent,
+        stackNodeId,
         // No owning host: a tool session's chain base is resolved by the `tddy-coder` the daemon
         // spawns, against that process's own sessions tree, not by the daemon at start. Sending a
         // host here would name a routing the start never performs.
@@ -514,6 +536,7 @@ export function CreateSessionPane({
         recipe: managedCodebase ? recipe : "",
         stackParent,
         stackParentDaemonInstanceId,
+        stackNodeId,
         sessionType: "cursor-cli",
         model,
         permissionMode: "",
@@ -539,6 +562,7 @@ export function CreateSessionPane({
       recipe: managedCodebase && !isSplitCodebase ? recipe : "",
       stackParent,
       stackParentDaemonInstanceId,
+      stackNodeId,
       sessionType: "claude-cli",
       model,
       permissionMode,

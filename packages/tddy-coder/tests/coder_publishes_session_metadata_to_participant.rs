@@ -121,6 +121,7 @@ async fn coder_publishes_session_metadata_to_participant() -> Result<()> {
         repo_path: "/home/dev/feature-meta".to_string(),
         elapsed_display: "3m".to_string(),
         pending_elicitation: false,
+        ..SessionMetadata::default()
     });
     metadata_tx
         .send(json)

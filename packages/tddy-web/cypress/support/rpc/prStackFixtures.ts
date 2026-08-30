@@ -177,3 +177,43 @@ export function aStackPlanJson(version: number, nodes: StackNodeFixture[]): stri
     })),
   });
 }
+
+/**
+ * A live cross-host child session, as the common room presents it: the coder participant identity
+ * its owning daemon joins under, plus the `session` metadata block it publishes.
+ *
+ * The stack association (`orchestrator_session_id`, `stack_node_id`, `branch`) is the whole point —
+ * a session on another host reaches the web only as presence, so the metadata is the only place the
+ * PR-Stack view can learn which planned PR the participant is working
+ * (docs/ft/coder/pr-stack-live-status.md D37).
+ */
+export function aStackChildParticipant(fx: {
+  sessionId: string;
+  daemonInstanceId: string;
+  orchestratorSessionId: string;
+  stackNodeId: string;
+  branch: string;
+  recipe?: string;
+  repoPath?: string;
+}): { identity: string; metadata: string } {
+  return {
+    identity: `daemon-${fx.daemonInstanceId}-${fx.sessionId}`,
+    metadata: JSON.stringify({
+      session: {
+        workflow_goal: "",
+        workflow_state: "",
+        agent: "claude",
+        model: "sonnet-4",
+        activity_status: "",
+        recipe: fx.recipe ?? "tdd",
+        repo_path: fx.repoPath ?? "/home/dev/pr-stack-project",
+        elapsed_display: "",
+        pending_elicitation: false,
+        session_id: fx.sessionId,
+        orchestrator_session_id: fx.orchestratorSessionId,
+        stack_node_id: fx.stackNodeId,
+        branch: fx.branch,
+      },
+    }),
+  };
+}

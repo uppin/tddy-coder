@@ -8,7 +8,8 @@ use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::connection_service::{
-    SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent,
+    SeedCodebase, SeededAgentClones, SeededCloneGuard, SpawnStackParent, StackBaseLookup,
+    StackNodeLink, StackParentHost,
 };
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
 use tddy_daemon::session_room::{OpenedSessionRoom, SessionRoomHost};
@@ -727,6 +728,18 @@ impl ACursorCliDaemon {
         session_id: &str,
         room_host: &RecordingRoomHost,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_cursor_cli_session_under(session_id, room_host, SpawnStackParent::NoParent)
+            .await
+    }
+
+    /// [`Self::start_cursor_cli_session`] for a spawn that materializes a planned pr-stack node,
+    /// so the orchestrator's owner is the test's and not a daemon one host over.
+    async fn start_cursor_cli_session_under(
+        &self,
+        session_id: &str,
+        room_host: &RecordingRoomHost,
+        stack_parent: SpawnStackParent<'_>,
+    ) -> Result<Response<StartSessionResponse>, Status> {
         spawn_cursor_cli_session_inner(
             &self.config,
             self.sessions.path(),
@@ -742,7 +755,7 @@ impl ACursorCliDaemon {
             "",
             "",
             "",
-            SpawnStackParent::NoParent,
+            stack_parent,
             "",
             false,
             &mut [],
@@ -758,6 +771,14 @@ impl ACursorCliDaemon {
 
     fn session_dir(&self, session_id: &str) -> PathBuf {
         self.sessions.path().join("sessions").join(session_id)
+    }
+
+    /// The branch the started session actually created, as its own changeset records it.
+    fn branch_of(&self, session_id: &str) -> String {
+        tddy_core::read_changeset(&self.session_dir(session_id))
+            .expect("a started session writes a changeset")
+            .branch
+            .expect("a started session records the branch it created")
     }
 
     /// The checkout the started session recorded for itself in `.session.yaml`.
@@ -860,5 +881,94 @@ async fn cursor_cli_peer_spawn_rejects_a_missing_repo_path() {
         err.message.to_ascii_lowercase().contains("not accessible"),
         "error message must explain the repo_path is not accessible, got: {}",
         err.message
+    );
+}
+
+/// One link a spawn recorded on its orchestrator's planned node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ARecordedLink {
+    orchestrator_session_id: String,
+    node_id: String,
+    child_session_id: String,
+    branch: String,
+}
+
+/// The daemon that owns the orchestrator, recording every link it is asked for. Standing in for a
+/// peer, because the point of the link being an RPC is that the orchestrator need not live here
+/// (D35).
+#[derive(Default)]
+struct ARecordingStackParentOwner {
+    linked: Mutex<Vec<ARecordedLink>>,
+}
+
+impl ARecordingStackParentOwner {
+    fn links_recorded(&self) -> Vec<ARecordedLink> {
+        self.linked
+            .lock()
+            .expect("link log is not poisoned")
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl StackParentHost for ARecordingStackParentOwner {
+    /// These spawns plan no ordering, so the child's worktree takes the project default.
+    async fn chain_base_ref(
+        &self,
+        _lookup: &StackBaseLookup<'_>,
+    ) -> Result<Option<String>, Status> {
+        Ok(None)
+    }
+
+    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
+        self.linked
+            .lock()
+            .expect("link log is not poisoned")
+            .push(ARecordedLink {
+                orchestrator_session_id: link.orchestrator_session_id.to_string(),
+                node_id: link.node_id.to_string(),
+                child_session_id: link.child_session_id.to_string(),
+                branch: link.branch.to_string(),
+            });
+        Ok(())
+    }
+}
+
+const STACK_CHILD_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000b2";
+const ORCHESTRATOR_SESSION_ID: &str = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
+
+#[tokio::test]
+async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializes() {
+    // Given — a cursor-cli spawn of a planned PR, exactly as the PR-Stack row starts one
+    let daemon = a_cursor_cli_daemon();
+    let rooms = a_room_host();
+    let orchestrators_daemon = ARecordingStackParentOwner::default();
+
+    // When
+    daemon
+        .start_cursor_cli_session_under(
+            STACK_CHILD_SESSION_ID,
+            &rooms,
+            SpawnStackParent::OwnedBy {
+                session_id: ORCHESTRATOR_SESSION_ID,
+                daemon_instance_id: "host-a",
+                stack_node_id: "attach-store",
+                session_token: TEST_SESSION_TOKEN,
+                host: &orchestrators_daemon,
+            },
+        )
+        .await
+        .expect("a cursor-cli StartSession under a pr-stack orchestrator must succeed");
+
+    // Then — without this the node owns no branch on any host, and `Stack::base_ref_for_spawn`
+    // refuses every descendant of it forever
+    assert_eq!(
+        orchestrators_daemon.links_recorded(),
+        vec![ARecordedLink {
+            orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
+            node_id: "attach-store".to_string(),
+            child_session_id: STACK_CHILD_SESSION_ID.to_string(),
+            branch: daemon.branch_of(STACK_CHILD_SESSION_ID),
+        }],
     );
 }

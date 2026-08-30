@@ -3,10 +3,13 @@ import type { BranchResolution, SessionEntry } from "../../../gen/connection_pb"
 import { resolveNodeSession } from "../../../utils/resolveNodeSession";
 import { PlannedPrRow } from "./PlannedPrRow";
 import { boundChildSession } from "./boundChildSession";
+import { plannedNameBranches, type BranchQuery } from "./branchQueries";
 import { resolveStackBase } from "./deriveStackBaseBranch";
 import { orderStackNodes } from "./orderStackNodes";
 import { parentTitles } from "./parentTitles";
+import { nodeChildSession, nodeChildSessionByIdentity } from "./nodeChildSession";
 import { resolveRepointTarget, startBlockers } from "./startBlockers";
+import type { StackChildSession } from "./stackChildSessions";
 import type { StackNode } from "./stackPlan";
 
 export interface PlannedPrListProps {
@@ -53,6 +56,25 @@ export interface PlannedPrListProps {
    * plain text rather than becoming a control that goes nowhere.
    */
   onOpenSession?: (sessionId: string) => void;
+  /**
+   * Every session in this orchestrator's stack, on any host, assembled by `stackChildSessions` from
+   * the session list plus the participant metadata the drawer parses. Each row resolves its own child
+   * out of it — the only join that crosses the host boundary, since `QueryBranch`'s session leg reads
+   * one daemon's sessions directory (D38, D39).
+   */
+  childSessions?: StackChildSession[];
+  /** This stack's orchestrator session id — the other half of every child's identity (D39). */
+  orchestratorSessionId?: string;
+  /**
+   * The poll set `branchResolutionByBranch` answers, from `buildBranchQueries` — needed because a
+   * resolution alone does not say which **question** was asked for it.
+   *
+   * A row may read a `pr` leg off a planned name only when the query under that name was itself a
+   * `planned-name` (D41). One name is queried once, and an owned branch wins it, so a branchless node
+   * whose suggestion collides with a branch another node created would otherwise render that node's
+   * PR as its own.
+   */
+  branchQueries?: BranchQuery[];
 }
 
 /**
@@ -77,8 +99,14 @@ export function PlannedPrList({
   onSyncFromBase,
   syncErrorByNodeId = {},
   onOpenSession,
+  childSessions = [],
+  orchestratorSessionId = "",
+  branchQueries = [],
 }: PlannedPrListProps) {
   const ordered = orderStackNodes(nodes);
+  // The names the poll asked about as planned rather than owned — the discriminator a row's
+  // `plannedPr` is gated on.
+  const plannedNames = plannedNameBranches(branchQueries);
   const nodeById = new Map(nodes.map((n) => [n.nodeId, n]));
   const [expandedNodeIds, setExpandedNodeIds] = useState<ReadonlySet<string>>(new Set());
 
@@ -104,6 +132,30 @@ export function PlannedPrList({
           const owner = resolveNodeSession(node, sessions);
           const inProgress = Boolean(owner?.isActive);
           const resolution = node.branch ? branchResolutionByBranch[node.branch] : undefined;
+          // The child working this node anywhere in the fleet — the row's only cross-host signal.
+          const childSession = nodeChildSession(node, childSessions, orchestratorSessionId);
+          // The same join without its branch-ownership leg. Only a session that claims *this node* —
+          // by node id, or by being the child the plan records — proves the node's own child still
+          // exists, and that is the only evidence allowed to override the orphan verdict (D40). A
+          // session that merely owns the branch now is a different session, and reading it as proof
+          // would hide the exact D7 orphan the recovery CTA exists for.
+          const identityChildSession = nodeChildSessionByIdentity(
+            node,
+            childSessions,
+            orchestratorSessionId,
+          );
+          // A node that owns no branch is polled on its planned name, and **only** that resolution's
+          // `pr` leg is read (D41): it is the one host-independent leg, and every other leg of it
+          // describes a ref that does not exist. Taking the leg here rather than the whole resolution
+          // is what keeps a planned name out of base resolution, the blockers and the branch line.
+          //
+          // Gated on the query's own kind, never on "this node has a suggestion and no branch": one
+          // name is polled once and an owned branch wins it, so a suggestion colliding with a branch
+          // another node created resolves to *that* node's ref — and its PR.
+          const plannedName = node.branchSuggestion ?? "";
+          const plannedPr = plannedNames.has(plannedName)
+            ? branchResolutionByBranch[plannedName]?.pr
+            : undefined;
           // Every reason this node cannot be started right now — see `startBlockers` for the rules.
           const blockers = startBlockers(node, nodes, branchResolutionByBranch);
           // Repoint is offered for the original merged-predecessor case *and* whenever the base
@@ -160,8 +212,17 @@ export function PlannedPrList({
               expanded={expandedNodeIds.has(node.nodeId)}
               onToggleExpanded={toggleExpanded}
               parentTitles={parentTitles(node, nodes)}
-              boundSessionId={boundChildSession(node, resolution, sessions)}
+              // A resolved child is a session the caller knows by construction, and it is the only
+              // one of the two that can name a session on another host — so it takes precedence.
+              // `boundChildSession` stays the fallback, keeping D23's ordering for a node no
+              // participant claims.
+              boundSessionId={
+                childSession?.sessionId || boundChildSession(node, resolution, sessions)
+              }
               onOpenSession={onOpenSession}
+              plannedPr={plannedPr}
+              childSession={childSession}
+              identityChildSession={identityChildSession}
             />
           );
         })

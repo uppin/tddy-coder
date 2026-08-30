@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { aBranchResolution, aStackNode } from "../../../test-utils";
+import { aBranchResolution, aStackChildSession, aStackNode } from "../../../test-utils";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 
 /**
@@ -13,6 +13,19 @@ import { isNodeOrphaned } from "./isNodeOrphaned";
  * A resolution that has not arrived is "unknown", never "orphaned" — `useQueryBranch` swallows
  * failed polls, so treating an absent resolution as an orphan would offer a duplicate spawn for a
  * node whose child is alive.
+ *
+ * That authority is **one host's**. `QueryBranch`'s session leg is a `read_dir` over the queried
+ * daemon's own sessions directory, so `exists = false` means "not here", which is the normal state
+ * for a child running one host over. A child session resolved for the node — from presence, which
+ * does cross the host boundary — therefore overrides the verdict: it positively proves the session
+ * exists, where the resolution can only report not having found it (D40, amending D7).
+ *
+ * Only a child resolved **by identity** may do so. "Whoever owns this branch right now" is a
+ * different session, and the case where it differs — the recorded child deleted, its branch picked
+ * up by a fresh session in the same stack — is precisely the orphan this reports. See
+ * `nodeChildSessionByIdentity`.
+ *
+ * PRD: docs/ft/coder/pr-stack-live-status.md § Cross-host planned PRs (D40).
  */
 
 const OWNED_BRANCH = "feature/attach-docs/attach-store";
@@ -87,6 +100,57 @@ describe("isNodeOrphaned", () => {
 
     // Then
     expect(orphaned).toBe(false);
+  });
+
+  it("reports not orphaned when a child session is resolved for the node on another host", () => {
+    // Given — host A cannot see host B's sessions directory, so its verdict is "not here"
+    const node = aStackNode({ nodeId: "n1", branch: OWNED_BRANCH, sessionId: "child-on-host-b" });
+    const resolution = aBranchResolution({
+      branch: OWNED_BRANCH,
+      session: { exists: false, sessionId: "", isActive: false, status: "" },
+    });
+    const child = aStackChildSession({ sessionId: "child-on-host-b", branch: OWNED_BRANCH });
+
+    // When
+    const orphaned = isNodeOrphaned(node, resolution, child);
+
+    // Then — offering a second spawn for a session mid-turn is what this prevents
+    expect(orphaned).toBe(false);
+  });
+
+  it("reports not orphaned when the child that claims the node has already finished", () => {
+    // Given — the session exists and is simply idle; only its host can say it is gone
+    const node = aStackNode({ nodeId: "n1", branch: OWNED_BRANCH, sessionId: "child-on-host-b" });
+    const resolution = aBranchResolution({
+      branch: OWNED_BRANCH,
+      session: { exists: false, sessionId: "", isActive: false, status: "" },
+    });
+    const child = aStackChildSession({
+      sessionId: "child-on-host-b",
+      branch: OWNED_BRANCH,
+      isActive: false,
+    });
+
+    // When
+    const orphaned = isNodeOrphaned(node, resolution, child);
+
+    // Then
+    expect(orphaned).toBe(false);
+  });
+
+  it("reports orphaned when no child is resolved for the node and the resolution says none exists", () => {
+    // Given — the same resolution with nobody claiming the node: the child really is gone
+    const node = aStackNode({ nodeId: "n1", branch: OWNED_BRANCH, sessionId: "child-since-deleted" });
+    const resolution = aBranchResolution({
+      branch: OWNED_BRANCH,
+      session: { exists: false, sessionId: "", isActive: false, status: "" },
+    });
+
+    // When
+    const orphaned = isNodeOrphaned(node, resolution, undefined);
+
+    // Then — presence narrows the rule, it does not remove it
+    expect(orphaned).toBe(true);
   });
 
   it("reports not orphaned for a node that records a session but owns no branch", () => {

@@ -5,6 +5,7 @@ import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/co
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
 import { canResumeSession, sessionBaseViewMode } from "./sessionBaseView";
@@ -98,6 +99,10 @@ interface SessionMainPaneProps {
   liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
   /** True when `liveKitFactory` is a test double that ignores its `room` argument. */
   liveKitFactoryIsOverridden?: boolean;
+  /** The `session` metadata block each live participant publishes, keyed by session id — passed to
+   *  the custom workflow view, where the PR-Stack screen joins planned nodes to cross-host child
+   *  sessions with it (D37, D38). */
+  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
 }
 
 export function SessionMainPane({
@@ -134,6 +139,7 @@ export function SessionMainPane({
   buildSessionClient,
   liveKitFactory,
   liveKitFactoryIsOverridden,
+  sessionMetadataBySessionId,
 }: SessionMainPaneProps) {
   const isConnected =
     attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
@@ -272,6 +278,7 @@ export function SessionMainPane({
         // attach, reusing the runtime registry — which is exactly what opening a planned PR's bound
         // child session means, so the two share one handler rather than adding a second.
         onOpenSession: onSwitchPeer,
+        sessionMetadataBySessionId,
       })
     : null;
 

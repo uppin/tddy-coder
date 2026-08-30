@@ -50,8 +50,12 @@ independent of whether the orchestrator agent is running:
    branch"** indicator in place of the Start-session button. See
    [Startability before the spawn](#startability-before-the-spawn-added-2026-07-26). Further amended
    2026-07-26 — the indicator no longer **replaces** the row's contents: a blocked row keeps its full
-   information and a disabled Start-session button beside a warning naming the issue. See
-   [Repointing a dead-end planned PR](#repointing-a-dead-end-planned-pr-added-2026-07-26).)*
+   information and its Start-session button beside a warning naming the issue. See
+   [Repointing a dead-end planned PR](#repointing-a-dead-end-planned-pr-added-2026-07-26). Further
+   amended 2026-08-30 — that button is no longer **disabled** either: a blocker is advice, not a
+   refusal, so it stays pressable in a warning colour with an alert icon, and the daemon's own gate
+   is what refuses a spawn that is genuinely impossible (D42). See
+   [Cross-host planned PRs, a PR without a session, and force start](#cross-host-planned-prs-a-pr-without-a-session-and-force-start-added-2026-08-30).)*
 
 ## Current behavior being fixed (capability 5)
 
@@ -80,7 +84,7 @@ respected.
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
 | D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `spawn-child` at once. |
 | D6 | Starting a node whose non-merged parent owns **no branch** is refused | Enforces bottom-up ordering: the parent's branch must exist to base onto it. Keyed on the branch, never on the parent's session — a closed or cleaned-up child session must not wedge the nodes below it. A merged parent is skipped, not required. |
-| D7 *(2026-07-26)* | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
+| D7 *(2026-07-26)* — **amended by D40** | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
 | D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
 | D9 *(2026-07-26)* | `BranchResolution` gains `BranchRemote { exists, sha }`, resolved server-side per branch | "Available to be based upon" is a fact about `origin`, and only the daemon can see the repo. Deriving it in the web from `Changeset.remote_pushed` or from a branch name being non-empty would report *available* for a local-only branch — exactly the case that fails inside `git fetch`. |
 | D10 *(2026-07-26)* — **superseded by D16** | "Missing branch" **replaces** the Start-session button rather than disabling it | A disabled button with no explanation is the dead end operators already hit. The blocked indicator names the branch being waited on, so the next action (start the predecessor) is obvious. |
@@ -89,7 +93,7 @@ respected.
 | D13 *(2026-07-26)* | **Stub / demo authentication resolves to "no PRs"** — never an error, never *unavailable* | `github.stub: true` exists so the product can be demoed and tested without real GitHub credentials. A stub login holds no access token by construction, so the lookup short-circuits to a clean empty result and must not fail the enclosing RPC — a demo must never surface an error banner or a red row. |
 | D14 *(2026-07-26)* | A login that **cannot retain** its access token fails | Minting a session without its token is a half-login: the operator appears signed in while every GitHub-backed read reports itself unavailable, and re-authenticating — the one action that would fix it — is the one action they have no reason to attempt. Failing the exchange surfaces the real fault (an unwritable `auth_storage`) at the moment it is caused. Does not apply to a stub login (D13, stores nothing by construction) nor to an unconfigured store, which is a deliberate deployment choice. |
 | D15 *(2026-07-26)* | `head` is qualified as `owner:branch` in both `get_open_pr` and `get_pr_by_head` | GitHub **ignores** an unqualified `head` and returns every PR, so `arr.first()` yields an arbitrary one (verified live: 30 PRs returned for a bare branch name vs 1 for `owner:branch`). Fixing only the display path would leave the orchestrator able to repoint or merge the wrong PR. |
-| D16 *(2026-07-26)* — **reverses D10** | A blocked row keeps its **full information and its Start-session button (disabled)**, with a separate warning naming every blocking issue | D10 traded one dead end for another: the operator learned *why* the node was blocked but the row stopped showing what the node *was*, and there was still no action to take. The row is the only place a planned PR's title, description, planned branch, base and PR live; suppressing all of it to render one amber chip is strictly less information at the moment the operator most needs it. With Repoint beside it (D17) the disabled button is no longer a dead end — it is the thing that becomes enabled. |
+| D16 *(2026-07-26)* — **reverses D10**, **amended by D42** | A blocked row keeps its **full information and its Start-session button (disabled)**, with a separate warning naming every blocking issue | D10 traded one dead end for another: the operator learned *why* the node was blocked but the row stopped showing what the node *was*, and there was still no action to take. The row is the only place a planned PR's title, description, planned branch, base and PR live; suppressing all of it to render one amber chip is strictly less information at the moment the operator most needs it. With Repoint beside it (D17) the disabled button is no longer a dead end — it is the thing that becomes enabled. |
 | D17 *(2026-07-26)* | Repoint is offered whenever the node's base **cannot be resolved right now**, not only when a parent merged | "Merged predecessor" is one cause of a dead end among several — the base branch deleted after its PR merged, deleted without merging, or never pushed — and the plan's own `pr_status` is written by the orchestrator agent, so a merged predecessor frequently *is not* recorded as merged. Gating on the recorded phase is why the reported case (PR merged, branch deleted, plan still says open) had no recovery at all. All of these causes are indistinguishable to the operator and all are resolved identically: re-base onto the default branch. |
 | D18 *(2026-07-26)* | The web computes the repoint **target** and **sends it** — `RepointPlannedPrRequest.target_base_branch` — and the daemon applies one rule: **retain exactly the parents that own that branch, drop the rest** | The button must promise exactly what the daemon will do, so the target has to be decided once, by the side that rendered the label. Having the daemon re-derive "which parents are dead" from git instead was rejected: `remote_branch_ref_sha` collapses every failure to `None`, so "absent from `origin`" and "could not tell" are indistinguishable, and the daemon would drop a real dependency whenever a probe failed or `repo_path` was not a working repo. The web is not inventing the fact either — it reads `BranchResolution.remote`, which the daemon itself resolved. **A repoint therefore collapses the node to a single parent** — the one owning the target, or none when no parent owns it. That is the intent, not a limitation of carrying one branch name: repointing is a decision to stack on one predecessor, so a multi-parent node comes out of it single-parent and its other edges are dropped. |
 | D19 *(2026-07-26)* | Repointing a node that owns **no branch** is a **plan-only** edit — no rebase, no force-push, no PR re-target | `repoint_planned_pr_node` refused with `node '<id>' has no branch to repoint`, which rejected precisely the node this recovery exists for: planned, never started, wedged behind a base that no longer exists. A node with no branch has nothing to rebase and no PR to re-target; dropping the dead parents *is* the whole repoint. |
@@ -128,7 +132,8 @@ session directory and changeset were written, leaving a broken session behind.
   of the *base*, and an unspawned node owns no branch to query.
 - A node with no `session_id` whose base is unavailable is blocked. *(Superseded 2026-07-26 — it first
   rendered a **"Missing branch: `<base>`"** indicator **in place of** the Start-session button (D10);
-  the row now keeps that button, disabled, beside a warning naming every reason (D16).)* Three
+  the row now keeps that button beside a warning naming every reason (D16), and since 2026-08-30
+  keeps it **pressable** rather than disabled (D42).)* Three
   independent blockers produce it: a direct parent that is non-merged and owns no branch (the
   daemon's own gate), no ancestor owning a created branch at all, or a base branch whose `remote.exists`
   is `false`.
@@ -154,8 +159,12 @@ worktree, and its PR link/state — every field it *has*. A blocked node necessa
 node that owns one is never blocked, since its spawn resumes rather than creates), and branch is the
 join key for the worktree and PR legs, so in practice a blocked row shows title, description, planned
 branch and base branch. Nothing it has is suppressed; the point of D16 is that the row is not replaced. When a spawn is not currently possible the row adds a **warning** that
-names each blocking issue, and its **Start-session button is disabled** with the same text as its
-tooltip (D16). Nothing is hidden.
+names each blocking issue, and its **Start-session button stays pressable** in the `warning` variant,
+carrying an alert icon (`pr-stack-start-session-blocked-icon-<nodeId>`) and the same text as its
+tooltip (D16 for the warning box; D42 for the button, which was disabled between 2026-07-26 and
+2026-08-30). Nothing is hidden, and nothing is refused here: two of the three blockers are derived
+from `QueryBranch` legs that can only see one host, so the view **advises** and the daemon's own gate
+is what refuses an impossible spawn — with the real reason.
 
 - Base branch absent from `origin` → *"Base branch `<base>` is not on origin"*.
 - A direct parent that is non-merged and owns no branch → *"`<parent title>` has not created its branch
@@ -494,10 +503,11 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   and `baseBranchLabel`, which previously passed the empty string and left a root node's dialog with an
   unnamed base.
 - *(2026-07-26, dead-end recovery)* `PlannedPrRow` always renders the row's full information and its
-  Start-session button, `disabled` when `startBlockers` is non-empty, beside a warning
-  (`pr-stack-start-warning-<nodeId>`) listing those blockers; the base branch gets its own line
-  (`pr-stack-base-branch-<nodeId>`). The `pr-stack-missing-branch-<nodeId>` replacement indicator is
-  **removed** (D16).
+  Start-session button beside a warning (`pr-stack-start-warning-<nodeId>`) listing those blockers;
+  the base branch gets its own line (`pr-stack-base-branch-<nodeId>`). The
+  `pr-stack-missing-branch-<nodeId>` replacement indicator is **removed** (D16). *(Amended 2026-08-30,
+  D42 — the button is no longer `disabled` when `startBlockers` is non-empty. It takes the `warning`
+  variant and an alert icon, `pr-stack-start-session-blocked-icon-<nodeId>`, and stays pressable.)*
 - *(2026-07-26, dead-end recovery)* `PrStackScreen.handleRepoint` records a per-node failure that the row
   renders as `pr-stack-repoint-error-<nodeId>`. It previously `await`ed the call with no `catch`, so a
   rejection was an unhandled promise and the row looked untouched — which the new `invalid_argument`
@@ -521,7 +531,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   | Node condition | CTA slot shows | Warning |
   |---|---|---|
   | No `session_id`, base branch on `origin` (or node is a root) | **Start session** button, enabled | — |
-  | No `session_id`, base branch absent from `origin` / unreachable | **Start session** button, **disabled** | warning naming each blocking issue *(D16)* |
+  | No `session_id`, base branch absent from `origin` / unreachable | **Start session** button, **pressable**, `warning` variant + alert icon `pr-stack-start-session-blocked-icon-<nodeId>` *(D42)* | warning naming each blocking issue *(D16)* |
   | `session_id` set, resolution not yet arrived, or says a session exists | status chip (unchanged) | — |
   | `session_id` set, resolution says **no** session exists | **Start session** button, pre-filled to resume `node.branch` | — |
 
@@ -624,7 +634,7 @@ anatomy, badges and controls as the operator meets them.
 |---|----------|-----------|
 | D21 *(2026-08-01)* | A row's detail is **hidden, not unmounted** | Expansion, scroll position and the branch poll set all survive a collapse — the stance `PlannedPrPanel` already takes. It also keeps D16 intact rather than reversing it: the row still renders its full information, one interaction away. Concretely, eight existing acceptance specs assert the detail lines with `exist` / `contain.text`, which pass inside a `display:none` subtree and would all break on an unmount. |
 | D22 *(2026-08-01)* | Blockers, refusals and errors stay **outside** the collapse boundary | These are the states that explain why an action is unavailable. A reason the operator has to expand a row to find is the dead end D16 removed. |
-| D23 *(2026-08-01)* | The bound session is resolved from the **plan first**, the branch's current owner second, and both are guarded on the session being one the drawer knows | The indicator is the *node's* recorded binding and the plan is the durable record; "who owns this branch right now" is a different question whose answer changes after a resume or a hand-off. Without the known-session guard the control would select nothing for a child deleted on another host. |
+| D23 *(2026-08-01)* — **extended by D39** | The bound session is resolved from the **plan first**, the branch's current owner second, and both are guarded on the session being one the drawer knows | The indicator is the *node's* recorded binding and the plan is the durable record; "who owns this branch right now" is a different question whose answer changes after a resume or a hand-off. Without the known-session guard the control would select nothing for a child deleted on another host. |
 | D24 *(2026-08-01)* | Display order is **persisted per node**, not derived from `parents` | The dependency graph and the reading order are different facts. Deriving one from the other means every merge, repoint and re-parenting silently rewrites the operator's view — a row they are reading jumps position because of an unrelated event. |
 | D25 *(2026-08-01)* | A plan carrying only *some* positions falls back to topological order **wholesale** | A half-numbered plan has no coherent total order, and interleaving real positions with invented ones can render a child above its parent — a worse lie than one render of a correct derived order. The next write numbers every node, after which the fallback stops applying. |
 | D26 *(2026-08-01)* | Base sync is computed with a **non-mutating** probe, and never fetches | It runs on the 5 s poll against worktrees that may have a live agent in them, which disqualifies the existing `pr_resolve_conflicts_action` (`git merge --no-commit` then `--abort` — it mutates the index). Fetching is disqualified on cost: the authoritative default-branch resolver runs `git fetch origin`. |
@@ -759,3 +769,137 @@ Web (`tddy-web`), all under `src/components/sessions/prstack/`:
 
 `in-sync` renders a real badge rather than nothing: if only the bad states rendered, a healthy row and a row
 whose poll has not answered would look identical — D27 one level down.
+
+## Cross-host planned PRs, a PR without a session, and force start *(added 2026-08-30)*
+
+Everything above assumes the orchestrator, its children, their worktrees and their branches live on
+**one** daemon. They routinely do not: the Start-session dialog lets the operator pick the host, and
+the drawer already shows sessions from every host in the fleet. Starting a planned PR's session on a
+different host than its orchestrator made the PR-Stack view lose the node entirely — the row fell back
+to offering **Start session** for work that was already running.
+
+Three separate mechanisms produce that one symptom.
+
+**The node link is written on the wrong host.** `link_stack_node_to_spawned_branch`
+(`connection_service.rs`) records `session_id` + `branch` on the planned node by writing the
+orchestrator's `changeset.yaml` **on the spawning daemon's own sessions tree**. When the child spawns
+on host B and the orchestrator lives on host A, host B has no such session, the lookup returns
+`None`, and the write is silently skipped. The node stays branchless and childless forever; its
+descendants stay unspawnable, because `Stack::base_ref_for_spawn` gates on a parent owning a branch.
+The code has carried a `TODO(cross-host-pr-stack)` naming this exact gap.
+
+**Three of `QueryBranch`'s six legs are local-only false negatives.** The `session` leg is a
+`read_dir` over this daemon's sessions directory (`branch_owner::find_session_owning_branch`); the
+`worktree` leg is `git worktree list` in this daemon's checkout; the `remote` leg is
+`git rev-parse refs/remotes/origin/<branch>` against this daemon's remote-tracking refs. Each answers
+`exists = false` for a branch that is alive one host over, and — unlike the `pr` and `base_sync` legs
+— none carries an `unavailable` discriminator, so "cannot see it from here" is indistinguishable from
+"does not exist". The `pr` leg is the exception: it asks the GitHub API by head branch, so it is
+already host-independent.
+
+**A claude-cli session publishes no participant metadata at all.** The drawer's cross-host rows come
+from LiveKit presence in the common room, and a participant's `session` metadata block is what
+hydrates them (`crossHostSessions::mergeActiveAndFetchedSessions`). Only `tddy-coder` publishes that
+block; a claude-cli session's LiveKit bridge (`cli_session_manager::spawn_livekit_bridge`) calls
+`participant.run()` with no metadata watch. Planned-PR children are claude-cli sessions, so their
+synthesized rows carry **no `branch` and no `orchestrator_session_id`** — the two keys every PR-stack
+join uses (`resolveNodeSession`, `boundChildSession`, `sessionStackGroups`).
+
+Alongside this, two adjacent gaps the same operator hits:
+
+- A planned PR that owns no `branch` is never polled at all (`buildBranchQueries` skips it), so a PR
+  opened for its planned branch — by a session on another host, or by a session that has since ended
+  — is invisible in the row that exists to track it.
+- Every blocker **disables** Start session (D16). Two of the three blocker kinds are now known to be
+  derivable from the false negatives above, so the one control that would recover the node is the one
+  the mis-derivation takes away.
+
+### Design decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D34 *(2026-08-30)* | A child spawn carries the **planned node's id** — `StartSessionRequest.stack_node_id` — rather than the daemon re-deriving the node from the branch the spawn creates | `pr_stack_node_for_spawn` matches on `new_branch_name`, which the operator can edit in the create dialog before confirming; a rename silently unlinks the node from the row that started it. And on the cross-host path the spawning daemon cannot read the orchestrator's stack *at all*, so there is nothing to derive from. The node id is the one fact the surface that rendered the button already knows exactly. Empty stays supported: the agent's own `spawn-child` runs on the orchestrator's host, where the branch-derived lookup is correct and local. |
+| D35 *(2026-08-30)* | The node link is written by a **peer-routed RPC** — `LinkStackNode`, routed through `rpc_served_by_peer` exactly as `ResolveStackBase` is — not by the spawning daemon's local disk write | This is the write half of the read `ResolveStackBase` already performs, and the same argument applies verbatim: the parent's stack lives in *its* session's `changeset.yaml`, so only the daemon holding that session can write it. Routing before authentication, as the other peer RPCs do: a token is verified by the daemon that serves the call. |
+| D36 *(2026-08-30)* | A failed link **does not fail the spawn** — it is logged, and the live association still travels in participant metadata (D37). This now covers the **local** write too: `link_stack_node_to_spawned_branch` used to be called with `?`, so an unwritable orchestrator changeset on this host failed the start | The failure lands *after* the worktree, the branch and the session exist. Failing the spawn there would leave an orphan session on host B and still no branch on host A, which is strictly worse than a node the operator can re-link by restarting it. The argument does not turn on the host: a local disk failure leaves exactly the same orphan, and the spawn that raised it is exactly as complete. Keeping the local write fatal while the routed one is not would also make the same operator action succeed or fail on where the orchestrator happens to live. The daemon's own spawn gate is unaffected: a descendant of an unlinked node is refused for the real reason. |
+| D37 *(2026-08-30)* | The session's LiveKit participant publishes its **stack association** — `session_id`, `orchestrator_session_id`, `stack_node_id`, `branch` — in the `session` metadata block, and the daemon publishes that block for **claude-cli sessions**, which previously published none | Presence is the only cross-host signal the web has: `ListSessions` does not fan out (only `ListProjects` does), and adding a fan-out would put a per-host RPC on a 2 s poll to answer a question presence already answers for free. The shape moves to `tddy_core` so the coder's publisher and the daemon's cannot drift — the merge into participant metadata is **shallow**, so a partial `session` object would erase the other publisher's keys rather than merge with them. |
+| D38 *(2026-08-30)* | The view joins on a **domain type of its own** — `StackChildSession { sessionId, orchestratorSessionId, stackNodeId, branch, isActive }` — assembled from the session list plus the parsed metadata the drawer already keeps (`sessionMetadataBySessionId`). **No new `SessionEntry` field.** `mergeActiveAndFetchedSessions` hydrates `branch` and `orchestrator_session_id`, which the row shape already has | The two facts the synthesized row was missing are existing proto fields; only `stack_node_id` is new, and it is needed exactly where a participant is live — which is exactly where the metadata map has an entry. A same-host child with no participant needs none: the node's own link was written correctly on its own host. Keeping the join off the proto row also stops the PR-stack join from being coupled to the `ListSessions` shape, which is what made it untestable without a protobuf message. |
+| D39 *(2026-08-30)* | A node's live child resolves **by `stack_node_id` first**, then the plan's recorded `session_id`, then branch ownership | Extends D23's ordering rather than replacing it. The node id is an exact identity that survives a branch rename and a host boundary; the plan's record is the durable second-best; "who owns this branch right now" stays last, as D23 already argued. |
+| D40 *(2026-08-30)* — **amends D7** | A live participant claiming the node **suppresses the orphan verdict** | D7 called `QueryBranch` the authority because it "scans sessions by their changeset branch" — true, and it scans exactly **one host's**. `session.exists = false` therefore means "not on the daemon I asked", which is precisely the cross-host case, so on its own it would render every remote child as a deleted one and offer a duplicate spawn for a session that is mid-turn. Presence is the one signal that *positively* proves the session exists; absence of presence still falls through to D7 unchanged. |
+| D41 *(2026-08-30)* | A node that owns **no branch** is additionally polled on its `branch_suggestion`, and **only the `pr` leg of that resolution is read** | The `pr` leg is the one leg of `QueryBranch` that is host-independent, so it is the one leg that can answer for a branch this daemon cannot see. Reading any other leg off a suggestion would violate D1: a suggestion is a planned name, not a ref, and letting it feed base resolution or the spawn gate would unblock a spawn onto a ref nothing created — the exact failure D1 exists to prevent. The row therefore gains a PR link and state; its base line, its blockers and its `branch` line are untouched. |
+| D42 *(2026-08-30)* — **amends D16** | **Start session is never disabled.** A blocked node renders it in a warning colour with an alert icon and a tooltip naming every blocker; the row keeps its warning box (D22) | D16 established that a blocked row keeps its information and its button, and that Repoint is what re-enables the button. That reasoning assumed the blockers were *true*. Two of the three are now known to be derivable from local-only false negatives — `remote.exists` reads absent for any branch pushed from another host until this clone fetches, and `parent-has-no-branch` is true for every parent whose link was written on the wrong host — so the gate refuses spawns that would in fact succeed, and no repoint fixes them. A gate that cannot see half the fleet must **advise, not refuse**. The daemon still enforces its own gate: a genuinely impossible spawn fails there, with the real reason, which is strictly more informative than a button that cannot be pressed. |
+| D43 *(2026-08-30)* | Force start needs **no extra confirmation step** | `CreateSessionDialog` already stands between the click and the spawn, showing the base branch, the branch name and the prompt the child will be started with. A confirm dialog in front of a review dialog is a click, not a safeguard. |
+
+### `LinkStackNode`
+
+Mirrors `ResolveStackBase` in shape, routing and refusal semantics:
+
+```proto
+rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
+
+message LinkStackNodeRequest {
+  string session_token = 1;
+  // The daemon whose sessions tree holds `orchestrator_session_id`. Empty or matching the local
+  // instance = this daemon answers from its own disk.
+  string daemon_instance_id = 2;
+  // The pr-stack orchestrator whose plan holds the node.
+  string orchestrator_session_id = 3;
+  // The planned node to link. Required — a link is never derived from the branch on this path (D34).
+  string node_id = 4;
+  // The child session that materialized the node.
+  string child_session_id = 5;
+  // The branch that session created. Recorded as the node's `branch`, which is what makes the
+  // node's descendants spawnable.
+  string branch = 6;
+}
+message LinkStackNodeResponse {
+  // The plan as it stands after the link, so a caller that renders it does not re-read.
+  string stack_plan_json = 1;
+}
+```
+
+- Routed **before** authentication (`rpc_served_by_peer`), like every other peer-routed RPC.
+- `require_pr_stack_orchestrator` on the resolved session; an unknown `node_id` is
+  `not_found`, never a silent success — a link that quietly does nothing is what the current local
+  write already does, and is the bug.
+- The write itself is the existing `link_stack_node_to_child_session`, unchanged.
+- The spawn path calls it in place of `link_stack_node_to_spawned_branch`'s local write whenever the
+  spawn carries a `stack_node_id`; a spawn without one keeps the branch-derived local lookup, so the
+  agent's own `spawn-child` (always on the orchestrator's host) is untouched.
+
+### The `session` metadata block
+
+The shape moves to `tddy_core::session_participant_metadata` and gains four keys, all additive and
+all tolerated as absent by older participants:
+
+```json
+{ "session": { "workflow_goal": "", "workflow_state": "", "agent": "", "model": "",
+               "activity_status": "", "recipe": "", "repo_path": "", "elapsed_display": "",
+               "pending_elicitation": false,
+               "session_id": "", "orchestrator_session_id": "", "stack_node_id": "", "branch": "" } }
+```
+
+`tddy-coder` publishes it as today, seeded with the new fields from its CLI args
+(`--stack-parent`, the new `--stack-node-id`) and its changeset's `branch`. The daemon publishes it
+for a claude-cli session by handing `spawn_livekit_bridge` a metadata watch — carrying the **static**
+identity and association fields the daemon knows at spawn (`session_id`, `orchestrator_session_id`,
+`stack_node_id`, `branch`, `agent`, `recipe`, `model`, `repo_path`). The live workflow fields stay
+empty for such a session, exactly as they are today; nothing that renders is lost, and the cross-host
+drawer row gains a real name where it previously had only a short session id.
+
+The block is **re-published on a 30 s timer** rather than sent once. The metadata watcher logs and
+drops a failed `set_metadata`, and a room rejoin starts the participant's wire metadata over, so a
+publisher that sends one value and never another loses the association permanently on either —
+the exact symptom this section exists to remove. `tddy-coder` needs no timer because every workflow
+transition re-sends on the same channel; a claude-cli session has no workflow tap, so the timer is
+its only other occasion to publish. It is the shape the participant's other publishers (the
+codex-OAuth and owned-project-count pollers) already use, for the same reason.
+
+### What is deliberately *not* fixed here
+
+- **The `worktree` and `remote` legs stay local-only.** Making them host-aware means routing
+  `QueryBranch` per branch to whichever daemon owns the checkout, which is a per-branch fan-out on a
+  5 s poll. Force start (D42) is the cheaper answer to the operator-visible half; the residual is that
+  a cross-host node's row shows no worktree path and no remote sha. Logged in `docs/dev/TODO.md`.
+- **`resolveRepointTarget` still skips a parent whose branch reads absent from this host's origin**,
+  so a repoint can name the default branch where a parent would have served. The target is stated on
+  the button before the click (D18), so the operator sees it; nothing is done behind their back.

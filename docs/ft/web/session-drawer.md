@@ -128,6 +128,12 @@ directly via `useRoomParticipants` — real-time and independent of each owning 
 `parseSessionParticipantIdentity` (`utils/crossHostSessions.ts`) reads the owning instance id and the
 (trailing-UUID) session id straight from the identity; a live session the selected host didn't return
 is added as a minimal synthesized row owned by its host (label falls back to the short session id).
+*(2026-08-30)* That row is also hydrated with the participant's `branch` and `orchestratorSessionId`,
+which were previously left empty — the two keys every PR-stack join uses, and the reason a planned
+PR's child running on another host used to vanish from its own stack. Filling them also files a
+cross-host child under its orchestrator in the stack grouping below, and lets a live cross-host child
+promote its idle orchestrator into the **Active** partition, which was previously impossible. See
+[PR-Stack live status § Cross-host planned PRs](../coder/pr-stack-live-status.md).
 Cross-host visibility only applies when a common room exists — a single-daemon deployment has one
 host and no cross-host case.
 

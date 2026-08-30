@@ -181,6 +181,7 @@ pub async fn spawn_session_via_supervisor(
             mouse: req.mouse,
             recipe: req.recipe.as_deref(),
             stack_parent: req.stack_parent.as_deref(),
+            stack_node_id: req.stack_node_id.as_deref(),
             stack_seed_base_session: req.stack_seed_base_session.as_deref(),
             model: req.model.as_deref(),
             host_session_socket: req.host_session_socket.as_deref(),

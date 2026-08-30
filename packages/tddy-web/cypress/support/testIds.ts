@@ -1169,8 +1169,15 @@ export const prStackPlannedBranch = (nodeId: string) => `pr-stack-planned-branch
 export const prStackBaseBranch = (nodeId: string) => `pr-stack-base-branch-${nodeId}`;
 
 /** `[data-testid="pr-stack-start-warning-<nodeId>"]` — the warning listing every reason the node cannot
- *  be started. The row's information and its (disabled) Start-session CTA stay put beside it */
+ *  be started. The row's information and its Start-session CTA stay put beside it */
 export const prStackStartWarning = (nodeId: string) => `pr-stack-start-warning-${nodeId}`;
+
+/** `[data-testid="pr-stack-start-session-blocked-icon-<nodeId>"]` — the alert icon carried by a blocked
+ *  node's Start-session button. The button stays pressable (a blocker is advice, not a refusal: three
+ *  of `QueryBranch`'s legs cannot see another host), so the icon plus the warning colour is what tells
+ *  the operator they are about to start something the view believes is blocked */
+export const prStackStartSessionBlockedIcon = (nodeId: string) =>
+  `pr-stack-start-session-blocked-icon-${nodeId}`;
 
 /** `[data-testid="pr-stack-repoint-error-<nodeId>"]` — the daemon's reason for refusing a repoint. The
  *  RPC can reject (a stale target names no acceptable base), so failing silently would leave the row

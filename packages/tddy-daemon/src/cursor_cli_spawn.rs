@@ -18,7 +18,8 @@ use crate::branch_intent::{
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::{
-    session_worktree_source, spawn_blocking_with_timeout, WorktreeSource,
+    effective_spawn_branch, session_worktree_source, spawn_blocking_with_timeout,
+    spawned_branch_of_session, WorktreeSource,
 };
 use crate::project_storage;
 use crate::user_sessions_path::projects_path_for_user;
@@ -246,6 +247,34 @@ pub async fn spawn_cursor_cli_session_inner(
                 timeout,
             )
             .await?;
+            // The child's branch now exists, so the planned node it materializes can record it —
+            // which is what makes that node's descendants spawnable at all, since they base onto
+            // `<remote>/<branch>` (`Stack::base_ref_for_spawn`). Until this call a cursor-cli child
+            // of a pr-stack orchestrator recorded neither a session nor a branch on its node **on
+            // any host**, so the stack wedged behind it: the read half of the same association was
+            // threaded through here and used, while the write half was never made.
+            //
+            // Keyed on the branch the session's changeset records rather than on the requested name
+            // — it may carry a collision suffix — and a failed link is logged, not raised (D36).
+            let remote =
+                project_storage::effective_remote_name_for_project(&projects_dir, &pid, &repo_root)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+            let spawned_branch = spawned_branch_of_session(
+                &session_dir,
+                effective_spawn_branch(
+                    branch_worktree_intent,
+                    new_branch_name,
+                    selected_branch_to_work_on,
+                    &remote,
+                ),
+            );
+            stack_parent
+                .link_spawned_branch_without_failing_the_spawn(
+                    &sessions_base,
+                    &spawned_branch,
+                    session_id,
+                )
+                .await;
             wt
         }
         WorktreeSource::RepoPath(path) => {

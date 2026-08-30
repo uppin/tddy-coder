@@ -10,21 +10,34 @@ import { PlannedPrPanel, PLANNED_PR_PANEL_WIDTH_PX } from "./PlannedPrPanel";
 import { AddPlannedPrForm, type AddPlannedPrFormSubmission } from "./AddPlannedPrForm";
 import { PrStackChat } from "./PrStackChat";
 import { parseStackPlan, type StackNode } from "./stackPlan";
+import { hydrateStackNodes } from "./hydrateStackNodes";
+import { stackChildSessions } from "./stackChildSessions";
 import { useQueryBranch } from "./useQueryBranch";
 import { buildBranchQueries } from "./branchQueries";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { DirtyWorktreeDialog, type DirtyWorktreePrompt } from "./DirtyWorktreeDialog";
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
-import { resolveRepointTarget } from "./startBlockers";
+import { resolveRepointTarget, startBlockers } from "./startBlockers";
 import { stackDocAttachments } from "./stackDocAttachments";
 import { CreateSessionDialog } from "../CreateSessionDialog";
 import type { CreateSessionInitialValues } from "../CreateSessionPane";
 import { remoteTrackingName } from "../../../lib/branchNames";
+import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
 const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
+
+/**
+ * The default for a caller that parses no participant metadata.
+ *
+ * Module-level rather than a `new Map()` in the parameter default: that default allocates a fresh
+ * map on every render, and it is a dependency of the `childSessions` memo, which `nodes` depends on,
+ * which the poll set, the base resolution and every row depend on in turn — so the whole chain would
+ * recompute on every render for a caller that never has any metadata at all.
+ */
+const NO_SESSION_METADATA: ReadonlyMap<string, SessionMetadata> = new Map();
 
 /** The reason map without `nodeId`'s entry, or the map itself when it holds none. */
 function withoutNode(errors: Record<string, string>, nodeId: string): Record<string, string> {
@@ -109,6 +122,16 @@ export interface PrStackScreenProps {
    * plain text rather than becoming a control that goes nowhere.
    */
   onOpenSession?: (sessionId: string) => void;
+  /**
+   * The `session` metadata block each live participant publishes, keyed by session id — the map the
+   * drawer already keeps from common-room presence.
+   *
+   * It carries the one fact no `SessionEntry` does: which planned node a session materializes
+   * (`stack_node_id`). Presence is also the only signal that crosses a host boundary — `ListSessions`
+   * answers for one daemon's own sessions tree — so this is where a child running on another host
+   * becomes joinable to the node it is working at all (D37, D38).
+   */
+  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
 }
 
 /**
@@ -126,6 +149,7 @@ export function PrStackScreen({
   defaultRemote = "",
   onChildSessionStarted,
   onOpenSession,
+  sessionMetadataBySessionId = NO_SESSION_METADATA,
 }: PrStackScreenProps) {
   const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
   const livekitServerIdentity =
@@ -140,6 +164,19 @@ export function PrStackScreen({
   const stack = useMemo(
     () => parseStackPlan(stackPlanOverride ?? session.stackPlanJson),
     [stackPlanOverride, session.stackPlanJson],
+  );
+  // Every session in this stack, on any host, in the one shape the view joins on (D38).
+  const childSessions = useMemo(
+    () => stackChildSessions(sessions, sessionMetadataBySessionId),
+    [sessions, sessionMetadataBySessionId],
+  );
+  // The plan as it stands, plus the `branch` and `session_id` a cross-host spawn wrote on the child's
+  // own disk and this orchestrator's `changeset.yaml` therefore never learned. Hydrated once, here,
+  // so `nodes` is what the whole screen reads: the poll set, base resolution, the spawn gate, the
+  // parent picker and each row's branch line all become correct without a case of their own.
+  const nodes = useMemo(
+    () => hydrateStackNodes(stack.nodes, childSessions, session.sessionId),
+    [stack.nodes, childSessions, session.sessionId],
   );
   const [startSessionNode, setStartSessionNode] = useState<StackNode | null>(null);
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
@@ -183,8 +220,8 @@ export function PrStackScreen({
   // limit within the hour on a five-node stack, after which every row reads "PR status unavailable"
   // and stays there.
   const branchQueries = useMemo(
-    () => buildBranchQueries(stack.nodes, defaultBranch),
-    [stack.nodes, defaultBranch],
+    () => buildBranchQueries(nodes, defaultBranch),
+    [nodes, defaultBranch],
   );
   // One-call branch resolution (worktree + in-progress session + remote + PR + base sync) per branch,
   // polled on the same interval and independent of the agent.
@@ -224,18 +261,42 @@ export function PrStackScreen({
   // and with it any label that IS that branch. A label that differs is prose, not a ref — today only a
   // legacy project's "project default", which names an empty ref in words — so it is left as written.
   const choice = startSessionNode
-    ? baseBranchChoice(startSessionNode, stack.nodes, defaultBranch)
+    ? baseBranchChoice(startSessionNode, nodes, defaultBranch)
     : { options: [], selected: "" };
   const baseBranchOptions = choice.options.map((option) => {
     const ref = remoteTrackingName(option.value, remote);
     return { value: ref, label: option.label === option.value ? ref : option.label };
   });
-  const selectedBaseBranch = remoteTrackingName(choice.selected, remote);
+  // Every reason this spawn may not succeed, as the row states them.
+  const startBlockersForNode = startSessionNode
+    ? startBlockers(startSessionNode, nodes, branchResolutionByBranch)
+    : [];
+  // A blocked node sends **no** explicit base, so the daemon resolves the chain base itself.
+  //
+  // `selected_integration_base_ref` is an override: `select_worktree_base_ref` gives it precedence
+  // over `resolve_chain_base_ref`, which is where `Stack::base_ref_for_spawn` — the daemon's own
+  // ordering gate — lives. And the value it would be given here is derived from a base the view could
+  // not resolve: `deriveStackBaseBranch` flattens an unresolvable base (`no-ancestor-branch`,
+  // `parent-has-no-branch`) to the project default. Sending it would cut the child's worktree from
+  // `origin/<default>` for a node whose non-merged parent owns no branch, record that branch on the
+  // node, and leave every descendant based onto a branch missing its parent's work — silently, with a
+  // healthy status chip on the row.
+  //
+  // Force start hands the decision to the daemon's gate (D42), so the view must not pre-empt that gate
+  // with an override. The picker keeps every option: a base the operator chooses on purpose is a
+  // decision, not a guess — only the pre-selection is dropped.
+  const selectedBaseBranch =
+    startBlockersForNode.length > 0 ? "" : remoteTrackingName(choice.selected, remote);
   const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
     ? {
         projectId: session.projectId,
         daemonInstanceId: session.daemonInstanceId,
         stackParent: session.sessionId,
+        // The planned node this spawn materializes, sent so the daemon links it by identity rather
+        // than re-deriving it from the branch (D34) — a branch the operator can still rename in the
+        // dialog before confirming, and one the spawning daemon cannot look up at all when the
+        // orchestrator lives on another host.
+        stackNodeId: startSessionNode.nodeId,
         sessionType: "claude-cli",
         branchIntent: ownedBranch ? "work_on_selected_branch" : "new_branch_from_base",
         selectedBranch: ownedBranch,
@@ -246,10 +307,16 @@ export function PrStackScreen({
         // ancestor's branch (predecessor stack branch), collapsing to the project's default branch
         // for a root. Lifted to `<remote>/<branch>` so the label matches the picker's options and
         // reads the same ref the daemon will fetch.
-        baseBranchLabel: remoteTrackingName(
-          deriveStackBaseBranch(startSessionNode, stack.nodes, defaultBranch),
-          remote,
-        ),
+        //
+        // Blank for a blocked node, for the same reason `selectedBaseBranch` is: the base that
+        // `deriveStackBaseBranch` flattens to is a guess this spawn no longer submits, and a dialog
+        // naming a ref it will not send is the drift D18 exists to prevent. The option then reads
+        // "New branch from base" with no ref, which is the truth — the daemon resolves it, and
+        // refuses the spawn when the chain has no base to give.
+        baseBranchLabel:
+          startBlockersForNode.length > 0
+            ? ""
+            : remoteTrackingName(deriveStackBaseBranch(startSessionNode, nodes, defaultBranch), remote),
         baseBranchOptions,
         selectedBaseBranch,
         initialPrompt: [startSessionNode.title, startSessionNode.description]
@@ -320,7 +387,7 @@ export function PrStackScreen({
   // from "could not tell" (D18).
   const handleRepoint = async (nodeId: string) => {
     if (!client) return;
-    const node = stack.nodes.find((n) => n.nodeId === nodeId);
+    const node = nodes.find((n) => n.nodeId === nodeId);
     if (!node) return;
     // The control is disabled while any mutation of this branch is in flight, but a second call must
     // be impossible rather than merely hard to trigger: a rebase and force-push landing beside a pull
@@ -337,7 +404,7 @@ export function PrStackScreen({
         nodeId,
         targetBaseBranch: resolveRepointTarget(
           node,
-          stack.nodes,
+          nodes,
           branchResolutionByBranch,
           defaultBranch,
         ),
@@ -441,7 +508,7 @@ export function PrStackScreen({
   // than a refusal (D31): a child session's agent may be mid-turn in that checkout, so the operator
   // sees what is outstanding and chooses to commit it before anything is touched.
   const handleSyncFromBase = (nodeId: string, strategy: "merge" | "rebase") => {
-    const node = stack.nodes.find((n) => n.nodeId === nodeId);
+    const node = nodes.find((n) => n.nodeId === nodeId);
     if (!node?.branch) return;
     // Refused here as well as in `runPull`, so a pull that cannot run never gets as far as opening
     // the dirty-worktree prompt — a prompt whose confirm button does nothing is its own dead end.
@@ -540,13 +607,13 @@ export function PrStackScreen({
           </div>
           {isAddingPlannedPr && (
             <AddPlannedPrForm
-              nodes={stack.nodes}
+              nodes={nodes}
               onSubmit={handleAddPlannedPr}
               onCancel={() => setIsAddingPlannedPr(false)}
             />
           )}
           <PlannedPrList
-            nodes={stack.nodes}
+            nodes={nodes}
             onStartSession={handleStartSession}
             startingNodeId={startSessionNode?.nodeId ?? null}
             sessions={sessions}
@@ -561,6 +628,9 @@ export function PrStackScreen({
             onSyncFromBase={handleSyncFromBase}
             syncErrorByNodeId={syncErrorByNodeId}
             onOpenSession={onOpenSession}
+            childSessions={childSessions}
+            orchestratorSessionId={session.sessionId}
+            branchQueries={branchQueries}
           />
         </PlannedPrPanel>
       </div>

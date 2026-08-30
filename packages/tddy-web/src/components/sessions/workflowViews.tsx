@@ -2,6 +2,7 @@ import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
 import { PrStackScreen } from "./prstack/PrStackScreen";
 import { WorkflowChatScreen } from "./WorkflowChatScreen";
@@ -47,6 +48,12 @@ export interface WorkflowViewContext {
    * session with it — see `PrStackScreenProps.onOpenSession`.
    */
   onOpenSession?: (sessionId: string) => void;
+  /**
+   * The `session` metadata block each live participant publishes, keyed by session id. The PR-Stack
+   * view joins its planned nodes to child sessions with it — the only signal that crosses a host
+   * boundary, and the only carrier of `stack_node_id` (D37, D38).
+   */
+  sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
 }
 
 /**
@@ -80,6 +87,7 @@ export function resolveWorkflowView(
         defaultRemote={context.defaultRemote}
         onChildSessionStarted={context.onChildSessionStarted}
         onOpenSession={context.onOpenSession}
+        sessionMetadataBySessionId={context.sessionMetadataBySessionId}
       />
     );
   }

@@ -1147,10 +1147,34 @@ impl RpcService for PtyLiveKitService {
     }
 }
 
+/// How often a claude-cli session re-publishes its `session` participant block.
+///
+/// Matches the owned-project-count poller's 30s cadence in `tddy-livekit`, and for the same reason:
+/// it is a bounded refresh of a value the room must not silently lose, not a live feed. Nothing in
+/// the block changes between ticks — what changes is whether the last publish landed.
+const SESSION_METADATA_REPUBLISH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Spawn a LiveKit participant that bridges a PTY session to the LiveKit room.
+///
+/// `session_metadata` is the `session` block this participant publishes about itself. It is what a
+/// PR-Stack view on **another host** has to work with: `ListSessions` does not fan out, so a row for
+/// a session running here is synthesized one host over from the common room's participants and
+/// hydrated from exactly this block. A claude-cli session that publishes none arrives there as a
+/// short session id with no branch, no orchestrator and no node — which is how a planned PR's child
+/// started on the wrong host went missing from the row that started it (D37).
+///
+/// Published at spawn and re-published unchanged on [`SESSION_METADATA_REPUBLISH_INTERVAL`], because
+/// a value published once is a value a single failed `set_metadata` — or a room rejoin — loses for
+/// the life of the session. Static fields only: the daemon knows this session's identity, its stack
+/// association and its static fields, and nothing about the agent's progress, so the live workflow
+/// fields (`workflow_goal`, `workflow_state`, `activity_status`, …) stay empty for a claude-cli
+/// session, exactly as they were when nothing was published at all. Filling them means a workflow
+/// tap the way `tddy-coder` has one — logged in `docs/dev/TODO.md` § Future Enhancements, not closed
+/// here.
 ///
 /// Returns the identity string used (`daemon-<instance_id>-<session_id>` or
 /// `daemon-<session_id>`), which the caller should return in `StartSessionResponse`.
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_livekit_bridge(
     handle: Arc<PtyHandle>,
     livekit_url: &str,
@@ -1158,6 +1182,7 @@ pub async fn spawn_livekit_bridge(
     api_key: &str,
     api_secret: &str,
     server_identity: &str,
+    session_metadata: Option<tddy_core::session_participant_metadata::SessionParticipantMetadata>,
 ) -> anyhow::Result<()> {
     let token = TokenGenerator::new(
         api_key.to_string(),
@@ -1176,8 +1201,49 @@ pub async fn spawn_livekit_bridge(
             .map_err(|e| anyhow::anyhow!("LiveKitParticipant::connect: {}", e))?;
 
     let identity_owned = server_identity.to_string();
+    // Taken before the event loop consumes the participant, and shared with the participant's own
+    // metadata publishers so two writers never race a `set_metadata` past each other.
+    let local = participant.room().local_participant().clone();
+    let publish_lock = participant.metadata_publish_lock();
+    let metadata_json = session_metadata
+        .as_ref()
+        .map(tddy_core::session_participant_metadata::session_metadata_json);
     tokio::spawn(async move {
+        // The watcher publishes on *change*, so the channel starts empty and the block is sent
+        // after the receiver exists: a value put into a channel before anyone subscribed is the
+        // subscriber's already-seen initial value and would never reach the room.
+        //
+        // Re-sent on an interval rather than once, on the shape the participant's other publishers
+        // already use (the codex-OAuth and owned-project-count pollers republish on a timer for
+        // this reason). A single `set_metadata` failure is logged and dropped by the watcher, and a
+        // room rejoin starts the participant's wire metadata over — so a session that publishes one
+        // value and never another loses its cross-host association permanently on either, which is
+        // the exact symptom this block exists to remove. `tddy-coder` needs no such timer because
+        // every workflow transition re-sends on the same channel; a claude-cli session has no
+        // workflow tap and so no other occasion to publish.
+        let republishing = metadata_json.map(|json| {
+            let (tx, rx) = watch::channel(String::new());
+            tddy_livekit::spawn_local_participant_metadata_watcher(rx, local, publish_lock);
+            tokio::spawn(async move {
+                let mut ticks = tokio::time::interval(SESSION_METADATA_REPUBLISH_INTERVAL);
+                loop {
+                    // The first tick completes immediately, so the block reaches the room at spawn
+                    // and every interval thereafter.
+                    ticks.tick().await;
+                    // `watch::Sender::send` marks the value changed whether or not it differs, so
+                    // each tick is a real publish and not a no-op the watcher would skip. It fails
+                    // only once the watcher is gone, which is the end of this publisher too.
+                    if tx.send(json.clone()).is_err() {
+                        break;
+                    }
+                }
+            })
+        });
         participant.run().await;
+        // The room is gone, so there is nothing left to advertise to.
+        if let Some(republishing) = republishing {
+            republishing.abort();
+        }
         log::info!(
             target: "tddy_daemon::claude_cli_session",
             "LiveKit bridge participant exited for identity {}",

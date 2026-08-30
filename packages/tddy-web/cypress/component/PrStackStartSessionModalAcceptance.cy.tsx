@@ -152,3 +152,23 @@ it("creates the stack-parented child session when the dialog is submitted", () =
   });
   sessionsDrawerPage.drawerItem(CHILD_SESSION_ID).should("exist");
 });
+
+it("names the planned node the child materializes on the StartSession it submits", () => {
+  // Given
+  const backend = aPrStackModalBackend();
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("n1").click();
+  prStackScreenPage.dialogSubmitBtn().click();
+
+  // Then — the node id is what links the child to this row. Deriving it from `new_branch_name`
+  // instead, as the daemon used to, unlinks the node the moment the operator renames the branch in
+  // this dialog — and cannot be derived at all when the child spawns on another host (D34).
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ConnectionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].stackNodeId).to.equal("n1");
+  });
+});

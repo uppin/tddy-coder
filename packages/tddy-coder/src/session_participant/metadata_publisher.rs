@@ -1,79 +1,25 @@
-//! `SessionMetadata` + `session` metadata JSON publisher.
+//! The `session` metadata block a coder session publishes on its LiveKit participant.
 //!
-//! On a workflow state transition the coder serializes its `SessionMetadata` into a JSON document
-//! `{ "session": { ... } }` and sends it on the `metadata_tx` watch channel. The existing
-//! `spawn_local_participant_metadata_watcher` shallow-merges that document into the participant's
-//! wire metadata (preserving `owned_project_count` / `codex_oauth`) and calls `set_metadata`.
+//! On a workflow state transition the coder updates its [`SessionMetadata`] snapshot, serializes it
+//! into a JSON document `{ "session": { ... } }` and sends it on the `metadata_tx` watch channel.
+//! The existing `spawn_local_participant_metadata_watcher` shallow-merges that document into the
+//! participant's wire metadata (preserving `owned_project_count` / `codex_oauth`) and calls
+//! `set_metadata`.
+//!
+//! The block's *shape* is [`tddy_core::session_participant_metadata`]'s, not this module's: the
+//! daemon publishes the same block for a `claude-cli` session, and because the merge is shallow two
+//! publishers emitting two different `session` shapes would erase each other's keys rather than
+//! merge. What lives here is the coder-specific half — what the snapshot starts as, and how a
+//! `PresenterEvent` moves it forward.
 
-use serde::Serialize;
 use tddy_core::{AppMode, PresenterEvent};
 use tddy_livekit::merge_participant_metadata_json;
 
-/// Session metadata published on the coder's LiveKit participant under the `session` key.
-///
-/// JSON key names mirror what the web parses in `parseSessionParticipantMetadata`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionMetadata {
-    pub goal: String,
-    pub state: String,
-    pub agent: String,
-    pub model: String,
-    pub activity_status: String,
-    pub recipe: String,
-    pub repo_path: String,
-    pub elapsed_display: String,
-    pub pending_elicitation: bool,
-}
-
-#[derive(Serialize)]
-struct SessionMetadataJson {
-    #[serde(rename = "workflow_goal")]
-    workflow_goal: String,
-    #[serde(rename = "workflow_state")]
-    workflow_state: String,
-    agent: String,
-    model: String,
-    activity_status: String,
-    recipe: String,
-    #[serde(rename = "repo_path")]
-    repo_path: String,
-    #[serde(rename = "elapsed_display")]
-    elapsed_display: String,
-    #[serde(rename = "pending_elicitation")]
-    pending_elicitation: bool,
-}
-
-impl From<&SessionMetadata> for SessionMetadataJson {
-    fn from(m: &SessionMetadata) -> Self {
-        SessionMetadataJson {
-            workflow_goal: m.goal.clone(),
-            workflow_state: m.state.clone(),
-            agent: m.agent.clone(),
-            model: m.model.clone(),
-            activity_status: m.activity_status.clone(),
-            recipe: m.recipe.clone(),
-            repo_path: m.repo_path.clone(),
-            elapsed_display: m.elapsed_display.clone(),
-            pending_elicitation: m.pending_elicitation,
-        }
-    }
-}
-
-/// Serialize a `SessionMetadata` into the JSON document published on the participant.
-///
-/// The document is `{ "session": { workflow_goal, workflow_state, elapsed_display, agent, model,
-/// activity_status, recipe, repo_path, pending_elicitation } }`.
-pub fn session_metadata_json(meta: &SessionMetadata) -> String {
-    let payload = SessionMetadataJson::from(meta);
-    let session = match serde_json::to_value(&payload) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!(target: "tddy_coder::metadata", "session_metadata_json serialize failed: {e}");
-            serde_json::Value::Null
-        }
-    };
-    serde_json::json!({ "session": session }).to_string()
-}
+/// The session block published under the `session` key — the one shape both publishers emit, so a
+/// shallow merge of either is lossless. See the module docs.
+pub use tddy_core::session_participant_metadata::{
+    session_metadata_json, SessionParticipantMetadata as SessionMetadata,
+};
 
 /// Shallow-merge a `session` JSON document into an existing participant metadata baseline,
 /// preserving sibling keys (`owned_project_count`, `codex_oauth`).
@@ -94,14 +40,27 @@ pub fn merge_session_metadata(baseline: &str, session_json: &str) -> String {
     }
 }
 
-/// Static seed for the session-metadata tap: values known at spawn time (CLI args) that should
-/// appear on the first publish, before any workflow event lands.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Static seed for the session-metadata tap: values known at spawn time (CLI args, the session's
+/// own changeset) that should appear on the first publish, before any workflow event lands.
+///
+/// The stack association is seeded rather than filled in by an event because it is true from the
+/// moment the session exists, and it is what a PR-Stack view one host over joins the session's row
+/// on (D37). A session that is nobody's stack child leaves those fields empty, and they are
+/// published empty rather than omitted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SessionMetadataSeed {
     pub agent: String,
     pub model: String,
     pub recipe: String,
     pub repo_path: String,
+    /// This session's own id.
+    pub session_id: String,
+    /// The pr-stack orchestrator that spawned this session (`--stack-parent`), if any.
+    pub orchestrator_session_id: String,
+    /// The planned node this session materializes (`--stack-node-id`), if any.
+    pub stack_node_id: String,
+    /// The branch this session works on.
+    pub branch: String,
 }
 
 /// Build the initial `SessionMetadata` snapshot from a seed. Workflow-derived fields
@@ -117,6 +76,10 @@ pub fn a_default_session_metadata(seed: &SessionMetadataSeed) -> SessionMetadata
         repo_path: seed.repo_path.clone(),
         elapsed_display: String::new(),
         pending_elicitation: false,
+        session_id: seed.session_id.clone(),
+        orchestrator_session_id: seed.orchestrator_session_id.clone(),
+        stack_node_id: seed.stack_node_id.clone(),
+        branch: seed.branch.clone(),
     }
 }
 

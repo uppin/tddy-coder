@@ -233,7 +233,9 @@ it("offers Start session for an orphaned node whose base branch is missing from 
     },
   });
 
-  // Then — blocking here would be an unrecoverable dead end for work that is not lost at all
-  prStackScreenPage.startSessionBtn("n1").should("be.enabled");
+  // Then — blocking here would be an unrecoverable dead end for work that is not lost at all.
+  // Asserted as the plain variant rather than as "enabled": since D42 nothing but an in-flight
+  // start disables the button, so `be.enabled` would hold for a blocked row too.
+  prStackScreenPage.startSessionBtn("n1").should("have.attr", "data-variant", "default");
   prStackScreenPage.startWarning("n1").should("not.exist");
 });
