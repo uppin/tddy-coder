@@ -47,6 +47,12 @@ pub struct PairedAgentSession {
 /// agent — it is a checkout, either standalone or the codebase half of a split session whose agent
 /// lives on another daemon entirely. Hosting a room here would put it on the one participant that
 /// has nobody to serve, and would name it after a session the agent's daemon does not own.
+///
+/// `sandbox` is recorded in the metadata, not acted on here: it is what every later tool dispatch
+/// reads to decide whether a call goes to this session's jail or to its worktree on the bare host
+/// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox). The jail is provisioned by
+/// the caller, once the roster is seeded and the index — which reads the host worktree directly —
+/// is built.
 #[allow(clippy::too_many_arguments)]
 pub async fn start_workspace_session(
     os_user: &str,
@@ -55,6 +61,7 @@ pub async fn start_workspace_session(
     project_id: &str,
     branch: &WorkspaceBranchIntent<'_>,
     paired_agent: Option<&PairedAgentSession>,
+    sandbox: bool,
     tddy_data_dir: &Path,
     request_timeout: std::time::Duration,
 ) -> Result<Response<StartSessionResponse>, Status> {
@@ -149,7 +156,10 @@ pub async fn start_workspace_session(
         cursor_chat_id: None,
         activity_status: None,
         hook_token: None,
-        sandbox: None,
+        // `Some(true)` or nothing: an unsandboxed session is written the way every workspace
+        // session was written before jails existed, so "no jail" reads the same whether the flag
+        // was declined or predates it.
+        sandbox: sandbox.then_some(true),
         agent: None,
         recipe: None,
         agents: Vec::new(),

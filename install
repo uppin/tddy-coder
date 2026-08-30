@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install tddy-supervisor (and tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo,
-# tddy-session-sync) as a
+# tddy-session-sync, tddy-sandbox-runner) as a
 # systemd service.
 #
 # tddy-supervisor is the only systemd unit and the only root process: it starts tddy-daemon as an
@@ -544,7 +544,14 @@ fi
 # whose own documentation tells the reader to put it on PATH and that no script ever puts anywhere.
 # They are small, they read no config this script writes, and the host's own operator is the
 # likeliest person to want a git remote — or a live mirror — against the projects living on it.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync)
+#
+# tddy-sandbox-runner is the process that runs INSIDE every jail the daemon spawns (sandboxed
+# claude-cli and cursor-cli sessions, and the workspace tool jail). It has to land in BIN_DIR next
+# to tddy-daemon specifically: the daemon resolves it as a sibling of its own executable, and the
+# only remaining fallback is a bare name on PATH. It is required in both modes, --user included —
+# a per-user install spawns jails too, and the daemon that cannot find it fails the first sandboxed
+# start rather than at install time.
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi

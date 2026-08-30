@@ -1093,6 +1093,15 @@ pub struct ConnectionServiceImpl {
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
+    /// The per-session jails sandboxed `workspace` sessions dispatch their tools through
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox). Keyed by session id, and
+    /// shared across clones so the jail a start provisioned is the one the next handler's
+    /// `ExecuteTool` finds.
+    workspace_sandboxes: Arc<crate::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
+    /// What builds those jails. Injected the way `host_stats` and `room_roster` are, so the
+    /// dispatch, refusal and ordering contracts are testable without booting one.
+    workspace_sandbox_provisioner:
+        Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
@@ -1557,6 +1566,21 @@ struct SessionStdioEndpoint {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// Where one exec tool call of a session this daemon holds is run.
+enum ExecToolRoute {
+    /// The session's checkout on this host, through the tool engine — every session that did not
+    /// ask to be confined.
+    HostWorktree,
+    /// The session's own jail on this host: a sandboxed `workspace` session
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
+    Jail(Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandbox>),
+    /// Neither, and the call is answered with this as its error. A session recorded as sandboxed
+    /// whose jail this daemon does not hold is refused rather than served from the bare host: a
+    /// tool that ran unconfined on a session that asked to be confined is the one failure nobody
+    /// can see afterwards.
+    Refused(String),
+}
+
 impl ConnectionServiceImpl {
     /// Resolve the `tddy-tools` binary as a sibling of the configured tool (`tddy-coder`) path, so
     /// an installed deployment and a dev `target/debug` tree both find the co-located binary. Falls
@@ -1637,6 +1661,12 @@ impl ConnectionServiceImpl {
             worktree_size_calculator,
             claude_cli_manager,
             sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
+            workspace_sandboxes: Arc::new(
+                crate::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
+            ),
+            workspace_sandbox_provisioner: Arc::new(
+                crate::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
+            ),
             task_registry,
             idle_tracker: None,
             host_stats,
@@ -1874,6 +1904,17 @@ impl ConnectionServiceImpl {
     pub fn with_host_stats_intervals(mut self, cpu: Duration, disk: Duration) -> Self {
         self.host_cpu_interval = cpu;
         self.host_disk_interval = disk;
+        self
+    }
+
+    /// Substitute what builds a sandboxed workspace session's jail (builder pattern) — lets a test
+    /// prove which calls reach the jail, and what a start does when one cannot be built, without a
+    /// kernel sandbox on the machine running it.
+    pub fn with_workspace_sandbox_provisioner(
+        mut self,
+        provisioner: Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
+    ) -> Self {
+        self.workspace_sandbox_provisioner = provisioner;
         self
     }
 
@@ -4160,6 +4201,40 @@ impl ConnectionServiceImpl {
         log::info!(
             "StartSession: indexed workspace session {session_id}'s worktree at {}",
             worktree_path.display()
+        );
+        Ok(())
+    }
+
+    /// Build the jail a sandboxed `workspace` session runs its tools in, and register it under the
+    /// session id every later dispatch looks it up by
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
+    ///
+    /// A host with no sandbox backend, or a jail that will not come up, is an error — never a start
+    /// that succeeds unconfined.
+    async fn provision_workspace_tool_sandbox(
+        &self,
+        sessions_base: &Path,
+        session_id: &str,
+    ) -> Result<(), Status> {
+        let spec = crate::workspace_tool_sandbox::WorkspaceSandboxSpec {
+            session_id: session_id.to_string(),
+            session_dir: unified_session_dir_path(sessions_base, session_id),
+            worktree_path: workspace_session::resolve_worktree_root_for_session(
+                sessions_base,
+                session_id,
+            )?,
+        };
+        let jail = self
+            .workspace_sandbox_provisioner
+            .provision(&spec)
+            .await
+            .map_err(crate::sandbox_session::sandbox_error_to_status)?;
+        self.workspace_sandboxes
+            .insert(session_id.to_string(), jail)
+            .await;
+        log::info!(
+            "StartSession: workspace session {session_id} runs its tools in a jail holding {}",
+            spec.worktree_path.display()
         );
         Ok(())
     }
@@ -8678,36 +8753,97 @@ impl ConnectionServiceImpl {
         Ok(tddy_core::backend::context_globs_for_agent(agent))
     }
 
-    /// Run one tool call in `worktree_root` and durably record it.
+    /// Where `session_id`'s tools run: its own jail, or the checkout on this host.
+    ///
+    /// Read from what this daemon persisted about the session rather than from the request, because
+    /// the request is the caller's claim and the metadata is the session's. A `workspace` session
+    /// that recorded `sandbox: true` is served by the jail registered for it and by nothing else.
+    async fn exec_tool_route(&self, session_dir: &Path, session_id: &str) -> ExecToolRoute {
+        let meta = match tddy_core::read_session_metadata(session_dir) {
+            Ok(meta) => meta,
+            // The callers all resolved this session's worktree out of this same file moments ago, so
+            // an unreadable one here is a transient failure rather than a session that is not
+            // sandboxed — and "assume unconfined" is the wrong guess to make about a jail.
+            Err(e) => {
+                return ExecToolRoute::Refused(format!(
+                    "session {session_id}: cannot tell whether this session is sandboxed \
+                     (.session.yaml unreadable: {e}); refusing to run its tools on the host"
+                ))
+            }
+        };
+        let sandboxed_workspace =
+            meta.session_type.as_deref() == Some("workspace") && meta.sandbox == Some(true);
+        if !sandboxed_workspace {
+            return ExecToolRoute::HostWorktree;
+        }
+        match self.workspace_sandboxes.get(session_id).await {
+            Some(jail) => ExecToolRoute::Jail(jail),
+            None => ExecToolRoute::Refused(format!(
+                "session {session_id} is sandboxed and this daemon holds no jail for it; \
+                 refusing to run its tools on the host worktree"
+            )),
+        }
+    }
+
+    /// Run one tool call for `req`'s session and durably record it.
     ///
     /// A tool failure is carried in the returned response, never raised as an RPC error: only
     /// routing and auth failures are RPC errors, so an agent can tell "the tool said no" from "the
     /// call never reached the tool".
+    ///
+    /// The single choke point for every exec tool this daemon serves out of its own sessions —
+    /// `ExecuteTool`, `StreamExecuteTool`, and a roster agent's own loop
+    /// ([`Self::local_agent_codebase_access`]) — which is why a sandboxed workspace session is
+    /// routed to its jail here rather than three times over. `worktree_root` is where the tool runs
+    /// when it runs on this host; inside the jail the same checkout is mounted at that very path.
     async fn run_exec_tool_locally(
         &self,
         req: &ExecuteToolRequest,
         sessions_base: &Path,
         worktree_root: &Path,
     ) -> ExecuteToolResponse {
-        let outcome = tool_engine::execute_tool(
-            worktree_root,
-            &req.tool_name,
-            &req.args_json,
-            &self.task_registry,
-            &req.session_id,
-        )
-        .await;
-
-        // Durably record the tool call (non-fatal on failure).
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
+        let response = match self.exec_tool_route(&session_dir, &req.session_id).await {
+            ExecToolRoute::HostWorktree => {
+                let outcome = tool_engine::execute_tool(
+                    worktree_root,
+                    &req.tool_name,
+                    &req.args_json,
+                    &self.task_registry,
+                    &req.session_id,
+                )
+                .await;
+                ExecuteToolResponse {
+                    result_json: outcome.result_json,
+                    is_error: outcome.is_error,
+                    error_message: outcome.error_message,
+                    job_id: outcome.job_id,
+                    job_running: outcome.job_running,
+                }
+            }
+            ExecToolRoute::Jail(jail) => jail.execute_tool(req).await,
+            ExecToolRoute::Refused(reason) => {
+                log::warn!("exec tool: {reason}");
+                ExecuteToolResponse {
+                    result_json: String::new(),
+                    is_error: true,
+                    error_message: reason,
+                    job_id: String::new(),
+                    job_running: false,
+                }
+            }
+        };
+
+        // Durably record the tool call (non-fatal on failure). One log for both routes: which side
+        // of the jail boundary a call ran on does not change that it is the session's tool call.
         let record = crate::tool_call_log::ToolCallRecord {
-            task_id: outcome.job_id.clone(),
+            task_id: response.job_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
-            result_json: outcome.result_json.clone(),
-            is_error: outcome.is_error,
-            error_message: outcome.error_message.clone(),
-            job_running: outcome.job_running,
+            result_json: response.result_json.clone(),
+            is_error: response.is_error,
+            error_message: response.error_message.clone(),
+            job_running: response.job_running,
             created_unix_ms: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -8721,13 +8857,7 @@ impl ConnectionServiceImpl {
             );
         }
 
-        ExecuteToolResponse {
-            result_json: outcome.result_json,
-            is_error: outcome.is_error,
-            error_message: outcome.error_message,
-            job_id: outcome.job_id,
-            job_running: outcome.job_running,
-        }
+        response
     }
 
     fn common_room_slot(
@@ -9927,6 +10057,7 @@ impl ConnectionServiceImpl {
                         selected_branch_to_work_on: req.selected_branch_to_work_on.trim(),
                     },
                     paired_agent.as_ref(),
+                    req.sandbox,
                     &self.tddy_data_dir,
                     timeout,
                 )
@@ -9960,6 +10091,39 @@ impl ConnectionServiceImpl {
                             seeded,
                         )
                         .await;
+                        return Err(status);
+                    }
+                }
+                // The jail is built last, and deliberately after the index: indexing reads the host
+                // worktree directly, so it belongs before a jail exists rather than through one.
+                if req.sandbox {
+                    if let Err(status) = self
+                        .provision_workspace_tool_sandbox(&sessions_base, &session_id)
+                        .await
+                    {
+                        // The failed index's unwind, plus the session directory itself: a session
+                        // surviving a start that answered with an error is one the operator can
+                        // see, list and resume, whose tools were never confined.
+                        self.unwind_seeded_roster(
+                            &session_id,
+                            &codebase,
+                            &req.session_token,
+                            seeded,
+                        )
+                        .await;
+                        let projects_dir =
+                            projects_path_for_user(os_user, Some(&self.tddy_data_dir));
+                        if let Err(e) = session_deletion::delete_session_directory(
+                            &sessions_base,
+                            &session_id,
+                            projects_dir.as_deref(),
+                        ) {
+                            log::warn!(
+                                "StartSession: could not remove session {session_id} after its \
+                                 jail could not be provisioned: {}",
+                                e.message()
+                            );
+                        }
                         return Err(status);
                     }
                 }

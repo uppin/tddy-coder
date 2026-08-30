@@ -79,6 +79,7 @@ pub mod tool_call_log;
 pub mod tool_catalog_sync;
 pub mod user_sessions_path;
 pub mod workspace_session;
+pub mod workspace_tool_sandbox;
 pub mod worktree_files;
 pub mod worktrees;
 

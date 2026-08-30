@@ -228,19 +228,21 @@ impl CodebaseHost {
             .into_inner();
         let mut stream = Box::pin(stream);
 
-        let mut result_json = String::new();
+        // The frames carry the result as bytes, split at a fixed size: a multi-byte character can
+        // land across two of them, so they are joined before being read as a string.
+        let mut result_bytes: Vec<u8> = Vec::new();
         let mut is_error = false;
         let mut error_message = String::new();
         while let Some(frame) = stream.next().await {
             let frame = frame.expect("no frame may carry an error");
-            result_json.push_str(&frame.result_json);
+            result_bytes.extend_from_slice(&frame.result_chunk);
             is_error |= frame.is_error;
             if !frame.error_message.is_empty() {
                 error_message = frame.error_message;
             }
         }
         ExecuteToolResponse {
-            result_json,
+            result_json: String::from_utf8(result_bytes).expect("a tool result is UTF-8"),
             is_error,
             error_message,
             job_id: String::new(),
@@ -267,6 +269,13 @@ impl CodebaseHost {
 
     fn session_dir_exists(&self, session_id: &str) -> bool {
         unified_session_dir_path(self.sessions.path(), session_id).exists()
+    }
+
+    /// The same sessions base served by a **fresh** daemon: a restart. Its `.session.yaml` files
+    /// survive, its jails do not — which is how a session recorded as sandboxed ends up with no
+    /// jail registered for it.
+    fn after_a_daemon_restart(&self) -> ConnectionServiceImpl {
+        test_service(self.sessions.path().to_path_buf())
     }
 }
 
@@ -636,4 +645,79 @@ async fn a_semantic_index_that_cannot_be_built_stops_the_start_before_any_jail_i
         vec![],
         "the jail is provisioned after indexing, so a failed index provisions none"
     );
+}
+
+/// A jail is process-local; the `sandbox: true` in `.session.yaml` outlives it. After a restart the
+/// session still says its tools must be confined and this daemon holds nothing to confine them
+/// with — so the call is refused. Serving it from the bare host instead would be the one failure
+/// nobody can see afterwards: the tool succeeds, the operator sees a sandboxed session, and
+/// nothing records that the boundary was not there. Re-provisioning on resume is
+/// `split-sandbox-resume`'s to add; until it exists, refusing is the only honest answer.
+#[tokio::test]
+async fn a_sandboxed_workspace_session_whose_jail_is_gone_is_refused_rather_than_run_on_the_host() {
+    // Given a sandboxed workspace session, and a daemon that has since restarted
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let host = CodebaseHost::with_provisioner(Arc::clone(&provisioner) as Arc<_>);
+    let session_id = host
+        .start_workspace(true)
+        .await
+        .expect("start must succeed");
+    let restarted = host.after_a_daemon_restart();
+
+    // When
+    let response = restarted
+        .execute_tool(Request::new(a_tool_request(
+            &session_id,
+            "Write",
+            r#"{"path":"after-restart.txt","contents":"hello"}"#,
+        )))
+        .await
+        .expect("the call is answered, not dropped: a refusal is a result, not an RPC failure")
+        .into_inner();
+
+    // Then
+    assert!(
+        response.is_error,
+        "a sandboxed session with no jail must be refused, got: {}",
+        response.result_json
+    );
+    assert!(
+        !host
+            .worktree_of(&session_id)
+            .join("after-restart.txt")
+            .exists(),
+        "the refusal must not have run the tool on the host worktree"
+    );
+}
+
+/// The control: an *unsandboxed* workspace session is unaffected by a restart, so the refusal
+/// above is about the missing jail and not about restarting.
+#[tokio::test]
+async fn an_unsandboxed_workspace_session_still_serves_its_tools_after_a_daemon_restart() {
+    // Given
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let host = CodebaseHost::with_provisioner(Arc::clone(&provisioner) as Arc<_>);
+    let session_id = host
+        .start_workspace(false)
+        .await
+        .expect("start must succeed");
+    let restarted = host.after_a_daemon_restart();
+
+    // When
+    let response = restarted
+        .execute_tool(Request::new(a_tool_request(
+            &session_id,
+            "Write",
+            r#"{"path":"after-restart.txt","contents":"hello"}"#,
+        )))
+        .await
+        .expect("ExecuteTool must not fail at the RPC level")
+        .into_inner();
+
+    // Then
+    assert!(!response.is_error, "{}", response.error_message);
+    assert!(host
+        .worktree_of(&session_id)
+        .join("after-restart.txt")
+        .exists());
 }

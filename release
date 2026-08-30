@@ -2,6 +2,10 @@
 # Build optimized production binary. Uses nix dev shell for consistent toolchain.
 # Output: target/release/tddy-coder, target/release/tddy-tools, target/release/tddy-daemon,
 #         target/release/tddy-supervisor, target/release/tddy-remote-git-repo,
-#         target/release/tddy-session-sync
+#         target/release/tddy-session-sync, target/release/tddy-sandbox-runner
+#
+# tddy-sandbox-runner is the process every jail runs inside itself (sandboxed claude-cli and
+# cursor-cli sessions, and the workspace tool jail). ./install and publish.sh both ship what this
+# script builds, so a package missing from this line is a binary missing from every installed host.
 set -e
-exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-daemon -p tddy-supervisor -p tddy-remote-git-repo -p tddy-session-sync
+exec nix develop --profile ./.nix-profile -c cargo build --release -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-app -p tddy-sandbox-runner -p tddy-daemon -p tddy-supervisor -p tddy-remote-git-repo -p tddy-session-sync
