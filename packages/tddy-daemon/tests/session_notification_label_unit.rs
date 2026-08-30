@@ -1,7 +1,7 @@
 //! Unit: resolving a session's label on the daemon side, from the same values `ListSessions`
 //! reports to the drawer.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR1).
+//! PRD: docs/ft/daemon/session-notifications.md (FR1).
 //!
 //! `tddy_core::session_display_label` is the rule; this is the lookup that feeds it. Parity is only
 //! real if the daemon reads the *same three values the browser receives*: `repo_path` from

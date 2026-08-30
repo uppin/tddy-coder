@@ -65,7 +65,7 @@ Notifications arrive on one daemon-level `StreamSessionNotifications` subscripti
 (`useSessionNotifications`) and are held per session in `sessionNotificationRegistry`. Selecting a
 row marks it seen, which clears the notification-driven yellow and settles a blink — but **not** a
 `pendingElicitation`, which stays yellow until the gate is actually answered. See
-[session-notifications-as-indicators](../daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md).
+[session-notifications-as-indicators](../daemon/session-notifications.md).
 
 `connectionStatusForSession(entry)` still exists and still maps proto fields to
 `connected | needs-input | disconnected`, but it no longer drives the dot. Its remaining callers ask

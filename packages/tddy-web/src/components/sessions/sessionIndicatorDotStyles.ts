@@ -1,6 +1,6 @@
 /**
  * Keyframes for the drawer's `working` dot — the green one that fades in and out while the agent is
- * busy (PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md, FR4/NFR2).
+ * busy (PRD: docs/ft/daemon/session-notifications.md, FR4/NFR2).
  *
  * Injected as an inline `<style>` next to the dots, following the one precedent the app already has
  * for a hand-written animation, `connection/connectionTerminalChromeDotStyles.ts`.

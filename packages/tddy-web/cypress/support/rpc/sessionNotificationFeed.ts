@@ -1,7 +1,7 @@
 /**
  * Test double for **`ConnectionService.StreamSessionNotifications`** — the one daemon-level feed
  * the session drawer subscribes to for every row (PRD:
- * `docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md`).
+ * `docs/ft/daemon/session-notifications.md`).
  *
  * The real stream stays open for the life of the screen and pushes an event whenever any session
  * on the daemon does something. The fake mirrors that: its generator never completes, and a spec

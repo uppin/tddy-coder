@@ -4,7 +4,7 @@ import { SessionNotificationRegistry } from "./sessionNotificationRegistry";
 /**
  * The per-session store behind the drawer's indicators.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR4–FR6).
+ * PRD: docs/ft/daemon/session-notifications.md (FR4–FR6).
  *
  * It holds three moments per session — last activity, last attention, last view — and nothing
  * else: the indicator itself is derived (`lib/sessionIndicator.ts`), so the store's only jobs are

@@ -1,6 +1,6 @@
 //! The subscribers that ship with the daemon: Telegram, and the stream `tddy-web` reads.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md` (FR2, FR3, FR7).
+//! PRD: `docs/ft/daemon/session-notifications.md` (FR2, FR3, FR7).
 
 use std::sync::Arc;
 

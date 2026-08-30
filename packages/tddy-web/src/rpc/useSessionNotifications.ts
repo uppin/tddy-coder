@@ -11,7 +11,7 @@
  * returns nothing — its whole output is the registry write, and a row that wants the state reads it
  * from there rather than through a prop drilled down the drawer.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR3, NFR1).
+ * PRD: docs/ft/daemon/session-notifications.md (FR3, NFR1).
  */
 
 import { useEffect } from "react";

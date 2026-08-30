@@ -7,7 +7,7 @@
 //! (`session_notification_subscribers::SessionNotificationStreamSubscriber`), which turn them into
 //! the drawer's per-row indicator.
 //!
-//! PRD: `docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md`.
+//! PRD: `docs/ft/daemon/session-notifications.md`.
 //!
 //! Two rules hold everywhere in here:
 //!

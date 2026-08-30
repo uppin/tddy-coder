@@ -1166,7 +1166,7 @@ pub struct ConnectionServiceImpl {
     agent_conversations:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, AgentConversation>>>,
     /// Where this daemon publishes its session notifications
-    /// (`docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md`). `None` means
+    /// (`docs/ft/daemon/session-notifications.md`). `None` means
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
     /// hand a client.
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,

@@ -1,7 +1,7 @@
 //! Unit: `TelegramNotificationSubscriber` — Telegram's interest in the notification bus, and the
 //! dedupe and routing it keeps from today's `TelegramSessionWatcher`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR2, FR7).
+//! PRD: docs/ft/daemon/session-notifications.md (FR2, FR7).
 //!
 //! Two things must hold after the extraction. **Telegram gets no new traffic**: it declines every
 //! `ACTIVITY` notification, and it declines `ATTENTION_REQUIRED` raised by the presenter, whose

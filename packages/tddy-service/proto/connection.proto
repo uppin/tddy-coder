@@ -134,7 +134,7 @@ service ConnectionService {
   rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
   rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
   // Session notifications — everything that happened in ANY of this daemon's sessions that an
-  // operator should know about (docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md).
+  // operator should know about (docs/ft/daemon/session-notifications.md).
   // One subscription serves the whole session drawer: the events name the session they belong to,
   // so a drawer of twelve rows opens one stream, not twelve. Live-only by construction — a
   // notification describes a moment, and a replayed one would claim an agent is working now

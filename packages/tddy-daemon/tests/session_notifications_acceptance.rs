@@ -1,6 +1,6 @@
 //! Acceptance: session notifications are a bus with subscribers, and Telegram is one of them.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md
+//! PRD: docs/ft/daemon/session-notifications.md
 //! (FR1/AC1, FR2/AC3, FR7/AC4).
 //!
 //! The path under test is the real one: `ConnectionServiceImpl::report_session_status` is called
@@ -38,6 +38,10 @@ const TEST_HOOK_TOKEN: &str = "tok-notifications-acceptance";
 const SESSION_ID: &str = "01900000-0000-7000-8000-AABB00000001";
 const BOUND_CHAT: i64 = 9999_i64;
 
+/// The configured bot token. Named so the secrets assertion can name it rather than repeat a
+/// literal that could drift out of step with the config builder below.
+const BOT_TOKEN: &str = "test-token-5f3a9c";
+
 /// The worktree the session under test works in. Its basename is what every surface must call the
 /// session — the drawer already does, and after this changeset Telegram does too.
 const SESSION_REPO_PATH: &str = "/home/dev/my-feature-branch";
@@ -55,7 +59,7 @@ fn a_daemon_config() -> DaemonConfig {
     DaemonConfig {
         telegram: Some(tddy_daemon::config::TelegramConfig {
             enabled: true,
-            bot_token: "test-token".to_string(),
+            bot_token: BOT_TOKEN.to_string(),
             chat_ids: vec![BOUND_CHAT],
         }),
         ..Default::default()
@@ -239,6 +243,59 @@ async fn a_waiting_for_input_hook_reaches_the_indicator_subscriber_alongside_tel
     assert_eq!(seen[0].kind, SessionNotificationKind::AttentionRequired);
     assert_eq!(seen[0].source, SessionNotificationSource::ActivityStatus);
     assert_eq!(seen[0].text, WAITING_FOR_INPUT_TELEGRAM_TEXT);
+}
+
+// ---------------------------------------------------------------------------
+// NFR4 — secrets stay out of notifications
+// ---------------------------------------------------------------------------
+
+/// A notification is operator-facing text that fans out to a chat and to every connected browser,
+/// and it is built beside two secrets: the caller's `hook_token` and the configured `bot_token`.
+/// Neither may ride along — not in the text, not in the label, not in the id.
+#[tokio::test]
+async fn keeps_the_hook_and_bot_tokens_out_of_everything_it_publishes() {
+    // Given
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let session_dir = sessions_tmp.path().join("sessions").join(SESSION_ID);
+    write_claude_cli_session(&session_dir, "Running");
+
+    let sender = Arc::new(InMemoryTelegramSender::new());
+    let indicators = Arc::new(RecordingSessionNotificationSubscriber::new());
+    let service = a_service_with_both_subscribers(
+        sessions_tmp.path().to_path_buf(),
+        Arc::clone(&sender),
+        Arc::clone(&indicators),
+    );
+
+    // When — the hook authenticates with its token, on a daemon holding a bot token
+    report_status(&service, "WaitingForInput").await;
+
+    // Then — neither secret appears anywhere a person or a browser can read
+    let notification = indicators
+        .received()
+        .into_iter()
+        .next()
+        .expect("the indicator subscriber must receive the notification");
+    let published = format!(
+        "{} {} {}",
+        notification.text, notification.label, notification.session_id
+    );
+    assert!(
+        !published.contains(TEST_HOOK_TOKEN),
+        "a published notification must not carry the hook token; got {published:?}"
+    );
+    assert!(
+        !published.contains(BOT_TOKEN),
+        "a published notification must not carry the bot token; got {published:?}"
+    );
+
+    let sent = sender.recorded();
+    assert_eq!(sent.len(), 1, "got {sent:?}");
+    assert!(
+        !sent[0].1.contains(TEST_HOOK_TOKEN) && !sent[0].1.contains(BOT_TOKEN),
+        "a Telegram message must not carry either token; got {:?}",
+        sent[0].1
+    );
 }
 
 // ---------------------------------------------------------------------------

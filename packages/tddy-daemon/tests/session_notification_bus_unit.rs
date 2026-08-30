@@ -1,7 +1,7 @@
 //! Unit: the session-notification domain — how a reported status becomes a notification, and how
 //! the bus fans one publish out to its subscribers.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR2, FR7, NFR3).
+//! PRD: docs/ft/daemon/session-notifications.md (FR2, FR7, NFR3).
 //!
 //! Classification is a pure mapping over the `SessionActivityStatus` wire strings
 //! (`packages/tddy-core/src/session_activity.rs`), so it is pinned here as a table of cases rather

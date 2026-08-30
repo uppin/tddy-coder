@@ -1,7 +1,7 @@
 //! Acceptance: `ConnectionService.StreamSessionNotifications` — the daemon-level feed `tddy-web`
 //! subscribes to once for the whole session drawer.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR3, AC5).
+//! PRD: docs/ft/daemon/session-notifications.md (FR3, AC5).
 //!
 //! One stream carries every session on the daemon, so the drawer pays for one subscription
 //! however many rows it shows (NFR1). Each event carries the session's drawer label and the

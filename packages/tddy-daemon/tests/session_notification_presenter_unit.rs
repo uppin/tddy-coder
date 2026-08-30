@@ -1,6 +1,6 @@
 //! Unit: classifying a `tddy-coder` workflow session's presenter events into notifications.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR5).
+//! PRD: docs/ft/daemon/session-notifications.md (FR5).
 //!
 //! This is the indicator story for **tool sessions**, which report no Claude Code hook statuses:
 //! their dot is driven entirely by the `PresenterObserver.ObserveEvents` stream. The classification

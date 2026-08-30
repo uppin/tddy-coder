@@ -1,7 +1,7 @@
 /**
  * Acceptance: the session drawer turns notifications into indicators.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (AC6–AC10).
+ * PRD: docs/ft/daemon/session-notifications.md (AC6–AC10).
  *
  * A drawer row's dot has four states, and every one of them is a claim about what the operator
  * should do next: grey (the session is gone), steady green (alive, nothing new), blinking green

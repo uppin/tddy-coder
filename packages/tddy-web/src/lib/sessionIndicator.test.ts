@@ -9,7 +9,7 @@ import {
 /**
  * The four states a drawer row's dot can be in, and the rules that pick between them.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR4–FR6).
+ * PRD: docs/ft/daemon/session-notifications.md (FR4–FR6).
  *
  * This is the whole decision, kept pure: liveness, then attention, then recency-against-the-view.
  * Everything the Cypress specs assert is one of these rows; the 30-second decay is only testable

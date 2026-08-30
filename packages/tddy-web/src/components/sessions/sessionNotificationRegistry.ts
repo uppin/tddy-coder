@@ -14,7 +14,7 @@
  * and does not survive a full page reload — a reloaded dashboard starts with every row settled,
  * which is the honest state: nothing has been streamed to it yet.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR4–FR6).
+ * PRD: docs/ft/daemon/session-notifications.md (FR4–FR6).
  */
 
 import type { SessionNotificationState } from "../../lib/sessionIndicator";

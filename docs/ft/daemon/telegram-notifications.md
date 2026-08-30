@@ -4,7 +4,7 @@
 
 Operators receive short Telegram messages when a **coding session’s recorded status** moves from one value to another, for sessions that are **active** (tool process alive) and **in progress**.
 
-**Activity alerts** (the `WaitingForInput` / `Done` path) identify a session by the **same label the `tddy-web` session drawer shows it under** — the basename of its `repo_path`, falling back to its `workflow_goal`, falling back to the first eight characters of its id. One rule, `tddy_core::session_label::session_display_label`, serves both surfaces, so a chat message and a drawer row name the same session identically. See [session-notifications-as-indicators](1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md).
+**Activity alerts** (the `WaitingForInput` / `Done` path) identify a session by the **same label the `tddy-web` session drawer shows it under** — the basename of its `repo_path`, falling back to its `workflow_goal`, falling back to the first eight characters of its id. One rule, `tddy_core::session_label::session_display_label`, serves both surfaces, so a chat message and a drawer row name the same session identically. See [session-notifications-as-indicators](session-notifications.md).
 
 **Every other Telegram surface** — the metadata-tick status line, presenter elicitation, the `/sessions` list, chain-parent buttons — still uses the **short id label**: the first two hyphen-separated segments of the session id (for example `018f1234-5678`). Unifying those is tracked as a follow-up.
 
@@ -114,7 +114,7 @@ to the broadcast, so an unreadable tracking map cannot turn a targeted alert int
 
 The bus and its other subscriber — the `StreamSessionNotifications` feed that drives the web's
 per-session indicators — are described in
-**[session-notifications-as-indicators](1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md)**.
+**[session-notifications-as-indicators](session-notifications.md)**.
 
 ## Presenter stream: elicitation (`ModeChanged`)
 

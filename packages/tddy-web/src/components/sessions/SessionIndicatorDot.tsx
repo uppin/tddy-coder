@@ -1,7 +1,7 @@
 /**
  * The session drawer's indicator dot, and the pieces that decide what it shows.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR4–FR6).
+ * PRD: docs/ft/daemon/session-notifications.md (FR4–FR6).
  *
  * The drawer paints this dot in two places — a row of the expanded list, and a row of the collapsed
  * 12px strip — at different sizes but with identical meaning. They live here as **one** component

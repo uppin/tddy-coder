@@ -1,6 +1,6 @@
 //! Acceptance: one session-display-label rule, shared by every surface that names a session.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md (FR1, AC1, AC2).
+//! PRD: docs/ft/daemon/session-notifications.md (FR1, AC1, AC2).
 //!
 //! The rule is the one `tddy-web`'s session drawer already applies
 //! (`packages/tddy-web/src/utils/sessionDrawerLabel.ts`): the basename of `repo_path`, falling

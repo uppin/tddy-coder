@@ -7,7 +7,7 @@ import type { SessionEntry } from "../gen/connection_pb";
  * module replaces: the three poll-derived tokens plus `"working"`, which only the notification
  * stream can tell us about.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md § Indicator model.
+ * PRD: docs/ft/daemon/session-notifications.md § Indicator model.
  */
 export type SessionIndicator = "disconnected" | "connected" | "working" | "needs-input";
 

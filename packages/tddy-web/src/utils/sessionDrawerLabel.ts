@@ -21,7 +21,7 @@ const WORKFLOW_GOAL_PLACEHOLDER = "—";
  *
  * `packages/tddy-core/src/session_label.rs` mirrors this rule so a Telegram notification and a
  * drawer row name the same session identically (PRD FR1,
- * docs/ft/daemon/1-WIP/PRD-2026-08-29-session-notifications-as-indicators.md). The two must stay in
+ * docs/ft/daemon/session-notifications.md). The two must stay in
  * step: a change here without the matching change there splits the naming again.
  */
 export function sessionDrawerLabel(session: SessionEntry): string {
