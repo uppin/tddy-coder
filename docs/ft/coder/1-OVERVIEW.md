@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-05-02
+**Updated**: 2026-08-31
 
 ## Summary
 
@@ -34,6 +34,8 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | **Backend selection** | With `--agent` omitted, users pick the coding backend (Claude, Claude ACP, Cursor, Codex, Codex ACP, Stub) via TUI `AppMode::Select` or a plain numbered menu. With `--agent` set, selection is skipped. Per-backend default models apply; `--model` overrides. Cursor receives `--model` on `cursor agent` when configured; Codex receives `-m` on `codex exec` when configured. |
 | **Workflow recipe** | **`--recipe`** selects **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, **`ReviewRecipe`**, or **`MergePrRecipe`** (**`tdd`**, **`tdd-small`**, **`bugfix`**, **`free-prompting`**, **`grill-me`**, **`review`**, **`merge-pr`**). **New sessions** with no **`--recipe`** and no **`recipe`** in **`changeset.yaml`** use **`free-prompting`**. Optional YAML **`recipe:`**; **`changeset.yaml`** stores **`recipe`** for resume. In TUI **FeatureInput**, **`/start-<recipe>`** lines switch recipe and restart the workflow; after a structured **`/start-*`** run completes, the session returns to **`free-prompting`**. |
 | **Project agent skills** | Skills under **`.agents/skills/<name>/SKILL.md`** with matching frontmatter **`name`**; **`tddy_core::agent_skills`** supplies discovery, slash menu items (**`/start-…`**, **`/recipe`**, skills), and composed prompts; built-in **`/recipe`** in the presenter opens recipe selection when wired with **`with_recipe_resolver`**. Slash completion in the ratatui feature input is outside this surface. |
+| **Rust code analysis** | **`tddy-tools analyze`** — llvm-cov capture, CRAP scoring, HTML report, duplicate/subset tests (`tddy-code-analysis`); skill **`analyze-code-issues`** |
+| **Rust code restructuring** | **`tddy-tools restructure`** — JSONL intent plans via rust-analyzer through **`tddy-lsp`** (`tddy-code-restructuring`); skill **`code-restructuring`** |
 
 ## Backend selection at session start
 
@@ -59,15 +61,11 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [gRPC Remote Control](grpc-remote-control.md) | `--grpc` flag, bidirectional streaming, programmatic control for E2E and automation |
 | [TUI status bar](tui-status-bar.md) | Spinner and session segment on the status line; parity with Virtual TUI / streamed frames |
 | [Feature prompt: agent skills](feature-prompt-agent-skills.md) | **`.agents/skills`** discovery, composed skill prompts, presenter **`/recipe`** selection |
+| [Rust code analysis](rust-code-analysis.md) | **`tddy-tools analyze`** — CRAP, coverage, duplicate tests (Rust v1) |
+| [Rust code restructuring](rust-code-restructuring.md) | **`tddy-tools restructure`** — plan-driven refactors via **`tddy-lsp`** (Rust v1) |
 | [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
-
-### In progress
-
-| Feature | Description |
-|---------|-------------|
-| [Rust code analysis and restructuring (PRD)](1-WIP/PRD-2026-08-31-rust-code-analysis-and-restructuring.md) | `tddy-tools analyze` (llvm-cov CRAP + HTML report + duplicate tests) and `tddy-tools restructure` (plan-driven rust-analyzer refactors via `tddy-lsp`); skills `analyze-code-issues` and `code-restructuring` under `.agents/skills/` |
 
 ## Integration Points
 

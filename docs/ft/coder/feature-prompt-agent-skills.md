@@ -53,6 +53,15 @@ The reference string includes:
 | **`packages/tddy-coder/tests/prompt_slash_skills_acceptance.rs`** | Discovery, mismatch quarantine, menu contents, composition literals, recipe slash presenter mode. |
 | **`packages/tddy-coder/tests/prompt_slash_skills_lower.rs`** | Menu with no skills directory; non-empty invalid reasons. |
 
+## Shipped project skills (examples)
+
+| Skill folder | Role |
+|---|---|
+| `analyze-code-issues` | Green baseline → `tddy-tools analyze` → CRAP targeting note; prerequisite for restructuring |
+| `code-restructuring` | Plan JSONL intents → `tddy-tools restructure` check/apply/verify |
+
+See [rust-code-analysis.md](rust-code-analysis.md) and [rust-code-restructuring.md](rust-code-restructuring.md).
+
 ## Related documentation
 
 - [Workflow recipes](workflow-recipes.md) — recipe CLI names, defaults, and **`/start-<recipe>`** behavior.  

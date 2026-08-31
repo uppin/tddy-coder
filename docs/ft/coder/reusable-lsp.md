@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Draft
-**Updated**: 2026-07-21
+**Updated**: 2026-08-31
 
 ## Summary
 
@@ -145,9 +145,15 @@ locations/diagnostics (fixed fake values), and the exact set of MCP tool names.
 - [x] `ReadLints` routes to workspace-level LSP diagnostics (`workspace/diagnostic` pull)
       when a language server is available, else the existing no-linter stub.
 
+## Restructuring bridge (added 2026-08-31)
+
+`tddy-code-restructuring` reuses the same `(workspace root, Rust)` server as MCP LSP tools. The Rust backend calls rust-analyzer assists through `LspClient::request_raw` and `notify_raw` — a sync bridge over the existing JSON-RPC client. No second rust-analyzer process is spawned for restructuring.
+
+The five agent MCP LSP tools (`LspDiagnostics`, `LspDefinition`, …) are unchanged. Assist-grade typed methods (`textDocument/codeAction`, `textDocument/rename`, `textDocument/semanticTokens/full`, `$/progress`) are a follow-up on top of the raw RPC surface. See [rust-code-restructuring.md](rust-code-restructuring.md).
+
 ## Future Considerations (Not In Scope)
 
 - Additional languages (TypeScript / Python / Go) beyond the Rust allow-list entry.
-- Rename / code-actions / formatting LSP operations.
+- Rename / code-actions / formatting LSP operations (MCP tools remain diagnostics/definition/references/hover/symbols; restructuring uses raw RPC for assists).
 - Sharing one server across distinct sessions in the same workspace (initial slice
   reuses across targets within an owner; cross-session sharing is a follow-up).

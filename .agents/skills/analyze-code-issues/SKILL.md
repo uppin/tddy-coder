@@ -79,5 +79,5 @@ Join key is `(file, declaration line)`, never function name.
 
 ## References
 
-- [PRD: Rust code analysis](../../docs/ft/coder/1-WIP/PRD-2026-08-31-rust-code-analysis-and-restructuring.md)
+- [Rust code analysis](../../docs/ft/coder/rust-code-analysis.md)
 - [`tddy-code-analysis` README](../../packages/tddy-code-analysis/README.md)
