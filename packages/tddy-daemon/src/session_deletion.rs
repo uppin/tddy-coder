@@ -137,6 +137,12 @@ fn teardown_workspace_sandbox(session_dir: &Path, metadata: &tddy_core::SessionM
             e
         );
     }
+    // The jail runner this daemon recorded was spawned by a *previous* daemon process; after a
+    // restart it is not our child, so `waitpid` returns `ECHILD` and this is a no-op. In a
+    // single-process test the host that spawned the runner is also the one running the delete, so
+    // the dead child is left as a zombie that `kill(pid, 0)` still reports as alive — reap it so
+    // the post-delete liveness check sees `ESRCH` rather than a zombie.
+    reap_child_if_ours(pid as i32);
 }
 
 #[cfg(not(unix))]
@@ -172,17 +178,18 @@ fn reap_child_if_ours(pid: i32) {
 #[cfg(unix)]
 fn terminate_session_process(pid: u32) -> Result<(), Status> {
     if pid_stopped_or_zombie(pid) {
-        reap_child_if_ours(pid as i32);
         return Ok(());
     }
     let pid_i = pid as i32;
     signal_pid(pid_i, libc::SIGTERM)?;
     if wait_until_pid_stopped(pid, Duration::from_secs(5), Duration::from_millis(100)) {
-        reap_child_if_ours(pid_i);
         return Ok(());
     }
     signal_pid(pid_i, libc::SIGKILL)?;
-    reap_child_if_ours(pid_i);
+    // SIGKILL cannot be blocked or ignored; the process is dead. On some platforms (macOS) the
+    // zombie remains visible to kill(pid,0) until the parent calls waitpid, so we do a brief
+    // best-effort wait but do not return an error — the process has no running threads.
+    let _ = wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100));
     Ok(())
 }
 
@@ -570,12 +577,15 @@ mod tests {
     fn terminate_session_process_kills_a_running_child() {
         use std::process::Command;
 
-        let child = Command::new("sleep").arg("120").spawn().unwrap();
+        let mut child = Command::new("sleep").arg("120").spawn().unwrap();
         let pid = child.id();
         terminate_session_process(pid).expect("terminate should succeed");
+        // `terminate_session_process` signals the child but does not reap it; the caller owns the
+        // `Child` handle and reaps. A killed-but-unreaped child is a zombie that `kill(pid, 0)`
+        // still reports as alive, so reap through the handle before asserting liveness.
+        child.wait().expect("child should have been signalled");
         let ret = unsafe { libc::kill(pid as i32, 0) };
         assert_ne!(ret, 0, "child should no longer respond to kill(pid, 0)");
-        std::mem::forget(child);
     }
 
     #[test]
