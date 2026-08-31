@@ -15,7 +15,7 @@
           overlays = [ rust-overlay.overlays.default ];
         };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rustfmt" "clippy" ];
+          extensions = [ "rustfmt" "clippy" "llvm-tools-preview" ];
         };
         # Buildroot 2024.02.6 (LTS) — not in nixpkgs; fetched from buildroot.org.
         # BUILDROOT_DIR is exported in shellHook so the VM image build daemon can find it.

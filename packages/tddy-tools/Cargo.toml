@@ -40,6 +40,10 @@ tddy-build-typescript = { path = "../tddy-build-typescript" }
 tddy-build-docker = { path = "../tddy-build-docker" }
 tddy-build-buildroot = { path = "../tddy-build-buildroot" }
 tddy-build-qemu = { path = "../tddy-build-qemu" }
+tddy-code-analysis = { path = "../tddy-code-analysis" }
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
+tddy-lsp = { path = "../tddy-lsp" }
+tddy-task = { path = "../tddy-task" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 log = "0.4"
 env_logger = "0.11"

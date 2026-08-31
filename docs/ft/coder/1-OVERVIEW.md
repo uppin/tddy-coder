@@ -63,6 +63,12 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
 
+### In progress
+
+| Feature | Description |
+|---------|-------------|
+| [Rust code analysis and restructuring (PRD)](1-WIP/PRD-2026-08-31-rust-code-analysis-and-restructuring.md) | `tddy-tools analyze` (llvm-cov CRAP + HTML report + duplicate tests) and `tddy-tools restructure` (plan-driven rust-analyzer refactors via `tddy-lsp`); skills `analyze-code-issues` and `code-restructuring` under `.agents/skills/` |
+
 ## Integration Points
 
 - **tddy-core**: Workflow engine (`WorkflowEngine`), recipe trait (`WorkflowRecipe`), graph execution, `RunnerHooks`, `CodingBackend` trait; goals and states are string IDs, not a fixed enum

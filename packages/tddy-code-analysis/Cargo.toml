@@ -1,0 +1,25 @@
+[package]
+name = "tddy-code-analysis"
+version = "0.1.0"
+edition = "2021"
+description = "Rust code analysis: cyclomatic complexity, CRAP scoring, llvm-cov capture, HTML reports, duplicate-test detection"
+
+[lib]
+name = "tddy_code_analysis"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+md5 = "0.7"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+syn = { version = "2", features = ["full", "visit"] }
+thiserror = "2"
+walkdir = "2"
+which = "6"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tempfile = "3"
