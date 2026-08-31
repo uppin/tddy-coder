@@ -60,16 +60,15 @@ that still has native filesystem tools has nothing to proxy through. A split pla
 
 ### What a split session cannot also ask for
 
-Two otherwise-valid options cannot be served on a split placement. Each is **refused** with
+One otherwise-valid option cannot be served on a split placement. It is **refused** with
 `invalid_argument` naming the field, rather than silently dropped — a session that came up without
 its recipe looks exactly like the session that was asked for.
 
 | Field | Why it cannot be served here |
 |---|---|
 | `recipe` | A workflow recipe's tooling resolves `TDDY_REPO_DIR` on the agent's host |
-| `sandbox` | The sandboxed spawn resolves its worktree on this daemon |
 
-Both need a repository on the daemon running the agent, which a split session does not have. This
+It needs a repository on the daemon running the agent, which a split session does not have. This
 mirrors the v1 restriction the original remote-codebase mode already carries (recipes other than
 `free-prompting` were out of scope there too).
 
@@ -90,11 +89,39 @@ is a gate on the selection.
 **The UI must not offer what is refused.** `CreateSessionPane` defaults `recipe` to `"tdd"` and sends
 it whenever managed codebase is on — so without a matching gate, the *only* thing the codebase-host
 selector could produce is a request the daemon rejects. The form therefore withdraws the Recipe
-control once a codebase host is chosen, and sends an empty `recipe`; the Sandbox control is withdrawn
-on the same terms. Putting the codebase back on the session's own host restores both: the withdrawal
-is a property of the split, not a one-way door. The specialized-agent picker and the Semantic index
-toggle are **not** withdrawn — on every placement they are served, so on every placement they are
-offered.
+control once a codebase host is chosen, and sends an empty `recipe`. Putting the codebase back on
+the session's own host restores it: the withdrawal is a property of the split, not a one-way door.
+The specialized-agent picker and the Semantic index toggle are **not** withdrawn — on every
+placement they are served, so on every placement they are offered.
+
+The **Sandbox** control is also withdrawn on a split placement today, on the same terms the Recipe
+control is. The daemon no longer refuses `sandbox = true` on a split placement (see § Sandbox:
+placement-dependent semantics below), but the web form still hides the checkbox there until a
+separate PR (`web-split-sandbox-toggle`) exposes it — so the daemon admits a combination the UI
+does not yet offer.
+
+### Sandbox: placement-dependent semantics
+
+On a **co-located** placement (`codebase_daemon_instance_id` empty or self), `sandbox = true` keeps
+today's meaning: it jails the *agent* on the daemon running it, and that jail resolves its worktree
+on the same daemon.
+
+On a **split** placement, the same flag is **inverted**: it confines the **codebase half**, not the
+agent half. The agent runs unsandboxed on A; the `workspace` session on B is sandboxed via the
+existing `workspace-tool-sandbox` path (`run_exec_tool_locally` dispatch + per-session jail
+provisioning), which reads `sandbox: Some(true)` off the workspace metadata the codebase host
+persists from the forwarded request.
+
+| Half | Sandbox | Why |
+|------|---------|-----|
+| Agent (daemon A) | **Unsandboxed** — `sandbox: None` metadata | The agent runs on the operator's host with managed MCP tools; jailing it there would confine nothing that touches the repository, which lives on B. Keeping the agent half unsandboxed also preserves the existing `spawn_split_agent` path and resume routing. |
+| Codebase (daemon B) | **Sandboxed** — `sandbox: Some(true)` metadata | The workspace session on B holds the checkout, so the workspace tool sandbox is the jail that confines the repository-side `Shell`/`Write` work the agent proxies to it. |
+
+The inversion is a property of the split placement, not of the flag: co-located sandbox is
+unchanged. Validation gates for split+sandbox are the same as split today (`managed_codebase`,
+`session_type = claude-cli`, eligible codebase daemon); `recipe` is still refused on a split
+placement. Resume/relaunch of the sandboxed codebase half after a stop or daemon restart is a
+separate PR (`split-sandbox-resume`).
 
 ### Why claude-cli only
 
