@@ -297,7 +297,7 @@ it("sends no workflow recipe for a split session", () => {
   });
 });
 
-it("stops offering sandbox once the codebase is placed on another host", () => {
+it("keeps the sandbox toggle on offer once the codebase is placed on another host", () => {
   // Given a managed claude-cli session, which offers the sandbox while the codebase is co-located
   mountCreatePane(aCreateSessionBackend());
   createSessionPage.switchToClaudeCliSession();
@@ -307,9 +307,10 @@ it("stops offering sandbox once the codebase is placed on another host", () => {
   // When the codebase moves to another host
   createSessionPage.selectCodebaseHost(CODEBASE_HOST);
 
-  // Then — a sandbox resolves a worktree on the daemon running the agent, which a split session
-  // does not have, so the daemon refuses it. Offering it would be the same trap the recipe had.
-  createSessionPage.sandboxToggle().should("not.exist");
+  // Then the toggle stays on offer. On a split placement the sandbox confines the codebase host —
+  // the workspace tool jail lives on B, where the checkout is — not the agent on A, so the
+  // combination is one the daemon admits rather than withdraws.
+  createSessionPage.sandboxToggle().should("exist");
 });
 
 it("keeps the semantic index on offer once the codebase is placed on another host", () => {
@@ -327,7 +328,7 @@ it("keeps the semantic index on offer once the codebase is placed on another hos
   createSessionPage.semanticIndexToggle().should("exist");
 });
 
-it("sends the chosen semantic index for a split session, and no sandbox", () => {
+it("sends the chosen semantic index and the sandbox for a split session", () => {
   // Given both switched on while the codebase was still co-located
   const backend = aCreateSessionBackend();
   mountCreatePane(backend);
@@ -341,13 +342,57 @@ it("sends the chosen semantic index for a split session, and no sandbox", () => 
   createSessionPage.selectCodebaseHost(CODEBASE_HOST);
   createSessionPage.submit();
 
-  // Then the index rides along to the host that can build it, while the sandbox — which the daemon
-  // refuses on this placement — does not survive into the request
+  // Then both ride along: the index to the host that can build it, and the sandbox to the host it
+  // confines — the codebase host, where the workspace tool jail lives. The checked state survives
+  // the split rather than being blanked at submit.
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.sandbox).to.equal(true);
+    expect(request.semanticIndex).to.equal(true);
+  });
+});
+
+it("sends sandbox false for a split session when the toggle is left unchecked", () => {
+  // Given a managed claude-cli split placement with the sandbox left off
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // When the session is created without checking the sandbox
+  createSessionPage.submit();
+
+  // Then the request carries the placement but no sandbox — the toggle passes through its real
+  // state rather than defaulting on once the split is in effect
   cy.wrap(null).should(() => {
     const request = theStartSessionRequest(backend);
     expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
     expect(request.sandbox).to.equal(false);
-    expect(request.semanticIndex).to.equal(true);
+  });
+});
+
+it("sends sandbox true for a split session when the toggle is checked after placing the codebase", () => {
+  // Given a managed claude-cli session with the codebase already on another host
+  const backend = aCreateSessionBackend();
+  mountCreatePane(backend);
+  createSessionPage.switchToClaudeCliSession();
+  createSessionPage.selectProject("proj-1");
+  createSessionPage.enableManagedCodebase();
+  createSessionPage.selectCodebaseHost(CODEBASE_HOST);
+
+  // When the sandbox is checked on the split placement and the session created
+  createSessionPage.sandboxToggle().check();
+  createSessionPage.submit();
+
+  // Then the checked state reaches the wire — the toggle is interactive on a split, not frozen,
+  // and the request reflects the operator's choice rather than a forced default
+  cy.wrap(null).should(() => {
+    const request = theStartSessionRequest(backend);
+    expect(request.codebaseDaemonInstanceId).to.equal(CODEBASE_HOST);
+    expect(request.sandbox).to.equal(true);
   });
 });
 
