@@ -220,7 +220,13 @@ pub async fn spawn_cursor_cli_session_inner(
                 ));
             }
             let chain_base_ref = stack_parent
-                .chain_base_ref(&pid, &sessions_base, &repo_root, new_branch_name)
+                .chain_base_ref(
+                    &pid,
+                    &sessions_base,
+                    &repo_root,
+                    new_branch_name,
+                    selected_integration_base_ref,
+                )
                 .await?;
             let worktree_base_ref =
                 tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);

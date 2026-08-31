@@ -1333,6 +1333,10 @@ pub struct StackBaseLookup<'a> {
     /// over the branch (D34) — see [`tddy_core::pr_stack_node_for_spawn`]: a renamed branch matches
     /// no node, and a node matched by nothing means no ordering gate runs at all.
     pub stack_node_id: &'a str,
+    /// The operator-chosen base from the Start-session dialog's "Base branch" selector. When
+    /// non-empty after trim, chain-base resolution short-circuits before the stack ordering gate
+    /// — that deliberate repoint is honored via [`tddy_core::select_worktree_base_ref`].
+    pub selected_integration_base_ref: &'a str,
 }
 
 /// A spawn's link back onto the planned node it materializes, as the daemon that records it needs
@@ -1447,6 +1451,7 @@ impl<'a> SpawnStackParent<'a> {
         sessions_base: &Path,
         repo_root: &Path,
         new_branch_name: &str,
+        selected_integration_base_ref: &str,
     ) -> Result<Option<String>, Status> {
         let Self::OwnedBy {
             session_id,
@@ -1467,6 +1472,7 @@ impl<'a> SpawnStackParent<'a> {
             repo_root,
             new_branch_name,
             stack_node_id,
+            selected_integration_base_ref,
         })
         .await
     }
@@ -2282,6 +2288,9 @@ impl ConnectionServiceImpl {
         &self,
         lookup: &StackBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
+        if !lookup.selected_integration_base_ref.trim().is_empty() {
+            return Ok(None);
+        }
         match tddy_core::classify_stack_parent_route(
             &local_instance_id_for_config(&self.config),
             lookup.stack_parent,
@@ -3557,7 +3566,13 @@ async fn spawn_claude_cli_session_inner(
         .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
     let chain_base_ref = stack_parent
-        .chain_base_ref(project_id, &sessions_base, &repo_root, new_branch_name)
+        .chain_base_ref(
+            project_id,
+            &sessions_base,
+            &repo_root,
+            new_branch_name,
+            selected_integration_base_ref,
+        )
         .await?;
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
@@ -6076,6 +6091,7 @@ impl ConnectionServiceImpl {
                         repo_root: &repo_root,
                         new_branch_name,
                         stack_node_id,
+                        selected_integration_base_ref,
                     })
                     .await?;
                 let worktree_base_ref = tddy_core::select_worktree_base_ref(
@@ -6653,6 +6669,7 @@ impl ConnectionServiceImpl {
                 repo_root: &repo_root,
                 new_branch_name,
                 stack_node_id,
+                selected_integration_base_ref,
             })
             .await?;
         let worktree_base_ref =
