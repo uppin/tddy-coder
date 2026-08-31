@@ -9658,11 +9658,6 @@ impl ConnectionServiceImpl {
                 "a workflow recipe needs a repository on the daemon running the agent; it cannot be combined with codebase_daemon_instance_id",
             ));
         }
-        if req.sandbox {
-            return Err(Status::invalid_argument(
-                "sandbox sessions resolve their worktree on this daemon; it cannot be combined with codebase_daemon_instance_id",
-            ));
-        }
         // `specialized_agents` and `semantic_index` are *not* refused: neither depends on where the
         // codebase lives. An index indexes a worktree, and the one that counts is the codebase
         // host's, so that host builds it. An agent is placeable on any host — co-located with the

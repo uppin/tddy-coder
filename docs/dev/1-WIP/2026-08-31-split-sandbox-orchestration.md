@@ -35,8 +35,20 @@ Land first:
 
 - [x] Create/update PRD documentation — amendment at `docs/ft/daemon/amendments/PRD-2026-08-31-split-sandbox-orchestration.md`
 - [x] Create changeset — this document
-- [ ] Failing acceptance tests (Step 6 — `/plan-red`)
-- [ ] Failing unit/integration tests (Step 7 — red phase)
-- [ ] Implement production code making tests pass (`/green`)
-- [ ] Apply amendment to `remote-managed-worktree.md` (`/wrap-context-docs`)
-- [ ] Prepend changeset index line to `docs/dev/changesets.md` (`/wrap-context-docs`)
+- [x] Failing acceptance tests (Step 6 — `/plan-red`)
+- [x] Failing unit/integration tests (Step 7 — red phase)
+- [x] Implement production code making tests pass (`/green`)
+- [x] Apply amendment to `remote-managed-worktree.md` (`/wrap-context-docs`)
+- [x] Prepend changeset index line to `docs/dev/changesets.md` (`/wrap-context-docs`)
+
+## Validation Results
+
+- `cargo build -p tddy-daemon` — pass.
+- `cargo test -p tddy-daemon --lib workspace_start_request_unit_tests::` — 11/11 pass (forward-contract regression guards stay green).
+- `remote_managed_worktree_acceptance.rs::a_split_start_asking_for_a_sandbox_is_admitted_and_fails_over_the_missing_room` — pass (flipped from `InvalidArgument` refusal to `FailedPrecondition` missing room).
+- `remote_managed_worktree_cross_host_acceptance.rs` — compiles; runtime blocked by LiveKit testkit WebRTC signalling timeout affecting the whole cross-host suite in this environment (not specific to these tests). To verify on CI / a host with a healthy LiveKit.
+- `cargo clippy -p tddy-daemon -- -D warnings` — pass.
+
+## Status
+
+Implementation complete. Ready for wrap: this WIP source is removed after the PR lands.

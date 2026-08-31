@@ -874,7 +874,8 @@ async fn a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_d
 /// the flag landed on rather than about confinement itself.
 #[tokio::test]
 #[serial]
-async fn a_split_session_started_with_sandbox_sandboxes_the_codebase_half_and_leaves_the_agent_half_unsandboxed() {
+async fn a_split_session_started_with_sandbox_sandboxes_the_codebase_half_and_leaves_the_agent_half_unsandboxed(
+) {
     // Given a codebase host whose jail is a recording provisioner, so the sandboxed workspace
     // start on B can complete without a kernel sandbox on the host running the test
     let provisioner = Arc::new(RecordingProvisioner::default());
@@ -896,8 +897,7 @@ async fn a_split_session_started_with_sandbox_sandboxes_the_codebase_half_and_le
     // MCP tools, and keeping it unsandboxed preserves the existing spawn_split_agent / resume path.
     let agent_metadata = session_metadata_on(&hosts.agent_sessions_base, &started.session_id);
     assert_eq!(
-        agent_metadata.sandbox,
-        None,
+        agent_metadata.sandbox, None,
         "the agent half of a sandboxed split session must stay unsandboxed"
     );
 
@@ -967,7 +967,10 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
 
     // Then — it ran in the jail on B, not on B's host worktree. The marker proves the call reached
     // the jail; the unchanged worktree proves the host tool engine on B never ran it.
-    assert_eq!(jail_marker_of(&response).as_deref(), Some(SPLIT_JAIL_MARKER));
+    assert_eq!(
+        jail_marker_of(&response).as_deref(),
+        Some(SPLIT_JAIL_MARKER)
+    );
     assert_eq!(
         jail.calls(),
         vec![JailedCall {
