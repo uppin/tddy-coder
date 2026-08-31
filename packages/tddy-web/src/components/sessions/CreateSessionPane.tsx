@@ -224,11 +224,13 @@ export function CreateSessionPane({
    * The session's worktree lives on a daemon other than the one running its agent — see
    * docs/ft/daemon/remote-managed-worktree.md.
    *
-   * Governs everything a split cannot also ask for: the workflow recipe, the sandbox and the
-   * permission bypass all resolve a worktree on the daemon running the agent, which a split session
-   * does not have, and the daemon refuses each by name. Specialized agents and the semantic index
-   * are not among them — an agent is placeable on any host, and the index is built wherever the
-   * worktree is, which on a split session is the codebase host.
+   * Governs everything a split cannot also ask for: the workflow recipe and the permission bypass
+   * both resolve a worktree on the daemon running the agent, which a split session does not have,
+   * and the daemon refuses each by name. The sandbox is not among them — on a split placement it
+   * confines the codebase host (the jail runs where the checkout is), so the combination is
+   * admitted. Specialized agents and the semantic index are not among them either — an agent is
+   * placeable on any host, and the index is built wherever the worktree is, which on a split
+   * session is the codebase host.
    */
   const isSplitCodebase =
     canChooseCodebaseHost &&
@@ -568,7 +570,7 @@ export function CreateSessionPane({
       permissionMode,
       dangerouslySkipPermissions: isSplitCodebase ? false : dangerouslySkipPermissions,
       initialPrompt,
-      sandbox: isSplitCodebase ? false : sandbox,
+      sandbox,
       managedCodebase,
       // Both ride along on any placement, split or not — an agent reads the codebase through its
       // own placement, and the index is built wherever the worktree is. Only `managedCodebase`
@@ -1015,23 +1017,22 @@ export function CreateSessionPane({
             </div>
           )}
 
-          {/* A sandboxed spawn resolves its worktree on this daemon, which a split session has no
-              worktree on — the daemon refuses the pair, so the choice is withdrawn rather than
-              offered and then rejected. */}
-          {!isSplitCodebase && (
-            <div>
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  data-testid="create-session-sandbox-toggle"
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-input"
-                  checked={sandbox}
-                  onChange={(e) => setSandbox(e.target.checked)}
-                />
-                Sandbox
-              </label>
-            </div>
-          )}
+          {/* On a co-located placement the sandbox confines the agent on this daemon. On a split
+              placement it confines the codebase host — the jail runs on the daemon holding the
+              checkout, not the agent host. The combination with codebase_daemon_instance_id is
+              admitted and the jail is placed on the codebase host. */}
+          <div>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                data-testid="create-session-sandbox-toggle"
+                type="checkbox"
+                className="h-4 w-4 rounded border-input"
+                checked={sandbox}
+                onChange={(e) => setSandbox(e.target.checked)}
+              />
+              Sandbox
+            </label>
+          </div>
 
           <div>
             <label className={labelClass} htmlFor="create-session-initial-prompt">
