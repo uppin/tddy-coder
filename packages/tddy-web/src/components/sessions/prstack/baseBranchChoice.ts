@@ -60,7 +60,19 @@ export function baseBranchChoice(
   defaultBranch: string,
 ): BaseBranchChoice {
   const stackBranches = prioritiseBaseBranchOptions(node, nodes);
-  if (stackBranches.length === 0) return { options: [], selected: "" };
+  if (stackBranches.length === 0) {
+    // No stack branch of its own is offered. A lone planned root (no parents) offers nothing to
+    // choose: the daemon resolves the default base itself from an empty override. A child whose
+    // parent is branchless — e.g. merged externally, branch deleted, `pr_status.phase` still
+    // `"open"` — has no stack branch to base onto, but it is not a root: the project default is its
+    // escape, offered and pre-selected so the operator sees the base and chooses it rather than
+    // guessing whether the spawn lands on a stack branch or master.
+    if (node.parents.length === 0) return { options: [], selected: "" };
+    return {
+      options: [{ value: defaultBranch, label: defaultBranch || PROJECT_DEFAULT_LABEL }],
+      selected: deriveStackBaseBranch(node, nodes, defaultBranch),
+    };
+  }
 
   const options: BaseBranchOption[] = stackBranches.map((branch) => ({
     value: branch,

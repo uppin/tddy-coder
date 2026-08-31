@@ -190,4 +190,53 @@ describe("baseBranchChoice", () => {
       DEFAULT_BRANCH,
     ]);
   });
+
+  // ---------------------------------------------------------------------------
+  // A child of a parent whose PR was merged externally: the parent is branchless and its
+  // `pr_status.phase` is still `"open"` (the daemon never merged it, and the branch was deleted on
+  // merge). The stack offers no branch of its own, but this is not a lone planned root — the node
+  // has a parent — so the project default must be offered as the escape, and pre-selected, so the
+  // operator sees the base rather than guessing whether the spawn lands on a stack branch or master.
+  // ---------------------------------------------------------------------------
+
+  function aStackWhoseParentWasMergedExternally(): { child: StackNode; nodes: StackNode[] } {
+    const bottom = aStackNode({
+      nodeId: "bottom",
+      title: "bottom",
+      branchSuggestion: "feature/stack/bottom",
+      sessionId: "child-bottom",
+      prStatus: { phase: "open" },
+    });
+    const child = aStackNode({
+      nodeId: "child",
+      title: "child",
+      branchSuggestion: "feature/stack/child",
+      parents: ["bottom"],
+    });
+    return { child, nodes: [bottom, child] };
+  }
+
+  it("offers the project default as the sole option for a child of an externally merged branchless parent", () => {
+    // Given — `bottom` was merged externally: branchless, `pr_status.phase` still `"open"`.
+    const { child, nodes } = aStackWhoseParentWasMergedExternally();
+
+    // When
+    const choice = baseBranchChoice(child, nodes, DEFAULT_BRANCH);
+
+    // Then — the picker renders with the project default as the only escape, so the operator can
+    // choose it instead of being left with no base to pick.
+    expect(choice.options).toEqual([{ value: DEFAULT_BRANCH, label: DEFAULT_BRANCH }]);
+  });
+
+  it("pre-selects the project default for a child of an externally merged branchless parent", () => {
+    // Given
+    const { child, nodes } = aStackWhoseParentWasMergedExternally();
+
+    // When
+    const choice = baseBranchChoice(child, nodes, DEFAULT_BRANCH);
+
+    // Then — the selection names the ref the spawn will branch from, so the operator reads the
+    // base before confirming rather than submitting a guess.
+    expect(choice.selected).toEqual(DEFAULT_BRANCH);
+  });
 });

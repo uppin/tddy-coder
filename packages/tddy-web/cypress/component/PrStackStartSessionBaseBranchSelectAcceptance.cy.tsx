@@ -328,3 +328,143 @@ it("hides the base-branch selector for a root node with no other materialized br
     expect(calls[0].selectedIntegrationBaseRef).to.equal("");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A child of a parent whose PR was merged externally must let the operator SEE and CHOOSE the base.
+//
+// The parent's branch is gone and its `pr_status.phase` is still `"open"` (the daemon never merged
+// it), so the ordering gate would refuse the spawn. The Start-session dialog must not hide the base
+// in that case: the operator needs to see which ref the child will branch from — `origin/master`,
+// where the merged work already lives — and confirm it, rather than guessing whether the spawn will
+// land on some stack branch or on master.
+// ---------------------------------------------------------------------------
+
+it("shows the base-branch selector with the project default for a child of an externally merged parent", () => {
+  // Given — `bottom` was merged externally: branchless, `pr_status.phase` still `"open"`. `child`
+  // depends on it and is planned. This is the shape of `workspace-tool-sandbox` in the incident.
+  const orchestrator: Partial<SessionEntry> = {
+    sessionId: ORCHESTRATOR_SESSION_ID,
+    createdAt: "2026-07-27T09:00:00Z",
+    status: "idle",
+    repoPath: "/home/dev/pr-stack-project",
+    isActive: false,
+    projectId: PROJECT_ID,
+    recipe: "pr-stack",
+    stackPlanJson: aStackPlanJson(1, [
+      aPlannedNode({
+        nodeId: "bottom",
+        title: "bottom",
+        branchSuggestion: "feature/stack/bottom",
+        sessionId: "child-bottom",
+        prStatus: { phase: "open" },
+      }),
+      aPlannedNode({
+        nodeId: "child",
+        title: "child",
+        branchSuggestion: "feature/stack/child",
+        parents: ["bottom"],
+      }),
+    ]),
+  };
+  const backend = aBaseSelectionBackend(orchestrator);
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("child").click();
+
+  // Then — the picker is rendered and offers the project default as the escape, lifted to its
+  // remote-tracking ref. The operator can see the base rather than guessing.
+  prStackScreenPage.dialogBaseBranchSelect().should("be.visible");
+  prStackScreenPage
+    .dialogBaseBranchOptionValues()
+    .should("deep.equal", [DEFAULT_BRANCH_REF]);
+});
+
+it("names the base in the 'New branch from base' caption for a child of an externally merged parent", () => {
+  // Given — the same externally-merged-parent stack.
+  const orchestrator: Partial<SessionEntry> = {
+    sessionId: ORCHESTRATOR_SESSION_ID,
+    createdAt: "2026-07-27T09:00:00Z",
+    status: "idle",
+    repoPath: "/home/dev/pr-stack-project",
+    isActive: false,
+    projectId: PROJECT_ID,
+    recipe: "pr-stack",
+    stackPlanJson: aStackPlanJson(1, [
+      aPlannedNode({
+        nodeId: "bottom",
+        title: "bottom",
+        branchSuggestion: "feature/stack/bottom",
+        sessionId: "child-bottom",
+        prStatus: { phase: "open" },
+      }),
+      aPlannedNode({
+        nodeId: "child",
+        title: "child",
+        branchSuggestion: "feature/stack/child",
+        parents: ["bottom"],
+      }),
+    ]),
+  };
+  const backend = aBaseSelectionBackend(orchestrator);
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("child").click();
+
+  // Then — the branch-mode caption names the ref, so the operator reads "New branch from base:
+  // origin/master" rather than a blank "New branch from base" that hides whether it is master or a
+  // stack branch.
+  prStackScreenPage.dialogBranchIntentSelectedLabel().should("eq", `New branch from base: ${DEFAULT_BRANCH_REF}`);
+});
+
+it("pre-selects the project default and sends it as the integration base ref for a child of an externally merged parent", () => {
+  // Given — the same externally-merged-parent stack.
+  const orchestrator: Partial<SessionEntry> = {
+    sessionId: ORCHESTRATOR_SESSION_ID,
+    createdAt: "2026-07-27T09:00:00Z",
+    status: "idle",
+    repoPath: "/home/dev/pr-stack-project",
+    isActive: false,
+    projectId: PROJECT_ID,
+    recipe: "pr-stack",
+    stackPlanJson: aStackPlanJson(1, [
+      aPlannedNode({
+        nodeId: "bottom",
+        title: "bottom",
+        branchSuggestion: "feature/stack/bottom",
+        sessionId: "child-bottom",
+        prStatus: { phase: "open" },
+      }),
+      aPlannedNode({
+        nodeId: "child",
+        title: "child",
+        branchSuggestion: "feature/stack/child",
+        parents: ["bottom"],
+      }),
+    ]),
+  };
+  const backend = aBaseSelectionBackend(orchestrator);
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("child").click();
+
+  // Then — the picker pre-selected the project default before the operator confirms.
+  prStackScreenPage.dialogBaseBranchSelect().should("have.value", DEFAULT_BRANCH_REF);
+
+  // When — the operator confirms the pre-selected base without changing anything.
+  prStackScreenPage.dialogSubmitBtn().click();
+
+  // Then — StartSession carries the pre-selected default as the integration base ref — the
+  // explicit override the daemon honors past the ordering gate.
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(ConnectionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].selectedIntegrationBaseRef).to.equal(DEFAULT_BRANCH_REF);
+  });
+});
