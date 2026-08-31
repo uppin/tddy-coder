@@ -645,7 +645,8 @@ async fn a_resumed_split_agent_keeps_every_tool_when_the_roster_is_empty() {
 /// path injects none of the `TDDY_REMOTE_*` variables, and would not have spawned the stub at all.
 #[tokio::test]
 #[serial]
-async fn a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sandboxed_runner_path() {
+async fn a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sandboxed_runner_path()
+{
     // Given a stopped split session whose agent half carries sandbox: None — the only metadata a
     // resume reads to decide between the split and sandboxed branches
     assert_eq!(

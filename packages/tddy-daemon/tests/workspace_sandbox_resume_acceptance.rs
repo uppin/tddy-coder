@@ -309,8 +309,11 @@ async fn a_resume_re_provisions_the_jail_for_a_sandboxed_workspace_session_after
     );
 
     // When the session is resumed on the restarted daemon
-    first
-        .resume(&session_id)
+    restarted
+        .resume_session(Request::new(ResumeSessionRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.clone(),
+        }))
         .await
         .expect("a sandboxed workspace session must resume by re-provisioning its jail");
 
@@ -319,7 +322,11 @@ async fn a_resume_re_provisions_the_jail_for_a_sandboxed_workspace_session_after
     // dispatch reads; a resume that did not re-provision would leave the call refused (or, worse,
     // run on the bare host worktree the session was sandboxed to avoid).
     let provisioned = restarted_provisioner.provisioned();
-    assert_eq!(provisioned.len(), 1, "exactly one jail must be re-provisioned");
+    assert_eq!(
+        provisioned.len(),
+        1,
+        "exactly one jail must be re-provisioned"
+    );
     assert_eq!(provisioned[0].session_id, session_id);
     assert_eq!(provisioned[0].worktree_path, first.worktree_of(&session_id));
 
@@ -352,7 +359,8 @@ async fn a_resume_re_provisions_the_jail_for_a_sandboxed_workspace_session_after
 /// already confined, so a resume must not pay for a second jail — it reuses the one it has. A resume
 /// that re-provisioned unconditionally would leak a jail per resume.
 #[tokio::test]
-async fn a_resume_reuses_the_existing_jail_when_the_sandboxed_workspace_session_was_not_restarted() {
+async fn a_resume_reuses_the_existing_jail_when_the_sandboxed_workspace_session_was_not_restarted()
+{
     // Given a sandboxed workspace session whose jail is still in this daemon's registry
     let provisioner = Arc::new(RecordingProvisioner::default());
     let host = CodebaseHost::with_provisioner(Arc::clone(&provisioner) as Arc<_>);
@@ -445,9 +453,8 @@ impl WorkspaceSandboxProvisioner for LingeringProcessProvisioner {
             .spawn()
             .map_err(|e| SandboxError::Io(format!("spawn lingering jail runner: {e}")))?;
         let pid = child.id();
-        std::fs::write(sandbox_dir.join(RUNNER_PID_FILE), pid.to_string()).map_err(|e| {
-            SandboxError::Io(format!("write runner pid: {e}"))
-        })?;
+        std::fs::write(sandbox_dir.join(RUNNER_PID_FILE), pid.to_string())
+            .map_err(|e| SandboxError::Io(format!("write runner pid: {e}")))?;
         *self.spawned.lock().unwrap() = Some(pid);
         Ok(Arc::new(LingeringProcessSandbox {
             child: Mutex::new(Some(child)),

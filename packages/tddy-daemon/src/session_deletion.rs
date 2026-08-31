@@ -103,22 +103,86 @@ pub(crate) fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
     Err(Status::internal(format!("kill(pid, signal {sig}): {err}")))
 }
 
+/// Kill the workspace jail runner recorded under `<session_dir>/sandbox/runner.pid`.
+///
+/// Best-effort: a missing file, an invalid pid, or a process already gone must not fail the delete.
+#[cfg(unix)]
+fn teardown_workspace_sandbox(session_dir: &Path, metadata: &tddy_core::SessionMetadata) {
+    if metadata.sandbox != Some(true) {
+        return;
+    }
+    let pid_path = session_dir
+        .join("sandbox")
+        .join(crate::workspace_tool_sandbox::RUNNER_PID_FILE);
+    let Ok(contents) = std::fs::read_to_string(&pid_path) else {
+        return;
+    };
+    let Ok(pid) = contents.trim().parse::<u32>() else {
+        log::warn!(
+            "teardown_workspace_sandbox: invalid pid in {:?}: {:?}",
+            pid_path,
+            contents
+        );
+        return;
+    };
+    log::debug!(
+        "teardown_workspace_sandbox: terminating jail runner pid={} from {:?}",
+        pid,
+        pid_path
+    );
+    if let Err(e) = terminate_session_process(pid) {
+        log::warn!(
+            "teardown_workspace_sandbox: failed to terminate jail runner pid={}: {}",
+            pid,
+            e
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn teardown_workspace_sandbox(_session_dir: &Path, _metadata: &tddy_core::SessionMetadata) {}
+
+/// Reap `pid` when this process is its parent. A reparented orphan returns immediately with `ECHILD`.
+#[cfg(unix)]
+fn reap_child_if_ours(pid: i32) {
+    let mut status: i32 = 0;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let ret = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if ret == pid {
+            return;
+        }
+        if ret == 0 {
+            if std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ECHILD) {
+            return;
+        }
+        log::warn!("reap_child_if_ours: waitpid({pid}): {err}");
+        return;
+    }
+}
+
 /// SIGTERM, wait, then SIGKILL if the PID from session metadata is still alive.
 #[cfg(unix)]
 fn terminate_session_process(pid: u32) -> Result<(), Status> {
     if pid_stopped_or_zombie(pid) {
+        reap_child_if_ours(pid as i32);
         return Ok(());
     }
     let pid_i = pid as i32;
     signal_pid(pid_i, libc::SIGTERM)?;
     if wait_until_pid_stopped(pid, Duration::from_secs(5), Duration::from_millis(100)) {
+        reap_child_if_ours(pid_i);
         return Ok(());
     }
     signal_pid(pid_i, libc::SIGKILL)?;
-    // SIGKILL cannot be blocked or ignored; the process is dead. On some platforms (macOS) the
-    // zombie remains visible to kill(pid,0) until the parent calls waitpid, so we do a brief
-    // best-effort wait but do not return an error — the process has no running threads.
-    let _ = wait_until_pid_stopped(pid, Duration::from_secs(3), Duration::from_millis(100));
+    reap_child_if_ours(pid_i);
     Ok(())
 }
 
@@ -287,6 +351,10 @@ pub fn delete_session_directory(
                 );
             }
         }
+    }
+
+    if let Some(ref m) = metadata {
+        teardown_workspace_sandbox(&session_dir, m);
     }
 
     std::fs::remove_dir_all(&session_dir).map_err(|e| {
@@ -497,6 +565,82 @@ mod tests {
 
     /// A `repo_path` session records the user's checkout as its worktree. Deleting the session must
     /// terminate/clean the session dir but never remove that external checkout.
+    #[test]
+    #[cfg(unix)]
+    fn terminate_session_process_kills_a_running_child() {
+        use std::process::Command;
+
+        let child = Command::new("sleep").arg("120").spawn().unwrap();
+        let pid = child.id();
+        terminate_session_process(pid).expect("terminate should succeed");
+        let ret = unsafe { libc::kill(pid as i32, 0) };
+        assert_ne!(ret, 0, "child should no longer respond to kill(pid, 0)");
+        std::mem::forget(child);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn delete_kills_workspace_jail_runner_recorded_in_runner_pid() {
+        use std::process::Command;
+
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        let sid = "sandbox-runner-sid";
+        let dir = unified_session_dir_path(base, sid);
+        let sandbox_dir = dir.join("sandbox");
+        std::fs::create_dir_all(&sandbox_dir).unwrap();
+
+        let child = Command::new("sleep").arg("120").spawn().unwrap();
+        let pid = child.id();
+        std::fs::write(
+            sandbox_dir.join(crate::workspace_tool_sandbox::RUNNER_PID_FILE),
+            pid.to_string(),
+        )
+        .unwrap();
+
+        let metadata = SessionMetadata {
+            session_id: sid.to_string(),
+            project_id: "proj-u".to_string(),
+            created_at: "2026-03-21T10:00:00Z".to_string(),
+            updated_at: "2026-03-21T10:00:00Z".to_string(),
+            status: "active".to_string(),
+            repo_path: None,
+            pid: None,
+            tool: None,
+            livekit_room: None,
+            pending_elicitation: false,
+            previous_session_id: None,
+            session_type: Some("workspace".to_string()),
+            model: None,
+            cursor_chat_id: None,
+            activity_status: None,
+            hook_token: None,
+            sandbox: Some(true),
+            agent: None,
+            recipe: None,
+            agents: Vec::new(),
+            agents_rev: 0,
+            legacy_specialized_agents: Vec::new(),
+            codebase_daemon_instance_id: None,
+            codebase_session_id: None,
+            agent_daemon_instance_id: None,
+            agent_session_id: None,
+        };
+        tddy_core::write_session_metadata(&dir, &metadata).unwrap();
+
+        let r = delete_session_directory(base, sid, None);
+        assert!(r.is_ok(), "delete should succeed: {r:?}");
+        assert!(!dir.exists(), "session directory should be removed");
+
+        let ret = unsafe { libc::kill(pid as i32, 0) };
+        assert_ne!(ret, 0, "jail runner should be terminated");
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+        std::mem::forget(child);
+    }
+
     #[test]
     fn delete_preserves_a_client_supplied_repo_path_checkout() {
         // Given — an external checkout with a file the user would lose if it were wiped

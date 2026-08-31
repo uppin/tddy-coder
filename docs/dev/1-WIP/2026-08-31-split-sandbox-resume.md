@@ -39,5 +39,9 @@ Implementation of full cross-host resume can follow in the same PR once the hook
   - `tests/workspace_sandbox_resume_acceptance.rs`: resume re-provisions the jail after a restart; resume reuses the live jail when not restarted; delete after a restart kills the orphaned jail runner.
   - `tests/split_session_resume_acceptance.rs`: a split session's agent half (`sandbox: None`) resumes through the split path, not the sandboxed runner path.
 - [ ] Failing unit/integration tests (Step 7 — red phase)
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`)
+  - `src/connection_service.rs`: workspace branch in `resume_session` — re-provisions jail when `sandbox == Some(true)` and not already registered; returns empty LiveKit fields.
+  - `src/session_deletion.rs`: `teardown_workspace_sandbox` reads `<session_dir>/sandbox/runner.pid` and terminates the orphaned runner before `remove_dir_all`; `reap_child_if_ours` reaps zombies so `kill(pid,0)` no longer lies.
+  - `src/workspace_tool_sandbox.rs`: `RUNNER_PID_FILE` const; production provisioner persists `handle.pid()` to `<session_dir>/sandbox/runner.pid`.
+  - Verified: 3/3 `workspace_sandbox_resume_acceptance`, 8/8 `split_session_resume_acceptance`, 15/15 `workspace_tool_sandbox_acceptance`, 2/2 `workspace_session_deletion_acceptance`, clippy clean. 2 cross-host `remote_managed_worktree_cross_host_acceptance` failures confirmed pre-existing on red-only baseline (sandboxed split-start refusal, owned by `split-sandbox-orchestration`).
 - [ ] Prepend changeset index line to `docs/dev/changesets.md` (`/wrap-context-docs`)
