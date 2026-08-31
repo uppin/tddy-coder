@@ -575,6 +575,18 @@ export const prStackScreenPage = {
   dialogBranchIntentSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionBranchIntentSelect, { timeout: 5000, ...options }),
 
+  /**
+   * The label of the branch-mode select's selected `<option>` — the "New branch from base: <ref>"
+   * caption that tells the operator which ref the child worktree will branch from. Yields it as a
+   * string so a test can assert the base is shown (not blanked) for a blocked node.
+   */
+  dialogBranchIntentSelectedLabel: (): Cypress.Chainable<string> =>
+    prStackScreenPage
+      .dialogBranchIntentSelect()
+      .find("option:selected")
+      .invoke("text")
+      .then((text) => String(text).trim()),
+
   /** The dialog's existing-branch select, shown in "Work on existing branch" mode. */
   dialogBranchToWorkOnSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionBranchToWorkOnSelect, { timeout: 5000, ...options }),

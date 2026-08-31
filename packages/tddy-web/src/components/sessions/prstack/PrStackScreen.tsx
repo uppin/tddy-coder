@@ -285,8 +285,18 @@ export function PrStackScreen({
   // Force start hands the decision to the daemon's gate (D42), so the view must not pre-empt that gate
   // with an override. The picker keeps every option: a base the operator chooses on purpose is a
   // decision, not a guess — only the pre-selection is dropped.
-  const selectedBaseBranch =
-    startBlockersForNode.length > 0 ? "" : remoteTrackingName(choice.selected, remote);
+  // A blocked node's pre-selection is dropped only when there is more than one option to choose
+  // from: the operator must then pick a base on purpose, and submitting without picking sends an
+  // empty override so the daemon's own ordering gate decides (D42). When the project default is the
+  // sole option — a child of a parent merged externally, whose branch is gone and whose work is
+  // already in the default — the default is the escape and is pre-selected, so confirming sends it
+  // as the explicit repoint the daemon honors past the gate. The caption always names the derived
+  // base (D43: the dialog "showing the base branch"), never blanked.
+  const blankBaseBranchSelection =
+    startBlockersForNode.length > 0 && baseBranchOptions.length !== 1;
+  const selectedBaseBranch = blankBaseBranchSelection
+    ? ""
+    : remoteTrackingName(choice.selected, remote);
   const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
     ? {
         projectId: session.projectId,
@@ -314,9 +324,7 @@ export function PrStackScreen({
         // "New branch from base" with no ref, which is the truth — the daemon resolves it, and
         // refuses the spawn when the chain has no base to give.
         baseBranchLabel:
-          startBlockersForNode.length > 0
-            ? ""
-            : remoteTrackingName(deriveStackBaseBranch(startSessionNode, nodes, defaultBranch), remote),
+          remoteTrackingName(deriveStackBaseBranch(startSessionNode, nodes, defaultBranch), remote),
         baseBranchOptions,
         selectedBaseBranch,
         initialPrompt: [startSessionNode.title, startSessionNode.description]

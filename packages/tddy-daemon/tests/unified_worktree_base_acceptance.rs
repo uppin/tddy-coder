@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use tddy_core::changeset::{Stack, StackNode};
+use tddy_core::changeset::{GithubPrStatus, Stack, StackNode};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{write_changeset, Changeset};
 use tddy_daemon::cli_session_manager::CliSessionManager;
@@ -382,5 +382,188 @@ async fn cursor_cli_session_without_stack_parent_uses_default_base() {
     assert_eq!(
         effective_base, "origin/main",
         "cursor-cli without stack_parent must base off the default integration base"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// An explicit base-branch override bypasses the stack ordering gate.
+//
+// The daemon's spawn gate (`Stack::base_ref_for_spawn`) refuses a child whose
+// non-merged parent owns no branch. That is correct for the *default* path: the
+// resolver would otherwise silently cut the child from `origin/<default>` for a
+// parent that has not pushed yet. But the Start-session dialog also lets the
+// operator pick a different base branch (`selected_integration_base_ref`),
+// and that choice is a deliberate repoint — not a guess. The gate must not run
+// for it, or a child of a parent whose PR was merged externally (branch gone,
+// `pr_status.phase` still `"open"` because the daemon never merged it) cannot
+// be started at all, even though the merged work is already in the chosen base.
+// ---------------------------------------------------------------------------
+
+/// A parent node whose PR was merged **externally**: the branch is gone (`branch: None`) and the
+/// daemon never updated `pr_status.phase`, so it still reads `"open"`. This is the exact shape of
+/// `workspace-tool-sandbox` in the reported incident.
+fn an_externally_merged_parent_node(node_id: &str, parents: &[&str]) -> StackNode {
+    StackNode {
+        node_id: node_id.to_string(),
+        title: node_id.to_string(),
+        description: String::new(),
+        branch_suggestion: Some(format!("feature/stack/{node_id}")),
+        branch: None,
+        session_id: Some(format!("session-for-{node_id}")),
+        parents: parents.iter().map(|p| p.to_string()).collect(),
+        pr_status: Some(GithubPrStatus {
+            phase: "open".to_string(),
+            url: Some(format!("https://github.com/acme/repo/pull/{node_id}")),
+            error: None,
+        }),
+        child_state: None,
+        internal_status: None,
+        display_order: None,
+    }
+}
+
+/// Write a pr-stack orchestrator whose planned `child` node depends on a parent `bottom` that was
+/// merged externally — branchless and still `"open"`. No branch is pushed for `bottom`: the merge
+/// deleted it on origin, and the child is meant to base off the project default instead.
+fn write_orchestrator_with_externally_merged_parent(
+    sessions_base: &std::path::Path,
+    child_branch: &str,
+) {
+    let orchestrator_dir = unified_session_dir_path(sessions_base, ORCHESTRATOR_SESSION_ID);
+    std::fs::create_dir_all(&orchestrator_dir).expect("create orchestrator session dir");
+
+    let stack = Stack {
+        version: 1,
+        nodes: vec![
+            an_externally_merged_parent_node("bottom", &[]),
+            a_planned_child_node("child", child_branch, &["bottom"]),
+        ],
+    };
+
+    let cs = Changeset {
+        recipe: Some("pr-stack".to_string()),
+        stack: Some(stack),
+        ..Changeset::default()
+    };
+    write_changeset(&orchestrator_dir, &cs).expect("write orchestrator changeset");
+}
+
+/// **explicit_base_override_bypasses_the_gate_for_an_externally_merged_parent** — When the
+/// operator picks a base branch in the Start-session dialog, that choice is sent as
+/// `selected_integration_base_ref` and must bypass the stack ordering gate. A child of a parent
+/// whose PR was merged externally (branch gone, `pr_status.phase` still `"open"`) then spawns off
+/// the chosen base instead of being refused with `failed_precondition`.
+#[tokio::test]
+async fn explicit_base_override_bypasses_the_gate_for_an_externally_merged_parent() {
+    // Given — a repo with origin/main, and an orchestrator whose `child` node depends on a
+    // parent `bottom` that was merged externally: branchless, `pr_status.phase` still `"open"`.
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+
+    let child_branch = "feature/stack/child";
+    write_orchestrator_with_externally_merged_parent(sessions_tmp.path(), child_branch);
+
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), false);
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // When — the operator starts `child` naming the planned node and choosing `origin/main` as the
+    // base, the deliberate escape from a stack whose parent has nothing left to offer.
+    let resp = service
+        .start_session(Request::new(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            tool_path: String::new(),
+            project_id: TEST_PROJECT_ID.to_string(),
+            agent: String::new(),
+            daemon_instance_id: String::new(),
+            recipe: String::new(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: "new_branch_from_base".to_string(),
+            new_branch_name: child_branch.to_string(),
+            selected_integration_base_ref: "origin/main".to_string(),
+            selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
+            permission_mode: String::new(),
+            stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+            sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
+            ..Default::default()
+        }))
+        .await
+        .expect("an explicit base override must bypass the ordering gate and spawn the child");
+
+    // Then — the child bases off the operator-chosen `origin/main`, where the externally merged
+    // parent's work already lives.
+    let session_id = resp.into_inner().session_id;
+    let effective_base = effective_base_for_session(sessions_tmp.path(), &session_id);
+    assert_eq!(
+        effective_base, "origin/main",
+        "an explicit base override must base the child off the chosen ref, not refuse the spawn"
+    );
+}
+
+/// **empty_base_override_still_refuses_when_the_parent_is_branchless_and_non_merged** — The gate
+/// still guards the default path: an empty `selected_integration_base_ref` falls through to the
+/// stack-parent resolution, which runs `base_ref_for_spawn` and refuses on a branchless non-merged
+/// parent. The fix bypasses the gate only for an *explicit* override, never silently.
+#[tokio::test]
+async fn empty_base_override_still_refuses_when_the_parent_is_branchless_and_non_merged() {
+    // Given — the same externally-merged-parent stack as above.
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    register_project(&sessions_tmp.path().join("projects"), repo_dir.path());
+
+    let child_branch = "feature/stack/child";
+    write_orchestrator_with_externally_merged_parent(sessions_tmp.path(), child_branch);
+
+    let stub = write_echo_argv_script(repo_dir.path());
+    let (_cfg_dir, config) = write_config_with_binary(stub.to_str().unwrap(), false);
+    let service = minimal_service(config, sessions_tmp.path().to_path_buf());
+
+    // When — the operator names the planned node but sends no base override (the default path).
+    let err = service
+        .start_session(Request::new(StartSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            tool_path: String::new(),
+            project_id: TEST_PROJECT_ID.to_string(),
+            agent: String::new(),
+            daemon_instance_id: String::new(),
+            recipe: String::new(),
+            session_type: "claude-cli".to_string(),
+            model: TEST_MODEL.to_string(),
+            branch_worktree_intent: "new_branch_from_base".to_string(),
+            new_branch_name: child_branch.to_string(),
+            selected_integration_base_ref: String::new(),
+            selected_branch_to_work_on: String::new(),
+            initial_prompt: String::new(),
+            permission_mode: String::new(),
+            stack_parent: ORCHESTRATOR_SESSION_ID.to_string(),
+            sandbox: false,
+            managed_codebase: false,
+            specialized_agents: vec![],
+            ..Default::default()
+        }))
+        .await
+        .expect_err(
+            "the default path must still be refused when a non-merged parent owns no branch",
+        );
+
+    // Then — the ordering gate refuses, naming the branchless parent, exactly as before.
+    assert_eq!(
+        err.code(),
+        tddy_rpc::Code::FailedPrecondition,
+        "the default path must fail with failed_precondition, not succeed silently"
+    );
+    assert!(
+        err.message().contains("non-merged parent 'bottom'"),
+        "the refusal must name the branchless parent; got: {}",
+        err.message()
     );
 }
