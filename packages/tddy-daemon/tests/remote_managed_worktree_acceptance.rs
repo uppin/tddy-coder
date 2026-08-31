@@ -426,9 +426,10 @@ async fn start_session_with_an_unknown_codebase_daemon_is_refused() {
 // withdraws nothing from `specialized_agents` — it only decides which host the roster and the clone
 // end up on.
 //
-// What a split placement still refuses is work with no host-independent meaning: a workflow recipe
-// and a sandbox both resolve a worktree on the daemon running the agent, which a split session does
-// not have.
+// What a split placement still refuses is work with no host-independent meaning: a workflow
+// recipe resolves `TDDY_REPO_DIR` on the daemon running the agent, which a split session does not
+// have. A sandbox, by contrast, confines the codebase half on a split placement (the host holding
+// the checkout), so it is admissible — see `a_split_start_asking_for_a_sandbox_is_admitted_and_fails_over_the_missing_room`.
 //
 // The fixture holds no LiveKit room, so the two codes say everything: `InvalidArgument` means the
 // daemon refused the combination outright, `FailedPrecondition` means it accepted it and got as far
@@ -564,8 +565,13 @@ async fn a_split_start_carrying_a_workflow_recipe_is_still_refused_naming_the_fi
 }
 
 #[tokio::test]
-async fn a_split_start_asking_for_a_sandbox_is_still_refused_naming_the_field() {
-    // Given a split request that also asks to be sandboxed
+async fn a_split_start_asking_for_a_sandbox_is_admitted_and_fails_over_the_missing_room() {
+    // Given a split request that also asks to be sandboxed. On a split placement the sandbox
+    // confines the codebase half (the host holding the checkout), not the agent half, so the
+    // combination is admissible: the flag forwards to the codebase host's workspace start, which
+    // is where the workspace tool sandbox lives. This fixture holds no LiveKit room, so an
+    // admissible split start gets as far as routing and then fails there — the same code split as
+    // `semantic_index` and `specialized_agents` above.
     let sessions_tmp = tempfile::tempdir().unwrap();
     let service = service_with_known_codebase_peer(sessions_tmp.path().to_path_buf());
     let request = StartSessionRequest {
@@ -577,19 +583,21 @@ async fn a_split_start_asking_for_a_sandbox_is_still_refused_naming_the_field() 
     let status = service
         .start_session(Request::new(request))
         .await
-        .expect_err("a sandbox resolves a worktree beside the agent, which a split session lacks");
+        .expect_err("no room is connected here, so even an admissible split start cannot complete");
 
-    // Then
+    // Then — the request was well-formed, so this is a precondition failure rather than an
+    // argument error: the distinction is what tells an operator whether to fix the request or
+    // the deployment. A refusal of the combination would be InvalidArgument naming `sandbox`.
     assert_eq!(
         status.code(),
-        tddy_rpc::Code::InvalidArgument,
-        "expected InvalidArgument; got {:?}: {}",
+        tddy_rpc::Code::FailedPrecondition,
+        "a sandboxed split placement must be admissible; got {:?}: {}",
         status.code(),
         status.message()
     );
     assert!(
-        status.message().contains("sandbox"),
-        "the refusal must name the field it refused; got '{}'",
+        !status.message().contains("sandbox"),
+        "the start must fail over the missing room, not over the sandbox it asked for; got '{}'",
         status.message()
     );
 }

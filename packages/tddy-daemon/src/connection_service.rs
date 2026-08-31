@@ -21631,6 +21631,47 @@ mod workspace_start_request_unit_tests {
         // Then
         assert!(forwarded.semantic_index);
     }
+
+    /// A sandbox on a split placement confines the codebase half, so the flag travels with the
+    /// request to the host holding the checkout — `run_exec_tool_locally` on that host reads it
+    /// back off the workspace metadata to route through the jail. The forward is `..req.clone()`,
+    /// so this pins the contract against a future refactor that drops the field: a silent drop
+    /// would leave the codebase half unsandboxed with nothing here saying it should have been.
+    #[test]
+    fn a_requested_sandbox_is_forwarded_to_the_host_holding_the_worktree() {
+        // Given — `a_split_start_request` already carries `sandbox: true`
+        let req = a_split_start_request();
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert!(
+            forwarded.sandbox,
+            "the sandbox flag must reach the codebase host so its workspace half is confined"
+        );
+    }
+
+    /// The control: a split placement that declines a sandbox forwards no sandbox, so the
+    /// codebase host's workspace session stays recognisably unsandboxed — the same shape every
+    /// split session had before this feature.
+    #[test]
+    fn an_unsandboxed_split_start_forwards_no_sandbox() {
+        // Given
+        let req = StartSessionRequest {
+            sandbox: false,
+            ..a_split_start_request()
+        };
+
+        // When
+        let forwarded = forwarded(&req);
+
+        // Then
+        assert!(
+            !forwarded.sandbox,
+            "an unsandboxed split start must not impose a sandbox on the codebase host"
+        );
+    }
 }
 
 /// A seeded roster agent on a sandboxed workspace session reaches files through the **same** jail

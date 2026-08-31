@@ -1,12 +1,19 @@
 //! Acceptance: a **split** session — the agent runs on daemon A, its git worktree lives on daemon B.
 //!
 //! PRD: `docs/ft/daemon/remote-managed-worktree.md`
-//! Changeset: `docs/dev/1-WIP/remote-managed-worktree.md`
+//! Changeset: `docs/dev/1-WIP/2026-08-31-split-sandbox-orchestration.md`
 //!
 //! `StartSessionRequest.codebase_daemon_instance_id` names the daemon whose filesystem holds the
 //! worktree. When it differs from the daemon running the agent, A creates a `workspace` session on B
 //! over the existing peer-forward path and spawns the agent locally with **no repository on disk**;
 //! the agent reaches the worktree only through `mcp__tddy-tools__*` over LiveKit.
+//!
+//! `sandbox = true` on a split placement inverts from the co-located meaning: the **codebase** half
+//! on B is sandboxed (the workspace tool jail confines the repository-side tool calls the agent
+//! proxies to it) and the **agent** half on A stays unsandboxed. The codebase host's jail is
+//! injected here as a recording provisioner, so confinement is asserted without a kernel sandbox
+//! on the host running the test — what the jail then *confines* is proven against a real one in
+//! `tests/workspace_tool_sandbox_seatbelt_acceptance.rs`.
 //!
 //! Each daemon serves RPC on its production identity `daemon-{instance_id}` — the one a real peer
 //! answers on — so a call landing on B's service proves the split actually crossed hosts rather than
@@ -20,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use livekit::prelude::RoomOptions;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -29,13 +37,17 @@ use tddy_daemon::livekit_peer_discovery::{
     spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
     LiveKitEligibleDaemonSource,
 };
+use tddy_daemon::workspace_tool_sandbox::{
+    WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
+};
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
+use tddy_sandbox::SandboxError;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ExecuteToolRequest,
-    ListEligibleDaemonsRequest, ListSessionsRequest, StartSessionRequest,
+    ExecuteToolResponse, ListEligibleDaemonsRequest, ListSessionsRequest, StartSessionRequest,
 };
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
@@ -193,6 +205,7 @@ async fn a_daemon(
     repo: &Path,
     user_resolver: UserResolver,
     claude_binary: &str,
+    codebase_provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
 ) -> Daemon {
     let (config_dir, config_path) =
         write_livekit_daemon_yaml(ws_url, instance_id, os_user, claude_binary);
@@ -224,6 +237,10 @@ async fn a_daemon(
         None,
         Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
     );
+    let service = match codebase_provisioner {
+        Some(provisioner) => service.with_workspace_sandbox_provisioner(provisioner),
+        None => service,
+    };
 
     Daemon {
         service,
@@ -306,6 +323,17 @@ async fn split_hosts() -> SplitHosts {
 /// the one way to fail *after* the codebase host has already created its workspace session, which
 /// is the only window in which teardown is observable. `None` gives A the working stub.
 async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>) -> SplitHosts {
+    split_hosts_with_codebase_provisioner_and_agent_binary(None, agent_claude_binary).await
+}
+
+/// A split pair whose codebase daemon B builds its workspace jail through `provisioner` rather
+/// than the real kernel sandbox, so a test can assert which calls reached the jail and that the
+/// host worktree was never touched — the same double `workspace_tool_sandbox_acceptance.rs` uses
+/// for the co-located contract. `agent_claude_binary` is passed through unchanged.
+async fn split_hosts_with_codebase_provisioner_and_agent_binary(
+    provisioner: Option<Arc<dyn WorkspaceSandboxProvisioner>>,
+    agent_claude_binary: Option<&str>,
+) -> SplitHosts {
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -328,6 +356,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>)
         repo_dir.path(),
         user_resolver.clone(),
         claude_stub,
+        provisioner,
     )
     .await;
     let agent = a_daemon(
@@ -337,6 +366,7 @@ async fn split_hosts_with_agent_claude_binary(agent_claude_binary: Option<&str>)
         repo_dir.path(),
         user_resolver,
         agent_claude_binary.unwrap_or(claude_stub),
+        None,
     )
     .await;
 
@@ -381,6 +411,15 @@ fn a_split_session_request() -> StartSessionRequest {
     }
 }
 
+/// A split placement that also asks to be sandboxed. On a split placement the sandbox confines the
+/// codebase half on B (the host holding the checkout), not the agent half on A.
+fn a_sandboxed_split_session_request() -> StartSessionRequest {
+    StartSessionRequest {
+        sandbox: true,
+        ..a_split_session_request()
+    }
+}
+
 fn session_metadata_on(sessions_base: &Path, session_id: &str) -> tddy_core::SessionMetadata {
     let dir = unified_session_dir_path(sessions_base, session_id);
     tddy_core::read_session_metadata(&dir)
@@ -417,6 +456,94 @@ async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
         .into_iter()
         .map(|s| s.session_id)
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// A recording workspace sandbox for the codebase host
+// ---------------------------------------------------------------------------
+//
+// The codebase half of a sandboxed split session is confined by the workspace tool jail (#427).
+// Proving confinement needs no kernel sandbox on the host running the test: a recording provisioner
+// hands out a jail that answers every call with a marker and touches no filesystem, so "the call
+// reached the jail" and "the host worktree was never touched" are both assertable — the same double
+// `workspace_tool_sandbox_acceptance.rs` uses for the co-located contract.
+
+/// The marker a jailed tool result carries. Its presence in a response proves the call went to the
+/// jail on B; its absence proves it ran on the host worktree instead.
+const SPLIT_JAIL_MARKER: &str = "ran-inside-the-workspace-jail";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JailedCall {
+    session_id: String,
+    tool_name: String,
+    args_json: String,
+}
+
+/// A jail that records what it was asked to run and answers with [`SPLIT_JAIL_MARKER`], touching no
+/// filesystem — so a host worktree left unchanged is proof the call never reached the host tool
+/// engine on B.
+#[derive(Default)]
+struct RecordingSandbox {
+    calls: std::sync::Mutex<Vec<JailedCall>>,
+}
+
+impl RecordingSandbox {
+    fn calls(&self) -> Vec<JailedCall> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl WorkspaceSandbox for RecordingSandbox {
+    async fn execute_tool(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+        self.calls.lock().unwrap().push(JailedCall {
+            session_id: req.session_id.clone(),
+            tool_name: req.tool_name.clone(),
+            args_json: req.args_json.clone(),
+        });
+        ExecuteToolResponse {
+            result_json: serde_json::json!({ "marker": SPLIT_JAIL_MARKER, "tool": req.tool_name })
+                .to_string(),
+            is_error: false,
+            error_message: String::new(),
+            job_id: String::new(),
+            job_running: false,
+        }
+    }
+
+    fn stop(&self) {}
+}
+
+/// A provisioner that hands out one [`RecordingSandbox`], so a test can assert both that the jail
+/// was built for the right session and which calls it served.
+#[derive(Default)]
+struct RecordingProvisioner {
+    sandbox: Arc<RecordingSandbox>,
+}
+
+impl RecordingProvisioner {
+    fn sandbox(&self) -> Arc<RecordingSandbox> {
+        Arc::clone(&self.sandbox)
+    }
+}
+
+#[async_trait]
+impl WorkspaceSandboxProvisioner for RecordingProvisioner {
+    async fn provision(
+        &self,
+        _spec: &WorkspaceSandboxSpec,
+    ) -> Result<Arc<dyn WorkspaceSandbox>, SandboxError> {
+        Ok(Arc::clone(&self.sandbox) as Arc<dyn WorkspaceSandbox>)
+    }
+}
+
+/// The `marker` a jailed result carries, or `None` when the result did not come from the jail.
+fn jail_marker_of(response: &ExecuteToolResponse) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(&response.result_json)
+        .ok()?
+        .get("marker")?
+        .as_str()
+        .map(str::to_string)
 }
 
 // ---------------------------------------------------------------------------
@@ -726,5 +853,132 @@ async fn a_failed_agent_spawn_tears_down_the_workspace_session_on_the_codebase_d
     assert_eq!(
         after, before,
         "a failed split start must leave no workspace session behind on the codebase host"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox on the codebase half of a split placement
+// ---------------------------------------------------------------------------
+//
+// `sandbox = true` on a split placement inverts from the co-located meaning: the codebase half on
+// B is sandboxed (the workspace tool jail confines the repository-side tool calls the agent
+// proxies to it) and the agent half on A stays unsandboxed. The refusal that used to block this
+// combination is removed in `start_split_claude_cli_session`; the forward path already carries the
+// flag through `workspace_start_request`'s `..req.clone()`, and the codebase host's workspace
+// start already persists `sandbox: Some(true)` and provisions the jail (#427).
+
+/// A split start with `sandbox = true` succeeds and splits the flag the way the placement demands:
+/// the agent half on A is unsandboxed (`sandbox: None` metadata, no jail on A) and the codebase
+/// half on B is sandboxed (`sandbox: Some(true)` metadata, a jail provisioned on B). The
+/// recording provisioner stands in for B's kernel sandbox, so the assertion is about which half
+/// the flag landed on rather than about confinement itself.
+#[tokio::test]
+#[serial]
+async fn a_split_session_started_with_sandbox_sandboxes_the_codebase_half_and_leaves_the_agent_half_unsandboxed() {
+    // Given a codebase host whose jail is a recording provisioner, so the sandboxed workspace
+    // start on B can complete without a kernel sandbox on the host running the test
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let hosts = split_hosts_with_codebase_provisioner_and_agent_binary(
+        Some(Arc::clone(&provisioner) as Arc<dyn WorkspaceSandboxProvisioner>),
+        None,
+    )
+    .await;
+
+    // When the agent host starts a split session that also asks to be sandboxed
+    let started = hosts
+        .agent
+        .start_session(Request::new(a_sandboxed_split_session_request()))
+        .await
+        .expect("a sandboxed split start must succeed once the refusal is gone")
+        .into_inner();
+
+    // Then — the agent half on A carries no sandbox: it runs on the operator's host with managed
+    // MCP tools, and keeping it unsandboxed preserves the existing spawn_split_agent / resume path.
+    let agent_metadata = session_metadata_on(&hosts.agent_sessions_base, &started.session_id);
+    assert_eq!(
+        agent_metadata.sandbox,
+        None,
+        "the agent half of a sandboxed split session must stay unsandboxed"
+    );
+
+    // And the codebase half on B is sandboxed: the flag forwarded through `workspace_start_request`
+    // is what every later tool dispatch on B reads to route through the jail.
+    let codebase_session_id = agent_metadata
+        .codebase_session_id
+        .expect("a split session must record its codebase session");
+    let codebase_metadata =
+        session_metadata_on(&hosts.codebase_sessions_base, &codebase_session_id);
+    assert_eq!(
+        codebase_metadata.session_type.as_deref(),
+        Some("workspace"),
+        "the codebase half must be a workspace session"
+    );
+    assert_eq!(
+        codebase_metadata.sandbox,
+        Some(true),
+        "the codebase half of a sandboxed split session must be sandboxed"
+    );
+}
+
+/// A tool call the agent proxies at the codebase session on B reaches the jail on B, not the host
+/// worktree on B. This is the confinement the split+sandbox combination exists to enforce: the
+/// repository-side `Shell`/`Write` work the agent drives runs inside the kernel sandbox on the host
+/// holding the checkout, and the host worktree on B is left untouched.
+#[tokio::test]
+#[serial]
+async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codebase_host() {
+    // Given a sandboxed split session whose codebase half on B is confined by a recording jail
+    let provisioner = Arc::new(RecordingProvisioner::default());
+    let jail = provisioner.sandbox();
+    let hosts = split_hosts_with_codebase_provisioner_and_agent_binary(
+        Some(Arc::clone(&provisioner) as Arc<dyn WorkspaceSandboxProvisioner>),
+        None,
+    )
+    .await;
+    let started = hosts
+        .agent
+        .start_session(Request::new(a_sandboxed_split_session_request()))
+        .await
+        .expect("a sandboxed split start must succeed")
+        .into_inner();
+    let codebase_session_id = session_metadata_on(&hosts.agent_sessions_base, &started.session_id)
+        .codebase_session_id
+        .expect("codebase session id");
+    let codebase_worktree = PathBuf::from(
+        session_metadata_on(&hosts.codebase_sessions_base, &codebase_session_id)
+            .repo_path
+            .expect("the workspace session must record its worktree"),
+    );
+
+    // When a tool is executed against the recorded codebase session on the codebase host
+    let response = hosts
+        .agent
+        .execute_tool(Request::new(ExecuteToolRequest {
+            session_token: a_caller_token().to_string(),
+            session_id: codebase_session_id.clone(),
+            tool_name: "Write".to_string(),
+            args_json: serde_json::json!({ "path": "from-the-jail.txt", "contents": "confined" })
+                .to_string(),
+            daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+        }))
+        .await
+        .expect("a tool call routed to the codebase host must succeed")
+        .into_inner();
+
+    // Then — it ran in the jail on B, not on B's host worktree. The marker proves the call reached
+    // the jail; the unchanged worktree proves the host tool engine on B never ran it.
+    assert_eq!(jail_marker_of(&response).as_deref(), Some(SPLIT_JAIL_MARKER));
+    assert_eq!(
+        jail.calls(),
+        vec![JailedCall {
+            session_id: codebase_session_id,
+            tool_name: "Write".to_string(),
+            args_json: r#"{"path":"from-the-jail.txt","contents":"confined"}"#.to_string(),
+        }],
+        "exactly one call must have reached the jail on the codebase host"
+    );
+    assert!(
+        !codebase_worktree.join("from-the-jail.txt").exists(),
+        "the host tool engine on B must not have run: the jail owns this write"
     );
 }
