@@ -12697,6 +12697,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .await;
         }
 
+        // --- workspace branch: re-provision jail when sandboxed, no LiveKit ---
+        if metadata.session_type.as_deref() == Some("workspace") {
+            if metadata.sandbox == Some(true)
+                && self
+                    .workspace_sandboxes
+                    .get(&req.session_id)
+                    .await
+                    .is_none()
+            {
+                self.provision_workspace_tool_sandbox(&sessions_base, &req.session_id)
+                    .await?;
+            }
+            return Ok(Response::new(ResumeSessionResponse {
+                session_id: req.session_id,
+                livekit_room: String::new(),
+                livekit_url: String::new(),
+                livekit_server_identity: String::new(),
+            }));
+        }
+
         let repo_path = metadata
             .repo_path
             .as_ref()
