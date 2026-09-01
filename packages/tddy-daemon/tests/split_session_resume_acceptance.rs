@@ -636,6 +636,41 @@ async fn a_resumed_split_agent_keeps_every_tool_when_the_roster_is_empty() {
     );
 }
 
+/// The agent half of a split session records `sandbox: None` (the codebase half on the other host
+/// is the one that is sandboxed). A resume must take the split wiring path — relaunching the
+/// configured `claude` with the rebuilt `TDDY_REMOTE_*` transport — and must **not** route to
+/// `resume_sandboxed_claude_cli_session`, which would refuse the session (the agent half has no
+/// `repo_path`) and never relaunch anything. The routing decision is observable in the relaunched
+/// process's environment: the split path injects `TDDY_REMOTE_DAEMON_INSTANCE_ID`; the sandboxed
+/// path injects none of the `TDDY_REMOTE_*` variables, and would not have spawned the stub at all.
+#[tokio::test]
+#[serial]
+async fn a_split_sessions_agent_half_resumes_through_the_split_path_not_the_sandboxed_runner_path()
+{
+    // Given a stopped split session whose agent half carries sandbox: None — the only metadata a
+    // resume reads to decide between the split and sandboxed branches
+    assert_eq!(
+        a_stopped_split_session().sandbox,
+        None,
+        "the agent half of a split session must record sandbox: None, so a resume cannot \
+         mistake it for a sandboxed session"
+    );
+
+    // When it is resumed — this itself is the guard: a resume that wrongly routed to the
+    // sandboxed branch would error on the agent half's missing repo_path rather than relaunch
+    let resumed = resume_a_split_session().await;
+
+    // Then — the relaunched agent carries the rebuilt split transport, proving it took the
+    // resume_split_wiring path. A sandboxed relaunch would have left every TDDY_REMOTE_* variable
+    // unset (and, in fact, would not have spawned the stub to record them).
+    assert_eq!(
+        resumed.agent_env_var("TDDY_REMOTE_DAEMON_INSTANCE_ID"),
+        CODEBASE_INSTANCE_ID,
+        "a split session whose agent half is sandbox: None must relaunch with the split \
+         transport, not the sandboxed runner path"
+    );
+}
+
 /// How much of the codebase host this daemon can see — the two shapes "unreachable" takes, which
 /// the resume must refuse identically.
 enum CodebaseHostVisibility {

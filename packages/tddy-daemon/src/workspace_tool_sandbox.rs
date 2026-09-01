@@ -30,6 +30,9 @@ use tddy_service::proto::sandbox::SessionFrame;
 use tokio::sync::{mpsc, Mutex};
 use tokio_stream::wrappers::ReceiverStream;
 
+/// Where the jail runner records its pid so a later daemon can tear down an orphaned process.
+pub const RUNNER_PID_FILE: &str = "runner.pid";
+
 /// A live jail serving one sandboxed workspace session.
 #[async_trait]
 pub trait WorkspaceSandbox: Send + Sync {
@@ -284,11 +287,23 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
             }
         };
 
+        let pid = handle.pid();
+        std::fs::write(layout.sandbox_root.join(RUNNER_PID_FILE), pid.to_string()).map_err(
+            |e| {
+                let _ = handle.child_mut().kill();
+                let _ = handle.child_mut().wait();
+                SandboxError::Io(format!(
+                    "write runner pid under {}: {e}",
+                    layout.sandbox_root.display()
+                ))
+            },
+        )?;
+
         log::info!(
             target: "tddy_daemon::workspace_tool_sandbox",
             "workspace session {} runs its tools in a jail (pid {}) holding {}",
             spec.session_id,
-            handle.pid(),
+            pid,
             worktree_path.display()
         );
 

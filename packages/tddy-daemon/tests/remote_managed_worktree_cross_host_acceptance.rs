@@ -971,14 +971,21 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
         jail_marker_of(&response).as_deref(),
         Some(SPLIT_JAIL_MARKER)
     );
+    // The cross-host hop re-serializes the tool args, so the jail records them with sorted keys
+    // rather than the request's insertion order; compare the args as parsed JSON so the assertion
+    // holds regardless of key order.
+    let calls = jail.calls();
     assert_eq!(
-        jail.calls(),
-        vec![JailedCall {
-            session_id: codebase_session_id,
-            tool_name: "Write".to_string(),
-            args_json: r#"{"path":"from-the-jail.txt","contents":"confined"}"#.to_string(),
-        }],
+        calls.len(),
+        1,
         "exactly one call must have reached the jail on the codebase host"
+    );
+    assert_eq!(calls[0].session_id, codebase_session_id);
+    assert_eq!(calls[0].tool_name, "Write");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&calls[0].args_json).unwrap(),
+        serde_json::json!({ "path": "from-the-jail.txt", "contents": "confined" }),
+        "the jailed call must carry the tool's args"
     );
     assert!(
         !codebase_worktree.join("from-the-jail.txt").exists(),
