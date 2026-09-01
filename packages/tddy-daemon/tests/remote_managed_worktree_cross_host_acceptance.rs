@@ -472,11 +472,36 @@ async fn sessions_on(service: &ConnectionServiceImpl) -> Vec<String> {
 /// jail on B; its absence proves it ran on the host worktree instead.
 const SPLIT_JAIL_MARKER: &str = "ran-inside-the-workspace-jail";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 struct JailedCall {
     session_id: String,
     tool_name: String,
     args_json: String,
+}
+
+impl PartialEq for JailedCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.session_id == other.session_id
+            && self.tool_name == other.tool_name
+            && json_args_equal(&self.args_json, &other.args_json)
+    }
+}
+
+impl Eq for JailedCall {}
+
+/// Compare two `args_json` blobs by value rather than by byte — the daemon re-serializes a tool
+/// call's args before forwarding them to the jail, and a map without preserved insertion order
+/// re-emits the keys in an order that is not the request's. The jail only needs to have received
+/// the same *arguments*, not the same bytes, so two payloads that parse to the same JSON value are
+/// equal here. A non-JSON payload (none in these tests) falls back to byte equality.
+fn json_args_equal(a: &str, b: &str) -> bool {
+    match (
+        serde_json::from_str::<serde_json::Value>(a),
+        serde_json::from_str::<serde_json::Value>(b),
+    ) {
+        (Ok(va), Ok(vb)) => va == vb,
+        _ => a == b,
+    }
 }
 
 /// A jail that records what it was asked to run and answers with [`SPLIT_JAIL_MARKER`], touching no

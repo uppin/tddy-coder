@@ -4,6 +4,12 @@ Release note history for the Web product area.
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-08-31 — Sandbox toggle on a split managed-codebase session
+
+- **The Sandbox checkbox is offered on a split placement.** A managed `claude-cli` session that places its codebase on another daemon used to hide the Sandbox control and force `sandbox = false` on submit, on the premise that a sandbox resolves a worktree on the agent's daemon — which a split session has no repository on. The workspace tool sandbox inverted that: the jail runs on the host holding the checkout, so on a split placement the flag confines the **codebase host**, not the agent. The control now renders on a split and its state rides through to `StartSession`.
+- **Recipe and permission-bypass withdrawal on split are unchanged.** A recipe's tooling and the `--dangerously-skip-permissions` deny-list-safety guarantee still resolve against the agent host, so both stay withdrawn on a split placement. Only the sandbox was re-enabled.
+- **Depends on the daemon accepting split + sandbox**, which landed in `split-sandbox-orchestration` (the `invalid_argument` refusal is gone). Cypress inverts the two cases that expected the sandbox withdrawn and adds cases pinning `sandbox: true` (checked) and `sandbox: false` (unchecked) on a split.
+
 ## 2026-08-30 — Force start, and a planned PR that keeps track of its session across hosts
 
 - **A blocked planned PR can be started anyway.** The Start-session button is no longer disabled; it takes a warning colour with an alert icon and a tooltip naming every blocker, and the row keeps its warning box. Two of the three blockers are derived from facts only the queried daemon can see — a branch pushed from another host reads as absent from `origin` until this clone fetches — so a gate that cannot see half the fleet must advise, not refuse. The daemon still enforces its own gate, and fails an impossible spawn with the real reason.
