@@ -2,6 +2,14 @@
 
 Release note history for the Coder product area.
 
+## 2026-08-31 — Rust code analysis and restructuring on tddy-tools
+
+- **`tddy-tools analyze`** adds llvm-cov capture, CRAP scoring (join on `(file, declaration line)`), HTML report, and duplicate/subset test detection for Rust crates. Library: `tddy-code-analysis`. Skill: `analyze-code-issues`.
+- **`tddy-tools restructure`** replays JSONL intent plans through rust-analyzer via `tddy-lsp` (`apply`, `status`, `check`, `anchors`, `verify`). Library: `tddy-code-restructuring`. Skill: `code-restructuring`. Seven Rust operations; plans refuse code-bearing fields.
+- **No new binaries** — both surfaces live on the existing `tddy-tools` binary. **Rust only** in v1 (no TypeScript analysis or restructuring).
+- **`tddy-lsp`** exposes `request_raw` / `notify_raw` for the restructuring bridge; typed assist APIs remain a follow-up.
+- ⚠️ End-to-end coverage capture on a fixture crate is not yet in CI; unit tests cover CRAP join and duplicate bitset logic.
+
 ## 2026-08-30 — A planned PR started on another host stops disappearing from its own stack
 
 - **Starting a planned PR's session on a different daemon than its orchestrator no longer loses the node.** The row went back to offering **Start session** for work already running, every descendant became unspawnable, and the node's GitHub PR never appeared. Three independent false negatives produced that one symptom.

@@ -3,10 +3,12 @@
 //! - CLI mode (default): `submit` and `ask` subcommands relay to tddy-coder via Unix socket
 //! - MCP mode (`--mcp`): Retains approval_prompt MCP server for backwards compatibility
 
+mod analyze_cli;
 mod build_cli;
 mod cli;
 mod pty_relay;
 mod remote_cli;
+mod restructure_cli;
 mod session_hook;
 
 use anyhow::Result;
@@ -89,6 +91,12 @@ enum Subcommand {
     /// Enumerate the models an agent supports (JSON on stdout). Queries the underlying agent
     /// command where possible (cursor `--list-models`, ACP `available_models`), else a curated list.
     ListModels(tddy_tools::list_models::ListModelsArgs),
+
+    /// Rust code analysis: coverage, CRAP report, duplicate-tests.
+    Analyze(analyze_cli::AnalyzeArgs),
+
+    /// Plan-driven Rust refactoring via rust-analyzer (through tddy-lsp).
+    Restructure(restructure_cli::RestructureArgs),
 }
 
 /// Initialise logging. When `TDDY_TOOLS_LOG_FILE` is set (e.g. by the sandbox runner, which points
@@ -147,6 +155,8 @@ async fn main() -> Result<()> {
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,
         Some(Subcommand::ListModels(s)) => tddy_tools::list_models::run_list_models(&s).await?,
+        Some(Subcommand::Analyze(s)) => analyze_cli::run(s)?,
+        Some(Subcommand::Restructure(s)) => restructure_cli::run(s).await?,
         None => {
             eprintln!("Error: missing subcommand. Use --help for usage.");
             std::process::exit(2);

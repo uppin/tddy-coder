@@ -37,6 +37,8 @@ members = [
     "packages/tddy-actions",
     "packages/tddy-task",
     "packages/tddy-lsp",
+    "packages/tddy-code-analysis",
+    "packages/tddy-code-restructuring",
     "packages/tddy-lsp-executor",
     "packages/tddy-pty",
     "packages/tddy-terminal-rpc",

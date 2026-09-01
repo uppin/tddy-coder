@@ -278,6 +278,16 @@ impl LspClient {
     }
 
     /// Send a request and await its correlated response `result`.
+    pub async fn request_raw(&self, method: &str, params: Value) -> Result<Value, LspError> {
+        self.request(method, params).await
+    }
+
+    /// Send a notification (no id, no response expected).
+    pub async fn notify_raw(&self, method: &str, params: Value) -> Result<(), LspError> {
+        self.notify(method, params)
+    }
+
+    /// Send a request and await its correlated response `result`.
     async fn request(&self, method: &str, params: Value) -> Result<Value, LspError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();

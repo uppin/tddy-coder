@@ -5513,6 +5513,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "md5"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9887,6 +9893,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-code-analysis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "md5",
+ "pretty_assertions",
+ "proc-macro2",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "syn 2.0.118",
+ "tempfile",
+ "thiserror 2.0.18",
+ "walkdir",
+ "which",
+]
+
+[[package]]
+name = "tddy-code-restructuring"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tddy-lsp",
+ "tddy-task",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-codegen"
 version = "0.1.0"
 dependencies = [
@@ -10819,13 +10859,17 @@ dependencies = [
  "tddy-build-qemu",
  "tddy-build-rust",
  "tddy-build-typescript",
+ "tddy-code-analysis",
+ "tddy-code-restructuring",
  "tddy-core",
  "tddy-discovery",
  "tddy-livekit",
+ "tddy-lsp",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
  "tddy-stdio",
+ "tddy-task",
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-workflow-recipes",
@@ -12508,6 +12552,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "which"
+version = "6.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
+dependencies = [
+ "either",
+ "home",
+ "rustix 0.38.44",
+ "winsafe",
+]
+
+[[package]]
 name = "whoami"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13052,6 +13108,12 @@ checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
 ]
+
+[[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
 name = "winscard"
