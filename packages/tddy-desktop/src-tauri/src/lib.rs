@@ -84,7 +84,8 @@ pub fn run() -> anyhow::Result<()> {
     let app = builder
         .invoke_handler(tauri::generate_handler![
             ipc::tddy_rpc_connect,
-            ipc::tddy_rpc_send
+            ipc::tddy_rpc_send,
+            ipc::tddy_rpc_disconnect
         ])
         .setup(move |app| {
             start_daemon(app, config, config_path, spawn_client)?;

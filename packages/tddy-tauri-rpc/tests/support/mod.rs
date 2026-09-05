@@ -142,6 +142,18 @@ fn one_message_then_never_completes(payload: &[u8]) -> mpsc::Receiver<Result<Vec
 // Fake sink
 // ---------------------------------------------------------------------------
 
+/// The echo roster, as a service a [`RosterResolver`](tddy_tauri_rpc::RosterResolver) hands back.
+///
+/// Same roster `a_webview_rpc_host` serves, exposed on its own so a multi-connection test can give
+/// every target its own copy — which is what makes the connections genuinely independent rather
+/// than two names for one service.
+pub fn an_echo_roster() -> Arc<dyn RpcService> {
+    Arc::new(MultiRpcService::new(vec![ServiceEntry {
+        name: ECHO_SERVICE,
+        service: Arc::new(EchoService),
+    }]))
+}
+
 /// A [`FrameSink`] that queues every frame for the test to read, and reports closure so a test can
 /// tell "no frame yet" apart from "this connection is over".
 pub struct RecordingSink {

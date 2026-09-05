@@ -30,6 +30,8 @@ export interface WebviewIpcDouble extends WebviewIpcBridge {
   respond(response: MessageInitShape<typeof RpcResponseSchema>): void;
   /** Report the channel permanently gone. */
   closeChannel(reason: string): void;
+  /** Whether the page released this connection — the host-side peer a detach must not leak. */
+  wasClosed(): boolean;
 }
 
 export function aWebviewIpcDouble(): WebviewIpcDouble {
@@ -41,6 +43,7 @@ export function aWebviewIpcDouble(): WebviewIpcDouble {
   const closed = new Promise<string>((resolve) => {
     reportClosed = resolve;
   });
+  let released = false;
 
   const push = (response: MessageInitShape<typeof RpcResponseSchema>) => {
     const frame = toBinary(RpcResponseSchema, create(RpcResponseSchema, response));
@@ -70,6 +73,10 @@ export function aWebviewIpcDouble(): WebviewIpcDouble {
       arrived.push(request);
     },
     closed,
+    async close(): Promise<void> {
+      released = true;
+    },
+    wasClosed: () => released,
     nextRequest() {
       const ready = arrived.shift();
       if (ready) {

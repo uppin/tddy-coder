@@ -19,6 +19,19 @@ import {
 /** The host application's IPC surface, as this transport needs it. */
 export interface WebviewIpcBridge {
   /**
+   * Release this connection: the host drops the peer's state, aborts the forwards still publishing
+   * for it, and closes the sink.
+   *
+   * `closed` never resolving was right while host and page shared one lifetime — true of the
+   * daemon connection, and the stated reason `createTauriIpcBridge` leaves it pending forever. It
+   * is **not** true of a session connection, which ends when the session is detached. Without an
+   * explicit release every attach leaks a host-side peer.
+   *
+   * Idempotent.
+   */
+  close(): Promise<void>;
+
+  /**
    * Register `onFrame` as this page's response channel, identified by `clientEpoch`. The host
    * abandons whatever the previous page opened.
    */
@@ -64,6 +77,10 @@ export function createTauriIpcBridge(): WebviewIpcBridge {
     // gone and the page is still running to hear about it. A refused `connect` or `send` is how a
     // departed host is noticed, and `webviewFramePipe` already reports those.
     closed: new Promise<string>(() => {}),
+    async close(): Promise<void> {
+      // TODO(multi-connection-ipc): implement — invoke `tddy_rpc_disconnect` for this epoch.
+      throw new Error("WebviewIpcBridge.close is not implemented yet");
+    },
   };
 }
 
@@ -121,4 +138,53 @@ export function createTauriTransport(options: TauriTransportOptions): Transport 
     label: "the host application",
     log: options.log,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Many connections per page
+// ---------------------------------------------------------------------------
+
+/**
+ * What a connection asks to reach, mirroring `tddy-tauri-rpc`'s `ConnectionTarget`.
+ *
+ * A closed union rather than a string, for the same reason it is a closed enum on the host side: an
+ * open target would let the LiveKit identity strings this stack removes leak across the IPC
+ * boundary, and nothing would notice.
+ */
+export type ConnectionTarget =
+  | { readonly kind: "daemon" }
+  | { readonly kind: "session"; readonly sessionId: string };
+
+/** The daemon serving this page. */
+export const DAEMON_TARGET: ConnectionTarget = { kind: "daemon" };
+
+/** One session's own RPC. */
+export function sessionTarget(sessionId: string): ConnectionTarget {
+  return { kind: "session", sessionId };
+}
+
+/**
+ * The page's connections to the host application.
+ *
+ * `createTauriIpcBridge` opens exactly one, because the host used to serve exactly one: registering
+ * a response channel *abandoned the previous one*, so a page that opened two would have abandoned
+ * its own first connection and left every call already issued on it waiting forever. With addressed
+ * connections that is no longer true, and the invariant becomes **one bridge per target** rather
+ * than one per page.
+ */
+export interface WebviewIpcHost {
+  /**
+   * The bridge for `target`, opening one if this page has none.
+   *
+   * Called twice for the same target it returns the same bridge — the daemon connection is still
+   * opened exactly once per page, which is what `daemonTransport.ts`'s module-level singleton was
+   * protecting.
+   */
+  openConnection(target: ConnectionTarget): WebviewIpcBridge;
+}
+
+/** This page's host-application connections. */
+export function thisPagesIpcHost(): WebviewIpcHost {
+  // TODO(multi-connection-ipc): implement
+  throw new Error("thisPagesIpcHost is not implemented yet");
 }

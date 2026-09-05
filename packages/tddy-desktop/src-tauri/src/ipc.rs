@@ -48,6 +48,22 @@ impl FrameSink for ChannelSink {
     }
 }
 
+/// Release the connection registered under `client_epoch`.
+///
+/// Sessions come and go far more often than pages do: a detach must release its host-side peer, or
+/// every attach leaks one. The single-connection host never needed this, because `connect` reaped
+/// the one slot on its own — with addressed connections that is no longer implicit.
+///
+/// Idempotent, so a detach racing an unmount is harmless.
+#[tauri::command]
+pub async fn tddy_rpc_disconnect(
+    _state: State<'_, RpcState>,
+    _client_epoch: u32,
+) -> Result<(), String> {
+    // TODO(multi-connection-ipc): implement — delegate to MultiConnectionHost::disconnect.
+    Err("tddy_rpc_disconnect is not implemented yet".to_string())
+}
+
 /// Register this page's response channel, identified by the client epoch it stamps its request
 /// frames with. Whatever the previous page opened is abandoned.
 #[tauri::command]

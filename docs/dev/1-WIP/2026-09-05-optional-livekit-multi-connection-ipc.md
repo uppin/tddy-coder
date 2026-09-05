@@ -1,6 +1,7 @@
 # Changeset: optional-livekit-multi-connection-ipc
 
 **Stack:** `optional-livekit` — node 6 of 7, **root** (base `master`)
+PR: [#442](https://github.com/uppin/tddy-coder/pull/442)
 PRD: [`2026-09-05-optional-livekit-multi-connection-ipc-prd.md`](2026-09-05-optional-livekit-multi-connection-ipc-prd.md)
 Discovery: [`2026-09-05-optional-livekit-multi-connection-ipc-initial-discovery.md`](2026-09-05-optional-livekit-multi-connection-ipc-initial-discovery.md)
 
@@ -96,18 +97,37 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `packages/tddy-tauri-rpc/tests/concurrent_webview_connections.rs`
+- [x] Run acceptance tests (verify they fail) — 8/8 on `MultiConnectionHost`
+- [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
+- [x] TDD Red — write failing unit/integration tests — `packages/tddy-tauri-web/src/multiConnection.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
-## Verification
+### Baseline and red status at the contract commit
+
+| Check | Result |
+|---|---|
+| `cargo build -p tddy-tauri-rpc` | clean on the published surface |
+| `cargo clippy -p tddy-tauri-rpc --all-targets -- -D warnings` | clean |
+| `cargo fmt --all --check` | clean |
+| `cargo check -p tddy-desktop` | clean — the new `tddy_rpc_disconnect` command compiles and is registered in `lib.rs` |
+| `cargo test -p tddy-tauri-rpc --test rpc_over_webview_ipc --test webview_connection_lifecycle` | **14 pass, 0 fail** — no regression to the single-connection host |
+| `cargo test -p tddy-tauri-rpc --test concurrent_webview_connections` | **8 tests, 8 failing** |
+| `cd packages/tddy-tauri-web && bun test` | 7 pass (pre-existing), **5 failing** (this node's) |
+
+Every failure is on this node's own `TODO(multi-connection-ipc)` bodies — `MultiConnectionHost`'s
+methods, `thisPagesIpcHost`, `WebviewIpcBridge.close`, `tddy_rpc_disconnect`. This is a root node, so
+none is on a parent's surface.
+
+The existing 14 tests passing matters as much as the 8 failing: `WebviewRpcHost` is untouched and
+still serves the single-connection path, so nothing that works today depends on this node landing.
+
+### Commands
 
 Scoped to the packages this node touches:
 
