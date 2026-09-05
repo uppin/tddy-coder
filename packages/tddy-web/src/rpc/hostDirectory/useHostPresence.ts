@@ -11,6 +11,7 @@
 
 import type { Room } from "livekit-client";
 import { useHostConnection } from "../connections/registry";
+import { useHasCapability } from "../connections/useHasCapability";
 import { usePresenceRoom } from "./presenceRoom";
 
 /**
@@ -31,6 +32,10 @@ import { usePresenceRoom } from "./presenceRoom";
 export function useHostPresence(hostId: string | null): Room | null {
   const connection = useHostConnection(hostId);
   const room = usePresenceRoom();
-  if (!connection?.capabilities.has("presence")) return null;
-  return room;
+  // Through the predicate, not `capabilities.has(...)` inline: node 4 gates every presence surface
+  // on `useHasCapability`, and this hook — the seam those surfaces reach presence through — reading
+  // the set its own way would be the fourth reading of capability the single predicate exists to
+  // prevent.
+  const carriesPresence = useHasCapability(connection, "presence");
+  return carriesPresence ? room : null;
 }

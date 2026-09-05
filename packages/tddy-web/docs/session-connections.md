@@ -122,8 +122,11 @@ Capabilities answer that question directly and survive a third wire:
   routes to the session's own process where it has one, and to the host that serves it where it does
   not — which is the daemon client the old gRPC branch reached for by hand.
 
-`capabilitiesForHint` is the single function the media and presence gating ultimately reads through,
-so the rule is stated once rather than re-derived per surface.
+`capabilitiesForHint` is the single place that answer is derived for a session, so the rule is stated
+once rather than re-derived per consumer. It also explains why the media surfaces around a session
+are gated on the **host** connection instead: what the hint names is decided by how the host is
+reached, so the host is the upstream fact — and it is the only one a dormant session has.
+See [capability gating](capability-gating.md).
 
 ## Lifetime and ownership
 
@@ -224,8 +227,9 @@ failed.
   neither is reachable through the wire-neutral interface.
   [#442](https://github.com/uppin/tddy-coder/pull/442) (node 6) introduces the transport that makes a
   subscription expressible.
-- **Capabilities select a terminal, but do not yet gate media.** VNC, screen sharing, participant
-  video and the participant list still render regardless of what the session's connection can carry;
-  [#440](https://github.com/uppin/tddy-coder/pull/440) (node 4) gates them.
+- **A session connection gates exactly one media decision.** `capabilities.has("media")` chooses the
+  terminal component, and nothing else about a session reads it: VNC, screen sharing, participant
+  video and the participant roster are gated on the **host** connection, because a dormant session
+  has no session connection to ask. See [capability gating](capability-gating.md).
 - **Both terminal components still exist.** `GhosttyTerminalLiveKit` and `GhosttyTerminalGrpc` are
   chosen between, not merged; the merge is node 5's.

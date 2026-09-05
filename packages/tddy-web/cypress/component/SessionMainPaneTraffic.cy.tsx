@@ -69,6 +69,9 @@ function closedInspectorState(): import("../../src/components/sessions/SessionIn
 function mountMainPane(attachment: SessionAttachmentState) {
   cy.mount(
     <SessionMainPane
+      // No host connection in scope: this spec is not about the inspector's media tabs,
+      // and `host` is required so that saying so is a choice rather than an omission.
+      host={null}
       selectedSession={FAKE_SESSION as any}
       attachment={attachment}
       inspectorState={closedInspectorState()}

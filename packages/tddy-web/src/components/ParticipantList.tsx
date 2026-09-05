@@ -2,6 +2,8 @@ import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import { shouldShowParticipantVideoAffordance } from "../hooks/participantCameraVideo";
+import { useHasCapability, type CapabilityBearing } from "../rpc/connections/useHasCapability";
+import { capabilityAvailability } from "../hooks/capabilityAvailability";
 import {
   parseOwnedProjectCount,
   type RoomParticipant,
@@ -97,6 +99,22 @@ export interface ParticipantListProps {
    * Used by tests and until ConnectionScreen plumbs live track state from the Room.
    */
   participantHasCameraVideo?: Record<string, boolean>;
+  /**
+   * The connection this roster is read over — the host connection whose common room these
+   * participants are joined to, or `null` when nothing can reach the host at all.
+   *
+   * Two capabilities are read off it. `presence` decides whether there is a roster here to speak
+   * of: without it the panel says so and names the connection as the reason, instead of the
+   * "Connecting to presence room…" placeholder it used to sit on forever. `media` decides the
+   * camera column and the preview dialog — a camera track arrives over the same wire the roster
+   * does, so a wire that carries no tracks has no video to preview and the column is absent rather
+   * than permanently empty.
+   *
+   * Required, and deliberately: a roster rendered without saying which wire it came over is exactly
+   * the panel this node exists to fix. There is no session in scope here — the roster is the
+   * *host's*, so the host's connection is the only one that can answer.
+   */
+  connection: CapabilityBearing | null;
 }
 
 /**
@@ -107,10 +125,20 @@ export function ParticipantList({
   roomStatus,
   connectionError,
   participantHasCameraVideo,
+  connection,
 }: ParticipantListProps) {
   const [videoPreviewIdentity, setVideoPreviewIdentity] = useState<string | null>(null);
+  const canShowVideo = useHasCapability(connection, "media");
+  const carriesPresence = useHasCapability(connection, "presence");
+  // The status the room reports and the capability the wire advertises, resolved in the one order
+  // that does not blame the connection for a join that is merely still in flight.
+  //
+  // `roomStatus` is passed in rather than read from the host directory, so this is the one gated
+  // surface that calls the rule directly instead of through `useCapabilityAvailability`: the panel
+  // is presentational and the screen above it owns which room's status it is being told about.
+  const availability = capabilityAvailability(roomStatus, carriesPresence);
 
-  if (roomStatus === "idle" || roomStatus === "connecting") {
+  if (availability === "connecting") {
     return (
       <div data-testid="participant-list" data-room-status="connecting">
         <p style={{ fontSize: 14, color: "#555" }}>Connecting to presence room…</p>
@@ -118,7 +146,7 @@ export function ParticipantList({
     );
   }
 
-  if (roomStatus === "error") {
+  if (availability === "error") {
     return (
       <div data-testid="participant-list" data-room-status="error">
         <p style={{ fontSize: 14, color: "#c00" }} data-testid="participant-list-error">
@@ -128,9 +156,29 @@ export function ParticipantList({
     );
   }
 
+  if (availability === "unavailable") {
+    return (
+      <div data-testid="participant-list" data-room-status="unavailable">
+        <p
+          style={{ fontSize: 14, color: "#666" }}
+          data-testid="participant-list-unavailable"
+        >
+          The participant roster is not available on this connection: this host is reached over a
+          wire that carries no LiveKit presence.
+        </p>
+      </div>
+    );
+  }
+
+  // `availability` is `available` from here down, which is a verdict about the *capability* and not
+  // a claim that the room is joined: with the wire carrying presence and no join in flight, the
+  // status underneath is `idle` (a host that never joins a room) just as readily as `connected`.
+  // So the attribute reports `roomStatus` itself. Stamping `connected` here is how the DOM came to
+  // say a room was joined that nothing had joined — the same dishonesty, one state along, as the
+  // "Connecting…" placeholder this panel used to sit on forever.
   if (participants.length === 0) {
     return (
-      <div data-testid="participant-list" data-room-status="connected">
+      <div data-testid="participant-list" data-room-status={roomStatus}>
         <p style={{ fontSize: 14, color: "#666" }} data-testid="participant-list-empty">
           No other participants in this room.
         </p>
@@ -144,7 +192,7 @@ export function ParticipantList({
   });
 
   return (
-    <div data-testid="participant-list" data-room-status="connected">
+    <div data-testid="participant-list" data-room-status={roomStatus}>
       <table style={tableStyle}>
         <thead>
           <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
@@ -154,7 +202,7 @@ export function ParticipantList({
             <th style={{ padding: 6 }}>Projects</th>
             <th style={{ padding: 6 }}>Metadata</th>
             <th style={{ padding: 6 }}>Codex sign-in</th>
-            <th style={{ padding: 6 }}>Video</th>
+            {canShowVideo && <th style={{ padding: 6 }}>Video</th>}
           </tr>
         </thead>
         <tbody>
@@ -165,10 +213,11 @@ export function ParticipantList({
               p.ownedProjectCount !== undefined
                 ? p.ownedProjectCount
                 : parseOwnedProjectCount(p.metadata);
-            const showVideoAffordance = shouldShowParticipantVideoAffordance(
-              participantHasCameraVideo,
-              p.identity,
-            );
+            // The camera-video hook is only consulted for a wire that can carry a camera track;
+            // on one that cannot, there is no question to ask.
+            const showVideoAffordance =
+              canShowVideo &&
+              shouldShowParticipantVideoAffordance(participantHasCameraVideo, p.identity);
             return (
               <tr key={p.identity} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: 6 }} data-testid={`participant-entry-${id}`}>
@@ -225,25 +274,27 @@ export function ParticipantList({
                     "—"
                   )}
                 </td>
-                <td style={{ padding: 6 }} data-testid={`participant-video-cell-${id}`}>
-                  {showVideoAffordance ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-xs"
-                      data-testid={`participant-video-trigger-${id}`}
-                      aria-label={`Open video preview for ${p.identity}`}
-                      onClick={() => {
-                        console.info("[tddy-web:participant-video] ParticipantList: open video preview", {
-                          identity: p.identity,
-                        });
-                        setVideoPreviewIdentity(p.identity);
-                      }}
-                    >
-                      <VideoCameraIcon className="size-3.5" />
-                    </Button>
-                  ) : null}
-                </td>
+                {canShowVideo && (
+                  <td style={{ padding: 6 }} data-testid={`participant-video-cell-${id}`}>
+                    {showVideoAffordance ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-xs"
+                        data-testid={`participant-video-trigger-${id}`}
+                        aria-label={`Open video preview for ${p.identity}`}
+                        onClick={() => {
+                          console.info("[tddy-web:participant-video] ParticipantList: open video preview", {
+                            identity: p.identity,
+                          });
+                          setVideoPreviewIdentity(p.identity);
+                        }}
+                      >
+                        <VideoCameraIcon className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -252,7 +303,7 @@ export function ParticipantList({
 
       <ParticipantVideoPreviewDialog
         identity={videoPreviewIdentity ?? ""}
-        open={videoPreviewIdentity !== null}
+        open={canShowVideo && videoPreviewIdentity !== null}
         onOpenChange={(next) => {
           if (!next) {
             console.info("[tddy-web:participant-video] ParticipantList: video preview closed");

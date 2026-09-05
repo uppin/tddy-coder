@@ -14,6 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import type { LiveKitRoom, LiveKitRoomParticipant } from "../../lib/liveKitRoomsState";
 import { metadataCardText } from "../../lib/liveKitMetadataCard";
 import { safeTestIdPart } from "../../lib/testId";
+import { useHostConnection } from "../../rpc/connections/registry";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
+import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitRooms } from "../../rpc/useLiveKitRooms";
 
 function formatInstant(ms: number): string {
@@ -21,6 +24,68 @@ function formatInstant(ms: number): string {
 }
 
 export function LiveKitRoomsPanel() {
+  // The panel follows the daemon selector (`useLiveKitRooms` streams from the selected daemon), so
+  // the connection that answers for it is that host's — the same one the roster above it is read
+  // over. It resolves its own rather than taking a prop because it sources its own data too; a
+  // second seam for the same host would be a second thing to keep in step.
+  //
+  // The feed itself is plain daemon RPC and would survive without LiveKit. The panel is gated all
+  // the same, because what it *shows* is rooms and who is joined to them: on a host reached with no
+  // presence there is nothing for it to be about, and an empty "Rooms" heading reads as "the server
+  // has no rooms" rather than "this connection cannot see them" (PRD AC 3).
+  //
+  // Removed, not rendered empty or disabled. `LiveKitAppPage`, the only screen that mounts this
+  // panel, explains the absence once for the whole screen — saying it again here would tell the
+  // operator twice that the same wire carries no presence.
+  //
+  // **Two questions, two gates, and they are not the same question.**
+  //
+  // *Does this panel apply at all* is the availability rule, exactly as every other gated surface
+  // asks it. Returning `null` on the bare predicate meant that on every LiveKit page load — where
+  // the common room spends a second or two joining and there is no host connection yet — the screen
+  // rendered roster-only and the room list dropped in underneath afterwards, shifting the page under
+  // the operator (PRD AC 7). While the join is in flight, or has failed, the panel therefore keeps
+  // its place and says what it is waiting on.
+  //
+  // *Should the feed be opened* is the capability alone, and stays that way. `useLiveKitRooms`
+  // subscribes from an effect the moment {@link RoomsFeed} mounts, so a `StreamLiveKitRooms` the
+  // daemon has to serve is the cost of mounting it at all — and a room that is merely joining has
+  // no host connection to stream over yet. The child is mounted only once the answer is
+  // `available`, which is what keeps `PresenceCapabilityGatingAcceptance`'s "no rooms feed at all"
+  // true and stops a join in flight from opening a stream it would have to abort.
+  const { selectedInstanceId } = useSelectedDaemon();
+  const connection = useHostConnection(selectedInstanceId);
+  const availability = useCapabilityAvailability(connection, "presence");
+  if (availability === "unavailable") return null;
+
+  return (
+    <div data-testid="livekit-rooms-panel" className="mt-3 rounded-md border border-border p-3">
+      <h3 className="mt-0 text-base font-semibold">Rooms</h3>
+      {availability === "available" ? (
+        <RoomsFeed />
+      ) : (
+        <p data-testid="livekit-rooms-panel-joining" className="text-sm text-muted-foreground">
+          {availability === "connecting"
+            ? "Joining the common room…"
+            : "The room list is read over the common room, which could not be joined."}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The feed proper, split out so it is not merely hidden but never opened: `useLiveKitRooms`
+ * subscribes from an effect, and a hook cannot be skipped by the component that decides whether the
+ * panel applies. A `StreamLiveKitRooms` held open for a panel nobody can see is a call the daemon
+ * has to serve for nothing.
+ *
+ * Renders the panel's contents only. The frame and heading belong to {@link LiveKitRoomsPanel},
+ * which keeps them on screen while the common room is still being joined — the whole point of
+ * having a child here is that the subscription, and only the subscription, is what the gate above
+ * withholds.
+ */
+function RoomsFeed() {
   const { rooms, hasSnapshot, error } = useLiveKitRooms();
   const [collapsed, setCollapsed] = useState<string[]>([]);
 
@@ -40,9 +105,7 @@ export function LiveKitRoomsPanel() {
     );
 
   return (
-    <div data-testid="livekit-rooms-panel" className="mt-3 rounded-md border border-border p-3">
-      <h3 className="mt-0 text-base font-semibold">Rooms</h3>
-
+    <>
       {error !== null && (
         <p data-testid="livekit-rooms-panel-error" className="text-sm text-destructive">
           {error}
@@ -69,7 +132,7 @@ export function LiveKitRoomsPanel() {
           onToggle={() => toggleRoom(room.name)}
         />
       ))}
-    </div>
+    </>
   );
 }
 

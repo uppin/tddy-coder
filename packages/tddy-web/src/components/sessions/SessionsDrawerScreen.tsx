@@ -13,6 +13,7 @@ import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
@@ -304,6 +305,16 @@ export function SessionsDrawerScreen({
   // `sessionsRefreshBridge`) with the live cross-host sessions observed as common-room coder
   // participants — LiveKit presence is the keep-alive that makes a non-selected host's session visible.
   const participants = useRoomParticipants(room);
+  // Whether this list can see the other hosts at all. The cross-host half of it is presence — a
+  // session on a non-selected host is observed as a common-room coder participant — so on a wire
+  // that carries none the union silently collapses to `ListSessions` for the selected host, which
+  // reads as "this host has no other sessions". The drawer says so instead (PRD AC 5).
+  //
+  // Read through the same rule the LiveKit screen uses, so a room that is merely mid-join does not
+  // produce a claim about the connection that the next second withdraws.
+  const selectedHost = useHostConnection(selectedInstanceId);
+  const crossHostSessionsVisible =
+    useCapabilityAvailability(selectedHost, "presence") !== "unavailable";
   const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
     client,
     sessionToken,
@@ -787,6 +798,7 @@ export function SessionsDrawerScreen({
             onOpen={() => setSessionListOpen(true)}
             isMobile={isMobile}
             selectedInstanceId={selectedInstanceId ?? ""}
+            crossHostSessionsVisible={crossHostSessionsVisible}
             hostLabelForInstance={hostLabelForInstance}
             sessionMetadataBySessionId={sessionMetadataBySessionId}
             selectedForDelete={selectedForDelete}

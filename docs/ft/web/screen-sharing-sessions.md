@@ -44,8 +44,10 @@ start time.
 
 ### AC-SS-1: Screen Sharing tab in session inspector
 
-The session inspector drawer shows a **Screen Sharing** tab alongside Details and Tools. The
-tab is accessible regardless of whether the session is connected.
+The session inspector drawer shows a **Screen Sharing** tab alongside Details and Tools, on a host
+reached over a wire that carries video. The tab is accessible regardless of whether the session is
+connected — a dormant session's targets are still worth reading — but not on a host whose
+connection carries no media (see [Availability](#availability)).
 
 ### AC-SS-2: Add screen-sharing target
 
@@ -102,6 +104,26 @@ never written to disk. Each target stores its protocol alongside the encrypted p
 
 The bridge process runs only while the overlay is open. Starting two targets spawns two
 bridge processes. Stopping removes the child process.
+
+## Availability
+
+The picture is a published video track, so this feature exists only where the host is reached over a
+wire that carries tracks. On a host whose connection does not, the **Screen Sharing** tab is
+**absent from the inspector's tab strip** rather than present and disabled, and a
+`?inspector=screen-sharing` deep link degrades to Details — honoured again the moment the wire can
+serve it.
+
+The gate is the **host's** connection, not the session's: a dormant session has no session
+connection to ask, and whether a session is carried over a room is decided by how its host is
+reached in the first place. A join that is merely still in flight, or one that failed, keeps the tab
+— the reason a join failed is what an operator opens the screen to find.
+
+Only the **picture** needs a media wire; the input half (`ScreenSharingInputService.StreamInput`) is
+ordinary RPC that any transport could carry. The whole tab is gated regardless, because a remote
+desktop with input and no picture is not a feature.
+
+See [capability gating](../../../packages/tddy-web/docs/capability-gating.md) for the rule all the
+media and presence surfaces share.
 
 ## Out of scope (MVP)
 

@@ -93,6 +93,8 @@ export const TEST_IDS = {
   participantList: "participant-list",
   participantListEmpty: "participant-list-empty",
   participantListError: "participant-list-error",
+  /** Shown instead of the roster when the connection carries no LiveKit presence. */
+  participantListUnavailable: "participant-list-unavailable",
   connectedParticipantsPanel: "connected-participants-panel",
 
   // LiveKit rooms panel
@@ -100,6 +102,10 @@ export const TEST_IDS = {
   livekitRoomsPanelLoading: "livekit-rooms-panel-loading",
   livekitRoomsPanelEmpty: "livekit-rooms-panel-empty",
   livekitRoomsPanelError: "livekit-rooms-panel-error",
+  /** Shown in the panel's place, frame and all, while the common room has not been joined. */
+  livekitRoomsPanelJoining: "livekit-rooms-panel-joining",
+  /** The whole `#/livekit` screen's stand-in on a connection that carries no LiveKit presence. */
+  livekitUnavailable: "livekit-unavailable",
 
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",
@@ -166,6 +172,8 @@ export const TEST_IDS = {
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
   sessionsDrawer: "sessions-drawer",
+  /** The drawer's footnote when it cannot see sessions owned by other hosts. */
+  sessionsDrawerCrossHostUnavailable: "sessions-drawer-cross-host-unavailable",
   sessionsDetailPane: "sessions-detail-pane",
   sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
   sessionsDetailMetadata: "sessions-detail-metadata",
@@ -472,6 +480,8 @@ export const TEST_IDS = {
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
+  /** Replaces the participant picker when the connection carries no LiveKit presence. */
+  rpcPlaygroundParticipantUnavailable: "rpc-playground-participant-unavailable",
   rpcServiceTree: "rpc-service-tree",
   rpcRequestEditor: "rpc-request-editor",
   rpcInvokeButton: "rpc-invoke-button",
@@ -781,6 +791,9 @@ export const participantRole = (identity: string) => `participant-role-${identit
 
 /** `[data-testid="participant-metadata-<identity>"]` */
 export const participantMetadata = (identity: string) => `participant-metadata-${identity}`;
+
+/** `[data-testid="participant-video-cell-<identity>"]` */
+export const participantVideoCell = (identity: string) => `participant-video-cell-${identity}`;
 
 /** `[data-testid="participant-video-trigger-<identity>"]` */
 export const participantVideoTrigger = (identity: string) =>
