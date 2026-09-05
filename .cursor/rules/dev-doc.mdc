@@ -109,7 +109,7 @@ High-level architecture description (1 paragraph ONLY, no diagrams, no details).
 - [Architecture](./docs/architecture.md) - System design and components
 - [API Reference](./docs/api-reference.md) - API documentation
 - [Integration Guide](./docs/integration.md) - Service integrations
-- [Changesets](./docs/changesets.md) - Applied changeset history
+- [Changesets](./docs/changesets/) - Applied changeset history
 
 ## Related Packages
 - [related-package](../related-package/README.md) — Crate or package reference
@@ -161,7 +161,7 @@ packages/{package-name}/docs/
 ├── implementation.md        # Implementation details, algorithms
 ├── testing.md              # Testing strategy and patterns
 ├── integration.md          # Integration with other packages
-├── changesets.md           # Applied changeset history
+├── changesets/             # Applied changeset history, one file per entry
 └── decisions/              # Architecture decision records
     ├── 001-decision.md
     └── 002-decision.md
@@ -270,42 +270,39 @@ Feature requirement → Create changeset → Implement → Wrap changeset → Up
 
 **Purpose**: Track the history of technical changes applied to package development documentation in release note style. This provides traceability without linking to deleted source files.
 
-**When updated**: The `changesets.md` file is automatically updated by the `/wrap-context-docs` command when a changeset is wrapped.
+**When updated**: A new file is added to the `changesets/` directory by the `/wrap-context-docs` command when a changeset is wrapped.
 
-**Location**: `packages/{package-name}/docs/changesets.md` - Existing file that tracks wrapped changesets for each package.
+**Location**: `packages/{package-name}/docs/changesets/` - Existing directory that tracks wrapped changesets for each package, **one file per changeset**.
 
 ### File Format
 
-**Canonical merge rules**: [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) (single-line bullets, prepend-only).
+**Canonical rules**: [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) (one file per entry, no index).
 
-**Package index** (`packages/{package-name}/docs/changesets.md`) and **cross-package index** (`docs/dev/changesets.md`): flat bullet list under the H1 (and short intro, if present).
+**Package changesets** (`packages/{package-name}/docs/changesets/`), **cross-package changesets** (`docs/dev/changesets/`) and **product-area changelogs** (`docs/ft/{area}/changelog/`) are all the same shape: a directory of `YYYY-MM-DD-<slug>.md` files with **no index**. The directory listing *is* the index — the date prefix sorts it reverse-chronologically.
+
+`packages/{package-name}/docs/changesets/2026-01-29-icon-generation-idempotency.md`:
 
 ```markdown
-# Changesets Applied
+# 2026-01-29 — Icon Generation Idempotency
 
-Wrapped changeset history for {package-name}.
+**Type:** Bug Fix
 
-**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
-
-- **2026-01-29** [Bug Fix] Icon Generation Idempotency — Fixed duplicate Duplexer events from Greyhound retries via processedIconIds tracking. (icons-server)
-- **2026-01-27** [Bug Fix] RGBA to HEX Color Format — Converted RGBA to HEX with separate opacity attributes for native image preview compatibility. (icons-server)
-- **2026-01-22** [Bug Fix] Icon Export Quality Fixes — Fixed blurry PNG at small sizes, gradient stop-color not themed, background visible at 0% opacity. (icons-server)
+Fixed duplicate Duplexer events from Greyhound retries via processedIconIds tracking. (icons-server)
 ```
 
-**Product-area changelogs** (`docs/ft/{coder,daemon,web}/changelog.md`): **reverse chronological** `## YYYY-MM-DD — Title` sections (newest first, after the intro). Use **distinct titles** when two releases share a date.
+Product-area changelog entries use the same `# YYYY-MM-DD — Title` first line and carry bullets instead of a `**Type:**` line.
 
 ### Guidelines
 
-**Format** (package / cross-package bullets): `- **YYYY-MM-DD** [Type] Title — Summary. (affected packages)` — **one bullet, one line** (no wrapped continuations).
-
 **Rules**:
-- **Reverse chronological order** (newest first). Add each wrapped changeset as a **new bullet immediately under** the intro/hygiene block (or a **new** `##` at the top of product changelogs). Do not reorder older entries when adding a new one.
-- **One bullet (or one `##` section) per wrapped changeset** — keeps each addition localized.
-- **No headers per bullet** in `changesets.md` — no H2/H3 per entry in the flat list; product changelogs use `##` per release as above.
+- **One new file per wrapped changeset.** Never append to an existing entry, and never add an index that every branch would have to edit — a shared append-point is exactly what this layout replaces.
+- **Filename** `YYYY-MM-DD-<short-slug>.md`; if the name is taken, add `-2`. Distinct slugs when two changesets share a date.
+- **First line** `# YYYY-MM-DD — Title`; for package/cross-package changesets follow it with `**Type:** {Feature|Bug Fix|Refactor|Architecture Change}`.
+- **Body**: whatever the entry needs. There is **no length rule** — the old one-bullet-one-line discipline existed only to keep git's `union` merge driver effective, and that driver is gone.
+- **Links are relative to the entry's own directory**, which is one level deeper than the old single file.
 - **No file references** — source changesets are deleted after wrapping
 - **Past tense** — "Fixed X", "Added Y", "Refactored Z"
-- **Type in brackets** — `[Feature]`, `[Bug Fix]`, `[Refactor]`, `[Architecture Change]`
-- **Do not rewrite** existing index lines for unrelated “cleanup” while other feature branches may be open; use a doc-only PR or add a new correcting entry.
+- **Never edit or reorder** an existing entry for unrelated “cleanup”; corrections are their own commit.
 
 **Git merges**: Repo `.gitattributes` sets `merge=union` on these paths. Union helps when branches **add different lines**; **same-line edits** still conflict—see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md).
 
