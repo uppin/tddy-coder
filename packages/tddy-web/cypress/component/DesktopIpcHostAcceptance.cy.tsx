@@ -15,6 +15,11 @@
 
 import React from "react";
 import { Room } from "livekit-client";
+import { create } from "@bufbuild/protobuf";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { GenerateTokenResponseSchema, TokenService } from "../../src/gen/token_pb";
+import { useLiveKitHostDirectorySource } from "../../src/rpc/hostDirectory/liveKitSource";
+import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   createIpcConnectionProvider,
   createLocalHostDirectorySource,
@@ -48,6 +53,25 @@ const A_PEER = "instance-a-peer";
 
 function aDesktopRegistration() {
   return { daemonInstanceId: THIS_HOST, label: "this daemon" };
+}
+
+/**
+ * The desktop's own connection provider, wired to a host application nothing here should reach.
+ *
+ * These specs are about which wire claims which host, never about frames, so the IPC host is
+ * injected and set to object if it is ever asked. Left to the default, the provider would reach the
+ * real page-level `thisPagesIpcHost()` singleton, whose `openConnections` map outlives the mount
+ * and cannot be reset from a test — one spec opening a connection would change what the next one
+ * sees.
+ */
+function anIpcProvider(): ConnectionProvider {
+  return createIpcConnectionProvider(aDesktopRegistration(), {
+    ipc: {
+      openConnection: () => {
+        throw new Error("no spec here reaches the host application");
+      },
+    },
+  });
 }
 
 /** Stands in for the LiveKit provider, which reaches peers and advertises everything. */
@@ -100,6 +124,12 @@ function ResolvedHostProbe({ hostId }: { hostId: string }) {
   );
 }
 
+/** Which wire reaches `hostId`, labelled so several hosts can be read from one mount. */
+function WireProbe({ hostId, testId }: { hostId: string; testId: string }) {
+  const connection = useHostConnection(hostId);
+  return <div data-testid={testId}>{connection?.providerId ?? "unreachable"}</div>;
+}
+
 /**
  * `providers` registered in order into one registry, with `hostId` resolved through it.
  *
@@ -129,6 +159,55 @@ function LiveKitDecisionProbe({ config }: { config: { livekitUrl?: string; commo
   );
 }
 
+/** The presence identity a signed-in operator has. Its presence is what makes the spec below bite. */
+const A_SIGNED_IN_IDENTITY = "web-someone";
+
+/**
+ * The common room actually brought up — or not — from `config`, through the production hook.
+ *
+ * `roomFactory` is `useCommonRoom`'s own injection seam, so a `Room` constructed on this path is a
+ * `Room` the app would have constructed. Reporting the source's status alongside is what
+ * distinguishes "did not start" from "started and failed".
+ */
+function LiveKitStartupProbe({
+  config,
+  roomFactory,
+}: {
+  config: { livekitUrl?: string; commonRoom?: string };
+  roomFactory: () => Room;
+}) {
+  const { source } = useLiveKitHostDirectorySource({
+    ...config,
+    identity: A_SIGNED_IN_IDENTITY,
+    roomFactory,
+  });
+  return <div data-testid="livekit-status">{source.status}</div>;
+}
+
+/** A `Room` factory that counts, so "no `Room` is constructed" can be asserted rather than claimed. */
+function aRoomFactoryTripwire() {
+  let constructed = 0;
+  return {
+    construct: () => {
+      constructed += 1;
+      return new Room();
+    },
+    constructed: () => constructed,
+  };
+}
+
+/** A daemon that answers a LiveKit token mint, and counts having been asked. */
+function aTokenMintTripwire() {
+  let minted = 0;
+  return {
+    backend: anInMemoryRpcBackend().onUnary(TokenService.method.generateToken, () => {
+      minted += 1;
+      return create(GenerateTokenResponseSchema, { token: "a-token", ttlSeconds: BigInt(3600) });
+    }),
+    minted: () => minted,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Specs
 // ---------------------------------------------------------------------------
@@ -137,7 +216,7 @@ describe("a desktop app with no LiveKit configuration", () => {
   it("reaches its own host over IPC", () => {
     // Given only the desktop's own provider — nothing else is registered because nothing else is
     // configured
-    const providers = [createIpcConnectionProvider(aDesktopRegistration())];
+    const providers = [anIpcProvider()];
 
     cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
 
@@ -147,7 +226,7 @@ describe("a desktop app with no LiveKit configuration", () => {
   });
 
   it("advertises rpc only, so the media surfaces do not apply", () => {
-    const providers = [createIpcConnectionProvider(aDesktopRegistration())];
+    const providers = [anIpcProvider()];
 
     cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
 
@@ -156,14 +235,26 @@ describe("a desktop app with no LiveKit configuration", () => {
   });
 
   it("starts no LiveKit connection at all", () => {
-    cy.mount(<LiveKitDecisionProbe config={{}} />);
+    // Given a signed-in operator — so the only thing standing between this page and a join is the
+    // configuration it does not have. Without an identity the hook short-circuits anyway and the
+    // spec would pass however the configuration were read.
+    const rooms = aRoomFactoryTripwire();
+    const tokens = aTokenMintTripwire();
 
-    // Then no room is joined, no token is minted, and no `Room` is constructed
-    byTestId("livekit").should("have.text", "not started");
+    mountWithRpc(<LiveKitStartupProbe config={{}} roomFactory={rooms.construct} />, tokens.backend);
+
+    // Then nothing was started: no token minted, no `Room` constructed. And the source says `idle`
+    // rather than `error`, which is the whole of "LiveKit is optional" — an operator who never
+    // configured a common room must not be shown a connection failure for it on every screen.
+    byTestId("livekit-status").should("have.text", "idle");
+    cy.wrap(null).then(() => {
+      expect(tokens.minted(), "LiveKit tokens minted").to.equal(0);
+      expect(rooms.constructed(), "Room objects constructed").to.equal(0);
+    });
   });
 
   it("sees no peers, and says so rather than failing", () => {
-    const providers = [createIpcConnectionProvider(aDesktopRegistration())];
+    const providers = [anIpcProvider()];
 
     cy.mount(<ResolutionProbe providers={providers} hostId={A_PEER} />);
 
@@ -174,7 +265,7 @@ describe("a desktop app with no LiveKit configuration", () => {
 describe("a desktop app that is configured for LiveKit", () => {
   it("still reaches its own host over IPC, not through the media server", () => {
     // Given both providers, the desktop's registered first
-    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProvider()];
+    const providers = [anIpcProvider(), aLiveKitProvider()];
 
     cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
 
@@ -184,18 +275,18 @@ describe("a desktop app that is configured for LiveKit", () => {
     byTestId("provider").should("have.text", "ipc");
   });
 
-  it("reaches a peer over LiveKit, with everything that carries", () => {
-    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProvider()];
+  it("reaches a peer over the common room, which the desktop's own wire declined", () => {
+    const providers = [anIpcProvider(), aLiveKitProvider()];
 
     cy.mount(<ResolutionProbe providers={providers} hostId={A_PEER} />);
 
-    // Then a peer is fully capable — the same host is media-capable over LiveKit and not over IPC,
-    // which is exactly why capabilities live on the connection and not on the host
+    // The IPC provider claims exactly one host, so a peer falls through to the wire behind it.
+    // Only the provider is asserted: what a peer over LiveKit *can do* is the stand-in's answer,
+    // not this node's, and asserting it back would be asserting the fixture.
     byTestId("provider").should("have.text", "livekit");
-    byTestId("capabilities").should("have.text", "media,presence,rpc");
   });
 
-  it("brings LiveKit up only when both a url and a room are configured", () => {
+  it("brings LiveKit up when both a url and a room are configured", () => {
     cy.mount(
       <LiveKitDecisionProbe config={{ livekitUrl: "wss://livekit.example", commonRoom: "tddy" }} />,
     );
@@ -215,19 +306,7 @@ describe("a desktop app that is configured for LiveKit", () => {
  * spec pins the outcome that matters: choosing that machine in a browser works exactly as it does
  * today, over LiveKit, with full capabilities.
  */
-describe("a browser, where the IPC override does not exist", () => {
-  it("reaches the desktop machine's host over LiveKit", () => {
-    // Given only the LiveKit provider — the browser bundle never loads the desktop's module
-    const providers = [aLiveKitProvider()];
 
-    cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
-
-    // Then choosing that machine in a browser works exactly as it does today, with full
-    // capabilities. Nothing about the browser path changes.
-    byTestId("provider").should("have.text", "livekit");
-    byTestId("capabilities").should("have.text", "media,presence,rpc");
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Registration: which page gets the IPC wire, and which never does
@@ -292,8 +371,9 @@ describe("offering the desktop's own wire to the app", () => {
     mountRegisteredOn(aPageInABrowser(), registry);
 
     // Then the browser path is untouched: no IPC provider exists to shadow LiveKit, because the
-    // page has no local host to register. This is the behavioural half of the guard below, and the
-    // one that would actually fail if a later change registered the IPC wire everywhere.
+    // page has no local host to register. Choosing that machine in a browser therefore works
+    // exactly as it does today, and a later change that registered the IPC wire everywhere would
+    // fail right here.
     byTestId("provider").should("have.text", "livekit");
     cy.wrap(null).then(() => expect([...registry.providerIds()]).to.deep.equal(["livekit"]));
   });
@@ -411,27 +491,29 @@ function mountDirectoryWithLiveKitDown() {
 }
 
 describe("a desktop app whose common room has failed", () => {
-  it("keeps its own host reachable over IPC", () => {
-    // Given the desktop's own wire, and a common room that cannot reach anything any more
-    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProviderWithNoRoom()];
-
-    cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
-
-    // Then the machine the operator is sitting at is untouched. The daemon is in this process and
-    // the media server was never on the path to it, so there is nothing about a failed join that
-    // could take it away — which is the whole reason its wire is registered separately.
-    byTestId("provider").should("have.text", "ipc");
-    byTestId("capabilities").should("have.text", "rpc");
-  });
-
   it("loses the peers, and only the peers", () => {
-    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProviderWithNoRoom()];
+    // Given the desktop's own wire, and a common room that cannot reach anything any more. Both
+    // hosts are asked in one mount, because the claim is about *which* of them degraded — asking
+    // separately could not tell a failed common room from a healthy one.
+    const registry = new ConnectionProviderRegistry();
+    registry.register(anIpcProvider());
+    registry.register(aLiveKitProviderWithNoRoom());
 
-    cy.mount(<ResolutionProbe providers={providers} hostId={A_PEER} />);
+    cy.mount(
+      <ConnectionProviders registry={registry}>
+        <div>
+          <WireProbe hostId={THIS_HOST} testId="local-wire" />
+          <WireProbe hostId={A_PEER} testId="peer-wire" />
+        </div>
+      </ConnectionProviders>,
+    );
 
-    // A peer really is out of reach, and says so plainly rather than pretending. The degradation is
-    // confined to exactly the hosts that needed the failed wire.
-    byTestId("provider").should("have.text", "unreachable");
+    // The machine the operator is sitting at is untouched — the daemon is in this process and the
+    // media server was never on the path to it. The peer really is out of reach and says so plainly
+    // rather than pretending. The degradation is confined to exactly the hosts that needed the wire
+    // that failed.
+    byTestId("local-wire").should("have.text", "ipc");
+    byTestId("peer-wire").should("have.text", "unreachable");
   });
 
   it("still offers its own host, and does not call the directory broken", () => {
@@ -452,5 +534,54 @@ describe("a desktop app whose common room has failed", () => {
     // see their fleet has to be told why. The failure belongs to that source and is read off it,
     // which is exactly what keeps it off the directory as a whole.
     byTestId("livekit-error").should("have.text", "could not join the common room");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Both wires at once — the configuration this stack exists to make possible
+// ---------------------------------------------------------------------------
+
+/** A common room that is up, and advertising one peer. */
+function aLiveKitDirectorySourceNaming(hostId: string): HostDirectorySource {
+  return {
+    id: LIVEKIT_SOURCE_ID,
+    status: "connected",
+    error: null,
+    hosts: [{ hostId, label: "a peer", sourceId: LIVEKIT_SOURCE_ID }],
+  };
+}
+
+describe("a desktop app with LiveKit configured and working", () => {
+  it("has its own host and a common-room peer, each over its own wire, in one session", () => {
+    // Given the app as it is actually assembled: the desktop's wire ahead of the common room, and
+    // the directory merging what each of them knows
+    const registry = new ConnectionProviderRegistry();
+    registry.register(anIpcProvider());
+    registry.register(aLiveKitProvider());
+
+    cy.mount(
+      <ConnectionProviders registry={registry}>
+        <HostDirectorySources
+          sources={[
+            aLiveKitDirectorySourceNaming(A_PEER),
+            createLocalHostDirectorySource(aDesktopRegistration()),
+          ]}
+        >
+          <div>
+            <MergedDirectoryProbe />
+            <WireProbe hostId={THIS_HOST} testId="local-wire" />
+            <WireProbe hostId={A_PEER} testId="peer-wire" />
+          </div>
+        </HostDirectorySources>
+      </ConnectionProviders>,
+    );
+
+    // Then both machines are offered and both are usable — one mount, no reload, no mode switch.
+    // Neither is reached the way the other is: the local host stays in-process even though the
+    // common room is up and could also reach that machine, and the peer is only reachable because
+    // it is up. That is the whole shape of the feature, in one assertion.
+    byTestId("hosts").should("have.text", `${A_PEER},${THIS_HOST}`);
+    byTestId("local-wire").should("have.text", "ipc");
+    byTestId("peer-wire").should("have.text", "livekit");
   });
 });

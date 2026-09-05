@@ -9,7 +9,7 @@ import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
 import type { TauriHostWindow } from "./rpc/daemonTransportFlavour";
 import {
-  createLocalHostDirectorySource,
+  localHostDirectorySources,
   localHostRegistrationFor,
 } from "./rpc/connections/localHost";
 import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
@@ -441,10 +441,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   );
   // Memoised on the registration rather than rebuilt per render: the array is the directory's source
   // list, and a new one every render would re-merge the directory and re-resolve the selected host.
-  const localHostSources = useMemo(
-    () => (localHost ? [createLocalHostDirectorySource(localHost)] : []),
-    [localHost],
-  );
+  const localHostSources = useMemo(() => localHostDirectorySources(localHost), [localHost]);
 
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {

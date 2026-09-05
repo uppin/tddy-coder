@@ -199,10 +199,6 @@ class IpcSessionWire {
   private bridge: WebviewIpcBridge | null = null;
   private builtTransport: Transport | null = null;
   private readonly clients = new MemoisedClients();
-
-  /** Why the host application will not carry this connection any more; `null` while it will. */
-  private failure: string | null = null;
-
   private attachments = 0;
 
   constructor(
@@ -212,13 +208,17 @@ class IpcSessionWire {
     private readonly onLastDetached: () => void,
   ) {}
 
-  /** `connected` unless the host application has reported this connection permanently gone. */
+  /**
+   * `connected`, structurally, for as long as an attachment holds this wire.
+   *
+   * There is no failure for it to report. The host application and the page have one lifetime, and
+   * a bridge's `closed` resolves for exactly one reason — the page releasing it — so the only thing
+   * this wire could ever learn from the host is what it already did itself, at the moment it has
+   * stopped caring. A call that cannot be delivered fails as a call; it does not first turn the
+   * connection carrying it into an `error` nobody was watching for.
+   */
   get status(): ConnectionStatus {
-    return this.failure === null ? "connected" : "error";
-  }
-
-  get error(): string | null {
-    return this.failure;
+    return "connected";
   }
 
   attach(): void {
@@ -263,9 +263,6 @@ class IpcSessionWire {
     }
     const bridge = ipc.openConnection(sessionTarget(this.sessionId));
     this.bridge = bridge;
-    void bridge.closed.then((reason) => {
-      this.failure = reason;
-    });
     return transportFor(bridge);
   }
 }
@@ -387,9 +384,8 @@ function openIpcSession(
     get status(): ConnectionStatus {
       return attached ? wire.status : "idle";
     },
-    get error(): string | null {
-      return attached ? wire.error : null;
-    },
+    /** Structurally `null` — see {@link IpcSessionWire.status}. */
+    error: null,
     capabilities: IPC_CAPABILITIES,
     clientFor<S extends DescService>(service: S): Client<S> {
       refuseIfClosed();
@@ -496,6 +492,19 @@ export function createLocalHostDirectorySource(
       hostDescriptorOf({ instanceId: hostId, label: registration.label }, LOCAL_IPC_SOURCE_ID),
     ],
   };
+}
+
+/**
+ * The directory sources this page contributes: its own host, or nothing at all.
+ *
+ * The `null` case is the browser, and it is the whole of why a browser's directory is untouched by
+ * everything the desktop build does. It is a function rather than a conditional at the registration
+ * site so that the gate is one testable thing — the same reason {@link localHostRegistrationFor} is.
+ */
+export function localHostDirectorySources(
+  registration: LocalHostRegistration | null,
+): readonly HostDirectorySource[] {
+  return registration ? [createLocalHostDirectorySource(registration)] : [];
 }
 
 /**
