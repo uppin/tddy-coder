@@ -80,7 +80,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 
 | Excluded | Why |
 |----------|-----|
-| VM-backed tests (`./vm-tests`) | `#[ignore]`d by design; need a QEMU guest and a base image that is never downloaded |
+| VM-backed tests (`./vm-tests`) | `#[ignore]`d by design; need a QEMU guest and a base image that is never downloaded. Two of them run in the separate VM workflow below |
 | cgroups sandbox tests | Need root and a writable cgroup root; the backend reports itself available on any Linux, then EPERMs at spawn |
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/TODO.md`; the intended fix is a VM-backed job, not a permanent exclusion |
@@ -104,13 +104,25 @@ redundant: `master` is the only ref that writes the cargo cache, so without it
 the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
 It also means the branch itself has VM coverage rather than only its PRs.
 
-Scope is currently **one** of the eight suites in `./vm-tests`:
-`vm_boot_control_acceptance`. It proves the launcher, serial-console control,
-9p, SSH login and graceful shutdown against a real guest, and it is the only
-entry that needs no baked image chain — it boots the supplied cloud image
-directly. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
+Scope is what a bare cloud image can reach, which is two checks out of the nine
+suites in `./vm-tests`. Both are legs of one matrix job, so they share the KVM
+handling and the false-green guard:
+
+| Check | Runs | Proves |
+|-------|------|--------|
+| `VM boot control` | all of `vm_boot_control_acceptance` (6 tests) | The launcher, serial-console control, 9p, SSH login with the per-VM key, graceful shutdown |
+| `Cloudinit VM boot` | one test of `cloud_init_acceptance`, `a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh` | That a bake produces a *usable* layer: cloud-init bakes a prepared base, a VM is created from it, boots, and answers `id -un` over SSH as the account the bake provisioned |
+
+Neither needs a pre-baked image chain, which is why these two and not the other
+seven. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
 against the `SHA512SUMS` published beside it, then cached) because the testkit
 never downloads anything itself by design.
+
+`Cloudinit VM boot` runs one test rather than its whole binary deliberately. The
+other two in `cloud_init_acceptance` each pay for their own bake and then only
+*inspect* the result — qcow2 magic bytes, a relative backing reference — which
+this one subsumes by booting it. `--exact` selects it by name, so adding a test
+to that file does not silently add a bake to CI.
 
 The runner is x86_64, and that matters in two ways. `VmArch::host()` reads
 `std::env::consts::ARCH`, so the guest image must be **amd64**, not the arm64
@@ -132,10 +144,11 @@ minutes.
 
 **Every test passes when the image is missing.** Each one does
 `let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`
-(`vm_boot_control_acceptance.rs:81`), so an unset variable or a failed download
-yields a green check that booted nothing. The workflow asserts the path exists
-before running, and afterwards greps the log for both the skip message and
-`test result: ok. 6 passed`. A false green is worse than a red one.
+(`vm_boot_control_acceptance.rs:81`, `cloud_init_acceptance.rs:117`), so an unset
+variable or a failed download yields a green check that booted nothing. The
+workflow asserts the path exists before running, and afterwards greps the log for
+both the skip message and `test result: ok. <n> passed` — `n` being the leg's own
+`expected_passing`, 6 or 1. A false green is worse than a red one.
 
 ### What it would take to run the rest
 
@@ -143,7 +156,8 @@ before running, and afterwards greps the log for both the skip message and
 |-------|---------|
 | `tddy_host_vm_acceptance` (the bake) | Several hours even accelerated: installs a 9p kernel, installs Nix, and runs a cold `./release` of the whole workspace including `libwebrtc` inside a 2-vCPU guest. Per `docs/ft/vm/tddy-vm.md`, it has never been run end to end. Its output is a multi-GB qcow2 chain that does not fit the 10 GB Actions cache, so it would need external blob storage (ghcr.io via ORAS, or Releases) |
 | `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base, so they inherit the bake's problem |
-| `cloud_init_acceptance`, `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
+| `cloud_init_acceptance` (the two tests CI does not run) | Nothing structural — each bakes from the bare cloud image like the one that does run. They are left out because a second and third bake buys inspection of an artifact the `Cloudinit VM boot` check already boots |
+| `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
 
 ## Flaky tests
 
@@ -201,8 +215,9 @@ CI reports status but does not block merges until a ruleset says so. The
 - `Rust build`
 - `Web tests`
 
-Do **not** add `VM boot control` to that list yet — it is still being proven out,
-and a required check that flakes on QEMU would block every merge.
+Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
+are still being proven out, and a required check that flakes on QEMU would block
+every merge.
 
 Creating it needs **repository admin**, so it lives here as a command rather
 than as a file the repo can apply itself:
@@ -314,7 +329,7 @@ blocked *for you*". Once the Actions app is a bypass actor, the answer for
 quietly become `#forcemerge`. So the workflow runs `gh pr checks --required`,
 which reports the checks themselves: exit 0 when every required one has passed,
 non-zero while any is pending or failing. It correctly reads requirements from
-the ruleset and excludes `VM boot control`.
+the ruleset and excludes the VM checks.
 
 The merge itself uses the repo's squash defaults (`COMMIT_OR_PR_TITLE` /
 `COMMIT_MESSAGES`), which is what produces the `... (#406)` subjects in
