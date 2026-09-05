@@ -141,26 +141,7 @@ impl BuilderVm {
     /// Both steps are no-ops once their output exists, so this is cheap to call on every
     /// run and expensive exactly once.
     pub async fn ensure_images(&self, progress: &(dyn Fn(&str) + Sync)) -> Result<PathBuf> {
-        let supplied = configured_base_image().ok_or_else(|| {
-            anyhow!(
-                "no base image configured — set {} in the environment or in the repo-root \
-                 .env to a cloud image already on disk (nothing is ever downloaded)",
-                crate::env_file::BASE_IMAGE_ENV
-            )
-        })?;
-
-        let nix_base_output = self.layout.prepared_base_path(NIX_BASE_IMAGE_NAME);
-        if !nix_base_output.exists() {
-            let imported = import_supplied_base(&self.layout, &supplied, SUPPLIED_BASE_NAME)?;
-            ensure_prepared_base(
-                &self.layout,
-                BakeSpec::new(NIX_BASE_IMAGE_NAME, &imported, nix_base_user_data())
-                    .with_ssh_host_port(NIX_BASE_BAKE_PORT)
-                    .with_timeout(NIX_BASE_BAKE_TIMEOUT),
-                progress,
-            )
-            .await?;
-        }
+        let nix_base_output = ensure_nix_base(&self.layout, progress).await?;
 
         // The builder bake mounts the working copy so `./dev true` has a flake to realise.
         let source_share = read_only_share(self.layout.repo_root(), SOURCE_MOUNT_TAG);
@@ -371,4 +352,36 @@ impl BuilderVm {
             .read_manifest(&name)
             .map_err(|e| anyhow!("reading back the builder VM's manifest: {e}"))
     }
+}
+
+/// Bake the shared Nix parent every later layer chains onto, and return its path.
+///
+/// The **only** thing that produces `tddy-nix-base`, and it is called on purpose rather
+/// than reached for implicitly. A component that wants a layer it does not own should say
+/// so and fail — silently baking someone else's prerequisite hides both the cost (this one
+/// installs Nix in a guest) and the ordering, and the caller who forgot is the one who
+/// needs to know.
+///
+/// Idempotent: [`ensure_prepared_base`] returns immediately when the layer is already
+/// sealed, so calling it on every run is right and costs nothing after the first.
+pub async fn ensure_nix_base(
+    layout: &TestkitLayout,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<PathBuf> {
+    let supplied = configured_base_image().ok_or_else(|| {
+        anyhow!(
+            "no base image configured — set {} in the environment or in the repo-root .env \
+             to a cloud image already on disk (nothing is ever downloaded)",
+            crate::env_file::BASE_IMAGE_ENV
+        )
+    })?;
+    let imported = import_supplied_base(layout, &supplied, SUPPLIED_BASE_NAME)?;
+    ensure_prepared_base(
+        layout,
+        BakeSpec::new(NIX_BASE_IMAGE_NAME, &imported, nix_base_user_data())
+            .with_ssh_host_port(NIX_BASE_BAKE_PORT)
+            .with_timeout(NIX_BASE_BAKE_TIMEOUT),
+        progress,
+    )
+    .await
 }

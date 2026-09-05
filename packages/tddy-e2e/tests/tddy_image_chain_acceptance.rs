@@ -41,7 +41,9 @@ use std::time::Duration;
 use serial_test::serial;
 use tddy_vm_testkit::env_file::BASE_IMAGE_ENV;
 use tddy_vm_testkit::recipes::TDDY_SERVICE_USERNAME;
-use tddy_vm_testkit::{require_env_path, BuiltBinaries, TestHostVm, TestkitLayout};
+use tddy_vm_testkit::{
+    ensure_nix_base, require_env_path, BuiltBinaries, TestHostVm, TestkitLayout,
+};
 
 /// Names the directory of Linux binaries to deploy — flat, as `./release` plus the install
 /// bundle leave it. Its absence is a failure: a test that cannot deploy has not passed.
@@ -78,10 +80,14 @@ async fn the_installed_stack_runs_under_systemd_and_the_daemon_serves() {
         .expect("the prebuilt dist directory must hold every binary a deployment needs");
 
     // When the cloud-init layers are baked and the real installer runs in the guest.
-    // `TestHostVm::start` bakes tddy-nix-base if it is not already sealed, then the
-    // test-host layer on top of it, boots a disposable VM off that, copies the binaries in
-    // and runs `./install --systemd --headless`.
+    //
+    // The shared Nix parent is baked here, explicitly, because it is a prerequisite of the
+    // test host rather than a side effect of starting one — `TestHostVm::start` refuses to
+    // bake it. Both calls are idempotent: a sealed layer is skipped, not rebuilt.
     let layout = TestkitLayout::for_this_repo();
+    ensure_nix_base(&layout, &progress)
+        .await
+        .expect("the shared Nix base must bake");
     let host = TestHostVm::start(&layout, &built, &progress)
         .await
         .expect("the test host must install the supervised stack");

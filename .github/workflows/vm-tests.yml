@@ -263,9 +263,13 @@ jobs:
           name: vm-${{ matrix.slug }}-logs
           # vm-tests.log is what the harness printed; vm-console-logs/ is what
           # each guest itself said, written by QEMU rather than by the test, so
-          # it survives a guest that wedged before the test could read it.
+          # it survives a guest that wedged before the test could read it; and
+          # the per-bake boot logs are the only record of a *bake* that failed —
+          # they live in the library under tmp/.tddy and are otherwise thrown
+          # away with the runner, which is exactly when they are needed.
           path: |
             vm-tests.log
             vm-console-logs/
+            tmp/.tddy/images/**/*-boot.log
           if-no-files-found: warn
           retention-days: 7

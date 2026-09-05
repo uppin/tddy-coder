@@ -41,7 +41,7 @@ pub mod recipes;
 pub mod test_host_vm;
 
 pub use bake::boot_probe_of_prepared_base;
-pub use builder_vm::{BuilderVm, BuiltBinaries};
+pub use builder_vm::{ensure_nix_base, BuilderVm, BuiltBinaries};
 pub use env_file::{configured_base_image, require_base_image, require_env_path, BASE_IMAGE_ENV};
 pub use guest::{BootedGuest, GuestCommandOutput};
 pub use layout::{
