@@ -95,8 +95,8 @@ credentials to; the build is not. Confine the build.
 A `--workspace-tools` jail has no egress shim today — a jail that serves file tools needs no
 network. A jail that runs `cargo build` does. In `sandboxed` mode the runner starts the CONNECT
 egress shim and the app's relay fulfils the tunnels, so a jailed build reaches crates.io and npm
-through the host's socket with TLS still end-to-end. This is the same relay the agent used to use
-from inside the jail, pointed at the build instead.
+through the host's socket with TLS still end-to-end. It is the same relay an agent confined by the other
+modes reaches the network through, serving the build instead.
 
 ### What the checkout must not be able to make this host do
 
