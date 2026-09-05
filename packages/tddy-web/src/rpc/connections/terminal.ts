@@ -38,12 +38,26 @@ export interface TerminalHistoryChunk {
   readonly data: Uint8Array;
   readonly startOffset: bigint;
   readonly endOffset: bigint;
+
+  /** True when this chunk reaches the oldest retained byte — nothing exists *below* it. */
   readonly atOldest: boolean;
+
+  /**
+   * True when this chunk reaches `untilOffset` (or the capture tip) — nothing exists *above* it,
+   * so the forward fill is complete.
+   *
+   * Not a duplicate of {@link atOldest}, and the two are read at opposite ends of the fill: the
+   * first chunk of a fill from offset 0 is normally `atOldest` and not `atEnd`. This is the field
+   * `TerminalHistoryForwardLoader` terminates on, and it is the *only* terminator available to a
+   * fill with no offset anchor — a LiveKit-carried session's, whose frames carry no offsets at all.
+   */
+  readonly atEnd: boolean;
 }
 
 /**
  * Fetch one forward chunk of older history starting at `fromOffset`, bounded by `untilOffset` (the
- * anchor). Resolves `null` when the backend has no chunk for that range.
+ * anchor, or `0n` for "until the capture tip"). Resolves `null` when the backend has no chunk for
+ * that range.
  */
 export type TerminalHistoryFetcher = (
   fromOffset: bigint,
@@ -60,6 +74,55 @@ export type TerminalHistoryFetcher = (
 export interface TerminalFeed {
   readonly stream: TerminalStream;
   readonly history?: TerminalHistoryFetcher;
+}
+
+/**
+ * What a caller must state to open a terminal, because the connection cannot know it.
+ *
+ * A session connection knows its host, its session and its wire. It does **not** know which of the
+ * session's terminals a pane is showing, nor who currently holds the right to type into it — those
+ * belong to the screen, and the daemon refuses a call that gets either wrong. Passing them in is
+ * what keeps `TerminalFeed` free of them: once opened, the terminal writes bytes and nothing else.
+ */
+export interface TerminalOptions {
+  /**
+   * Which of the session's terminals to open. Empty (the default) resolves to the reserved main
+   * ("claude"/Agent) terminal; a bash terminal started with `StartTerminalSession` passes its own
+   * id. A session has several, so a connection cannot pick one on the caller's behalf.
+   */
+  readonly terminalId?: string;
+
+  /**
+   * The caller's access token, which the daemon resolves to a GitHub user before serving any
+   * terminal RPC.
+   *
+   * Stated rather than left to `createAuthGateInterceptor` because that gate is **unary-only**
+   * (`rpc/authGateInterceptor.ts` — `if (!req.stream && …)`), and every terminal RPC that matters
+   * here (`StreamTerminalOutput`, `GetTerminalHistory`) is server-streaming. A feed that relied on
+   * the gate would open a stream with an empty token and be refused as unauthenticated.
+   */
+  readonly sessionToken: string;
+
+  /**
+   * The control lease held by the screen doing the typing, read **at send time**.
+   *
+   * A getter, not a value, because the lease moves: a second screen claiming the terminal replaces
+   * it (`ClaimTerminalControl`), and the daemon compares what a `SendTerminalInput` presents against
+   * whatever it holds now (`cli_session_manager.rs` — `verify_control`). A token snapshotted when
+   * the feed was opened goes stale the moment control changes hands, and every subsequent keystroke
+   * comes back `failed_precondition: terminal controlled by another screen` — silently, since input
+   * has no reply the terminal renders. Reading it per send is what lets a re-claim resume typing
+   * without reopening the stream.
+   */
+  readonly controlToken: () => string;
+
+  /**
+   * The terminal's measured grid, so the daemon resizes the PTY *before* it replays.
+   *
+   * Omitted when the pane has not been laid out yet. This is the fix for the 220-column garbling:
+   * replaying a buffer at the wrong width re-wraps every line in it.
+   */
+  readonly initialGrid?: { readonly cols: number; readonly rows: number };
 }
 
 /**

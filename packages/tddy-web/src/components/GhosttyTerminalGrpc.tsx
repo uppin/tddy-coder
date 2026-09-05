@@ -11,12 +11,13 @@ import { ShortcutDrawer } from "./connection/ShortcutDrawer";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useVisualViewport } from "../hooks/useVisualViewport";
 import type { ToolShortcutDef } from "../lib/toolShortcuts";
-import {
-  TerminalHistoryForwardLoader,
-  type HistoryChunk,
-} from "../lib/terminalHistoryLoader";
+import { TerminalHistoryForwardLoader } from "../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
-import type { TerminalFrame, TerminalStream } from "../rpc/connections/terminal";
+import type {
+  TerminalFrame,
+  TerminalHistoryFetcher,
+  TerminalStream,
+} from "../rpc/connections/terminal";
 
 // `[tddy]` diagnostics for the gRPC terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
@@ -48,11 +49,11 @@ export type GrpcStream = TerminalStream;
 /**
  * Fetches one forward chunk of older history starting at `fromOffset`, bounded by `untilOffset`
  * (the anchor). Returns `null` when the backend has no chunk for the range.
+ *
+ * Promoted out of this component as {@link TerminalHistoryFetcher}, alongside the stream it travels
+ * with — the point of the move being that history follows the *connection* rather than the wire.
  */
-export type HistoryFetcher = (
-  fromOffset: bigint,
-  untilOffset: bigint,
-) => Promise<HistoryChunk | null>;
+export type HistoryFetcher = TerminalHistoryFetcher;
 
 export interface GhosttyTerminalGrpcProps {
   sessionToken: string;

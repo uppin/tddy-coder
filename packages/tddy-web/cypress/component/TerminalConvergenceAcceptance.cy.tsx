@@ -54,13 +54,14 @@ function aControllableStream() {
   };
 }
 
-/** One page of older output, as a host that can replay would serve it. */
+/** One page of older output — the whole of it, as a host that can replay would serve it. */
 function anOlderChunk(text: string): TerminalHistoryChunk {
   return {
     data: new TextEncoder().encode(text),
     startOffset: BigInt(0),
     endOffset: BigInt(text.length),
     atOldest: true,
+    atEnd: true,
   };
 }
 

@@ -16,7 +16,7 @@
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { ConnectionCapability, ConnectionStatus } from "./types";
-import type { TerminalFeed } from "./terminal";
+import type { TerminalFeed, TerminalOptions } from "./terminal";
 
 /**
  * What the daemon's attach reply said about reaching this session, in transport-neutral terms.
@@ -94,8 +94,12 @@ export interface SessionConnection {
    * Added by node 5 (`terminal-convergence`), which is what lets one terminal component be fed by
    * any wire. A connection that cannot serve history omits it and the terminal degrades to
    * live-tail — the LiveKit path's behaviour today, so nothing regresses.
+   *
+   * `options` carries the three things a connection provably cannot know — which terminal, whose
+   * access token, and who holds the control lease — see {@link TerminalOptions}. Everything else
+   * (the host, the session, the wire) the connection already is.
    */
-  openTerminal(): TerminalFeed;
+  openTerminal(options: TerminalOptions): TerminalFeed;
 }
 
 /**
