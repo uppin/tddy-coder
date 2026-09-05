@@ -104,9 +104,64 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 - [x] Run acceptance tests (verify they fail) — 8/8 on `MultiConnectionHost`
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `packages/tddy-tauri-web/src/multiConnection.test.ts`
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
+
+### Green status
+
+Implemented in three pushed milestones, each verified before it went out:
+
+| Milestone | Commit | Delivers | Tests |
+|---|---|---|---|
+| A | `f1d7b6da` | `MultiConnectionHost` — connections keyed by client epoch, each with its own engine, bounded queue, drain task and peer | 8 new; 22/22 in `tddy-tauri-rpc` |
+| B | `9e9bb085` | `thisPagesIpcHost` — one bridge per target, released explicitly | 5 new; 12/12 in `tddy-tauri-web` |
+| C | `ff9d7a2f` | `ipc.rs` on the multi-connection host, `tddy_rpc_disconnect`, `DaemonRosters`, page-reload reaping, `daemonTransport.ts` registry | 2 new; 25/25 in `tddy-desktop`, 9/9 on `daemonTransport` |
+
+| Check | Result |
+|---|---|
+| `cargo test -p tddy-tauri-rpc` | 22 passed, 0 failed |
+| `cargo test -p tddy-desktop` | 25 passed, 0 failed |
+| `cargo clippy -p tddy-tauri-rpc -p tddy-rpc -p tddy-desktop --all-targets -- -D warnings` | clean |
+| `cargo fmt --all --check` | clean |
+| `cd packages/tddy-tauri-web && bun test` | 12 pass, 0 fail |
+| `bun run --filter tddy-web test:unit` | 977 pass, 23 fail — all 23 pre-existing and parent-owned (see below) |
+| `./desktop-dev` | **outstanding** — `tddy-desktop` is outside the CI gate, so the desktop half still needs a reported manual run |
+
+Decisions taken during green, for `/validate-changes` to confirm:
+
+- **`Arc<S: RpcService>` gained a delegating `RpcService` impl** in `tddy-rpc/src/bridge.rs`, so a roster
+  handed back as `Arc<dyn RpcService>` can drive a `ServerEngine`. Additive, no new dependency, and
+  `ServiceEntry` already stored rosters this way. Outside this node's listed files, but it touches none
+  of what `## Boundaries` protects.
+- **A session target resolves to the daemon's own roster**, gated on nothing. The embedded daemon serves
+  session-scoped RPCs itself and routes them by the request, so addressing is real per connection while
+  the roster behind every target is the same one. Not gated on a live session because `roster_for` is
+  synchronous and `CliSessionManager::get` is async; widening that trait would break the signature node 7
+  compiles against.
+- **`serde` is now declared in `tddy-desktop`** (and `serde_json` as a dev-dependency), because a Tauri
+  command argument must be `Deserialize`. Both were already linked via tauri, so no crate enters the
+  tree — the `Cargo.lock` diff is two lines in this crate's own dependency list. Agreed with the
+  developer against the `## Boundaries` no-new-dependency line on that basis.
+- **`FrameError` is unchanged.** `MultiConnectionHost` reports `StaleConnection` only when exactly one
+  connection is open — where naming `connected` is true — and `NotConnected` otherwise. Correct and
+  documented, but the refusal now varies with how many *other* connections exist; a dedicated variant
+  would be more uniform and was left out rather than churn a published surface.
+- **`close()` now resolves `closed`**, so calls in flight when a session detaches settle instead of
+  hanging. This is `## Draft PR contract` item 4, which the red phase specified but never pinned with a
+  test — a real coverage gap.
+
+### Inherited red from parent nodes
+
+This branch was cut from `feature/optional-livekit/terminal-convergence`, not `master`, so it carries
+nodes 1–5 as ancestors and inherits **23 failing `tddy-web` tests** that belong to them:
+`TODO(host-directory)` 9, `TODO(capability-gating)` 6, `TODO(session-connection)` 5,
+`TODO(terminal-convergence)` 3. None is `TODO(multi-connection-ipc)`, and none was touched here — those
+surfaces belong to the PRs that own them.
+
+Note this contradicts the header above: this node is documented as a **root** based on `master`, but
+PR #442's base is `terminal-convergence`. It therefore cannot merge in parallel with nodes 1–5. Changing
+a base is a repoint, which belongs to the stack orchestrator, not to this worktree.
 
 ### Baseline and red status at the contract commit
 
