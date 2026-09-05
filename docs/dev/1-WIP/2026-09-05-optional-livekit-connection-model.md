@@ -1,6 +1,7 @@
 # Changeset: optional-livekit-connection-model
 
 **Stack:** `optional-livekit` — node 1 of 7, root (base `master`)
+PR: [#437](https://github.com/uppin/tddy-coder/pull/437)
 PRD: [`2026-09-05-optional-livekit-connection-model-prd.md`](2026-09-05-optional-livekit-connection-model-prd.md)
 Discovery: [`2026-09-05-optional-livekit-connection-model-initial-discovery.md`](2026-09-05-optional-livekit-connection-model-initial-discovery.md)
 
@@ -82,18 +83,53 @@ PR under `/green` — **this PR does not merge on the contract alone.**
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `cypress/component/HostConnectionAcceptance.cy.tsx`
+- [x] Run acceptance tests (verify they fail) — 6/6 failing at `useHostConnection`/`useHostClient`
+- [x] USER REVIEW — acceptance tests — approved 2026-09-05
+- [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/registry.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — fold the model into `docs/ft/web/daemon-selector-livekit-rpc.md`
 
 ## Verification
+
+### Baseline recorded before the contract commit (2026-09-05)
+
+| Check | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **971 pass, 0 fail** across 114 files |
+| `bun run --filter tddy-web cypress:component` | **207 specs, 1214 tests, 1213 pass, 1 fail** (the pre-existing failure below) |
+| `cargo build -p tddy-tauri-rpc` | clean (unrelated to this node; warmed for node 6) |
+
+`tsc --noEmit` is **not** a gate in this repo and reports 1288 pre-existing errors (121 files cannot
+resolve `bun:test`; Cypress specs pass plain object literals where a proto message is expected). It
+was still run, and this node's files contribute none of them.
+
+### Pre-existing failures, recorded so `/green` does not mistake them for this node's red
+
+| Spec | Test | Symptom |
+|---|---|---|
+| `cypress/component/SelectedHostUrlStateAcceptance.cy.tsx` | `choosing a host records it in the URL` | times out after 4s waiting for `[data-testid='daemon-selector-option-laptop-b']`, via `daemonSelectorPage.choose` |
+
+Observed on this branch **before** any of this node's code was added, so it predates the stack. It
+sits in the daemon-selector area node 2 rewrites; node 2 should decide whether its rework fixes it or
+whether it needs a separate report.
+
+### Red status at the contract commit
+
+| Suite | Result |
+|---|---|
+| `src/rpc/connections/registry.test.ts` | **6 tests, 6 failing** |
+| `cypress/component/HostConnectionAcceptance.cy.tsx` | **6 tests, 6 failing** |
+
+Every failure is on this node's own `TODO(connection-model)` body — `ConnectionProviderRegistry`'s
+methods, `useHostConnection`, `useHostClient`. None is on a parent's surface: this node is a root and
+has no parent.
+
+### Commands
 
 Scope to the packages this node touches (`packages/tddy-web` only):
 
