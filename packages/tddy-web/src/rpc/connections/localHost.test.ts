@@ -23,6 +23,7 @@ import {
   createIpcConnectionProvider,
   createLocalHostDirectorySource,
   liveKitIsConfigured,
+  localHostRegistrationFor,
 } from "./localHost";
 
 const THIS_HOST = "instance-this-host";
@@ -61,6 +62,49 @@ describe("whether LiveKit should be brought up", () => {
     expect(liveKitIsConfigured({ livekitUrl: "wss://livekit.example", commonRoom: "  " })).toBe(
       false,
     );
+  });
+});
+
+/** A page the Tauri host application loaded: it injects its IPC internals into every one. */
+function aPageInsideTheDesktopApp() {
+  return { __TAURI_INTERNALS__: {} };
+}
+
+/** A page a browser loaded over HTTP from the daemon that serves the bundle. */
+function aPageInABrowser() {
+  return {};
+}
+
+describe("whether this page has a local host at all", () => {
+  it("has one when the host application loaded it", () => {
+    const registration = localHostRegistrationFor(aPageInsideTheDesktopApp(), THIS_HOST);
+
+    // The daemon is in this page's own process, so it is reachable before anything else is
+    expect(registration?.daemonInstanceId).toBe(THIS_HOST);
+  });
+
+  it("names the host the way a daemon names itself in a common room", () => {
+    const registration = localHostRegistrationFor(aPageInsideTheDesktopApp(), THIS_HOST);
+
+    // So a machine that both sources describe does not change name in the selector depending on
+    // which account of it the directory happened to keep
+    expect(registration?.label).toBe(`${THIS_HOST} (this daemon)`);
+  });
+
+  it("has none in a browser", () => {
+    // Given the same bundle, loaded over HTTP instead — one build serves both hosts
+    const registration = localHostRegistrationFor(aPageInABrowser(), THIS_HOST);
+
+    // Then there is nothing to register, which is the whole of how the browser stays on LiveKit:
+    // not a second `isDesktop` question, but the one `daemonTransportFlavour` already answers to
+    // choose how this page reaches its own daemon
+    expect(registration).toBeNull();
+  });
+
+  it("has none when the daemon named no instance", () => {
+    // A bundle served by something that is not a daemon — a Storybook build — knows no host id
+    expect(localHostRegistrationFor(aPageInsideTheDesktopApp(), undefined)).toBeNull();
+    expect(localHostRegistrationFor(aPageInsideTheDesktopApp(), "   ")).toBeNull();
   });
 });
 

@@ -14,11 +14,23 @@
  */
 
 import React from "react";
+import { Room } from "livekit-client";
 import {
   createIpcConnectionProvider,
+  createLocalHostDirectorySource,
   liveKitIsConfigured,
+  localHostRegistrationFor,
 } from "../../src/rpc/connections/localHost";
+import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
+import {
+  ConnectionProviderRegistry,
+  ConnectionProviders,
+  useConnectionProviders,
+  useHostConnection,
+} from "../../src/rpc/connections/registry";
 import type { ConnectionProvider } from "../../src/rpc/connections/types";
+import { SelectedDaemonProvider, useDaemons } from "../../src/rpc/selectedDaemon";
+import { AuthProvider } from "../../src/hooks/authProvider";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -178,12 +190,15 @@ describe("a desktop app that is configured for LiveKit", () => {
 });
 
 /**
- * A regression guard, and **green at the contract commit** — it exercises none of this node's code.
+ * A regression guard: the browser path must be untouched by everything the desktop build does.
  *
- * That is the point of it: the browser path must be untouched by everything the desktop build does,
- * and the strongest form of that guarantee is structural — `tddy-web` never imports `localHost.ts`,
- * so a browser bundle cannot contain the IPC provider even by accident. This spec pins the visible
- * half of it, so a later change that quietly registered the IPC provider everywhere would fail here.
+ * The guarantee is **behavioural, not structural.** There is one bundle — the Tauri shell loads
+ * `packages/tddy-web/dist`, the same files the daemon serves a browser — so `localHost.ts` is in
+ * every build there is, and no import graph can keep it out. What keeps a browser off the IPC path
+ * is that `localHostRegistrationFor` answers `null` for it and nothing is registered, which
+ * *"registers nothing at all for a page a browser loaded"* below drives through the real gate. This
+ * spec pins the outcome that matters: choosing that machine in a browser works exactly as it does
+ * today, over LiveKit, with full capabilities.
  */
 describe("a browser, where the IPC override does not exist", () => {
   it("reaches the desktop machine's host over LiveKit", () => {
@@ -198,3 +213,129 @@ describe("a browser, where the IPC override does not exist", () => {
     byTestId("capabilities").should("have.text", "media,presence,rpc");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Registration: which page gets the IPC wire, and which never does
+// ---------------------------------------------------------------------------
+
+/**
+ * Stands in for `LiveKitConnections`, which registers the common room from inside
+ * `SelectedDaemonProvider` — below the desktop's own registration, which is what orders the two.
+ */
+function LiveKitStandIn({ children }: { children: React.ReactNode }) {
+  const registry = useConnectionProviders();
+  const provider = React.useRef<ConnectionProvider | null>(null);
+  provider.current ??= aLiveKitProvider();
+  registry.register(provider.current);
+  return <>{children}</>;
+}
+
+/** Reads the wire a host is actually reached over, through the registry rather than by hand. */
+function RegisteredResolutionProbe({ hostId }: { hostId: string }) {
+  const connection = useHostConnection(hostId);
+  return <div data-testid="provider">{connection?.providerId ?? "unreachable"}</div>;
+}
+
+/** A page the Tauri host application loaded: it injects its IPC internals into every one. */
+function aPageInsideTheDesktopApp() {
+  return { __TAURI_INTERNALS__: {} };
+}
+
+/** A page a browser loaded over HTTP from the daemon that serves the bundle. */
+function aPageInABrowser() {
+  return {};
+}
+
+/**
+ * The app's registration site, as far as this is about: the desktop's own wire offered above the
+ * common room, into one registry, for a page that may or may not have a local host.
+ */
+function mountRegisteredOn(page: { __TAURI_INTERNALS__?: unknown }, registry: ConnectionProviderRegistry) {
+  cy.mount(
+    <ConnectionProviders registry={registry}>
+      <LocalHostConnections registration={localHostRegistrationFor(page, THIS_HOST)}>
+        <LiveKitStandIn>
+          <RegisteredResolutionProbe hostId={THIS_HOST} />
+        </LiveKitStandIn>
+      </LocalHostConnections>
+    </ConnectionProviders>,
+  );
+}
+
+describe("offering the desktop's own wire to the app", () => {
+  it("registers it ahead of the common room for a page the host application loaded", () => {
+    const registry = new ConnectionProviderRegistry();
+
+    mountRegisteredOn(aPageInsideTheDesktopApp(), registry);
+
+    // Precedence is registration order, and the order is where the components sit — no preference
+    // setting, and none wanted. So the local host is reached in-process even though the common room
+    // could also reach that machine.
+    byTestId("provider").should("have.text", "ipc");
+    cy.wrap(null).then(() => expect([...registry.providerIds()]).to.deep.equal(["ipc", "livekit"]));
+  });
+
+  it("registers nothing at all for a page a browser loaded", () => {
+    const registry = new ConnectionProviderRegistry();
+
+    // Given the very same bundle — there is one build, and it is served to browsers by the daemon
+    // and loaded by the desktop shell alike
+    mountRegisteredOn(aPageInABrowser(), registry);
+
+    // Then the browser path is untouched: no IPC provider exists to shadow LiveKit, because the
+    // page has no local host to register. This is the behavioural half of the guard below, and the
+    // one that would actually fail if a later change registered the IPC wire everywhere.
+    byTestId("provider").should("have.text", "livekit");
+    cy.wrap(null).then(() => expect([...registry.providerIds()]).to.deep.equal(["livekit"]));
+  });
+});
+
+describe("the desktop's own host in the directory", () => {
+  it("names its host where no common room describes it", () => {
+    cy.mount(
+      <AuthProvider>
+        <SelectedDaemonProvider
+          room={new Room()}
+          daemons={[]}
+          hostSources={[createLocalHostDirectorySource(aDesktopRegistration())]}
+        >
+          <DirectoryProbe />
+        </SelectedDaemonProvider>
+      </AuthProvider>,
+    );
+
+    // With no room and no serving id there was nothing at all before this — the host list *was* the
+    // common room, so the desktop app offered the operator no host, not even its own
+    byTestId("hosts").should("have.text", THIS_HOST);
+  });
+
+  it("does not shadow a common room's richer account of the same machine", () => {
+    cy.mount(
+      <AuthProvider>
+        <SelectedDaemonProvider
+          room={new Room()}
+          daemons={[{ instanceId: THIS_HOST, label: "advertised", maxAttachmentBytes: 5_000_000 }]}
+          hostSources={[createLocalHostDirectorySource(aDesktopRegistration())]}
+        >
+          <DirectoryProbe />
+        </SelectedDaemonProvider>
+      </AuthProvider>,
+    );
+
+    // The desktop's own account is built from `GetClientConfig`, which carries an instance id and
+    // no attachment cap. Letting it win would cost the Start-Session form the client-side refusal
+    // for the very host the operator is most likely to use, and gain nothing but a source id.
+    byTestId("cap").should("have.text", "5000000");
+  });
+});
+
+/** The merged directory, as the daemon-mode screens read it. */
+function DirectoryProbe() {
+  const daemons = useDaemons();
+  return (
+    <div>
+      <div data-testid="hosts">{daemons.map((daemon) => daemon.instanceId).join(",")}</div>
+      <div data-testid="cap">{daemons[0]?.maxAttachmentBytes ?? "unadvertised"}</div>
+    </div>
+  );
+}

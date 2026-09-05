@@ -125,8 +125,27 @@ export interface SelectedDaemonProviderProps {
    * production caller sets this.
    */
   roomFactory?: () => Room;
+  /**
+   * Directory sources the *host build* contributes, on top of the two this component assembles.
+   *
+   * The desktop application's own host arrives this way. It is handed in rather than imported
+   * because which extra sources exist is settled by the transport flavour, and that is resolved
+   * once, at the registration site in `index.tsx`, alongside the connection provider that reaches
+   * the same host. Reading it here would be the same decision made a second time, in a file whose
+   * job is to merge sources rather than to know where they come from — and it is exactly how a
+   * browser would end up carrying a source it must never have.
+   *
+   * Empty in a browser, and empty for any subtree that mounts this component directly.
+   */
+  hostSources?: readonly HostDirectorySource[];
   children: ReactNode;
 }
+
+/**
+ * What a page with no host build of its own contributes. Module-level and frozen, so the merge below
+ * memoises on it instead of re-deriving the directory on every render.
+ */
+const NO_HOST_SOURCES: readonly HostDirectorySource[] = Object.freeze([]);
 
 /**
  * Assemble the directory's sources for the provider, and hand back the room they were assembled
@@ -142,6 +161,17 @@ export interface SelectedDaemonProviderProps {
  * win over the room's account of the same machine would silently drop the attachment cap the
  * Start-Session form enforces. It contributes the serving daemon when the room did not — which is
  * every case where there is no room, and the whole point of the exercise.
+ *
+ * `hostSources` sits between them, for that same reason and not the one originally written down.
+ * The plan had the desktop's own source ahead of the common room, on the expectation that it would
+ * be the *richer* account of the machine (`hostDirectory/servingSource.ts` says so in as many
+ * words). It is not: it is built from `GetClientConfig`, which carries an instance id and no
+ * `repos_base_path` or `max_attachment_bytes`, and teaching it to would be a proto change this node
+ * may not make. Ahead of the room it would therefore shadow the advertisement with a poorer copy of
+ * it and cost the local host its attachment cap — the precise regression the paragraph above exists
+ * to prevent — while gaining nothing but a `sourceId`. Ahead of the *serving* source it costs
+ * nothing and still names the host wherever no room does, which is what the desktop app needs.
+ * Move it to the front the day the daemon advertises those fields to its own page.
  */
 function useDirectorySources({
   livekitUrl,
@@ -150,6 +180,7 @@ function useDirectorySources({
   room: roomOverride,
   daemons: daemonsOverride,
   roomFactory,
+  hostSources = NO_HOST_SOURCES,
 }: Omit<SelectedDaemonProviderProps, "children">): {
   sources: readonly HostDirectorySource[];
   room: Room | null;
@@ -177,8 +208,8 @@ function useDirectorySources({
   });
   const servingSource = useServingHostDirectorySource(servingInstanceId);
   const sources = useMemo(
-    () => [liveKitSource, servingSource],
-    [liveKitSource, servingSource],
+    () => [liveKitSource, ...hostSources, servingSource],
+    [liveKitSource, hostSources, servingSource],
   );
   return { sources, room };
 }
@@ -266,6 +297,7 @@ export function SelectedDaemonProvider({
   room: roomOverride,
   daemons: daemonsOverride,
   roomFactory,
+  hostSources,
   children,
 }: SelectedDaemonProviderProps) {
   const { sources, room } = useDirectorySources({
@@ -275,6 +307,7 @@ export function SelectedDaemonProvider({
     room: roomOverride,
     daemons: daemonsOverride,
     roomFactory,
+    hostSources,
   });
 
   return (

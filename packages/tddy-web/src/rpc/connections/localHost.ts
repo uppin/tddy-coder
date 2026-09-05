@@ -8,17 +8,14 @@
  * What was still missing is the one thing `tddy-web` must never contain: knowledge of a particular
  * wire. It arrives here, from the desktop build, through the same registries any provider uses.
  *
- * **`tddy-web` must not import this module.** Nothing in the browser's screens may name a wire, and
- * the strongest form of that guarantee is structural: an unimported module cannot register a
- * provider by accident, whatever a later change does. `DesktopIpcHostAcceptance.cy.tsx` pins the
- * visible half of it.
- *
- * TODO(desktop-ipc-host): the desktop build has no registration point yet, so nothing calls the
- * three factories below. `packages/tddy-desktop` is a Tauri shell over `packages/tddy-web/dist` —
- * one bundle, one entry (`src/index.tsx`), served to browsers by the daemon and loaded by the shell
- * alike. Registering from that shared entry needs either a runtime host check (the one
- * `daemonTransportFlavour` already makes) or a second bundle with its own entry; both are
- * decisions above this module. See the changeset's `## Responsibility`.
+ * **The browser is protected behaviourally, not structurally.** `packages/tddy-desktop` is a Tauri
+ * shell over `packages/tddy-web/dist`: one bundle, one entry (`src/index.tsx`), served to browsers
+ * by the daemon and loaded by the shell alike. So this module *is* in the browser's bundle — there
+ * was never a build in which it could not be — and what keeps a browser off the IPC path is that
+ * {@link localHostRegistrationFor} answers `null` for it, so nothing is ever registered. That is the
+ * one runtime question `../daemonTransportFlavour` already answers to choose this page's own daemon
+ * transport, asked once more rather than asked a second way; there is no separate notion of "is this
+ * the desktop" anywhere. `DesktopIpcHostAcceptance.cy.tsx` pins it from both sides.
  *
  * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-desktop-ipc-host-prd.md`.
  */
@@ -35,6 +32,7 @@ import {
 } from "tddy-tauri-web";
 import { ConnectionService } from "../../gen/connection_pb";
 import { SELF_LABEL_SUFFIX } from "../../lib/participantRole";
+import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
 import { hostDescriptorOf } from "../hostDirectory/daemonHost";
 import type { HostDirectorySource } from "../hostDirectory/types";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
@@ -75,6 +73,35 @@ export interface LocalHostRegistration {
 
   /** How the host is named in the selector. */
   readonly label: string;
+}
+
+/**
+ * The local host `win` has, or `null` when it has none.
+ *
+ * The whole of "is the IPC path available here", asked once. It is not a new question: reaching the
+ * daemon that served this page already depends on it, and `daemonTransportFlavour` is where that is
+ * decided — a browser page posts to `{origin}/rpc`, a page the host application loaded has no origin
+ * and goes over the IPC bridge. A host reached over IPC is available on exactly the same terms, so
+ * asking a second, differently-worded question ("is this the desktop") would be inventing a way for
+ * the two answers to disagree.
+ *
+ * `null` for a browser, and `null` when the daemon named no instance — a bundle served by something
+ * that is not a daemon has no local host, which is the state a Storybook build is in. A `null`
+ * registration is what {@link createIpcConnectionProvider} is never called with, and so what keeps
+ * the browser bundle from registering a wire it cannot use.
+ *
+ * The label matches the one a daemon publishes for itself into a common room
+ * (`SELF_LABEL_SUFFIX`), so the selector reads the same in both hosts and a machine described by
+ * both sources does not change name depending on which account of it the directory kept.
+ */
+export function localHostRegistrationFor(
+  win: TauriHostWindow,
+  daemonInstanceId: string | undefined,
+): LocalHostRegistration | null {
+  if (daemonTransportFlavour(win) !== "webview-ipc") return null;
+  const hostId = daemonInstanceId?.trim() ?? "";
+  if (!hostId) return null;
+  return { daemonInstanceId: hostId, label: `${hostId}${SELF_LABEL_SUFFIX}` };
 }
 
 /**
@@ -417,6 +444,13 @@ export function createLocalHostDirectorySource(
  * With either missing the LiveKit source contributes nothing, constructs no `Room`, and calls no
  * `TokenService` — and reports `idle`, not `error`, because an operator who deliberately did not
  * configure LiveKit must not be shown a connection failure for it on every screen.
+ *
+ * That behaviour is already enforced, by `hooks/useCommonRoom`'s own guard, which short-circuits
+ * before it mints a token or constructs a `Room`. This is the rule stated by name, for a caller that
+ * has to decide *before* rendering the hook — which is where a registration site asks it. The two
+ * are not consolidated because `useCommonRoom` belongs to a parent node of this stack and rewriting
+ * its guard from here would be reaching into somebody else's surface for a tidiness that changes no
+ * behaviour.
  */
 export function liveKitIsConfigured(config: {
   livekitUrl?: string;

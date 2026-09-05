@@ -46,7 +46,9 @@ Everything is in place; nothing is wired.
 
 - `IpcConnectionProvider` — host and session connections over node 6's addressed IPC, with
   `{"rpc"}` capabilities and correct `close()` lifecycle.
-- `LocalHostDirectorySource` — the local host descriptor, from `daemonInstanceId`.
+- `LocalHostDirectorySource` — the local host descriptor, from `daemonInstanceId`. **Corrected at
+  `/green`:** it is merged *after* the LiveKit source, not ahead of it — see "Directory ordering"
+  below. Connection precedence is unchanged and still puts IPC first; the two are separate registries.
 - The desktop build's registration point (its entry module), and provider precedence for the host it
   claims.
 - Making the LiveKit directory source and connection provider genuinely inert when `livekitUrl` /
@@ -111,8 +113,7 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 - [x] Run acceptance tests (verify they fail) — 7/8 failing; the 8th is a green regression guard, below
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/localHost.test.ts`
-- [~] Implement production code making tests pass (`/green`) — **items 1, 2, 3 and 5 delivered and
-      green; item 4 (the desktop registration point) is BLOCKED, see below**
+- [x] Implement production code making tests pass (`/green`) — all five items delivered and green
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
@@ -177,7 +178,7 @@ Delivered and verified on this branch, rebased onto `multi-connection-ipc`:
 | 1. `IpcConnectionProvider` — host + session connections, `{"rpc"}`, `close()` lifecycle | **done** |
 | 2. `LocalHostDirectorySource` from `daemonInstanceId` | **done** (deferral resolved by the linearization) |
 | 3. `liveKitIsConfigured` | **done** |
-| 4. The desktop build's registration point and provider precedence | **BLOCKED** — see below |
+| 4. The desktop build's registration point and provider precedence | **done** — `localHostRegistrationFor` + `LocalHostConnections`, gated on the transport flavour |
 | 5. LiveKit source/provider inert when unconfigured | **already true at HEAD**; verified, no change needed |
 
 Evidence:
@@ -199,32 +200,66 @@ Parent nodes' own tests already pin it. `liveKitIsConfigured` is this node's nam
 rule; it is deliberately **not** wired into `useCommonRoom`, because that would make `tddy-web` import
 `localHost.ts` and destroy the structural guarantee the browser regression guard exists to protect.
 
-### Item 4 is blocked on a plan premise that does not hold
+### Item 4 — resolved by reusing the existing transport-flavour check
 
-`## State B` and `## Responsibility` assume the desktop build has **its own entry module** to register
-from — "they arrive through node 1's registry and node 2's source list, so the browser bundle is
-unchanged and no `isDesktop` branch exists anywhere".
+The plan's premise did not hold. `packages/tddy-desktop/src-tauri/tauri.conf.json` sets
+`frontendDist: "../../tddy-web/dist"`, so the Tauri shell loads **the same bundle the daemon serves
+to browsers**: one build, one entry (`packages/tddy-web/src/index.tsx`). There is no desktop-only
+entry module, and there never was — so `## State B`'s "no `isDesktop` branch exists anywhere" was
+describing a build layout this repository does not have.
 
-That premise is not true of this codebase. `packages/tddy-desktop/src-tauri/tauri.conf.json` sets
-`frontendDist: "../../tddy-web/dist"`: the Tauri shell loads **the same bundle the daemon serves to
-browsers**. One build, one entry (`packages/tddy-web/src/index.tsx`). There is no desktop entry point
-in which a desktop-only registration could live.
+**Decision (operator, 2026-09-05): reuse the runtime host check that already exists.**
+`localHostRegistrationFor(win, daemonInstanceId)` delegates to `daemonTransportFlavour(win)` and
+returns `null` for a browser page. That is not a new branch: `daemonTransportFlavour.ts` already
+answers exactly this question, once, and already uses the answer to decide how the page reaches its
+own daemon. Asking a second, differently-worded question would have invented a way for the two
+answers to disagree. The rejected alternative was a second bundle with its own Vite entry, which
+would have matched the plan's literal wording at the cost of `tauri.conf.json`, `./install` and
+`./publish.sh` changes — a build-architecture change outside this node's scope.
 
-Registering unconditionally from the shared entry is not an option: the IPC provider registers first,
-so in a browser it would claim the serving host and shadow LiveKit — precisely what the regression
-guard *"a browser, where the IPC override does not exist"* forbids.
+**The browser guarantee is therefore behavioural, not structural.** `index.tsx` does import
+`localHost.ts`, and this module always was in the browser's bundle; what keeps a browser off the IPC
+path is that nothing is ever registered there. The doc comments in `localHost.ts` and above the
+acceptance spec's browser guard were rewritten to say so — the previous wording claimed a structural
+guarantee the code does not provide.
 
-Two seams exist, both decisions above this module:
+Wiring: `LocalHostConnections` (`src/rpc/connections/localHostRegistration.tsx`) follows
+`LiveKitConnections` exactly — `useConnectionProviders()`, provider in a `useRef`, `register()` called
+unconditionally every render. It builds `transportFor` from `useTrafficMeterRegistry()` and
+`useAuthTokenGate()`, which is the registration-site responsibility that made `transportFor`
+defaultless in the first place. It wraps `SelectedDaemonProvider`, so `ipc` registers ahead of
+`livekit`.
 
-1. **Reuse the existing runtime host check** — register when `daemonTransportFlavour(window) ===
-   "webview-ipc"`. This adds no new branch: `daemonTransportFlavour.ts` already makes exactly this
-   decision, once, and already uses it to decide how the page reaches its own daemon. It does
-   contradict the changeset's literal "no `isDesktop` branch anywhere", while honouring its intent
-   (no desktop conditionals scattered through the app, no divergence between the builds).
-2. **A second bundle with its own entry** — a new Vite entry and html, plus `tauri.conf.json`,
-   `./install` and `./publish.sh` changes. This matches the plan's literal wording but is a build
-   architecture change well outside node 7's scope.
+### Directory ordering — a corrected plan assumption
 
-Recorded as `TODO(desktop-ipc-host)` at `localHost.ts:16`. Until it is resolved the three factories
-have no production caller, so **this node is not yet a valid merge candidate** under the boundary
-contract — a node that ships only surface is not a valid PR.
+`## Responsibility` said the local source should be preferred **over** a common-room advertisement of
+the same machine. It is merged **after** the LiveKit source instead
+(`[liveKitSource, ...hostSources, servingSource]`), and the reason is recorded at the ordering site.
+
+The plan assumed the local source would be the *richer* account of the machine. It is not: it is
+built from `GetClientConfig`, which carries `daemonInstanceId` and **no** `repos_base_path` or
+`max_attachment_bytes` (`clientConfig.ts`), and teaching it to is a proto change this node may not
+make. Ahead of the room it would shadow the advertisement with a strictly poorer copy and cost the
+local host its attachment cap — so `useSessionAttachments.ts:243` would compute no cap and line 249
+would silently stop refusing over-cap files. That is the identical regression `selectedDaemon.tsx`'s
+pre-existing comment already guards against for the serving source, so this ordering follows an
+established rule in that file rather than a new one.
+
+Nothing is lost. Connection precedence is a **separate** registry and still puts IPC first, so the
+local host is still reached in-process; only which descriptor names it changes, and only when a
+common room also advertises the same machine. With no LiveKit configured the LiveKit source
+contributes nothing, so the local source names the host — which is the case this whole stack exists
+for. Pinned by *"does not shadow a common room's richer account of the same machine"*. Move it to the
+front the day the daemon advertises those fields to its own page.
+
+### Known limitations, recorded rather than hidden
+
+- **`LocalHostConnections` sits inside the `isAuthenticated` branch**, so the IPC provider registers
+  after sign-in, in the same place the LiveKit provider does. `LocalHostRegistration`'s doc says the
+  IPC path has no sign-in gate and gives "a usable host from its first paint": that is true of the
+  registration *data*, but `App` gates the whole daemon-mode UI on auth today. Lifting that gate is
+  not this node's change.
+- **`liveKitIsConfigured` has no production caller.** Item 5 is already enforced by `useCommonRoom`'s
+  own guard, which is a parent node's file. The function is this node's named statement of the rule;
+  it is documented as such rather than given a redundant call site or wired in by reaching into a
+  parent's surface.
