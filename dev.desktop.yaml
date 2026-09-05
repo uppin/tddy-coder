@@ -41,6 +41,11 @@ log:
 # embedded + CLI daemons on one machine do not hit DuplicateIdentity.
 daemon_instance_id_append_startup_timestamp: true
 
+# Sessions and daemon state, kept inside the checkout. An installed app defaults to `~/.tddy`;
+# naming it here means a `./desktop-dev` run never writes into that, and does not merely inherit
+# the debug-build default.
+tddy_data_dir: tmp/.tddy
+
 listen:
   web_port: 8899
   web_host: 127.0.0.1
@@ -59,6 +64,7 @@ livekit:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+  redirect_uri: "http://localhost:5173/auth/callback"
 
 users:
   - github_user: "testuser"

@@ -49,6 +49,9 @@ pub struct RuntimeOptions {
     /// idle tracker into the roster and yields [`DaemonRuntime::relay_shutdown`]; `None` is a
     /// daemon that runs until it is stopped.
     pub relay_idle_timeout: Option<Duration>,
+    /// Where a GitHub sign-in comes back to, when the host serves the callback itself rather than
+    /// relying on a web server. `None` leaves the configured value alone.
+    pub oauth_redirect_uri: Option<String>,
     /// The spawn worker this host forked *before* starting a runtime, with its pid.
     ///
     /// It cannot be forked here: `fork` from a multi-threaded process can deadlock, and [`build`]
@@ -81,6 +84,7 @@ impl RuntimeOptions {
     pub fn for_binary() -> Self {
         Self {
             host: RuntimeHost::Binary,
+            oauth_redirect_uri: None,
             relay_idle_timeout: None,
             spawn_client: None,
             config_path: None,
@@ -91,6 +95,7 @@ impl RuntimeOptions {
     pub fn for_embedded() -> Self {
         Self {
             host: RuntimeHost::Embedded,
+            oauth_redirect_uri: None,
             relay_idle_timeout: None,
             spawn_client: None,
             config_path: None,
@@ -100,6 +105,16 @@ impl RuntimeOptions {
     /// Run in relay mode, shutting down after `timeout` of idleness.
     pub fn with_relay_idle_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.relay_idle_timeout = timeout;
+        self
+    }
+
+    /// Where a GitHub sign-in should come back to, when the host serves the callback itself.
+    ///
+    /// Applied to the auth services only — never to the configuration this runtime keeps, which is
+    /// what a settings update persists. A host that overrode the stored value would write an
+    /// address the operator never chose into their file, and break sign-in for anyone else using it.
+    pub fn with_oauth_redirect(mut self, redirect_uri: Option<String>) -> Self {
+        self.oauth_redirect_uri = redirect_uri;
         self
     }
 
@@ -364,10 +379,22 @@ fn env_var(name: &str) -> Option<String> {
 }
 
 /// The tddy home data directory: config is the single source of truth.
+/// Where this daemon keeps sessions and state, given what the configuration says and what the
+/// environment overrides it with.
+///
+/// `TDDY_DATA_DIR` wins: it is how a development run is kept out of the `~/.tddy` an installed app
+/// owns, and how one machine can host two daemons that share a configuration file without sharing
+/// their sessions. Taken as a parameter rather than read here so the rule is testable without
+/// process-wide state.
+fn data_dir_from(config: &DaemonConfig, env_override: Option<String>) -> Option<PathBuf> {
+    env_override
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| config.tddy_data_dir.clone())
+}
+
 fn tddy_data_dir_for(config: &DaemonConfig) -> PathBuf {
-    config
-        .tddy_data_dir
-        .clone()
+    data_dir_from(config, env_var("TDDY_DATA_DIR"))
         .or_else(tddy_core::output::default_tddy_data_dir)
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
@@ -397,7 +424,20 @@ pub async fn build(
         .web_port
         .ok_or_else(|| anyhow::anyhow!("config.listen.web_port is required"))?;
 
-    let auth_result = crate::auth::build_auth_entries(&config, web_host.as_str(), web_port)?;
+    // The override reaches the auth services and stops there: `config` is what the settings service
+    // persists, and a host-chosen callback address written into an operator's file would be a value
+    // they never set — and would send a browser sign-in to loopback on some other machine.
+    let auth_config = match &options.oauth_redirect_uri {
+        Some(redirect_uri) => {
+            let mut overridden = config.clone();
+            if let Some(github) = overridden.github.as_mut() {
+                github.redirect_uri = Some(redirect_uri.clone());
+            }
+            overridden
+        }
+        None => config.clone(),
+    };
+    let auth_result = crate::auth::build_auth_entries(&auth_config, web_host.as_str(), web_port)?;
     let mut rpc_entries = auth_result.entries;
 
     // The room-JWT mint the web UI joins rooms through. Gated on the same session token as every
@@ -1026,5 +1066,67 @@ fn build_telegram(
     TelegramWiring {
         hooks: Some(hooks),
         inbound: Some(TelegramInbound { bot, harness }),
+    }
+}
+
+#[cfg(test)]
+mod data_dir {
+    use super::*;
+
+    /// A daemon whose configuration names where its state lives.
+    fn a_daemon_keeping_state_in(path: &str) -> DaemonConfig {
+        DaemonConfig {
+            tddy_data_dir: Some(PathBuf::from(path)),
+            ..DaemonConfig::default()
+        }
+    }
+
+    #[test]
+    fn keeps_state_where_the_configuration_says() {
+        // Given a configuration naming a data directory, and no override
+        let config = a_daemon_keeping_state_in("tmp/.tddy");
+
+        // When the data directory is resolved
+        let resolved = data_dir_from(&config, None);
+
+        // Then the configured directory is used
+        assert_eq!(resolved, Some(PathBuf::from("tmp/.tddy")));
+    }
+
+    #[test]
+    fn lets_the_environment_move_state_off_the_configured_directory() {
+        // Given a configuration naming one directory and an environment naming another — which is
+        // how a development run is kept out of the `~/.tddy` an installed app owns
+        let config = a_daemon_keeping_state_in("/var/lib/tddy");
+
+        // When the data directory is resolved
+        let resolved = data_dir_from(&config, Some("tmp/.tddy".to_string()));
+
+        // Then the environment wins
+        assert_eq!(resolved, Some(PathBuf::from("tmp/.tddy")));
+    }
+
+    #[test]
+    fn ignores_an_empty_override_rather_than_keeping_state_in_no_directory() {
+        // Given an override that is set but empty, as an unset shell variable expands to
+        let config = a_daemon_keeping_state_in("tmp/.tddy");
+
+        // When the data directory is resolved
+        let resolved = data_dir_from(&config, Some("   ".to_string()));
+
+        // Then it is ignored: an empty path would put a daemon's state at the filesystem root
+        assert_eq!(resolved, Some(PathBuf::from("tmp/.tddy")));
+    }
+
+    #[test]
+    fn falls_back_to_the_builds_default_when_nothing_names_a_directory() {
+        // Given no configured directory and no override
+        let config = DaemonConfig::default();
+
+        // When the data directory is resolved
+        let resolved = data_dir_from(&config, None);
+
+        // Then nothing is chosen here — the caller applies the build's default
+        assert_eq!(resolved, None);
     }
 }

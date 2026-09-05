@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
+# Start Tddy Desktop in development: the Tauri app hosting tddy-daemon in its own process, with the
+# tddy-web Vite dev server for HMR.
+#
+# The counterpart of ./web-dev, and deliberately repo-local: an installed app keeps its
+# configuration and data under ~/.tddy, while this uses the checkout's dev.desktop.yaml and
+# tmp/.tddy so a dev run never touches an installed app's state.
+#
+# Usage: ./desktop-dev                   # dev.desktop.yaml at the repo root
+#        ./desktop-dev --release         # extra CLI for `tauri dev` (pass-through)
+#
+# Environment variables:
+#   VITE_PORT       — Port for the Vite dev server (default: 5173)
+#   VITE_URL        — Origin the app loads its UI from (default: http://localhost:<VITE_PORT>).
+#                     `tauri dev` is told to wait on this, so a non-default port works.
+#   TDDY_DAEMON_CONFIG — YAML for the embedded tddy-daemon (default: dev.desktop.yaml at repo root).
+#   TDDY_DATA_DIR   — Where sessions and daemon state live (default: tmp/.tddy in the checkout).
+#                     An installed app defaults to ~/.tddy; this keeps a dev run out of it.
+#   TDDY_WORKSPACE_ROOT — The checkout the app resolves config and relative paths against.
+#
+# Repo-root .env is loaded first and never overrides an already-set variable, the same rule
+# ./web-dev follows.
 set -euo pipefail
-# Background Vite is not in the foreground process group; Ctrl+C won't reach it unless we
-# tear it down in a trap. Job control gives the background pipeline its own PGID so one
-# kill can stop bun + vite.
 set -m
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +48,11 @@ fi
 # The app resolves the repo root from cwd / TDDY_WORKSPACE_ROOT. `cargo tauri dev` runs from
 # packages/tddy-desktop/src-tauri, so name it here rather than relying on the upward walk.
 export TDDY_WORKSPACE_ROOT="${TDDY_WORKSPACE_ROOT:-$PROJECT_ROOT}"
+
+# Sessions and daemon state stay inside the checkout, so a dev run never writes into the ~/.tddy an
+# installed app owns. Exported rather than left to the YAML so it holds for any config passed in.
+export TDDY_DATA_DIR="${TDDY_DATA_DIR:-$PROJECT_ROOT/tmp/.tddy}"
+mkdir -p "$TDDY_DATA_DIR"
 
 # Daemon config for the in-process tddy-daemon (dev.desktop.yaml at the repo root).
 if [[ -z "${TDDY_DAEMON_CONFIG:-}" ]] && [[ -f "$PROJECT_ROOT/dev.desktop.yaml" ]]; then
