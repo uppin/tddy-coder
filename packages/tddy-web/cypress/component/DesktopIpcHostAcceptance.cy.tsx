@@ -29,6 +29,12 @@ import {
   useHostConnection,
 } from "../../src/rpc/connections/registry";
 import type { ConnectionProvider } from "../../src/rpc/connections/types";
+import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
+import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
+import {
+  HostDirectorySources,
+  useHostDirectory,
+} from "../../src/rpc/hostDirectory/useHostDirectory";
 import { SelectedDaemonProvider, useDaemons } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
 import { byTestId } from "../support/testIds";
@@ -70,34 +76,20 @@ function aLiveKitProvider(): ConnectionProvider {
   };
 }
 
-/**
- * Resolve `hostId` the way the registry does — first registered provider that claims it.
- *
- * Taken directly rather than through `ConnectionProviderRegistry`, which is node 1's and is still
- * unimplemented on this branch. Precedence is what these specs are about, so it is spelled out here
- * rather than borrowed from an unimplemented dependency: driving through the registry would make
- * every failure read as node 1's.
- */
-function resolveThrough(providers: ConnectionProvider[], hostId: string) {
-  for (const provider of providers) {
-    const connection = provider.connectHost(hostId);
-    if (connection) return connection;
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Probes
 // ---------------------------------------------------------------------------
 
-function ResolutionProbe({
-  providers,
-  hostId,
-}: {
-  providers: ConnectionProvider[];
-  hostId: string;
-}) {
-  const connection = resolveThrough(providers, hostId);
+/**
+ * What wire a host is reached over, and what it can do — read through the real registry.
+ *
+ * `ConnectionProviderRegistry` resolves a host by asking each registered provider in turn and
+ * taking the first that claims it, which is the precedence rule these specs are entirely about. It
+ * is driven rather than restated: a local re-implementation of "first match wins" would keep
+ * passing if the thing the app actually resolves through stopped obeying it.
+ */
+function ResolvedHostProbe({ hostId }: { hostId: string }) {
+  const connection = useHostConnection(hostId);
   return (
     <div>
       <div data-testid="provider">{connection?.providerId ?? "unreachable"}</div>
@@ -105,6 +97,29 @@ function ResolutionProbe({
         {connection ? [...connection.capabilities].sort().join(",") : "none"}
       </div>
     </div>
+  );
+}
+
+/**
+ * `providers` registered in order into one registry, with `hostId` resolved through it.
+ *
+ * Registration order *is* precedence, so the array reads as the deployment it stands for: the
+ * desktop's own wire first where the desktop has one, the common room behind it.
+ */
+function ResolutionProbe({
+  providers,
+  hostId,
+}: {
+  providers: ConnectionProvider[];
+  hostId: string;
+}) {
+  const registry = React.useRef<ConnectionProviderRegistry | null>(null);
+  registry.current ??= new ConnectionProviderRegistry();
+  for (const provider of providers) registry.current.register(provider);
+  return (
+    <ConnectionProviders registry={registry.current}>
+      <ResolvedHostProbe hostId={hostId} />
+    </ConnectionProviders>
   );
 }
 
@@ -230,12 +245,6 @@ function LiveKitStandIn({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Reads the wire a host is actually reached over, through the registry rather than by hand. */
-function RegisteredResolutionProbe({ hostId }: { hostId: string }) {
-  const connection = useHostConnection(hostId);
-  return <div data-testid="provider">{connection?.providerId ?? "unreachable"}</div>;
-}
-
 /** A page the Tauri host application loaded: it injects its IPC internals into every one. */
 function aPageInsideTheDesktopApp() {
   return { __TAURI_INTERNALS__: {} };
@@ -255,7 +264,7 @@ function mountRegisteredOn(page: { __TAURI_INTERNALS__?: unknown }, registry: Co
     <ConnectionProviders registry={registry}>
       <LocalHostConnections registration={localHostRegistrationFor(page, THIS_HOST)}>
         <LiveKitStandIn>
-          <RegisteredResolutionProbe hostId={THIS_HOST} />
+          <ResolvedHostProbe hostId={THIS_HOST} />
         </LiveKitStandIn>
       </LocalHostConnections>
     </ConnectionProviders>,
@@ -339,3 +348,109 @@ function DirectoryProbe() {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Degradation: LiveKit failing is LiveKit's problem, not the machine's
+// ---------------------------------------------------------------------------
+
+/**
+ * The common room as it looks once the join has failed: `error`, with a reason worth showing, and
+ * no hosts.
+ *
+ * This is a *source* fixture rather than a driven join because the failure is what the spec is
+ * about, not how it came about — `useCommonRoom` has its own coverage for reaching this state, and
+ * routing through it here would need a signed-in presence identity and a rejecting `Room` to assert
+ * something neither of them is responsible for.
+ */
+function aFailedLiveKitDirectorySource(): HostDirectorySource {
+  return {
+    id: LIVEKIT_SOURCE_ID,
+    status: "error",
+    error: "could not join the common room",
+    hosts: [],
+  };
+}
+
+/**
+ * The common room as a *connection provider* once it has failed.
+ *
+ * It claims no host, which is `LiveKitConnectionProvider`'s own answer whenever it has no room: a
+ * join that failed leaves it without one, and saying "I cannot reach that" is a different claim
+ * from the host not existing. So the peers become unreachable and nothing else does.
+ */
+function aLiveKitProviderWithNoRoom(): ConnectionProvider {
+  return { id: "livekit", connectHost: () => null };
+}
+
+/** The merged directory, as the selector chrome reads it. */
+function MergedDirectoryProbe() {
+  const directory = useHostDirectory();
+  return (
+    <div>
+      <div data-testid="hosts">{directory.hosts.map((host) => host.hostId).join(",")}</div>
+      <div data-testid="directory-status">{directory.status}</div>
+      <div data-testid="livekit-error">
+        {directory.sources.find((source) => source.id === LIVEKIT_SOURCE_ID)?.error ?? "none"}
+      </div>
+    </div>
+  );
+}
+
+/** The directory a desktop app has while its common room is down: one source failed, one working. */
+function mountDirectoryWithLiveKitDown() {
+  cy.mount(
+    <HostDirectorySources
+      sources={[
+        aFailedLiveKitDirectorySource(),
+        createLocalHostDirectorySource(aDesktopRegistration()),
+      ]}
+    >
+      <MergedDirectoryProbe />
+    </HostDirectorySources>,
+  );
+}
+
+describe("a desktop app whose common room has failed", () => {
+  it("keeps its own host reachable over IPC", () => {
+    // Given the desktop's own wire, and a common room that cannot reach anything any more
+    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProviderWithNoRoom()];
+
+    cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
+
+    // Then the machine the operator is sitting at is untouched. The daemon is in this process and
+    // the media server was never on the path to it, so there is nothing about a failed join that
+    // could take it away — which is the whole reason its wire is registered separately.
+    byTestId("provider").should("have.text", "ipc");
+    byTestId("capabilities").should("have.text", "rpc");
+  });
+
+  it("loses the peers, and only the peers", () => {
+    const providers = [createIpcConnectionProvider(aDesktopRegistration()), aLiveKitProviderWithNoRoom()];
+
+    cy.mount(<ResolutionProbe providers={providers} hostId={A_PEER} />);
+
+    // A peer really is out of reach, and says so plainly rather than pretending. The degradation is
+    // confined to exactly the hosts that needed the failed wire.
+    byTestId("provider").should("have.text", "unreachable");
+  });
+
+  it("still offers its own host, and does not call the directory broken", () => {
+    mountDirectoryWithLiveKitDown();
+
+    // Then the selector still has something to offer, and the chrome above it reads `connected`
+    // rather than `error`. One working source is a usable directory — condemning the whole of it
+    // for the source that failed is what would put a connection error on a screen that is talking
+    // to its host perfectly well.
+    byTestId("hosts").should("have.text", THIS_HOST);
+    byTestId("directory-status").should("have.text", "connected");
+  });
+
+  it("still reports the common room's own failure", () => {
+    mountDirectoryWithLiveKitDown();
+
+    // Degrading quietly would be its own bug: an operator who configured a common room and cannot
+    // see their fleet has to be told why. The failure belongs to that source and is read off it,
+    // which is exactly what keeps it off the directory as a whole.
+    byTestId("livekit-error").should("have.text", "could not join the common room");
+  });
+});

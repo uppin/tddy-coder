@@ -30,8 +30,12 @@ configuration the app is fully functional on one host.
 ### Acceptance criteria
 
 1. The desktop build registers an `IpcConnectionProvider` and a `LocalHostDirectorySource` at
-   startup. `tddy-web` imports neither — they arrive through node 1's registry and node 2's source
-   list, so the browser bundle is unchanged.
+   startup, and a **browser registers neither**, so the browser's behaviour is unchanged. They arrive
+   through node 1's registry and node 2's source list, so nothing in `tddy-web`'s screens names a
+   wire. *(Corrected during `/green`: this criterion first said `tddy-web` imports neither. It does
+   import them — `tddy-desktop` is a Tauri shell over `tddy-web/dist`, one bundle and one entry, so
+   there is no build in which it could not. The guarantee is behavioural: `localHostRegistrationFor`
+   returns `null` for a browser page, so nothing is registered there.)*
 2. Selecting the local host yields a `HostConnection` over the `Daemon`-targeted IPC connection,
    advertising `{"rpc"}`.
 3. `hostConnection.openSession(sessionId, hint)` on the local host opens a

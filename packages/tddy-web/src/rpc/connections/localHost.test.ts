@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import type { Transport } from "@connectrpc/connect";
 import {
   createTauriTransport,
   sessionTarget,
@@ -17,6 +18,7 @@ import {
   type WebviewIpcBridge,
   type WebviewIpcHost,
 } from "tddy-tauri-web";
+import { ConnectionService } from "../../gen/connection_pb";
 import type { SessionConnection } from "./session";
 import type { HostConnection } from "./types";
 import {
@@ -24,6 +26,7 @@ import {
   createLocalHostDirectorySource,
   liveKitIsConfigured,
   localHostRegistrationFor,
+  LOCAL_IPC_SOURCE_ID,
 } from "./localHost";
 
 const THIS_HOST = "instance-this-host";
@@ -128,13 +131,15 @@ describe("the desktop's own directory source", () => {
     expect(source.error).toBeNull();
   });
 
-  it("stamps its own source id, so the merge prefers it over a common-room advertisement", () => {
+  it("stamps its own source id on the host it contributes", () => {
     const source = createLocalHostDirectorySource(aRegistration());
 
-    // The directory de-duplicates by host id, first source winning. Registering this one ahead of
-    // LiveKit is what keeps the desktop's account of its own machine; the id is how a diagnostic
-    // says which account won.
-    expect(source.id).toBe(source.hosts[0]?.sourceId);
+    // Which is what a diagnostic reads to say *which account* of a machine the directory kept. It
+    // is not how this source wins anything: it is registered behind the common room deliberately,
+    // because a room's advertisement carries an attachment cap this one cannot know — see the
+    // ordering note in `useDirectorySources`.
+    expect(source.hosts[0]?.sourceId).toBe(LOCAL_IPC_SOURCE_ID);
+    expect(source.id).toBe(LOCAL_IPC_SOURCE_ID);
   });
 
   it("offers no host when the daemon named no instance", () => {
@@ -183,50 +188,111 @@ function targetKey(target: ConnectionTarget): string {
 }
 
 interface BridgeDouble extends WebviewIpcBridge {
+  /** How many times a transport registered a response channel on this bridge. */
+  connectCount(): number;
   /** Whether the page released this connection — the host-side peer a detach must not leak. */
   wasReleased(): boolean;
 }
 
-function aBridgeDouble(): BridgeDouble {
+/**
+ * Epochs for the doubles below.
+ *
+ * A bridge owns its epoch and it is fixed for the connection's lifetime, so two bridges must not
+ * share one — the host refuses an epoch an open connection already holds.
+ */
+let nextClientEpoch = 1;
+
+/**
+ * One host-application connection, faithful to `tddy-tauri-web`'s bridge in the three ways a
+ * lifetime depends on.
+ *
+ * **A second `connect` is refused**, because the real one invokes `tddy_rpc_connect` with the
+ * bridge's own epoch and `multi_host.rs` answers `EpochInUse` for an epoch it already holds. A
+ * double that accepted it would let a second transport be built over one bridge and report nothing
+ * — which is exactly the shape of bug this file exists to catch.
+ *
+ * **`closed` resolves on release**, as the real bridge's does, so anything watching for the
+ * connection to end sees it end.
+ *
+ * `onReleased` is how the registry below learns to drop its entry, mirroring the callback
+ * `createTauriIpcBridgeTo` is constructed with.
+ */
+function aBridgeDouble(onReleased: () => void): BridgeDouble {
+  let connects = 0;
   let released = false;
+  let reportGone: (reason: string) => void = () => {};
+  const closed = new Promise<string>((resolve) => {
+    reportGone = resolve;
+  });
   return {
-    connect: async () => {},
-    send: async () => {},
-    // Never resolves: the host application and the page share one lifetime, so nothing but a
-    // release ends a connection, and a release goes through `close`.
-    closed: new Promise<string>(() => {}),
-    close: async () => {
-      released = true;
+    clientEpoch: nextClientEpoch++,
+    async connect() {
+      if (released) return;
+      connects += 1;
+      if (connects > 1) {
+        throw new Error(`the host application refused a second connection under one epoch`);
+      }
     },
+    send: async () => {},
+    closed,
+    async close() {
+      if (released) return;
+      released = true;
+      onReleased();
+      reportGone("the page released this connection");
+    },
+    connectCount: () => connects,
     wasReleased: () => released,
   };
 }
 
+/**
+ * The page's connections to the host application: one bridge per target, dropped on release.
+ *
+ * The registry deletes an entry as its bridge is released, which the real one does too — so a target
+ * reattached after a detach opens a *fresh* connection rather than being handed the released one.
+ * `openConnection` is the factory and nothing else inspects through it: an inspector that minted a
+ * bridge would change the very thing it was asked about.
+ */
 interface IpcHostDouble extends WebviewIpcHost {
   /** The targets the page asked for a connection to, in the order it asked. */
   targetsOpened(): string[];
-  bridgeTo(target: ConnectionTarget): BridgeDouble;
+  /** Every bridge ever opened for `target`, oldest first. Mints nothing. */
+  bridgesFor(target: ConnectionTarget): BridgeDouble[];
 }
 
 function anIpcHostDouble(): IpcHostDouble {
-  const bridges = new Map<string, BridgeDouble>();
+  const open = new Map<string, BridgeDouble>();
+  const everOpened = new Map<string, BridgeDouble[]>();
   const opened: string[] = [];
-  const bridgeTo = (target: ConnectionTarget): BridgeDouble => {
-    const key = targetKey(target);
-    const alreadyOpen = bridges.get(key);
-    if (alreadyOpen) return alreadyOpen;
-    const bridge = aBridgeDouble();
-    bridges.set(key, bridge);
-    opened.push(key);
-    return bridge;
+  return {
+    openConnection(target: ConnectionTarget): WebviewIpcBridge {
+      const key = targetKey(target);
+      const alreadyOpen = open.get(key);
+      if (alreadyOpen) return alreadyOpen;
+      const bridge: BridgeDouble = aBridgeDouble(() => {
+        if (open.get(key) === bridge) open.delete(key);
+      });
+      open.set(key, bridge);
+      everOpened.set(key, [...(everOpened.get(key) ?? []), bridge]);
+      opened.push(key);
+      return bridge;
+    },
+    targetsOpened: () => [...opened],
+    bridgesFor: (target) => [...(everOpened.get(targetKey(target)) ?? [])],
   };
-  return { openConnection: bridgeTo, bridgeTo, targetsOpened: () => [...opened] };
+}
+
+/** The transport this page already holds to its own daemon, as far as a lifecycle test looks. */
+function thePagesDaemonTransport(): Transport {
+  return createTauriTransport({ bridge: aBridgeDouble(() => {}) });
 }
 
 /** The local host, reached over `ipc` with the page's own transport stack standing in. */
 function theLocalHostOver(ipc: WebviewIpcHost): HostConnection {
   const connection = createIpcConnectionProvider(aRegistration(), {
     ipc,
+    hostTransport: thePagesDaemonTransport(),
     transportFor: (bridge) => createTauriTransport({ bridge }),
   }).connectHost(THIS_HOST);
   if (!connection) throw new Error(`the IPC provider declined its own host ${THIS_HOST}`);
@@ -245,23 +311,56 @@ function anAttachedSession(host: HostConnection, sessionId: string): SessionConn
   return session;
 }
 
+/** The one session bridge this page holds for `sessionId`. */
+function theWireFor(ipc: IpcHostDouble, sessionId: string): BridgeDouble {
+  const bridges = ipc.bridgesFor(sessionTarget(sessionId));
+  if (bridges.length !== 1) {
+    throw new Error(`expected one connection to session ${sessionId}, found ${bridges.length}`);
+  }
+  return bridges[0]!;
+}
+
+describe("the local host over the page's own daemon connection", () => {
+  it("opens no connection of its own to reach the daemon", () => {
+    // Given the local host, used
+    const ipc = anIpcHostDouble();
+    const host = theLocalHostOver(ipc);
+
+    host.transport();
+    host.clientFor(ConnectionService);
+
+    // Then the host application was never asked for a daemon connection. It already holds one —
+    // `daemonTransport.ts` opened it before any screen rendered — and a bridge owns one connection
+    // under one epoch, so a second transport over it would re-register that epoch, be refused with
+    // `EpochInUse`, and leave every call this host made failing.
+    expect(ipc.targetsOpened()).toEqual([]);
+  });
+
+  it("refuses to reach the host when it was registered without that transport", () => {
+    const host = createIpcConnectionProvider(aRegistration(), {
+      ipc: anIpcHostDouble(),
+    }).connectHost(THIS_HOST);
+
+    // Building one here instead would mean choosing an interceptor stack, and the only stack
+    // available to a plain factory is the empty one — which sends whatever token a request happened
+    // to carry. Refusing names what is missing; sending stale credentials would not.
+    expect(() => host?.transport()).toThrow("without the page's own daemon transport");
+  });
+});
+
 describe("sessions attached over IPC", () => {
   it("gives each session a connection addressed to it", () => {
     // Given two sessions attached on the local host
     const ipc = anIpcHostDouble();
     const host = theLocalHostOver(ipc);
-    host.transport();
 
     anAttachedSession(host, "session-one");
     anAttachedSession(host, "session-two");
 
-    // Then each has its own wire, alongside the host's own — concurrent addressed connections are
-    // what node 6 made possible, and what a single-connection bridge could never have expressed
-    expect(ipc.targetsOpened()).toEqual([
-      "daemon",
-      "session:session-one",
-      "session:session-two",
-    ]);
+    // Then each has its own wire — concurrent addressed connections are what node 6 made possible,
+    // and what a single-connection bridge could never have expressed. The daemon is not among them:
+    // the page's connection to it already exists and is not this provider's to open.
+    expect(ipc.targetsOpened()).toEqual(["session:session-one", "session:session-two"]);
   });
 
   it("releases only the session that was detached", () => {
@@ -276,8 +375,8 @@ describe("sessions attached over IPC", () => {
     // Then the host drops that peer and no other. Forgetting a connection instead of releasing it
     // would leak a host-side peer per attach; releasing too much would silently kill the sessions
     // the operator is still watching.
-    expect(ipc.bridgeTo(sessionTarget("session-one")).wasReleased()).toBe(true);
-    expect(ipc.bridgeTo(sessionTarget("session-two")).wasReleased()).toBe(false);
+    expect(theWireFor(ipc, "session-one").wasReleased()).toBe(true);
+    expect(theWireFor(ipc, "session-two").wasReleased()).toBe(false);
   });
 
   it("refuses calls issued after a detach rather than routing them nowhere", () => {
@@ -289,5 +388,66 @@ describe("sessions attached over IPC", () => {
     // A call on a detached session has no answer coming, and saying so beats leaving it unsettled
     expect(() => detached.transport()).toThrow("session session-one");
     expect(detached.status).toBe("idle");
+  });
+
+  it("reattaching a released session opens a fresh connection", () => {
+    const ipc = anIpcHostDouble();
+    const host = theLocalHostOver(ipc);
+
+    anAttachedSession(host, "session-one").close();
+    anAttachedSession(host, "session-one");
+
+    // The released bridge is gone from the page's registry and its epoch is spent, so the second
+    // attach has to be a new connection rather than a second transport over the departed one
+    expect(ipc.bridgesFor(sessionTarget("session-one"))).toHaveLength(2);
+    expect(ipc.targetsOpened()).toEqual(["session:session-one", "session:session-one"]);
+  });
+});
+
+describe("two screens attached to one session", () => {
+  it("share the one connection the host application holds for it", () => {
+    // Given the same session attached twice — `useSessionAttachment` is per screen, so two screens
+    // watching one session is ordinary rather than exotic
+    const ipc = anIpcHostDouble();
+    const host = theLocalHostOver(ipc);
+
+    anAttachedSession(host, "session-one");
+    anAttachedSession(host, "session-one");
+
+    // Then there is one connection and it was registered once. Two would be two transports over the
+    // one bridge the host application keys by target — the second registering an epoch already in
+    // use, refused, with every call on it failing.
+    expect(ipc.bridgesFor(sessionTarget("session-one"))).toHaveLength(1);
+    expect(theWireFor(ipc, "session-one").connectCount()).toBe(1);
+  });
+
+  it("keeps the wire while either screen is still attached", () => {
+    const ipc = anIpcHostDouble();
+    const host = theLocalHostOver(ipc);
+    const firstScreen = anAttachedSession(host, "session-one");
+    const secondScreen = anAttachedSession(host, "session-one");
+
+    // When one screen detaches
+    firstScreen.close();
+
+    // Then the other is untouched. Releasing on the first detach would take the wire out from under
+    // a screen still rendering the session's output.
+    expect(theWireFor(ipc, "session-one").wasReleased()).toBe(false);
+    expect(secondScreen.status).toBe("connected");
+    expect(() => secondScreen.transport()).not.toThrow();
+  });
+
+  it("releases it when the last screen detaches", () => {
+    const ipc = anIpcHostDouble();
+    const host = theLocalHostOver(ipc);
+    const firstScreen = anAttachedSession(host, "session-one");
+    const secondScreen = anAttachedSession(host, "session-one");
+
+    firstScreen.close();
+    secondScreen.close();
+
+    // Nobody is watching, so the host-side peer goes — never releasing would leak one per session
+    // for the life of the page
+    expect(theWireFor(ipc, "session-one").wasReleased()).toBe(true);
   });
 });

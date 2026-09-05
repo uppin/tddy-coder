@@ -15,7 +15,7 @@
  */
 
 import { useRef, type ReactNode } from "react";
-import { useAuthTokenGate, useTrafficMeterRegistry } from "../transportProvider";
+import { useAuthTokenGate, useHttpTransport, useTrafficMeterRegistry } from "../transportProvider";
 import { createDefaultWebviewIpcTransport } from "../daemonTransport";
 import { createIpcConnectionProvider, type LocalHostRegistration } from "./localHost";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
@@ -43,17 +43,23 @@ export interface LocalHostConnectionsProps {
  * room is configured and could also reach that machine — there is no preference setting, and none is
  * wanted.
  *
- * The transport factory is assembled here rather than defaulted inside the provider because the two
- * things it needs are this subtree's: the traffic meter that makes the desktop's calls show up in
- * the same status bar a browser's do, and the auth gate that puts a request-time-fresh access token
- * on every call. A webview stays open longer than an access token lives, so a transport built
- * without the gate would send stale credentials — which is why `LocalHostWiring.transportFor` has no
- * default and this is the site that supplies it.
+ * Both halves of the wiring are assembled here rather than defaulted inside the provider, because
+ * both are this subtree's. The page's own daemon transport (`useHttpTransport`) is what the local
+ * host is *reached over* — it must not be rebuilt, since a bridge owns one connection and one epoch
+ * and a second transport over the daemon bridge would be refused. The session transport factory
+ * carries the traffic meter that puts the desktop's calls in the same status bar a browser's go to,
+ * and the auth gate that puts a request-time-fresh access token on every call; a webview stays open
+ * longer than an access token lives, so a transport built without the gate would send stale
+ * credentials. Neither has a default, and this is the site that supplies them.
  */
 export function LocalHostConnections({ registration, children }: LocalHostConnectionsProps) {
   const registry = useConnectionProviders();
   const meters = useTrafficMeterRegistry();
   const authTokenGate = useAuthTokenGate();
+  // The connection this page already holds to its own daemon. Inside the host application it is the
+  // IPC transport over the `Daemon`-targeted bridge, which is connected before any screen renders —
+  // so the local host uses it rather than opening a second connection to the one thing.
+  const hostTransport = useHttpTransport();
 
   // Both of those are held in refs by `RpcTransportProvider` and so are stable for as long as this
   // subtree exists — unlike the LiveKit transport factory, which is rebuilt every render and forced
@@ -64,6 +70,7 @@ export function LocalHostConnections({ registration, children }: LocalHostConnec
     registered.current = {
       hostId: registration.daemonInstanceId,
       provider: createIpcConnectionProvider(registration, {
+        hostTransport,
         transportFor: (bridge) =>
           createDefaultWebviewIpcTransport(bridge, meters ?? undefined, authTokenGate),
       }),

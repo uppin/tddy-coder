@@ -224,6 +224,13 @@ side of the desktop build — a module the desktop entry loads that calls into n
 registry and node 2's source list. `tddy-web` must not import it, or the browser bundle picks up a
 Tauri dependency.
 
+> **Corrected at `/green` (2026-09-05).** There is no "desktop entry" and no separate desktop bundle:
+> `tauri.conf.json` sets `frontendDist: ../../tddy-web/dist`, so the shell loads the browser's own
+> bundle. `tddy-web` therefore does import the module, and a Tauri dependency was already in that
+> bundle via `daemonTransport.ts`. The paragraph immediately below had it right — the runtime-flavour
+> precedent is the answer, and it is what shipped. Left as written because this is a record of what
+> discovery found.
+
 Precedent for exactly this pattern: `daemonTransport.ts` decides its flavour at runtime from
 `window.__TAURI_INTERNALS__` rather than at build time, so "one build and the browser dashboard
 cannot silently diverge from the desktop one". The registration should follow the same runtime-detect

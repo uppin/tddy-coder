@@ -28,9 +28,12 @@ Everything is in place; nothing is wired.
 
 ## State B
 
-- The desktop build registers an `IpcConnectionProvider` and a `LocalHostDirectorySource`.
-  `tddy-web` imports neither; they arrive through node 1's registry and node 2's source list, so the
-  browser bundle is unchanged and no `isDesktop` branch exists anywhere.
+- The desktop build registers an `IpcConnectionProvider` and a `LocalHostDirectorySource`; a browser
+  registers neither. They arrive through node 1's registry and node 2's source list, so nothing in
+  `tddy-web`'s screens names a wire, and there is no *second* notion of "is this the desktop" — the
+  one `daemonTransportFlavour` already answers is reused. *(Corrected during `/green`: this first read
+  "`tddy-web` imports neither … no `isDesktop` branch exists anywhere", which assumed a desktop-only
+  entry module that does not exist. See "Item 4" below.)*
 - The local host is reached over the `Daemon`-targeted IPC connection, advertising `{"rpc"}`.
 - `openSession` on the local host opens a `Session { session_id }` IPC connection — separate and
   concurrent, released on `close()`. Several attached sessions hold several connections; detaching
@@ -114,7 +117,7 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/localHost.test.ts`
 - [x] Implement production code making tests pass (`/green`) — all five items delivered and green
-- [ ] `/validate-changes`
+- [x] `/validate-changes` — found one CRITICAL production bug; fixed and pinned, see below
 - [ ] `/pr-wrap`
 
 ### Baseline and red status at the contract commit
@@ -132,10 +135,11 @@ The failures are on this node's own `TODO(desktop-ipc-host)` bodies —
 
 **The one green test is deliberate and is recorded rather than hidden.** *"a browser … reaches the
 desktop machine's host over LiveKit"* exercises no code of this node's: it drives only the LiveKit
-stand-in. It is a regression guard for the requirement that the browser path is untouched — the
-strongest form of which is structural, since `tddy-web` never imports `localHost.ts` and a browser
-bundle therefore cannot contain the IPC provider even by accident. A later change that registered the
-IPC provider everywhere would fail here.
+stand-in. It is a regression guard for the requirement that the browser path is untouched. *(Corrected
+during `/green`: this said the guarantee's strongest form was structural, "since `tddy-web` never
+imports `localHost.ts`". It does import it, and always would have — one bundle. The guarantee is
+behavioural, and this guard plus "registers nothing at all for a page a browser loaded" are what
+enforce it.)* A later change that registered the IPC provider everywhere would fail here.
 
 **Two scoping decisions forced by the diamond**, both recorded so `/green` does not rediscover them:
 
@@ -263,3 +267,86 @@ front the day the daemon advertises those fields to its own page.
   own guard, which is a parent node's file. The function is this node's named statement of the rule;
   it is documented as such rather than given a redundant call site or wired in by reaching into a
   parent's surface.
+
+## Validation Results — /validate-changes, 2026-09-05
+
+### Stack gate
+
+| Check | Result |
+|---|---|
+| Stack branch | Yes — planned, base `feature/optional-livekit/multi-connection-ipc` |
+| `/pr-stack-rebase` | ✅ Rebased (base had moved twice: `0024a826`, then node 6's doc wrap) |
+| Leak check (`origin/<base>..HEAD` is this PR only) | ✅ Clean — 4 commits, 9 files |
+| Parent-owned files intact | ✅ No deletions anywhere in the diff |
+| `## Dependencies` not implemented here | ✅ No parent-owned file in the diff; `tddy-tauri-web` / `tddy-tauri-rpc` untouched |
+| `## Boundaries` respected | ✅ Nothing in `src/rpc/connections/*` or `src/rpc/hostDirectory/*` beyond this node's own files |
+| No dependent's behaviour | ✅ Top node; no dependents |
+
+`selectedDaemon.tsx` **is** modified, and it is node 2's file. That is inside the boundary — `## Boundaries`
+names only `src/rpc/connections/*` and `src/rpc/hostDirectory/*`, and `## State B` requires the source to
+arrive through node 2's source list. It is additive (one optional prop, one merge-array line). Recorded
+because #438 is open and this is live conflict surface.
+
+### CRITICAL — found and fixed: the local host could not issue a single RPC
+
+`RpcTransportProvider` builds the daemon transport eagerly, and on the desktop that opens the
+`DAEMON_TARGET` bridge and **connects it** (`transport.ts:104`). `IpcChannel` then called
+`openConnection(DAEMON_TARGET)` — which memoises, returning that same bridge — and built a *second*
+transport over it, calling `connect()` again under the same epoch. `multi_host.rs:113` answers
+`EpochInUse`, so every call through the local `HostConnection` failed. Worse, `transport.ts:239` assigns
+`registration` unconditionally, so the shared daemon bridge's registration became the rejected promise and
+its `close()` stopped calling `tddy_rpc_disconnect` — disarming release for the page's own connection.
+
+**Cause: node 6's `0024a826` landed on this branch mid-implementation.** Before it each transport minted
+its own epoch, so a second transport over one bridge worked; making a bridge own one epoch turned a latent
+design flaw into a hard failure. `WebviewIpcBridge.connect`'s doc now states the invariant outright.
+
+**Fix:** `LocalHostWiring.hostTransport` — the host connection *uses* the page's existing daemon transport
+(`useHttpTransport()`) rather than building one, and no longer references `DAEMON_TARGET` at all.
+`transportFor` is now for **session** bridges only, which `openConnection(sessionTarget(id))` genuinely
+mints fresh. No node-6 file was touched.
+
+**Pinned:** `"opens no connection of its own to reach the daemon"`. Verified by mutation — reintroducing
+the bug fails that test (23 pass / 1 fail); restoring it gives 24/24.
+
+### CRITICAL — the test double was concealing it
+
+`aBridgeDouble` diverged from `transport.ts` in exactly the load-bearing ways: `connect()` always
+succeeded, `close()` kept the registry entry, `closed` never resolved, and the factory doubled as the
+inspector. `"releases only the session that was detached"` passed **only because** the double was wrong —
+against a faithful double, `close()` deletes the entry, so the inspector minted a fresh bridge whose
+`wasReleased()` is `false`. The double now refuses a second `connect`, deletes the entry on `close`,
+resolves `closed`, and separates factory from inspector.
+
+### Also fixed
+
+| Finding | Resolution |
+|---|---|
+| Two attachments of one session broke each other | `IpcSessionWire` refcounts attachments; the peer is released on the **last** detach. 4 specs |
+| `void held?.close()` unhandled rejection | `.catch` logging via `tddyDebug("tddy:rpc:local-host")` — logged, not swallowed |
+| Docs claimed the source is registered *ahead of* LiveKit | Corrected; header now separates provider precedence (ahead — true) from source order (behind) |
+| 9 Cypress specs bypassed `ConnectionProviderRegistry` via a local helper | `resolveThrough` deleted; all specs now resolve through the real registry via `useHostConnection` |
+| Test title/body mismatch on the source id | Retitled; body asserts `LOCAL_IPC_SOURCE_ID` and says the id is diagnostic, not a merge preference |
+| Uncontracted `label.trim() || …` fallback; `openIpcSession` 63 lines | Fallback removed; function down to ~47 lines |
+
+### Reported, not acted on — needs a decision
+
+- **`createLocalHostDirectorySource` is observably redundant in production.** Its descriptor is
+  byte-identical to `useServingHostDirectorySource`'s (same `hostId`, same `` `<id> (this daemon)` ``
+  label, same `connected`), both are fed the same `appConfig.daemonInstanceId`, and **nothing in
+  `packages/tddy-web/src` reads `HostDescriptor.sourceId`** — `daemonHostOf` drops it before any screen
+  sees it. Only the source *object* is observable, in `directory.sources`. Nothing deleted; it is named in
+  `## Responsibility`, so removing it is a plan change.
+- **`liveKitIsConfigured` has no production caller.** Item 5 is enforced by `useCommonRoom`'s own guard, a
+  parent's file. The function is this node's named statement of the rule.
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **1101 pass, 0 fail** |
+| `DesktopIpcHostAcceptance.cy.tsx` | **16 pass, 0 fail** — all now through the real registry |
+| `App`, `SessionsDrawerCrossHost`, `DaemonChangeReloadsScreen` | **30 pass, 0 fail** combined |
+| `bun run --filter tddy-web build` | ✅ clean |
+| `cargo fmt --all --check` | ✅ clean — **0 Rust files changed**, so the Rust CI checks cannot regress |
+| `tsc --noEmit` | 522 errors, the pre-existing baseline (down 1); only `TS2307 'bun:test'` in this node's files — **not a repo gate** |
