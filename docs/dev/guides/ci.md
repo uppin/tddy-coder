@@ -92,17 +92,22 @@ The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 hole in the gate. Removing one is the preferred fix; suppressing a newly failing
 test there is not.
 
-## VM tests (separate workflow)
+## VM tests
 
-`.github/workflows/vm-tests.yml` runs the QEMU-backed production tests. It is a
-separate workflow, not part of `ci.yml`, and **not a required check** — it is
-slower, needs hardware virtualisation, and is new enough to want its own blast
-radius.
+The QEMU-backed production tests are jobs in `ci.yml`, gated on `needs:
+rust-build`. They are **not required checks** — that is a property of the branch
+ruleset's list of contexts, not of which workflow they live in.
 
-It runs on pull requests **and on pushes to `master`**. The master half is not
+They were a separate workflow until they started needing `Rust build`'s output.
+Consuming another workflow's artifact means finding the sibling run for the same
+SHA and polling it, which is a race where `needs` is an edge; and gating on the
+build means no guest is booted for a workspace that does not compile. The cost
+is the blast radius the split used to buy: a VM leg's failure now sits in the
+same run as the required checks, though it still cannot block a merge.
+
+They run on pull requests **and on pushes to `master`**. The master half is not
 redundant: `master` is the only ref that writes the cargo cache, so without it
 the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
-It also means the branch itself has VM coverage rather than only its PRs.
 
 Scope is three checks out of the ten suites in `./vm-tests`: two that a bare
 cloud image can reach, and one that bakes the full chain. Both are legs of one matrix job, so they share the KVM
@@ -118,21 +123,30 @@ None of the three bakes an image chain by hand, and none needs a pre-baked one.
 
 ### Where the deployed binaries come from
 
-The `build-dist` job runs `./release` on the runner and uploads a flat dist
-directory; the chain leg downloads it and points `TDDY_PREBUILT_DIST_DIR` at it,
-and `BuiltBinaries::from_dist_dir` checks it is complete before a guest boots.
+`Rust build` stages them, from the debug build it already performs: the five
+binaries `recipes::deployed_binaries` names plus the four files `./install`
+reads out of a checkout, uploaded flat as `tddy-dist`. The chain leg downloads
+it, points `TDDY_PREBUILT_DIST_DIR` at it, and `BuiltBinaries::from_dist_dir`
+checks it is complete before a guest boots.
 
-This deliberately does **not** use the testkit's builder guest. That guest exists
-because a macOS host cannot emit Linux ELF — not a constraint on an x86_64 Linux
-runner. Building in the guest meant realising a multi-gigabyte dev shell over
-slirp and then compiling `libwebrtc` inside a VM: hours, to produce bytes the
-runner produces in minutes. The builder path still has coverage in
-`vm_cgroups_acceptance`, which is where a developer on Apple silicon needs it.
+**Debug binaries, deliberately.** `./release` is a bare `cargo build --release`
+with no features or flags and no `[profile.release]` section behind it;
+`./install` never inspects what it installs, and `TestHostVm::deploy` arranges
+the staged files into `target/release/` in the guest by placement rather than by
+profile. What the leg asserts — the unit, the privilege drop, the daemon serving
+— does not change with opt-level. A second full compile in release bought none
+of it. The gap this leaves is narrow and worth naming: nothing here proves the
+*shipped* artifact installs and serves, so a release-only failure (an
+optimisation-level miscompile, a bug masked by `debug_assertions`) would go
+unseen. The place for that is a release-artifact smoke test at publish time, not
+every PR.
 
-The trade: the matrix carries one `needs: build-dist` for every leg, so the two
-cheap legs now start after the release build instead of immediately. Splitting
-the chain into its own job would buy that back, at the cost of a second copy of
-the KVM setup — a refactor worth doing only if the wait becomes annoying.
+It deliberately does **not** use the testkit's builder guest either. That guest
+exists because a macOS host cannot emit Linux ELF — not a constraint on an
+x86_64 Linux runner, where the compile takes minutes rather than the hours the
+guest spent realising a dev shell over slirp first. The builder path keeps its
+coverage in `vm_cgroups_acceptance`, which is where a developer on Apple silicon
+needs it.
 
 ### arm64
 

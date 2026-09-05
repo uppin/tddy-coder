@@ -529,7 +529,7 @@ report-and-stop unless the fix needs a human decision.
 | `Rust tests` | `cargo nextest run --workspace --profile ci --locked` | change-caused failures; a test shelling out to a workspace binary that is not in the `rust-fixture-bins` artifact ("not built") |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit + `tddy-web`/`tddy-livekit-web` Cypress component | a stale `bun.lock` under `--frozen-lockfile`; a component spec |
 
-`VM boot control` (`.github/workflows/vm-tests.yml`) also runs but is **not required** — deliberately,
+`VM boot control` (a job in `.github/workflows/ci.yml`) also runs but is **not required** — deliberately,
 because a QEMU flake would block every merge. Report a red one; do not treat it as a gate.
 
 **A red check is work, not a stop.** Pull the failing test names with `--failures`, reproduce

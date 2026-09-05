@@ -213,6 +213,38 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # The deployment set the VM chain leg installs: the five binaries
+      # `recipes::deployed_binaries` names, plus the files `./install` reads out
+      # of a checkout, flat and under the staged names
+      # `BuiltBinaries::from_dist_dir` expects. The AppArmor profile is renamed
+      # rather than flattened under its own basename, which would land on top of
+      # the tddy-daemon binary.
+      #
+      # Debug binaries, deliberately. `./release` is a bare `cargo build
+      # --release` with no features or flags and no `[profile.release]` section
+      # behind it; `./install` never inspects what it installs; and the leg
+      # asserts wiring — the unit, the privilege drop, the daemon serving — none
+      # of which changes with opt-level. Compiling the workspace a second time in
+      # release bought none of that.
+      - name: Stage the deployment set
+        run: |
+          mkdir -p dist
+          for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools tddy-sandbox-runner; do
+            cp "target/debug/$b" dist/
+          done
+          cp install daemon.yaml.production supervisor.yaml.production dist/
+          cp packages/tddy-daemon/apparmor/tddy-daemon dist/apparmor-tddy-daemon
+          strip dist/tddy-* 2>/dev/null || true
+          du -sh dist
+
+      - name: Upload the deployment set
+        uses: actions/upload-artifact@v7
+        with:
+          name: tddy-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
   rust-build-arm64:
     name: Rust build (arm64)
     runs-on: ubuntu-24.04-arm
@@ -366,4 +398,206 @@ jobs:
           name: cypress-screenshots
           path: packages/*/cypress/screenshots
           if-no-files-found: ignore
+          retention-days: 7
+
+  # ── VM-backed production tests ───────────────────────────────────────────────
+  #
+  # The QEMU legs, gated on `Rust build` so they inherit its artifacts and never
+  # boot a guest for a workspace that does not compile. They are **not** required
+  # checks — that is a property of the branch ruleset's list of contexts, not of
+  # which workflow file they live in. See docs/dev/guides/ci.md.
+  vm-suite:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    # `Rust build` publishes both the binaries this deploys and the compile that
+    # proves the workspace builds at all — no point booting a guest if it failed.
+    needs: rust-build
+    # Per leg: the two cheap ones boot a guest, the chain bakes three images and
+    # compiles the workspace inside one of them. 350 is under GitHub's 360-minute
+    # ceiling for a hosted job, so the leg fails on its own timeout with logs
+    # rather than being killed by the platform.
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    strategy:
+      # One suite's guest failing says nothing about the other's, and cancelling
+      # the survivor would throw away the console transcript that explains it.
+      fail-fast: false
+      matrix:
+        include:
+          # The launcher itself: boot, serial console, 9p, SSH, graceful shutdown.
+          - name: VM boot control
+            slug: boot-control
+            package: tddy-vm
+            test_binary: vm_boot_control_acceptance
+            # No filter: the whole suite is the check.
+            filter: ""
+            expected_passing: 6
+            timeout_minutes: 90
+          # The bake, used rather than inspected: cloud-init bakes a prepared
+          # base, a VM is created from it, and the guest is logged into over
+          # SSH. Deliberately one test — its two siblings in the same binary
+          # inspect the artifact instead of booting it, so they cost a second
+          # bake each and prove less than this one does.
+          - name: Cloudinit VM boot
+            slug: cloudinit-vm-boot
+            package: tddy-vm
+            test_binary: cloud_init_acceptance
+            filter: "--exact a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh"
+            expected_passing: 1
+            timeout_minutes: 90
+          # Cloud-init layers all the way to a serving daemon: bake tddy-nix-base,
+          # bake the test host on top of it, install the binaries `Rust build`
+          # produced with the real ./install --systemd --headless, and assert the
+          # supervisor is active as root, the daemon dropped to its service
+          # account, and the daemon answers on its own web port.
+          - name: Cloudinit + nix + tddy
+            slug: cloudinit-nix-tddy
+            package: tddy-e2e
+            test_binary: tddy_image_chain_acceptance
+            filter: ""
+            expected_passing: 1
+            timeout_minutes: 90
+    # The cloud image these boot. amd64 to match the x86_64 runner: VmArch::host()
+    # reads std::env::consts::ARCH, and the guest image must match it.
+    env:
+      IMAGE_NAME: debian-12-genericcloud-amd64.qcow2
+      IMAGE_BASE_URL: https://cloud.debian.org/images/cloud/bookworm/latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          # The chain's builder overlay carries a Nix store and a full release
+          # `target/`; the preloaded Docker images are ~10 GB nothing here uses.
+          sudo docker image prune -af || true
+          df -h /
+
+      # /dev/kvm exists on the runner image but is root:kvm 0660, so the runner
+      # account can see it and not open it. tddy-vm tests openability, not
+      # existence (packages/tddy-vm/src/vm.rs:72), and silently falls back to
+      # TCG — which would not fail, it would blow the suite's 180s boot budget.
+      - name: Grant access to /dev/kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Fail in seconds if virtualisation is unavailable, rather than after an
+      # hour of TCG. This is the same read-write open the Rust code performs.
+      - name: Require working KVM
+        run: |
+          ls -l /dev/kvm || true
+          if ! ( exec 3<>/dev/kvm ) 2>/dev/null; then
+            echo "::error::/dev/kvm is not openable read-write. The suite would fall back to TCG and time out."
+            exit 1
+          fi
+          echo "/dev/kvm is openable — guests will run accelerated."
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # ci.yml's rust-build is the sole writer
+
+      # Both legs compile the same crate, so they share one cache to restore
+      # from — but only one may write it, or they race to save the same key.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: vm
+          save-if: ${{ github.ref == 'refs/heads/master' && matrix.slug == 'boot-control' }}
+
+      # The testkit never downloads anything by design, so CI supplies the image
+      # itself. Cached because it is 331 MB and Debian's mirrors are a courtesy.
+      - name: Cache Debian cloud image
+        id: image-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/vm-images
+          key: debian-cloud-image-${{ env.IMAGE_NAME }}-v1
+
+      - name: Download Debian cloud image
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/vm-images
+          cd ~/vm-images
+          curl -fsSL -O "${IMAGE_BASE_URL}/${IMAGE_NAME}"
+          curl -fsSL -O "${IMAGE_BASE_URL}/SHA512SUMS"
+          # `latest` moves, so verify against the checksums published beside it
+          # rather than pinning a snapshot that eventually 404s.
+          grep " ${IMAGE_NAME}\$" SHA512SUMS | sha512sum -c -
+          rm -f SHA512SUMS
+
+      # Only the leg that deploys them. `download-artifact` does not preserve the
+      # executable bit; `TestHostVm::deploy` chmods everything in the guest after
+      # the copy, which is where it has to happen anyway.
+      - name: Fetch the deployable binaries
+        if: matrix.slug == 'cloudinit-nix-tddy'
+        uses: actions/download-artifact@v7
+        with:
+          name: tddy-dist
+          path: dist
+
+      - name: Run ${{ matrix.test_binary }}
+        run: |
+          set -o pipefail
+          export TDDY_CLOUDINIT_BASE_IMAGE="$HOME/vm-images/${IMAGE_NAME}"
+          # The fixtures put their images in a tempdir that is removed when the
+          # test ends, taking the guest's console transcript with it. Redirect
+          # the transcripts somewhere that outlives the run so they can be
+          # uploaded — a guest failure is usually only explicable from its own
+          # console, and there is no other way to see it from a runner.
+          export TDDY_VM_CONSOLE_LOG_DIR="$GITHUB_WORKSPACE/vm-console-logs"
+          # Empty for the legs that do not deploy; the test that needs it fails
+          # loudly when it is unset rather than skipping.
+          export TDDY_PREBUILT_DIST_DIR="$GITHUB_WORKSPACE/dist"
+          # An unset or wrong path makes every test pass without booting, so
+          # check before spending the runtime rather than after.
+          test -f "$TDDY_CLOUDINIT_BASE_IMAGE" \
+            || { echo "::error::base image missing at $TDDY_CLOUDINIT_BASE_IMAGE"; exit 1; }
+          # Deliberately not `./vm-tests`, which runs all ten suites including
+          # the multi-hour bake. --test-threads=1 is not optional: these bind
+          # fixed host ports (2231-2236 for boot control, 2296-2297 for the
+          # cloud-init boot, 2293-2294 for the Nix layer) and QEMU derives its
+          # monitor socket path from the port alone.
+          ./dev cargo test -p ${{ matrix.package }} --test ${{ matrix.test_binary }} \
+            -- --ignored --nocapture --test-threads=1 ${{ matrix.filter }} \
+            2>&1 | tee vm-tests.log
+
+      # These tests now *fail* when the image variable is unset
+      # (`require_base_image`), so a broken download or mistyped path is red at
+      # the test rather than green here. The grep stays as a regression guard —
+      # it matches the wording of the skip-and-return these tests used to do, so
+      # reintroducing that pattern fails the job instead of quietly reporting a
+      # check that booted nothing. The count is the assertion that carries.
+      - name: Assert a guest was actually booted
+        run: |
+          if grep -q "skipping production test" vm-tests.log; then
+            echo "::error::Tests skipped — TDDY_CLOUDINIT_BASE_IMAGE never reached them. This is a false green, not a pass."
+            exit 1
+          fi
+          if ! grep -qE "test result: ok\. ${{ matrix.expected_passing }} passed" vm-tests.log; then
+            echo "::error::Expected ${{ matrix.expected_passing }} passing tests from ${{ matrix.test_binary }}; the suite did not report them."
+            exit 1
+          fi
+          echo "${{ matrix.expected_passing }} test(s) from ${{ matrix.test_binary }} ran against a real guest."
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vm-${{ matrix.slug }}-logs
+          # vm-tests.log is what the harness printed; vm-console-logs/ is what
+          # each guest itself said, written by QEMU rather than by the test, so
+          # it survives a guest that wedged before the test could read it.
+          path: |
+            vm-tests.log
+            vm-console-logs/
+          if-no-files-found: warn
           retention-days: 7
