@@ -7,7 +7,7 @@
  * lets one terminal component render a session carried over a room and a session its host serves
  * itself without knowing which it is looking at.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence-prd.md`.
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
 import { useEffect, useRef, useState, type RefObject } from "react";

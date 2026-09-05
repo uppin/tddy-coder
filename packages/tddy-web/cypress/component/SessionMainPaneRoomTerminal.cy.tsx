@@ -12,7 +12,7 @@
  * no token and joins no room — the connection did both when the session was attached, which is why
  * there is one handshake here now instead of two.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence.md`.
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
 import React from "react";

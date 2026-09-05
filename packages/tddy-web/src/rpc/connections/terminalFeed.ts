@@ -8,7 +8,7 @@
  * has no business choosing a replay mode, and once the connection chooses it the *same* terminal
  * component can be fed by a wire that is not this one.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence-prd.md`.
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
 import type { Client } from "@connectrpc/connect";

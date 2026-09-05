@@ -25,7 +25,7 @@ As a developer, I want to start a raw Cursor Agent CLI session from the tddy web
 
 ## Terminal access
 
-- The web UI mounts `GhosttyTerminalGrpc` connected to `StreamSessionTerminalIO` (same component path as claude-cli).
+- The web UI mounts `GhosttyTerminalSession` connected to `StreamSessionTerminalIO` (same component path as claude-cli).
 - No LiveKit connection is made for Cursor CLI sessions.
 
 ## Session persistence

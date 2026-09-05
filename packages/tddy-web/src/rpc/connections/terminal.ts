@@ -10,7 +10,7 @@
  * Promoting the interface here is most of what makes one terminal possible — and, because the
  * history path travels with it, is what gives a LiveKit-carried session scrollback it has never had.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence-prd.md`.
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
 /**

@@ -13,7 +13,7 @@
  * of what the canvas painted, the bytes it writes back, and the scrollback affordance. Delete the
  * component and every one of them fails.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence.md`
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  * Stack: `optional-livekit` node 5 of 7.
  */
 

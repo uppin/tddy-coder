@@ -6,7 +6,7 @@
  * LiveKit terminal had none of it, so a LiveKit session could not scroll back past what was live.
  * Once the feed carries the history fetcher, the transport stops deciding.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence.md`
+ * Docs: `packages/tddy-web/docs/terminal-session.md`.
  */
 
 import { describe, it, expect } from "bun:test";

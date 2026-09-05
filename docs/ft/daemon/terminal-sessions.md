@@ -259,12 +259,12 @@ client returns. Only a stream-end with a **valid** client (a real `pty_done`) ev
 
 The web client's forward-fill state machine lives in
 `packages/tddy-web/src/lib/terminalHistoryLoader.ts` (`TerminalHistoryForwardLoader`);
-`GhosttyTerminalGrpc` owns the overlay double-buffer paging end-to-end: it captures the anchor from
+`GhosttyTerminalSession` owns the overlay double-buffer paging end-to-end: it captures the anchor from
 the initial frame, renders two interchangeable overlaid terminals (live `scrollback: 0` always
 mounted & streaming; page `scrollback > 0`), shows a loading indicator while forward-filling the
 page terminal in the background, swaps it to the foreground on `at_end`, and swaps back on
-"Back to live" / scroll-down-at-bottom — all via a `historyFetcher` prop built by
-`GrpcSessionTerminal`. (The live terminal stays at `scrollback: 0` to preserve the
+"Back to live" / scroll-down-at-bottom — all via the history fetcher its
+`TerminalFeed` carries (`GrpcSessionTerminal` builds it for a host-served session). (The live terminal stays at `scrollback: 0` to preserve the
 no-duplicate-pane fix; the page terminal carries `scrollback > 0`. The
 `onRegisterLoadOlderHistory` indirection is removed.)
 
