@@ -17,6 +17,12 @@ name: arm64 runner probe
 
 on:
   workflow_dispatch:
+  # Path-filtered so it runs when this probe itself changes and never on an
+  # unrelated PR. `workflow_dispatch` alone cannot be triggered from a branch
+  # until the file exists on the default branch, which is not much use for
+  # answering a question before merging.
+  pull_request:
+    paths: ['.github/workflows/arm64-probe.yml']
 
 permissions:
   contents: read
