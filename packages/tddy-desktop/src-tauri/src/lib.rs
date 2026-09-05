@@ -17,11 +17,12 @@ mod oauth_callback;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::{Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::{PageLoadEvent, PageLoadPayload};
+use tauri::{Manager, RunEvent, Url, Webview, WebviewUrl, WebviewWindowBuilder};
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::runtime::{self, RuntimeOptions, RuntimeTaskHandles};
 use tddy_rpc::MultiRpcService;
-use tddy_tauri_rpc::WebviewRpcHost;
+use tddy_tauri_rpc::MultiConnectionHost;
 
 /// The window the dashboard is loaded into.
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -87,6 +88,7 @@ pub fn run() -> anyhow::Result<()> {
             ipc::tddy_rpc_send,
             ipc::tddy_rpc_disconnect
         ])
+        .on_page_load(reap_the_departing_pages_connections)
         .setup(move |app| {
             start_daemon(app, config, config_path, spawn_client)?;
             open_dashboard_window(app, dashboard)?;
@@ -100,6 +102,42 @@ pub fn run() -> anyhow::Result<()> {
         }
     });
     Ok(())
+}
+
+/// Release every connection the page that is being replaced had open.
+///
+/// A page owns its connections: it mints an epoch per transport and holds the daemon connection
+/// plus one per attached session. When that page goes — a reload, or the navigation a completed
+/// sign-in performs — it takes the memory of those epochs with it, so it can no longer release
+/// them and nothing else knows they exist. Left alone they linger: the host only notices a departed
+/// page lazily, when a response it can no longer deliver is published, which for an idle connection
+/// is never. One slot used to make this automatic, because `connect` overwrote it; a map of
+/// connections has to be told.
+///
+/// **Ordering is the whole difficulty**, because this fires on the *arriving* page's load, not the
+/// departing one's: reaping late would take out the connections the new page has just opened.
+/// [`PageLoadEvent::Started`] is the commit of the new document — before its scripts are injected
+/// and therefore before it can invoke anything — and the reap is awaited here rather than spawned,
+/// so it has finished by the time this returns and the new page begins to run. The work is the
+/// daemon's runtime's, not this thread's; what is awaited is its completion.
+fn reap_the_departing_pages_connections(webview: &Webview, page: &PageLoadPayload<'_>) {
+    // `Finished` is the arriving page already running — by then it has opened its own connections,
+    // and reaping would take them with it.
+    if !matches!(page.event(), PageLoadEvent::Started) {
+        return;
+    }
+    // Connections are not attributed to a webview by the host, and only the dashboard opens any, so
+    // the reap is scoped to the one window that owns them rather than to whatever loaded a page.
+    if webview.label() != MAIN_WINDOW_LABEL {
+        return;
+    }
+    // Before the daemon is assembled there is no host and nothing to reap — the dashboard's very
+    // first load reaches here, and it precedes every connection there has ever been.
+    let Some(state) = webview.try_state::<ipc::RpcState>() else {
+        return;
+    };
+    log::debug!("[tddy-desktop] a new page committed; releasing what the previous one held");
+    tauri::async_runtime::block_on(state.disconnect_all());
 }
 
 /// Assemble the daemon, hand its roster to the webview host, and start what the runtime left to
@@ -217,7 +255,10 @@ fn start_daemon(
         // TODO: the binary host sends "started"/"stopped" Telegram lifecycle messages from
         // `server::run_server`; this host does not, because window creation would then wait on a
         // Telegram HTTP call. Move the lifecycle message out of the HTTP server to share it.
-        let state = ipc::RpcState::new(WebviewRpcHost::new(MultiRpcService::new(daemon.entries)));
+        // The roster behind every connection, whatever it is addressed to. `Arc` because the
+        // resolver hands one out per connection and each connection's engine holds it.
+        let roster = Arc::new(MultiRpcService::new(daemon.entries));
+        let state = ipc::RpcState::new(MultiConnectionHost::new(ipc::DaemonRosters::over(roster)));
         let shutdown = DaemonShutdown {
             cli_sessions: daemon.cli_sessions,
             tasks: daemon.tasks.spawn(),

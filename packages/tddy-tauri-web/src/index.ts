@@ -1,2 +1,13 @@
-export { createTauriIpcBridge, createTauriTransport } from "./transport.js";
-export type { TauriTransportOptions, WebviewIpcBridge } from "./transport.js";
+export {
+  createTauriIpcBridge,
+  createTauriTransport,
+  DAEMON_TARGET,
+  sessionTarget,
+  thisPagesIpcHost,
+} from "./transport.js";
+export type {
+  ConnectionTarget,
+  TauriTransportOptions,
+  WebviewIpcBridge,
+  WebviewIpcHost,
+} from "./transport.js";
