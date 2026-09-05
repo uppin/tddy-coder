@@ -350,3 +350,35 @@ resolves `closed`, and separates factory from inspector.
 | `bun run --filter tddy-web build` | ✅ clean |
 | `cargo fmt --all --check` | ✅ clean — **0 Rust files changed**, so the Rust CI checks cannot regress |
 | `tsc --noEmit` | 522 errors, the pre-existing baseline (down 1); only `TS2307 'bun:test'` in this node's files — **not a repo gate** |
+
+### AC10 — the `tddy-desktop` e2e is RED, and it is red on the base too
+
+`bun run --filter tddy-desktop e2e` fails **1 of 2**, and the same test fails identically on this
+node's base (`origin/feature/optional-livekit/multi-connection-ipc`, at `b1524872`) with no part of
+this node present. Measured, not assumed — the base was checked out detached and run:
+
+| Tree | Result |
+|---|---|
+| This PR (before the CRITICAL fix) | 1 passing, 1 failing — `reaches the daemon running in its own process` |
+| This PR (after the CRITICAL fix) | 1 passing, 1 failing — same test, same assertion |
+| **Base `b1524872`, no node-7 code** | **1 passing, 1 failing — same test, same assertion** |
+
+So it is **pre-existing and inherited, not a regression from this node.** It is not this PR's to fix:
+the app under test is `tddy-desktop` plus node 6's IPC bridge, and the failure predates node 7.
+
+The failure: `waitUntilLoaded()` waits up to 60s for `[data-testid='github-login-button']` and
+**succeeds**; the assertion on the very next line (`signIn.e2e.ts:23`) then reports it "not displayed".
+The button appears and is gone by the immediate re-query, which reads as a remount rather than a
+failure to reach the daemon. The second spec passes, and it also waits for load and clicks that same
+button.
+
+**This is exactly the case `tddy-desktop` being outside the CI gate is designed to hide** — nothing
+would have reported it. Worth raising against node 6 or as its own issue; recorded here rather than
+silently carried.
+
+### AC10 — the manual `./desktop-dev` run is NOT done
+
+`## Commands` requires both desktop configurations, LiveKit configured and not, to be "run and
+reported". That needs an operator at a GUI and cannot be honestly reported by an agent.
+**Deferred, explicitly, to the human reviewer.** AC10 is therefore the one acceptance criterion this
+node does not satisfy; every other criterion (1–9) has passing coverage.
