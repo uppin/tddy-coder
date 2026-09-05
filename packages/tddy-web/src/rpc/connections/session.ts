@@ -16,6 +16,7 @@
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { ConnectionCapability, ConnectionStatus } from "./types";
+import type { TerminalFeed } from "./terminal";
 
 /**
  * What the daemon's attach reply said about reaching this session, in transport-neutral terms.
@@ -85,6 +86,16 @@ export interface SessionConnection {
    * leaving it unsettled.
    */
   close(): void;
+
+  /**
+   * The terminal byte stream for this session, and its history fetcher where the transport can
+   * serve one.
+   *
+   * Added by node 5 (`terminal-convergence`), which is what lets one terminal component be fed by
+   * any wire. A connection that cannot serve history omits it and the terminal degrades to
+   * live-tail — the LiveKit path's behaviour today, so nothing regresses.
+   */
+  openTerminal(): TerminalFeed;
 }
 
 /**

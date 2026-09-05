@@ -2,6 +2,7 @@
 
 **Stack:** `optional-livekit` — node 5 of 7 (parent: `capability-gating`, base
 `feature/optional-livekit/capability-gating`)
+PR: [#441](https://github.com/uppin/tddy-coder/pull/441)
 PRD: [`2026-09-05-optional-livekit-terminal-convergence-prd.md`](2026-09-05-optional-livekit-terminal-convergence-prd.md)
 Discovery: [`2026-09-05-optional-livekit-terminal-convergence-initial-discovery.md`](2026-09-05-optional-livekit-terminal-convergence-initial-discovery.md)
 
@@ -72,6 +73,10 @@ implementing one here collides with the PR that owns it.
 node 3 owns. Adding a member is this PR's to do; changing an existing one is not — if a node-3
 signature is wrong here, that is a plan change to raise, not to patch from this branch.
 
+As with node 3 extending node 1's interface, adding `openTerminal` made one of node 3's **test
+fixtures** fail to typecheck. This PR adds a one-line throwing `openTerminal` to
+`cypress/component/SessionConnectionAcceptance.cy.tsx`. No production file of node 3's is touched.
+
 ## Draft PR contract
 
 Lands first:
@@ -90,18 +95,42 @@ Deleting the two old components and migrating their call sites lands in the same
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `cypress/component/TerminalConvergenceAcceptance.cy.tsx`
+- [x] Run acceptance tests (verify they fail) — 4/4 on `feedSupportsHistory`
+- [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
+- [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/terminal.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
 ## Verification
+
+### Baseline after rebasing onto the parent's contract commit
+
+`bun run --filter tddy-web test:unit` — 971 pass, 17 fail, all inherited red from #437 (6), #439 (5)
+and #440 (6). None is this node's to fix; this node adds 3 more.
+
+The full Cypress component sweep ran once at node 1 (207 specs, 1213/1214; the one failure
+pre-existing in `SelectedHostUrlStateAcceptance.cy.tsx`). One full sweep runs at the Step 8
+completion gate.
+
+### Red status at the contract commit
+
+| Suite | Result |
+|---|---|
+| `src/rpc/connections/terminal.test.ts` | **3 tests, 3 failing** |
+| `cypress/component/TerminalConvergenceAcceptance.cy.tsx` | **4 tests, 4 failing** |
+
+Every failure is on this node's own `TODO(terminal-convergence)` body.
+
+The acceptance spec's third test — *"offers scrollback on a LiveKit-carried session"* — is the one
+worth watching during `/green`: it is the behaviour this node **adds**, not one it preserves. The
+other three would pass against either predecessor component.
+
+### Commands
 
 ```bash
 ./dev bun run --filter tddy-web test:unit
