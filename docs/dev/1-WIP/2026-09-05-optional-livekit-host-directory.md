@@ -2,6 +2,7 @@
 
 **Stack:** `optional-livekit` — node 2 of 7 (parent: `connection-model`, base
 `feature/optional-livekit/connection-model`)
+PR: [#438](https://github.com/uppin/tddy-coder/pull/438)
 PRD: [`2026-09-05-optional-livekit-host-directory-prd.md`](2026-09-05-optional-livekit-host-directory-prd.md)
 Discovery: [`2026-09-05-optional-livekit-host-directory-initial-discovery.md`](2026-09-05-optional-livekit-host-directory-initial-discovery.md)
 
@@ -82,18 +83,46 @@ Implementation and the removal of `room` from the context land in the same PR un
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `cypress/component/HostDirectoryAcceptance.cy.tsx`
+- [x] Run acceptance tests (verify they fail) — 5/5 failing on `useHostDirectory` / `useHostPresence`
+- [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
+- [x] TDD Red — write failing unit/integration tests — `src/rpc/hostDirectory/useHostDirectory.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
 ## Verification
+
+### Baseline after rebasing onto the parent's contract commit
+
+| Check | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | 971 pass, **6 fail** |
+
+The 6 failures are the **parent's** red tests (`src/rpc/connections/registry.test.ts`), inherited
+from #437's contract commit. They are not this node's to fix — `connection-model` makes them pass
+under its own `/green`. This node adds 9 more.
+
+`bun run --filter tddy-web cypress:component` was run in full at node 1 (207 specs, 1213/1214, one
+pre-existing failure in `SelectedHostUrlStateAcceptance.cy.tsx`). Per-node full sweeps were dropped
+for nodes 2–5 by agreement — the branches differ only by added files and added failing tests, no call
+site changes — and one full sweep runs at the Step 8 completion gate.
+
+### Red status at the contract commit
+
+| Suite | Result |
+|---|---|
+| `src/rpc/hostDirectory/useHostDirectory.test.ts` | **9 tests, 9 failing** |
+| `cypress/component/HostDirectoryAcceptance.cy.tsx` | **5 tests, 5 failing** |
+
+Every failure is on this node's own `TODO(host-directory)` bodies — `mergeHostDirectory`,
+`directoryStatusOf`, `hostsOf`, `useHostDirectory`, `useHostPresence`. None is on the parent's
+surface.
+
+### Commands
 
 ```bash
 ./dev bun run --filter tddy-web test:unit
