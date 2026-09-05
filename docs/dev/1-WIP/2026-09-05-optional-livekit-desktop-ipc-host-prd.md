@@ -29,8 +29,11 @@ configuration the app is fully functional on one host.
 
 ### Acceptance criteria
 
-1. The desktop build registers an `IpcConnectionProvider` and a `LocalHostDirectorySource` at
-   startup, and a **browser registers neither**, so the browser's behaviour is unchanged. They arrive
+1. The desktop build registers an `IpcConnectionProvider` at startup, and a **browser registers
+   none**, so the browser's behaviour is unchanged. *(Amended at `/pr-wrap`: this also required a
+   `LocalHostDirectorySource`. It was built, then removed — see the changeset's "Scope removed". The
+   local host is named in the directory by node 2's `useServingHostDirectorySource`, which produced a
+   byte-identical descriptor from the same input.)* They arrive
    through node 1's registry and node 2's source list, so nothing in `tddy-web`'s screens names a
    wire. *(Corrected during `/green`: this criterion first said `tddy-web` imports neither. It does
    import them — `tddy-desktop` is a Tauri shell over `tddy-web/dist`, one bundle and one entry, so

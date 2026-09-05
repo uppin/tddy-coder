@@ -2,12 +2,14 @@
  * Acceptance spec: the desktop reaches its own host over IPC, and LiveKit stays optional.
  *
  * This is the node the whole stack exists for. `tddy-desktop` does not join a common room by
- * default, and until now the host list *was* the common room — so it could reach no host at all,
- * not even the daemon running in its own process.
+ * default, and reaching a host *was* being on one — so the app could reach nothing at all, not even
+ * the daemon running in its own process. Node 3 had already put that daemon in the host list; what
+ * was still missing, and arrives here, is a wire to it.
  *
  * Two directions have to hold at once, and they come from one mechanism rather than a mode switch:
  * with no LiveKit configuration the app works entirely on its own host, and with LiveKit configured
- * it reaches peers over LiveKit while keeping its own host on IPC.
+ * it reaches peers over LiveKit while keeping its own host on IPC. Nothing here is a directory
+ * source — the desktop build contributes a provider and nothing else.
  *
  * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-desktop-ipc-host.md`
  * Stack: `optional-livekit` node 7 of 7.
@@ -22,8 +24,6 @@ import { useLiveKitHostDirectorySource } from "../../src/rpc/hostDirectory/liveK
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
   createIpcConnectionProvider,
-  createLocalHostDirectorySource,
-  liveKitIsConfigured,
   localHostRegistrationFor,
 } from "../../src/rpc/connections/localHost";
 import { LocalHostConnections } from "../../src/rpc/connections/localHostRegistration";
@@ -36,12 +36,11 @@ import {
 import type { ConnectionProvider } from "../../src/rpc/connections/types";
 import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
 import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
+import { useServingHostDirectorySource } from "../../src/rpc/hostDirectory/servingSource";
 import {
   HostDirectorySources,
   useHostDirectory,
 } from "../../src/rpc/hostDirectory/useHostDirectory";
-import { SelectedDaemonProvider, useDaemons } from "../../src/rpc/selectedDaemon";
-import { AuthProvider } from "../../src/hooks/authProvider";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
@@ -52,7 +51,7 @@ const THIS_HOST = "instance-this-host";
 const A_PEER = "instance-a-peer";
 
 function aDesktopRegistration() {
-  return { daemonInstanceId: THIS_HOST, label: "this daemon" };
+  return { daemonInstanceId: THIS_HOST };
 }
 
 /**
@@ -150,12 +149,6 @@ function ResolutionProbe({
     <ConnectionProviders registry={registry.current}>
       <ResolvedHostProbe hostId={hostId} />
     </ConnectionProviders>
-  );
-}
-
-function LiveKitDecisionProbe({ config }: { config: { livekitUrl?: string; commonRoom?: string } }) {
-  return (
-    <div data-testid="livekit">{liveKitIsConfigured(config) ? "brought up" : "not started"}</div>
   );
 }
 
@@ -285,14 +278,6 @@ describe("a desktop app that is configured for LiveKit", () => {
     // not this node's, and asserting it back would be asserting the fixture.
     byTestId("provider").should("have.text", "livekit");
   });
-
-  it("brings LiveKit up when both a url and a room are configured", () => {
-    cy.mount(
-      <LiveKitDecisionProbe config={{ livekitUrl: "wss://livekit.example", commonRoom: "tddy" }} />,
-    );
-
-    byTestId("livekit").should("have.text", "brought up");
-  });
 });
 
 /**
@@ -379,56 +364,6 @@ describe("offering the desktop's own wire to the app", () => {
   });
 });
 
-describe("the desktop's own host in the directory", () => {
-  it("names its host where no common room describes it", () => {
-    cy.mount(
-      <AuthProvider>
-        <SelectedDaemonProvider
-          room={new Room()}
-          daemons={[]}
-          hostSources={[createLocalHostDirectorySource(aDesktopRegistration())]}
-        >
-          <DirectoryProbe />
-        </SelectedDaemonProvider>
-      </AuthProvider>,
-    );
-
-    // With no room and no serving id there was nothing at all before this — the host list *was* the
-    // common room, so the desktop app offered the operator no host, not even its own
-    byTestId("hosts").should("have.text", THIS_HOST);
-  });
-
-  it("does not shadow a common room's richer account of the same machine", () => {
-    cy.mount(
-      <AuthProvider>
-        <SelectedDaemonProvider
-          room={new Room()}
-          daemons={[{ instanceId: THIS_HOST, label: "advertised", maxAttachmentBytes: 5_000_000 }]}
-          hostSources={[createLocalHostDirectorySource(aDesktopRegistration())]}
-        >
-          <DirectoryProbe />
-        </SelectedDaemonProvider>
-      </AuthProvider>,
-    );
-
-    // The desktop's own account is built from `GetClientConfig`, which carries an instance id and
-    // no attachment cap. Letting it win would cost the Start-Session form the client-side refusal
-    // for the very host the operator is most likely to use, and gain nothing but a source id.
-    byTestId("cap").should("have.text", "5000000");
-  });
-});
-
-/** The merged directory, as the daemon-mode screens read it. */
-function DirectoryProbe() {
-  const daemons = useDaemons();
-  return (
-    <div>
-      <div data-testid="hosts">{daemons.map((daemon) => daemon.instanceId).join(",")}</div>
-      <div data-testid="cap">{daemons[0]?.maxAttachmentBytes ?? "unadvertised"}</div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Degradation: LiveKit failing is LiveKit's problem, not the machine's
 // ---------------------------------------------------------------------------
@@ -462,6 +397,29 @@ function aLiveKitProviderWithNoRoom(): ConnectionProvider {
   return { id: "livekit", connectHost: () => null };
 }
 
+/**
+ * The directory the app actually assembles, with only the common room stood in for.
+ *
+ * `[liveKitSource, servingSource]` in that order is `selectedDaemon.tsx`'s own list, and the serving
+ * source is node 3's real hook — so the local host arrives here exactly the way it arrives in
+ * production, from the `daemonInstanceId` that served the page. The desktop build contributes no
+ * source of its own: it contributes a *wire*, which is what the probes beside this one read.
+ */
+function AppDirectory({
+  liveKitSource,
+  servingInstanceId,
+  children,
+}: {
+  liveKitSource: HostDirectorySource;
+  servingInstanceId: string;
+  children: React.ReactNode;
+}) {
+  const servingSource = useServingHostDirectorySource(servingInstanceId);
+  return (
+    <HostDirectorySources sources={[liveKitSource, servingSource]}>{children}</HostDirectorySources>
+  );
+}
+
 /** The merged directory, as the selector chrome reads it. */
 function MergedDirectoryProbe() {
   const directory = useHostDirectory();
@@ -479,14 +437,9 @@ function MergedDirectoryProbe() {
 /** The directory a desktop app has while its common room is down: one source failed, one working. */
 function mountDirectoryWithLiveKitDown() {
   cy.mount(
-    <HostDirectorySources
-      sources={[
-        aFailedLiveKitDirectorySource(),
-        createLocalHostDirectorySource(aDesktopRegistration()),
-      ]}
-    >
+    <AppDirectory liveKitSource={aFailedLiveKitDirectorySource()} servingInstanceId={THIS_HOST}>
       <MergedDirectoryProbe />
-    </HostDirectorySources>,
+    </AppDirectory>,
   );
 }
 
@@ -561,18 +514,16 @@ describe("a desktop app with LiveKit configured and working", () => {
 
     cy.mount(
       <ConnectionProviders registry={registry}>
-        <HostDirectorySources
-          sources={[
-            aLiveKitDirectorySourceNaming(A_PEER),
-            createLocalHostDirectorySource(aDesktopRegistration()),
-          ]}
+        <AppDirectory
+          liveKitSource={aLiveKitDirectorySourceNaming(A_PEER)}
+          servingInstanceId={THIS_HOST}
         >
           <div>
             <MergedDirectoryProbe />
             <WireProbe hostId={THIS_HOST} testId="local-wire" />
             <WireProbe hostId={A_PEER} testId="peer-wire" />
           </div>
-        </HostDirectorySources>
+        </AppDirectory>
       </ConnectionProviders>,
     );
 

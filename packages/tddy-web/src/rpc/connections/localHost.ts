@@ -1,10 +1,12 @@
 /**
- * The desktop build's own host: reached over IPC, and contributed to the directory.
+ * The desktop build's own host: reached over IPC.
  *
- * Its **connection provider** is registered ahead of the LiveKit one, which is what keeps the
- * machine the operator is sitting at off the media server. Its **directory source** is not — see
- * {@link createLocalHostDirectorySource}; the two orderings answer different questions and only the
- * first one is about reachability.
+ * Its connection provider is registered ahead of the LiveKit one, which is what keeps the machine
+ * the operator is sitting at off the media server. It contributes **no directory entry**: the host
+ * directory already names the daemon that served this page, from the same `daemonInstanceId`
+ * (`hostDirectory/servingSource.ts`), so a second source saying it again would only be a second
+ * name for the one machine. What was missing was never the entry — it was a wire that could reach
+ * it, which is this.
  *
  * Everything else in this stack was preparation for this file. Nodes 1–4 gave `tddy-web` a provider
  * registry, a source-merged host directory, one session connection carrying capabilities, and
@@ -35,10 +37,7 @@ import {
 } from "tddy-tauri-web";
 import { ConnectionService } from "../../gen/connection_pb";
 import { tddyDebug } from "../../lib/debugMask";
-import { SELF_LABEL_SUFFIX } from "../../lib/participantRole";
 import { daemonTransportFlavour, type TauriHostWindow } from "../daemonTransportFlavour";
-import { hostDescriptorOf } from "../hostDirectory/daemonHost";
-import type { HostDirectorySource } from "../hostDirectory/types";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
 import type { TerminalFeed, TerminalOptions } from "./terminal";
 import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
@@ -51,9 +50,6 @@ import type {
 
 /** The id this provider registers under. Precedence is stated against it, so it is a constant. */
 export const IPC_PROVIDER_ID = "ipc";
-
-/** The id this directory source contributes under, for the same reason. */
-export const LOCAL_IPC_SOURCE_ID = "local-ipc";
 
 /**
  * A frame pipe carries calls and nothing else — no tracks, no participant roster. Shared by every
@@ -71,15 +67,14 @@ export interface LocalHostRegistration {
    * The daemon instance serving this page, from `DaemonConfigService.GetClientConfig`'s
    * `daemonInstanceId` — the same payload a browser reads from `/api/config`.
    *
-   * Available **before sign-in**, because the daemon serves that call ungated. That matters: the
-   * LiveKit path cannot produce a host until authentication completes, since it needs a presence
-   * identity derived from the user's login. The IPC path has no such gate, so the desktop app has a
-   * usable host from its first paint.
+   * The same id `hostDirectory/servingSource.ts` puts in the directory, which is why this
+   * registration carries nothing else: the host is already *named*: what it needs is a wire, and a
+   * wire needs only to know which host it claims.
+   *
+   * The daemon serves that call ungated, so the id exists before sign-in — unlike a LiveKit host,
+   * which cannot be named until authentication produces a presence identity.
    */
   readonly daemonInstanceId: string;
-
-  /** How the host is named in the selector. */
-  readonly label: string;
 }
 
 /**
@@ -96,10 +91,6 @@ export interface LocalHostRegistration {
  * that is not a daemon has no local host, which is the state a Storybook build is in. A `null`
  * registration is what {@link createIpcConnectionProvider} is never called with, and so what keeps
  * the browser bundle from registering a wire it cannot use.
- *
- * The label matches the one a daemon publishes for itself into a common room
- * (`SELF_LABEL_SUFFIX`), so the selector reads the same in both hosts and a machine described by
- * both sources does not change name depending on which account of it the directory kept.
  */
 export function localHostRegistrationFor(
   win: TauriHostWindow,
@@ -108,7 +99,7 @@ export function localHostRegistrationFor(
   if (daemonTransportFlavour(win) !== "webview-ipc") return null;
   const hostId = daemonInstanceId?.trim() ?? "";
   if (!hostId) return null;
-  return { daemonInstanceId: hostId, label: `${hostId}${SELF_LABEL_SUFFIX}` };
+  return { daemonInstanceId: hostId };
 }
 
 /**
@@ -458,73 +449,4 @@ export function createIpcConnectionProvider(
       return connection;
     },
   };
-}
-
-/**
- * The desktop's own host, as a host-directory source.
- *
- * It contributes exactly one entry — the daemon serving this page, from `daemonInstanceId` — and
- * reports `connected`, because there is nothing to connect to: the daemon is in this process and the
- * page was loaded by the application hosting it. That is what gives the desktop app a selectable
- * host from its first paint, before sign-in and with no common room anywhere.
- *
- * Registered **behind** the LiveKit source and ahead of the serving one — see the ordering note in
- * `../selectedDaemon`'s `useDirectorySources`. The plan had it in front, on the expectation that it
- * would be the richer account of the machine; it is not, because `GetClientConfig` carries an
- * instance id and neither `repos_base_path` nor `max_attachment_bytes`, so in front it would shadow
- * a common room's advertisement with a poorer copy and cost the local host its attachment cap. Its
- * `sourceId` is therefore for diagnostics — which account of a host the directory kept — rather than
- * for winning.
- *
- * `idle` with no hosts when the daemon named no instance — a page served by something that is not a
- * daemon has no local host to offer, exactly as `useServingHostDirectorySource` reports.
- */
-export function createLocalHostDirectorySource(
-  registration: LocalHostRegistration,
-): HostDirectorySource {
-  const hostId = registration.daemonInstanceId.trim();
-  if (!hostId) return { id: LOCAL_IPC_SOURCE_ID, status: "idle", error: null, hosts: [] };
-  return {
-    id: LOCAL_IPC_SOURCE_ID,
-    status: "connected",
-    error: null,
-    hosts: [
-      hostDescriptorOf({ instanceId: hostId, label: registration.label }, LOCAL_IPC_SOURCE_ID),
-    ],
-  };
-}
-
-/**
- * The directory sources this page contributes: its own host, or nothing at all.
- *
- * The `null` case is the browser, and it is the whole of why a browser's directory is untouched by
- * everything the desktop build does. It is a function rather than a conditional at the registration
- * site so that the gate is one testable thing — the same reason {@link localHostRegistrationFor} is.
- */
-export function localHostDirectorySources(
-  registration: LocalHostRegistration | null,
-): readonly HostDirectorySource[] {
-  return registration ? [createLocalHostDirectorySource(registration)] : [];
-}
-
-/**
- * Whether LiveKit should be brought up at all, from the configuration the daemon served.
- *
- * The exact definition of "if settings are configured": both a URL and a common room, non-blank.
- * With either missing the LiveKit source contributes nothing, constructs no `Room`, and calls no
- * `TokenService` — and reports `idle`, not `error`, because an operator who deliberately did not
- * configure LiveKit must not be shown a connection failure for it on every screen.
- *
- * That behaviour is already enforced, by `hooks/useCommonRoom`'s own guard, which short-circuits
- * before it mints a token or constructs a `Room`. This is the rule stated by name, for a caller that
- * has to decide *before* rendering the hook — which is where a registration site asks it. The two
- * are not consolidated because `useCommonRoom` belongs to a parent node of this stack and rewriting
- * its guard from here would be reaching into somebody else's surface for a tidiness that changes no
- * behaviour.
- */
-export function liveKitIsConfigured(config: {
-  livekitUrl?: string;
-  commonRoom?: string;
-}): boolean {
-  return Boolean(config.livekitUrl?.trim()) && Boolean(config.commonRoom?.trim());
 }

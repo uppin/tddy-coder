@@ -49,9 +49,9 @@ Everything is in place; nothing is wired.
 
 - `IpcConnectionProvider` — host and session connections over node 6's addressed IPC, with
   `{"rpc"}` capabilities and correct `close()` lifecycle.
-- `LocalHostDirectorySource` — the local host descriptor, from `daemonInstanceId`. **Corrected at
-  `/green`:** it is merged *after* the LiveKit source, not ahead of it — see "Directory ordering"
-  below. Connection precedence is unchanged and still puts IPC first; the two are separate registries.
+- ~~`LocalHostDirectorySource` — the local host descriptor, from `daemonInstanceId`.~~ **REMOVED at
+  `/pr-wrap`** — it duplicated node 2's serving source observably exactly. See "Scope removed" at the
+  end of this document. The ordering question this raised is moot with the source gone.
 - The desktop build's registration point (its entry module), and provider precedence for the host it
   claims.
 - Making the LiveKit directory source and connection provider genuinely inert when `livekitUrl` /
@@ -180,8 +180,8 @@ Delivered and verified on this branch, rebased onto `multi-connection-ipc`:
 | Responsibility item | State |
 |---|---|
 | 1. `IpcConnectionProvider` — host + session connections, `{"rpc"}`, `close()` lifecycle | **done** |
-| 2. `LocalHostDirectorySource` from `daemonInstanceId` | **done** (deferral resolved by the linearization) |
-| 3. `liveKitIsConfigured` | **done** |
+| 2. `LocalHostDirectorySource` from `daemonInstanceId` | built, then **REMOVED** — redundant with node 2's serving source; see "Scope removed" |
+| 3. `liveKitIsConfigured` | built, then **REMOVED** — no production caller; `useCommonRoom`'s guard enforces the rule |
 | 4. The desktop build's registration point and provider precedence | **done** — `localHostRegistrationFor` + `LocalHostConnections`, gated on the transport flavour |
 | 5. LiveKit source/provider inert when unconfigured | **already true at HEAD**; verified, no change needed |
 
@@ -234,27 +234,13 @@ unconditionally every render. It builds `transportFor` from `useTrafficMeterRegi
 defaultless in the first place. It wraps `SelectedDaemonProvider`, so `ipc` registers ahead of
 `livekit`.
 
-### Directory ordering — a corrected plan assumption
+### Directory ordering — moot
 
-`## Responsibility` said the local source should be preferred **over** a common-room advertisement of
-the same machine. It is merged **after** the LiveKit source instead
-(`[liveKitSource, ...hostSources, servingSource]`), and the reason is recorded at the ordering site.
-
-The plan assumed the local source would be the *richer* account of the machine. It is not: it is
-built from `GetClientConfig`, which carries `daemonInstanceId` and **no** `repos_base_path` or
-`max_attachment_bytes` (`clientConfig.ts`), and teaching it to is a proto change this node may not
-make. Ahead of the room it would shadow the advertisement with a strictly poorer copy and cost the
-local host its attachment cap — so `useSessionAttachments.ts:243` would compute no cap and line 249
-would silently stop refusing over-cap files. That is the identical regression `selectedDaemon.tsx`'s
-pre-existing comment already guards against for the serving source, so this ordering follows an
-established rule in that file rather than a new one.
-
-Nothing is lost. Connection precedence is a **separate** registry and still puts IPC first, so the
-local host is still reached in-process; only which descriptor names it changes, and only when a
-common room also advertises the same machine. With no LiveKit configured the LiveKit source
-contributes nothing, so the local source names the host — which is the case this whole stack exists
-for. Pinned by *"does not shadow a common room's richer account of the same machine"*. Move it to the
-front the day the daemon advertises those fields to its own page.
+This section recorded a departure from the plan: the local source merged *after* the LiveKit source
+rather than ahead of it, because it was the poorer descriptor and winning the merge would have cost
+the local host its attachment cap. **The source has since been removed entirely**, so there is no
+ordering to decide and `selectedDaemon.tsx` is back to its base state. The reasoning is preserved in
+"Scope removed" because it is why the source turned out to be redundant.
 
 ### Known limitations, recorded rather than hidden
 
@@ -382,3 +368,42 @@ silently carried.
 reported". That needs an operator at a GUI and cannot be honestly reported by an agent.
 **Deferred, explicitly, to the human reviewer.** AC10 is therefore the one acceptance criterion this
 node does not satisfy; every other criterion (1–9) has passing coverage.
+
+## Scope removed at `/pr-wrap` — operator decision, 2026-09-06
+
+Two pieces of this node's planned surface were built, found to earn nothing observable, and removed
+rather than shipped. Both were verified before removal, not assumed.
+
+### `LocalHostDirectorySource` — removed
+
+`createLocalHostDirectorySource` produced a descriptor **byte-identical** to node 2's
+`useServingHostDirectorySource`: same `hostId`, same `` `<id> (this daemon)` `` label, same
+`connected` status. Both were fed the same `appConfig.daemonInstanceId` in `index.tsx`, so they were
+always both present or both absent. And **nothing in `packages/tddy-web/src` reads
+`HostDescriptor.sourceId`** — `daemonHostOf` drops it before any screen sees it — so the only thing
+that distinguished the two was invisible to every consumer.
+
+Removing it took this PR **out of `selectedDaemon.tsx` entirely**: that file was modified only to
+accept the `hostSources` prop this source needed, so with the source gone the prop, `NO_HOST_SOURCES`
+and the changed merge ordering all became dead. That file belongs to node 2 (#438), which is open, so
+this also removes live conflict surface — a better outcome than the ordering compromise recorded
+above, which is now moot.
+
+The local host is still named in the directory, by the serving source, exactly as it was.
+
+### `liveKitIsConfigured` — removed
+
+It had no production caller and never gained one. The rule it stated — no url or no room means no
+join, no token, no `Room` — is enforced by `useCommonRoom`'s own guard (`useCommonRoom.ts:41`), a
+parent node's file this PR must not touch. An exported predicate nothing calls is not a statement of
+a rule, it is a second place for the rule to drift from.
+
+Its truth-table tests went with it. AC6 keeps real coverage: the spec that drives the actual
+`useLiveKitHostDirectorySource` with a signed-in identity, a counting `roomFactory` and an in-memory
+`TokenService`, asserting zero rooms constructed and zero tokens minted.
+
+### What this node delivers after the removals
+
+The `IpcConnectionProvider` — host and session connections over node 6's addressed IPC, `{"rpc"}`
+only, attachment-counted release — and its registration from the shared entry, gated on the transport
+flavour. That is still a complete vertical slice: contract, behaviour and tests in one node.

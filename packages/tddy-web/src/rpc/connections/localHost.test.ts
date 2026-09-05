@@ -1,10 +1,11 @@
 /**
- * Unit tests for the desktop build's own host registration.
+ * Unit tests for the desktop build's own host: which pages have one, and what a connection to it
+ * costs the host application.
  *
- * Two rules carry this node. **LiveKit is configured or it is not**, and "not" must be a working
- * state rather than a broken one — with either the URL or the common room missing, nothing is
- * joined, no token is minted, and no `Room` is constructed. And **the local host is always there**,
- * from `daemonInstanceId`, which the daemon serves ungated and therefore before sign-in.
+ * The rule that carries this node is that **a connection is a connection**. The host application
+ * holds one bridge per target, under one epoch, so what this module may open, share and release is
+ * fixed by what the page already holds rather than by what would be convenient here. Most of the
+ * file is about that, against a double faithful enough to make a leaked peer visible.
  *
  * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-desktop-ipc-host.md`
  */
@@ -21,53 +22,13 @@ import {
 import { ConnectionService } from "../../gen/connection_pb";
 import type { SessionConnection } from "./session";
 import type { HostConnection } from "./types";
-import {
-  createIpcConnectionProvider,
-  createLocalHostDirectorySource,
-  liveKitIsConfigured,
-  localHostDirectorySources,
-  localHostRegistrationFor,
-  LOCAL_IPC_SOURCE_ID,
-} from "./localHost";
+import { createIpcConnectionProvider, localHostRegistrationFor } from "./localHost";
 
 const THIS_HOST = "instance-this-host";
 
 function aRegistration() {
-  return { daemonInstanceId: THIS_HOST, label: "this daemon" };
+  return { daemonInstanceId: THIS_HOST };
 }
-
-describe("whether LiveKit should be brought up", () => {
-  it("is configured when both a url and a common room are given", () => {
-    expect(
-      liveKitIsConfigured({ livekitUrl: "wss://livekit.example", commonRoom: "tddy" }),
-    ).toBe(true);
-  });
-
-  it("is not configured when the common room is missing", () => {
-    // A url with no room names a server but nothing to join — there is no host list to build
-    expect(liveKitIsConfigured({ livekitUrl: "wss://livekit.example" })).toBe(false);
-  });
-
-  it("is not configured when the url is missing", () => {
-    expect(liveKitIsConfigured({ commonRoom: "tddy" })).toBe(false);
-  });
-
-  it("is not configured when nothing is given at all", () => {
-    // The desktop app's default. This must be a *working* state: no room joined, no token minted,
-    // no Room constructed, and the app fully usable on its own host.
-    expect(liveKitIsConfigured({})).toBe(false);
-  });
-
-  it("treats blank and whitespace-only settings as unconfigured", () => {
-    // The daemon serves absent fields as empty strings, so a blank must not read as configured —
-    // it would produce a join attempt against `""` and a connection error on every screen
-    expect(liveKitIsConfigured({ livekitUrl: "", commonRoom: "" })).toBe(false);
-    expect(liveKitIsConfigured({ livekitUrl: "   ", commonRoom: "tddy" })).toBe(false);
-    expect(liveKitIsConfigured({ livekitUrl: "wss://livekit.example", commonRoom: "  " })).toBe(
-      false,
-    );
-  });
-});
 
 /** A page the Tauri host application loaded: it injects its IPC internals into every one. */
 function aPageInsideTheDesktopApp() {
@@ -87,14 +48,6 @@ describe("whether this page has a local host at all", () => {
     expect(registration?.daemonInstanceId).toBe(THIS_HOST);
   });
 
-  it("names the host the way a daemon names itself in a common room", () => {
-    const registration = localHostRegistrationFor(aPageInsideTheDesktopApp(), THIS_HOST);
-
-    // So a machine that both sources describe does not change name in the selector depending on
-    // which account of it the directory happened to keep
-    expect(registration?.label).toBe(`${THIS_HOST} (this daemon)`);
-  });
-
   it("has none in a browser", () => {
     // Given the same bundle, loaded over HTTP instead — one build serves both hosts
     const registration = localHostRegistrationFor(aPageInABrowser(), THIS_HOST);
@@ -112,77 +65,11 @@ describe("whether this page has a local host at all", () => {
   });
 });
 
-describe("the desktop's own directory source", () => {
-  it("contributes the serving daemon, and only it", () => {
-    // Given the desktop's source
-    const source = createLocalHostDirectorySource(aRegistration());
-
-    // Then the app has a host to select before it has reached anything at all — today it has none,
-    // because the host list *is* the common room and the desktop app never joins one
-    expect(source.hosts.map((host) => host.hostId)).toEqual([THIS_HOST]);
-    expect(source.hosts[0]?.label).toBe("this daemon");
-  });
-
-  it("is connected, because there is nothing to connect to", () => {
-    const source = createLocalHostDirectorySource(aRegistration());
-
-    // The daemon is in this process and it served this page. Reporting anything else would put a
-    // "connecting…" or a failure on a screen that is already talking to it.
-    expect(source.status).toBe("connected");
-    expect(source.error).toBeNull();
-  });
-
-  it("stamps its own source id on the host it contributes", () => {
-    const source = createLocalHostDirectorySource(aRegistration());
-
-    // Which is what a diagnostic reads to say *which account* of a machine the directory kept. It
-    // is not how this source wins anything: it is registered behind the common room deliberately,
-    // because a room's advertisement carries an attachment cap this one cannot know — see the
-    // ordering note in `useDirectorySources`.
-    expect(source.hosts[0]?.sourceId).toBe(LOCAL_IPC_SOURCE_ID);
-    expect(source.id).toBe(LOCAL_IPC_SOURCE_ID);
-  });
-
-  it("offers no host when the daemon named no instance", () => {
-    // Given a page served by something that is not a daemon — a static file server, a Storybook
-    // build — the client config carries no instance id
-    const source = createLocalHostDirectorySource({ daemonInstanceId: "", label: "unknown" });
-
-    // Then there is nothing to contribute, and saying so is `idle`: an absent local daemon is not a
-    // fault, and a source claiming a host called "" would shadow every other account of it
-    expect(source.hosts).toEqual([]);
-    expect(source.status).toBe("idle");
-    expect(source.error).toBeNull();
-  });
-});
-
-describe("what a page contributes to the directory", () => {
-  it("contributes its own host when the host application loaded the page", () => {
-    // Given the gate the registration site runs, on a desktop page
-    const sources = localHostDirectorySources(
-      localHostRegistrationFor(aPageInsideTheDesktopApp(), THIS_HOST),
-    );
-
-    expect(sources.flatMap((source) => source.hosts.map((host) => host.hostId))).toEqual([
-      THIS_HOST,
-    ]);
-  });
-
-  it("contributes nothing in a browser", () => {
-    // The same gate on a browser page. The provider half of this is pinned in
-    // `DesktopIpcHostAcceptance`; the *source* half is here, because it is a pure decision and a
-    // rendered directory would only re-state it more slowly.
-    expect(
-      localHostDirectorySources(localHostRegistrationFor(aPageInABrowser(), THIS_HOST)),
-    ).toEqual([]);
-  });
-});
-
 describe("the desktop's own connection provider", () => {
   it("claims nothing when the daemon named no instance", () => {
     // A page served by something that is not a daemon knows no host id. A provider that answered to
     // `""` would be registered first and shadow every other wire for a host nobody has.
-    const provider = createIpcConnectionProvider({ daemonInstanceId: "  ", label: "unknown" });
+    const provider = createIpcConnectionProvider({ daemonInstanceId: "  " });
 
     expect(provider.connectHost("")).toBeNull();
     expect(provider.connectHost(THIS_HOST)).toBeNull();

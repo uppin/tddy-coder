@@ -8,10 +8,7 @@ import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
 import type { TauriHostWindow } from "./rpc/daemonTransportFlavour";
-import {
-  localHostDirectorySources,
-  localHostRegistrationFor,
-} from "./rpc/connections/localHost";
+import { localHostRegistrationFor } from "./rpc/connections/localHost";
 import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
 import type { DaemonHost } from "./lib/participantRole";
 import { GhosttyTerminalSession } from "./components/GhosttyTerminalSession";
@@ -439,9 +436,6 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
       ),
     [appConfig.daemonInstanceId],
   );
-  // Memoised on the registration rather than rebuilt per render: the array is the directory's source
-  // list, and a new one every render would re-merge the directory and re-resolve the selected host.
-  const localHostSources = useMemo(() => localHostDirectorySources(localHost), [localHost]);
 
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
@@ -479,7 +473,6 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
               servingInstanceId={appConfig.daemonInstanceId}
               room={testDaemonRoom}
               daemons={testDaemonHosts}
-              hostSources={localHostSources}
             >
               {isRpcPlaygroundPath(path) ? (
                 <RpcPlaygroundAppPage onNavigate={navigate} />
