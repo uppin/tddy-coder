@@ -92,18 +92,20 @@ The Rust exclusions live in `.config/nextest.toml` under `[profile.ci]`
 hole in the gate. Removing one is the preferred fix; suppressing a newly failing
 test there is not.
 
-## VM tests
+## VM tests (separate workflow)
 
-The QEMU-backed production tests are jobs in `ci.yml`, gated on `needs:
-rust-build`. They are **not required checks** — that is a property of the branch
-ruleset's list of contexts, not of which workflow they live in.
+`.github/workflows/vm-tests.yml` runs the QEMU-backed production tests, and it
+is **not a required check**. Separate from `ci.yml` on purpose: these boot real
+guests, and a CI run should report its own result rather than stay in progress
+until a VM finishes.
 
-They were a separate workflow until they started needing `Rust build`'s output.
-Consuming another workflow's artifact means finding the sibling run for the same
-SHA and polling it, which is a race where `needs` is an edge; and gating on the
-build means no guest is booted for a workspace that does not compile. The cost
-is the blast radius the split used to buy: a VM leg's failure now sits in the
-same run as the required checks, though it still cannot block a merge.
+Only the chain leg needs anything from CI, and only that leg waits for it — it
+polls for the `tddy-dist` artifact `Rust build` publishes for the same commit,
+failing if that build failed or never finished. The two cheap legs start
+immediately. The alternative is `workflow_run`, which would give a real
+dependency edge instead of a poll, but GitHub always takes a `workflow_run`
+workflow from the **default branch**: the file could not be changed and tested
+from a PR, and its runs do not appear in the PR's checks.
 
 They run on pull requests **and on pushes to `master`**. The master half is not
 redundant: `master` is the only ref that writes the cargo cache, so without it

@@ -126,7 +126,7 @@ Every PR gets four required checks, all defined in `.github/workflows/ci.yml`
 | `Rust tests` | `cargo nextest run --workspace --profile ci --locked` |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests |
 
-`VM boot control` (a job in `.github/workflows/ci.yml`) also runs on PRs but is **not required** — treat
+`VM boot control` (`.github/workflows/vm-tests.yml`) also runs on PRs but is **not required** — treat
 a red one as a report, not a merge blocker, and say so.
 
 Read them with the repo's own script, which turns a red check into failing **test names** rather
