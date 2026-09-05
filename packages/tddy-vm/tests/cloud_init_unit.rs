@@ -365,7 +365,7 @@ fn each_dumped_guest_log_is_framed_by_markers_the_host_can_grep_for() {
     // log can be cut out of the boot log by `grep`/`sed`
     let completion_shell = first_runcmd_step(&rendered);
     assert!(
-        completion_shell.contains("echo \"TDDY_GUEST_LOG_BEGIN $__tddy_log\""),
+        completion_shell.contains("echo \"TDDY_GUEST_LOG_BEGIN $__tddy_log"),
         "each dumped guest log must open with a greppable marker, got: {completion_shell}"
     );
     assert!(
@@ -978,4 +978,43 @@ fn serial_watcher_stays_pending_for_unrelated_boot_output() {
 
     // Then it reports pending — neither success nor failure has been observed yet
     assert_eq!(outcome, CloudInitOutcome::Pending);
+}
+
+#[test]
+fn each_dumped_guest_log_is_bounded_so_the_token_is_not_lost_behind_it() {
+    // Given a bake
+    let user_data = a_cloud_init_user_data();
+
+    // When rendering user-data for a bake
+    let rendered = render_user_data(
+        &user_data,
+        "ssh-ed25519 AAAA...",
+        "CLOUDINIT_COMPLETE_demo_abc123456789",
+    );
+
+    // Then the dump takes the tail of each log rather than the whole file. Cloud-init's
+    // logs are inherited down the image chain, so a layer baked onto one that installed
+    // Nix starts with megabytes of its parent's history; dumping all of it floods a serial
+    // console that drains slower than the shell writes, and the token — written after the
+    // dumps — powers off with the machine while still buffered
+    let completion_shell = first_runcmd_step(&rendered);
+    assert!(
+        completion_shell.contains("tail -n 2000 \"$__tddy_log\""),
+        "the dump must be bounded to the log's tail, got: {completion_shell}"
+    );
+    assert!(
+        !completion_shell.contains("cp \"$__tddy_log\""),
+        "the whole file must not be copied, got: {completion_shell}"
+    );
+
+    // And the guest waits before halting, so the token has a chance to reach the host
+    // rather than racing a teardown that does not drain the console
+    assert!(
+        completion_shell.contains("echo \"$1\"\n  # The token has to *reach the host*"),
+        "the token must be echoed before the halt, got: {completion_shell}"
+    );
+    assert!(
+        completion_shell.contains("sleep 5\n  shutdown -h now"),
+        "the halt must give the console time to drain, got: {completion_shell}"
+    );
 }
