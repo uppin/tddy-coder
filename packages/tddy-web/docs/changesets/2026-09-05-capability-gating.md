@@ -74,8 +74,11 @@ carry the capability. Harmless while LiveKit is the only registered provider; th
 Gating is rendering only: `sessionPaneIsWorkflowView` and terminal-claim decisions are unchanged, and
 no media surface was deleted. No proto change, no daemon change, no new npm dependency. Tests: 1046
 unit passing, and the new `PresenceCapabilityGatingAcceptance` (16),
-`SessionInspectorMediaCapabilityAcceptance` (12), `ParticipantVideoCapabilityAcceptance` (4) and
-`CapabilityGatingAcceptance` (5) beside ~380 existing Cypress tests re-run with no assertion changed.
+`SessionInspectorMediaCapabilityAcceptance` (12) and `ParticipantVideoCapabilityAcceptance` (4)
+beside ~380 existing Cypress tests re-run with no assertion changed. The red phase's
+`CapabilityGatingAcceptance` was deleted once these landed: it exercised probe components declared in
+the spec itself, so it could only fail if the predicate did — which `useHasCapability.test.ts` already
+covers — while the three specs above pin the same rule on the real surfaces.
 Technical [capability-gating.md](../capability-gating.md), feature
 [daemon-selector-livekit-rpc.md](../../../../docs/ft/web/daemon-selector-livekit-rpc.md). PR
 [#440](https://github.com/uppin/tddy-coder/pull/440).
