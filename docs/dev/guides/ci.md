@@ -112,48 +112,47 @@ handling and the false-green guard:
 |-------|------|--------|
 | `VM boot control` | all of `vm_boot_control_acceptance` (6 tests) | The launcher, serial-console control, 9p, SSH login with the per-VM key, graceful shutdown |
 | `Cloudinit VM boot` | one test of `cloud_init_acceptance`, `a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh` | That a bake produces a *usable* layer: cloud-init bakes a prepared base, a VM is created from it, boots, and answers `id -un` over SSH as the account the bake provisioned |
-| `Cloudinit + nix + tddy` | all of `tddy_image_chain_acceptance` (1 test) | The whole chain: a cloud-init base with Nix, then both flavours derived from it — the **builder**, which compiles tddy for deployment inside the guest, and the **test host**, which installs those binaries with the real `./install --systemd --headless` and runs them. Asserts `nix` resolves into `/nix/…` on the base, that the builder produced `tddy-supervisor` and `tddy-daemon`, and that on the test host the supervisor is `active` and running as `root` with the daemon already dropped to `tddy` |
+| `Cloudinit + nix + tddy` | all of `tddy_image_chain_acceptance` (1 test) | Cloud-init layers all the way to a serving daemon: bake `tddy-nix-base`, bake the test host on it, install the binaries with the real `./install --systemd --headless`, then assert the supervisor is `active` as `root`, the daemon dropped to `tddy`, and the daemon **answers HTTP on its own web port** — a process in the table proves it started, only a response proves it serves |
 
-The first two need no pre-baked image chain. The third **builds** the chain, and
-is the expensive one by a wide margin.
+None of the three bakes an image chain by hand, and none needs a pre-baked one.
 
-### The cost of the chain leg
+### Where the deployed binaries come from
 
-It runs on every PR by explicit choice. What that buys and what it costs:
+The `build-dist` job runs `./release` on the runner and uploads a flat dist
+directory; the chain leg downloads it and points `TDDY_PREBUILT_DIST_DIR` at it,
+and `BuiltBinaries::from_dist_dir` checks it is complete before a guest boots.
 
-- **Cold**: hours. The builder realises a multi-gigabyte dev shell over slirp
-  (`builder_user_data` retries three times, because a single dropped connection
-  failed a bake ~45 minutes in) and then compiles the workspace — `libwebrtc`
-  included — in a 4-vCPU guest.
-- **Warm**: a boot plus an incremental `./release`. But a GitHub runner is cold
-  every time: `tmp/.tddy` is not cached, so every run pays the full price.
-- **Budget**: `timeout_minutes: 350`, just under GitHub's 360-minute ceiling for
-  a hosted job, so the leg fails with its own logs rather than being killed by
-  the platform.
-- **Disk** is the sharper constraint. The reclaim step drops the .NET, Android,
-  GHC and Boost trees plus the preloaded Docker images; the builder overlay then
-  holds a Nix store and a full release `target/`.
+This deliberately does **not** use the testkit's builder guest. That guest exists
+because a macOS host cannot emit Linux ELF — not a constraint on an x86_64 Linux
+runner. Building in the guest meant realising a multi-gigabyte dev shell over
+slirp and then compiling `libwebrtc` inside a VM: hours, to produce bytes the
+runner produces in minutes. The builder path still has coverage in
+`vm_cgroups_acceptance`, which is where a developer on Apple silicon needs it.
 
-If that proves untenable, the cheap variant is to build the binaries **on the
-runner** — it is x86_64 Linux, and the builder guest exists because an
-Apple-Silicon developer cannot emit Linux ELF, which is not a constraint here —
-and keep only the test-host bake. That drops the builder flavour from CI
-coverage, which is the trade being made either way. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
-against the `SHA512SUMS` published beside it, then cached) because the testkit
-never downloads anything itself by design.
+The trade: the matrix carries one `needs: build-dist` for every leg, so the two
+cheap legs now start after the release build instead of immediately. Splitting
+the chain into its own job would buy that back, at the cost of a second copy of
+the KVM setup — a refactor worth doing only if the wait becomes annoying.
 
-`Cloudinit VM boot` runs one test rather than its whole binary deliberately. The
-other two in `cloud_init_acceptance` each pay for their own bake and then only
-*inspect* the result — qcow2 magic bytes, a relative backing reference — which
-this one subsumes by booting it. `--exact` selects it by name, so adding a test
-to that file does not silently add a bake to CI.
+### arm64
 
-The runner is x86_64, and that matters in two ways. `VmArch::host()` reads
-`std::env::consts::ARCH`, so the guest image must be **amd64**, not the arm64
-one a developer on Apple silicon would use. And on x86_64 the `q35` machine
-boots through SeaBIOS, so `uefi_firmware_for` returns `None` and no `edk2` image
-has to be located — which is fortunate, since the nix QEMU package ships
-`edk2-aarch64-code.fd` but no x86_64 equivalent.
+`Rust build (arm64)` builds the workspace on `ubuntu-24.04-arm`. Native, not
+emulated: `rustc` there is `aarch64-unknown-linux-gnu`, and GitHub's arm64 Linux
+runners are free for public repositories.
+
+It builds and nothing more, because **an arm64 hosted runner has no `/dev/kvm`
+node at all** — measured, not assumed:
+
+```
+arch: aarch64   kernel: 6.17.0-1022-azure   cpus: 4   mem: 15Gi   disk: 145G (109G free)
+ls: cannot access '/dev/kvm': No such file or directory
+qemu-system-aarch64: failed to initialize kvm: No such file or directory
+```
+
+So no VM test can run there: QEMU would fall back to TCG and blow every boot
+budget by an order of magnitude. aarch64 guests remain a developer-machine
+concern. (Both runner classes report the same 145 G disk with ~110 G free, which
+is far more headroom than the VM legs need.)
 
 ### Two traps this workflow guards against
 

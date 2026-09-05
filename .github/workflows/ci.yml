@@ -213,6 +213,49 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  rust-build-arm64:
+    name: Rust build (arm64)
+    runs-on: ubuntu-24.04-arm
+    # The same build on the other architecture this project ships to. Native, not
+    # emulated: GitHub's arm64 Linux runners are free for public repositories, and
+    # `rustc` there is aarch64-unknown-linux-gnu, so nothing is cross-compiled.
+    #
+    # It builds and nothing more. The VM tests cannot run here — an arm64 hosted
+    # runner has no /dev/kvm node at all, so a guest would fall back to TCG and take
+    # hours (measured, see docs/dev/guides/ci.md).
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      # Keyed on the architecture as well as the OS. `runner.os` is "Linux" on both,
+      # so sharing the x86_64 job's key would restore a store full of the wrong
+      # architecture's paths — useless here, and a race to save over each other.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+          gc-max-store-size-linux: 5G
+          save: ${{ github.ref == 'refs/heads/master' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-arm64
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: cargo build
+        run: ./dev cargo build --workspace --bins --examples --locked
+
   web:
     name: Web tests
     runs-on: ubuntu-latest

@@ -45,9 +45,75 @@ env:
   IMAGE_BASE_URL: https://cloud.debian.org/images/cloud/bookworm/latest
 
 jobs:
+  # The binaries the `Cloudinit + nix + tddy` leg deploys.
+  #
+  # This is what the testkit's builder *guest* exists to do — and the reason it
+  # exists is that a macOS host cannot emit Linux ELF, which is not true of this
+  # runner. Building here takes minutes and produces the same bytes; building in
+  # a guest took hours to realise a dev shell over slirp first.
+  build-dist:
+    name: Build deployable binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # ci.yml's rust-build is the sole writer
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dist
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: ./release
+        run: ./release
+
+      # Flat, named exactly as `recipes::deployed_binaries` and the staged names in
+      # `recipes::install_bundle_paths` — the shape `BuiltBinaries::from_dist_dir`
+      # validates and `TestHostVm::deploy` unpacks. The apparmor profile is renamed
+      # rather than flattened under its own basename, which would land on top of the
+      # tddy-daemon binary.
+      - name: Assemble the dist directory
+        run: |
+          mkdir -p dist
+          for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools tddy-sandbox-runner; do
+            cp "target/release/$b" dist/
+          done
+          cp install daemon.yaml.production supervisor.yaml.production dist/
+          cp packages/tddy-daemon/apparmor/tddy-daemon dist/apparmor-tddy-daemon
+          strip dist/tddy-* 2>/dev/null || true
+          ls -la dist; du -sh dist
+
+      - name: Upload the dist directory
+        uses: actions/upload-artifact@v7
+        with:
+          name: tddy-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
+
   vm-suite:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    # Only the chain leg consumes the artifact, but a matrix carries one `needs`
+    # for every leg. The cost is that the two cheap legs start after the release
+    # build rather than immediately.
+    needs: build-dist
     # Per leg: the two cheap ones boot a guest, the chain bakes three images and
     # compiles the workspace inside one of them. 350 is under GitHub's 360-minute
     # ceiling for a hosted job, so the leg fails on its own timeout with logs
@@ -80,22 +146,18 @@ jobs:
             filter: "--exact a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh"
             expected_passing: 1
             timeout_minutes: 90
-          # The whole chain: a cloud-init base with Nix, and the two flavours
-          # derived from it — the builder, which compiles tddy for deployment
-          # inside the guest, and the test host, which installs those binaries
-          # with the real ./install --systemd and runs them under systemd.
-          #
-          # This is the expensive one, deliberately: the builder realises a
-          # multi-gigabyte dev shell over slirp and then compiles the workspace,
-          # libwebrtc included, in a guest. Hours on a cold cache. It runs on
-          # every PR by explicit choice — see docs/dev/guides/ci.md.
+          # Cloud-init layers all the way to a serving daemon: bake tddy-nix-base,
+          # bake the test host on top of it, install the binaries `build-dist`
+          # produced with the real ./install --systemd --headless, and assert the
+          # supervisor is active as root, the daemon dropped to its service
+          # account, and the daemon answers on its own web port.
           - name: Cloudinit + nix + tddy
             slug: cloudinit-nix-tddy
             package: tddy-e2e
             test_binary: tddy_image_chain_acceptance
             filter: ""
             expected_passing: 1
-            timeout_minutes: 350
+            timeout_minutes: 90
     steps:
       - uses: actions/checkout@v7
 
@@ -169,6 +231,16 @@ jobs:
           grep " ${IMAGE_NAME}\$" SHA512SUMS | sha512sum -c -
           rm -f SHA512SUMS
 
+      # Only the leg that deploys them. `download-artifact` does not preserve the
+      # executable bit; `TestHostVm::deploy` chmods everything in the guest after
+      # the copy, which is where it has to happen anyway.
+      - name: Fetch the deployable binaries
+        if: matrix.slug == 'cloudinit-nix-tddy'
+        uses: actions/download-artifact@v7
+        with:
+          name: tddy-dist
+          path: dist
+
       - name: Run ${{ matrix.test_binary }}
         run: |
           set -o pipefail
@@ -179,6 +251,9 @@ jobs:
           # uploaded — a guest failure is usually only explicable from its own
           # console, and there is no other way to see it from a runner.
           export TDDY_VM_CONSOLE_LOG_DIR="$GITHUB_WORKSPACE/vm-console-logs"
+          # Empty for the legs that do not deploy; the test that needs it fails
+          # loudly when it is unset rather than skipping.
+          export TDDY_PREBUILT_DIST_DIR="$GITHUB_WORKSPACE/dist"
           # An unset or wrong path makes every test pass without booting, so
           # check before spending the runtime rather than after.
           test -f "$TDDY_CLOUDINIT_BASE_IMAGE" \

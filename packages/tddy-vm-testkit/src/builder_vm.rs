@@ -60,6 +60,51 @@ pub struct BuiltBinaries {
 }
 
 impl BuiltBinaries {
+    /// Adopt a dist directory somebody else produced, checking it holds everything a
+    /// deployment needs.
+    ///
+    /// The builder guest exists because a macOS host cannot emit Linux ELF. That is not a
+    /// universal constraint: on a Linux x86_64 machine — a CI runner, say — `./release`
+    /// produces exactly the same binaries in minutes, and paying for a guest to rebuild
+    /// them buys nothing. This is the seam for that case, and it validates rather than
+    /// trusts: a dist directory missing a binary would otherwise fail much later, inside a
+    /// guest, as an install that cannot find its own payload.
+    ///
+    /// The directory is flat and named the way [`BuilderVm::build_release`] leaves it —
+    /// [`deployed_binaries`] by their own names, [`install_bundle_paths`] by their staged
+    /// ones.
+    pub fn from_dist_dir(dist_dir: impl Into<PathBuf>) -> Result<Self> {
+        let dist_dir = dist_dir.into();
+        let binaries = deployed_binaries()
+            .into_iter()
+            .map(|name| dist_dir.join(name))
+            .collect::<Vec<_>>();
+        let install_bundle = install_bundle_paths()
+            .into_iter()
+            .map(|(_, staged_name)| dist_dir.join(staged_name))
+            .collect::<Vec<_>>();
+
+        let missing = binaries
+            .iter()
+            .chain(install_bundle.iter())
+            .filter(|path| !path.exists())
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(anyhow!(
+                "{} is not a complete dist directory — missing: {}",
+                dist_dir.display(),
+                missing.join(", ")
+            ));
+        }
+
+        Ok(Self {
+            dist_dir,
+            binaries,
+            install_bundle,
+        })
+    }
+
     /// Everything that has to reach the test host, binaries and bundle together.
     pub fn all_paths(&self) -> Vec<PathBuf> {
         self.binaries
