@@ -1,0 +1,10 @@
+schema_version: 1
+targets:
+  - id: "tddy-tauri-rpc:lib"
+    name: "tddy-tauri-rpc"
+    config:
+      type: rust_library
+      package: tddy-tauri-rpc
+      srcs:
+        - "packages/tddy-tauri-rpc/src/**/*.rs"
+        - "packages/tddy-tauri-rpc/Cargo.toml"

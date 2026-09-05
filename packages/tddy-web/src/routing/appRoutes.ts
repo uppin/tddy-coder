@@ -113,6 +113,13 @@ export function isModelsPath(pathname: string): boolean {
   return pathname === MODELS_ROUTE;
 }
 
+/** Canonical path for the daemon settings screen. */
+export const SETTINGS_ROUTE = "/settings";
+
+export function isSettingsPath(pathname: string): boolean {
+  return pathname === SETTINGS_ROUTE;
+}
+
 /** Path for the sessions drawer screen and its deep links. */
 export const SESSIONS_DRAWER_ROUTE = "/sessions";
 

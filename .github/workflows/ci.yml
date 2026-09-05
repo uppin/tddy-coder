@@ -275,6 +275,17 @@ jobs:
           mkdir -p reports/junit
           ./dev bun run --filter tddy-web test:unit:ci
 
+      - name: Transport package tests
+        id: transports
+        continue-on-error: true
+        run: |
+          # Run both suites even if the first fails, so one broken package does
+          # not hide the other's results.
+          status=0
+          ./dev bun run --filter tddy-rpc-web test:ci || status=1
+          ./dev bun run --filter tddy-tauri-web test:ci || status=1
+          exit $status
+
       - name: Component tests
         id: component
         continue-on-error: true

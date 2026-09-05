@@ -5,7 +5,7 @@
 //! claude-cli/cursor sessions instead share the daemon's one RPC surface, so every request must say
 //! *which* session it targets. This service reads the `session_token`/`session_id` on each request,
 //! resolves them to the session's worktree + catalog directory via the injected [`SessionPathsResolver`]
-//! (built in `main.rs` from the daemon's token/user/sessions-base machinery), and delegates to a
+//! (built in `runtime.rs` from the daemon's token/user/sessions-base machinery), and delegates to a
 //! `BspServiceImpl` scoped to that session.
 
 use std::path::PathBuf;

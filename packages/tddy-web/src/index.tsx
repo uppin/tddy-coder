@@ -2,7 +2,8 @@ import "./index.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import type { Room } from "livekit-client";
-import { RpcTransportProvider, useHttpClient } from "./rpc/transportProvider";
+import { RpcTransportProvider, useHttpClient, useHttpTransport } from "./rpc/transportProvider";
+import { loadClientConfig } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import type { DaemonHost } from "./lib/participantRole";
@@ -56,6 +57,7 @@ import { ModelsAppPage } from "./components/models/ModelsAppPage";
 import { TasksDrawerScreen } from "./components/tasks/TasksDrawerScreen";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
 import { SessionsDrawerScreen } from "./components/sessions/SessionsDrawerScreen";
+import { SettingsAppPage } from "./components/settings/SettingsAppPage";
 import {
   isRpcPlaygroundPath,
   isTasksPath,
@@ -63,6 +65,7 @@ import {
   isProjectsPath,
   isModelsPath,
   isLiveKitPath,
+  isSettingsPath,
   isSessionsDrawerPath,
   parseTerminalSessionIdFromPathname,
   SESSIONS_DRAWER_ROUTE,
@@ -210,18 +213,18 @@ function ConnectionForm() {
   const [roomName, setRoomName] = useState("terminal-e2e");
   const [debugLogging, setDebugLogging] = useState(false);
   const [connected, setConnected] = useState(false);
+  const transport = useHttpTransport();
 
   useEffect(() => {
     // URL params take priority, then server config, then defaults
     const params = getParamsFromUrl();
 
-    fetch("/api/config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((config: { livekit_url?: string; livekit_room?: string; debug?: string } | null) => {
+    loadClientConfig(transport)
+      .then((config) => {
         applyDebugMaskFromConfig(config?.debug);
-        setUrl(params.url || config?.livekit_url || "");
+        setUrl(params.url || config?.livekitUrl || "");
         setIdentity(params.identity || "");
-        setRoomName(params.roomName || config?.livekit_room || "terminal-e2e");
+        setRoomName(params.roomName || config?.livekitRoom || "terminal-e2e");
         setDebugLogging(params.debugLogging);
       })
       .catch(() => {
@@ -230,7 +233,7 @@ function ConnectionForm() {
         setRoomName(params.roomName || "terminal-e2e");
         setDebugLogging(params.debugLogging);
       });
-  }, []);
+  }, [transport]);
 
   if (connected && url && identity) {
     return (
@@ -364,6 +367,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const { location, navigate } = useAppLocation();
   const path = location.path;
   const { isAuthenticated, isLoading: authLoading, login, error: authError } = useAuthContext();
+  const transport = useHttpTransport();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
     livekitUrl?: string;
@@ -373,29 +377,19 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   }>({ daemonMode: null });
 
   useEffect(() => {
-    fetch("/api/config")
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (config: {
-          daemon_mode?: boolean;
-          livekit_url?: string;
-          common_room?: string;
-          daemon_instance_id?: string;
-          allowed_agents?: { id: string; label: string }[];
-          debug?: string;
-        } | null) => {
-          applyDebugMaskFromConfig(config?.debug);
-          setAppConfig({
-            daemonMode: config?.daemon_mode ?? false,
-            livekitUrl: config?.livekit_url,
-            commonRoom: config?.common_room,
-            daemonInstanceId: config?.daemon_instance_id,
-            allowedAgents: config?.allowed_agents,
-          });
-        }
-      )
+    loadClientConfig(transport)
+      .then((config) => {
+        applyDebugMaskFromConfig(config?.debug);
+        setAppConfig({
+          daemonMode: config?.daemonMode ?? false,
+          livekitUrl: config?.livekitUrl,
+          commonRoom: config?.commonRoom,
+          daemonInstanceId: config?.daemonInstanceId,
+          allowedAgents: config?.allowedAgents,
+        });
+      })
       .catch(() => setAppConfig({ daemonMode: false }));
-  }, []);
+  }, [transport]);
 
   const daemonMode = appConfig.daemonMode;
 
@@ -443,6 +437,8 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
               <ModelsAppPage onNavigate={navigate} />
             ) : isLiveKitPath(path) ? (
               <LiveKitAppPage onNavigate={navigate} />
+            ) : isSettingsPath(path) ? (
+              <SettingsAppPage onNavigate={navigate} />
             ) : path === "/worktrees" ? (
               <WorktreesAppPage onNavigate={navigate} />
             ) : isSessionsDrawerPath(path) ? (

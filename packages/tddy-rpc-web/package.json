@@ -1,0 +1,28 @@
+{
+  "name": "tddy-rpc-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./test-fixtures": "./src/gen/test/echo_service_pb.ts"
+  },
+  "scripts": {
+    "generate": "buf generate ../tddy-rpc/proto",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src",
+    "test:ci": "bun test src --reporter=junit --reporter-outfile=../../reports/junit/rpc-web.xml"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.0",
+    "@connectrpc/connect": "^2.0.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.50.0",
+    "@bufbuild/protoc-gen-es": "^2.2.0",
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

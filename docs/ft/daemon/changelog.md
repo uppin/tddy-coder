@@ -2,6 +2,12 @@
 
 **Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **`##`** first; **distinct titles** when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
 
+## 2026-09-05 — The daemon as a library, and its own settings
+
+- **tddy-daemon**: the bootstrap moves out of `main()` into **`tddy_daemon::runtime`** (959 → 183 lines); `build` is assembly — it binds no socket, joins no room, spawns no task — so the binary and an embedding process assemble the **same roster**. Feature **[tddy-desktop-tauri.md](../desktop/tddy-desktop-tauri.md)**.
+- **tddy-daemon**: **`daemon_config.DaemonConfigService`** reads and writes the daemon's YAML — secrets redacted, validation before any write, atomic rename, `restart_required` for what cannot apply live — with a supervisor that genuinely reconnects the LiveKit common room. Feature **[daemon-settings.md](daemon-settings.md)**.
+- **tddy-core**: `LogConfig` and its nested types gained `Serialize` so `DaemonConfig` can be written back.
+
 ## 2026-08-30 — A workspace session's tools run inside a jail on the host holding the checkout
 
 - **`sandbox` now means something on a `workspace` session.** It confined the agent and left the tools it called running on the host — fine while both are on one daemon, wrong the moment the codebase lives on another, which is why `sandbox` was refused on a split placement at all.

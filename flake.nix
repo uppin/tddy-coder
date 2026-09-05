@@ -50,6 +50,20 @@
             # xcap → gbm-sys / X11 path: link needs libgbm and libxcb (-lgbm -lxcb)
             pkgs.libgbm
             pkgs.libxcb
+            # Tauri (packages/tddy-desktop/src-tauri) → wry/tao on Linux: WebKitGTK 4.1 plus the
+            # GTK stack it links against. macOS needs none of this — the webview is the system
+            # WKWebView. Without these, `cargo build --workspace` fails on Linux at pkg-config.
+            pkgs.webkitgtk_4_1
+            pkgs.libsoup_3
+            pkgs.gtk3
+            # TLS for the webview's own network stack (glib-networking provides the GIO TLS backend)
+            pkgs.glib-networking
+            # Tauri renders the tray/window icons through librsvg
+            pkgs.librsvg
+            pkgs.cairo
+            pkgs.pango
+            pkgs.gdk-pixbuf
+            pkgs.atk
           ];
           packages = [
             rustToolchain
@@ -59,6 +73,8 @@
             pkgs.cargo-nextest
             pkgs.buf
             pkgs.protobuf
+            # `cargo tauri dev` / `cargo tauri build` for packages/tddy-desktop.
+            pkgs.cargo-tauri
             pkgs.bzip2
             pkgs.git
             pkgs.bun

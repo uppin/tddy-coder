@@ -45,6 +45,10 @@ export const appShellPage = {
   projectsItem: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.shellMenuProjects, { timeout: 5000, ...options }),
 
+  /** The Settings menu item. */
+  settingsItem: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.shellMenuSettings, { timeout: 5000, ...options }),
+
   /** The visible labels of every menu item in the open menu, in DOM order. */
   menuItemLabels: (): Cypress.Chainable<string[]> =>
     appShellPage.menuItems().then(($items) => [...$items].map((el) => el.textContent!.trim())),

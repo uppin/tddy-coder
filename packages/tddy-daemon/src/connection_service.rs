@@ -1181,7 +1181,7 @@ pub struct ConnectionServiceImpl {
     /// hand a client.
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
     /// Self-reference for handing out `Arc<ConnectionServiceImpl>` from a `&self` method. Set
-    /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `main.rs`;
+    /// once (via [`Self::set_self_handle`]) right after the top-level `Arc::new` in `runtime.rs`;
     /// shared across `Clone`s because it is itself behind an `Arc`, so a clone tonic holds can
     /// still recover the original `Arc`. Used by the sandbox-IPC RPC bridge: a sandboxed session's
     /// `dial_and_bridge` builds a `DaemonRpcHandler` from `self_arc()` so the in-jail `tddy-tools`
@@ -1842,7 +1842,7 @@ impl ConnectionServiceImpl {
     }
 
     /// Record the `Weak` to the top-level `Arc<ConnectionServiceImpl>` so a `&self` method can
-    /// recover the `Arc` via [`Self::self_arc`]. Called once, right after `Arc::new`, in `main.rs`.
+    /// recover the `Arc` via [`Self::self_arc`]. Called once, right after `Arc::new`, in `runtime.rs`.
     /// Shared across `Clone`s (the field is an `Arc<OnceLock<…>>`), so a clone tonic holds still
     /// sees the same handle. Idempotent: a second call is a no-op, which is what tests want when
     /// they re-construct a service in the same process.

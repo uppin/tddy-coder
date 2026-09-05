@@ -1,8 +1,8 @@
-# Dev config for tddy-daemon when started from Tddy Desktop (Electrobun) or `bun run desktop:dev`.
-# From `packages/tddy-desktop`, use `bun run dev` (not raw `electrobun dev`) so `TDDY_WORKSPACE_ROOT`
-# / daemon binary paths resolve; or run `./scripts/desktop-dev.sh` from the repo root.
+# Dev config for the tddy-daemon Tddy Desktop hosts in its own process (`bun run desktop:dev`).
+# Run `./scripts/desktop-dev.sh` from the repo root, or `bun run dev` from `packages/tddy-desktop`
+# with `TDDY_WORKSPACE_ROOT` set, so the workspace root resolves.
 # Default when TDDY_DAEMON_CONFIG is unset: this file at the repo root (if it exists).
-# Repo-root `.env` is loaded before spawn (same rule as ./web-dev: does not override already-set env).
+# Repo-root `.env` is loaded first (same rule as ./web-dev: does not override already-set env).
 # tddy-daemon then applies env overrides (LIVEKIT_URL, LIVEKIT_API_KEY, WEB_HOST, GITHUB_*, etc.) — see packages/tddy-daemon/src/main.rs apply_env_overrides.
 # For browser dev without the desktop shell, keep using ./web-dev with dev.daemon.yaml (or DAEMON_CONFIG).
 #
@@ -41,11 +41,17 @@ log:
 # embedded + CLI daemons on one machine do not hit DuplicateIdentity.
 daemon_instance_id_append_startup_timestamp: true
 
+# Sessions and daemon state, kept inside the checkout. An installed app defaults to `~/.tddy`;
+# naming it here means a `./desktop-dev` run never writes into that, and does not merely inherit
+# the debug-build default.
+tddy_data_dir: tmp/.tddy
+
 listen:
   web_port: 8899
   web_host: 127.0.0.1
 
-# Production web bundle (used when hitting the daemon port directly). With desktop:dev + Vite, open the Vite URL for HMR.
+# Production web bundle, for a tddy-daemon binary started with this file. The desktop app embeds
+# its own copy at bundle time and binds no port, so it does not read this.
 web_bundle_path: packages/tddy-web/dist
 
 livekit:
@@ -58,10 +64,11 @@ livekit:
 github:
   stub: true
   stub_codes: "test-code:testuser"
+  redirect_uri: "http://localhost:5173/auth/callback"
 
 users:
   - github_user: "testuser"
-    os_user: "CURRENT_USER" # Replaced before spawn (same as ./web-dev)
+    os_user: "CURRENT_USER" # Replaced with the OS user at load (same as ./web-dev)
 
 spawn_mouse: true
 
