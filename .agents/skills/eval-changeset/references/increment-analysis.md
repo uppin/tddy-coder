@@ -54,6 +54,20 @@ happened; the blame pass below says *where* and *whose*.
 **Watch for a formatter.** If `cargo fmt` or a lint autofix ran mid-stack, reformatted lines count as
 rework. Re-run the numstats with `-w` and report both if the gap is large.
 
+### Changed files — per PR and integrated
+
+```bash
+# per PR, judged count: production + test + config, excluding generated
+git diff --name-only "$INTEGRATION".."origin/$N" \
+  | grep -vE '(Cargo\.lock|bun\.lock|\.snap$)' | wc -l
+git diff --name-only "$INTEGRATION".."origin/$N" | grep -cE '\.md$'   # docs, reported separately
+# integrated
+git diff --name-only "$BASE"..eval/<slug> | grep -vE '(Cargo\.lock|bun\.lock|\.snap$)' | wc -l
+```
+
+Over **20** judged files, a PR gets the atomic core test below. The integrated count is context for
+it: twelve PRs of 25 files each is a different finding from one PR of 25 in a stack of twelve.
+
 ### File overlap — the cheap pre-filter
 
 ```bash
@@ -93,6 +107,29 @@ Report per PR: **rework lines**, **rework share** (rework ÷ own changed lines),
 predecessor** the rework landed on. "PR 5 rewrote 180 of PR 2's lines" is the sentence this whole
 reference exists to let you write.
 
+## Measuring the atomic core
+
+For a PR over the 20-file line, the atomic core is the smallest set of its files that must land
+together for the tree to compile and its tests to pass. Read it off the diff first — name the
+keystone edit and the files that exist only to satisfy it. When the planning-versus-design verdict
+actually turns on the answer, prove it in the eval worktree:
+
+```bash
+SEP="<paths you believe were separable>"
+git checkout "$BASE" -- $SEP        # revert that subset to the fork point
+./dev cargo check -p <crate>        # compiles without it?
+./test -p <crate>                   # and still green? then it was separable
+git checkout HEAD -- $SEP           # restore the eval tree — do not leave it reverted
+```
+
+- **Compiles and passes** → the subset was separable; the oversize is a **planning** finding, proven.
+- **Fails to compile** → read the error. It names the symbol that enforces the boundary — the trait
+  method, the struct field, the enum variant. That symbol is the design finding, and quoting it is
+  what makes the § 8 proposal concrete.
+
+Two cautions: revert *whole files*, never hunks, or you are testing a tree nobody could have shipped;
+and restore afterwards, since every later measurement reads the same worktree.
+
 ## The summary table
 
 One row per PR in stack order, integrated total last — so the comparison is on one screen:
@@ -100,9 +137,12 @@ One row per PR in stack order, integrated total last — so the comparison is on
 | PR | Own +/- | Files | Overlap | Rework | Rework % | Rewrote |
 |---|---|---|---|---|---|---|
 | 1/3 `feature/x/store` | +420 / -12 | 6 | — | 0 | 0% | — |
-| 2/3 `feature/x/service` | +310 / -95 | 9 | 4 | 78 | 19% | 1/3 |
+| 2/3 `feature/x/service` | +310 / -95 | **27** ⚠ | 4 | 78 | 19% | 1/3 |
 | 3/3 `feature/x/ui` | +260 / -8 | 5 | 1 | 0 | 0% | — |
-| **Integrated** | **+890 / -40** | **17** | | | **inflation 1.24** | |
+| **Integrated** | **+890 / -40** | **39** | | | **inflation 1.24** | |
+
+⚠ marks a PR over the 20-file line — it gets the atomic core test in
+[`SKILL.md`](../SKILL.md) § 5a.
 
 ## Reading it
 

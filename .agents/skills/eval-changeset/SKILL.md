@@ -1,6 +1,6 @@
 ---
 name: eval-changeset
-description: Evaluate a landed or in-flight changeset — one PR, or a whole stack squashed into a single integration branch — for complexity, whether that complexity was justified by the expressed intent, how cleanly each stacked PR incremented on its predecessors, how the system's design helped or fought the change, and what redesign would have made it easier. Use when reviewing the cost of a change after the fact, deciding whether a stack was worth its size or split along the right seams, or looking for the design deficiency a painful change exposed.
+description: Evaluate a landed or in-flight changeset — one PR, or a whole stack squashed into a single integration branch — for complexity, whether that complexity was justified by the expressed intent, how cleanly each stacked PR incremented on its predecessors, whether any PR was too large to review or to go green on its own, how the system's design helped or fought the change, and what redesign would have made it easier. Use when reviewing the cost of a change after the fact, deciding whether a stack was worth its size or split along the right seams, or looking for the design deficiency a painful change exposed.
 ---
 
 # eval-changeset — judge a changeset as one unit
@@ -19,8 +19,8 @@ The unit of evaluation is the **changeset**: the whole delta from the trunk to t
 stack of PRs is one changeset, so it is squashed into a single integration branch in a temporary
 worktree and measured there. Reviewing a stack node-by-node systematically under-reports its cost —
 the plumbing that node 2 added for node 5 looks free in both diffs and is only visible in the union.
-But the per-node diffs are not thrown away either: comparing each node against the integrated total
-is what answers question 3.
+But the per-PR diffs are not thrown away either: comparing each PR against the integrated total is
+what answers question 3.
 
 ## When to use
 
@@ -44,8 +44,8 @@ quality (`/validate-tests`), per-file metrics (`/analyze-clean-code`), or CRAP s
   judgement and options.
 - **Challenge the change, and yourself.** If the size was justified, say so plainly and stop looking
   for a villain. A changeset that is large because the problem is large is a good changeset.
-- **Never push the eval branch, never delete a node branch.** A stack node's branch is its children's
-  base; deleting it closes their PRs (`pr-stack` golden rule 2).
+- **Never push the eval branch, never delete a stack branch.** A stack branch is its successor's
+  base; deleting it closes that PR (`pr-stack` golden rule 2).
 
 ## Workflow
 
@@ -114,7 +114,7 @@ A linear stack squashes in one step, because the top branch already contains eve
 linearized late, leaves a branch that is not an ancestor of the top.
 
 `tmp/` is gitignored, and this worktree needs no `target/` or `node_modules` unless you take the
-optional deep pass in § 7 — so it is cheap, unlike the per-node worktrees `pr-stack` warns about.
+optional deep pass in § 7 — so it is cheap, unlike the per-PR worktrees `pr-stack` warns about.
 
 Two things that are findings in themselves, not setup noise:
 
@@ -160,7 +160,7 @@ git diff --stat "$BASE"..HEAD | tail -1
 git diff --numstat "$BASE"..HEAD                     # per-file +/-; the basis for every split below
 git diff --name-status --find-renames "$BASE"..HEAD  # A/M/D/R
 git diff --dirstat=files,0 "$BASE"..HEAD             # where the change concentrated
-git log --oneline "$BASE"..HEAD | wc -l              # pre-squash commit count, from the node branches
+git log --oneline "$BASE"..HEAD | wc -l              # pre-squash commit count, from the stack branches
 ```
 
 Split the line counts by **role**, and report generated content separately — never inside a total
@@ -185,7 +185,7 @@ justifies it:
   public API, an installed unit? Hard-to-reverse costs more than its line count suggests.
 - **Review cost** — realistic reviewer-hours, and whether the node boundaries actually reduced them.
 
-### 5. Per-node increments — stacks only
+### 5. Per-PR increments — stacks only
 
 **The ideal stack is one where every PR is a pure increment: it adds to what its predecessors built
 and rewrites none of it.** A node that re-edits lines an earlier node in the same stack wrote is
@@ -203,12 +203,13 @@ Then compute the three figures that matter:
 
 | Figure | How | Reads as |
 |---|---|---|
-| **Inflation** | Σ per-node changed lines ÷ integrated changed lines | 1.0 = every node a pure increment. 1.3 = 30% of the work never reached the final tree. |
+| **Inflation** | Σ per-PR changed lines ÷ integrated changed lines | 1.0 = every PR a pure increment. 1.3 = 30% of the work never reached the final tree. |
 | **Rework, per PR** | of the lines this PR deletes or replaces, the share whose blame lands on a **predecessor in this same stack** | the direct measure of "changed what predecessors developed" |
 | **File overlap** | files this PR touches that a predecessor also touched | the cheap pre-filter — blame only the overlapping files |
 
-Report a row per PR — own size, files, overlap with predecessors, rework lines, rework share — and
-put the integrated total on the last row so the comparison the table exists for is on one screen.
+Report a row per PR — own size, **changed files**, overlap with predecessors, rework lines, rework
+share — and put the integrated total on the last row so the comparison the table exists for is on one
+screen. Flag every PR whose changed-file count is over 20; those get § 5a.
 
 Distinguish two things a blame hit can mean, because only one is rework:
 
@@ -229,14 +230,69 @@ evidence separates them:
 Do not force a single verdict on the whole stack. Attribute **per rework site**, then say which
 cause dominates by lines.
 
+### 5a. Oversized PRs — the 20-file line
+
+**Report the changed-file count for every PR, and for the integrated changeset.** Count production +
+test + config; report docs and generated files separately and keep them out of the figure you judge,
+the same way § 4 does.
+
+**A PR changing more than 20 such files gets its own analysis.** Twenty is a review-attention
+heuristic, not a law — say so, and do not manufacture a finding for a PR at 21. But past it, a
+reviewer stops holding the whole change in their head, and `pr-stack`'s contract is already at risk:
+every PR must be independently reviewable and independently mergeable — **self-greenable**, meaning
+its own tests pass, its CI is green, and it can land without its successors.
+
+The question is the same shape as the rework verdict, with a different subject:
+
+> Could this PR have been smaller and still gone green on its own?
+
+**The atomic core test answers it.** The atomic core is the smallest set of the PR's changed files
+that must land *together* for the tree to compile and its tests to pass. Everything outside the core
+was separable — it could have been its own PR, below or above this one.
+
+| Finding | What it looks like |
+|---|---|
+| **Planning** — the PR bundled separable work | The atomic core is small; the remainder is separable and often cohesive on its own (a rename, a docs sweep, a second responsibility, opportunistic cleanup from § 6). A different cut *was* available and nobody took it. **The fix is a better plan** — name the split, in linear order, in § 8. |
+| **Design** — nothing smaller could have gone green | The atomic core is itself over the line. No decomposition would have been smaller, because the system forces these files to move together. **The fix is a redesign**, and it earns a § 8 proposal. |
+
+When the verdict is *design*, name the force — the diagnosis is worthless unless it is specific:
+
+| Force | Why nothing smaller compiles or goes green |
+|---|---|
+| **Signature atomicity** | a trait method, type or wire message changed, so every implementor and call site must move in the same commit. In Rust this is a hard compile boundary, not a preference — and the size of the blast is the size of the trait's implementor set |
+| **Knowledge duplication** | one fact declared in K homes (a config key across `./install`, `daemon.yaml`, the unit file, a Rust default, a docs table) — all K must change together or the system is inconsistent at rest |
+| **Circular dependency** | two packages that must change in lockstep because neither can compile against the other's old shape |
+| **No seam to land behind** | no trait, registry or flag lets the old and new paths coexist for the length of one PR, so the swap has to be total |
+| **Test-at-the-end** | the only test that proves the change is an acceptance test that passes only once the last layer lands. This is also a `## Draft PR contract` failure — that heading exists precisely so a predecessor can ship failing tests and unblock its successors |
+| **Mechanical ripple** | a rename or move touching N files. Listed here because it *looks* like design, but it is **usually planning**: a pure-mechanical PR first, then the behavioural one, is almost always available. Call it design only if the rename cannot be separated from the behaviour change |
+
+**Measuring the core.** Cheap version: read the diff and name the keystone — the one edit that
+everything else exists to satisfy. Definitive version, in the eval worktree, when the verdict actually
+turns on it:
+
+```bash
+git checkout "$BASE" -- <candidate separable paths>   # revert the subset you believe was separable
+./dev cargo check -p <crate>                          # or ./test -p <crate> for the green claim
+git checkout HEAD -- <candidate separable paths>      # restore the eval tree afterwards
+```
+
+If it still compiles and that package's tests still pass, the subset **was** separable and the
+planning verdict is proven rather than asserted. If it does not, you have located a real atomicity
+boundary and can say exactly which symbol enforces it. Skip this when the answer is already obvious
+from the diff, and say in the report which way you decided it.
+
+**A single PR over the line is the same question, asked once:** *should this have been a stack at
+all?* Run the same atomic core test — if the core is small, the answer is yes, and § 8 names the PRs
+it should have been.
+
 **Also check the boundary contract itself** while the per-PR data is in hand: a PR whose diff is only
 types or only stubs, a PR that implements a surface its `## Dependencies` says belongs to a
 predecessor, a PR that cannot be reviewed without reading its successor, or a PR missing any of the
 four required headings. Each is a planning finding independent of the rework count — as is a chain
 that was never registered with `gh stack link`, which leaves reviewers no stack view at all.
 
-For a **single PR** this whole step is skipped — say so in the report rather than omitting the
-section.
+For a **single PR** the increment figures do not apply — say so rather than omitting the section —
+but **§ 5a still runs**: a 40-file standalone PR raises the same question a 40-file PR inside a stack does.
 
 ### 6. Classify every hunk — the number that carries the whole report
 
@@ -284,6 +340,7 @@ evidence, and the incidental lines it caused:
 | **Cross-package cycle** | the change forced a dependency edge that should not exist |
 | **Homeless code** | new code landed in a package because nothing owned the concern |
 | **Unsplittable chokepoint** | every PR of the stack had to edit the same file — the § 5 *system* verdict, seen from the design side |
+| **Compile-atomic surface** | a signature whose implementor set is so wide that no PR touching it can stay small — the § 5a *design* verdict, seen from the design side |
 
 Also check what the change *avoided* saying: a fallback added without consent, a test-only branch in
 production code, a `TODO`/`FIXME` standing in for the hard half. CLAUDE.md forbids the first two
@@ -303,19 +360,21 @@ these are inputs, and if you skip them the report says so:
 
 Write the report to `tmp/eval-changeset/<slug>/report.md` using
 [`references/report-template.md`](references/report-template.md), and give the user the verdicts, the
-headline numbers — including the per-node table if it is a stack — and the ranked proposals in the
+headline numbers — including the per-PR table if it is a stack — and the ranked proposals in the
 reply, not the whole document.
 
 Proposals come in **two kinds**, and mixing them wastes the distinction § 5 just established:
 
-- **Planning proposals** — where the stack should have been cut instead. Concrete: name the PRs, their
-  responsibilities, their order, and which rework each would have avoided. Keep the proposed cut
-  **linear** — a branching proposal is not implementable here. These cost nothing to adopt and apply
-  to the *next* stack.
+- **Planning proposals** — where the stack should have been cut instead: the rework § 5 attributed to
+  planning, and the separable remainder § 5a found in an oversized PR. Concrete: name the PRs, their
+  responsibilities, their order, and what each would have avoided. Every proposed PR must be
+  **self-greenable** — its own tests pass, without its successors — or you have proposed the layer
+  split the boundary contract forbids. Keep the cut **linear**; a branching proposal is not
+  implementable here. These cost nothing to adopt and apply to the *next* stack.
 - **Redesign proposals** — the payload for question 5. Raise one only for a friction site that cost
   real lines, and give each of them all six parts:
 
-  1. **Deficiency** — which friction site, quantified from § 6 and § 5.
+  1. **Deficiency** — which friction site, quantified from § 6, § 5 and § 5a.
   2. **Proposal** — the seam, in one sentence, naming the types or modules it would create.
   3. **Counterfactual** — what *this* changeset would have been under it: *"≈4 files / ≈300 lines
      instead of 19 / 2,400; PRs 3 and 4 would not have existed, and PR 5's rework of PR 2

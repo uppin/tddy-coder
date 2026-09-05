@@ -3,7 +3,7 @@
 The shape of `tmp/eval-changeset/<slug>/report.md`. Every `<…>` is filled from a command that ran;
 a measurement that was skipped is written as **skipped**, never as a zero or an estimate.
 
-Keep the reply to the user short — the verdicts, the headline numbers, the per-node table if it is a
+Keep the reply to the user short — the verdicts, the headline numbers, the per-PR table if it is a
 stack, and the ranked proposals. The document is where the evidence lives.
 
 ```markdown
@@ -20,6 +20,7 @@ or built from local unpushed refs>
 **Complexity: <low | moderate | high | very high>** — <one sentence>
 **Justification: <justified | justified but oversized | under-scoped | unjustified>** — <one sentence>
 **Increments: <clean | some rework | heavy rework>** — <one sentence; single PR ⇒ not applicable>
+**PR size: <all within 20 files | <n> over the line>** — <one sentence>
 **Cause of rework: <planning | system | discovery | linearization | mixed>** — <one sentence>
 **Design: <carried the change | mixed | fought the change>** — <one sentence>
 
@@ -28,6 +29,8 @@ or built from local unpushed refs>
 | Production lines | +<a> / -<b> across <n> files |
 | Essential share | <p>% of production lines |
 | Incidental share | <q>% — <the friction site that caused most of it> |
+| Changed files | <n> judged (<d> docs, <g> generated, excluded) |
+| Largest PR | <k>/N at <n> files <— over the 20-file line> |
 | Stack inflation | <x>× — <y>% of the work never reached the final tree |
 | Reviewable in | ≈<h>h |
 
@@ -69,7 +72,7 @@ weak evidence and should be read as such.>
 | Reversibility | | <behind a seam | wire format | on-disk | public API | installed unit> |
 | Review cost | | <≈h hours; whether node boundaries reduced it> |
 
-## 4. Per-node increments
+## 4. Per-PR increments and PR size
 
 <Single PR: "Not applicable — single PR." and nothing else.>
 
@@ -78,6 +81,8 @@ weak evidence and should be read as such.>
 | 1/N `<branch>` | | | | | | |
 | … | | | | | | |
 | **Integrated** | | | | | **inflation <x>×** | |
+
+<Mark every PR over 20 judged files with ⚠ — each gets an entry under *Oversized PRs* below.>
 
 **Ideal:** inflation 1.0 — every PR a pure increment, no predecessor's lines rewritten.
 **Measured:** <x>× — <n> lines of the stack's work did not survive into the final tree.
@@ -89,6 +94,23 @@ weak evidence and should be read as such.>
   avoided this? name it, or say why none would have>
 
 <Repeat per site. Then: which cause dominates by lines, and why.>
+
+### Oversized PRs
+
+<None over the line: "Every PR changed 20 files or fewer." and nothing else.>
+
+#### PR <k>/N — <n> files
+
+- **Atomic core:** <n> files — <the keystone edit, and what exists only to satisfy it>
+- **Separable remainder:** <n> files — <what it was: a rename, a docs sweep, a second responsibility>
+- **Decided by:** <read from the diff | proven — reverted `<paths>`, `cargo check -p <crate>` passed
+  / failed on `<symbol>`>
+- **Finding: <planning | design>**
+  - *planning* → <the split that was available, in linear order; goes to § 8 Planning>
+  - *design* → **<force>**: <signature atomicity | knowledge duplication | circular dependency | no
+    seam to land behind | test-at-the-end | mechanical ripple> — <the symbol or fact that enforces
+    it; goes to § 8 Redesign>
+- **Self-greenable:** <yes | no — what it needed from a successor to pass its own tests>
 
 ### Boundary contract
 
@@ -117,9 +139,9 @@ its successor, a document missing one of the four required headings, or a chain 
 ## 6. Justification
 
 <Whether the size and complexity above are warranted by the intent in § 1. Cite the essential share,
-the opportunistic share, and — for a stack — the inflation figure and whether the node boundaries
-followed the intent's own seams or just the layers. A layer split is a boundary-contract violation,
-not a style preference.>
+the opportunistic share, and — for a stack — the inflation figure, any PR over the 20-file line and
+what § 4 decided about it, and whether the PR boundaries followed the intent's own seams or just the
+layers. A layer split is a boundary-contract violation, not a style preference.>
 
 <If a smaller change would have delivered the same intent, say concretely what it would have been.>
 
@@ -150,6 +172,8 @@ each would have avoided. Costs nothing to adopt; applies to the next stack.>
 - **Instead of `<2/3: service> → <3/3: ui>`, cut `<2/3: feature A end to end> → <3/3: feature B end
   to end>`** — avoids <n> lines of rework, because <reason>. <The proposed cut is linear: a branching
   one cannot be registered as a stack.>
+- **Split PR <k>/N (<n> files) into `<a: the separable remainder>` → `<b: the atomic core>`** — each
+  self-greenable, <n> and <m> files. <Which order, and why that one.>
 
 ### Redesign — ranked by (lines saved next time × recurrence) ÷ migration cost
 
