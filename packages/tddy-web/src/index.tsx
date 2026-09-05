@@ -8,7 +8,8 @@ import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
 import type { DaemonHost } from "./lib/participantRole";
-import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
+import { GhosttyTerminalSession } from "./components/GhosttyTerminalSession";
+import { useDirectRoomTerminal } from "./rpc/connections/livekit/useDirectRoomTerminal";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
 
@@ -45,7 +46,6 @@ function HmrOverlay() {
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
 import { TokenService } from "./gen/token_pb";
 import { useVisualViewport } from "./hooks/useVisualViewport";
-import { useIsMobile } from "./hooks/useIsMobile";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
@@ -121,8 +121,7 @@ function ConnectedTerminal({
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
-  const isMobile = useIsMobile();
+  const { height: viewportHeight } = useVisualViewport();
 
   useEffect(() => {
     // `sessionToken` is not passed: the field exists on the request, so the transport's auth gate
@@ -151,6 +150,24 @@ function ConnectedTerminal({
     },
     [client, roomName, identity]
   );
+
+  // The room is this screen's to join: it was handed a url, an identity and a room name, and there
+  // is no session and no daemon behind them to open a connection on. The terminal it feeds knows
+  // none of that — see `useDirectRoomTerminal`.
+  //
+  // Called with the other hooks, above every early return. It used to be a component rendered in
+  // the JSX below, where an early return was harmless; as a hook, returning before it would make
+  // this render call fewer hooks than the last and React would throw instead of painting. The
+  // failing render is precisely the `error` one below — so the screen whose job is to show a token
+  // failure was the screen that could not.
+  const terminal = useDirectRoomTerminal({
+    url,
+    token: initialToken ?? undefined,
+    getToken,
+    ttlSeconds: ttlSeconds ?? undefined,
+    roomName,
+    debug: debugLogging ?? false,
+  });
 
   if (error) {
     return (
@@ -189,20 +206,26 @@ function ConnectedTerminal({
 
   return (
     <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
-      <GhosttyTerminalLiveKit
-        url={url}
-        token={initialToken}
-        getToken={getToken}
-        ttlSeconds={ttlSeconds}
-        roomName={roomName}
-        debugMode={false}
-        debugLogging={debugLogging ?? false}
-        autoFocus={!isMobile}
-        preventFocusOnTap={isMobile && !isKeyboardOpen}
-        showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
-        fullscreenTargetRef={fullscreenTargetRef}
-      />
+      {terminal.feed ? (
+        <GhosttyTerminalSession
+          feed={terminal.feed}
+          connectionStatus={terminal.status}
+          connectionError={terminal.error ?? undefined}
+          debugLogging={debugLogging ?? false}
+          connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+          fullscreenTargetRef={fullscreenTargetRef}
+        />
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <ConnectionTerminalChrome
+            overlayStatus={terminal.status}
+            buildId={BUILD_ID}
+            onDisconnect={onDisconnect}
+            onTerminate={onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -262,10 +262,10 @@ The inspector **Details** tab shows bytes in, bytes out (both via `formatBytes`,
 and a "last data received: Ns ago" relative timestamp that advances while the inspector is open.
 The source is dual:
 
-- **Attached LiveKit session** — the session's `GhosttyTerminalLiveKit` fires an `onBytes` event
+- **Attached LiveKit session** — the session's `GhosttyTerminalSession` fires an `onBytes` event
   per terminal I/O unit: `bytesIn = output.data.length` per received output chunk, and
   `bytesOut = data.length` per batched input yield sent to the coder. These thread up through
-  `SessionLiveKitTerminal` → `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
+  `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
   which folds them into the session's runtime counters via `SessionRuntimeRegistry.recordBytes`
   (`makeByteTap`). The registry's `notify()` re-renders the screen (`useSyncExternalStore`), so the
   meter ticks live — even for a backgrounded session. `lastDataReceivedAt` is stamped from inbound
@@ -1164,7 +1164,7 @@ names the holding screen and provides a button to steal control.
 
 - Rendered inside `SessionMainPane` when `terminalControl.isController === false`.
 - Full-cover absolute scrim over the terminal container (`data-testid="terminal-control-overlay"`),
-  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalLiveKit`.
+  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalSession`.
 - Contains:
   - A brief message: "Controlled by another screen".
   - The holder screen identifier (`data-testid="terminal-control-holder"`).

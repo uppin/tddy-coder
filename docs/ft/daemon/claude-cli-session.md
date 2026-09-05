@@ -29,7 +29,7 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 5. `StartSessionResponse` returns `session_id`; no LiveKit credentials (empty strings).
 
 ### Terminal access
-6. The web UI opens a `GhosttyTerminalGrpc` component connected to `StreamSessionTerminalIO` (gRPC bidirectional stream on `ConnectionService`).
+6. The web UI opens a `GhosttyTerminalSession` component connected to `StreamSessionTerminalIO` (gRPC bidirectional stream on `ConnectionService`).
 7. All keyboard input and output are relayed in real time. Terminal resize events update the PTY.
 8. No LiveKit connection is made for Claude Code CLI sessions.
 
@@ -180,9 +180,9 @@ response's `default_model`. The web holds no model list of its own; the catalog 
 
 ### Web: terminal component
 
-New `GhosttyTerminalGrpc` component wraps `GhosttyTerminal` and connects `onData`/`onResize` to a gRPC `StreamSessionTerminalIO` bidi stream via the existing Connect-Web gRPC client. The component uses the same connection-chrome pattern as `GhosttyTerminalLiveKit` (status dot, disconnect, terminate).
+The `GhosttyTerminalSession` component wraps `GhosttyTerminal` and connects `onData`/`onResize` to a gRPC `StreamSessionTerminalIO` bidi stream via the existing Connect-Web gRPC client. It carries the connection-chrome pattern (status dot, disconnect, terminate).
 
-`ConnectionScreen` mounts `GhosttyTerminalGrpc` (instead of `GhosttyTerminalLiveKit`) when the attached session's `agent` is `claude-cli`.
+`ConnectionScreen` mounts `GhosttyTerminalSession` on the session's host-served terminal feed when the attached session's `agent` is `claude-cli`.
 
 ## Session table display
 

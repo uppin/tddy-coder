@@ -1,8 +1,8 @@
 /**
  * Acceptance test: the PR-Stack Chat Screen must open its own dedicated LiveKit room
  * connection for the session's remote Presenter, derived from the session's own
- * `connectSession`/`resumeSession` attachment — the same room/url the terminal
- * (`SessionLiveKitTerminal`) independently connects to. Today it is handed
+ * `connectSession`/`resumeSession` attachment — the same room/url the session's own
+ * connection joins. Today it is handed
  * `SessionMainPane`'s VNC-purpose `room` prop instead, which is always `null`, so the
  * chat can never actually send or receive anything.
  *

@@ -1,17 +1,15 @@
 /**
- * Behaviour spec: the Sessions-screen terminal (GhosttyTerminalGrpc) must accept
- * text typed on a mobile soft keyboard and forward it to the PTY stream.
+ * Behaviour spec: the Sessions-screen terminal must accept text typed on a mobile soft keyboard and
+ * forward it to the PTY stream.
  *
- * Soft keyboards fire DOM `input` events (not `keydown` with a `key`), so
- * ghostty-web's `onData` never sees them. The terminal therefore needs the same
- * hidden-input mobile keyboard affordance that GhosttyTerminalLiveKit has.
- *
- * Fails today: GhosttyTerminalGrpc renders no mobile keyboard affordance, so the
- * typed character never reaches `stream.send`.
+ * Soft keyboards fire DOM `input` events (not `keydown` with a `key`), so ghostty-web's `onData`
+ * never sees them. The terminal therefore needs a hidden-input mobile keyboard affordance of its
+ * own — one of the two behaviours that used to exist on only one of the two terminals.
  */
 
 import React from "react";
-import { GhosttyTerminalGrpc, type GrpcStream } from "../../src/components/GhosttyTerminalGrpc";
+import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import type { TerminalStream } from "../../src/rpc/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS, shortcutButton } from "../support/testIds";
 
@@ -21,7 +19,7 @@ const TYPED_CHAR_BYTE = 0x78; // UTF-8 for "x"
 const SHIFT_TAB_SHORTCUT = { label: "Shift+Tab", keys: ["Shift", "Tab"] };
 const SHIFT_TAB_BYTES = [0x1b, 0x5b, 0x5a]; // CSI Z (reverse tab)
 
-function aCapturingStream(): GrpcStream {
+function aCapturingStream(): TerminalStream {
   return {
     send: cy.stub().as("streamSend"),
     onMessage: () => {},
@@ -30,17 +28,17 @@ function aCapturingStream(): GrpcStream {
 }
 
 function mountSessionsTerminalOnMobile(
-  stream: GrpcStream,
+  stream: TerminalStream,
   mobileShortcuts?: { label: string; keys: string[] }[],
 ) {
   cy.viewport(375, 667);
   cy.mount(
     <div style={{ width: 375, height: 500, position: "relative" }}>
       <UploadProgressProvider>
-        <GhosttyTerminalGrpc
+        <GhosttyTerminalSession
+          feed={{ stream }}
           sessionToken="test-token"
           sessionId="test-session"
-          stream={stream}
           mobileShortcuts={mobileShortcuts}
         />
       </UploadProgressProvider>

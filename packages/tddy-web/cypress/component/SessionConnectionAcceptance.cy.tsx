@@ -194,11 +194,9 @@ const CONNECTION_STATUS_EL = "probe-connection-status";
 function AttachedSessionRuntime({
   connection,
   hint,
-  tokenClient,
 }: {
   connection: SessionConnection;
   hint?: SessionAttachmentHint;
-  tokenClient?: ReturnType<typeof createClient<typeof TokenService>>;
 }) {
   const observed = useConnectionStatus(connection);
   return (
@@ -216,7 +214,6 @@ function AttachedSessionRuntime({
         }}
         focused
         sessionToken={A_SESSION_TOKEN}
-        tokenClient={tokenClient}
       />
     </div>
   );
@@ -226,12 +223,17 @@ function AttachedSessionRuntime({
  * A session room that joins without a media server.
  *
  * The connection's own join is not what these specs are about — they are about what the overlay
- * does once it has landed — so the room settles immediately instead of reaching anything.
+ * does once it has landed — so the room settles immediately instead of reaching anything. It carries
+ * the roster listeners as well: the terminal a runtime opens on such a session watches the room for
+ * the participant serving its PTY, and a double that answered no `on`/`off` would fail the mount
+ * rather than the assertion.
  */
 function aRoomThatJoinsAtOnce(): Room {
   const room = {
     state: ConnectionState.Disconnected,
     remoteParticipants: new Map<string, { identity: string }>(),
+    on: () => room,
+    off: () => room,
     connect: async () => {
       room.state = ConnectionState.Connected;
     },
@@ -356,10 +358,10 @@ describe("the handshake overlay over an attached session's panes", () => {
     byTestId(TEST_IDS.sessionConnectionOverlay).should("not.exist");
   });
 
-  it("stays up while the terminal is still handshaking, though the connection says connected", () => {
-    // Given a room-backed session whose connection has joined its room, and whose terminal — which
-    // still performs a *second*, independent join of the same room — is reaching for a media server
-    // that is not there
+  it("lifts on a room-backed session once its connection is up, because the terminal has no join of its own", () => {
+    // Given a room-backed session whose connection has joined its room. The terminal used to make a
+    // *second*, independent join of that same room, so the pane stayed covered until both had
+    // landed; it now reads its bytes off this connection, and there is one handshake to wait for
     interceptGenerateToken();
     const transport = createConnectTransport({
       baseUrl: `${window.location.origin}/rpc`,
@@ -372,19 +374,12 @@ describe("the handshake overlay over an attached session's panes", () => {
     const hint = attachmentHintFromReply(A_SESSION, A_ROOM_BACKED_REPLY);
     const connection = host.openSession(A_SESSION, hint);
 
-    cy.mount(
-      <AttachedSessionRuntime
-        connection={connection}
-        hint={hint}
-        tokenClient={createClient(TokenService, transport)}
-      />,
-    );
+    cy.mount(<AttachedSessionRuntime connection={connection} hint={hint} />);
 
-    // Then the connection is connected and the overlay is up anyway. The pane the overlay covers is
-    // the terminal's, and the two handshakes are still separate objects — lifting on the connection
-    // alone would hand the operator an interactive terminal that has not connected to anything
+    // Then the connection is connected and the pane is interactive. Keeping the overlay up here
+    // would now be waiting on a handshake nobody is performing
     byTestId(CONNECTION_STATUS_EL).should("have.text", "connected");
-    byTestId(TEST_IDS.sessionConnectionOverlay, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.sessionConnectionOverlay).should("not.exist");
   });
 
   it("says so when the connection failed rather than sitting on Connecting", () => {

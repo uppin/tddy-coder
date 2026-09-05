@@ -4,7 +4,7 @@ import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
  * A one-finger drag on a mobile terminal must reach whoever owns the scrolling, exactly as the
  * wheel does on desktop.
  *
- * Desktop already gates the wheel three ways (`GhosttyTerminalGrpc` + ghostty-web's own handler):
+ * Desktop already gates the wheel three ways (`GhosttyTerminalSession` + ghostty-web's own handler):
  * a mouse-tracking TUI gets an SGR wheel report, a pager in the alternate screen gets ghostty-web's
  * Up/Down emulation, and only the normal screen scrolls the emulator's scrollback (the live pane of
  * the history double buffer, at `scrollback: 0`, turning that into the lazy-history fill).

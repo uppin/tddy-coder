@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { GhosttyTerminal } from "./GhosttyTerminal";
-import { GhosttyTerminalLiveKit } from "./GhosttyTerminalLiveKit";
+import { GhosttyTerminalSession } from "./GhosttyTerminalSession";
+import { useDirectRoomTerminal } from "../rpc/connections/livekit/useDirectRoomTerminal";
 
 const meta: Meta<typeof GhosttyTerminal> = {
   component: GhosttyTerminal,
@@ -47,6 +48,13 @@ export const ColorPalette: Story = {
   },
 };
 
+/**
+ * The terminal on a room the story was handed the coordinates for.
+ *
+ * The join is the story's, not the terminal's: `useDirectRoomTerminal` connects the room and opens
+ * the feed, and `GhosttyTerminalSession` renders whatever arrives on it. This is the entry point
+ * the `ghostty-*` E2E suite drives, with `url`/`token` passed in the iframe's query string.
+ */
 function LiveKitConnectedStory(args: {
   url?: string;
   token?: string;
@@ -62,6 +70,7 @@ function LiveKitConnectedStory(args: {
   const showBufferTextForTest = args.showBufferTextForTest ?? true;
   const debugMode = args.debugMode ?? params?.get("debugMode") === "1";
   const debugLogging = args.debugLogging ?? params?.get("debugLogging") === "1";
+  const terminal = useDirectRoomTerminal({ url, token, roomName, debug: debugMode || debugLogging });
 
   if (!url || !token) {
     return (
@@ -71,11 +80,15 @@ function LiveKitConnectedStory(args: {
     );
   }
 
+  if (!terminal.feed) {
+    return <div data-testid="livekit-status">{terminal.status}</div>;
+  }
+
   return (
-    <GhosttyTerminalLiveKit
-      url={url}
-      token={token}
-      roomName={roomName}
+    <GhosttyTerminalSession
+      feed={terminal.feed}
+      connectionStatus={terminal.status}
+      connectionError={terminal.error ?? undefined}
       showBufferTextForTest={showBufferTextForTest}
       debugMode={debugMode}
       debugLogging={debugLogging}
@@ -86,7 +99,7 @@ function LiveKitConnectedStory(args: {
   );
 }
 
-export const LiveKitConnected: StoryObj<typeof GhosttyTerminalLiveKit> = {
+export const LiveKitConnected: StoryObj<typeof LiveKitConnectedStory> = {
   render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
     <LiveKitConnectedStory {...args} />
   ),
@@ -104,7 +117,7 @@ export const LiveKitConnected: StoryObj<typeof GhosttyTerminalLiveKit> = {
 };
 
 /** Minimal LiveKit terminal for echo E2E: only loads terminal RPC, no debug panel. OCR asserts on rendered output. Add ?debugLogging=1 to URL for data flow logs. */
-export const LiveKitEcho: StoryObj<typeof GhosttyTerminalLiveKit> = {
+export const LiveKitEcho: StoryObj<typeof LiveKitConnectedStory> = {
   render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
     <LiveKitConnectedStory
       {...args}
@@ -130,7 +143,7 @@ export const LiveKitEcho: StoryObj<typeof GhosttyTerminalLiveKit> = {
  * sizes the terminal predictably, and hidden `terminal-buffer-text` for E2E assertions (matches
  * Rust `grpc_terminal_rpc` large segmented echo scenario: line-based echo after Enter).
  */
-export const LiveKitEchoLargeSegmented: StoryObj<typeof GhosttyTerminalLiveKit> = {
+export const LiveKitEchoLargeSegmented: StoryObj<typeof LiveKitConnectedStory> = {
   render: (args: Parameters<typeof LiveKitConnectedStory>[0]) => (
     <div
       style={{

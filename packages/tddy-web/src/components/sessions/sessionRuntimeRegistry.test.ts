@@ -14,6 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
+import type { TerminalFeed } from "../../rpc/connections/terminal";
 import type { SessionConnection } from "../../rpc/connections/session";
 import type { ConnectionCapability } from "../../rpc/connections/types";
 import {
@@ -162,6 +163,9 @@ function aSessionConnection(sessionId: string) {
     },
     transport: (): Transport => {
       throw new Error("this connection is a lifetime stand-in and issues no calls");
+    },
+    openTerminal: (): TerminalFeed => {
+      throw new Error("this connection is a lifetime stand-in and serves no terminal");
     },
     close: () => {
       closes += 1;

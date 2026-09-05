@@ -10,7 +10,7 @@ const defaultMakeIdentity = () => `browser-presenter-${Math.random().toString(36
 
 /**
  * Derive the PR-Stack Chat Screen's own dedicated LiveKit room target from the attached session's
- * routing hint — the same room/url the terminal (`SessionLiveKitTerminal`) independently connects
+ * routing hint — the same room/url the session's own connection joins for its terminal
  * to. Returns `null` for a session that names no room: one the host serves itself has nothing for a
  * second participant to join, and neither has a session that is not attached at all.
  *

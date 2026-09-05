@@ -3,14 +3,13 @@
  * is initiated from an "Attach" button in the Keyboard strip. Picking a file
  * runs the same upload → type-path flow as a desktop drop.
  *
- * Fails today: `GhosttyTerminalGrpc` renders no upload button, and there is no
- * `UploadSessionFileChunk` RPC nor path-typing.
  *
  * PRD: docs/ft/web/web-terminal.md § Mobile UX — File upload from the Keyboard strip
  */
 
 import React from "react";
-import { GhosttyTerminalGrpc, type GrpcStream } from "../../src/components/GhosttyTerminalGrpc";
+import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import type { TerminalStream } from "../../src/rpc/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
@@ -20,7 +19,7 @@ import { TEST_IDS, byTestId } from "../support/testIds";
 import { terminalFileUploadPage as page } from "../support/pages/terminalFileUploadPage";
 import { reconstructUtf8 } from "../support/util/fileDrop";
 
-function aCapturingStream(): GrpcStream {
+function aCapturingStream(): TerminalStream {
   return {
     send: cy.stub().as("streamSend"),
     onMessage: () => {},
@@ -35,16 +34,16 @@ function anUploadBackend(): InMemoryRpcBackend {
   );
 }
 
-function mountMobileTerminal(stream: GrpcStream, backend: InMemoryRpcBackend) {
+function mountMobileTerminal(stream: TerminalStream, backend: InMemoryRpcBackend) {
   cy.viewport(375, 667);
   mountWithRpc(
     withSelectedDaemon(
       <UploadProgressProvider>
         <div style={{ width: 375, height: 500, position: "relative" }}>
-          <GhosttyTerminalGrpc
+          <GhosttyTerminalSession
+            feed={{ stream }}
             sessionToken="tok"
             sessionId="s1"
-            stream={stream}
           />
         </div>
       </UploadProgressProvider>,

@@ -30,6 +30,101 @@ function aChunk(
   };
 }
 
+/**
+ * The fill a terminal drives when its stream carries no offsets at all.
+ *
+ * A LiveKit-carried session's frames are `terminal.TerminalOutput`, which is `bytes data` and
+ * nothing else — there is no `end_offset` to anchor against. That is a different fact from an
+ * anchor of zero, which a `SessionTerminalOutput` replay frame reports when the terminal has
+ * captured nothing, so the two are constructed differently.
+ */
+function anUnanchoredLoader(): TerminalHistoryForwardLoader {
+  return new TerminalHistoryForwardLoader(null);
+}
+
+/** A host that serves `chunks` in order, and records the range each fetch asked for. */
+function aHostServing(...chunks: HistoryChunk[]) {
+  const asked: Array<{ from: bigint; until: bigint | null }> = [];
+  let next = 0;
+  return {
+    asked,
+    fetchChunk: async (from: bigint, until: bigint): Promise<HistoryChunk | null> => {
+      asked.push({ from, until });
+      return next < chunks.length ? chunks[next++] : null;
+    },
+  };
+}
+
+describe("a forward fill with no offset anchor", () => {
+  it("pages forward from the oldest retained byte", async () => {
+    // Given a host holding two pages of older output, and a terminal whose stream never told it
+    // where the live tail is
+    const host = aHostServing(
+      aChunk("older-1\n", 0n, 600n, /* atOldest */ true, /* atEnd */ false),
+      aChunk("older-2\n", 600n, 1000n, /* atOldest */ false, /* atEnd */ true),
+    );
+    const loader = anUnanchoredLoader();
+
+    // When the fill runs
+    const first = await loader.loadNext(host.fetchChunk);
+    const second = await loader.loadNext(host.fetchChunk);
+
+    // Then both pages arrive, in order. An anchor of zero would have made the loader `done` before
+    // it asked for anything — which is why "no anchor" is not spelled `0n`.
+    expect([first?.data, second?.data]).toEqual([enc("older-1\n"), enc("older-2\n")]);
+  });
+
+  it("asks the host for history up to the capture tip", async () => {
+    // Given an unanchored fill over two pages
+    const host = aHostServing(
+      aChunk("older-1\n", 0n, 600n, /* atOldest */ true, /* atEnd */ false),
+      aChunk("older-2\n", 600n, 1000n, /* atOldest */ false, /* atEnd */ true),
+    );
+    const loader = anUnanchoredLoader();
+
+    // When the fill runs
+    await loader.loadNext(host.fetchChunk);
+    await loader.loadNext(host.fetchChunk);
+
+    // Then each fetch resumes at the previous chunk's end and bounds itself with `0n`, which
+    // `GetTerminalHistory` reads as "until the capture tip"
+    expect(host.asked).toEqual([
+      { from: 0n, until: 0n },
+      { from: 600n, until: 0n },
+    ]);
+  });
+
+  it("terminates on the chunk that reports atEnd", async () => {
+    // Given a host whose single page already reaches the capture tip
+    const host = aHostServing(aChunk("all of it\n", 0n, 200n, /* atOldest */ true, /* atEnd */ true));
+    const loader = anUnanchoredLoader();
+
+    // When the fill runs past that page
+    const first = await loader.loadNext(host.fetchChunk);
+    const afterTheEnd = await loader.loadNext(host.fetchChunk);
+
+    // Then the page arrived and nothing follows it — with no anchor to compare against, the
+    // chunk's own verdict is the only thing that ends the fill
+    expect([first?.data, afterTheEnd]).toEqual([enc("all of it\n"), null]);
+  });
+
+  it("reports the offset the next fetch resumes from", async () => {
+    // Given a host serving a page that does not reach the tip
+    const host = aHostServing(
+      aChunk("older-1\n", 0n, 600n, /* atOldest */ true, /* atEnd */ false),
+      aChunk("older-2\n", 600n, 1000n, /* atOldest */ false, /* atEnd */ true),
+    );
+    const loader = anUnanchoredLoader();
+
+    // When the first page lands
+    const first = await loader.loadNext(host.fetchChunk);
+
+    // Then the page states where the fill resumes — its own end, which is what the caller driving
+    // the fill reads back
+    expect(first?.nextFromOffset).toBe(600n);
+  });
+});
+
 describe("TerminalHistoryForwardLoader", () => {
   it("is done immediately when the anchor is zero (no captured history)", () => {
     const loader = new TerminalHistoryForwardLoader(0n);

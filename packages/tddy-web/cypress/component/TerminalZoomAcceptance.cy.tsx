@@ -1,7 +1,7 @@
 import React, { createRef } from "react";
 import { flushSync } from "react-dom";
 import { GhosttyTerminal, type GhosttyTerminalHandle } from "../../src/components/GhosttyTerminal";
-import { GhosttyTerminalLiveKit } from "../../src/components/GhosttyTerminalLiveKit";
+import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
 import {
   DEFAULT_TERMINAL_FONT_MAX,
   DEFAULT_TERMINAL_FONT_MIN,
@@ -9,13 +9,13 @@ import {
   pitchOutFontSize,
 } from "../../src/lib/terminalZoom";
 import { dispatchTerminalZoomBridgeOn } from "../../src/lib/terminalZoomBridge";
-import { defaultGetToken } from "../support/drivers/ghosttyTerminalLiveKitDriver";
+import { aControllableFeed } from "../support/drivers/ghosttyTerminalSessionDriver";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
 /**
  * Acceptance contract (embedded terminal zoom / pitch):
  * - Font steps use the same `terminalZoom` helpers as keyboard / bridge paths (`setTerminalFontSize` on the imperative handle).
- * - LiveKit case uses `dispatchTerminalZoomBridgeOn` from the terminal textarea's `ownerDocument.defaultView` (same `window` as `GhosttyTerminal` listeners).
+ * - The session-terminal case uses `dispatchTerminalZoomBridgeOn` from the terminal textarea's `ownerDocument.defaultView` (same `window` as `GhosttyTerminal` listeners).
  * - `ghostty-terminal` exposes data-terminal-font-size (integer string) for assertions
  * - Pitch tests wait briefly after the terminal textarea exists so the `ready` + prop-sync effect has run before imperative `setTerminalFontSize` (avoids a race on warm init).
  */
@@ -229,17 +229,11 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     byTestId(TEST_IDS.ghosttyTerminal).should("have.attr", "data-terminal-font-size", "8");
   });
 
-  it("livekit_resize_osc_enqueued_when_dimensions_change_after_zoom", () => {
+  it("session_terminal_resize_osc_sent_when_dimensions_change_after_zoom", () => {
     // Given
     cy.mount(
       <div style={{ height: 400, position: "relative" }}>
-        <GhosttyTerminalLiveKit
-          url="ws://localhost:9999"
-          token="fake-token"
-          getToken={defaultGetToken}
-          ttlSeconds={BigInt(600)}
-          debugLogging
-        />
+        <GhosttyTerminalSession feed={aControllableFeed().feed} debugLogging />
       </div>
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
@@ -287,7 +281,7 @@ describe("Terminal zoom acceptance (PRD Testing Plan)", () => {
     // Then — font size increases
     byTestId(TEST_IDS.ghosttyTerminal).should(($el) => {
       const fs = Number($el.attr("data-terminal-font-size"));
-      expect(fs, "livekit path: font must increase after pitch-in").to.be.greaterThan(14);
+      expect(fs, "session terminal: font must increase after pitch-in").to.be.greaterThan(14);
     });
 
     // eslint-disable-next-line cypress/no-unnecessary-waiting
