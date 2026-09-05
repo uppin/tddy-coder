@@ -199,7 +199,7 @@ pub agents_rev: u64,
 
 No migration and no back-compat shim: per the repo's standing rule, the old field is removed
 outright and a `.session.yaml` carrying it loads with an empty roster. It is recorded in
-`docs/dev/changelog.md` as a breaking change to session files.
+`docs/dev/changelog/` as a breaking change to session files.
 
 ### What an agent is doing
 

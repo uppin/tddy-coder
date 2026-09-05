@@ -1,0 +1,5 @@
+# 2026-07-26 — pr-stack-branch-gated-spawn: a stack progresses on **branches, not sessions**. `Stack::base_ref_for_spawn` now refuses on a non-merged parent with no `branch` ("has no branch to base onto yet") instead of on a missing `session_id`, so a closed or cleaned-up child session no longer wedges every node below it; `Stack::effective_base_refs` counts only branch-bearing non-merged parents and no longer fabricates `origin/<node_id>` for a branchless one. New `resolve_stack_node_branch(sessions_root, node) -> Option<String>` (the node's own `branch`, else the `branch` in its child session's changeset
+
+**Type:** Fix
+
+a missing session dir resolves to `None`, never an error) and `read_stack_with_resolved_branches(sessions_root, orchestrator_session_id)` (the orchestrator's stack hydrated through that resolver; read-only). Feature [pr-stack-live-status.md](../../../../docs/ft/coder/pr-stack-live-status.md), [pr-stacking.md](../../../../docs/ft/coder/pr-stacking.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

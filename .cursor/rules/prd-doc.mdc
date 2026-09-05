@@ -122,41 +122,36 @@ The changelog file is automatically created/updated by the `/wrap-context-docs` 
 
 ### Location
 
-**Separate file**: `docs/ft/{product-area}/changelog.md`
+**Separate directory**: `docs/ft/{product-area}/changelog/`
 
-Each product area maintains one changelog file that tracks all changes across all features in that product area.
+Each product area maintains one changelog **directory** that tracks all changes across all features in that product area. Every entry is **its own file**, named `YYYY-MM-DD-<slug>.md`. There is deliberately **no index** — the directory listing is the index, and the date prefix sorts it.
 
 ### Format
 
-Align with [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) and `docs/ft/{product-area}/changelog.md` in this repo.
+Align with [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) and the existing entries in `docs/ft/{product-area}/changelog/` in this repo.
+
+`docs/ft/{product-area}/changelog/2026-04-06-example-feature.md`:
 
 ```markdown
-# {Product Area} Changelog
-
-Release note history for the {Product Area} product area.
-
-**Merge hygiene:** [Changelog merge hygiene](../../dev/guides/changelog-merge-hygiene.md) — newest **##** first; distinct titles when two releases share a date; single-line bullets; do not edit older sections for unrelated work.
-
-## 2026-04-06 — Example feature (short slug)
+# 2026-04-06 — Example feature
 
 - **package**: Summary with links to feature docs.
-- **Docs**: [feature.md](feature.md).
-
-## 2026-04-05 — Earlier release
-
-- …
+- **Docs**: [feature.md](../feature.md).
 ```
+
+Links are relative to the **entry's own directory**, which is one level deeper than the product area — so a sibling feature doc is `../feature.md`, not `feature.md`.
 
 ### Guidelines
 
 **Rules**:
-- **Reverse chronological order**: each wrap adds a **new `## YYYY-MM-DD — Title`** section **below** the intro (newest `##` first).
-- **Distinct `##` titles** when two releases land on the same calendar day (different slug after the em dash).
-- **Single-line bullets** under each section; long prose belongs in feature docs.
+- **One new file per wrap.** Never append to an existing entry, and never add an index that every branch would have to edit — a shared append-point is exactly what this layout replaces.
+- **Filename** `YYYY-MM-DD-<short-slug>.md`; if the name is taken, add `-2`. Distinct slugs when two releases land on the same calendar day.
+- **First line** `# YYYY-MM-DD — Title`.
+- **Body**: whatever the entry needs — prose, bullets, tables, links. There is no length rule; the old single-line-bullet discipline existed only to keep git's `union` merge driver effective, and that driver is gone.
 - **No file references** to deleted PRDs — source PRDs are deleted after wrapping
 - **Past tense** — "Added X", "Enhanced Y", "Removed Z"
-- One `changelog.md` per product area (not per feature)
-- **Do not edit** older `##` blocks for unrelated follow-up work—prepend a new `##` at the top.
+- One `changelog/` per product area (not per feature)
+- **Never edit or reorder** an existing entry to tidy it up in the same PR as unrelated work. Corrections are their own commit.
 
 ## PRD Lifecycle
 

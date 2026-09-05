@@ -1,7 +1,7 @@
 # PRD Amendment: split-sandbox-orchestration
 
 Amends [`docs/ft/daemon/remote-managed-worktree.md`](../remote-managed-worktree.md) (State A).
-Dependency: [`docs/dev/1-WIP/2026-08-30-workspace-tool-sandbox.md`](../../dev/changesets.md) — workspace tool sandbox (#427, landed).
+Dependency: [`docs/dev/1-WIP/2026-08-30-workspace-tool-sandbox.md`](../../dev/changesets/) — workspace tool sandbox (#427, landed).
 
 ## Problem
 

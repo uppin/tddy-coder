@@ -1,0 +1,5 @@
+# 2026-04-10 — Tddy Desktop (Electrobun) Phases 1–3
+
+**Type:** Feature
+
+Electrobun native shell (`packages/tddy-desktop`) with embedded `tddy-web`, OAuth callback server, LiveKit relay (`CodexOAuthService/DeliverCallback`); `codex_oauth.proto` + `CodexOAuthServiceImpl` in **tddy-service**; `run_with_reconnect_metadata` + `spawn_local_participant_metadata_watcher` in **tddy-livekit**; multi-service wiring in **tddy-coder**; conditional codegen imports in **tddy-codegen**; `codex_oauth_pb.ts` in **tddy-livekit-web**; ParticipantList OAuth UX + `codexOauthMetadata` in **tddy-web**. Feature **[tddy-desktop-electrobun.md](../../ft/desktop/tddy-desktop-electrobun.md)**; changelogs **[desktop/changelog/](../../ft/desktop/changelog/)**, **[web/changelog/](../../ft/web/changelog/)**, **[coder/changelog/](../../ft/coder/changelog/)**; package changesets for **tddy-desktop**, **tddy-service**, **tddy-livekit**, **tddy-coder**, **tddy-codegen**, **tddy-livekit-web**, **tddy-web**. (tddy-desktop, tddy-service, tddy-livekit, tddy-coder, tddy-codegen, tddy-livekit-web, tddy-web, docs)

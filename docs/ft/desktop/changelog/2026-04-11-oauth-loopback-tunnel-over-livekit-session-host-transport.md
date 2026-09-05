@@ -1,0 +1,3 @@
+# 2026-04-11 — OAuth loopback tunnel over LiveKit (session host + transport)
+
+- **tddy-service**: **`LoopbackTunnelServiceImpl`**. **tddy-coder**: LiveKit **`MultiRpcService`** includes **LoopbackTunnel** (+ **Token** when applicable). **tddy-livekit** / **tddy-livekit-web**: **`rpc_scenarios`** tunnel coverage and **`loopback_tunnel_pb`**. Operator-side TCP is implemented in **`tddy-daemon`** (see **OAuth loopback TCP owned by tddy-daemon** above). Feature docs: **[codex-oauth-web-relay.md](../../web/codex-oauth-web-relay.md)**, **[tddy-desktop-electrobun.md](../tddy-desktop-electrobun.md)**.

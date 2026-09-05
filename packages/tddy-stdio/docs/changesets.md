@@ -1,8 +1,0 @@
-# Changesets Applied
-
-Wrapped changeset history for tddy-stdio.
-
-**Merge hygiene:** [Changelog merge hygiene](../../../docs/dev/guides/changelog-merge-hygiene.md) — prepend one single-line bullet; do not rewrite shipped lines.
-
-- **2026-07-01** [Feature] **`StdioEndpoint::from_duplex` — wrap an already-open duplex stream** — new public constructor for hosting an `RpcService` over any `AsyncRead`/`AsyncWrite` pair the caller already owns (not just a `tokio::process::Command` `spawn_child_endpoint` spawns itself) — needed for jailed/sandboxed process stdio, which platform-specific spawn code (Seatbelt `sandbox-exec`, Linux namespaces) must own the spawning of. Cross-package: [docs/dev/changesets.md](../../../docs/dev/changesets.md). PR [#253](https://github.com/uppin/tddy-coder/pull/253). (tddy-stdio, tddy-sandbox-runner, tddy-daemon, tddy-tools)
-- **2026-07-01** [Feature] **New package — stdio/IPC RPC transport** — `StdioRpcClient` (implements `tddy_rpc::RpcClientTransport`, backed by `tddy_rpc::client_engine::ClientEngine`), `StdioBidiSender` for incremental real-time bidi sends, `StdioEndpoint` (length-prefixed framed duplex, demuxes `Request`/`Response` frames via `tddy_rpc::transport::FrameKind` so one peer can be both client and server over one pipe), `spawn_child_endpoint`/`ChildEndpoint` for parent→child process RPC. 5 acceptance tests including a reverse-call scenario (child calls a service hosted by the parent) and concurrent/streaming/bidi multiplexing over one pipe pair. Feature [rpc-multi-transport.md](../../../docs/ft/coder/rpc-multi-transport.md). (tddy-stdio)

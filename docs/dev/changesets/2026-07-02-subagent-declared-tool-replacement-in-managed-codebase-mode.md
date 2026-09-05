@@ -1,0 +1,5 @@
+# 2026-07-02 — Subagent-declared tool replacement in managed-codebase mode
+
+**Type:** Feature
+
+a discovery subagent (FastContext → `Grep`+`Glob`) can declare which exec tools it replaces on the main agent; when wired in, those tools are dropped from the sandboxed Claude `--allowedTools` (`tddy-sandbox-recipes`/`tddy-sandbox-runner`) and the managed-codebase appendix names the subagent that must be used instead (`tddy-sandbox`), configurable via `--subagent-replaces`/`TDDY_SUBAGENT_REPLACES` (default resolved from the subagent's own declaration when no override is given). Extended to daemon-hosted sandboxed sessions (`tddy-daemon`, new `StartSessionRequest` proto fields in `tddy-service`, persisted on `SessionMetadata` in `tddy-core` for resume) at the user's request during PR wrap, since the daemon path had no discovery-subagent wiring at all before this change. Feature [managed-codebase-subagents.md § Tool replacement](../../ft/coder/managed-codebase-subagents.md#tool-replacement-subagent-declared). (tddy-discovery, tddy-sandbox, tddy-sandbox-recipes, tddy-sandbox-runner, tddy-sandbox-app, tddy-daemon, tddy-core, tddy-service)

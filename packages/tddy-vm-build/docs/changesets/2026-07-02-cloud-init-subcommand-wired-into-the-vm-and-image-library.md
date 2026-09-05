@@ -1,0 +1,5 @@
+# 2026-07-02 — `cloud-init` subcommand wired into the VM & Image Library
+
+**Type:** Feature
+
+`CloudInitBuildArgs.output_dir` replaced with optional `--library-root` (defaults to the profile tddy data dir, or `$HOME/.tddy`); `run_cloud_init_build` now imports `--base-image` into `images/01-base/`, points the unchanged `build_cloud_init_image` pipeline at a per-image scratch subdirectory (`images/02-prepared-base/<name>/`, holding the seed ISO/SSH keypair/boot log), then moves only the finished qcow2 pair up to the flat `images/02-prepared-base/` location `tddy_vm::cloud_init::cloud_init_library_paths` resolves (via the new `move_scratch_output` helper, preserving the overlay's relative backing-file reference) and locks both halves read-only. `tests/cloud_init_cli_acceptance.rs` split into 4 production tests by semantic claim, sharing a `run_cloud_init_cli` helper. Feature [vm/tddy-vm.md](../../../../docs/ft/vm/tddy-vm.md) § VM & Image Library; cross-package [changesets/](../../../../docs/dev/changesets/). (tddy-vm-build, tddy-vm)

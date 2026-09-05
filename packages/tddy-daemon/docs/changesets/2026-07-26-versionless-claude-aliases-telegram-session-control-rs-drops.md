@@ -1,0 +1,5 @@
+# 2026-07-26 — versionless-claude-aliases: `telegram_session_control.rs` drops its two private `&[(&str, &str)]` model tables
+
+**Type:** Feature
+
+`CLAUDE_CLI_MODELS` / `CURSOR_CLI_MODELS` are now `LazyLock<Vec<BackendModel>>` over `tddy_core::backend::claude_cli_models()` / `cursor_cli_models()`, so both keyboards render the shared catalog's `label` and index into it (fixing the Claude keyboard's stale labels and taking Cursor from 3 buttons to 5). `handle_telegram_claude_model_callback` / `handle_telegram_cursor_model_callback` resolve `model_idx` through `.get(..).map(|m| m.id.as_str())`, erroring on an out-of-range index instead of resolving to an arbitrary model. Tests: 3 added (alias ordering, plus Claude and Cursor keyboards asserted equal to the core catalogs) — `telegram_start_claude_acceptance` 7/7. Feature [telegram-session-control.md](../../../../docs/ft/daemon/telegram-session-control.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

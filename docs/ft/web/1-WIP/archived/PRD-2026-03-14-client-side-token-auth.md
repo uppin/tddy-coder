@@ -51,4 +51,4 @@ Previously, tddy-web required users to manually generate a LiveKit JWT token usi
 
 ## Documentation wrap
 
-Merged into [web-terminal.md](../../web-terminal.md) and [Web changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.
+Merged into [web-terminal.md](../../web-terminal.md) and [Web changelog](../../changelog/) on 2026-03-21. This file is archived under `1-WIP/archived/`.

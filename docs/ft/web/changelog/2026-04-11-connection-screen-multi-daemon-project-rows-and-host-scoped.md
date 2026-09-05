@@ -1,0 +1,3 @@
+# 2026-04-11 — Connection screen: multi-daemon project rows and host-scoped sessions
+
+- **`tddy-web`**: **`ListProjects`** rows carry **`daemon_instance_id`**; **`ConnectionScreen`** renders one accordion and session table per row, with composite **`data-testid`** keys **`projectId__daemonInstanceId`** when the field is set; **`sessionProjectTable`** helpers (**`connectionProjectRowKey`**, **`sessionBelongsToProjectHost`**, **`sortedSessionsForProjectHostTable`**, **`isSessionOrphan`**) scope sessions and unscoped repo matching per host. Cypress **`ConnectionScreen.cy.tsx`** covers multi-host listing and collision cases; Bun **`sessionProjectTableMultiHost.test.ts`** covers table helpers. Feature doc: [web-terminal.md](../web-terminal.md).

@@ -1,7 +1,7 @@
 //! Acceptance: workspace tool sandbox — the contracts that hold on every platform.
 //!
 //! PRD: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
-//! Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
+//! Changeset: `docs/dev/changesets/`, 2026-08-30 workspace tool sandbox.
 //!
 //! What a sandboxed workspace session *routes* — which calls reach the jail, what is persisted,
 //! what is refused, and in what order the start does its work — is decided by the daemon, not by

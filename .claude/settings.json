@@ -26,15 +26,7 @@
       "Edit(~/.aws/**)",
       "Edit(~/.gnupg/**)",
       "Edit(~/.config/**)",
-      "Edit(~/.claude/**)",
-      "Write(//etc/**)",
-      "Write(//root/**)",
-      "Write(//home/**)",
-      "Write(~/.ssh/**)",
-      "Write(~/.aws/**)",
-      "Write(~/.gnupg/**)",
-      "Write(~/.config/**)",
-      "Write(~/.claude/**)"
+      "Edit(~/.claude/**)"
     ],
     "deny": [
       "Bash(git commit --no-verify*)",

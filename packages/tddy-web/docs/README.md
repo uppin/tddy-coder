@@ -1,6 +1,6 @@
 # tddy-web documentation
 
-- **Changeset history**: [changesets.md](changesets.md)
+- **Changeset history**: [changesets/](changesets/)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
 - **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](inactive-session-activities.md)
 - **Agent conversation tabs (attach a roster agent, talk to it)**: [session-agent-conversation.md](session-agent-conversation.md)

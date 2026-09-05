@@ -21,14 +21,14 @@ pub fn system_prompt() -> String {
 **Targets** (update in the project root, per repo guidelines):
 - Feature docs: docs/ft/{product-area}/
 - Dev docs: packages/*/docs/, packages/*/README.md
-- Changelog: packages/*/docs/changesets.md, docs/ft/*/changelog.md
+- Changelog: packages/*/docs/changesets/, docs/ft/*/changelog/ — one entry per FILE, named YYYY-MM-DD-<slug>.md. Create a new file; never append to an existing one, and never write an index.
 
 **Process**:
 1. Read all available artifacts
 2. Discover the repo's documentation structure
 3. Extract final state (State B) — no delta language ("changed", "updated", "now")
 4. Apply content transformations to target docs
-5. Update changelog/changesets history
+5. Record the change as a new changelog/changeset file (see Targets — one file per entry)
 6. When done, submit your output by calling: tddy-tools submit --goal update-docs --data '<your JSON output>'
 
 Run `tddy-tools get-schema update-docs` to see the expected output format. The JSON must include: goal, summary, docs_updated.

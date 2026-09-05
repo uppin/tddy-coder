@@ -125,7 +125,7 @@ tddy-web
 
 **Product area:** VM
 **Feature PRD:** this section
-**Status:** Implemented — verified against two real (non-mocked) Buildroot builds on macOS via the Docker toolchain below (`#[ignore]`+`#[serial]`, ~62 min total); see [packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md) and [packages/tddy-vm-build/docs/changesets.md](../../../packages/tddy-vm-build/docs/changesets.md)
+**Status:** Implemented — verified against two real (non-mocked) Buildroot builds on macOS via the Docker toolchain below (`#[ignore]`+`#[serial]`, ~62 min total); see [packages/tddy-vm/docs/changesets/](../../../packages/tddy-vm/docs/changesets/) and [packages/tddy-vm-build/docs/changesets/](../../../packages/tddy-vm-build/docs/changesets/)
 
 A standalone binary that builds a VM image from a Buildroot `.config` spec and writes it
 to an explicit output file, independent of the daemon/RPC path:
@@ -278,8 +278,8 @@ tddy-sandbox-qemu --image <qcow2> \
 end-to-end multiple times in a nested-virtualization sandbox, including one real bug
 found+fixed (a benign `set_hostname` module failure misclassified as fatal) and one
 boot-speed fix (`ds=nocloud` SMBIOS pinning) — see
-[packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md)
-and [docs/dev/changesets.md](../../dev/changesets.md) for details. The
+[packages/tddy-vm/docs/changesets/](../../../packages/tddy-vm/docs/changesets/)
+and [docs/dev/changesets/](../../dev/changesets/) for details. The
 `#[ignore]`+`#[serial]` real-boot acceptance tests remain timing-sensitive under that
 sandbox's fixed budgets due to environment resource contention, not implementation
 defects.
@@ -413,9 +413,9 @@ absolute backing-file path. The `tddy-vm-build cloud-init` CLI wiring compiles a
 raw base, locks both halves read-only, keeps scratch artifacts out of the flat
 `02-prepared-base/`) are correctly updated/gated, but could not be run end-to-end in
 this environment (no `xorriso`/`mkisofs`/`genisoimage` on PATH for the seed-ISO step).
-See [packages/tddy-vm/docs/changesets.md](../../../packages/tddy-vm/docs/changesets.md),
-[packages/tddy-vm-build/docs/changesets.md](../../../packages/tddy-vm-build/docs/changesets.md),
-and [docs/dev/changesets.md](../../dev/changesets.md) for the full delta.
+See [packages/tddy-vm/docs/changesets/](../../../packages/tddy-vm/docs/changesets/),
+[packages/tddy-vm-build/docs/changesets/](../../../packages/tddy-vm-build/docs/changesets/),
+and [docs/dev/changesets/](../../dev/changesets/) for the full delta.
 
 Organizes base images, prepared bases, and per-VM state under a single **library**
 rooted at the existing tddy data dir (the same root `tddy-daemon` already resolves via

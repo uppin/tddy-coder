@@ -1,0 +1,5 @@
+# 2026-06-26 — **VNC sessions
+
+**Type:** Feature
+
+encrypted vault, VncService control plane, web inspector tab** — `tddy-service`: `vnc.proto` (VncService 6 RPCs) + `vnc_input.proto` (VncInputService bidi StreamInput) + TS codegen; `tddy-vnc` (new package): vnc_client/streamer/bridge stubs (follow-up), `common.rs` (char_to_keysym/rgba_to_abgr); `tddy-daemon`: `VncVault` (Argon2id KDF + ChaCha20-Poly1305 AEAD, `.vnc.yaml` mode 0600), `VncServiceImpl` (6 RPCs, bridge-spawn FIXME), per-session vault-key cache; `tddy-web`: `vncTabState.ts` reducer, `vncInput.ts` helpers (coordinate scaling/keysym/RFB masks), `SessionVncTab`, `VncOverlay` (full-screen fixed overlay, Escape/backdrop/close-button dismiss, videoTrack.attach), `VncPassphraseDialog`, `InspectorTabs` VNC tab button, `SessionInspectorDrawer` VncService client; 9 Cypress CT tests, 20 bun unit tests, 12 Rust acceptance tests. PRD [vnc-sessions.md](../ft/web/vnc-sessions.md); PR [#234](https://github.com/uppin/tddy-coder/pull/234). (tddy-service, tddy-vnc, tddy-daemon, tddy-web)

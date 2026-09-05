@@ -99,7 +99,7 @@ the stack, and would put a plan the host can validate structurally behind a payl
 
   *This was not the original design.* The goal was first built on the premise that pr-stack goals
   carry no schemas — true when it was written, and made false by
-  [#411](../../dev/changesets.md), which registered `write-stack-plan` after finding that a submit
+  [#411](../../dev/changesets/), which registered `write-stack-plan` after finding that a submit
   naming a goal with no schema was acknowledged without ever being routed. The prompt also told the
   agent to submit **YAML**; `tddy-tools submit` parses JSON. Every test drove the hook directly with
   a hand-written string, so the suite was green while the real flow could not work. Both are

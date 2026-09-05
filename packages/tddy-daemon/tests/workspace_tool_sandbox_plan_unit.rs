@@ -1,6 +1,6 @@
 //! Unit: the workspace tool jail's layout, its sandbox plan, and the platform gate in front of it.
 //!
-//! Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
+//! Changeset: `docs/dev/changesets/`, 2026-08-30 workspace tool sandbox.
 //!
 //! These pin what the jail is *declared* to be — where its artifacts live, what of the host is
 //! inside it, and what runs in it — without spawning one. What the kernel then enforces is proven

@@ -1,0 +1,5 @@
+# 2026-07-22 — **Code pane syntax highlighting
+
+**Type:** Feature
+
+tokenized preview for recognized code files** — the `WorktreeCodePane` non-markdown preview branch now renders a new `CodeBlock` instead of a plain `<pre>`. `CodeBlock` derives a Prism language from the file path via `codeLanguageForPath` (`src/lib/codeLanguage.ts`; extension→language table, dotfiles/extensionless/`.md`→`null`) and highlights with `react-syntax-highlighter` `PrismLight` (registers only the ~15 shipped languages; theme objects, no external CSS), picking `oneLight`/`oneDark` from the document's `.dark` class. Unrecognized files fall back to the original plain monospace `<pre>` with no highlight container; markdown/error/empty branches and the `worktree-file-preview` wrapper are unchanged. New dep `react-syntax-highlighter` (+ `@types/…`). New testid `worktree-code-highlight` + `worktreeCodePanePage.highlight()`; unit `codeLanguage.test.ts` (8); Cypress `WorktreeCodePaneAcceptance` extended to 9. Feature [session-code-pane.md](../../../../docs/ft/web/session-code-pane.md). PR [#314](https://github.com/uppin/tddy-coder/pull/314). (tddy-web)

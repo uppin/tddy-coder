@@ -140,11 +140,11 @@ docs/ft/
 - Target users and use cases
 - Links to all feature documents in the area
 - Integration points with other product areas
-- Link to product area changelog.md
+- Link to product area `changelog/`
 
-#### changelog.md
-- **Change History** for all features in the product area (`docs/ft/{area}/changelog.md`)
-- Newest-first **`## YYYY-MM-DD — Title`** sections; single-line bullets; merge rules in [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)
+#### changelog/
+- **Change History** for all features in the product area (`docs/ft/{area}/changelog/`)
+- **One file per entry**, `YYYY-MM-DD-<slug>.md`, first line `# YYYY-MM-DD — Title`. No index — see [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)
 - Release note-style summaries (no file references to deleted PRDs)
 - See [prd-doc.mdc](mdc:.cursor/rules/prd-doc.mdc) for PRD linkage and wrap workflow
 

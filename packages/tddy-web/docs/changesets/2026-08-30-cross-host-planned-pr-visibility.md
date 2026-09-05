@@ -1,0 +1,5 @@
+# 2026-08-30 — cross-host planned-PR visibility
+
+**Type:** Bug Fix + Feature
+
+the PR-Stack view joins a planned node to its child over LiveKit presence rather than one host's `ListSessions`: new `stackChildSessions` / `nodeChildSession` / `hydrateStackNodes` adopt a live cross-host child's branch and session id onto a node whose own host never got to record them, and only the *identity* legs (node id, plan record) suppress the orphan verdict — the branch-owner leg would mask a genuine D7 orphan. A branchless node is additionally polled on its `branch_suggestion` and **only that answer's `pr` leg** is read, gated on the query's `planned-name` kind so a suggestion colliding with another node's real branch cannot render that node's PR. Start-session is never disabled by a blocker: it takes a `warning` variant with an alert icon and a tooltip, and sends **no** explicit base branch when blocked, so the daemon's own gate decides rather than an override derived from a base the view could not resolve.

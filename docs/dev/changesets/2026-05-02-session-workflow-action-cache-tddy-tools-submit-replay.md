@@ -1,0 +1,5 @@
+# 2026-05-02 — Session workflow action cache (`tddy-tools submit` replay)
+
+**Type:** Feature
+
+**`tddy_core::workflow::action_cache`**: **`.workflow/action-cache.json`** under session dir; fingerprinted keys; **`BackendInvokeTask`** may skip **`CodingBackend::invoke`** on hit; **`CodingBackend::action_invoke_cache_eligible`** (**`MockBackend`** **false**); **`FlowRunner`** sets **`workflow_engine_graph_id`** / **`workflow_engine_current_task_id`**; opt-out **`disable_action_cache`** / **`TDDY_DISABLE_ACTION_CACHE`**. Feature **[session-actions.md](../../ft/coder/session-actions.md)**; **[coder/changelog/](../../ft/coder/changelog/)**; **[architecture.md](../../../packages/tddy-core/docs/architecture.md#workflow-action-cache)**; packages **[tddy-core/changesets/](../../../packages/tddy-core/docs/changesets/)**, **[tddy-tools/changesets/](../../../packages/tddy-tools/docs/changesets/)**. WIP **`docs/dev/1-WIP/2026-05-02-changeset-session-action-cache.md`** removed after wrap. (tddy-core, tddy-tools, tddy-integration-tests, docs)

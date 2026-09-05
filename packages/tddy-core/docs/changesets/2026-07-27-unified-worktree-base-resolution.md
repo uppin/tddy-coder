@@ -1,0 +1,5 @@
+# 2026-07-27 — **unified-worktree-base-resolution
+
+**Type:** Architecture
+
+`session_chain.rs` becomes the single source of truth for chain base resolution** — `resolve_chain_base_ref` (PR-stack orchestrator parent → `Stack::base_ref_for_spawn`; code-session parent → `resolve_chain_integration_base_ref_from_parent_session`; no `stack_parent` → `Ok(None)`) and its helpers `parent_is_pr_stack_orchestrator` / `pr_stack_node_for_spawn` move here from `tddy-daemon::connection_service`. New `resolve_chain_base_for_session_spawn` encodes the spawn-time precedence: a runtime `stack_parent` wins over a persisted `worktree_integration_base_ref`, which wins over the default base. The error type is `String` (tddy-core has no tonic `Status`); the daemon wraps it via `resolve_chain_base_ref_status`. Tests: `tests/unified_chain_base_resolution.rs` 6 (resolver contract + precedence). Feature [git-integration-base-ref.md § Session chaining](../../../../docs/ft/coder/git-integration-base-ref.md#session-chaining-parent-session--originbranch). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

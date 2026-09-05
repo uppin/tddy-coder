@@ -1,0 +1,5 @@
+# 2026-06-29 — Unified actions → tasks with optional sandbox execution
+
+**Type:** Feature
+
+new `tddy-actions` leaf crate (`ActionSpec`, `ProcessRuntime`/`PtyRuntime`/`PipelineRuntime`, `ActionCatalog`); `actions.proto` `ActionService` (ListActionKinds/StartAction/GetAction); daemon `ActionServiceImpl` + `sandbox_plan_builder`/`sandbox_action` (confined process + PTY via `tddy-sandbox-runner --pty-command`); `tddy-sandbox-recipes` (Claude CLI + generic exec, `SandboxRecipe::RunnerPty`); fast tools, session-action jobs, PTY terminals, `tddy-build`, and sandboxed `tddy-coder` share `TaskRegistry`; `job_id == task_id` for async session actions. Feature [background-tasks.md](../../ft/daemon/background-tasks.md), [session-actions.md](../../ft/coder/session-actions.md), [sandbox-builder.md](../../ft/coder/sandbox-builder.md), [tddy-build.md](../../ft/build/tddy-build.md); PR [#244](https://github.com/uppin/tddy-coder/pull/244). (tddy-actions, tddy-task, tddy-service, tddy-daemon, tddy-core, tddy-build, tddy-sandbox, tddy-sandbox-recipes, tddy-sandbox-runner, tddy-sandbox-darwin, tddy-sandbox-cgroups, tddy-coder, tddy-tools, tddy-e2e)

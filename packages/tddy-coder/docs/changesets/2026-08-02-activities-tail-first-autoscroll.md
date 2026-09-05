@@ -1,0 +1,5 @@
+# 2026-08-02 — **activities-tail-first-autoscroll
+
+**Type:** Feature
+
+the session participant serves tail mode and the cursor in lockstep with the daemon** — `session_participant` hosts its own `StreamAcpReplay` for LiveKit-routed sessions, so it gained `TAIL_THEN_LIVE`, `seq` stamping and a `GetAcpReplayPage` arm at the same time as the daemon; had it not, the same session would have opened tail-first when reached over HTTP and head-first when reached over LiveKit. Both hosts serve from the same `tddy-service` helpers (`tail_page`, `page_before`, `strip_tool_body`) and share the `tool_call_id → seq` dedup, so a call's terminal event carries the position its running event was given on either route. Pre-existing and left alone: this host subscribes to the presenter broadcast *before* reading the snapshot (deliberate gap-avoidance), so an event landing in that window is both replayed and delivered live — duplicate delivery that `seq` now makes visible for the first time. Tests: 3 mirroring the daemon's, `session_participant` at 40/40. (tddy-coder)

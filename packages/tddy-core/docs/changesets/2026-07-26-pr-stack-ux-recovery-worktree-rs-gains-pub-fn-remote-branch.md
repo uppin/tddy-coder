@@ -1,0 +1,5 @@
+# 2026-07-26 — pr-stack-ux-recovery: `worktree.rs` gains `pub fn remote_branch_ref_sha(repo_root, branch) -> Option<String>`
+
+**Type:** Feature
+
+`git rev-parse --verify --quiet refs/remotes/origin/<branch>`, the public form of the private `remote_ref_exists`, backing the new `BranchResolution.remote` leg so "can a descendant be based onto this branch?" is answered from the repo rather than guessed in the frontend from `Changeset.remote_pushed` (write-only) or from a branch name being non-empty. Every failure mode (not a repository, git missing, non-zero exit, non-UTF8) collapses to `None` deliberately: it runs on the polled `QueryBranch` path, where an error is indistinguishable from absent and a conservative "missing" can only delay a spawn, never permit one that would fail. Tests: `tests/remote_branch_ref_acceptance.rs` 4 (pushed / local-only / absent / non-repository). Feature [pr-stack-live-status.md](../../../../docs/ft/coder/pr-stack-live-status.md#startability-before-the-spawn-added-2026-07-26). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

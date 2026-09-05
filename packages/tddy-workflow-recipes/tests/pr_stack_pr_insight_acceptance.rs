@@ -10,7 +10,7 @@
 //! flag (REST does not expose one — it is GraphQL-only).
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
-//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
+//! Changeset: docs/dev/changesets/2026-07-30-pr-stack-full-control.md.
 
 mod common;
 

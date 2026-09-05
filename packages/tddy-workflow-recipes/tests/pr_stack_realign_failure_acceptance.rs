@@ -12,7 +12,7 @@
 //! reviewer, so the PR is deliberately left pointing where it did and the branch is left for a human.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
-//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
+//! Changeset: docs/dev/changesets/2026-07-30-pr-stack-full-control.md.
 
 mod common;
 

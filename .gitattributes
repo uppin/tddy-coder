@@ -1,9 +1,4 @@
-# Changelog and changeset indexes are append-only at the top (newest first). The union
-# merge driver combines non-overlapping line additions so parallel branches rarely conflict.
+# Changelogs and changeset histories are directories of one-file-per-entry, so parallel
+# branches add distinct files and never share an append-point. No union merge driver is
+# needed — and none should be added back.
 # See docs/dev/guides/changelog-merge-hygiene.md
-docs/dev/changesets.md merge=union
-docs/ft/coder/changelog.md merge=union
-docs/ft/supervisor/changelog.md merge=union
-docs/ft/daemon/changelog.md merge=union
-docs/ft/web/changelog.md merge=union
-packages/*/docs/changesets.md merge=union

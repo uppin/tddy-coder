@@ -1,0 +1,5 @@
+# 2026-07-26 — pr-stack-ux-recovery: `proto/connection.proto` adds `BranchRemote { bool exists = 1; string sha = 2 }` and `BranchResolution.remote = 5`
+
+**Type:** Feature
+
+the remote-tracking state of a branch on `origin`, which is what decides whether a descendant's worktree can be based onto it (previously nothing on the wire carried branch existence at all, so an absent `origin/<base>` was discovered by `git fetch` failing *after* `StartSession` had been accepted). `PrStatusView` gains `bool unavailable = 5` + `string unavailable_reason = 6`, making "the lookup could not be performed" distinguishable from `exists = false` ("no PR exists for this head branch") — the silent conflation is why a live PR was invisible. `StartSessionRequest` needed no new field (`selected_branch_to_work_on = 12` already existed). Regenerated Rust + `tddy-web/src/gen/connection_pb.ts`. Feature [pr-stack-live-status.md](../../../../docs/ft/coder/pr-stack-live-status.md#api-surface). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-service)

@@ -1,0 +1,3 @@
+# 2026-04-11 — LiveKit participant metadata: publish lock
+
+- **tddy-coder**: **`spawn_local_participant_metadata_watcher`** uses **`participant.metadata_publish_lock()`** from **`LiveKitParticipant::connect`** so watch-channel metadata merges with OAuth and registry publishers; **`projects_registry_dir`** is **`None`** on **`connect`** / **`run_with_reconnect_metadata`** until the session registry path is supplied by the spawn layer. Feature doc: [livekit-participant-owned-projects.md](../../web/livekit-participant-owned-projects.md); transport: [participant-metadata.md](../../../../packages/tddy-livekit/docs/participant-metadata.md).

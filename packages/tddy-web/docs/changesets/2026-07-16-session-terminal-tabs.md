@@ -1,0 +1,5 @@
+# 2026-07-16 — Session terminal tabs
+
+**Type:** Feature
+
+`SessionTerminalTabs` (fixed non-closable Agent tab + closable bash tabs + `+`) and `useSessionTerminals` (lists open terminals via `ListTerminalSessions`; `open()`/`close(id)` drive `StartTerminalSession`/`StopTerminalSession` with optimistic tab add/remove; active-tab fallback to `main`). `GrpcSessionTerminal` gains a `terminalId` prop threaded into `streamTerminalOutput`/`sendTerminalInput`. `SessionRuntime` mounts one `sessions-terminal-pane-<id>` per terminal (active visible, others `hidden`, all kept streaming); a bash pane's `onDisconnect` drops only that tab while the Agent keeps the session-level disconnect. Agent renders the transport-appropriate view (gRPC main terminal / LiveKit VirtualTui); bash tabs use `GrpcSessionTerminal` over the daemon or session-scoped client. Cypress `SessionTerminalTabsAcceptance` (5, all green) + `sessionTerminalTabsPage` page object. Feature [session-terminal-tabs.md](../../../../docs/ft/web/session-terminal-tabs.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). PR [#298](https://github.com/uppin/tddy-coder/pull/298). (tddy-web)

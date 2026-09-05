@@ -1,0 +1,5 @@
+# 2026-07-26 — pr-stack-repoint-dead-end: new pure **`connection_service::validate_repoint_target(target, default_branch, parent_branches) -> Result<Option<String>, String>`**, in the same shape as `effective_spawn_branch`
+
+**Type:** Fix
+
+empty/whitespace → `Ok(None)`, the default branch matched with `origin/` stripped from **both** sides (the resolver returns a remote-tracking ref while a node's `branch` and a GitHub PR base are plain names), a parent's branch accepted verbatim, anything else `invalid_argument`. Validation is not politeness: "no parent owns this branch" *is* the detach instruction, so an unvalidated target silently rewrites the plan. `repoint_planned_pr` collects the node's parents' branches off `changeset.stack`, **substitutes its own resolved `default_branch` for an empty wire target** (without which a project storing no `main_branch_ref` sent `""`, selected the recipe's drop-merged-parents rule, and returned success against an unchanged plan — no error, no change), then forwards `as_deref()`. Tests: `tests/repoint_target_validation_acceptance.rs` 8. Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

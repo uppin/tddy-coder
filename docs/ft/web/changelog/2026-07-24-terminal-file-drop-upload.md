@@ -1,0 +1,4 @@
+# 2026-07-24 — Terminal file drop upload
+
+- Dragging one or more files onto the Ghostty web terminal (either transport) uploads them to the host under `{session_dir}/uploads/<drop-id>/` and **types the uploaded files' shell-escaped absolute host paths into the terminal input** (space-separated, one trailing space, no newline), emulating a native terminal file-drag. See [web-terminal.md § File drop upload](../web-terminal.md#file-drop-upload).
+- Upload progress shows as one aggregate bar in the Host Stats Footer and auto-hides on completion; a failed file is skipped (its path is not typed) and surfaced as a transient error. On mobile the gesture is initiated from an **Attach** button in the Keyboard strip. See [host-stats-footer.md § Upload progress](../host-stats-footer.md#upload-progress-drag-to-upload).

@@ -67,4 +67,4 @@ daemon's cli sessions and aborts its runtime tasks, as the binary does on `SIGTE
 ## Documentation
 
 - Product: [docs/ft/desktop/](../../docs/ft/desktop/)
-- Changesets: [docs/changesets.md](./docs/changesets.md)
+- Changesets: [docs/changesets/](./docs/changesets/)

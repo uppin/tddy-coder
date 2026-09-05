@@ -1,0 +1,4 @@
+# 2026-07-24 — Session activity overlay becomes a read-only ACP transcript
+
+- The Agent Activity overlay's flat tool-call row list is replaced by a **read-only, ACP-style conversation transcript**: the agent's text output interleaved with its tool calls, each tool call enriched inline (`Read main.rs L10-49`) with a running/error status chip, and a DEBUG-style colored **`+Ns`** badge showing wall-clock elapsed since the previous entry. Read-only — no composer. See [agent-activity-pane.md](../agent-activity-pane.md).
+- Works for **both live and completed/dormant** sessions: the session persists its own ACP-mapped transcript (`acp-transcript.jsonl`), and a new server-streaming `StreamAcpReplay` RPC replays it (then tails live) over the existing HTTP transport — so history survives even if the coding agent doesn't keep its own transcript. `StreamSessionActivity` is retained (no longer backing this overlay), reserved for future system session messages.

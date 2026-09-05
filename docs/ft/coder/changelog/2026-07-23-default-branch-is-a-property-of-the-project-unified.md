@@ -1,0 +1,5 @@
+# 2026-07-23 — Default branch is a property of the project (unified integration-base resolution)
+
+- The remote-tracking integration base ref (`origin/master` vs `origin/main`) is now a settable property of the **project** (`main_branch_ref`), the single source of truth for the default base ref across every session-start surface (web/gRPC and Telegram) ([git-integration-base-ref.md](../git-integration-base-ref.md)).
+- One resolver: a stored default is authoritative; a **legacy** project with none resolves its default **live** from the repository (`origin/master` → `origin/main` → `origin/HEAD`). The live probe is legacy-only and loses effect the moment a default is stored (previously legacy rows used a hardcoded `origin/master`).
+- Any remote branch is a valid default, including slash-containing names like `origin/release/2025` (validated with the chain-PR validator; shell-metacharacters still rejected). Single-segment validation still governs the per-session `selected_integration_base_ref` override.

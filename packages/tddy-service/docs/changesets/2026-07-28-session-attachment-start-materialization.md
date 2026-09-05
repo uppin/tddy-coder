@@ -1,0 +1,5 @@
+# 2026-07-28 — **session-attachment-start-materialization
+
+**Type:** Feature
+
+`connection.proto` adds the unary `ReadHostDocument` RPC** — `ReadHostDocument(ReadHostDocumentRequest) returns (ReadHostDocumentResponse)` reads a `HostDocumentRef`'s bytes from the owning daemon (binary, capped at `MAX_HOST_DOCUMENT_BYTES`, forwardable by `daemon_instance_id` like the staging RPCs); the request carries `daemon_instance_id` + `HostDocumentScope` + `session_id`/`project_id` + `relative_path`, the response carries the bytes and `size_bytes`. Unary because the existing streaming RPCs return `unimplemented` for `PeerRoute::Forward`. The staging / `SessionAttachment` / `HostDocumentRef` / `HostDocumentScope` messages were already on `master` from the wire-contract slice. Regenerated Rust + `packages/tddy-web/src/gen/connection_pb.ts`. Feature [session-attachments.md § `ReadHostDocument`](../../../../docs/ft/coder/session-attachments.md#readhostdocument--unary-host-document-fetch). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-service)

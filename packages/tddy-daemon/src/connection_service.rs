@@ -21693,7 +21693,7 @@ mod workspace_start_request_unit_tests {
 /// the remote `ExecuteTool` callers do.
 ///
 /// PRD: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
-/// Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
+/// Changeset: `docs/dev/changesets/`, 2026-08-30 workspace tool sandbox.
 ///
 /// Lives here rather than in `tests/workspace_tool_sandbox_acceptance.rs` because
 /// [`ConnectionServiceImpl::local_agent_codebase_access`] is the seam under test and it is private:

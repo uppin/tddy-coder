@@ -1,0 +1,3 @@
+# 2026-04-11 — LiveKit LoopbackTunnel for Codex OAuth callback
+
+- **tddy-coder**: LiveKit **`MultiRpcService`** registers **`LoopbackTunnelService`** alongside **Terminal** (and **Token** when API key mode is used); **`codex_oauth` participant metadata** continues via **`terminal_and_codex_oauth_for_livekit`** watch path without unary **DeliverCallback** on the LiveKit surface. **tddy-service**: **`LoopbackTunnelServiceImpl`** (**`TunnelChunk`**, **`open_port` ≥ 1024**). Feature **[tddy-desktop-electrobun.md](../../desktop/tddy-desktop-electrobun.md)**, **[codex-oauth-web-relay.md](../../web/codex-oauth-web-relay.md)**. **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

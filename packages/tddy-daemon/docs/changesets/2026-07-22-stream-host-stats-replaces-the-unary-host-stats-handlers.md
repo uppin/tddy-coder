@@ -1,0 +1,5 @@
+# 2026-07-22 — `stream_host_stats` replaces the unary host-stats handlers
+
+**Type:** Refactor
+
+`connection_service.rs` drops `get_host_cpu_stats`/`get_host_disk_stats` (and their unit tests) for a single server-streaming `stream_host_stats`: authenticates the `session_token`, emits both CPU+disk immediately on subscribe, then drives two independent `interval_at` timers (`HOST_CPU_INTERVAL` 5 s / `HOST_DISK_INTERVAL` 60 s defaults, overridable via a new `with_host_stats_intervals` builder) in a `select!` loop, pushing a `HostStatsEvent` carrying the latest CPU+disk each tick over an mpsc-backed `MpscHostStatsStream` (task ends when the receiver drops). The `sysinfo`-backed `HostStats` provider is reused unchanged; `connection_tonic_adapter.rs` boxes the new stream type like `stream_session_activity`. Tests: `stream_host_stats_*` 4 (auth reject, immediate both-emit, independent CPU/disk cadence refresh via injected intervals). Feature [host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

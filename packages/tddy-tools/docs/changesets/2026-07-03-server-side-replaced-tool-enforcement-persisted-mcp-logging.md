@@ -1,0 +1,5 @@
+# 2026-07-03 — Server-side replaced-tool enforcement + persisted MCP logging
+
+**Type:** Feature
+
+`PermissionServer::new()` (`server.rs`) now filters the advertised exec catalog by the replaced set (`resolve_replaced_tools_for_defs(&subagents_from_env())`) before merging it into the tool router, so a replaced tool is not advertised and cannot be invoked at the server — independent of Claude's `--allowedTools`/`--disallowedTools` lists (defense-in-depth); the subagent's own READ/GLOB/GREP loop is a separate in-process path, so delegation still works. `init_logging()` honors `TDDY_TOOLS_LOG_FILE` (append; falls back to stderr), set by `tddy-sandbox-runner` to `<session-dir>/egress/tddy-tools.mcp.log` so the in-jail `tddy-tools --mcp` server's logs (including specialized-subagent HTTP calls) persist outside the jail. Feature [managed-codebase-subagents.md § Standalone launcher](../../../../docs/ft/coder/managed-codebase-subagents.md#standalone-launcher-claude-sandbox). (tddy-tools, tddy-sandbox-runner, tddy-discovery, tddy-sandbox-recipes)

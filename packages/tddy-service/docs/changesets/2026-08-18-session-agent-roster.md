@@ -1,0 +1,5 @@
+# 2026-08-18 — **session agent roster
+
+**Type:** Feature
+
+roster, conversation, and admission wire surface** — `connection.proto` gains `SessionAgentRoster`/`SessionAgentEntry` (with `AgentCloneState` enum + `clone_error`), the four roster RPCs (`AttachSessionAgent`/`DetachSessionAgent`/`ListSessionAgents`/`StreamSessionAgents`), the three conversation RPCs (`OpenAgentConversation`/`PromptAgentConversation` server-streaming/`CancelAgentConversation`), `SubagentInfo` fields 4-7 (daemon stamp, agent id, replaces, tools), and `StartSessionRequest.specialized_agents` qualified-id semantics. New `session_admission.proto` (`SessionAdmissionService.AdmitOwningDaemon`). `sandbox.proto` gains `RpcRequest`/`RpcStreamFrame` on `SessionFrame` so roster/conversation RPCs multiplex over the sandbox `SessionChannel` by `request_id`. New `session_agents.rs` carries the `session.agents` broadcast topic constant. Feature [session-agent-roster.md](../../../../docs/ft/daemon/session-agent-roster.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-service)

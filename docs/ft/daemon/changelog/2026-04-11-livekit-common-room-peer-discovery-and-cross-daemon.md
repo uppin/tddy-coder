@@ -1,0 +1,4 @@
+# 2026-04-11 — LiveKit common-room peer discovery and cross-daemon StartSession
+
+- **`tddy-daemon`**: Module **`livekit_peer_discovery`** — JSON metadata advertisement, **`CommonRoomPeerRegistry`**, **`LiveKitEligibleDaemonSource`**, **`LiveKitDiscoveryHandles`**, background join/sync for **`livekit.common_room`**, **StartSession** forward via **`tddy_livekit::RpcClient`** to peer identity; **`local_instance_id_for_config`** shared with **ConnectionService**; **`TDDY_PROJECTS_DIR`** test hook documented on **`projects_path_for_user`**. Integration tests **`livekit_peer_daemons_acceptance`**, **`multi_host_acceptance`** (remote routing). **`tddy-livekit`**: **`RpcClient::new_shared`** (**`Arc<Room>`**).
+- **Feature doc**: [livekit-peer-discovery.md](../livekit-peer-discovery.md) (includes operator / CI notes). **Web**: [web-terminal.md](../../web/web-terminal.md) (eligible daemons, host ordering). **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

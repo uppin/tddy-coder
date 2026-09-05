@@ -1,0 +1,4 @@
+# 2026-07-23 — Session Inspector Worktree tab
+
+- The Session Inspector gains a **Worktree** tab scoped to the selected session's own git worktree: on-disk size + changed-file/±line summary, cache-backed and refreshed on a **10-minute** client-side timer (plus a Refresh button), served from the existing `ListWorktreesForProject`. See [session-worktree-inspector.md](../session-worktree-inspector.md).
+- Three lifecycle actions reuse the worktree infrastructure: **Clear** (`git clean -fdx` via new `CleanWorktree` RPC — reclaims untracked/ignored disk without removing the worktree), **Delete** (existing `RemoveWorktree`), and **Restore** (recreates a missing worktree from the session's persisted changeset via new `RestoreSessionWorktree`). Clear and Delete are two-step confirm; the primary worktree is refused for both. The daemon invalidates the stats cache after clear/restore.

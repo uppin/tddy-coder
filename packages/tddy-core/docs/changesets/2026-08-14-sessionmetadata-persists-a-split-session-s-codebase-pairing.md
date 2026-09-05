@@ -1,0 +1,5 @@
+# 2026-08-14 — `SessionMetadata` persists a split session's codebase pairing; `RemoteToolEnv` carries a scoped join token
+
+**Type:** Feature
+
+`codebase_daemon_instance_id` / `codebase_session_id` (both `Option`, `skip_serializing_if`, so a co-located `.session.yaml` is byte-identical to before and a legacy file still parses). They have to be *persisted* rather than derived: `SessionEntry.daemon_instance_id` is stamped at read time by whichever daemon answered `ListSessions`, which works only while a session has one host — a split session has two, and each daemon would legitimately claim its own half. `RemoteToolEnv.livekit_token` exports `TDDY_REMOTE_LIVEKIT_TOKEN`, a per-session scoped JWT, so the agent process never receives `livekit.api_secret` (which `spawner.rs` still passes to `tddy-coder` on the command line, where `/proc/<pid>/cmdline` exposes it). Feature [remote-managed-worktree.md](../../../../docs/ft/daemon/remote-managed-worktree.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

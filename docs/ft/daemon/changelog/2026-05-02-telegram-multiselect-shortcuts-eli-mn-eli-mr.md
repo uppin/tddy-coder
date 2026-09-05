@@ -1,0 +1,6 @@
+# 2026-05-02 — Telegram MultiSelect shortcuts (`eli:mn:` / `eli:mr:`)
+
+- **`tddy-daemon`**: **`telegram_multi_select_shortcuts`** — compact **Choose none** (**`eli:mn:`**) and **Choose recommended** (**`eli:mr:`**, when **`recommended_other`** is present) keyboards within Telegram’s **64-byte** **`callback_data`** limit; **`TelegramSessionWatcher`** **`MultiSelectShortcutElicitationMeta`** cache keyed by Telegram chat plus session (**`recommended_other`** for **Choose recommended**); **`telegram_bot`** dispatches **`eli:mn:`** / **`eli:mr:`** through **`authorized_elicitation_surface_gate`**; **`handle_elicitation_multi_select_shortcut`** submits **`PresenterIntent::AnswerClarificationMultiSelect`**. Integration tests **`telegram_multi_select_acceptance`**; **`telegram_concurrent_elicitation_integration`** asserts primary-keyboard alignment for MultiSelect shortcuts.
+- **`tddy-core`**: Presenter rejects **`AnswerClarificationMultiSelect`** with empty indices and no **Other** text when **`allow_other`** on the clarification is **false**.
+- **`tddy-service`**: **`ClarificationQuestionProto.recommended_other`** on MultiSelect wire events.
+- **Feature docs**: [telegram-session-control.md](../telegram-session-control.md), [telegram-notifications.md](../telegram-notifications.md). **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

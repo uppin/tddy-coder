@@ -1,0 +1,3 @@
+# 2026-04-11 — Codex ACP backend documentation wrap
+
+- **Docs**: Feature **[codex-acp-backend.md](../codex-acp-backend.md)** documents shipped **`--agent codex-acp`** (ACP subprocess, **`codex login`** OAuth retry, **`codex_thread_id`**); cross-links in **[1-OVERVIEW.md](../1-OVERVIEW.md)**, **[implementation-step.md](../implementation-step.md)**, **[session-layout.md](../session-layout.md)**, **[codex-oauth-web-relay.md](../../web/codex-oauth-web-relay.md)**, **[codex-oauth-relay.md](../../daemon/codex-oauth-relay.md)**; **`packages/tddy-core/docs/architecture.md`**; PRD removed from **`docs/ft/coder/1-WIP/`**; dev and package **`changesets.md`** indexes point at **[codex-acp-backend.md](../codex-acp-backend.md)**.

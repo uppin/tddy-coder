@@ -76,9 +76,9 @@ Follow this strict flow:
 
 ### Mandatory Test Style: `fluent-tests`
 
-**`fluent-tests` is the mandatory test style for this repo.** Every test written in any phase (Red, Green, Refactor) must comply with the `fluent-tests` skill at `.claude/skills/fluent-tests/`. Before writing or modifying tests, read:
+**`fluent-tests` is the mandatory test style for this repo.** Every test written in any phase (Red, Green, Refactor) must comply with the `fluent-tests` skill at `.agents/skills/fluent-tests/`. Before writing or modifying tests, read:
 
-- `.claude/skills/fluent-tests/references/generic-guidelines.md` (universal principles)
+- `.agents/skills/fluent-tests/references/generic-guidelines.md` (universal principles)
 - The framework-specific reference for the test type (`rust/std-test.md`, `typescript/cypress-component.md`, etc.)
 
 Required: Given/When/Then structure, intent-revealing test names, one behavior per test, named page-object/driver helpers (no raw selectors or wire-format handling in test bodies), meaningful fixture values, and in-memory backends instead of `cy.intercept` for Cypress component tests. Violations are treated as test bugs.

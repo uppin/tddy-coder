@@ -1,0 +1,5 @@
+# 2026-06-16 — **tddy-build
+
+**Type:** Refactor
+
+plugin architecture** — vacated ecosystem target knowledge from the engine. Removed `manifest.proto`/`targets.proto` + the closed `config` oneof; `BuildManifest`/`BuildTarget` are serde structs with an open `config: { type, #[serde(flatten)] fields }`. New `plugin.rs` (`BuildPlugin`, `LowerContext`, `PluginRegistry`) + `builtin.rs` (`script`/`tool`/`group` built in); `lower`/`graph`/`executor`/`service::build_json` thread `&PluginRegistry` (`build_list_json` registry-free). cargo/bun/docker recipes extracted to new crates `tddy-build-rust`/`-typescript`/`-docker` (engine keeps zero `tddy-*` deps, no recipe literals); `BuildAction` + cache stay proto. `tddy-tools`/`tddy-coder` assemble the registry. Feature [build/tddy-build.md](../../ft/build/tddy-build.md); architecture [tddy-build/architecture.md](../../../packages/tddy-build/docs/architecture.md). (tddy-build, tddy-build-rust, tddy-build-typescript, tddy-build-docker, tddy-tools, tddy-coder)

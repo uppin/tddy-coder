@@ -1,0 +1,5 @@
+# 2026-07-22 — **session-catalog
+
+**Type:** Feature
+
+`BUILD.yaml` provider + worktree-open populate** — `catalog_provider.rs`: `TddyBuildCatalogProvider` implements `tddy_core::session_catalog::BuildCatalogProvider` over `tddy_build::discovery::discover_build_manifests` (flattens `BUILD.yaml` targets → entries; `package` = id prefix before `:`; `source_path` = manifest path), registered beside `build_executor` in both `run.rs` paths and at daemon startup (`tddy-daemon/src/main.rs`). `run.rs` `spawn_session_catalog_populate` kicks off a background populate on worktree-open (detached thread + runtime running `PopulateCatalogTask` to completion on a local registry, no global registration) that writes `<session_dir>/catalog.db`. The catalog is written for later reads; `list-actions` is not served from it yet. Tests: provider 1 + populate integration 1. Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). Feature [session-catalog.md](../../../../docs/ft/coder/session-catalog.md). (tddy-coder)

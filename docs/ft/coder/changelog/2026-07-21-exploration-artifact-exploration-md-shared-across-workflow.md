@@ -1,0 +1,5 @@
+# 2026-07-21 — Exploration artifact (`exploration.md`) shared across workflow steps
+
+- Workflow planning now produces a persisted `session_dir/artifacts/exploration.md` capturing code-discovery knowledge — a Code Map (file:line/col references), mermaid diagrams, documentation pointers, and conventions/gotchas — so every step that runs after the user interview reuses it instead of re-exploring the codebase. See [exploration-artifact.md](../exploration-artifact.md).
+- The plan agent stays read-only: it returns the content inline via a new optional `exploration` field on the plan (and bugfix `analyze`) submit schema, and the engine writes the file (blank/absent → no file). grill-me's create-plan writes it directly.
+- `exploration.md` is registered in `known_artifacts()` for tdd, tdd_small, bugfix, and grill-me, so it is advertised (absolute path) in the `<context-reminder>` header — now extended past acceptance-tests/red to green, evaluate, demo, validate, and refactor. The acceptance-tests, red, and green prompts instruct agents to read it before exploring and append new discoveries as a living document.

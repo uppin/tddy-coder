@@ -79,7 +79,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 
 ## Change History
 
-See [changelog.md](changelog.md) for release note history.
+See [changelog/](changelog/) for release note history.
 
 ## Appendices
 

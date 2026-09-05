@@ -1,0 +1,5 @@
+# 2026-03-09 — TUI E2E Testing & Clarification Question Fix
+
+**Type:** Feature
+
+New package. gRPC-driven tests: spawn_presenter_with_grpc, connect_grpc. tests/grpc_clarification.rs (CLARIFY flow), grpc_full_workflow.rs (SKIP_QUESTIONS flow). PTY test: pty_clarification.rs with termwright (#[ignore] by default). Validates clarification question rendering and workflow completion. (tddy-e2e)

@@ -1,0 +1,5 @@
+# 2026-04-09 — Codex ACP backend
+
+**Type:** Feature
+
+**`CodexAcpBackend`** (**`backend/codex_acp.rs`**, ACP over **`codex-acp`** subprocess), **`--agent codex-acp`**, **`TDDY_CODEX_ACP_CLI`**; **`agent-client-protocol` `=0.10.4`** + **`unstable`** (non-exhaustive request/response **`::new`** / builders); **`tddy-acp-stub`** advertises **`load_session`**; OAuth retry uses **`codex login`** (same **`BROWSER`** / file contract as **`CodexBackend`**, not embedded **`codex-login`** crate). **`workflow/task.rs`**: **`codex-acp`** shares **`codex_thread_id`** behavior with **`codex`**. Tests: **`codex_acp_backend`**, **`acp_backend_acceptance`**, **`log_config_acceptance`** (**`LogRotation.only_paths`**). Feature **[codex-acp-backend.md](../../ft/coder/codex-acp-backend.md)**; **[coder/changelog/](../../ft/coder/changelog/)**; packages **[tddy-core](../../../packages/tddy-core/docs/changesets/)**, **[tddy-coder](../../../packages/tddy-coder/docs/changesets/)**. (tddy-core, tddy-coder, tddy-acp-stub, tddy-integration-tests, docs)

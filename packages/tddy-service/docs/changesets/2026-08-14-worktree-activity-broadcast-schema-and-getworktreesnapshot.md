@@ -1,0 +1,5 @@
+# 2026-08-14 — `worktree_activity` broadcast schema and `GetWorktreeSnapshot`
+
+**Type:** Feature
+
+new messages-only `worktree_activity.proto` (`WorktreeActivityEvent`, `WorktreeActivityKind`) carrying a session room's broadcast payload in binary protobuf: `kind`, a monotonic `seq` whose gaps mean a lost event, a timestamp, the HEAD sha and the numstat counts — deliberately no file paths and no contents. Compiled without a service generator, since it is a data-channel payload with no method to dispatch and no reply to await. `connection.proto` gains `GetWorktreeSnapshot`, letting the daemon hosting a session's room measure a checkout held by a peer. `worktree_activity::format_worktree_activity_for_log` renders the single `DEBUG` line every receiver emits, and lives here rather than in `tddy-daemon` because `tddy-tools` is the other consumer and depends on this crate unconditionally. Feature [session-room.md](../../../../docs/ft/daemon/session-room.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-service, tddy-daemon, tddy-tools)

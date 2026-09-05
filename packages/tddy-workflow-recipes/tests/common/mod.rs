@@ -6,7 +6,7 @@
 //! test can assert what was *not* sent as precisely as what was.
 //!
 //! PRD: `docs/ft/coder/pr-stacking.md` § Full control over the plan.
-//! Changeset: `docs/dev/changesets.md` (2026-07-30, pr-stack-full-control).
+//! Changeset: `docs/dev/changesets/` (2026-07-30, pr-stack-full-control).
 
 #![allow(dead_code)] // Each integration-test binary uses a different subset of these fixtures.
 

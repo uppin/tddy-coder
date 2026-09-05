@@ -1,0 +1,7 @@
+# 2026-08-29 — A long subagent turn no longer holds the agent hostage
+
+- **`subagent_prompt` now waits only as long as you tell it to.** It blocks for at most `graceMs` (default 25 seconds); a turn that answers in time returns exactly what it always did. A turn still running gets a `responseId` and **keeps going** — nothing is cancelled — and the new **`subagent_await`** collects the answer when it is ready, or says it is still pending so the agent can go do something else and come back. Previously a coding agent on another host, whose turn runs for minutes, was indistinguishable from a hung one; worse, a timeout anywhere along the path ended the *call* while the turn ran on, so the work was done and the answer unreachable.
+- **`graceMs` is per call, not a server setting** — a workflow step waiting on a coding agent and a quick discovery question mid-edit want very different numbers, and both run in the same process.
+- **Asking what your subagents have cost no longer waits for them.** `subagent_list` used to queue behind any turn in flight — as did `subagent_cancel`, so the tool that would have ended a long turn was blocked by it. Both answer immediately now, and a listing reports the totals as of each conversation's last completed turn.
+- **A second prompt to a busy conversation queues instead of interleaving**, and runs against the history the first turn leaves. Closing a conversation answers everything waiting on it rather than leaving an agent parked forever.
+- See [managed-codebase-subagents.md](../managed-codebase-subagents.md) § Long turns.

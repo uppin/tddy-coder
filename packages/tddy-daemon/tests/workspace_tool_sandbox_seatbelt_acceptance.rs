@@ -1,7 +1,7 @@
 //! Acceptance: a sandboxed workspace session's tools inside a **real** Seatbelt jail.
 //!
 //! PRD: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
-//! Changeset: `docs/dev/changesets.md`, 2026-08-30 workspace tool sandbox.
+//! Changeset: `docs/dev/changesets/`, 2026-08-30 workspace tool sandbox.
 //!
 //! `workspace_tool_sandbox_acceptance.rs` proves the daemon *routes* a tool call to the jail. That
 //! is the daemon's claim and an injected provisioner can answer it. Whether the jail then holds is

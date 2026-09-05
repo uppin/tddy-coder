@@ -1,0 +1,5 @@
+# 2026-05-02 — Session chaining Phase 2 (live `tcp:`, chain-base merge on blocking pool, tests)
+
+**Type:** Documentation
+
+**`telegram_bot`**: **`maybe_dispatch_tcp_chain_parent_callback`**, **`workflow_callback_gate_authorized`**; **`telegram_session_control`**: **`parent_candidates_page_for_chain_picker`**, **`handle_chain_parent_callback`** validates **`tcp:`** child ids; **`spawn_telegram_workflow`** runs **`merge_chain_integration_base_with_explicit_operator_overrides`** in **`tokio::task::spawn_blocking`**. Tests: **`session_chaining_phase2_acceptance`**, **`session_chaining_phase2_unit`**, integration **`parent_candidates_page_for_chain_picker_*`**, **`telegram_chain_parent_callback_rejects_invalid_child_session_id_segment`**. Feature **[telegram-session-control.md](../../../../docs/ft/daemon/telegram-session-control.md)**; optional product follow-up **[2026-05-02-changeset-session-chaining.md](../../../../docs/dev/1-WIP/2026-05-02-changeset-session-chaining.md)**. (tddy-daemon, docs)

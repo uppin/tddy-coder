@@ -67,4 +67,4 @@ Log target **`tddy_daemon::telegram`** carries **`info`** and **`debug`** lines 
 - **Integration** (**`tests/telegram_notifier.rs`**): disabled config (zero sends), single send on transition with label in body, no duplicate sends when terminal status repeats.
 - **Integration** (**`tests/telegram_tracked_session_acceptance.rs`**): tracked-session gate, **Enter** replay, structured log expectations.
 
-See **[changesets.md](./changesets.md)** for the wrapped changeset line.
+See **[changesets/](./changesets/)** for the wrapped changeset line.

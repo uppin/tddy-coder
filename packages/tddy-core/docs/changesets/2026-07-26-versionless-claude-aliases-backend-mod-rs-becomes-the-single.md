@@ -1,0 +1,5 @@
+# 2026-07-26 — versionless-claude-aliases: `backend/mod.rs` becomes the single source of truth for the Claude catalog. `CLAUDE_MODEL_ALIASES` (`opus`/`sonnet`/`haiku` → "Claude … (latest)") and `CLAUDE_PINNED_MODELS` (`claude-opus-5`/`claude-sonnet-5`/`claude-haiku-4-5-20251001` → "Claude … (pinned)") replace the previous inline full-id list; new `pub const CLAUDE_DEFAULT_MODEL = "opus"` is the one place the Claude default lives, and `default_model_for_agent` / `curated_models_for_agent` / `claude_cli_models()` all read from it via a shared `catalog_from` helper. `claude_cli_models()` now returns aliases first, pinned ids after, defaulting to `opus`. Tests: 5 catalog tests (alias ordering, pinned suffix, alias/curated agreement, label disambiguation, every default selectable in its own catalog)
+
+**Type:** Feature
+
+backend suite 59/59. Feature [tool-session-model-selection.md](../../../../docs/ft/web/tool-session-model-selection.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

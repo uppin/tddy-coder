@@ -1,0 +1,9 @@
+# 2026-08-29 — A peer agent session's row says what its agent is doing
+
+- **`SessionEntry` gains `agent_status` and `last_activity`**, inferred from the session's own conversation. They reuse the agent roster's `SessionAgentStatus` / `SessionAgentActivity` verbatim, so one badge renders a roster agent and a peer agent session alike, and they ride `ListSessions` rather than a second stream a reader would have to correlate against a row.
+- **Neither is a new source.** The resolved transcript (`acp-transcript.jsonl` merged with `agent-activity.jsonl` — the view `StreamAcpReplay` already replays) seeds the newest signal once per session; the per-session `AgentActivityHub` broadcast keeps it current.
+- **A live record and its replayed frame go through one mapper**, so a row cannot word the same call differently from the replay of it — which would surface as a session that rewords its own status when the daemon restarts.
+- **A hook word of `Done` outranks a tool call left in flight.** A `running` row whose terminal record never arrived would otherwise pin the badge at `EXECUTING_TOOL` for the rest of the session's life. Otherwise a call in flight outranks the hook's `Running`: it is strictly more precise, and the only source of the call's name.
+- **`UNSPECIFIED` stays "this daemon has nothing to say", never "idle"** — and is what every session type that runs no agent reports. Only `claude-cli` and `cursor-cli` sessions are tailed, the gate `ReportSessionStatus` already applies.
+- **`activity_status` is unchanged** and keeps its own field: it is the raw hook word a worktree reports, and this is an inference built partly on top of it.
+- Known: a seed that fails to read is not retried, the seed is read once per daemon lifetime per session, there is no cross-daemon inference, and `WAITING_FOR_INPUT` still has no producer but the hook word. See [agent-session-status.md](../agent-session-status.md).
