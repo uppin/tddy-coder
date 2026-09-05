@@ -826,8 +826,8 @@ export default defineConfig({
           return token;
         },
 
-        // Start a real tddy-daemon wired to the LiveKit testkit so recipe sessions attach over
-        // LiveKit (connectSession → connected-livekit), which the PR-Stack Chat presenter requires.
+        // Start a real tddy-daemon wired to the LiveKit testkit so recipe sessions attach over a
+        // LiveKit room (connectSession names one), which the PR-Stack Chat presenter requires.
         // Uses agent "stub" (== tddy-demo's backend) for deterministic agent output.
         async startDaemonForPrStack(): Promise<{
           baseUrl: string;

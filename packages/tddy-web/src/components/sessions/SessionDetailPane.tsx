@@ -18,8 +18,7 @@ export function SessionDetailPane({
   onResume,
   onDelete,
 }: SessionDetailPaneProps) {
-  const isConnected =
-    attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
+  const isConnected = attachment.status === "connected";
 
   return (
     <div
@@ -37,15 +36,10 @@ export function SessionDetailPane({
           data-testid="sessions-detail-terminal-container"
           className="flex-1 min-h-0 flex flex-col relative overflow-hidden"
         >
-          {attachment.status === "connected-livekit" && (
+          {attachment.status === "connected" && (
             <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
-              {/* Terminal mounts here; in CT the LiveKit connection may not fully initialize */}
-              Terminal connected to {attachment.livekitRoom}
-            </div>
-          )}
-          {attachment.status === "connected-grpc" && (
-            <div className="flex-1 min-h-0 text-xs text-muted-foreground p-4">
-              gRPC terminal connected
+              {/* Terminal mounts here; in CT the session's transport may not fully initialize */}
+              Terminal connected to session {attachment.connection.sessionId}
             </div>
           )}
         </div>

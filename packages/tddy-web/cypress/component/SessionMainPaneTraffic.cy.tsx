@@ -13,6 +13,8 @@ import React from "react";
 import { byTestId, TEST_IDS } from "../support/testIds";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aConnectionServiceBackend } from "../support/rpc/connectionServiceBackend";
@@ -38,18 +40,24 @@ const FAKE_SESSION = {
   pendingElicitation: false,
 };
 
+/** A session carried over its own LiveKit room. */
 const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-livekit",
-  sessionId: FAKE_SESSION.sessionId,
-  livekitRoom: "room-traffic-test-001",
-  livekitUrl: "wss://livekit.example.internal",
-  livekitServerIdentity: "server",
-  identity: "browser-traffic-test-aaaa-0000-0000-0000-000000000001",
+  status: "connected",
+  connection: aSessionConnection(FAKE_SESSION.sessionId)
+    .carriedByRoom("room-traffic-test-001", {
+      url: "wss://livekit.example.internal",
+      serverIdentity: "server",
+    })
+    .servingOver(anInMemoryRpcBackend().transport())
+    .build(),
 };
 
-const GRPC_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-grpc",
-  sessionId: FAKE_SESSION.sessionId,
+/** A session its host serves itself — plain RPC, no room. */
+const HOST_SERVED_ATTACHMENT: SessionAttachmentState = {
+  status: "connected",
+  connection: aSessionConnection(FAKE_SESSION.sessionId)
+    .servingOver(anInMemoryRpcBackend().transport())
+    .build(),
 };
 
 const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
@@ -91,7 +99,7 @@ describe("SessionMainPane — traffic strip integration (Cypress)", () => {
   });
 
   it("does NOT render the traffic strip inside sessions-detail-pane when connected via HTTP RPC", () => {
-    mountMainPane(GRPC_ATTACHMENT);
+    mountMainPane(HOST_SERVED_ATTACHMENT);
 
     byTestId(TEST_IDS.sessionsDetailPane)
       .find(`[data-testid="${TEST_IDS.sessionTrafficStrip}"]`)

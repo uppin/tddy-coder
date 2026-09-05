@@ -31,6 +31,7 @@ import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDraw
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { PrStackChat } from "../../src/components/sessions/prstack/PrStackChat";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { TddyRemote } from "../../src/gen/tddy/v1/remote_pb";
 import { AcpService } from "../../src/gen/tddy/acp/v1/acp_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -59,14 +60,15 @@ const PR_STACK_SESSION = {
   stackPlanJson: "",
 };
 
+const ATTACHED_OVER_A_ROOM = aSessionConnection(PR_STACK_SESSION.sessionId).carriedByRoom(
+  "daemon-pr-stack-silent-failure-0001",
+  { url: "wss://livekit.internal:7880", serverIdentity: "daemon-pr-stack-silent-failure-0001" },
+);
 const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-livekit",
-  sessionId: PR_STACK_SESSION.sessionId,
-  livekitRoom: "daemon-pr-stack-silent-failure-0001",
-  livekitUrl: "wss://livekit.internal:7880",
-  livekitServerIdentity: "daemon-pr-stack-silent-failure-0001",
-  identity: "browser-pr-stack-silent-failure-0001-1719999999999",
+  status: "connected",
+  connection: ATTACHED_OVER_A_ROOM.build(),
 };
+const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
 
 /**
  * Yields a single `AgentOutput`, then throws — simulates the presenter stream dying mid-flight.
@@ -89,6 +91,7 @@ function PrStackMainPaneHarness() {
     <SessionMainPane
       selectedSession={PR_STACK_SESSION as any}
       attachment={LIVEKIT_ATTACHMENT}
+      attachmentHint={LIVEKIT_HINT}
       inspectorState="closed"
       onToggleInspector={cy.stub()}
       onInspectorClose={cy.stub()}
@@ -147,7 +150,7 @@ it("shows an inline error in the chat panel when handed a failed room connection
 });
 
 it("requests a browser LiveKit token for the presenter room and surfaces the failure when it cannot be issued", () => {
-  // Given — the session's attachment is connected-livekit, but the token service that
+  // Given — the session is attached over its own room, but the token service that
   // usePresenterLiveKitRoom's useCommonRoom depends on is unavailable
   interceptGenerateTokenUnavailable();
 

@@ -1,15 +1,14 @@
 /**
- * Behaviour spec: `SessionMainPane` must render the real Ghostty terminal for
- * `connected-livekit` sessions, using the same underlying terminal component
+ * Behaviour spec: `SessionMainPane` must render the real Ghostty terminal for a session whose
+ * connection carries tracks, using the same underlying terminal component
  * (`GhosttyTerminalLiveKit` → `GhosttyTerminal`) already used for Claude CLI's
  * LiveKit-routed sessions in `ConnectionScreen.tsx`.
  *
- * Today `connected-livekit` renders only a static placeholder ("Terminal
+ * Such a session used to render only a static placeholder ("Terminal
  * connected to {room}") — this is the only attachment path tddy-coder recipe
  * sessions (e.g. `plan-pr-stack`) ever reach, since `connect_session` always
  * returns a LiveKit room for any session type other than `claude-cli` /
- * `workspace`. Every test below fails today: `SessionMainPane` has no
- * `tokenClient` prop, and the placeholder renders instead of a terminal.
+ * `workspace`.
  *
  * Changeset: unify tddy-coder recipe-session terminals onto the same LiveKit
  * terminal component already used for Claude CLI.
@@ -19,9 +18,11 @@ import React, { useMemo } from "react";
 import { createClient, type Client } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { TokenService, GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { useHttpClient } from "../../src/rpc/transportProvider";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
@@ -44,14 +45,20 @@ const FAKE_SESSION = {
   pendingElicitation: false,
 };
 
+/** The session's own RPC route. Nothing here asserts on it — these specs are about the terminal the
+ *  connection's `media` capability selects — so an empty backend serves it. */
+const ATTACHED_OVER_A_ROOM = aSessionConnection(FAKE_SESSION.sessionId)
+  .carriedByRoom("tddy-lobby", {
+    url: "ws://localhost:9999",
+    serverIdentity: "daemon-dev-livekit-terminal-test-0001",
+  })
+  .servingOver(anInMemoryRpcBackend().transport());
+const LIVEKIT_CONNECTION = ATTACHED_OVER_A_ROOM.build();
 const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-livekit",
-  sessionId: FAKE_SESSION.sessionId,
-  livekitRoom: "tddy-lobby",
-  livekitUrl: "ws://localhost:9999",
-  livekitServerIdentity: "daemon-dev-livekit-terminal-test-0001",
-  identity: "browser-livekit-terminal-test-aaaa-0000-0000-000000000001-1719999999999",
+  status: "connected",
+  connection: LIVEKIT_CONNECTION,
 };
+const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
 
 /** The signed-in operator's daemon access token — what the daemon's mint refuses to act without. */
 const SESSION_TOKEN = "an-operator-access-token";
@@ -79,6 +86,7 @@ function LiveKitMainPaneHarness({ tokenClient: injected }: { tokenClient?: Clien
     <SessionMainPane
       selectedSession={FAKE_SESSION as any}
       attachment={LIVEKIT_ATTACHMENT}
+      attachmentHint={LIVEKIT_HINT}
       inspectorState="closed"
       onToggleInspector={cy.stub()}
       onInspectorClose={cy.stub()}
@@ -92,11 +100,8 @@ function LiveKitMainPaneHarness({ tokenClient: injected }: { tokenClient?: Clien
         {
           sessionId: FAKE_SESSION.sessionId,
           attached: true,
-          status: "connected-livekit",
-          livekitUrl: LIVEKIT_ATTACHMENT.livekitUrl,
-          livekitRoom: LIVEKIT_ATTACHMENT.livekitRoom,
-          livekitServerIdentity: LIVEKIT_ATTACHMENT.livekitServerIdentity,
-          identity: (LIVEKIT_ATTACHMENT as { identity: string }).identity,
+          connection: LIVEKIT_CONNECTION,
+          hint: LIVEKIT_HINT,
           bytesIn: 0,
           bytesOut: 0,
           lastDataReceivedAt: null,
@@ -124,7 +129,7 @@ function interceptGenerateToken() {
 // ---------------------------------------------------------------------------
 
 describe("SessionMainPane — LiveKit-routed sessions render a real terminal", () => {
-  it("renders the Ghostty terminal for a connected-livekit session when a tokenClient is supplied", () => {
+  it("renders the Ghostty terminal for a room-carried session when a tokenClient is supplied", () => {
     // Given
     interceptGenerateToken();
 
@@ -157,8 +162,12 @@ describe("SessionMainPane — LiveKit-routed sessions render a real terminal", (
     // Then
     cy.wait("@generateToken").then((interception) => {
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
-      expect(req.room).to.equal(LIVEKIT_ATTACHMENT.livekitRoom);
-      expect(req.identity).to.equal((LIVEKIT_ATTACHMENT as { identity: string }).identity);
+      expect(req.room).to.equal(LIVEKIT_HINT.room);
+      // The browser's own participant identity is minted per join, so only its shape can be pinned:
+      // it must name this session, must not collide with the session process's own identity, and
+      // carries a random tail so two joins landing in the same millisecond are still two
+      // participants — see `SessionTerminalIdentity.cy.tsx` for that half.
+      expect(req.identity).to.match(new RegExp(`^browser-${FAKE_SESSION.sessionId}-\\d+-[a-z0-9]+$`));
     });
   });
 

@@ -13,6 +13,7 @@
 import React from "react";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import type { SessionEntry, ProjectEntry } from "../../src/gen/connection_pb";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 
@@ -37,9 +38,10 @@ const aRegisteredProject: Partial<ProjectEntry> = {
   mainRepoPath: PROJECT_MAIN_REPO,
 };
 
-const aConnectedGrpcAttachment: SessionAttachmentState = {
-  status: "connected-grpc",
-  sessionId: SESSION_ID,
+/** A session its host serves itself — plain RPC, no room. */
+const anAttachedSession: SessionAttachmentState = {
+  status: "connected",
+  connection: aSessionConnection(SESSION_ID).build(),
 };
 
 const noopHandlers = {
@@ -63,7 +65,7 @@ function anUnscopedSessionMainPane(): void {
     <SessionMainPane
       {...noopHandlers}
       selectedSession={anUnscopedSession as SessionEntry}
-      attachment={aConnectedGrpcAttachment}
+      attachment={anAttachedSession}
       projects={[aRegisteredProject as ProjectEntry]}
       runtimes={[]}
       focusedRuntimeId={null}

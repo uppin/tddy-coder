@@ -207,3 +207,41 @@ describe("LiveKitConnectionProvider", () => {
     expect([...capabilities].sort()).toEqual(["media", "presence", "rpc"]);
   });
 });
+
+describe("opening a session on a host the provider reached", () => {
+  it("refuses a hint that belongs to another session", () => {
+    // Given a host, and a hint minted from a *different* session's attach reply — the shape a
+    // stale reply landing after the operator has moved on produces
+    const provider = new LiveKitConnectionProvider(
+      aRoomWith(ConnectionState.Connected, [A_HOST]),
+      aStubFactory(),
+    );
+    const host = provider.connectHost(A_HOST)!;
+
+    // Then it refuses rather than opening a connection routed at the wrong session. Every field
+    // that decides where calls land comes from the hint, so honouring a mismatched one would
+    // silently address another session's process
+    expect(() => host.openSession("session-0001", { sessionId: "session-0002" })).toThrow(
+      "openSession(session-0001) was given a hint for session session-0002",
+    );
+  });
+
+  it("refuses a room-backed session when it was registered without the means to join one", () => {
+    // Given a provider registered by a build that never joins session rooms — no token client and
+    // no room factory
+    const provider = new LiveKitConnectionProvider(
+      aRoomWith(ConnectionState.Connected, [A_HOST]),
+      aStubFactory(),
+    );
+    const host = provider.connectHost(A_HOST)!;
+
+    // Then a session that names a room says exactly what is missing. Returning a connection that
+    // could never join would leave the failure to surface later as an empty terminal
+    expect(() =>
+      host.openSession("session-0001", { sessionId: "session-0001", room: "daemon-session-0001" }),
+    ).toThrow(
+      "session session-0001 names LiveKit room daemon-session-0001, but this provider was " +
+        "registered without the token client and room factory needed to join one",
+    );
+  });
+});

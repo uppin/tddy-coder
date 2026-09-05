@@ -13,6 +13,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 
 // ---------------------------------------------------------------------------
@@ -36,14 +37,15 @@ const TDD_SESSION = {
   stackPlanJson: "",
 };
 
+const ATTACHED_OVER_A_ROOM = aSessionConnection(TDD_SESSION.sessionId).carriedByRoom(
+  "daemon-tdd-presenter-room-0001",
+  { url: "wss://livekit.internal:7880", serverIdentity: "daemon-tdd-presenter-room-0001" },
+);
 const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-livekit",
-  sessionId: TDD_SESSION.sessionId,
-  livekitRoom: "daemon-tdd-presenter-room-0001",
-  livekitUrl: "wss://livekit.internal:7880",
-  livekitServerIdentity: "daemon-tdd-presenter-room-0001",
-  identity: "browser-tdd-presenter-room-aaaa-0000-0000-000000000001-1719999999999",
+  status: "connected",
+  connection: ATTACHED_OVER_A_ROOM.build(),
 };
+const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
 
 const GENERATE_TOKEN_OK = toArrayBuffer(
   toBinary(
@@ -61,6 +63,7 @@ function WorkflowChatMainPaneHarness() {
     <SessionMainPane
       selectedSession={TDD_SESSION as any}
       attachment={LIVEKIT_ATTACHMENT}
+      attachmentHint={LIVEKIT_HINT}
       inspectorState="closed"
       onToggleInspector={cy.stub()}
       onInspectorClose={cy.stub()}
@@ -96,7 +99,7 @@ describe("Workflow Chat Screen — opens its own presenter LiveKit room from the
     // `room` prop forever
     cy.wait("@generateToken").then((interception) => {
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
-      expect(req.room).to.equal(LIVEKIT_ATTACHMENT.livekitRoom);
+      expect(req.room).to.equal(LIVEKIT_HINT.room);
     });
   });
 });

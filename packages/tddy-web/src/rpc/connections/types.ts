@@ -17,6 +17,7 @@
 
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
+import type { SessionAttachmentHint, SessionConnection } from "./session";
 
 /**
  * What a connection can do beyond unary and streaming RPC.
@@ -97,6 +98,18 @@ export interface HostConnection {
    * Prefer {@link clientFor} when the service is known at the call site.
    */
   transport(): Transport;
+
+  /**
+   * Open a connection to one session on this host.
+   *
+   * `hint` is what the daemon's attach reply said about reaching it; only this connection's provider
+   * reads its fields. Over LiveKit that means joining the session's room and addressing
+   * `daemon-<instance>-<session>`; where the hint names no room it means routing to this host's own
+   * roster, which already serves session RPC (`cli_session_manager.rs`).
+   *
+   * The caller owns the returned connection and must `close()` it when the session is detached.
+   */
+  openSession(sessionId: string, hint: SessionAttachmentHint): SessionConnection;
 }
 
 /**

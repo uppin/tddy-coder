@@ -17,7 +17,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ConnectionService,
@@ -27,6 +27,7 @@ import {
 import type { SessionEntry } from "../../src/gen/connection_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -142,7 +143,7 @@ const OTHER_SCREEN = "screen-held-by-another-9999";
 
 /** A client serving the transcript AND a terminal whose control lease is held elsewhere, so a
  *  mounted runtime would show its "Claim terminal" CTA if it were rendered in the foreground. */
-function aReplayClientWithHeldTerminal() {
+function aReplayTransportWithHeldTerminal() {
   const backend = anInMemoryRpcBackend().implement(ConnectionService, {
     ...acpReplayHandlers(RECORDED_TRANSCRIPT),
     claimTerminalControl: async () =>
@@ -165,12 +166,14 @@ function aReplayClientWithHeldTerminal() {
       );
     },
   });
-  return createClient(ConnectionService, backend.transport());
+  return backend.transport();
 }
 
-const aGrpcRuntimeFor = (sessionId: string): SessionRuntimeState => ({
+/** A runtime whose session is served by its host itself — plain RPC over `transport`. */
+const aHostServedRuntimeFor = (sessionId: string, transport: Transport): SessionRuntimeState => ({
   sessionId,
-  status: "connected-grpc",
+  connection: aSessionConnection(sessionId).servingOver(transport).build(),
+  hint: { sessionId },
   attached: true,
   bytesIn: 0,
   bytesOut: 0,
@@ -613,7 +616,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
 
   it("keeps a mounted runtime unfocused behind the activities view", () => {
     // Given — a dormant session that still has a runtime mounted from an earlier attach
-    const client = aReplayClientWithHeldTerminal();
+    const transport = aReplayTransportWithHeldTerminal();
 
     // When
     mountWithRpc(
@@ -622,8 +625,8 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="closed"
-        client={client}
-        runtimes={[aGrpcRuntimeFor(DORMANT.sessionId)]}
+        client={createClient(ConnectionService, transport)}
+        runtimes={[aHostServedRuntimeFor(DORMANT.sessionId, transport)]}
         focusedRuntimeId={DORMANT.sessionId}
       />,
       anInMemoryRpcBackend(),

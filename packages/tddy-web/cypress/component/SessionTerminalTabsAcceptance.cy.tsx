@@ -5,7 +5,7 @@
  * Changeset: `session-terminal-tabs`
  *
  * Driven over the deterministic gRPC path: `connectSession` returns an empty `livekitRoom`, so the
- * session attaches as `connected-grpc` and every terminal RPC (List/Start/Stop/StreamOutput/
+ * session's host serves it directly and every terminal RPC (List/Start/Stop/StreamOutput/
  * SendInput) flows over the daemon client into the in-memory backend.
  */
 
@@ -37,7 +37,7 @@ const SESSION = {
   pendingElicitation: false,
 };
 
-/** A connected-grpc backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
+/** A host-served backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
 function aGrpcBackend(
   terminals: Array<{ terminalId: string }> = [],
 ): ConnectionServiceBackend {
