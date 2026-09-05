@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minimize2 } from "lucide-react";
 import type { Client } from "@connectrpc/connect";
-import type { Room } from "livekit-client";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
-import type { TokenService } from "../../gen/token_pb";
-import { SessionLiveKitTerminal } from "./SessionLiveKitTerminal";
+import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
 import { GrpcSessionTerminal } from "./GrpcSessionTerminal";
+import { useSessionTerminalFeed } from "./useSessionTerminalFeed";
 import { SessionTerminalTabs } from "./SessionTerminalTabs";
 import { SessionAgentConversationPane } from "./SessionAgentConversationPane";
 import type { AgentConversation } from "./agentConversationTabs";
@@ -18,8 +17,7 @@ import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
-import type { ConnectionStatus, HostConnection } from "../../rpc/connections/types";
-import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
+import type { HostConnection } from "../../rpc/connections/types";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import {
   exitDocumentFullscreen,
@@ -30,30 +28,6 @@ import { safeTestIdPart } from "../../lib/testId";
 import { cn } from "../../lib/utils";
 
 type ConnectionClient = Client<typeof ConnectionService>;
-type TokenClient = Client<typeof TokenService>;
-
-/**
- * What to show over a pane whose session has **two** handshakes in flight: the session connection's,
- * and — for a room-backed session — the terminal's own join into the same room.
- *
- * The pane is interactive only once both are up, so the pessimistic one wins: a failure from either
- * is a failure, and anything short of connected from either keeps the overlay up. Reporting the
- * connection alone would lift the overlay over a terminal still handshaking; reporting the terminal
- * alone is what the pre-connection code did, and left a host-served session with no overlay at all.
- *
- * `terminal` is `null` when nothing on the pane has a join of its own, which is the ordinary case.
- *
- * TODO(optional-livekit node 5): goes away with the second handshake. Node 5 folds the terminal's
- * join into the session connection, leaving one status for the pane.
- */
-function leastConnectedOf(
-  connection: ConnectionStatus,
-  terminal: LiveKitChromeStatus | null,
-): ConnectionStatus {
-  if (connection === "error" || terminal === "error") return "error";
-  if (connection !== "connected") return connection;
-  return terminal === null || terminal === "connected" ? "connected" : "connecting";
-}
 
 export interface SessionRuntimeProps {
   /** This runtime's attached-session state (connection params + status). */
@@ -68,18 +42,14 @@ export interface SessionRuntimeProps {
   /** The connection to the session's owning daemon — a spawned child conversation attaches its own
    *  session over it. `null` until a host is reachable, which is when no child can be attached. */
   host?: HostConnection | null;
-  /** Browser LiveKit-token client — required to render a LiveKit terminal. */
-  tokenClient?: TokenClient;
   /** Shortcut presets — shown as the mobile shortcut overlay on the focused runtime only. */
   mobileShortcuts?: ToolShortcutDef[];
-  /** Capture the runtime's connected LiveKit `Room` (for session-scoped RPC routing). */
-  onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Register this session's Agent-terminal text-insert (for the inspector Files-tab click/tap
    *  route). Fired once the terminal mounts. */
   onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Evict this runtime's terminal (e.g. remote session ended). */
   onSessionDisconnect?: (sessionId: string) => void;
-  /** Account this session's terminal I/O bytes (see `GhosttyTerminalLiveKit.onBytes`) so the
+  /** Account this session's terminal I/O bytes (see `GhosttyTerminalSession.onBytes`) so the
    *  screen can fold them into the session's inspector counters. */
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** The drawer's full session list — used to discover this session's spawned child conversations
@@ -123,9 +93,7 @@ export function SessionRuntime({
   sessionToken,
   client,
   host = null,
-  tokenClient,
   mobileShortcuts,
-  onSessionRoom,
   onSessionRegisterInsert,
   onSessionDisconnect,
   onSessionBytes,
@@ -135,33 +103,17 @@ export function SessionRuntime({
   onSelectAgentConversation,
   onCloseAgentConversation,
 }: SessionRuntimeProps) {
-  // This session's own connection, and what it can carry. Which terminal component the Agent pane
-  // renders is derived from the capabilities — a session whose wire carries tracks gets the LiveKit
-  // terminal, one that carries only calls gets the direct stream — never from a status string.
+  // This session's own connection, and what it can carry. One terminal component renders either
+  // way; what the capabilities decide is where its bytes come from — a session whose wire carries
+  // tracks opens its terminal on the connection, one that carries only calls renders the direct
+  // stream, which additionally accounts un-acknowledged input.
   const connection = runtime.connection ?? null;
   const carriesMedia = useHasCapability(connection, "media");
-  const hint = runtime.hint;
 
   // The connection's own status, sampled as it changes. It drives the handshake overlay for **every**
   // wire: the overlay used to be gated on `connected-livekit`, so a session its host served itself
   // — the configuration that works — showed no connection state at all.
   const connectionStatus = useConnectionStatus(connection);
-
-  // The *terminal's* own join, which for a room-backed session is a second, independent handshake
-  // into the same room (`SessionLiveKitTerminal` mints its own identity and connects its own
-  // `Room`). The overlay covers the pane that terminal renders into, so a pane whose terminal has
-  // not finished connecting must stay covered even once the connection this component holds says
-  // `connected` — otherwise the overlay lifts over a terminal that is still handshaking.
-  // `null` until a terminal that has a join of its own reports one; a session with no such terminal
-  // never sets it, and the connection alone answers for the pane.
-  // TODO(optional-livekit node 5): delete this and every `onConnectionStatusChange` below. Node 5
-  // folds the terminal's join into the session connection, at which point there is one handshake
-  // for the pane and `connectionStatus` is the whole answer.
-  const [terminalStatus, setTerminalStatus] = useState<LiveKitChromeStatus | null>(null);
-
-  // What the overlay shows: the *less* connected of the two handshakes, and an error from either.
-  // Never a wait on a participant roster — see `SessionConnection.status`.
-  const handshakeStatus = leastConnectedOf(connectionStatus.status, terminalStatus);
 
   // The session-scoped `ConnectionService` client, used by the explicit steal-claim so "Claim
   // terminal" routes to the session's own process rather than to the daemon. The connection
@@ -234,13 +186,6 @@ export function SessionRuntime({
     setActiveChildSessionId((prev) => (prev === sessionId ? null : prev));
   }, []);
 
-  const handleRoom = useCallback(
-    (room: Room) => {
-      onSessionRoom?.(runtime.sessionId, room);
-    },
-    [onSessionRoom, runtime.sessionId],
-  );
-
   // Expose this session's Agent-terminal text-insert to the screen, keyed by session id, so the
   // inspector Files-tab click/tap route can reach the focused session's terminal.
   const registerInsertInput = useCallback(
@@ -269,12 +214,25 @@ export function SessionRuntime({
   // The runtime's outer container — used by the focus guard to tell "focus landed inside me" from
   // "a sibling session's terminal stole focus".
   const containerRef = useRef<HTMLDivElement>(null);
+  // The Agent pane, measured when its terminal opens so the daemon resizes the PTY before replaying.
+  const agentPaneRef = useRef<HTMLDivElement>(null);
+
+  // The Agent terminal of a session whose wire carries it, opened on the session's own connection.
+  // A host-served session renders `GrpcSessionTerminal` instead, which builds its stream itself so
+  // it can also account the daemon's input acks — there is nowhere on a `TerminalFrame` to carry
+  // one, so a feed cannot express them (see the changeset).
+  const agentTerminalFeed = useSessionTerminalFeed({
+    connection: carriesMedia ? connection : null,
+    sessionToken,
+    controlToken: () => connected?.controlToken ?? "",
+    containerRef: agentPaneRef,
+  });
 
   // When this runtime becomes focused with the Agent pane active, return keyboard focus to its
   // terminal — so selection alone makes the session ready to type, no click required. Never steals
   // focus for a backgrounded runtime, and stays out of the way when a bash tab or child pane is up.
-  // TODO: the direct terminal stream (GrpcSessionTerminal/GhosttyTerminalGrpc) doesn't yet plumb a
-  // focus handle, so focus-on-select only works for a session carried over its own room.
+  // TODO: `GrpcSessionTerminal` doesn't yet plumb a focus handle through to the terminal, so
+  // focus-on-select only works for a session carried over its own room.
   const agentPaneActive =
     activeChildSessionId === null &&
     activeAgentConversationId === null &&
@@ -412,30 +370,25 @@ export function SessionRuntime({
         style={{ position: "relative" }}
       >
         {/* Agent pane — the reserved "main" terminal. A session whose connection carries tracks
-            renders the VirtualTui terminal over its own room; one that carries only calls renders
-            the direct terminal stream (terminalId ""). */}
-        <div data-testid={`sessions-terminal-pane-${AGENT_TERMINAL_ID}`} className={paneClass(AGENT_TERMINAL_ID)}>
-          {carriesMedia && hint?.room && tokenClient && (
-            <SessionLiveKitTerminal
-              livekitUrl={hint.url ?? ""}
-              livekitRoom={hint.room}
-              livekitServerIdentity={hint.serverIdentity ?? ""}
-              tokenClient={tokenClient}
+            reads its bytes off that connection; one that carries only calls renders the direct
+            terminal stream (terminalId ""). Both render the same terminal component. */}
+        <div
+          ref={agentPaneRef}
+          data-testid={`sessions-terminal-pane-${AGENT_TERMINAL_ID}`}
+          className={paneClass(AGENT_TERMINAL_ID)}
+        >
+          {carriesMedia && agentTerminalFeed && (
+            <GhosttyTerminalSession
+              feed={agentTerminalFeed}
               sessionToken={sessionToken}
               sessionId={runtime.sessionId}
-              onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
+              connectionChromePlacement="none"
+              onRemoteSessionEnded={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
-              onRoom={handleRoom}
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
-              onConnectionStatusChange={setTerminalStatus}
               onBytes={handleBytes}
             />
-          )}
-          {carriesMedia && hint?.room && !tokenClient && (
-            <div className="h-full w-full p-4 text-xs text-muted-foreground">
-              Terminal connected to {hint.room}
-            </div>
           )}
           {connection && !carriesMedia && (
             <GrpcSessionTerminal
@@ -489,9 +442,7 @@ export function SessionRuntime({
               focused={focused && activeChildSessionId === childId}
               sessionToken={sessionToken}
               client={client}
-              tokenClient={tokenClient}
               mobileShortcuts={mobileShortcuts}
-              onSessionRoom={onSessionRoom}
               onSessionRegisterInsert={onSessionRegisterInsert}
               onSessionBytes={onSessionBytes}
               onDisconnect={dropChild}
@@ -539,7 +490,17 @@ export function SessionRuntime({
           // managed, so the terminal stays interactive (no spurious "Claim terminal" CTA).
           // `pointer-events-none` lets clicks reach the terminal below when no overlay is showing;
           // the overlay itself re-enables pointer events.
-          <div data-testid="sessions-detail-terminal-container" className="absolute inset-0 pointer-events-none">
+          //
+          // Its position and stacking are stated inline for the same reason the conversation panes
+          // state theirs: `terminal-live-pane` claims `position: absolute; z-index: 2` inline, so a
+          // mutex CTA that only claimed them through utility classes would be painted over by the
+          // very terminal canvas it is meant to cover — leaving a session another screen controls
+          // looking interactive while swallowing every key.
+          <div
+            data-testid="sessions-detail-terminal-container"
+            className="absolute inset-0 pointer-events-none"
+            style={{ position: "absolute", inset: 0, zIndex: 4 }}
+          >
             {client && (
               <TerminalControlOverlay
                 isController={controlState.isController}
@@ -555,7 +516,7 @@ export function SessionRuntime({
             interactive. Driven by the connection itself, so every wire gets a real status: it used
             to be gated on the LiveKit path, leaving a session its host serves directly — a working
             configuration — with no connection state shown at all. */}
-        {connection && <SessionConnectionOverlay status={handshakeStatus} />}
+        {connection && <SessionConnectionOverlay status={connectionStatus.status} />}
 
         {/* The tab strip — and with it the strip's own toggle — is outside the fullscreen element,
             so full screen needs its own way back. Rendered only by the stack that actually holds
@@ -586,9 +547,7 @@ interface SessionChildRuntimeProps {
   client?: ConnectionClient | null;
   /** The connection to the daemon that owns this child — the child attaches its own session over it. */
   host?: HostConnection | null;
-  tokenClient?: TokenClient;
   mobileShortcuts?: ToolShortcutDef[];
-  onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Register this child's Agent-terminal text-insert (see `SessionRuntime.onSessionRegisterInsert`). */
   onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Account this child's terminal I/O bytes to its own session id (see `SessionRuntime.onSessionBytes`). */
@@ -610,9 +569,7 @@ function SessionChildRuntime({
   sessionToken,
   client,
   host = null,
-  tokenClient,
   mobileShortcuts,
-  onSessionRoom,
   onSessionRegisterInsert,
   onSessionBytes,
   onDisconnect,
@@ -659,9 +616,7 @@ function SessionChildRuntime({
       sessionToken={sessionToken}
       client={client}
       host={host}
-      tokenClient={tokenClient}
       mobileShortcuts={mobileShortcuts}
-      onSessionRoom={onSessionRoom}
       onSessionRegisterInsert={onSessionRegisterInsert}
       onSessionBytes={onSessionBytes}
       onSessionDisconnect={onDisconnect}

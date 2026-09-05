@@ -1,16 +1,16 @@
 /**
- * Cypress component tests for GhosttyTerminalGrpc.
+ * Cypress component tests for `GhosttyTerminalSession`.
  *
- * GhosttyTerminalGrpc wraps GhosttyTerminal and connects terminal I/O to the gRPC
- * StreamSessionTerminalIO bidi stream (ConnectionService) instead of a LiveKit DataChannel.
+ * The one terminal wraps `GhosttyTerminal` and renders whatever arrives on the feed its caller
+ * opened — a daemon's `StreamTerminalOutput`, a room's `StreamTerminalIO`, or a double.
  *
  * PRD: docs/ft/daemon/claude-cli-session.md
  *
  */
 
 import React from "react";
-// FAILS: module does not exist yet — implement at packages/tddy-web/src/components/GhosttyTerminalGrpc.tsx
-import { GhosttyTerminalGrpc, type GrpcFrame } from "../../src/components/GhosttyTerminalGrpc";
+import { GhosttyTerminalSession } from "../../src/components/GhosttyTerminalSession";
+import type { TerminalFrame } from "../../src/rpc/connections/terminal";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../support/testIds";
 
@@ -27,22 +27,22 @@ function mountTerminal(node: React.ReactElement) {
   );
 }
 
-/** A minimal fake gRPC bidi stream matching the StreamSessionTerminalIO shape. */
+/** A minimal feed double: bytes the test pushes in, and the bytes the terminal writes back. */
 function makeFakeGrpcStream() {
   const sentChunks: Uint8Array[] = [];
-  const outputListeners: Array<(frame: GrpcFrame) => void> = [];
+  const outputListeners: Array<(frame: TerminalFrame) => void> = [];
 
   return {
     /** Simulate the server pushing a frame to the terminal (defaults to a live tail frame). */
     pushOutput(data: Uint8Array, endOffset: bigint = 0n, atOldest = false) {
       outputListeners.forEach((fn) => fn({ data, endOffset, atOldest }));
     },
-    /** The stream object passed as a prop to GhosttyTerminalGrpc. */
+    /** The stream half of the feed passed to the terminal. */
     stream: {
       send(data: Uint8Array) {
         sentChunks.push(data);
       },
-      onMessage(fn: (frame: GrpcFrame) => void) {
+      onMessage(fn: (frame: TerminalFrame) => void) {
         outputListeners.push(fn);
       },
       close() {},
@@ -55,17 +55,17 @@ function makeFakeGrpcStream() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalGrpc", () => {
+describe("GhosttyTerminalSession", () => {
   it("renders the ghostty terminal container", () => {
     // Given
     const fake = makeFakeGrpcStream();
 
     // When
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
-        stream={fake.stream}
+        feed={{ stream: fake.stream }}
       />,
     );
 
@@ -79,16 +79,16 @@ describe("GhosttyTerminalGrpc", () => {
 
     // When
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
-        stream={fake.stream}
+        feed={{ stream: fake.stream }}
       />,
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
     // When — server pushes "Hello world\r\n" to the terminal
-    // Verifies that stream.onMessage is wired up and GhosttyTerminalGrpc receives the data
+    // Verifies that stream.onMessage is wired up and the terminal receives the data
     // without throwing. Rendered text lives on a WebGL canvas so contain.text cannot read it.
     const payload = new TextEncoder().encode("Hello world\r\n");
     cy.then(() => {
@@ -99,14 +99,14 @@ describe("GhosttyTerminalGrpc", () => {
     byTestId(TEST_IDS.ghosttyTerminal).should("exist");
   });
 
-  it("forwards keyboard input as bytes to the gRPC stream", () => {
+  it("forwards keyboard input as bytes to the terminal stream", () => {
     // Given
     const fake = makeFakeGrpcStream();
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000001"
-        stream={fake.stream}
+        feed={{ stream: fake.stream }}
       />,
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
@@ -133,10 +133,10 @@ describe("GhosttyTerminalGrpc", () => {
         style={{ height: 400, width: 800, position: "relative" }}
       >
         <UploadProgressProvider>
-          <GhosttyTerminalGrpc
+          <GhosttyTerminalSession
             sessionToken="fake-token"
             sessionId="01900000-0000-7000-8000-000000000002"
-            stream={fake.stream}
+            feed={{ stream: fake.stream }}
           />
         </UploadProgressProvider>
       </div>
@@ -160,11 +160,11 @@ describe("GhosttyTerminalGrpc", () => {
     // Given / When
     const fake = makeFakeGrpcStream();
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000003"
-        stream={fake.stream}
-        connectionOverlay
+        feed={{ stream: fake.stream }}
+        connectionOverlay={{ onDisconnect: () => {} }}
       />,
     );
 
@@ -177,12 +177,11 @@ describe("GhosttyTerminalGrpc", () => {
     const fake = makeFakeGrpcStream();
     const onDisconnect = cy.stub().as("onDisconnect");
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000004"
-        stream={fake.stream}
-        connectionOverlay
-        onDisconnect={onDisconnect}
+        feed={{ stream: fake.stream }}
+        connectionOverlay={{ onDisconnect }}
       />,
     );
 
@@ -200,10 +199,10 @@ describe("GhosttyTerminalGrpc", () => {
     const offsets: bigint[] = [];
     const onOffsetUpdate = cy.stub().callsFake((offset: bigint) => { offsets.push(offset); }).as("onOffsetUpdate");
     mountTerminal(
-      <GhosttyTerminalGrpc
+      <GhosttyTerminalSession
         sessionToken="fake-token"
         sessionId="01900000-0000-7000-8000-000000000005"
-        stream={fake.stream}
+        feed={{ stream: fake.stream }}
         onOffsetUpdate={onOffsetUpdate}
       />,
     );

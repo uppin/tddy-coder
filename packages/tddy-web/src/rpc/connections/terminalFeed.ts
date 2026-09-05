@@ -119,6 +119,13 @@ export function openDaemonTerminalFeed({
   const offsets = new TerminalStreamOffset(fromOffset);
   const { cols: initialCols, rows: initialRows } = options.initialGrid ?? { cols: 0, rows: 0 };
 
+  // Settled when the daemon stops sending — `pty_done`, or a transport that gave up. Not settled by
+  // this side closing the feed: that is the pane going away, not the session ending.
+  let reportEnded = () => {};
+  const ended = new Promise<void>((resolve) => {
+    reportEnded = resolve;
+  });
+
   void (async () => {
     try {
       // `initialCols`/`initialRows` are sent on every open and honoured by the daemon only on a
@@ -166,11 +173,14 @@ export function openDaemonTerminalFeed({
         terminalId,
         err instanceof Error ? err.message : err,
       );
+    } finally {
+      if (!closed) reportEnded();
     }
   })();
 
   return {
     stream,
+    ended,
     // This daemon holds the capture ring, so it can always replay. The fetcher is anchor-neutral —
     // whether the fill is bounded by the replay frame's `endOffset` or runs to the capture tip is
     // the loader's decision, not this one's.

@@ -1,15 +1,19 @@
 /**
- * Fluent component driver for GhosttyTerminalLiveKit.
+ * Fluent component driver for `GhosttyTerminalSession`'s chrome.
  *
  * Centralises:
- *  - the default `getToken` stub used across tests
+ *  - the feed the terminal is mounted on (a stand-in a spec can push bytes into and read sends from)
  *  - `win.Element.prototype.requestFullscreen` stub setup
  *  - `win.confirm` stub setup
  *  - mounting inside the required positioned container
  *
+ * The terminal no longer connects anything, so there is no url, no token and no room here: a spec
+ * that wants output delivers it, and one that only exercises chrome need not think about bytes at
+ * all.
+ *
  * Usage:
  *
- *   aGhosttyTerminalLiveKit()
+ *   aGhosttyTerminalSession()
  *     .withTerminate()
  *     .stubRequestFullscreen()
  *     .mount()
@@ -20,37 +24,76 @@
 
 import React from "react";
 import { mount } from "cypress/react";
-import type { GhosttyTerminalLiveKitProps } from "../../../src/components/GhosttyTerminalLiveKit";
-import { GhosttyTerminalLiveKit } from "../../../src/components/GhosttyTerminalLiveKit";
+import type { GhosttyTerminalSessionProps } from "../../../src/components/GhosttyTerminalSession";
+import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
+import type { TerminalFeed, TerminalFrame, TerminalStream } from "../../../src/rpc/connections/terminal";
 import type { ToolShortcutDef } from "../../../src/lib/toolShortcuts";
 import { byTestId, TEST_IDS } from "../testIds";
 
 // ---------------------------------------------------------------------------
-// Canonical test token factory — duplicated in tests; lives here once.
+// The feed the terminal is mounted on
 // ---------------------------------------------------------------------------
 
-export const defaultGetToken = () =>
-  Promise.resolve({ token: "fake-token", ttlSeconds: BigInt(600) });
+export interface ControllableFeed {
+  /** What the component is handed. */
+  feed: TerminalFeed;
+  /** Deliver one live-tail frame of output. */
+  deliver: (text: string) => void;
+  /** Everything the terminal has written back. */
+  sent: Uint8Array[];
+  /** Settle the feed's `ended` — the far end is gone. */
+  endSession: () => void;
+}
+
+/** A feed a spec drives by hand: bytes in, bytes out, and an end it can trigger. */
+export function aControllableFeed(options: { withHistory?: boolean } = {}): ControllableFeed {
+  const listeners: Array<(frame: TerminalFrame) => void> = [];
+  const sent: Uint8Array[] = [];
+  let endSession = () => {};
+  const ended = new Promise<void>((resolve) => {
+    endSession = resolve;
+  });
+
+  const stream: TerminalStream = {
+    send: (data) => sent.push(data),
+    onMessage: (fn) => listeners.push(fn),
+    close: () => {},
+  };
+
+  return {
+    feed: {
+      stream,
+      ended,
+      ...(options.withHistory ? { history: async () => null } : {}),
+    },
+    deliver: (text: string) => {
+      const frame: TerminalFrame = {
+        data: new TextEncoder().encode(text),
+        endOffset: 0n,
+        atOldest: false,
+      };
+      for (const fn of listeners) fn(frame);
+    },
+    sent,
+    endSession: () => endSession(),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Driver
 // ---------------------------------------------------------------------------
 
-export interface GhosttyTerminalLiveKitDriverOptions {
-  /** LiveKit server URL (defaults to non-resolving local addr for unit tests). */
-  url?: string;
-  /** Initial token. */
-  token?: string;
-  /** Token refresh factory. Defaults to `defaultGetToken`. */
-  getToken?: GhosttyTerminalLiveKitProps["getToken"];
-  /** TTL in seconds. */
-  ttlSeconds?: bigint;
-  /** Whether to show the mobile keyboard overlay. */
+export interface GhosttyTerminalSessionDriverOptions {
+  /** The feed to mount on. Defaults to a fresh controllable one with no history. */
+  feed?: TerminalFeed;
+  /** What the caller says about the connection carrying the feed. Omitted by default. */
+  connectionStatus?: GhosttyTerminalSessionProps["connectionStatus"];
+  /** Whether to show the mobile keyboard affordance. */
   showMobileKeyboard?: boolean;
   /** Whether to prevent focus on tap. */
   preventFocusOnTap?: boolean;
   /** Connection overlay options (enables chrome). If omitted, no overlay. */
-  connectionOverlay?: GhosttyTerminalLiveKitProps["connectionOverlay"];
+  connectionOverlay?: GhosttyTerminalSessionProps["connectionOverlay"];
   /** Container height (default 400). */
   containerHeight?: number;
   /** Container width (default unset). */
@@ -59,22 +102,32 @@ export interface GhosttyTerminalLiveKitDriverOptions {
   mobileShortcuts?: ToolShortcutDef[];
 }
 
-export function aGhosttyTerminalLiveKit(
-  opts: GhosttyTerminalLiveKitDriverOptions = {},
-) {
+export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOptions = {}) {
   const onDisconnect = cy.stub().as("onDisconnect");
   const onTerminate = cy.stub().as("onTerminate");
 
-  const url = opts.url ?? "ws://localhost:9999";
-  const token = opts.token ?? "fake-token";
-  const getToken = opts.getToken ?? defaultGetToken;
-  const ttlSeconds = opts.ttlSeconds ?? BigInt(600);
   const containerHeight = opts.containerHeight ?? 400;
+  const controllable = aControllableFeed();
+  const feed = opts.feed ?? controllable.feed;
 
-  let connectionOverlay: GhosttyTerminalLiveKitProps["connectionOverlay"] =
-    opts.connectionOverlay;
+  let connectionOverlay: GhosttyTerminalSessionProps["connectionOverlay"] = opts.connectionOverlay;
 
   const driver = {
+    /** The bytes the terminal has written back to its feed (only for the default feed). */
+    sent: controllable.sent,
+
+    /** Deliver output on the default feed. */
+    deliver(text: string) {
+      controllable.deliver(text);
+      return driver;
+    },
+
+    /** End the session on the default feed — the far end is gone. */
+    endSession() {
+      controllable.endSession();
+      return driver;
+    },
+
     /**
      * Add connection overlay with Disconnect handler (required for chrome tests).
      */
@@ -127,11 +180,9 @@ export function aGhosttyTerminalLiveKit(
 
       mount(
         <div style={style}>
-          <GhosttyTerminalLiveKit
-            url={url}
-            token={token}
-            getToken={getToken}
-            ttlSeconds={ttlSeconds}
+          <GhosttyTerminalSession
+            feed={feed}
+            connectionStatus={opts.connectionStatus}
             showMobileKeyboard={opts.showMobileKeyboard}
             preventFocusOnTap={opts.preventFocusOnTap}
             connectionOverlay={connectionOverlay}
@@ -150,7 +201,7 @@ export function aGhosttyTerminalLiveKit(
     statusDot: (options?: Parameters<typeof cy.get>[1]) =>
       byTestId(TEST_IDS.connectionStatusDot, { timeout: 10000, ...options }),
 
-    /** The LiveKit status text element. */
+    /** The raw connection status readout. */
     livekitStatus: () => byTestId(TEST_IDS.livekitStatus),
 
     /** The terminal fullscreen button. */

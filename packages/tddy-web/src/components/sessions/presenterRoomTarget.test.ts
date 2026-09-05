@@ -4,7 +4,7 @@ import type { SessionAttachmentHint } from "../../rpc/connections/session";
 
 // Tests for the pure `presenterRoomTargetFor` derivation — the PR-Stack Chat Screen's own
 // dedicated LiveKit room connection is derived from the attached session's routing hint (the same
-// room/url the terminal independently connects to via `SessionLiveKitTerminal`), never from
+// room/url the session's connection joins for its terminal), never from
 // `SessionMainPane`'s VNC-purpose `room` prop.
 
 describe("presenterRoomTargetFor", () => {

@@ -1,11 +1,11 @@
 /**
  * A session's terminal byte stream, however it is carried.
  *
- * `GhosttyTerminalGrpc` already had the right abstraction — `GrpcStream` / `GrpcFrame` — it just had
- * one transport's name on it and one implementation. `GhosttyTerminalLiveKit` had no equivalent
- * because it built its own `TerminalService` client and connected its own `Room`; node 3 moved the
- * room, the identity and the token onto the `SessionConnection`, which is what leaves the two
- * components differing in nothing but a name.
+ * The gRPC terminal already had the right abstraction — `GrpcStream` / `GrpcFrame` — it just had
+ * one transport's name on it and one implementation. The LiveKit terminal had no equivalent because
+ * it built its own `TerminalService` client and connected its own `Room`; node 3 moved the room,
+ * the identity and the token onto the `SessionConnection`, which is what left the two components
+ * differing in nothing but a name.
  *
  * Promoting the interface here is most of what makes one terminal possible — and, because the
  * history path travels with it, is what gives a LiveKit-carried session scrollback it has never had.
@@ -74,6 +74,22 @@ export type TerminalHistoryFetcher = (
 export interface TerminalFeed {
   readonly stream: TerminalStream;
   readonly history?: TerminalHistoryFetcher;
+
+  /**
+   * Settles when the remote end of this feed is gone for good — the session's process exited, or
+   * the participant serving its PTY left the room.
+   *
+   * The terminal cannot see this for itself once the transport moved onto the connection: the loop
+   * that reads the wire is the feed's, so the end of that loop is a fact only the feed holds. Both
+   * predecessors acted on it — the LiveKit terminal covered the pane with "Session ended" and fired
+   * `onRemoteSessionEnded`, and the daemon path evicted the runtime — so a converged terminal that
+   * could not be told would leave a dead session looking interactive.
+   *
+   * Optional, and never rejected: a feed that has no way of knowing simply never settles it, and a
+   * terminal fed by one keeps tailing. That is the honest reading of "this wire cannot tell you",
+   * as against inventing an end that did not happen.
+   */
+  readonly ended?: Promise<void>;
 }
 
 /**

@@ -49,6 +49,17 @@ function aControllableStream() {
     stream,
     written,
     isClosed: () => closed,
+    /**
+     * Settles once the terminal has registered its listener.
+     *
+     * A frame delivered before it has is dropped and never retried — `cy.mount` returns before
+     * React has run the mounting effect, so a delivery chained straight off it races the
+     * registration rather than the behaviour under test.
+     */
+    listening: () =>
+      cy.wrap(null, { log: false }).should(() => {
+        expect(listener, "terminal registered its onMessage listener").to.not.equal(null);
+      }),
     deliver: (text: string, endOffset = BigInt(0), atOldest = false) =>
       listener?.({ data: new TextEncoder().encode(text), endOffset, atOldest }),
   };
@@ -117,12 +128,12 @@ function TerminalProbe({ feed }: { feed: TerminalFeed }) {
 describe("a terminal fed by a session connection", () => {
   it("renders output arriving on the stream, whatever carries it", () => {
     // Given any feed at all — the component never learns which wire this is
-    const { stream, deliver } = aControllableStream();
+    const { stream, deliver, listening } = aControllableStream();
 
     cy.mount(<TerminalProbe feed={{ stream }} />);
 
     // When output arrives
-    cy.then(() => deliver("hello from the session"));
+    listening().then(() => deliver("hello from the session"));
 
     // Then it is rendered. One component, one path, no `livekit-client` import.
     byTestId("output").should("have.text", "hello from the session");
@@ -157,10 +168,10 @@ describe("a terminal fed by a session connection", () => {
 
   it("hides the scrollback control when the connection cannot replay", () => {
     // Given a live-tail-only feed
-    const { stream, deliver } = aControllableStream();
+    const { stream, deliver, listening } = aControllableStream();
 
     cy.mount(<TerminalProbe feed={{ stream }} />);
-    cy.then(() => deliver("live output"));
+    listening().then(() => deliver("live output"));
 
     // Then the terminal still works and simply offers no scrollback. The positive assertion comes
     // first so a component that throws cannot satisfy the absence check.

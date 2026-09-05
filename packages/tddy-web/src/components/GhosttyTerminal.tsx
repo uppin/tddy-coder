@@ -95,7 +95,7 @@ export interface GhosttyTerminalProps {
   /**
    * Fires with the new viewportY (lines scrolled up from the bottom; 0 = pinned to latest)
    * whenever the viewport moves — wheel, touch, keyboard, or programmatic scroll. Used by
-   * GhosttyTerminalGrpc to mirror scroll position across the two overlay terminals.
+   * GhosttyTerminalSession to mirror scroll position across the two overlay terminals.
    */
   onScroll?: (viewportY: number) => void;
   /** When true, log write/onData and lifecycle to console. */
@@ -679,7 +679,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // down pulls older output into view.
     //
     // Who owns the gesture depends on what is on screen, the same three ways the wheel is gated on
-    // desktop (`GhosttyTerminalGrpc`'s capture-phase listener plus ghostty-web's own wheel
+    // desktop (`GhosttyTerminalSession`'s capture-phase listener plus ghostty-web's own wheel
     // handling). Each line of finger travel is one notch of that gesture:
     //
     // - **`tui-mouse`** — the TUI tracks the mouse (the Claude CLI does): report the notch as an

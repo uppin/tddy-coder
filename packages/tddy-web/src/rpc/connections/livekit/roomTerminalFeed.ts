@@ -1,14 +1,14 @@
 /**
  * The terminal feed a room-carried session offers.
  *
- * Bytes travel the way `GhosttyTerminalLiveKit` already sent them: a bidi
+ * Bytes travel the way the LiveKit terminal already sent them: a bidi
  * `terminal.TerminalService/StreamTerminalIO` against the participant the session's own process
  * serves on, which is the only method that participant answers (`cli_session_manager.rs` —
  * `PtyLiveKitService`). Nothing about that routing changes here; what changes is that the component
  * no longer performs it.
  *
  * **History does not travel that way, and this is the point of the node.** A session room serves
- * the PTY and nothing else, so `GhosttyTerminalLiveKit` had no history fetcher, no offset tracking
+ * the PTY and nothing else, so the LiveKit terminal had no history fetcher, no offset tracking
  * and no page terminal — a LiveKit session could not see past what was live. The capture ring is
  * the *host daemon's*, and the host is reachable: asking it for `GetTerminalHistory` gives a
  * room-carried session the scrollback it has never had, without moving a single output byte off the
@@ -29,7 +29,7 @@ const dTerm = tddyDebug("tddy:term:feed");
 /**
  * How long the input generator waits before looking at the outbound queue again.
  *
- * `GhosttyTerminalLiveKit`'s interval, kept: an async generator has nothing to await when the queue
+ * The LiveKit terminal's interval, kept: an async generator has nothing to await when the queue
  * is empty, and each yield is one WebRTC data-channel message. Draining the whole queue into a
  * single message per tick is what stopped rapid typing and pastes overflowing the channel's send
  * buffer — a thousand one-byte sends became a handful of large ones, and the drops that produced
@@ -37,8 +37,16 @@ const dTerm = tddyDebug("tddy:term:feed");
  */
 const INPUT_DRAIN_INTERVAL_MS = 20;
 
-export interface RoomTerminalFeedDeps {
-  /** The session's own room, joined by the connection that owns this feed. */
+/**
+ * What carrying a terminal's bytes over a room takes.
+ *
+ * Stated without a session or a host, because the room is the whole of what this half needs: the
+ * standalone connect screen (`src/index.tsx`) joins a room it was handed a token for and has
+ * neither. Scrollback is the part that needs a host, and it is bolted on by
+ * {@link openRoomTerminalFeed}.
+ */
+export interface RoomTerminalStreamDeps {
+  /** The session's own room, joined by whoever owns this stream. */
   readonly room: Room;
 
   /** The participant the session's process serves `StreamTerminalIO` on. */
@@ -47,6 +55,11 @@ export interface RoomTerminalFeedDeps {
   /** Addressed at {@link serverIdentity} over {@link room}. */
   readonly terminal: Client<typeof TerminalService>;
 
+  /** Named in diagnostics only — this wire carries no session id of its own. */
+  readonly sessionId: string;
+}
+
+export interface RoomTerminalFeedDeps extends RoomTerminalStreamDeps {
   /**
    * The **host daemon's** client, not the session participant's.
    *
@@ -55,7 +68,6 @@ export interface RoomTerminalFeedDeps {
    */
   readonly host: Client<typeof ConnectionService>;
 
-  readonly sessionId: string;
   readonly options: TerminalOptions;
 }
 
@@ -105,23 +117,19 @@ function whenServerJoins(room: Room, identity: string): { joined: Promise<void>;
 }
 
 /**
- * Open `sessionId`'s terminal over the room its process publishes into.
+ * The byte pipe half of a room-carried terminal: `StreamTerminalIO` against the session's own
+ * participant, and the end of it.
  *
- * `options.controlToken` is not read: `StreamTerminalIO` writes straight to the PTY handle the
- * session's own process holds, so there is no lease for the daemon to compare against — the room
- * membership *is* the authorisation. `options.initialGrid` is likewise unused; this wire has no
- * pre-replay resize, and the terminal states its size with the resize OSC the PTY bridge parses out
- * of the input stream.
+ * Separate from {@link openRoomTerminalFeed} because scrollback needs a host and this does not. The
+ * standalone connect screen joins a room with a token it was handed and knows of no session and no
+ * daemon, so it can have bytes and nothing else — which is exactly what a feed with no `history` is.
  */
-export function openRoomTerminalFeed({
+export function openRoomTerminalStream({
   room,
   serverIdentity,
   terminal,
-  host,
   sessionId,
-  options,
-}: RoomTerminalFeedDeps): TerminalFeed {
-  const terminalId = options.terminalId ?? "";
+}: RoomTerminalStreamDeps): { stream: TerminalStream; ended: Promise<void> } {
   const listeners: Array<(frame: TerminalFrame) => void> = [];
   const outbound: Uint8Array[] = [];
   let closed = false;
@@ -139,8 +147,28 @@ export function openRoomTerminalFeed({
     close(): void {
       closed = true;
       waitingForServer.abandon();
+      room.off(RoomEvent.ParticipantDisconnected, onServerLeft);
     },
   };
+
+  // The two ways a room-carried terminal dies, settled onto one promise. The RPC stream ending is
+  // the definitive one, but a participant that vanishes takes a while to surface as a stream error,
+  // and the roster says so at once — which is what put the "Session ended" cover over the pane
+  // promptly enough to stop the operator typing into a terminal nobody is reading.
+  let reportEnded = () => {};
+  const ended = new Promise<void>((resolve) => {
+    reportEnded = () => {
+      room.off(RoomEvent.ParticipantDisconnected, onServerLeft);
+      resolve();
+    };
+  });
+
+  function onServerLeft(participant: { identity: string }): void {
+    if (participant.identity !== serverIdentity) return;
+    dTerm("server participant left sessionId=%s serverIdentity=%s", sessionId, serverIdentity);
+    reportEnded();
+  }
+  room.on(RoomEvent.ParticipantDisconnected, onServerLeft);
 
   async function* input(): AsyncGenerator<ReturnType<typeof create<typeof TerminalInputSchema>>> {
     // The bridge starts its PTY read side on the first message of the stream, so one empty frame
@@ -175,11 +203,39 @@ export function openRoomTerminalFeed({
         serverIdentity,
         err instanceof Error ? err.message : err,
       );
+    } finally {
+      // A stream this side closed is not a session that ended — the pane is going away, and telling
+      // it so would evict a runtime the operator merely navigated off.
+      if (!closed) reportEnded();
     }
   })();
 
+  return { stream, ended };
+}
+
+/**
+ * Open `sessionId`'s terminal over the room its process publishes into.
+ *
+ * `options.controlToken` is not read: `StreamTerminalIO` writes straight to the PTY handle the
+ * session's own process holds, so there is no lease for the daemon to compare against — the room
+ * membership *is* the authorisation. `options.initialGrid` is likewise unused; this wire has no
+ * pre-replay resize, and the terminal states its size with the resize OSC the PTY bridge parses out
+ * of the input stream.
+ */
+export function openRoomTerminalFeed({
+  room,
+  serverIdentity,
+  terminal,
+  host,
+  sessionId,
+  options,
+}: RoomTerminalFeedDeps): TerminalFeed {
+  const terminalId = options.terminalId ?? "";
+  const { stream, ended } = openRoomTerminalStream({ room, serverIdentity, terminal, sessionId });
+
   return {
     stream,
+    ended,
     history: createForwardHistoryFetcher(host, {
       sessionToken: options.sessionToken,
       sessionId,

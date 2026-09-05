@@ -1,10 +1,10 @@
 /**
  * Unit tests for the terminal feed a session connection hands its terminal.
  *
- * The asymmetry this node removes: scrollback history exists **only** on the gRPC path today.
- * `GhosttyTerminalGrpc` has the forward-history loader, the offset tracking and a 50 000-line page
- * terminal; `GhosttyTerminalLiveKit` has none of it, so a LiveKit session cannot scroll back past
- * what is live. Once the feed carries the history fetcher, the transport stops deciding.
+ * The asymmetry this node removes: scrollback history existed **only** on the gRPC path. The gRPC
+ * terminal had the forward-history loader, the offset tracking and a 50 000-line page terminal; the
+ * LiveKit terminal had none of it, so a LiveKit session could not scroll back past what was live.
+ * Once the feed carries the history fetcher, the transport stops deciding.
  *
  * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-terminal-convergence.md`
  */
@@ -40,7 +40,7 @@ describe("a terminal feed", () => {
     const feed = aFeedWithHistory();
 
     // Then the terminal can page backwards. This is the behaviour a LiveKit session has never had:
-    // GhosttyTerminalLiveKit has no HistoryFetcher, no offset tracking and no page terminal.
+    // the LiveKit terminal had no HistoryFetcher, no offset tracking and no page terminal.
     expect(feedSupportsHistory(feed)).toBe(true);
   });
 

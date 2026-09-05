@@ -11,7 +11,7 @@ import { toArrayBuffer } from "../support/rpc/protoRpc";
 import { byTestId, TEST_IDS } from "../support/testIds";
 import { connectionPage } from "../support/pages/connectionPage";
 
-// Mobile tap-to-type / focus assertions need a real LiveKit room (server participant). Those flows are covered in GhosttyTerminalLiveKit.cy.tsx without full App wiring.
+// Mobile tap-to-type / focus assertions need a real LiveKit room (server participant). Those flows are covered in GhosttyTerminalSessionChrome.cy.tsx without full App wiring.
 describe("App", () => {
   beforeEach(() => {
     cy.clearLocalStorage();
