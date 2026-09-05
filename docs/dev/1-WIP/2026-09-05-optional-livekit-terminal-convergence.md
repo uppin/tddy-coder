@@ -120,7 +120,7 @@ Deleting the two old components and migrating their call sites lands in the same
 - [x] Run acceptance tests (verify they fail) — 4/4 on `feedSupportsHistory`
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/terminal.test.ts`
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`) — four milestones, all pushed
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
@@ -164,6 +164,19 @@ above this one never inherit a half-finished tree.
 | 1 | `9eecb269` | `feedSupportsHistory`; `GrpcFrame`/`GrpcStream` re-pointed at the promoted types | 1047 pass, 0 fail |
 | 2 | `6fc8365b` | `TerminalOptions` and the widened `openTerminal`; `atEnd` on `TerminalHistoryChunk`; the loader's anchor relaxed to `bigint \| null` | 1051 pass, 0 fail |
 | 3 | `d4c80805` | `openTerminal` implemented on both connections — `terminalFeed.ts` and `livekit/roomTerminalFeed.ts` | 1051 pass, 0 fail |
+| 4 | `e459ea11` | `GhosttyTerminalSession`; the two predecessors and `SessionLiveKitTerminal` deleted; every call site and Cypress driver migrated | 1054 pass, 0 fail |
+
+(Commit hashes above are pre-rebase. The branch was rebased onto `capability-gating`'s new tip
+`91d51769` on 2026-09-05 and force-pushed; `origin/<base>..HEAD` is this PR's seven commits only.)
+
+**Cypress component specs — 102 tests across the 17 specs this PR touches, all passing.** The five
+predecessor specs were re-pointed, not dropped: 51 `it`s became 52, each spec mapping 1:1 to a
+renamed counterpart.
+
+| Spec group | Result |
+|---|---|
+| `GhosttyTerminalSession` / `…Chrome` / `…MobileInput`, `TerminalHistoryPaging`, `SessionMainPaneRoomTerminal`, `TerminalConvergenceAcceptance` | **56 / 56** |
+| the eleven other affected specs (`App`, `BrowserTerminalShortcuts`, `TerminalZoom`, `TerminalTouchScrollRouting`, `SessionConnectionAcceptance`, `useConnectionStatus`, …) | **46 / 46** |
 
 Milestone 2 went out on its own, ahead of the implementations behind it: it changes a signature that
 #442 and #443 compile against, and a late signature change surfaces as somebody else's bug in
