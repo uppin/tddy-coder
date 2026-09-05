@@ -65,7 +65,14 @@ capabilities, so no consumer branches on the wire again.
    routes exactly where the current code routes: over LiveKit, to
    `daemon-<instance>-<session>`; where the attach reply names no room, to the daemon connection.
 2. The LiveKit implementation owns room join, observer-identity minting, token generation and TTL
-   refresh. None of those words appear outside `src/rpc/connections/livekit/`.
+   refresh **for the session's RPC connection**. None of those words appear outside
+   `src/rpc/connections/livekit/` for that connection.
+
+   They do still appear in `SessionLiveKitTerminal`, which performs its own separate join and mints
+   its own browser identity through `useLiveKitTerminalToken`. Folding that second join into the
+   connection is node 5's; until it does, the boundary this criterion draws holds for the RPC
+   connection only. The overlay compensates by tracking both sources — see the changeset's
+   **Review findings** #1.
 3. `SessionAttachmentState` has **one** connected status. `connected-livekit` and `connected-grpc`
    are gone from `useSessionAttachment`, `sessionRuntimeRegistry`, `SessionRuntime`,
    `SessionMainPane`, `SessionDetailPane` and `SessionsDrawerScreen`.
