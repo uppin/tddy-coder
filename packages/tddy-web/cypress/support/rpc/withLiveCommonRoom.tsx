@@ -30,12 +30,30 @@ export const COMMON_ROOM_NAME = "tddy-lobby";
 /** The instance id of the daemon that served the bundle (`/api/config`'s `daemon_instance_id`). */
 export const SERVING_INSTANCE_ID = "udoo";
 
+export interface LiveCommonRoomMountOptions {
+  /**
+   * Whether the page was served by a daemon that names itself (`/api/config`'s
+   * `daemon_instance_id`). Defaults to `true`, which is the ordinary browser case.
+   *
+   * Set `false` to mount the one configuration where the common room is the *only* contributor to
+   * the host directory. That is the configuration in which an unjoinable room still leaves the
+   * selector with nothing to offer, and so the only one in which the selector itself has to explain
+   * why — see `CommonRoomConnectionVisibilityAcceptance`.
+   */
+  readonly servedByADaemon?: boolean;
+}
+
 /**
  * Mount `children` as a signed-in operator whose browser attempts to join the common room using
- * `room`. Nothing else about the provider is faked: the daemon list is derived from the room's
- * participants exactly as in production, so a room that never connects yields no daemons.
+ * `room`. Nothing else about the provider is faked: the common room's contribution to the host
+ * directory is derived from the room's participants exactly as in production, so a room that never
+ * connects contributes no hosts.
  */
-export function mountWithLiveCommonRoom(children: React.ReactNode, room: Room): Cypress.Chainable {
+export function mountWithLiveCommonRoom(
+  children: React.ReactNode,
+  room: Room,
+  { servedByADaemon = true }: LiveCommonRoomMountOptions = {},
+): Cypress.Chainable {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN);
   window.localStorage.setItem(REFRESH_TOKEN_KEY, VALID_REFRESH_TOKEN);
 
@@ -49,7 +67,7 @@ export function mountWithLiveCommonRoom(children: React.ReactNode, room: Room): 
       <SelectedDaemonProvider
         livekitUrl={COMMON_ROOM_LIVEKIT_URL}
         commonRoom={COMMON_ROOM_NAME}
-        servingInstanceId={SERVING_INSTANCE_ID}
+        servingInstanceId={servedByADaemon ? SERVING_INSTANCE_ID : undefined}
         roomFactory={() => room}
       >
         {children}

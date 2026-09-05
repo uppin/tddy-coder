@@ -10,10 +10,12 @@ with several daemons in the same LiveKit common room (e.g. a laptop and a workst
 that daemon's own URL.
 
 This feature adds a **daemon selector** to the top-right strip of these screens. The selectable
-daemons are the **daemon-role LiveKit participants in the common room** — the same source already
-used by the Projects screen's host picker (`daemonHostsFromParticipants`). Selecting a daemon
-switches **all daemon-level RPC** (projects, worktrees, VMs, tasks, session list/start) to that
-daemon, without a page reload.
+daemons come from the **host directory** — the merge of every registered directory source. The
+common room is one source (daemon-role participants, via `daemonHostsFromParticipants`); the daemon
+that served the page is another, so a build that joins no common room still has a host to offer.
+Selecting a daemon switches **all daemon-level RPC** (projects, worktrees, VMs, tasks, session
+list/start) to that daemon, without a page reload. See
+[`tddy-web` host directory](../../../packages/tddy-web/docs/host-directory.md).
 
 ## Why daemon-level RPC does not use HTTP
 
@@ -46,10 +48,14 @@ Everything else — `ConnectionService`, `TaskService`, `ActionService`, `VmServ
 `ScreenSharingService`, `AuthService` — resolves through a host connection, addressed at the
 **selected** daemon.
 
-Who the hosts *are* is still read from common-room participants, so a build with no room resolves no
-hosts even though the connection model itself no longer requires one. Separating the directory from
-the connection is the next step in the `optional-livekit` stack
-([#438](https://github.com/uppin/tddy-coder/pull/438)).
+Who the hosts *are* is the **host directory**'s answer, not the common room's. An unconfigured
+common room contributes no hosts and reports `idle` rather than `error` — an operator who chose not
+to configure LiveKit is not shown a connection failure for it — and the daemon serving the page is
+contributed regardless, so the selector is never empty on a daemon-served page.
+
+Naming a host is not the same as reaching one: until a wire is registered that can reach the serving
+daemon, selecting it resolves no connection and each screen renders its own "no connection" state.
+That wire arrives later in the `optional-livekit` stack.
 
 ## Scope boundary: daemon-level vs. per-session RPC
 
