@@ -41,10 +41,10 @@ VM_TESTS=(
   "tddy-vm cloud_init_acceptance"
   "tddy-vm vm_boot_control_acceptance"
   "tddy-vm vm_library_acceptance"
-  "tddy-vm nix_layer_acceptance"
   "tddy-vm tddy_host_vm_acceptance"
   "tddy-vm-build cloud_init_cli_acceptance"
   "tddy-vm-build build_image_cli_acceptance"
+  "tddy-e2e tddy_image_chain_acceptance"
   "tddy-e2e vm_cgroups_acceptance"
   "tddy-e2e vm_workspace_tool_sandbox_acceptance"
 )

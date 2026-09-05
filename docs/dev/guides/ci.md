@@ -104,25 +104,41 @@ redundant: `master` is the only ref that writes the cargo cache, so without it
 the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
 It also means the branch itself has VM coverage rather than only its PRs.
 
-Scope is what a bare cloud image can reach, which is three checks out of the ten
-suites in `./vm-tests`. Both are legs of one matrix job, so they share the KVM
+Scope is three checks out of the ten suites in `./vm-tests`: two that a bare
+cloud image can reach, and one that bakes the full chain. Both are legs of one matrix job, so they share the KVM
 handling and the false-green guard:
 
 | Check | Runs | Proves |
 |-------|------|--------|
 | `VM boot control` | all of `vm_boot_control_acceptance` (6 tests) | The launcher, serial-console control, 9p, SSH login with the per-VM key, graceful shutdown |
 | `Cloudinit VM boot` | one test of `cloud_init_acceptance`, `a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh` | That a bake produces a *usable* layer: cloud-init bakes a prepared base, a VM is created from it, boots, and answers `id -un` over SSH as the account the bake provisioned |
-| `Cloudinit + nix` | all of `nix_layer_acceptance` (1 test) | That a bake carries real work across the seal: it installs Nix from `tddy_vm_testkit::recipes::nix_base_user_data` — the document the testkit's own image chain starts from — and the VM booted off that layer resolves `nix` into `/nix/…` and runs it |
+| `Cloudinit + nix + tddy` | all of `tddy_image_chain_acceptance` (1 test) | The whole chain: a cloud-init base with Nix, then both flavours derived from it — the **builder**, which compiles tddy for deployment inside the guest, and the **test host**, which installs those binaries with the real `./install --systemd --headless` and runs them. Asserts `nix` resolves into `/nix/…` on the base, that the builder produced `tddy-supervisor` and `tddy-daemon`, and that on the test host the supervisor is `active` and running as `root` with the daemon already dropped to `tddy` |
 
-None needs a pre-baked image chain, which is why these three and not the other
-six.
+The first two need no pre-baked image chain. The third **builds** the chain, and
+is the expensive one by a wide margin.
 
-The Nix leg earns its ~8 minutes by catching a failure the smaller one cannot
-see. cloud-init concatenates `runcmd` into a single script with no error
-handling of its own — which is why the recipe opens with `set -e` — so a bake
-whose provisioning silently failed still produces a layer that boots and still
-accepts SSH. Only asking the finished guest to *run what was installed*
-distinguishes "cloud-init ran" from "cloud-init did what it was told". CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
+### The cost of the chain leg
+
+It runs on every PR by explicit choice. What that buys and what it costs:
+
+- **Cold**: hours. The builder realises a multi-gigabyte dev shell over slirp
+  (`builder_user_data` retries three times, because a single dropped connection
+  failed a bake ~45 minutes in) and then compiles the workspace — `libwebrtc`
+  included — in a 4-vCPU guest.
+- **Warm**: a boot plus an incremental `./release`. But a GitHub runner is cold
+  every time: `tmp/.tddy` is not cached, so every run pays the full price.
+- **Budget**: `timeout_minutes: 350`, just under GitHub's 360-minute ceiling for
+  a hosted job, so the leg fails with its own logs rather than being killed by
+  the platform.
+- **Disk** is the sharper constraint. The reclaim step drops the .NET, Android,
+  GHC and Boost trees plus the preloaded Docker images; the builder overlay then
+  holds a Nix store and a full release `target/`.
+
+If that proves untenable, the cheap variant is to build the binaries **on the
+runner** — it is x86_64 Linux, and the builder guest exists because an
+Apple-Silicon developer cannot emit Linux ELF, which is not a constraint here —
+and keep only the test-host bake. That drops the builder flavour from CI
+coverage, which is the trade being made either way. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
 against the `SHA512SUMS` published beside it, then cached) because the testkit
 never downloads anything itself by design.
 
@@ -172,7 +188,7 @@ coming back. A false green is worse than a red one.
 | Suite | Blocker |
 |-------|---------|
 | `tddy_host_vm_acceptance` (the bake) | Several hours even accelerated: installs a 9p kernel, installs Nix, and runs a cold `./release` of the whole workspace including `libwebrtc` inside a 2-vCPU guest. Per `docs/ft/vm/tddy-vm.md`, it has never been run end to end. Its output is a multi-GB qcow2 chain that does not fit the 10 GB Actions cache, so it would need external blob storage (ghcr.io via ORAS, or Releases) |
-| `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base, so they inherit the bake's problem |
+| `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base. `vm_cgroups_acceptance` shares its chain with the `Cloudinit + nix + tddy` leg, so what blocks it now is only its extra per-test guest boots, not the bake |
 | `cloud_init_acceptance` (the two tests CI does not run) | Nothing structural — each bakes from the bare cloud image like the one that does run. They are left out because a second and third bake buys inspection of an artifact the `Cloudinit VM boot` check already boots |
 | `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
 

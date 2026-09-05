@@ -48,7 +48,11 @@ jobs:
   vm-suite:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Per leg: the two cheap ones boot a guest, the chain bakes three images and
+    # compiles the workspace inside one of them. 350 is under GitHub's 360-minute
+    # ceiling for a hosted job, so the leg fails on its own timeout with logs
+    # rather than being killed by the platform.
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       # One suite's guest failing says nothing about the other's, and cancelling
       # the survivor would throw away the console transcript that explains it.
@@ -58,10 +62,12 @@ jobs:
           # The launcher itself: boot, serial console, 9p, SSH, graceful shutdown.
           - name: VM boot control
             slug: boot-control
+            package: tddy-vm
             test_binary: vm_boot_control_acceptance
             # No filter: the whole suite is the check.
             filter: ""
             expected_passing: 6
+            timeout_minutes: 90
           # The bake, used rather than inspected: cloud-init bakes a prepared
           # base, a VM is created from it, and the guest is logged into over
           # SSH. Deliberately one test — its two siblings in the same binary
@@ -69,19 +75,27 @@ jobs:
           # bake each and prove less than this one does.
           - name: Cloudinit VM boot
             slug: cloudinit-vm-boot
+            package: tddy-vm
             test_binary: cloud_init_acceptance
             filter: "--exact a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh"
             expected_passing: 1
-          # The same shape, carrying real work across the seal: the bake installs
-          # Nix — the testkit's own `nix_base_user_data`, not a copy — and the VM
-          # booted from that layer runs `nix` out of the store the bake created.
-          # A `runcmd` that failed silently still boots and still accepts SSH, so
-          # only asking the guest to run Nix tells the two apart.
-          - name: Cloudinit + nix
-            slug: cloudinit-nix
-            test_binary: nix_layer_acceptance
+            timeout_minutes: 90
+          # The whole chain: a cloud-init base with Nix, and the two flavours
+          # derived from it — the builder, which compiles tddy for deployment
+          # inside the guest, and the test host, which installs those binaries
+          # with the real ./install --systemd and runs them under systemd.
+          #
+          # This is the expensive one, deliberately: the builder realises a
+          # multi-gigabyte dev shell over slirp and then compiles the workspace,
+          # libwebrtc included, in a guest. Hours on a cold cache. It runs on
+          # every PR by explicit choice — see docs/dev/guides/ci.md.
+          - name: Cloudinit + nix + tddy
+            slug: cloudinit-nix-tddy
+            package: tddy-e2e
+            test_binary: tddy_image_chain_acceptance
             filter: ""
             expected_passing: 1
+            timeout_minutes: 350
     steps:
       - uses: actions/checkout@v7
 
@@ -89,6 +103,9 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          # The chain's builder overlay carries a Nix store and a full release
+          # `target/`; the preloaded Docker images are ~10 GB nothing here uses.
+          sudo docker image prune -af || true
           df -h /
 
       # /dev/kvm exists on the runner image but is root:kvm 0660, so the runner
@@ -171,7 +188,7 @@ jobs:
           # fixed host ports (2231-2236 for boot control, 2296-2297 for the
           # cloud-init boot, 2293-2294 for the Nix layer) and QEMU derives its
           # monitor socket path from the port alone.
-          ./dev cargo test -p tddy-vm --test ${{ matrix.test_binary }} \
+          ./dev cargo test -p ${{ matrix.package }} --test ${{ matrix.test_binary }} \
             -- --ignored --nocapture --test-threads=1 ${{ matrix.filter }} \
             2>&1 | tee vm-tests.log
 
