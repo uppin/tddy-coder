@@ -9,9 +9,9 @@ Turn **one** branch/PR into a **stack** of smaller PRs, each based on its predec
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it collects the stack model,
 base tracking, the per-PR documents, the forward-only doc linking rule, the golden rules (a deleted
 base branch **closes** its dependent PR), and the worktree-pinning constraint. The authoritative
-product specs are `docs/ft/coder/pr-stacking.md` (stack data model, PR-management tools, the PR
-boundary contract), `docs/ft/coder/pr-stack-docs.md` (the per-PR `PRD.md` / `changeset.md`), and
-`docs/ft/coder/pr-stack-live-status.md` (live status, repoint, base sync). This command assumes
+product specs are the `pr-stack` skill (stack data model, PR-management tools, the PR
+boundary contract), the `pr-stack` skill § *Per-PR documents* (the per-PR `PRD.md` / `changeset.md`), and
+the `pr-stack` skill. This command assumes
 those definitions.
 
 **Use this, not `/split-branch`**, when the slices must land as dependent PRs
@@ -21,7 +21,7 @@ both off `master`, and registers no stack.
 **Plan the stack, not split it**, when the work is not written yet — that is `/plan-pr-stack`. This
 command carves an **existing** PR; it does not plan from requirements. Note that `plan-pr-stack` is
 also the name of a tddy **workflow recipe**, which is a separate product feature documented in
-`docs/ft/coder/pr-stacking.md`; a
+the `pr-stack` skill; a
 different thing from the slash command — see the `pr-stack` skill § *Two ways to plan a stack*. This
 command carves up **existing** commits/files.
 
@@ -32,8 +32,7 @@ A third slice is a second invocation, on B1 or B2. Confirm the distribution befo
 ## The boundary contract governs the split — read this before proposing slices
 
 This is the rule that decides whether a split is allowed at all, and it is not negotiable. From
-`docs/ft/coder/pr-stacking.md` § [PR boundary contract: every node is
-self-contained](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained):
+the `pr-stack` skill
 
 > A planned PR must be **independently reviewable and independently mergeable**: the API/schema
 > change, the code implementing it, and its tests land in **one** node.
@@ -550,7 +549,7 @@ back onto B.
 ## Rules
 
 - **Split by capability, never by layer.** A slice that ships only surface is not a valid PR. See
-  `docs/ft/coder/pr-stacking.md` § PR boundary contract.
+  the `pr-stack` skill.
 - **Never add a stub or a fallback to make B1 build.** That is the layer split, wearing a disguise.
 - **Re-register the stack** after the split — `gh stack link --base master <prs…>`, additive, never
   `--open`. Do not claim the stack was updated when only the bases were.

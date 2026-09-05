@@ -83,7 +83,7 @@ gh pr list --state open --json number,headRefName,baseRefName,isDraft,reviewDeci
 ordinary branch, and it does not force-push.
 
 **Cascade mode.** The current branch does **not** need to be in the stack — cascade mode may be run
-from an orchestrator worktree, or any worktree sitting on an unrelated branch. What it does need:
+from any worktree sitting on an unrelated branch. What it does need:
 
 - **A clean tree here**, because cascade may borrow this worktree (Step 3b). Commit first — never
   `--no-verify`, never amend, do not stash silently.
@@ -106,7 +106,7 @@ For every branch to be rebased, resolve what to rebase **onto**, in this order:
    - The `## Dependencies` section names the predecessor. Skip **merged** ancestors and take the
      nearest non-merged one's branch as `origin/<branch>`; when every ancestor is merged the base
      collapses to `origin/master`. Background in
-     [`docs/ft/coder/pr-stacking.md` § Stack data model](../../docs/ft/coder/pr-stacking.md#stack-data-model).
+     the `pr-stack` skill.
      A non-merged ancestor that owns no branch contributes nothing — there is no ref to rebase onto,
      and that is a **blocked** node, not a base. Say so and stop.
    - *Ad-hoc chain*: the stack parent found by the ancestry walk in Step 1, or the branch's
@@ -152,7 +152,7 @@ Untracked files are deliberately **not** a blocker here (hence the `grep -v '^??
 loudly rather than clobbering an untracked file, and blocking on them would make this permanently dead
 in any real agent worktree — the same reasoning the product's own dirtiness probe uses
 (`git status --porcelain --untracked-files=no`, see
-[`docs/ft/coder/pr-stack-live-status.md` § Base sync](../../docs/ft/coder/pr-stack-live-status.md#base-sync)).
+the `pr-stack` skill).
 
 ### 3b. Borrow — no worktree pins this branch
 
@@ -232,7 +232,7 @@ Run these for the layer's branch, in the worktree Step 3 chose (`git -C "$W"` wh
    it from `git reflog show origin/<base>` or the backup branch. This is the same
    `git rebase --onto <new_base> <old_base> <branch>` shape the product's repoint bridge uses, with the
    same `git merge-base` guard against a stale `<old_base>` — see
-   [`docs/ft/coder/pr-stacking.md` § Merge and repoint](../../docs/ft/coder/pr-stacking.md#merge-and-repoint).
+   the `pr-stack` skill.
 
    Never `git rebase --update-refs` — it rewrites sibling stack branches all at once, which is the
    atomic, all-branches behaviour this command deliberately does not have.
@@ -242,7 +242,7 @@ Run these for the layer's branch, in the worktree Step 3 chose (`git -C "$W"` wh
    parent-owned symbol while resolving.** The whole point of `## Dependencies` in the per-PR
    `changeset.md` is that a surface listed there is somebody else's to create; re-creating it here is
    the duplicate-development failure the per-PR documents exist to prevent
-   ([`docs/ft/coder/pr-stack-docs.md` § Why boundaries belong in a per-PR document](../../docs/ft/coder/pr-stack-docs.md#why-boundaries-belong-in-a-per-pr-document)).
+   (the `pr-stack` skill § *Per-PR documents*).
    **Never delete parent-owned files to resolve a conflict.**
 
    **In cascade mode a conflict stops the run.** Resolve this layer, or abort it
@@ -356,7 +356,5 @@ Report:
 **Commands**: `/merge`, `/repoint`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/split-branch`,
 `/squash-pr`, `/green`, `/validate-changes`, `/pr-wrap`, `/merge-pr-stack`, `/fix-pr`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Product docs**: [PR stacking](../../docs/ft/coder/pr-stacking.md) ·
-[PR-Stack live status & repoint](../../docs/ft/coder/pr-stack-live-status.md) ·
-[PR-stack documents](../../docs/ft/coder/pr-stack-docs.md) ·
+**Product docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) ·
 [Continuous integration](../../docs/dev/guides/ci.md)

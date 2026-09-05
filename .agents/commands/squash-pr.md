@@ -10,7 +10,7 @@ anything destructive.
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) for the stack model, base tracking,
 and the golden rules referenced below. The product-level model — the DAG, the node fields, the
 `pr_*` tools, merge and repoint — is
-[`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md).
+the `pr-stack` skill.
 
 > **A branch pinned by a worktree cannot be rebased**, so free it first (`git worktree list`).
 > tddy-coder sessions live in worktrees, so this is the normal case, not the exception. And once a
@@ -172,7 +172,7 @@ squashed commit; this PR closes as merged; the base PR's diff grows to cover bot
      independently reviewable and mergeable, and it must not be a layer split reassembled — if the
      two halves were "add the surface" and "implement it", folding them is a *fix*, and worth saying
      so in the report. See
-     [`docs/ft/coder/pr-stacking.md` § PR boundary contract](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
+     the `pr-stack` skill § *The PR boundary contract*.
 5. **Fix up the stack, not just the prose.** The fold means one fewer PR, so re-register what
    remains — `gh stack link --base master <prs…>` with the folded PR left out — **after** the merge
    closes it. Retitle the remaining PRs so `K/N` reflects the new count, and note the fold in the
@@ -252,7 +252,5 @@ what landed. Never use `--no-verify`.
 **Commands**: `/repoint`, `/merge-pr-stack`, `/fix-pr`, `/merge`, `/pr`, `/pr-wrap`,
 `/wrap-context-docs`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Specs**: [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md),
-[`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md),
-[`docs/ft/coder/pr-stack-live-status.md`](../../docs/ft/coder/pr-stack-live-status.md)
+**Specs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)
 **Guide**: [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md)

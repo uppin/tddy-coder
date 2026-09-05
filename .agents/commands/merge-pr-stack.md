@@ -21,7 +21,7 @@ it never needed to form.
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — its **Golden rules for
 landing** and **Landing sequence** define the mechanics this command drives. The product-level
 model — the DAG, `StackNode`, the `pr_*` tools, merge and repoint — is
-[`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md); the CI and merge gates are
+the `pr-stack` skill; the CI and merge gates are
 [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md).
 
 **Use this when** the stack is planned, implemented, wrapped, and every PR is ready for review.
@@ -189,7 +189,7 @@ whichever PR's diff happened to show them the code. Two things follow:
 - **The fix often belongs to a different PR.** A comment on PR 1 may describe a symbol PR 4 owns.
   Fixing it in PR 1 would cross the node's `## Boundaries` and implement something listed under
   another node's `## Dependencies` — the same ownership rule that governed planning governs where a
-  review fix goes ([`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md)).
+  review fix goes (the `pr-stack` skill § *Per-PR documents*).
 
 And the direction matters, asymmetrically:
 
@@ -208,7 +208,7 @@ is not a valid answer to a reviewer: every node must be independently reviewable
 mergeable, and a node that ships only surface — an RPC returning `unimplemented`, a field nothing
 reads, a trait with stub impls — is not a valid PR. When a fix is genuinely too large for the node
 it belongs to, split by **capability**, not by layer, and record the split as a follow-up. See
-[`docs/ft/coder/pr-stacking.md` § PR boundary contract](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
+the `pr-stack` skill § *The PR boundary contract*.
 
 #### 1b. Collect every thread across every PR in the stack
 
@@ -780,13 +780,11 @@ Mark anything not green with an explicit visual indicator rather than burying it
 **Commands**: `/pr-stack-rebase`, `/add-to-pr-stack`, `/fix-pr`, `/squash-pr`, `/repoint`,
 `/pr-wrap`, `/pr`, `/merge`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Specs**: [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md),
-[`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md),
-[`docs/ft/coder/pr-stack-live-status.md`](../../docs/ft/coder/pr-stack-live-status.md)
+**Specs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)
 **Guides**: [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md),
 [`docs/dev/guides/testing.md`](../../docs/dev/guides/testing.md)
 
 > **`/plan-pr-stack` is what plans a stack in the first place**, and this command lands what it
 > produced. Note that tddy also ships a **workflow recipe** by a similar name — a separate product
-> feature documented in [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md) — which
+> feature documented in the `pr-stack` skill — which
 > this command has nothing to do with.

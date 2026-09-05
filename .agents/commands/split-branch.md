@@ -15,18 +15,18 @@ neither depends on the other to build, test or merge.
 | Slice B must merge **before** slice A, and A is built on top of B | `/split-pr-to-stack` |
 | A new PR **on top of** an existing one, with nothing to carve out | `/add-to-pr-stack` |
 | A branch that just needs to follow the current one, no split at all | `/follow-up-branch` |
-| The work isn't written yet and you are planning several PRs from requirements | the `pr-stack` workflow recipe (`tddy-coder --recipe pr-stack`, or the recipe dropdown on the web New-session screen) |
+| The work isn't written yet and you are planning several PRs from requirements | `/plan-pr-stack` |
 
 **The test that decides it:** after the split, can each branch build and pass its own tests with the
 other branch absent? If yes → sibling split, this command. If the second slice would not compile
 without the first, the slices are **dependent** and belong in a stack — stop and run
-`/split-pr-to-stack`, which keeps the correct bases and (in a planned stack) re-parents the DAG.
+`/split-pr-to-stack`, which keeps the correct bases and re-registers the stack.
 Do **not** produce two siblings and paper the dependency over with a stub or a fallback; fallbacks
 require explicit developer consent (`CLAUDE.md`).
 
 Each resulting branch becomes its own PR, so each is judged on its own. The
-[PR boundary contract](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained)
-is binding for planned stack nodes, but its principle applies here too: split by **capability**, not
+the `pr-stack` skill § *The PR boundary contract*
+is binding inside a stack, but its principle applies here too: split by **capability**, not
 by layer. "Branch 1 has the API, branch 2 has the implementation" is not two branches — it is one
 branch cut in half, and neither half is reviewable.
 
@@ -62,11 +62,10 @@ Stop and ask the user if any of these hold:
   (`--force-with-lease`, never plain `--force`) or pick a different branch to carry the leftover.
 - **Another open PR is based on this branch.** Resetting it breaks that PR's base and its diff will
   swallow whatever is left. This is a stack, not siblings — use `/split-pr-to-stack`.
-- **The branch is bound to a PR-stack node.** In a planned stack the **branch is the durable link
-  key**: an orchestrator's `StackNode.branch` points at it, and rewriting it out from under the node
-  silently changes what that node ships. Ask the orchestrator (or its owner) first; the plan-level
-  move is `pr_set_parents` / `pr_delete_planned` on the orchestrator, not a reset here. A session's
-  `changeset.yaml` records `orchestrator_session_id` when it belongs to a stack.
+- **The branch is part of a stack.** The **branch is the durable link key**: an open PR points at
+  it and successors are based on it, so rewriting it out from under them silently changes what that
+  PR ships. Ask its owner first; reshaping a stack is `/split-pr-to-stack` plus a re-registration,
+  not a reset here.
 - **The branch is checked out in another worktree** (`<repo>/.worktrees/<name>` for session
   worktrees). Free it first, or work from a worktree that does not pin it — git will refuse
   otherwise, usually halfway through.
@@ -457,5 +456,5 @@ siblings off `master`), `/add-to-pr-stack` (a new PR on top of an existing one),
 branch — it detects the base), `/merge` (if branches need merging later), `/pr-wrap`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`) — only if the split should land as
 stacked PRs; otherwise this command stays a sibling-branch split.
-**Specs**: `docs/ft/coder/pr-stacking.md` (the PR boundary contract and the stack data model),
+**Specs**: the `pr-stack` skill (the PR boundary contract and the stack data model),
 `docs/dev/guides/testing.md`, `docs/dev/guides/changelog-merge-hygiene.md`

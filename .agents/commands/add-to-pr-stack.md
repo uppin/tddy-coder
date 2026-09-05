@@ -20,7 +20,7 @@ plans a whole stack from a feature description. `/split-pr-to-stack` carves an e
 slices.
 
 Load the **`pr-stack` skill** (`.agents/skills/pr-stack/SKILL.md`) first, and read
-[`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md) — the stack is a product feature
+the `pr-stack` skill — the stack is a product feature
 here, not a `gh` extension, and this command has to say which of its two shapes it is operating on.
 
 ## What owns the stack
@@ -49,7 +49,7 @@ Two narrow exceptions: a purely mechanical rename/move/extraction with no behavi
 regeneration of already-committed generated code exposing no new surface.
 
 Full rule:
-[`docs/ft/coder/pr-stacking.md` § PR boundary contract: every node is self-contained](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
+the `pr-stack` skill § *The PR boundary contract*.
 If the work the user described is a layer split, say so and propose the capability cut before creating
 anything.
 
@@ -93,7 +93,7 @@ git worktree list
 ```
 
 - Read the chain off the open PRs' base refs, mirrored to
-  `artifacts/stack-plan.yaml` and `artifacts/pr-stack-plan.md`.
+  each PR's `docs/dev/1-WIP/` changeset.
 - **Ad-hoc chain?** Detect it the way `/pr` does: for each open PR's `headRefName` other than the
   current branch, `git merge-base --is-ancestor origin/<headRefName> HEAD`; the ones that pass are
   stack ancestors, and the closest is the stack parent (smallest
@@ -217,6 +217,4 @@ Remind: merge order is still bottom-up. This PR must not merge before its parent
 from work already in the tree), `/split-pr-to-stack` (carve an existing PR; this command only **adds
 on top**), `/split-branch`, `/pr`, `/pr-stack-rebase`, `/repoint`, `/merge`, `/merge-pr-stack`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Product docs**: [PR stacking](../../docs/ft/coder/pr-stacking.md) ·
-[PR-stack documents](../../docs/ft/coder/pr-stack-docs.md) ·
-[PR-Stack live status & repoint](../../docs/ft/coder/pr-stack-live-status.md)
+**Product docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)
