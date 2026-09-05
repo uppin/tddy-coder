@@ -31,9 +31,13 @@ export interface WebviewIpcDouble extends WebviewIpcBridge {
   respond(response: MessageInitShape<typeof RpcResponseSchema>): void;
   /** Report the channel permanently gone. */
   closeChannel(reason: string): void;
-  /** Whether the page released this connection — the host-side peer a detach must not leak. */
-  wasClosed(): boolean;
 }
+
+/**
+ * The reason a released connection reports, word for word as the real bridge reports it, so a test
+ * asserting on what the caller is told is asserting on what the host application would tell it.
+ */
+export const PAGE_RELEASED_THE_CONNECTION = "the page released this connection";
 
 /** What the double stands for, unless a test names the connection it wants. */
 export interface WebviewIpcDoubleOptions {
@@ -86,10 +90,15 @@ export function aWebviewIpcDouble(options: WebviewIpcDoubleOptions = {}): Webvie
       arrived.push(request);
     },
     closed,
+    // Idempotent, as the real bridge is.
     async close(): Promise<void> {
+      if (released) return;
       released = true;
+      // Resolving `closed` is what a release means to everything above the bridge: it is how a
+      // transport learns its peer is gone and settles the calls still waiting on one. A double that
+      // only recorded the release would let a test pass while those calls hung in production.
+      reportClosed(PAGE_RELEASED_THE_CONNECTION);
     },
-    wasClosed: () => released,
     nextRequest() {
       const ready = arrived.shift();
       if (ready) {

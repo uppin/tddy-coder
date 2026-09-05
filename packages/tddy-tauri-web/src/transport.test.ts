@@ -9,7 +9,11 @@ import { describe, it, expect } from "bun:test";
 import { Code, createClient, type ConnectError } from "@connectrpc/connect";
 import { EchoService } from "tddy-rpc-web/test-fixtures";
 import { createTauriTransport } from "./transport.js";
-import { aWebviewIpcDouble, anEchoResponseBody } from "./test-utils/webviewIpcDouble.js";
+import {
+  anEchoResponseBody,
+  aWebviewIpcDouble,
+  PAGE_RELEASED_THE_CONNECTION,
+} from "./test-utils/webviewIpcDouble.js";
 
 describe("webview IPC transport", () => {
   it("resolves a unary call through the webview IPC bridge", async () => {
@@ -106,6 +110,26 @@ describe("webview IPC transport", () => {
       (error: ConnectError) => error,
     );
     expect(failure?.code).toEqual(Code.Unavailable);
+  });
+
+  it("fails a call still in flight when the page releases the connection", async () => {
+    // Given a unary call the host has not answered yet
+    const bridge = aWebviewIpcDouble();
+    const client = createClient(EchoService, createTauriTransport({ bridge }));
+    const pending = client.echo({ message: "ping" });
+    await bridge.nextRequest();
+
+    // When the page gives the connection up — a session detached while a screen was still loading
+    await bridge.close();
+
+    // Then the caller is told the connection is gone rather than waiting for an answer no peer is
+    // left to send. `null` on success, so a resolved call fails the assertions below.
+    const failure = await pending.then(
+      () => null,
+      (error: ConnectError) => error,
+    );
+    expect(failure?.code).toEqual(Code.Unavailable);
+    expect(failure?.rawMessage).toEqual(PAGE_RELEASED_THE_CONNECTION);
   });
 
   it("registers its response channel before sending the first request frame", async () => {
