@@ -9,8 +9,24 @@ use tddy_daemon::sandbox_session::{
 };
 use tddy_sandbox::{append_line, SandboxContextDir, SandboxHandle, SubagentReplacement};
 
-fn spawn_trace(session_dir: &Path, message: &str) {
+use crate::codebase_mode::CodebaseMode;
+
+pub(crate) fn spawn_trace(session_dir: &Path, message: &str) {
     eprintln!("{message}");
+    let trace = session_dir.join("spawn.trace.log");
+    let _ = append_line(&trace, message);
+}
+
+/// [`spawn_trace`] without the copy to stderr: the same session trace file, for the things a
+/// session has to say *after* it stops owning the terminal.
+///
+/// Every other trace here runs before the agent starts, when stderr is still this process's to
+/// write on. A `sandboxed` session then hands the real controlling terminal to `claude`, which
+/// draws its own UI on it — so a line written from a background task lands in the middle of
+/// someone else's rendering, and there is no reason for the operator reading it later to be the
+/// same person watching the screen now. The file is where the session's own record belongs;
+/// `tail -f <session-dir>/spawn.trace.log` reads it without touching the agent's canvas.
+pub(crate) fn spawn_trace_quietly(session_dir: &Path, message: &str) {
     let trace = session_dir.join("spawn.trace.log");
     let _ = append_line(&trace, message);
 }
@@ -59,10 +75,8 @@ pub struct SpawnParams {
     pub claude_home_dir: PathBuf,
     /// Persistent jail `$HOME` for Cursor (`agent`) when `agent_kind` is Cursor.
     pub cursor_home_dir: PathBuf,
-    /// Remote-codebase mode: don't mount `repo` into the jail. Claude reaches it only via
-    /// `mcp__tddy-tools__*` calls, which the host relays against the real `repo` path (see
-    /// `bridge::AppToolHandler`). Matches the daemon's sandboxed-session isolation model.
-    pub remote_codebase: bool,
+    /// Where the checkout lives relative to the jail, and which side of it the agent is on.
+    pub codebase_mode: CodebaseMode,
     /// Already-resolved specialized-agent defs to wire into the in-jail `tddy-tools --mcp` process
     /// (see `crate::config::resolve_session_agents`). Empty means no subagent is wired.
     pub specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
@@ -233,24 +247,93 @@ pub(crate) fn resolve_jail_cwd(
     })
 }
 
-/// Build the list of read-write mounts passed to `spawn_sandbox_runner`: in remote-codebase mode
-/// only the persistent jail home is mounted (the repo is reached only via `mcp__tddy-tools__*`
-/// relayed by the host); otherwise both the repo and the jail home are mounted.
+/// Build the list of read-write mounts passed to `spawn_sandbox_runner`.
+///
+/// `Managed` is the one mode that leaves the checkout outside: the agent reaches it only via
+/// `mcp__tddy-tools__*` calls the host relays, so mounting it would hand back the direct route the
+/// mode exists to remove. `Mounted` and `Sandboxed` both mount it read-write for opposite reasons
+/// — in `Mounted` the agent is in the jail and needs the tree it works on, in `Sandboxed` the tree
+/// is what the jail is *for*.
 pub(crate) fn build_sandbox_mounts(
-    remote_codebase: bool,
+    mode: CodebaseMode,
     repo: &Path,
     scratch_home: &Path,
 ) -> Vec<tddy_sandbox::MountSpec> {
-    if remote_codebase {
-        vec![tddy_sandbox::MountSpec::read_write(
-            scratch_home.to_path_buf(),
-        )]
-    } else {
-        vec![
-            tddy_sandbox::MountSpec::read_write(repo.to_path_buf()),
-            tddy_sandbox::MountSpec::read_write(scratch_home.to_path_buf()),
-        ]
+    let mut mounts = Vec::new();
+    if mode != CodebaseMode::Managed {
+        mounts.push(tddy_sandbox::MountSpec::read_write(repo));
     }
+    mounts.push(tddy_sandbox::MountSpec::read_write(scratch_home));
+    mounts
+}
+
+/// What a `--workspace-tools` jail is spawned with: the no-agent runner form a `sandboxed` session
+/// uses, where the jail serves the host's tool calls against the mounted checkout instead of
+/// hosting an agent of its own.
+pub(crate) struct WorkspaceToolsRunnerArgs {
+    pub sandbox_runner_path: String,
+    pub session_id: String,
+    /// The checkout, mounted read-write at this same path inside the jail.
+    pub repo: PathBuf,
+    pub context_dir: PathBuf,
+    pub tool_ipc_socket: PathBuf,
+    pub tddy_tools_path: String,
+    pub ready_marker: PathBuf,
+    pub grpc_socket: PathBuf,
+    /// The app attaches over its existing loopback-gRPC transport, not over `--stdio`.
+    pub grpc_listen_port: u16,
+    /// A jail that runs the build needs the CONNECT relay the agent used to use from the other
+    /// side of it.
+    pub egress_shim_port: u16,
+}
+
+/// Build the argv for the no-agent jail a `sandboxed` session spawns.
+///
+/// Deliberately not a branch inside the agent-hosting argv builder: the two share no flag that
+/// matters. There is no model, no permission mode, no agent binary and no pass-through agent args,
+/// because there is no agent in this jail to give them to.
+pub(crate) fn build_workspace_tools_runner_argv(args: WorkspaceToolsRunnerArgs) -> Vec<String> {
+    let WorkspaceToolsRunnerArgs {
+        sandbox_runner_path,
+        session_id,
+        repo,
+        context_dir,
+        tool_ipc_socket,
+        tddy_tools_path,
+        ready_marker,
+        grpc_socket,
+        grpc_listen_port,
+        egress_shim_port,
+    } = args;
+
+    vec![
+        sandbox_runner_path,
+        "--session-id".into(),
+        session_id,
+        "--context-dir".into(),
+        context_dir.to_string_lossy().into_owned(),
+        "--tool-ipc-socket".into(),
+        tool_ipc_socket.to_string_lossy().into_owned(),
+        "--tddy-tools-path".into(),
+        tddy_tools_path,
+        "--ready-marker".into(),
+        ready_marker.to_string_lossy().into_owned(),
+        "--grpc-socket".into(),
+        grpc_socket.to_string_lossy().into_owned(),
+        // What makes this the no-agent form: the runner serves the host's `in_jail_tool_request`s
+        // against the checkout as mounted here, and spawns no PTY and no in-jail MCP server.
+        "--workspace-tools".into(),
+        repo.to_string_lossy().into_owned(),
+        // The app attaches over loopback gRPC, the transport it already drives every other session
+        // with — the daemon's `--stdio` flavour of this same jail has no place here, because the
+        // app does not own this process's stdio: the host agent does.
+        "--grpc-listen-port".into(),
+        grpc_listen_port.to_string(),
+        // A jail that runs `cargo build` needs the network the daemon's workspace jail never did,
+        // and reaches it through the CONNECT tunnels the host relay fulfills.
+        "--egress-shim-port".into(),
+        egress_shim_port.to_string(),
+    ]
 }
 
 pub(crate) fn seed_cursor_credentials(cursor_home_dir: &Path) -> Result<()> {
@@ -293,7 +376,7 @@ pub struct SpawnedSandbox {
     pub session_dir: PathBuf,
 }
 
-fn canonicalize_exec_path(path: &str) -> String {
+pub(crate) fn canonicalize_exec_path(path: &str) -> String {
     if path.contains('/') {
         std::fs::canonicalize(path)
             .map(|c| c.to_string_lossy().into_owned())
@@ -337,7 +420,10 @@ fn resolve_cursor_binary(configured: Option<&str>) -> Result<String> {
     );
 }
 
-fn resolve_claude_binary(configured: Option<&str>) -> Result<String> {
+/// Resolve the `claude` binary to exec: an explicit path as given, or the first `claude` on the
+/// host PATH. Never a bare name — the jail's PATH is not this host's, and a session that cannot
+/// name its agent binary should fail here rather than inside the jail.
+pub fn resolve_claude_binary(configured: Option<&str>) -> Result<String> {
     let name = configured
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("claude");
@@ -505,7 +591,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     // reaching the real repo only via `mcp__tddy-tools__*` calls relayed by the host.
     let jail_cwd = resolve_jail_cwd(
         params.cwd.as_deref(),
-        params.remote_codebase,
+        params.codebase_mode == CodebaseMode::Managed,
         &repo,
         &context_dir,
     );
@@ -602,7 +688,7 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         env,
         loopback_allow_ports,
         ipc_socket: Some(tool_ipc_socket),
-        mounts: build_sandbox_mounts(params.remote_codebase, &repo, &scratch_home),
+        mounts: build_sandbox_mounts(params.codebase_mode, &repo, &scratch_home),
         // Preserve prior behavior (build_sandbox_plan used to hardcode $HOME): the recipe's
         // per-session credential copy stays enabled for the app path.
         host_home: std::env::var_os("HOME").map(PathBuf::from),
@@ -677,6 +763,31 @@ pub fn log_spawn_diagnostics(egress_dir: &Path, session_dir: &Path) {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // ─── The session's own record, once the terminal is somebody else's ─────────
+
+    /// A `sandboxed` session hands the controlling terminal to `claude`, so what its background
+    /// tasks have to say cannot go to stderr — but it still has to be *somewhere*, or the one
+    /// event that explains a wedged tool socket exists nowhere at all.
+    #[test]
+    fn a_quiet_trace_still_lands_in_the_sessions_trace_log() {
+        // Given
+        let session_dir = tempfile::tempdir().expect("temp session dir");
+
+        // When
+        spawn_trace_quietly(
+            session_dir.path(),
+            "the host tool IPC socket could not accept",
+        );
+
+        // Then
+        let trace = std::fs::read_to_string(session_dir.path().join("spawn.trace.log"))
+            .expect("a quiet trace must still write the session's trace log");
+        assert!(
+            trace.contains("the host tool IPC socket could not accept"),
+            "the trace log must hold what was not printed; it held: {trace}"
+        );
+    }
 
     /// `seed_claude_credentials` copies the real host `~/.claude/.credentials.json` into the jail
     /// home the first time it's called, so the jail can authenticate on its first run.
@@ -864,16 +975,21 @@ mod tests {
         );
     }
 
-    /// `build_sandbox_mounts` mounts only the repo and the persistent jail home — in that order —
-    /// when not in remote-codebase mode.
+    // ─── Codebase-mode placement ────────────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criteria 2, 3)
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// Mounted mode mounts the repo and the persistent jail home, in that order — the agent works
+    /// on the real project tree from inside the jail.
     #[test]
-    fn build_sandbox_mounts_mounts_repo_then_scratch_home_when_not_remote_codebase() {
+    fn build_sandbox_mounts_mounts_the_repo_and_scratch_home_in_mounted_mode() {
         // Given
         let repo = PathBuf::from("/tmp/repo");
         let scratch_home = PathBuf::from("/tmp/scratch-home");
 
         // When
-        let mounts = build_sandbox_mounts(false, &repo, &scratch_home);
+        let mounts = build_sandbox_mounts(CodebaseMode::Mounted, &repo, &scratch_home);
 
         // Then
         assert_eq!(
@@ -883,22 +999,139 @@ mod tests {
         );
     }
 
-    /// `build_sandbox_mounts` mounts only the persistent jail home in remote-codebase mode — the
-    /// repo is reached only via `mcp__tddy-tools__*` calls relayed by the host, never mounted.
+    /// Managed mode mounts only the persistent jail home — the repo is reached via
+    /// `mcp__tddy-tools__*` calls relayed by the host, never mounted.
     #[test]
-    fn build_sandbox_mounts_mounts_only_scratch_home_when_remote_codebase() {
+    fn build_sandbox_mounts_mounts_only_the_scratch_home_in_managed_mode() {
         // Given
         let repo = PathBuf::from("/tmp/repo");
         let scratch_home = PathBuf::from("/tmp/scratch-home");
 
         // When
-        let mounts = build_sandbox_mounts(true, &repo, &scratch_home);
+        let mounts = build_sandbox_mounts(CodebaseMode::Managed, &repo, &scratch_home);
 
         // Then
         assert_eq!(
             mounts.iter().map(|m| m.host.clone()).collect::<Vec<_>>(),
             vec![scratch_home],
             "expected exactly [scratch_home] alone"
+        );
+    }
+
+    /// Sandboxed mode is the placement where the *code* is what the jail holds, so the repo is
+    /// mounted read-write — the opposite of managed mode, which shares its "the agent has no
+    /// direct route to the checkout" property but reaches it the other way round.
+    #[test]
+    fn build_sandbox_mounts_mounts_the_repo_and_scratch_home_in_sandboxed_mode() {
+        // Given
+        let repo = PathBuf::from("/tmp/repo");
+        let scratch_home = PathBuf::from("/tmp/scratch-home");
+
+        // When
+        let mounts = build_sandbox_mounts(CodebaseMode::Sandboxed, &repo, &scratch_home);
+
+        // Then
+        assert_eq!(
+            mounts.iter().map(|m| m.host.clone()).collect::<Vec<_>>(),
+            vec![repo, scratch_home],
+            "the checkout must be inside the jail in sandboxed mode"
+        );
+    }
+
+    // ─── The no-agent jail a sandboxed session spawns ───────────────────────────
+
+    fn a_workspace_tools_runner_argv() -> Vec<String> {
+        build_workspace_tools_runner_argv(WorkspaceToolsRunnerArgs {
+            sandbox_runner_path: "/opt/tddy/tddy-sandbox-runner".to_string(),
+            session_id: "sandboxed-codebase-session".to_string(),
+            repo: PathBuf::from("/tmp/repo"),
+            context_dir: PathBuf::from("/tmp/session/sandbox/context"),
+            tool_ipc_socket: PathBuf::from("/tmp/tool_ipc.sock"),
+            tddy_tools_path: "/opt/tddy/tddy-tools".to_string(),
+            ready_marker: PathBuf::from("/tmp/session/sandbox/sandbox.ready"),
+            grpc_socket: PathBuf::from("/tmp/session/sandbox/sandbox.grpc.sock"),
+            grpc_listen_port: 45_501,
+            egress_shim_port: 45_502,
+        })
+    }
+
+    /// The value following `flag` in an argv, if the flag is present.
+    fn value_after(argv: &[String], flag: &str) -> Option<String> {
+        argv.iter()
+            .position(|arg| arg == flag)
+            .and_then(|i| argv.get(i + 1))
+            .cloned()
+    }
+
+    /// The jail is spawned in the no-agent form, pointed at the checkout it serves tool calls
+    /// against.
+    #[test]
+    fn a_sandboxed_codebase_jail_is_spawned_in_the_no_agent_workspace_tools_form() {
+        // Given / When
+        let argv = a_workspace_tools_runner_argv();
+
+        // Then
+        assert_eq!(
+            value_after(&argv, "--workspace-tools").as_deref(),
+            Some("/tmp/repo"),
+            "the jail must serve tool calls against the checkout; argv was: {argv:?}"
+        );
+    }
+
+    /// There is no agent in this jail, so nothing in its argv may describe one. A `--model` or
+    /// `--claude-binary` reaching it would mean the wrong runner mode was spawned.
+    #[test]
+    fn a_sandboxed_codebase_jail_is_spawned_without_an_agent_binary_model_or_permission_mode() {
+        // Given / When
+        let argv = a_workspace_tools_runner_argv();
+
+        // Then
+        for agent_flag in [
+            "--claude-binary",
+            "--model",
+            "--permission-mode",
+            "--claude-arg",
+            "--agent-kind",
+            "--agent-binary",
+        ] {
+            assert!(
+                !argv.iter().any(|arg| arg == agent_flag),
+                "a jail with no agent must not carry {agent_flag}; argv was: {argv:?}"
+            );
+        }
+    }
+
+    /// The build runs in here, and a build fetches dependencies. The jail has no network of its
+    /// own, so it is given the shim port whose CONNECT tunnels the host relay fulfills.
+    #[test]
+    fn a_sandboxed_codebase_jail_carries_an_egress_shim_port_for_its_build() {
+        // Given / When
+        let argv = a_workspace_tools_runner_argv();
+
+        // Then
+        assert_eq!(
+            value_after(&argv, "--egress-shim-port").as_deref(),
+            Some("45502"),
+            "a jail that runs the build needs the host CONNECT relay; argv was: {argv:?}"
+        );
+    }
+
+    /// The app attaches over the loopback-gRPC transport it already uses for every other session,
+    /// not over the `--stdio` transport the daemon drives its workspace jails with.
+    #[test]
+    fn a_sandboxed_codebase_jail_is_reachable_over_the_apps_loopback_grpc_transport() {
+        // Given / When
+        let argv = a_workspace_tools_runner_argv();
+
+        // Then
+        assert_eq!(
+            value_after(&argv, "--grpc-listen-port").as_deref(),
+            Some("45501"),
+            "argv was: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|arg| arg == "--stdio"),
+            "the app owns no piped stdio for this jail; argv was: {argv:?}"
         );
     }
 

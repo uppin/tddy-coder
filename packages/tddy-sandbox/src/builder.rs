@@ -25,6 +25,15 @@ pub enum ReadKind {
     Literal,
     /// A regex over absolute paths (`(regex #"...")`).
     Regex(String),
+    /// A single path, readable only as *metadata* (`(allow file-read-metadata (literal ...))`).
+    ///
+    /// What path resolution needs and nothing more. Resolving `/a/b/checkout` has the kernel look
+    /// up `/a`, then `/a/b` — an `lstat` of each, not a read of either. A [`Literal`] grant would
+    /// serve that too, but `file-read*` on a directory also permits listing its entries, so it
+    /// would hand over the names of everything beside the path being resolved. This grant does not.
+    ///
+    /// [`Literal`]: ReadKind::Literal
+    Metadata,
 }
 
 /// Provenance of a read rule — auditable, drives discovery labels and the spawn manifest.
@@ -72,6 +81,17 @@ impl ReadSpec {
             host: host.into(),
             jail: None,
             kind: ReadKind::Literal,
+            exec: false,
+            reason,
+        }
+    }
+
+    /// A grant to *resolve* a path without reading what is at it — see [`ReadKind::Metadata`].
+    pub fn metadata(host: impl Into<PathBuf>, reason: ReadReason) -> Self {
+        Self {
+            host: host.into(),
+            jail: None,
+            kind: ReadKind::Metadata,
             exec: false,
             reason,
         }
