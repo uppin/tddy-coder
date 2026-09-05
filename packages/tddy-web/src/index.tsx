@@ -7,6 +7,9 @@ import { loadClientConfig } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
 import { ConnectionProviders } from "./rpc/connections/registry";
+import type { TauriHostWindow } from "./rpc/daemonTransportFlavour";
+import { localHostRegistrationFor } from "./rpc/connections/localHost";
+import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
 import type { DaemonHost } from "./lib/participantRole";
 import { GhosttyTerminalSession } from "./components/GhosttyTerminalSession";
 import { useDirectRoomTerminal } from "./rpc/connections/livekit/useDirectRoomTerminal";
@@ -417,6 +420,23 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
 
   const daemonMode = appConfig.daemonMode;
 
+  /**
+   * The host this page's own application serves, when this page is running inside one.
+   *
+   * `null` in a browser, which is the whole of what keeps the IPC wire out of the browser's hands:
+   * with no registration nothing is registered, and every host is reached exactly as it is today.
+   * The question is `daemonTransportFlavour`'s, already asked to choose this page's own daemon
+   * transport — asked once more here rather than re-asked in a second, differently-worded form.
+   */
+  const localHost = useMemo(
+    () =>
+      localHostRegistrationFor(
+        typeof window === "undefined" ? {} : (window as TauriHostWindow),
+        appConfig.daemonInstanceId,
+      ),
+    [appConfig.daemonInstanceId],
+  );
+
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
     if (daemonMode !== false || typeof window === "undefined") return;
@@ -442,35 +462,41 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         !isAuthenticated ? (
           <DaemonLoginScreen path={path} login={login} authError={authError} />
         ) : (
-          <SelectedDaemonProvider
-            livekitUrl={appConfig.livekitUrl}
-            commonRoom={appConfig.commonRoom}
-            servingInstanceId={appConfig.daemonInstanceId}
-            room={testDaemonRoom}
-            daemons={testDaemonHosts}
-          >
-            {isRpcPlaygroundPath(path) ? (
-              <RpcPlaygroundAppPage onNavigate={navigate} />
-            ) : isTasksPath(path) ? (
-              <TasksDrawerScreen onNavigate={navigate} />
-            ) : isVmsPath(path) ? (
-              <VmsAppPage onNavigate={navigate} />
-            ) : isProjectsPath(path) ? (
-              <ProjectsAppPage onNavigate={navigate} />
-            ) : isModelsPath(path) ? (
-              <ModelsAppPage onNavigate={navigate} />
-            ) : isLiveKitPath(path) ? (
-              <LiveKitAppPage onNavigate={navigate} />
-            ) : isSettingsPath(path) ? (
-              <SettingsAppPage onNavigate={navigate} />
-            ) : path === "/worktrees" ? (
-              <WorktreesAppPage onNavigate={navigate} />
-            ) : isSessionsDrawerPath(path) ? (
-              <SessionsDrawerScreen onNavigate={navigate} />
-            ) : (
-              <SessionsDrawerScreen onNavigate={navigate} />
-            )}
-          </SelectedDaemonProvider>
+          /* `LocalHostConnections` sits above `SelectedDaemonProvider`, which is what offers the
+             common room: precedence is registration order and a parent renders first, so the
+             desktop's own host stays on its in-process bridge even where a common room could also
+             reach that machine. In a browser `localHost` is `null` and it registers nothing. */
+          <LocalHostConnections registration={localHost}>
+            <SelectedDaemonProvider
+              livekitUrl={appConfig.livekitUrl}
+              commonRoom={appConfig.commonRoom}
+              servingInstanceId={appConfig.daemonInstanceId}
+              room={testDaemonRoom}
+              daemons={testDaemonHosts}
+            >
+              {isRpcPlaygroundPath(path) ? (
+                <RpcPlaygroundAppPage onNavigate={navigate} />
+              ) : isTasksPath(path) ? (
+                <TasksDrawerScreen onNavigate={navigate} />
+              ) : isVmsPath(path) ? (
+                <VmsAppPage onNavigate={navigate} />
+              ) : isProjectsPath(path) ? (
+                <ProjectsAppPage onNavigate={navigate} />
+              ) : isModelsPath(path) ? (
+                <ModelsAppPage onNavigate={navigate} />
+              ) : isLiveKitPath(path) ? (
+                <LiveKitAppPage onNavigate={navigate} />
+              ) : isSettingsPath(path) ? (
+                <SettingsAppPage onNavigate={navigate} />
+              ) : path === "/worktrees" ? (
+                <WorktreesAppPage onNavigate={navigate} />
+              ) : isSessionsDrawerPath(path) ? (
+                <SessionsDrawerScreen onNavigate={navigate} />
+              ) : (
+                <SessionsDrawerScreen onNavigate={navigate} />
+              )}
+            </SelectedDaemonProvider>
+          </LocalHostConnections>
         )
       ) : (
         <ConnectionForm />
