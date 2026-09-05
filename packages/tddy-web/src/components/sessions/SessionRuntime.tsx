@@ -463,11 +463,13 @@ export function SessionRuntime({
             // Stated inline, not as utility classes, because the terminal this overlays states its
             // own stacking inline too (`terminal-live-pane` takes z-index 2 and paints over anything
             // that only claims document order), and a conversation that ends up under a terminal
-            // still painting is one the operator cannot type into.
+            // still painting is one the operator cannot type into. Above the terminal-control
+            // overlay (3) as well: that overlay is about typing into the *terminal*, and a
+            // conversation is not it.
             style={{
               position: "absolute",
               inset: 0,
-              zIndex: 3,
+              zIndex: 4,
               display:
                 activeAgentConversationId === conversation.conversationId ? "block" : "none",
             }}
@@ -496,10 +498,13 @@ export function SessionRuntime({
           // mutex CTA that only claimed them through utility classes would be painted over by the
           // very terminal canvas it is meant to cover — leaving a session another screen controls
           // looking interactive while swallowing every key.
+          //
+          // The ladder in this stack, bottom up: terminal panes (2), this mutex overlay (3), an
+          // open agent conversation (4). Each covers what it is about and nothing else.
           <div
             data-testid="sessions-detail-terminal-container"
             className="absolute inset-0 pointer-events-none"
-            style={{ position: "absolute", inset: 0, zIndex: 4 }}
+            style={{ position: "absolute", inset: 0, zIndex: 3 }}
           >
             {client && (
               <TerminalControlOverlay
