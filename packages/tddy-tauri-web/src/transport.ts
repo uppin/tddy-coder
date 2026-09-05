@@ -57,31 +57,14 @@ export interface TauriTransportOptions {
 }
 
 /**
- * The production bridge, over the host application's `invoke` and channel APIs.
+ * The production bridge to the daemon serving this page, over the host application's `invoke` and
+ * channel APIs.
  *
- * Both commands carry frames as bytes: the response channel is a `Channel<ArrayBuffer>` the host
- * writes `InvokeResponseBody::Raw` onto, and a request frame is the invoke body itself rather than
- * a field inside a JSON object. Nothing on this path is base64 or JSON.
+ * A bridge built here is nobody's but the caller's: releasing it releases the host-side peer and
+ * nothing else. {@link thisPagesIpcHost} is what holds one bridge per target for the whole page.
  */
 export function createTauriIpcBridge(): WebviewIpcBridge {
-  return {
-    async connect(onFrame: (frame: Uint8Array) => void, clientEpoch: number): Promise<void> {
-      const channel = new Channel<ArrayBuffer>();
-      channel.onmessage = (frame) => onFrame(new Uint8Array(frame));
-      await invoke("tddy_rpc_connect", { channel, clientEpoch });
-    },
-    async send(frame: Uint8Array): Promise<void> {
-      await invoke("tddy_rpc_send", frame);
-    },
-    // The host process and this page have one lifetime: there is no state in which the bridge is
-    // gone and the page is still running to hear about it. A refused `connect` or `send` is how a
-    // departed host is noticed, and `webviewFramePipe` already reports those.
-    closed: new Promise<string>(() => {}),
-    async close(): Promise<void> {
-      // TODO(multi-connection-ipc): implement — invoke `tddy_rpc_disconnect` for this epoch.
-      throw new Error("WebviewIpcBridge.close is not implemented yet");
-    },
-  };
+  return createTauriIpcBridgeTo(DAEMON_TARGET, () => {});
 }
 
 /**
@@ -183,8 +166,117 @@ export interface WebviewIpcHost {
   openConnection(target: ConnectionTarget): WebviewIpcBridge;
 }
 
+/**
+ * A bridge to `target`, over the host application's `invoke` and channel APIs.
+ *
+ * Both commands carry frames as bytes: the response channel is a `Channel<ArrayBuffer>` the host
+ * writes `InvokeResponseBody::Raw` onto, and a request frame is the invoke body itself rather than
+ * a field inside a JSON object. Nothing on this path is base64 or JSON. The target rides along with
+ * the registration only: a frame is routed by the `clientEpoch` it is stamped with, which is the
+ * epoch this bridge registered under, so the send path needs no target and must not grow one.
+ *
+ * Neither command is invoked while the bridge is merely being built — `openConnection` may run
+ * for a component that never issues a call, and the host is asked for a peer only once one is
+ * wanted.
+ *
+ * `onReleased` runs when `close` releases the connection, before the host is told: the page's
+ * registry drops its entry there, so a target reattached while the release is still in flight opens
+ * a fresh connection rather than being handed one whose peer is going away.
+ */
+function createTauriIpcBridgeTo(
+  target: ConnectionTarget,
+  onReleased: () => void,
+): WebviewIpcBridge {
+  /**
+   * What this bridge asked the host to register, once `connect` has asked. A bridge that never
+   * asked has no host-side peer, so there is nothing for `close` to release — and the pending
+   * registration is kept, not just the epoch, because a `close` racing a mount would otherwise
+   * leave behind the very peer the registration in flight is still creating.
+   */
+  let registration: { readonly clientEpoch: number; readonly registered: Promise<unknown> } | null =
+    null;
+  let released = false;
+
+  let reportGone: (reason: string) => void = () => {};
+  // The host process and this page have one lifetime: there is no state in which the host is gone
+  // and the page is still running to hear about it. A refused `connect` or `send` is how a departed
+  // host is noticed, and `webviewFramePipe` already reports those. What does end this connection on
+  // its own is the page releasing it, which is what resolves this.
+  const closed = new Promise<string>((resolve) => {
+    reportGone = resolve;
+  });
+
+  return {
+    async connect(onFrame: (frame: Uint8Array) => void, clientEpoch: number): Promise<void> {
+      const channel = new Channel<ArrayBuffer>();
+      channel.onmessage = (frame) => onFrame(new Uint8Array(frame));
+      const registered = invoke("tddy_rpc_connect", { channel, clientEpoch, target });
+      registration = { clientEpoch, registered };
+      await registered;
+    },
+    async send(frame: Uint8Array): Promise<void> {
+      await invoke("tddy_rpc_send", frame);
+    },
+    closed,
+    async close(): Promise<void> {
+      if (released) return;
+      released = true;
+      const held = registration;
+      registration = null;
+      onReleased();
+      reportGone("the page released this connection");
+      if (held === null) return;
+
+      // A registration the host refused left no peer behind, so asking it to forget one would be
+      // asking about something it never held. `connect`'s caller has already been told it failed.
+      const registered = await held.registered.then(
+        () => true,
+        () => false,
+      );
+      if (!registered) return;
+      await invoke("tddy_rpc_disconnect", { clientEpoch: held.clientEpoch });
+    },
+  };
+}
+
+/**
+ * `target` as a key.
+ *
+ * The union has no identity of its own — `sessionTarget(id)` called twice yields two objects that
+ * are equal in every way that matters and `===` in none — so the registry keys on what the target
+ * *says* rather than on the object saying it.
+ */
+function connectionKey(target: ConnectionTarget): string {
+  return target.kind === "daemon" ? "daemon" : `session:${target.sessionId}`;
+}
+
+/**
+ * The connections this page holds, keyed by target.
+ *
+ * Module-level, because the page is what owns them: the daemon connection is opened once however
+ * many call sites ask for it, and two call sites reaching the same session share the one bridge
+ * rather than each registering a response channel and displacing the other.
+ */
+const openConnections = new Map<string, WebviewIpcBridge>();
+
+const pagesIpcHost: WebviewIpcHost = {
+  openConnection(target: ConnectionTarget): WebviewIpcBridge {
+    const key = connectionKey(target);
+    const alreadyOpen = openConnections.get(key);
+    if (alreadyOpen) return alreadyOpen;
+
+    const bridge: WebviewIpcBridge = createTauriIpcBridgeTo(target, () => {
+      // Only if this bridge is still the one held: a target reattached while its predecessor was
+      // being released has already put a fresh bridge under this key, and dropping that one would
+      // leave the next caller opening a third connection to a session that has two.
+      if (openConnections.get(key) === bridge) openConnections.delete(key);
+    });
+    openConnections.set(key, bridge);
+    return bridge;
+  },
+};
+
 /** This page's host-application connections. */
 export function thisPagesIpcHost(): WebviewIpcHost {
-  // TODO(multi-connection-ipc): implement
-  throw new Error("thisPagesIpcHost is not implemented yet");
+  return pagesIpcHost;
 }
