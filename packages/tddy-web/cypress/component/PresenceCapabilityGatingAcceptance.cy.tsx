@@ -17,8 +17,7 @@
  * Every absence is asserted next to something that does render, or next to a call that was or was
  * not made: a bare `not.exist` is satisfied just as well by a component that threw.
  *
- * PRD: docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md (AC 1, AC 3, AC 4, AC 5).
- * Changeset: docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md.
+ * Technical: packages/tddy-web/docs/capability-gating.md.
  */
 
 import React from "react";

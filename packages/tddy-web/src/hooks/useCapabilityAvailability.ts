@@ -21,8 +21,7 @@
  * pure function with no React and no host-directory import — that is what lets
  * `capabilityAvailability.test.ts` state the whole truth table without rendering anything.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md`.
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md` (AC 2, AC 3, AC 7).
+ * Technical: `packages/tddy-web/docs/capability-gating.md`.
  */
 
 import { LIVEKIT_SOURCE_ID } from "../rpc/hostDirectory/liveKitSource";
@@ -42,7 +41,7 @@ import type { ConnectionCapability } from "../rpc/connections/types";
  * **The common room is one source for the whole page, and the capability is one host's.** So while
  * the join is in flight — or permanently in `error` — this answers "not unavailable" for *every*
  * host, including one reached over a wire that provably cannot carry the capability. That is
- * harmless today (see the changeset's ordering-rule section) and node 7 of the `optional-livekit`
+ * harmless today (see `capability-gating.md` § Current limits) and node 7 of the `optional-livekit`
  * stack, which introduces a fleet where one host is reached over IPC and another over LiveKit, is
  * where it stops being harmless.
  */

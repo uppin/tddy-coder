@@ -5,7 +5,7 @@
  * presence of a `Room`, from a transport, or from a status string. Three nodes have now added
  * capability information; a fourth reading of it would be the drift that undoes the stack.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md`
+ * Technical: `packages/tddy-web/docs/capability-gating.md`
  */
 
 import { describe, it, expect } from "bun:test";

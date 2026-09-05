@@ -10,7 +10,7 @@
  * question with no good answer, while an absent one matches the truth — this host is reached a way
  * that has no video. And **one predicate**: nothing re-derives capability from a `Room`.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md`
+ * Technical: `packages/tddy-web/docs/capability-gating.md`
  * Stack: `optional-livekit` node 4 of 7.
  */
 

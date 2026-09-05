@@ -5,7 +5,7 @@
  * capability and a join that is still in flight look identical to the capability predicate —
  * neither has it *yet* — and only one of them should be told "not available on this connection".
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md`
+ * Technical: `packages/tddy-web/docs/capability-gating.md`
  */
 
 import { describe, it, expect } from "bun:test";

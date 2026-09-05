@@ -40,7 +40,7 @@
  * `ParticipantList` calls this directly, because it is presentational and is *told* which room's
  * status it is reporting on.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md` (AC 2, AC 3, AC 7).
+ * Technical: `packages/tddy-web/docs/capability-gating.md`.
  */
 
 import type { CommonRoomStatus } from "./useCommonRoom";

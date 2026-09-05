@@ -10,8 +10,7 @@
  * Every absence is asserted next to something that does render, because a `not.exist` on its own is
  * satisfied just as well by a component that threw.
  *
- * PRD: docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md (AC 2, AC 4).
- * Changeset: docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating.md.
+ * Technical: packages/tddy-web/docs/capability-gating.md.
  */
 
 import React from "react";

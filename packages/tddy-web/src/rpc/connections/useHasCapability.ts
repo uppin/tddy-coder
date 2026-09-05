@@ -6,7 +6,7 @@
  * fourth place that re-derived "can I show video here" from the presence of a `Room` is precisely
  * the drift that would undo the stack.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md`.
+ * Technical: `packages/tddy-web/docs/capability-gating.md`.
  */
 
 import type { ConnectionCapability } from "./types";
