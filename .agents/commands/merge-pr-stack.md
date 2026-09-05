@@ -799,8 +799,14 @@ Mark anything not green with an explicit visual indicator rather than burying it
 **Guides**: [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md),
 [`docs/dev/guides/testing.md`](../../docs/dev/guides/testing.md)
 
-> The `pr-stack` **workflow recipe** — not a slash command — is what plans a stack in the first
-> place: start a `pr-stack` session (`tddy-coder --recipe pr-stack`, or the web New-session screen's
-> recipe dropdown) and it runs `analyze-stack` → `write-stack-plan` → `write-stack-docs` and then
-> drops into the interactive `orchestrate` loop this command is driven from.
+> The `pr-stack` **workflow recipe** is what plans a stack in the first place, and it is the path
+> this command is built for: start a `pr-stack` session (`tddy-coder --recipe pr-stack`, or the web
+> New-session screen's recipe dropdown) and it runs `analyze-stack` → `write-stack-plan` →
+> `write-stack-docs`, then drops into the interactive `orchestrate` loop this command is driven from.
 > [`docs/ft/coder/pr-stacking.md` § pr-stack recipe](../../docs/ft/coder/pr-stacking.md#pr-stack-recipe)
+>
+> **`/plan-pr-stack` is the by-hand alternative** — a slash command, distinct from the recipe's
+> legacy CLI alias `--recipe plan-pr-stack`. It produces an **ad-hoc chain** with no orchestrator, so
+> this command lands it through the manual path (no `pr_stack_status`, no `pr_merge`, no
+> `pr_repoint`) unless the chain has been promoted with `pr_adopt`. See the `pr-stack` skill § *Two
+> ways to plan a stack*.

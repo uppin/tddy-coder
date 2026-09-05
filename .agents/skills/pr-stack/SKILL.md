@@ -21,10 +21,10 @@ description: >-
   diff), milestone pushes, the not-on-its-base's-latest-tip trap, recurring shared-file conflicts,
   approval dismissal, the `#automerge` / `#forcemerge` comment gate, CI reading with
   `scripts/ci-status.sh`, and recovery. Load this whenever working a stack. The
-  `/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`, `/green`,
-  `/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`,
-  `/follow-up-branch` and `/pr` commands are the operational entrypoints; this skill is the shared
-  model they all follow. Triggers: stacked PRs, PR stack, pr-stack orchestrator, planned PR,
+  `/plan-pr-stack`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`,
+  `/merge-pr-stack`, `/green`, `/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`,
+  `/fix-pr`, `/follow-up-branch` and `/pr` commands are the operational entrypoints; this skill is
+  the shared model they all follow. Triggers: stacked PRs, PR stack, pr-stack orchestrator, planned PR,
   "PR based on another branch", add a PR to a stack, ad-hoc stacked PR, split a PR into a stack,
   A→B→C split B, base branch deleted / PR auto-closed, retarget a PR base, repoint, follow-up branch
   off an open PR.
@@ -47,12 +47,25 @@ Canonical mechanics for planning, tracking, and landing a **stack** of dependent
 and `/pr` are the operational entrypoints; they all follow the definitions below, so follow them
 exactly and keep the commands and this skill in agreement.
 
-Planning a stack is **not** a slash command in this repo. A stack is planned by the **`pr-stack`
-workflow recipe** — start a session on it (`tddy-coder --recipe pr-stack …`, or pick `pr-stack` in
-the web New-session screen) and its `analyze-stack` → `write-stack-plan` → `write-stack-docs` pass
-produces the plan and the per-PR documents. `plan-pr-stack` and `orchestrate-pr-stack` are **legacy
-CLI aliases of that same recipe**, not slash commands; never write them with a leading `/`. The
-authority is [`docs/ft/coder/pr-stacking.md`](../../../docs/ft/coder/pr-stacking.md).
+### Two ways to plan a stack — and `plan-pr-stack` names both
+
+**`plan-pr-stack` refers to two different things, and the leading slash is the whole
+disambiguation.** Say which one you mean before acting on either.
+
+| | **`--recipe pr-stack`** | **`/plan-pr-stack`** |
+|---|---|---|
+| What it is | a **product workflow recipe** — a `tddy-coder` session (`tddy-coder --recipe pr-stack …`, or the web New-session screen), whose `analyze-stack` → `write-stack-plan` → `write-stack-docs` pass produces the plan and the per-PR documents | a **slash command** ([`.agents/commands/plan-pr-stack.md`](../../commands/plan-pr-stack.md)), run in the worktree you are already in |
+| Produces | a **planned stack** — the DAG in `Changeset.stack` on an orchestrator session, plus `artifacts/prs/<node_id>/{PRD.md,changeset.md}` and `artifacts/pr-stack-plan.md` | an **ad-hoc chain** — real branches and draft PRs, each node's documents in `docs/dev/1-WIP/` |
+| Tooling | the `mcp__tddy-tools__pr_*` tools, the PR-Stack chat screen, `pr_stack_status`, journalled `pr_merge` / `pr_repoint` | plain `git` + `gh`, and the `/pr-stack-*` commands |
+| Legacy names | `--recipe plan-pr-stack` and `--recipe orchestrate-pr-stack` are **CLI aliases of this recipe** — never write those with a leading `/` | — |
+
+**The recipe is the default path**: it is the only one with live status, journalled merges, and
+repointing that cannot forget a dependent. Reach for the slash command when the user wants a stack
+planned by hand — no orchestrator session, no child sessions — and accepts driving the loop
+themselves. An ad-hoc chain it produces can be **promoted later** with `pr_adopt` + `pr_set_parents`.
+
+Both paths obey everything below, the **PR boundary contract** first of all. The authority on the
+recipe is [`docs/ft/coder/pr-stacking.md`](../../../docs/ft/coder/pr-stacking.md).
 
 ## Two stack contexts — say which one you are in
 
