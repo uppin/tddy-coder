@@ -73,9 +73,27 @@ implementing one here collides with the PR that owns it.
 node 3 owns. Adding a member is this PR's to do; changing an existing one is not — if a node-3
 signature is wrong here, that is a plan change to raise, not to patch from this branch.
 
-As with node 3 extending node 1's interface, adding `openTerminal` made one of node 3's **test
-fixtures** fail to typecheck. This PR adds a one-line throwing `openTerminal` to
-`cypress/component/SessionConnectionAcceptance.cy.tsx`. No production file of node 3's is touched.
+As with node 3 extending node 1's interface, adding `openTerminal` made node 3's **test fixtures**
+fail to typecheck. This PR completes three of them — `cypress/support/rpc/sessionConnections.ts`,
+`cypress/component/useConnectionStatus.cy.tsx` and
+`src/components/sessions/sessionRuntimeRegistry.test.ts` — each throwing from `openTerminal` in the
+voice its neighbours already use ("this connection is a status stand-in and issues no calls"). A
+stand-in returning an empty feed was rejected deliberately: one that accepted input and produced no
+bytes would let a spec about terminal output pass while rendering nothing. No production file of
+node 3's is touched.
+
+`cypress/component/SessionConnectionAcceptance.cy.tsx` needed no such edit in the end. An earlier
+draft of this PR patched a hand-rolled `aRecordingProvider` fixture in it; by the time this branch
+rebased onto `capability-gating`'s latest tip, node 3 had replaced that fixture with the production
+`LiveKitConnectionProvider.openSession` path, which satisfies the member on its own.
+
+**Signature change, taken during `/green`:** `openTerminal()` shipped in the draft contract taking no
+arguments, and could not be implemented — a connection knows the host, the session and the wire, but
+provably cannot know which terminal, the `sessionToken` (`createAuthGateInterceptor` is unary-only
+and both terminal RPCs are server-streaming) or the control lease (which moves between screens). It
+now takes `TerminalOptions`, whose `controlToken` is a **getter** so it is read per send rather than
+snapshotted. `openTerminal` is this node's own member, so widening it is this PR's to do; it was
+pushed on its own, ahead of the implementations, because dependents compile against it.
 
 ## Draft PR contract
 
@@ -110,8 +128,14 @@ Deleting the two old components and migrating their call sites lands in the same
 
 ### Baseline after rebasing onto the parent's contract commit
 
-`bun run --filter tddy-web test:unit` — 971 pass, 17 fail, all inherited red from #437 (6), #439 (5)
-and #440 (6). None is this node's to fix; this node adds 3 more.
+**Superseded — this figure was recorded against the parent's *contract* commit, and the parent has
+since implemented its node.** It read: 971 pass, 17 fail, all inherited red from #437 (6), #439 (5)
+and #440 (6).
+
+Re-measured on this branch at `0fcf3a7a`, after rebasing onto `capability-gating`'s latest tip
+(`644f93cc`): **1044 pass, 3 fail** of 1047. The 17 inherited failures are gone — nodes 1–4 fixed
+them — and the only red left was this node's own `terminal.test.ts`. Anyone reading the older number
+would wrongly write off 17 real failures as somebody else's.
 
 The full Cypress component sweep ran once at node 1 (207 specs, 1213/1214; the one failure
 pre-existing in `SelectedHostUrlStateAcceptance.cy.tsx`). One full sweep runs at the Step 8
@@ -129,6 +153,31 @@ Every failure is on this node's own `TODO(terminal-convergence)` body.
 The acceptance spec's third test — *"offers scrollback on a LiveKit-carried session"* — is the one
 worth watching during `/green`: it is the behaviour this node **adds**, not one it preserves. The
 other three would pass against either predecessor component.
+
+### Green progress
+
+Pushed as milestones, each green on its own tests before it left the worktree, so the PRs stacked
+above this one never inherit a half-finished tree.
+
+| # | Commit | Delivered | `test:unit` |
+|---|---|---|---|
+| 1 | `9eecb269` | `feedSupportsHistory`; `GrpcFrame`/`GrpcStream` re-pointed at the promoted types | 1047 pass, 0 fail |
+| 2 | `6fc8365b` | `TerminalOptions` and the widened `openTerminal`; `atEnd` on `TerminalHistoryChunk`; the loader's anchor relaxed to `bigint \| null` | 1051 pass, 0 fail |
+| 3 | `d4c80805` | `openTerminal` implemented on both connections — `terminalFeed.ts` and `livekit/roomTerminalFeed.ts` | 1051 pass, 0 fail |
+
+Milestone 2 went out on its own, ahead of the implementations behind it: it changes a signature that
+#442 and #443 compile against, and a late signature change surfaces as somebody else's bug in
+somebody else's worktree.
+
+**How a room-carried session got scrollback.** Its own room serves `StreamTerminalIO` and nothing
+else, so the history had to come from somewhere — and the capture ring belongs to the *host daemon*,
+which is already reachable. `openRoomTerminalFeed` therefore takes bytes from the session
+participant and history from the host, leaving output routing untouched, which `## Boundaries` rules
+out changing. The fill runs unanchored because `terminal.TerminalOutput` is `bytes data` and carries
+no offsets.
+
+`tsc --noEmit` is not a gate in this package (518 errors at the time of writing, essentially all
+pre-existing); it fell from 524 across these milestones and rose at no point.
 
 ### Commands
 
