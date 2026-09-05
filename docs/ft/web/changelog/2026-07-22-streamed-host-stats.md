@@ -1,0 +1,3 @@
+# 2026-07-22 — Streamed host stats
+
+- The Host Stats Footer's CPU and disk readouts are now fed by a **single server-streaming RPC** (`StreamHostStats`) instead of two client-polled unary RPCs. The **daemon owns the cadence**: it emits both readings immediately on subscribe, then refreshes CPU every 5 s and disk every 60 s, pushing an event carrying the latest CPU and disk each tick. The footer opens one subscription per selected daemon (no client-side polling); visible behavior is unchanged. The old `GetHostCpuStats`/`GetHostDiskStats` RPCs are removed. See [host-stats-footer.md](../host-stats-footer.md).

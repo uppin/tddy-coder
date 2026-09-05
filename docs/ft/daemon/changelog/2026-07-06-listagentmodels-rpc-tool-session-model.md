@@ -1,0 +1,4 @@
+# 2026-07-06 — `ListAgentModels` RPC + tool-session `--model`
+
+- New `ConnectionService.ListAgentModels(agent, daemon_instance_id)` RPC enumerates a backend's models on demand, shelling out to `tddy-tools list-models --agent <agent>` and returning `{models, default_model}`. Results are cached per (agent, daemon, OS user) with a short TTL — keyed by OS user because cursor/ACP catalogs are account-specific — and the probe runs as the user with its `current_dir` set to that user's home (the daemon cwd may be unreadable after setuid). A failed probe surfaces as an RPC error, never an empty catalog. See [tool-session-model-selection.md](../../web/tool-session-model-selection.md).
+- `StartSession` now threads `model` into the spawned **tool** (tddy-coder) session as `--model <m>` (previously claude-cli only), so a session runs with the operator-selected model.

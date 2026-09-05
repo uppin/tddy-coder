@@ -1,0 +1,5 @@
+# 2026-07-26 — pr-stack-repoint-dead-end: `RepointPlannedPrRequest` gains **`string target_base_branch = 4`**
+
+**Type:** Fix
+
+the branch the operator's "Repoint to `<target>`" control named. The daemon retains exactly the parents that own it and drops the rest, so a target no parent owns *is* the instruction to detach the node onto the default branch, and an unvalidated target would be a silent plan rewrite. On the wire an **empty** value means "the project's default branch" (the daemon substitutes its own resolved ref): a client cannot always name it, and forwarding the empty string reached the recipe as "no target named", selecting the drop-merged-parents rule — which in the dead-end case drops nothing and returns success against an unchanged plan. Regenerated into `packages/tddy-web/src/gen/connection_pb.ts` only; `packages/tddy-rust-typescript-tests/gen/connection_pb.ts` remains stale (predates `RepointPlannedPr`, filed in TODO). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-service)

@@ -1,0 +1,5 @@
+# 2026-06-26 — **byte-traffic
+
+**Type:** Feature
+
+ConnectRPC/LiveKit byte-traffic meters + session traffic strip** — `TrafficMeter`/`TrafficMeterRegistry` (accumulator + 2 s sliding-window B/s rate, subscribe/notify, keyed by scope) fed by an HTTP `Interceptor` (`createTrafficInterceptor`, sizing unary req/res via `toBinary` + wrapping streaming iterables) and the LiveKit `LiveKitTransport` (`meter.record("in"/"out", payload.length)`), both wired in `transportProvider.tsx`. Adds `readRoomRtt`/`useLiveKitPing` (WebRTC `getStats()` RTT), `useSessionLiveKitRoom`, `formatTraffic` (`formatBytes`/`formatRate`/`formatPing`), and the presentational `SessionTrafficStrip`. Later relocated from the header into the screen-level footer (host-stats-footer, 2026-07-21). Tests: `trafficMeter`/`httpTrafficInterceptor`/`livekitPing`/`formatTraffic` units + Cypress `SessionTrafficStrip`/`SessionMainPaneTraffic`. Feature [session-drawer.md § Session Traffic Strip](../../../../docs/ft/web/session-drawer.md#session-traffic-strip). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-web)

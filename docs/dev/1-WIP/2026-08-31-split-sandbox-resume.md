@@ -44,4 +44,4 @@ Implementation of full cross-host resume can follow in the same PR once the hook
   - `src/session_deletion.rs`: `teardown_workspace_sandbox` reads `<session_dir>/sandbox/runner.pid` and terminates the orphaned runner before `remove_dir_all`; `reap_child_if_ours` reaps zombies so `kill(pid,0)` no longer lies.
   - `src/workspace_tool_sandbox.rs`: `RUNNER_PID_FILE` const; production provisioner persists `handle.pid()` to `<session_dir>/sandbox/runner.pid`.
   - Verified: 3/3 `workspace_sandbox_resume_acceptance`, 8/8 `split_session_resume_acceptance`, 15/15 `workspace_tool_sandbox_acceptance`, 2/2 `workspace_session_deletion_acceptance`, clippy clean. 2 cross-host `remote_managed_worktree_cross_host_acceptance` failures confirmed pre-existing on red-only baseline (sandboxed split-start refusal, owned by `split-sandbox-orchestration`).
-- [ ] Prepend changeset index line to `docs/dev/changesets.md` (`/wrap-context-docs`)
+- [ ] Prepend changeset index line to `docs/dev/changesets/` (`/wrap-context-docs`)

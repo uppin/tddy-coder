@@ -1,0 +1,5 @@
+# 2026-05-01 — Session action pipeline (`session_action_pipeline`)
+
+- **tddy-core**: **`session_action_pipeline`** — **`merge_session_action_env`**, **`build_invocation_envelope_direct`**, **`resolve_output_globs_sorted`** (**`glob`**), **`build_extended_channel_manifest`**, **`run_input_mapper_for_envelope`**, **`run_output_transform_and_validate`** (**`jsonschema`**), **`run_primary_action_with_capture_paths`**; structured errors **`SessionActionPipelineError`**. Tests: **`session_action_resolve_unit`**. Feature doc: **[session-actions.md](../session-actions.md)**; **[architecture.md](../../../../packages/tddy-core/docs/architecture.md)**.
+- **tddy-tools**: Integration tests **`session_action_pipeline_integration`** (mapper, transform schema, capture paths).
+- **Docs**: **[session-actions.md](../session-actions.md)** (pipeline section); **[architecture.md](../../../../packages/tddy-core/docs/architecture.md)**; package **[changesets/](../../../../packages/tddy-core/docs/changesets/)**, **[changesets/](../../../../packages/tddy-tools/docs/changesets/)**; cross-package **[docs/dev/changesets/](../../../dev/changesets/)**.

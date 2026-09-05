@@ -1,0 +1,9 @@
+# 2026-08-30 — A workspace session's tools run inside a jail on the host holding the checkout
+
+- **`sandbox` now means something on a `workspace` session.** It confined the agent and left the tools it called running on the host — fine while both are on one daemon, wrong the moment the codebase lives on another, which is why `sandbox` was refused on a split placement at all.
+- **The jail holds the worktree and nothing else of that host**, and every exec tool goes through it: the remote `ExecuteTool` and `StreamExecuteTool` callers and a seeded roster agent's own loop alike, since all three already dispatch through one function.
+- **Nothing falls back to the host.** An unsupported platform is `failed_precondition`, a jail that will not provision unwinds the session, and a session recorded as sandboxed whose jail this daemon no longer holds is refused rather than quietly served unconfined.
+- **A jail no longer outlives its session.** `DeleteSession` stops it; previously the registry held the only handle and never released it, so a jailed runner kept running against a deleted checkout.
+- **Every jail on macOS stopped holding the host's shared per-user temp base** — read and write, by three separate rules. On a stock host that is where temp files and application caches live, and a jailed `Shell` could read a host file outside its worktree.
+- ⚠️ **Sandboxed `claude-cli` and `cursor-cli` sessions share that profile and are unverified end-to-end** — their suites fail here on an unrelated pre-existing panic. On a stock-`TMPDIR` host, confirm each still reaches a prompt and check its egress log for `Operation not permitted` under `/private/var/folders`. Cursor is the higher risk: its wrapper resolves its install through `realpath` and execs a bundled Node.
+- ⚠️ **Split placement still refuses `sandbox`.** This is the primitive that refusal was waiting on, not its removal — `split-sandbox-orchestration` lifts it.

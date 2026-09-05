@@ -1,0 +1,5 @@
+# 2026-07-03 — `--config <yaml>` + inline subagent defs + `-- <claude args>` pass-through
+
+**Type:** Feature
+
+`config::SandboxAppConfig` (`deny_unknown_fields`); CLI flags override config. `subagents:` carries full inline `SpecializedAgentDef`s — declaring one both defines and activates it and overrides a same-named builtin, so `fastcontext` can be re-pointed at Ollama with no `--specialized-agent` flag or agents dir. New `config::resolve_session_agents` merges named + inline + `agents_dir` defs. `--model` is optional (defaults after config merge). Trailing `-- <args>` (`#[arg(last = true)]`) forward to the in-jail `claude`. `SpawnParams` now carries resolved `specialized_defs` + `claude_args` (replaces the old `SubagentSpawnConfig`; resolution moved to `config.rs`). Paired with the repo-root `./claude-sandbox` launcher and `sandbox-config.example.yaml` starter config. Feature [managed-codebase-subagents.md § Standalone launcher](../../../../docs/ft/coder/managed-codebase-subagents.md#standalone-launcher-claude-sandbox). (tddy-sandbox-app, tddy-sandbox-runner, tddy-sandbox-recipes, tddy-tools, tddy-discovery)

@@ -1,0 +1,5 @@
+# 2026-07-03 — Managed-codebase workflow wiring
+
+**Type:** Feature
+
+`ConnectionServiceImpl::prepare_managed_workflow` (shared across start/resume × sandbox) seeds `changeset.yaml` at the recipe start goal, builds a per-session `WorkflowController` + toolcall listener (new `session_toolcall.rs`), injects the recipe's orchestration prompt (`--append-system-prompt-file`) and a per-session `TDDY_SOCKET`/`PATH`, and persists `recipe` for resume; `tool_engine`/`pty_runtime`/`claude_cli_session`/`sandbox_session` thread the per-session env so host-side `tddy-tools transition` advances the controller; resume re-wires at the persisted goal; unknown recipe → `INVALID_ARGUMENT`. Feature [managed-codebase-workflow.md](../../../../docs/ft/coder/managed-codebase-workflow.md); [connection-service.md](../connection-service.md#managed-codebase-workflow-workflow-aware-claude-cli). Cross-package: [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon, tddy-core, tddy-sandbox-runner, tddy-web)

@@ -1,0 +1,5 @@
+# 2026-07-25 — session-files-inspector: new `session_uploads` module
+
+**Type:** Feature
+
+`list_uploads` walks `{session_dir}/uploads/{upload_id}/*` into a flat, newest-first `UploadEntry` list (absolute host path, size, mtime-ms; missing uploads root → empty, not an error), and `delete_upload` removes one file addressed by `upload_id`+`file_name`, reusing the writer's basename + canonicalize-and-contain guard (unsafe segment → `InvalidArgument`, removing nothing; missing file → `NotFound`) and pruning the emptied `upload_id` folder. Extracted the shared `session_file_upload::{validate_segment, contained_canonical_dir}` guard from `write_upload_chunk` (behavior unchanged). New `list_session_uploads`/`delete_session_upload` handlers (auth → `sessions_base` → `validate_session_id_segment`, via a shared `uploads_sessions_base` helper), delegated through the tonic adapter. Tests: `session_uploads_rpc` 13 (+ `session_file_upload_rpc` 9 regression). Feature [session-files-inspector.md](../../../../docs/ft/web/session-files-inspector.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

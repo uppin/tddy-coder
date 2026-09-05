@@ -1,0 +1,5 @@
+# 2026-07-25 — terminal-mode-replay: `stream_terminal_output` sends `capture.mode_prologue()` as its **own first frame**, before and independently of the replay branch
+
+**Type:** Fix
+
+the replay is gated on `!has_initial_dims` and a browser always supplies dimensions, so the web terminal's path previously received no capture (and no mouse DECSETs) at all; frame order on attach is prologue → legacy replay → initial ACK → live bridge, and the legacy replay chunks `capture.buffered_bytes()`. `PtyHandle.capture` becomes `Arc<Mutex<TerminalCapture>>` and the LiveKit bidi attach replays `cap.replay()` (prologue ++ retained output). See [connection-service.md § Terminal mode replay](../connection-service.md#terminal-mode-replay-mouse-tracking). Acceptance: `tests/terminal_mode_replay_acceptance.rs` (stub TUI enables tracking, ring is flooded until the DECSETs are provably gone from `buffered_bytes()`, then a dimensions-supplying browser-shaped client must get the prologue first). Known gap: `sandbox_session.rs` keeps its own unbounded raw capture and gets no prologue — follow-up. Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

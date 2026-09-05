@@ -1,0 +1,5 @@
+# 2026-07-22 — **session-catalog
+
+**Type:** Feature
+
+per-session SQLite catalog (`session_catalog`)** — new `sqlx`-backed module storing action-manifest + auto-discovered build-target entries as JSON with a projected VIRTUAL `package` column + index at `<session_dir>/catalog.db`: `CatalogEntry`/`CatalogEntryKind`/`project_package`, `store` (WAL pool, single-transaction rebuild, prefix/substring/paginated `query` preserving `list_action_summaries` semantics + `query_for_package`), `BuildCatalogProvider` port (`OnceLock`, mirrors `toolcall::build::BuildExecutor`), `PopulateCatalogTask` (`tddy-task` unifying YAML-glob manifests + provider build targets in one transactional rebuild), `SessionCatalog` (per-session pool handle + process-global `DashMap` registry + block-until-populate read). Reads are not yet cut over — `list_action_summaries` still globs YAML (see [docs/dev/TODO.md](../../../../docs/dev/TODO.md)). 16 tests. Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). Feature [session-catalog.md](../../../../docs/ft/coder/session-catalog.md). (tddy-core)

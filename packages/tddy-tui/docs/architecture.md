@@ -55,4 +55,4 @@ The status bar is a single `Paragraph` line. Text is built by `render::status_ba
 
 - [Feature: TUI status bar](../../../../docs/ft/coder/tui-status-bar.md)
 - [Feature: Activity log streaming](../../../../docs/ft/coder/activity-log-streaming.md)
-- [Changesets](./changesets.md)
+- [Changesets](./changesets/)

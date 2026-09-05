@@ -14,7 +14,7 @@
 //! hence the cardinality guard there, and the count assertion on the dispatch loop.
 //!
 //! PRD: docs/ft/coder/pr-stacking.md § PR-management tools.
-//! Changeset: docs/dev/changesets.md (2026-07-30, pr-stack-full-control).
+//! Changeset: docs/dev/changesets/2026-07-30-pr-stack-full-control.md.
 
 use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 use tddy_workflow_recipes::pr_stack::PR_STACK_TOOL_NAMES;

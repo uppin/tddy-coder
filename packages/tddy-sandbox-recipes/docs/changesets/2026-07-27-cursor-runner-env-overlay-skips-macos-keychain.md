@@ -1,0 +1,5 @@
+# 2026-07-27 — `cursor_runner_env_overlay` skips macOS Keychain
+
+**Type:** Fix
+
+the overlay now emits `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) alongside `CURSOR_TMPDIR`, so a sandboxed Cursor Agent CLI never probes `securityd` from inside the jail (the host is unsigned, has no `keychain-access-group` entitlement, and a probe would hang ~30s and fail with `errSecMissingEntitlement` / -34018 / "Security process exited with code: 36"). The caller still has to supply `CURSOR_API_KEY` or pre-seed `~/.cursor/auth.json` via `seed_cursor_credentials` — this removes a path that cannot work in a sandbox, it does not authenticate. Tests: 2 fluent-style unit tests in `cursor_cli::tests` (`cursor_runner_env_overlay_redirects_cursor_tmpdir_into_the_scratch_tree`, `cursor_runner_env_overlay_skips_macos_keychain_so_the_agent_never_probes_securityd`). Feature [cursor-cli-session.md § Known follow-ups](../../../../docs/ft/daemon/cursor-cli-session.md#known-follow-ups). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-sandbox-recipes)

@@ -263,7 +263,7 @@ When **Session type** is set to **Claude Code CLI** in the project start form, t
 
 Pure selection helpers live in **`packages/tddy-web/src/utils/sessionSelection.ts`** (Bun **`sessionSelection.test.ts`**). **`ConnectionScreen`** bulk-path logging is limited to Vite development builds (**`import.meta.env.DEV`**); the **`sessionSelection`** helpers do not emit **`console`** calls in production bundles.
 
-The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog.md) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
+The daemon **`DeleteSession`** uses the same GitHub user → OS user → **`sessions_base`** resolution as **`ListSessions`**, terminates a live **`metadata.pid`** when needed, then removes **`{sessions_base}/sessions/{session_id}/`**. See [daemon changelog](../daemon/changelog/) and [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md).
 
 See [daemon project concept](../daemon/project-concept.md).
 
@@ -275,7 +275,7 @@ If **`common_room`** is unset or blank, that panel is not shown and no extra Liv
 
 Product reference for the count field and merge semantics: [livekit-participant-owned-projects.md](livekit-participant-owned-projects.md).
 
-Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog.md).
+Spawned **`tddy-*`** sessions use the same configured room for **`--livekit-room`** when **`common_room`** is set; each process still uses a distinct **`daemon-{session_id}`** LiveKit identity for terminal RPC. If **`common_room`** is unset, the room name is **`daemon-{session_id}`** per session. See [daemon changelog](../daemon/changelog/).
 
 ### Per-session LiveKit room (sessions drawer)
 

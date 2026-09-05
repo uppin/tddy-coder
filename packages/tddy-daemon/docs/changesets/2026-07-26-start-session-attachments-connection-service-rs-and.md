@@ -1,0 +1,5 @@
+# 2026-07-26 — start-session-attachments: `connection_service.rs` and `connection_tonic_adapter.rs` gain the three new `ConnectionService` methods (`upload_staged_attachment_chunk`, `list_staged_attachments`, `delete_staged_attachment`)
+
+**Type:** Feature
+
+the rpc impl returns **`Status::unimplemented`** under a `TODO(start-session-attachments)`, the tonic adapter delegates; the stubs are not optional, since adding an RPC makes both impls incomplete and nothing compiles without them. `start_session` **ignores** `StartSessionRequest.attachments` entirely, so a request carrying attachments starts a session with none and no error. No tests beyond compilation; the host side (staging root + chunked writer, materialization into `{session_dir}/attachments/`, `HostDocumentRef` scope resolution + cross-host fetch, staging GC) is unbuilt and recorded as known limitations. Docs [connection-service.md § Start-session attachments](../connection-service.md#start-session-attachments-wire-contract-only). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

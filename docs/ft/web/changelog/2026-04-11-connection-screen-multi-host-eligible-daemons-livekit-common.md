@@ -1,0 +1,3 @@
+# 2026-04-11 — Connection screen: multi-host eligible daemons (LiveKit common room)
+
+- **`tddy-web`**: **ConnectionScreen** sorts **ListEligibleDaemons** for the Host dropdown (**local** first, then **`instance_id`**); **StartSession** sends the selected **`daemonInstanceId`** when the daemon lists multiple eligible hosts. Cypress **ConnectionScreen** covers multi-row host list and multi-session disconnect scoping. **Feature docs**: [web-terminal.md](../web-terminal.md), [livekit-peer-discovery.md](../../daemon/livekit-peer-discovery.md). **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

@@ -165,7 +165,7 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 
 - [Testing practices](docs/dev/guides/testing.md) — anti-patterns, unit/integration/production test guidelines
 - [Technology stack](docs/dev/guides/tech-stack.md) — core technologies, integration patterns
-- [Changelog merge hygiene](docs/dev/guides/changelog-merge-hygiene.md) — format for `changelog.md`, `changesets.md`
+- [Changelog and changeset hygiene](docs/dev/guides/changelog-merge-hygiene.md) — one file per entry in `changelog/`, `changesets/`; no index
 - [Continuous integration](docs/dev/guides/ci.md) — what each PR check runs, how to query results, what the gate deliberately skips
 
 ## Documentation Hierarchy
@@ -173,6 +173,6 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 - `packages/*/docs/` — Technical implementation (HOW) per package
 - `docs/ft/` — Product requirements (WHAT) by product area
 - `docs/dev/1-WIP/` — Active changesets (cross-package deltas)
-- `docs/dev/changesets.md` — Cross-package changeset index (single-line bullets, prepend-only)
+- `docs/dev/changesets/` — Cross-package changeset history: **one file per changeset**, `YYYY-MM-DD-<slug>.md`. Add a new file; never append to an existing one, and never add an index
 - `docs/dev/guides/` — Cross-cutting technical guides
 - **`plans/`** (repo root, optional) — Persisted **grill-me** **Create plan** output (the brief: problem, Q&A, analysis, preliminary plan) for version control in the working copy. Use a descriptive basename, e.g. **`plans/<feature-slug>-grill-me-brief.md`**. If a feature PRD or guide in **`docs/ft/`** specifies a different path under the repo, use that instead. If nothing is specified, default to **`plans/<SOME-PLAN-NAME>.md`** (replace `<SOME-PLAN-NAME>` with a stable, human-readable label for the effort). Session-scoped **`artifacts/grill-me-brief.md`** remains the runtime path during the session; **`plans/`** is the documented convention for copying or checking in the same content for the team repo.

@@ -39,7 +39,7 @@ Land first:
 - [x] Failing unit/integration tests (Step 7 — red phase)
 - [x] Implement production code making tests pass (`/green`)
 - [x] Apply amendment to `remote-managed-worktree.md` (`/wrap-context-docs`)
-- [x] Prepend changeset index line to `docs/dev/changesets.md` (`/wrap-context-docs`)
+- [x] Prepend changeset index line to `docs/dev/changesets/` (`/wrap-context-docs`)
 
 ## Validation Results
 

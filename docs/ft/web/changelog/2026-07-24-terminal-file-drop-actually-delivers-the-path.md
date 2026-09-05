@@ -1,0 +1,5 @@
+# 2026-07-24 — Terminal file drop actually delivers the path
+
+- Dragging a file onto the web terminal now works on a **plain-http LAN origin**: the per-drop id no longer comes from the secure-context-only `crypto.randomUUID`, which threw before any upload started (so the drop appeared to do nothing, on desktop drop and mobile **Attach** alike). See [web-terminal.md § File drop upload](../web-terminal.md#file-drop-upload).
+- Uploads no longer stall mid-file in silence: each chunk request is sized to fit one LiveKit data packet (a larger, frame-split request was lost outright if any frame dropped), and every chunk carries a deadline — a stalled chunk now fails that one file (skipped, error shown, other files continue) instead of leaving the drop pending forever with no path and no error.
+- Known limitation: a drop is round-trip bound (a 2 MB file takes ~40 s) and the only progress feedback is the aggregate bar in the Host Stats Footer, so a large drop can read as a failure until the path appears.

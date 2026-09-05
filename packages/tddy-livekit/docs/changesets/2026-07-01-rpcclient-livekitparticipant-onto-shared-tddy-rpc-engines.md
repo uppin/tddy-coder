@@ -1,0 +1,5 @@
+# 2026-07-01 — `RpcClient`/`LiveKitParticipant` onto shared `tddy-rpc` engines
+
+**Type:** Refactor
+
+`RpcClient` now holds `Arc<ClientEngine>` (was hand-rolled pending-request maps) and implements `RpcClientTransport`; `LiveKitParticipant` now holds `Arc<ServerEngine<S>>` (removed `ActiveStream`/`BidiStreamMeta`/`BidiSession`/`SessionKey`/`spawn_streaming_response`, replaced by `spawn_response_drain`/`spawn_response_drain_reconnectable`). `ServerEngine` needed zero changes — LiveKit-specific concerns (multi-remote identity resolution, pending-data buffering, `SharedPublisher` reconnect-resilient publishing) live around `on_request`, not inside it. Envelope moved to `tddy_rpc::envelope` (own `proto/rpc_envelope.proto` deleted; `build.rs` no longer compiles it). Wire format and TypeScript client compatibility unchanged. Behavior fix: single-message bidi calls now correctly route through `start_bidi_stream` (previously fell through to `handle_rpc_stream`'s default single-message path). Feature [rpc-multi-transport.md](../../../../docs/ft/coder/rpc-multi-transport.md). (tddy-livekit)

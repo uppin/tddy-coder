@@ -74,4 +74,4 @@ An axum-based HTTP handler that implements the Connect protocol:
 
 ## Documentation wrap
 
-Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog.md) on 2026-03-21. This file is archived under `1-WIP/archived/`.
+Merged into [gRPC remote control](../../grpc-remote-control.md) (transport stack) and [Coder changelog](../../changelog/) on 2026-03-21. This file is archived under `1-WIP/archived/`.

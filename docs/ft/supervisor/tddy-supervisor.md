@@ -144,4 +144,4 @@ because quietly spawning as the daemon user instead is the regression this featu
 
 - Implementation: [packages/tddy-supervisor/docs/architecture.md](../../../packages/tddy-supervisor/docs/architecture.md)
 - Install: [docs/ft/daemon/systemd-install.md](../daemon/systemd-install.md)
-- [changelog.md](changelog.md)
+- [changelog/](changelog/)

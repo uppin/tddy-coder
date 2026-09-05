@@ -1,6 +1,6 @@
 //! Acceptance tests for web bundle serving (--web-port, --web-bundle-path).
 //!
-//! Feature reference: docs/ft/coder/changelog.md (2026-03-13 — Web Bundle Serving).
+//! Feature reference: docs/ft/coder/changelog/2026-03-13-web-bundle-serving.md.
 
 mod common;
 

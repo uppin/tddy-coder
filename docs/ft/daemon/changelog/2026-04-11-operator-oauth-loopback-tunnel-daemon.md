@@ -1,0 +1,3 @@
+# 2026-04-11 — Operator OAuth loopback tunnel (daemon)
+
+- **`tddy-daemon`**: **`oauth_loopback_tunnel`** — **`TcpListener`** on operator **`127.0.0.1:{callback_port}`**, **`RpcClient::start_bidi_stream`** **`loopback_tunnel.LoopbackTunnelService`/`StreamBytes`**, **`pick_daemon_oauth_target`** over common-room **`daemon-*`** metadata; **`run_oauth_tunnel_supervisor_follow_room_slot`** with **`livekit_peer_discovery`**; **`codex_oauth_participant_metadata`**. Package **[oauth-loopback-tunnel.md](../../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; feature **[codex-oauth-relay.md](../codex-oauth-relay.md)**, **[livekit-peer-discovery.md](../livekit-peer-discovery.md)**. **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

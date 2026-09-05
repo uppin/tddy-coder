@@ -1,0 +1,5 @@
+# 2026-07-11 — `SandboxCgroupConfig` daemon section for the unprivileged Linux jail
+
+**Type:** Feature
+
+new optional `sandbox_cgroup:` config section (`SandboxCgroupConfig` + `DaemonConfig.sandbox_cgroup` + `sandbox_cgroup_config()` mapping onto `tddy_sandbox::CgroupConfig`) is threaded into `build_sandbox_plan` (`SandboxRunnerSpawn.cgroup`, set as `plan.cgroup`) at the 3 `connection_service.rs` spawn call sites, so a running-as-`tddy` daemon can override the runtime-derived delegated cgroup v2 base; absent → derive from `/proc/self/cgroup`. Pairs with `./install` flipping the systemd unit to `User=tddy`/`Delegate=yes`/`AppArmorProfile=tddy-daemon` (service-user creation, log/auth chown, AppArmor profile ship+auto-load). Config test 1. Architecture [tddy-sandbox § Linux cgroups jail](../../../tddy-sandbox/docs/architecture.md#linux-cgroups-jail), install [systemd-install.md § Unprivileged service](../../../../docs/ft/daemon/systemd-install.md#unprivileged-service-linux-cgroups-sandbox). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon, tddy-sandbox, tddy-sandbox-cgroups)

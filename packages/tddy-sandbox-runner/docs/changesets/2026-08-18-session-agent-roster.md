@@ -1,0 +1,5 @@
+# 2026-08-18 — **session agent roster
+
+**Type:** Feature
+
+sandbox-IPC bridge for roster and conversation RPCs** — `SessionFrame` gains `RpcRequest` (jail → host) and `RpcStreamFrame` (host → jail) payload variants, multiplexed by `request_id` the way tunnels are, so a lifetime-long roster stream does not occupy the positionally-paired `ExecuteTool` slot. New `HostRpcHandler` trait + `NullRpcHandler` (refuses every call with `UNIMPLEMENTED`); `run_host_relay_with_rpc` dispatches an inbound `RpcRequest` to the handler and forwards the reply as `RpcStreamFrame`s (unary → one terminal frame; server-stream → payload frames + terminal marker; error → terminal frame with the message). `SandboxSessionRelay` gains `rpc_seq` + an in-flight `rpc_streams` map; `call_rpc`/`deliver_rpc_stream_frame`/`cancel_rpc` route by `request_id`, and `ToolExecService::handle_rpc` routes `StreamSessionAgents` and the three conversation RPCs through the bridge. Feature [session-agent-roster.md](../../../../docs/ft/daemon/session-agent-roster.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-sandbox-runner)

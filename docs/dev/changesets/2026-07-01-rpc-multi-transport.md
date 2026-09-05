@@ -1,0 +1,5 @@
+# 2026-07-01 — **RPC multi-transport
+
+**Type:** Feature
+
+stdio/IPC + shared transport-agnostic engines** — extracted `tddy-rpc`'s envelope and two transport-agnostic engines (`ClientEngine`, `ServerEngine<S>`) from what was previously LiveKit-specific logic in `tddy-livekit`; added new `tddy-stdio` package (parent↔child process RPC over stdin/stdout, both directions, multiplexed); refactored `tddy-livekit`'s `RpcClient`/`LiveKitParticipant` onto the shared engines and implemented `RpcClientTransport` for `RpcClient` — the same client code now runs over LiveKit or stdio. Along the way: made server-streaming and bidi responses genuinely real-time (no artificial per-item lookahead delay), fixed a client-streaming dispatch bug (multi-message calls were dispatched prematurely on the first fragment), and fixed a genuine pre-existing data-loss bug in the original `RpcClient` (stream delivery silently dropped responses on a full channel under a rapid-fire burst — now backpressures instead). Feature [rpc-multi-transport.md](../../ft/coder/rpc-multi-transport.md). (tddy-rpc, tddy-stdio, tddy-livekit)

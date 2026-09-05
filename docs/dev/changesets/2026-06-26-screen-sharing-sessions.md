@@ -1,0 +1,5 @@
+# 2026-06-26 — **Screen sharing sessions
+
+**Type:** Feature
+
+generalize VNC → ScreenSharing + RDP support** — new `tddy-screenshare` crate (generic `ScreenSharingClient` trait, `Streamer`, `run_bridge<C>`, `BridgeConfig`); new `tddy-rdp` crate (`RdpClient` via IronRDP — TLS/RDP handshake, graphics pipeline → RGBA frames, fast-path pointer/key input); `tddy-vnc` refactored to use `tddy-screenshare` (real vnc-rs impl with `ScreenSharingClient`); `tddy-service`: `screen_sharing.proto` + `screen_sharing_input.proto` (Protocol enum VNC/RDP, username field); `tddy-daemon`: `ScreenSharingServiceImpl` (VNC/RDP dispatch), `ScreenSharingVault` (`create_dir_all` fix, username storage), `ScreenSharingConfig` with per-protocol binary paths, `ScreenSharingServiceServer` mounted; `tddy-web`: Screen Sharing inspector tab with protocol selector, RDP username field, passphrase dialog, inline error display. Feature [screen-sharing-sessions.md](../ft/web/screen-sharing-sessions.md). (tddy-service, tddy-screenshare, tddy-vnc, tddy-rdp, tddy-daemon, tddy-web)

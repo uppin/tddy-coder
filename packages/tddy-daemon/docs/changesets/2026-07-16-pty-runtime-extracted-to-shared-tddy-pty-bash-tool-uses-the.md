@@ -1,0 +1,5 @@
+# 2026-07-16 — PTY runtime extracted to shared `tddy-pty`; Bash tool uses the passwd login shell
+
+**Type:** Refactor
+
+`pty_runtime.rs`/`pty_registry.rs` now delegate to the new `tddy-pty` crate (`PtyRuntime`/`open_pty_and_pump`/`PtyRegistry`/`PtyControl` moved out); the daemon keeps OS-user impersonation (`resolve_pty_os_user`/`wrap_argv_for_privilege_drop`/`pty_user_env_overrides`) and pre-computes the final argv/env via `resolve_final_argv_env` before calling the shared spawner (`FailedSpawnBody` preserves the unresolvable-user path). `StartTerminalSession` resolves the Bash tool's shell from the target user's passwd `pw_shell` (`login_shell_for_os_user`), falling back to `$SHELL` then `/bin/bash`, so a nix/systemd `$SHELL` no longer leaks in. Daemon PTY unit + `terminal_session`/`terminal_control` acceptance tests unchanged and green. Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). PR [#298](https://github.com/uppin/tddy-coder/pull/298). (tddy-daemon, tddy-pty)

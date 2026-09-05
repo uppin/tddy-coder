@@ -1,0 +1,5 @@
+# 2026-07-12 — Specialized-agent warm-up gate
+
+**Type:** Feature
+
+new `warmup.rs`: `warm_up_agents(defs, &WarmupOptions)` wakes each resolved `SpecializedAgentDef`'s endpoint via a one-token `/v1/chat/completions` probe and returns `Ok(())` only once all answer, else a typed `AgentWarmupError` (agent/base_url/model/last_error). `classify_probe_status` — `2xx`→Ready, `408`/`429`/`5xx`→Transient (incl. Ollama's `502`, an upstream-reachability failure, not "unloaded"), else Fatal; transients retry until `opts.timeout`, a `404` fails fast. Injectable timing (`WarmupOptions`); empty defs → no-op no-HTTP; step logging at `tddy_discovery::warmup`. No new deps (reuses `reqwest`/`tokio`). Feature [specialized-subagents.md § Start-time warm-up gate](../../../../docs/ft/coder/specialized-subagents.md#start-time-warm-up-gate). Cross-package: [docs/dev/changesets/](../../../../docs/dev/changesets/). PR [#296](https://github.com/uppin/tddy-coder/pull/296). (tddy-discovery, tddy-sandbox-app, tddy-daemon)

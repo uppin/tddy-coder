@@ -1,0 +1,5 @@
+# 2026-07-21 — **Host Stats Footer
+
+**Type:** Feature
+
+disk + per-core CPU; byte-traffic relocated** — new screen-level bottom footer on `SessionsDrawerScreen`: `HostStatsFooter` combines the relocated `SessionTrafficStrip`/`StatusBar` with `DiskSpaceIndicator` (free space via `formatDiskFree`) and `CpuCoresIndicator` (one `cpu-core-bar-<i>` mini bar per logical core, `data-percent` = `clampCorePercent`). `useHostCpuStats` (5 s) / `useHostDiskStats` (60 s) poll `GetHostCpuStats`/`GetHostDiskStats` over `useDaemonClient(ConnectionService)`. The top header now holds only the daemon selector. New testids `host-stats-footer`/`disk-space-available`/`cpu-cores`/`cpu-core-bar-<i>`; `connectionServiceBackend` stubs both RPCs. Cypress `HostStatsFooterAcceptance` (4) + `SessionTrafficBarFooter` (5, replacing the retired `SessionTrafficBarTopbar` top-toolbar spec); `hostStatsFormat.test.ts` (6). Feature [host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). PR [#306](https://github.com/uppin/tddy-coder/pull/306). (tddy-web)

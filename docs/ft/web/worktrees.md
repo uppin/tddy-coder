@@ -17,7 +17,7 @@ The **`worktrees`** module provides:
 - **`list_cached_stats`**: reads the last persisted snapshot from disk without running diff on the hot path.
 - **`remove_worktree_under_repo`**: requires the target path to appear in **`git worktree list`**, refuses removal of the primary (first-listed) worktree, runs **`git worktree remove`**. Secondary worktrees may live outside the main repo directory (sibling paths); membership in Git’s list is the gate.
 
-**ConnectionService** (local daemon) exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (see [daemon changelog](../daemon/changelog.md)). Handlers use a shared **`WorktreeStatsCache`** rooted at **`projects_stats_cache_root()`**; **`refresh`** on the list RPC runs **`refresh_stats_for_project`** so ordinary polling can use **`refresh: false`** and stay on the cache-only path.
+**ConnectionService** (local daemon) exposes **`ListWorktreesForProject`** and **`RemoveWorktree`** (see [daemon changelog](../daemon/changelog/)). Handlers use a shared **`WorktreeStatsCache`** rooted at **`projects_stats_cache_root()`**; **`refresh`** on the list RPC runs **`refresh_stats_for_project`** so ordinary polling can use **`refresh: false`** and stay on the cache-only path.
 
 ### Web UI (`tddy-web`)
 

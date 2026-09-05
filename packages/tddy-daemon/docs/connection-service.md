@@ -777,4 +777,4 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 - Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
 - Feature: [Cursor Agent CLI session](../../../../docs/ft/daemon/cursor-cli-session.md)
-- [changesets.md](./changesets.md)
+- [changesets/](./changesets/)

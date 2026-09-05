@@ -173,6 +173,6 @@ Distributed/parent-fallback cache; hermetic sandboxing; full remote build execut
 
 ## Related
 
-- `packages/tddy-build/docs/architecture.md` — crate architecture; `docs/dev/changesets.md` — cross-package changeset history
+- `packages/tddy-build/docs/architecture.md` — crate architecture; `docs/dev/changesets/` — cross-package changeset history
 - `packages/tddy-build/` — implementation
 - Prior art: `~/Code/makers-lt/maker-build` (two-phase TypeScript build system)

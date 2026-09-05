@@ -1,0 +1,5 @@
+# 2026-07-23 — Session worktree inspector actions
+
+**Type:** Feature
+
+`worktrees` module adds `CleanWorktreeError` + `clean_worktree_under_repo` (membership-gated `git clean -fdx`, refuses the primary row; mirrors `remove_worktree_under_repo`). `ConnectionService` gains `clean_worktree` and `restore_session_worktree` handlers (auth → arg validation → `main_repo_path_for_host` → `spawn_blocking` under `spawn_worker_request_timeout` → stats-cache invalidation → typed error mapping via `map_clean_worktree_error`); restore resolves the session dir (`sessions_base_for_user` + `unified_session_dir_path`) and reuses `tddy_core::resolve_persisted_worktree_integration_base_for_session` + `setup_worktree_for_session_with_integration_base`. Tonic adapter delegations added. Tests: `worktree_session_actions_acceptance` 3 + `worktrees_rpc` +6 (13 total). Feature [session-worktree-inspector.md](../../../../docs/ft/web/session-worktree-inspector.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon)

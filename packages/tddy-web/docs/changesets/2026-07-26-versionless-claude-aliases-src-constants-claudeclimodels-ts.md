@@ -1,0 +1,5 @@
+# 2026-07-26 — versionless-claude-aliases: `src/constants/claudeCliModels.ts` loses the hardcoded `CLAUDE_CLI_MODELS` array and its `ClaudeCliModel` interface (dead since `ConnectionScreen.tsx` was removed
+
+**Type:** Feature
+
+only tests still imported them), keeping just the `isClaudeCliSession` / `isCursorCliSession` / `isCliTerminalSession` predicates; the web now holds no model list at all and every dropdown renders `ListAgentModels`' `models` preselecting its `default_model`. The testkit gains `DEFAULT_CLAUDE_CLI_MODELS` / `DEFAULT_CLAUDE_CLI_MODEL` in `cypress/support/rpc/responses.ts` (mirroring `tddy_core::backend::claude_cli_models`) wired into `connectionServiceBackend`'s `listAgentModels` fixture. Tests: `CreateSessionAcceptance` gains a preselection test and sources its dropdown expectation from the fixture; `claudeCliModels.test.ts` swaps the deleted-constant block for `isCursorCliSession`/`isCliTerminalSession` coverage — unit 318/318, `CreateSession*` Cypress 81/81. Feature [tool-session-model-selection.md](../../../../docs/ft/web/tool-session-model-selection.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-web)

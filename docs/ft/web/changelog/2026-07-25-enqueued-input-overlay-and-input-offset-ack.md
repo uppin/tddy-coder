@@ -1,0 +1,4 @@
+# 2026-07-25 — Enqueued input overlay & input-offset ACK
+
+- The web terminal now stays responsive on slow links: every input chunk carries a cumulative byte `input_offset`, the server acks the applied offset on `StreamTerminalOutput` (new `SessionTerminalOutput.acked_input_offset`), and un-acknowledged input surfaces after 500 ms as a single-line **enqueued-input overlay** that collapses from the front as ACKs arrive and hides when caught up. Mouse events coalesce into one glyph with a count; overflow past the line collapses into a trailing count. See [enqueued-input-overlay.md](../enqueued-input-overlay.md) and [web-terminal.md § Enqueued-input overlay](../web-terminal.md#enqueued-input-overlay-slow-networks).
+- Works for both hosting models — daemon-hosted claude-cli terminals and tddy-coder-participant-hosted bash tabs — because the ACK state lives on the shared `tddy_task::TaskChannel` (the daemon rebuilds a `PtyHandle` per RPC).

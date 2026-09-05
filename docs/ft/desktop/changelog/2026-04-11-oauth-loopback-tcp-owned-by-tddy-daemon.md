@@ -1,0 +1,3 @@
+# 2026-04-11 — OAuth loopback TCP owned by tddy-daemon
+
+- **tddy-desktop**: Production main process does not **`Bun.listen`** or join LiveKit for OAuth; **`TDDY_DESKTOP_OAUTH_RELAY`/`@livekit/rtc-node`** path removed. **`tddy-daemon`**: **`oauth_loopback_tunnel`** + **`codex_oauth_participant_metadata`**, wired from **`livekit_peer_discovery`** common-room **`Room`**. **`installLiveKitOAuthRelay`** retained for tests only. Feature **[tddy-desktop-electrobun.md](../tddy-desktop-electrobun.md)**; daemon **[oauth-loopback-tunnel.md](../../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; **[codex-oauth-relay.md](../../daemon/codex-oauth-relay.md)**. **Cross-package**: [docs/dev/changesets/](../../../dev/changesets/).

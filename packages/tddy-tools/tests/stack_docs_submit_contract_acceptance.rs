@@ -5,7 +5,7 @@
 //! refused before the hook ever ran, and no test saw it: every one drove the hook directly with a
 //! hand-written string. These tests take the payload out of the prompt itself and push it through
 //! the real CLI, so prompt, schema and hook cannot drift apart again — the same class of defect
-//! [#411](../../../docs/dev/changesets.md) closed for `write-stack-plan`.
+//! [#411](../../../docs/dev/changesets/) closed for `write-stack-plan`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;

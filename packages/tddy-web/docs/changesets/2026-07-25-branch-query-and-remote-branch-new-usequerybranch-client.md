@@ -1,0 +1,5 @@
+# 2026-07-25 — branch-query-and-remote-branch: new `useQueryBranch(client, sessionToken, orchestratorId, branches)` hook (sibling of `usePrStatus`, per-branch polled → `Record<string, BranchResolution>`) threaded `PrStackScreen → PlannedPrList → PlannedPrRow` to render worktree (`pr-stack-worktree-<nodeId>`), in-progress session (`pr-stack-session-<nodeId>`), and PR link/state from `QueryBranch` (additive; `usePrStatus`/`resolveNodeSession` kept). `CreateSessionPane` gains a pre-checked "Create Remote Branch" checkbox (`create-session-create-remote-branch-toggle`, claude-cli/cursor-cli, new-branch mode) sending `createRemoteBranch` and a "New branch from base: `<baseBranchLabel>`" caption; `CreateSessionInitialValues` gains `createRemoteBranch`/`baseBranchLabel`; new pure `utils/deriveStackBaseBranch.ts`. Feature [pr-stack-live-status.md](../../../../docs/ft/coder/pr-stack-live-status.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-web)
+
+**Type:** Feature
+
+

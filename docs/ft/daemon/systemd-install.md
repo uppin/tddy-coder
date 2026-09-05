@@ -99,4 +99,4 @@ Because a unit is only overwritten when `--update-systemd-unit` is passed, a hos
 ## Related
 
 - Root **[AGENTS.md](../../../AGENTS.md)** — scripts table and install overview.
-- **[changelog](changelog.md)** — daemon product changelog.
+- **[changelog](changelog/)** — daemon product changelog.

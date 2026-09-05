@@ -44,4 +44,4 @@ Main process (Bun) spawns **`tddy-daemon`** (when configured), opens a **`Browse
 ## Documentation
 
 - Product: [docs/ft/desktop/tddy-desktop-electrobun.md](../../docs/ft/desktop/tddy-desktop-electrobun.md)
-- Changesets: [docs/changesets.md](./docs/changesets.md)
+- Changesets: [docs/changesets/](./docs/changesets/)

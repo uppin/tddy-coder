@@ -1,0 +1,5 @@
+# 2026-03-08 — Rename validate-refactor to validate and Add refactor Goal
+
+**Type:** Feature
+
+`validate-refactor` goal renamed to `validate` at CLI and internal levels. Internal types: `Goal::Validate`, `ValidateOptions`, `ValidateSubagentsOutput`, `parse_validate_subagents_response`, `validate_subagents_allowlist`, module `validate_subagents.rs`. Validate produces `refactoring-plan.md` (synthesized from 3 subagent reports); structured response includes `refactoring_plan_written: bool`. New `refactor` goal: reads `refactoring-plan.md`, executes refactoring tasks via full tool access. Types: `Goal::Refactor`, `RefactorOptions`, `RefactorOutput` (`summary`, `items_completed`, `items_remaining`), `parse_refactor_response`, `refactor_allowlist`. States: `Refactoring`, `RefactorComplete`. CursorBackend rejects both `Goal::Validate` and `Goal::Refactor`. State machine: `Evaluated` → validate → `ValidateComplete` → refactor → `RefactorComplete` → None. `refactoring-plan.md` in `KNOWN_ARTIFACTS`. Full 8-step auto-sequence: plan → acceptance-tests → red → green → demo → evaluate → validate → refactor. (tddy-core)

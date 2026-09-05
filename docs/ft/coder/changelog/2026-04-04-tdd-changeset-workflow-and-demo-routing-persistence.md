@@ -1,0 +1,7 @@
+# 2026-04-04 — TDD changeset workflow and demo routing persistence
+
+- **Changeset**: **`ChangesetWorkflow`** on **`changeset.yaml`** under **`workflow`** (**`run_optional_step_x`**, **`demo_options`**, optional **`tool_schema_id`**); **`write_changeset_atomic`**; **`merge_persisted_workflow_into_context`** applies persisted values to engine **`Context`**.
+- **tddy-tools**: **`persist-changeset-workflow`** (**`--session-dir`**, **`--data`**) validates **`changeset-workflow`** JSON and writes the **`workflow`** block; registry entry in **`goals.json`** with **`generated/tdd/changeset-workflow.schema.json`** and **`proto/changeset_workflow.proto`**.
+- **Interview**: Prompts require **`tddy-tools ask`** for optional **demo** after **green**, demo options, and persistence of **`run_optional_step_x`** / **`demo_options`** into **`changeset.yaml`**.
+- **Tests**: **`changeset_demo_workflow_acceptance`**, **`changeset_workflow_cli`**, **`tdd_demo_workflow_config`**, **`workflow_graph`** **`full_graph_green_routes_per_changeset_demo_intent`**; **`cli_integration`** lists **`changeset-workflow`** in **`REGISTERED_GOALS`**.
+- **Docs**: [workflow-recipes.md](../workflow-recipes.md), [planning-step.md](../planning-step.md), [workflow-json-schemas.md](../workflow-json-schemas.md); **`packages/tddy-tools/docs/json-schema.md`**; **`packages/tddy-workflow-recipes/docs/workflow-schemas.md`**; package **`changesets.md`** for **tddy-core**, **tddy-tools**, **tddy-workflow-recipes**.

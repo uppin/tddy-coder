@@ -1,0 +1,5 @@
+# 2026-07-04 — Cross-daemon verifiable session tokens
+
+**Type:** Feature
+
+`auth::build_auth_entries` builds a `tddy_github::SessionTokenSigner` from `livekit.api_secret` and wires `AuthServiceImpl::new_signed` (stub + real providers via a new generic `auth_service_entry` helper); the `SessionUserResolver` now verifies a token's HMAC signature + expiry and extracts the login instead of a per-daemon `HashMap` lookup, so any daemon holding the shared secret accepts a token any other daemon minted (fixes daemon-switch `invalid or expired session` and the peer `ListProjects`/`StartSession`/`AddProjectToHost` forwarding paths). No `api_secret` ⇒ resolver rejects every token (fail-closed); the `tddy_data_dir` param and `auth-sessions.json` persistence were dropped. `cargo test -p tddy-daemon` lib 236/0; cross-daemon acceptance 2/2 + resolver 3/3 green. Feature [../../../docs/ft/daemon/session-auth.md](../../../../docs/ft/daemon/session-auth.md). Cross-package: [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-daemon, tddy-github, tddy-service, tddy-web)

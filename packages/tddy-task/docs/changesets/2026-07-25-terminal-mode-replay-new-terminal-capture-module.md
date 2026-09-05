@@ -1,0 +1,5 @@
+# 2026-07-25 — terminal-mode-replay: new `terminal_capture` module
+
+**Type:** Fix
+
+`TerminalCapture` is a mode-aware replay ring (64 KiB `CAPTURE_LIMIT_BYTES`) that sniffs DECSET/DECRST via a byte-at-a-time `EscapeParser` (so a sequence split across PTY reads is still seen), keeps the mouse-tracking modes in effect as sticky state costing no ring space, re-issues them via `mode_prologue()` / `replay()`, exposes prologue-free output as `buffered_bytes()`, and stops eviction at an escape-sequence boundary so a cut cannot leave an orphan fragment. `TaskChannel.capture` becomes `Arc<Mutex<TerminalCapture>>` and `write()` delegates to `append` (the private `CHANNEL_CAPTURE_LIMIT_BYTES` and inline trim are gone); `replay_capture()` deliberately stays byte-exact and prologue-free for the non-terminal consumers, with `capture_arc().lock().replay()` for terminal callers. Docs [terminal-capture.md](../terminal-capture.md). Tests: `terminal_capture_replay` 10. Cross-package [changeset](../../../../docs/dev/changesets/). (tddy-task)

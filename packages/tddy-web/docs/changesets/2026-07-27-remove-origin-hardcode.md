@@ -1,0 +1,5 @@
+# 2026-07-27 — **remove-origin-hardcode
+
+**Type:** Bug Fix
+
+the branch picker normalizes against the resolved default remote, not a hardcoded `origin`** — `lib/branchNames.ts`'s `localBranchName(reference, remote)` strips one leading `<remote>/` (defaults to `origin` only when a caller supplies no remote), so a project tracking `upstream` no longer leaks the `upstream/` prefix into the local branch name. `ProjectsScreen`'s default-branch heuristic uses `<default_remote>/master` → `<default_remote>/main` (was hardcoded `origin/...`), reading `defaultRemote` from the `listProjectBranches` response (falling back to `origin` only when the field is empty); `ProjectsAppPage`'s `loadProjectBranches` returns `{ branches, defaultRemote }`. `CreateSessionPane` passes the picker's `defaultRemote` into `localBranchName`. Tests: `branchNames.test.ts` non-origin stripping 8; Cypress `ProjectsScreenAcceptance` non-origin default selection; `bun run build` clean. Feature [git-integration-base-ref.md](../../../../docs/ft/coder/git-integration-base-ref.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-web)

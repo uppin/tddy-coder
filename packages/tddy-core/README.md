@@ -25,5 +25,5 @@ Core library providing: `CodingBackend` trait (async) for LLM backends, `Workflo
 
 ### Technical Implementation (How)
 - [Architecture](./docs/architecture.md) — Component structure and data flow
-- [Changesets](./docs/changesets.md) — Applied changeset history
+- [Changesets](./docs/changesets/) — Applied changeset history
 - [Tech Stack](../../docs/dev/guides/tech-stack.md) — Workspace layout, toolchain

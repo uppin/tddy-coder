@@ -1,0 +1,5 @@
+# 2026-08-14 — `cloud-init` stops flattening, and starts working with the default library root
+
+**Type:** Fix
+
+the subcommand baked through `build_cloud_init_image`, whose first step copied the source image into a scratch subdirectory and converted it, producing a standalone `<name>-base.qcow2` + overlay pair rather than a delta. It now chains a single delta directly onto the imported base and promotes nothing, so `promote_prepared_base_pair` is gone from this path and the CLI's output is one file. Two consequences fixed red-first: the second bake of the same `--name` died `EACCES`, because the overlay is now created exactly where the previous bake left a sealed `0444` file; and — worse — `--library-root` defaults to `default_tddy_data_dir()`, which is the **relative** `tmp/.tddy` in debug builds, so with the overlay's own directory used as the `qemu-img` cwd both the output path and the backing check resolved twice and the command failed 100% of the time with no flags at all. See [tddy-vm](../../../tddy-vm/docs/changesets/) for the shared change. (tddy-vm-build, tddy-vm)

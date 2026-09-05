@@ -74,4 +74,4 @@ Static contract tests live in **`packages/tddy-e2e`** (`web_dev_contract` module
 
 - [Web workspace setup](web-workspace-setup.md) — Bun / `tddy-web` package layout
 - [Web terminal](web-terminal.md) — Browser terminal over RPC / LiveKit
-- [Coder changelog](../coder/changelog.md) — Release notes for the broader Coder area
+- [Coder changelog](../coder/changelog/) — Release notes for the broader Coder area

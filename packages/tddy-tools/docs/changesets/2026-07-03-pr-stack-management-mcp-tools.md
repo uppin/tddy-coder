@@ -1,0 +1,5 @@
+# 2026-07-03 — PR-stack management MCP tools
+
+**Type:** Feature
+
+`PermissionServer` (`server.rs`) gains eight `mcp__tddy-tools__pr_*` tools for the free-prompting `orchestrate` loop: `pr_stack_status` (assembles live views, derives + persists internal statuses, override-wins), `pr_merge`/`pr_repoint`/`pr_close` (via `RealGithubPrApi`/`pr_actions`), `pr_resolve_conflicts` (detect-only; marks `has-conflicts` as a sticky override, cleared on a clean merge), `pr_set_status` (agent override), `pr_add_planned` (`add_planned_pr_node`), and `pr_spawn_child` (async; relays a `spawn-child` verb over `TDDY_SOCKET` via `dispatch_toolcall`). Reads the orchestrator changeset via `TDDY_SESSION_DIR` and the repo via `TDDY_REPO_DIR`; `default_branch()` errors rather than guessing when `origin/HEAD` is unresolved. Feature [pr-stacking.md § PR-management tools](../../../../docs/ft/coder/pr-stacking.md#pr-management-tools). Cross-package: [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-tools, tddy-workflow-recipes, tddy-core, tddy-daemon)

@@ -51,5 +51,5 @@ The reflection bidi stream runs over the existing `LiveKitTransport` / `tddy-rpc
 - [gRPC remote control and transport stack](../../packages/tddy-livekit/docs/README.md) *(when written)*
 - [LiveKit common-room peer discovery](livekit-peer-discovery.md)
 - [Web terminal (screen/routing patterns)](../web/web-terminal.md)
-- [Daemon changelog](changelog.md)
-- [Web changelog](../web/changelog.md)
+- [Daemon changelog](changelog/)
+- [Web changelog](../web/changelog/)

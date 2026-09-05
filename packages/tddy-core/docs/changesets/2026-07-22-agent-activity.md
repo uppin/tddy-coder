@@ -1,0 +1,5 @@
+# 2026-07-22 — **agent-activity
+
+**Type:** Feature
+
+shared per-session agent tool-call log** — new **`agent_activity`** module: `AgentActivityRecord` (`call_id`/`tool_name`/`input_json`/`status`/`result_json`/`error_message`/`started`/`completed`/`source`) + `append_agent_activity`/`read_agent_activity` (coalesce-by-`call_id`, first-seen order, 500-cap), modeled on `tddy-daemon/tool_call_log.rs` but placed here for one cross-crate definition. `stream/mod.rs`: `ProgressEvent::ToolUse` gains `input_json` + `call_id`; new additive `ProgressEvent::ToolResult { call_id, result_json, is_error }` (a `tool_use`+`tool_result` emits a correlated pair). `session_activity.rs`: `HookEvent` gains `#[serde(default)]` `tool_name`/`tool_input`/`tool_response` + a Pre→running/Post→completed mapper. Doc [architecture.md § Agent activity](../architecture.md#agent-activity-agent_activity). Feature [agent-activity-pane.md](../../../../docs/ft/web/agent-activity-pane.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-core)

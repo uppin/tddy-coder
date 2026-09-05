@@ -1,0 +1,5 @@
+# 2026-06-13 — **Per-worktree Claude Code hooks
+
+**Type:** Feature
+
+claude-cli session activity status** — When the daemon starts a claude-cli session it writes `.claude/settings.local.json` into the worktree configuring 6 hooks; `tddy-tools session-hook` maps each event to `SessionActivityStatus` (`Started`, `Running`, `ExecutingTool`, `WaitingForInput`, `Done`, `Ended`) and POSTs to new `ReportSessionStatus` gRPC RPC; daemon validates per-session `hook_token`, writes `activity_status` to `.session.yaml`, surfaces via `ListSessions`. Feature [claude-cli-session.md § Activity status](../../ft/daemon/claude-cli-session.md#session-activity-status-via-per-worktree-hooks); product [daemon/changelog/](../../ft/daemon/changelog/); packages [tddy-core](../../../packages/tddy-core/docs/changesets/), [tddy-service](../../../packages/tddy-service/docs/changesets/), [tddy-daemon](../../../packages/tddy-daemon/docs/changesets/), [tddy-tools](../../../packages/tddy-tools/docs/changesets/). (tddy-core, tddy-service, tddy-daemon, tddy-tools, docs)
