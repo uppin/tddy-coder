@@ -70,6 +70,8 @@ export interface TerminalFeed {
  * answered identically in all of them.
  */
 export function feedSupportsHistory(feed: TerminalFeed): boolean {
-  // TODO(terminal-convergence): implement
-  throw new Error("feedSupportsHistory is not implemented yet");
+  // The *value*, never `"history" in feed`. A provider that builds its feed conditionally —
+  // `{ stream, history: canReplay ? fetcher : undefined }` — produces the key either way, so the
+  // membership test would answer `true` for a feed whose scrollback control calls `undefined`.
+  return feed.history !== undefined;
 }

@@ -16,6 +16,7 @@ import {
   type HistoryChunk,
 } from "../lib/terminalHistoryLoader";
 import { TerminalStreamOffset } from "../lib/terminalStreamOffset";
+import type { TerminalFrame, TerminalStream } from "../rpc/connections/terminal";
 
 // `[tddy]` diagnostics for the gRPC terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
@@ -34,18 +35,15 @@ const PAGE_SCROLLBACK = 50000;
 /**
  * One frame from `StreamTerminalOutput`: the raw output bytes plus the offset metadata carried on
  * the initial replay frame. Live tail frames leave `endOffset`/`atOldest` at their zero defaults.
+ *
+ * The interface itself now lives in `rpc/connections/terminal` as {@link TerminalFrame} — it was
+ * only ever gRPC-shaped by its name. The alias keeps this component's existing callers and its
+ * Cypress drivers compiling while the two terminals converge.
  */
-export interface GrpcFrame {
-  data: Uint8Array;
-  endOffset: bigint;
-  atOldest: boolean;
-}
+export type GrpcFrame = TerminalFrame;
 
-export interface GrpcStream {
-  send(data: Uint8Array): void;
-  onMessage(fn: (frame: GrpcFrame) => void): void;
-  close(): void;
-}
+/** The duplex byte pipe this terminal reads and writes — see {@link TerminalStream}. */
+export type GrpcStream = TerminalStream;
 
 /**
  * Fetches one forward chunk of older history starting at `fromOffset`, bounded by `untilOffset`
