@@ -4,32 +4,20 @@ description: Plan a stack of dependent PRs by hand, in two waves - interview and
 ## Plan PR Stack — From Requirements to a Stack of Draft PRs, in Two Waves
 
 Alternative to `/plan-red` when the work is large enough to split across **multiple PRs planned
-ahead**. Interview the user, decompose the work into a DAG of self-contained nodes, then build the
-stack in **two waves**, both in the **current worktree**, one branch at a time.
+ahead**. Interview the user, decompose the work into a **linear sequence** of self-contained PRs,
+then build the stack in **two waves**, both in the **current worktree**, one branch at a time.
 
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it defines the stack model,
-the **PR boundary contract**, the `## Draft PR contract`, base tracking, forward-only doc linking,
-the worktree-pinning constraint, PR titles, and the landing rules. This command assumes those
-definitions and never contradicts them.
+**registering the stack with `gh stack`**, the **PR boundary contract**, the `## Draft PR contract`,
+base tracking, forward-only doc linking, the worktree-pinning constraint, PR titles, and the landing
+rules. This command assumes those definitions and never contradicts them.
 
-### `/plan-pr-stack` vs `--recipe pr-stack` — two different things sharing a name
-
-`plan-pr-stack` names **two** things in this repo. Establish which one the user means before doing
-anything; the leading slash is the whole disambiguation.
-
-| | **`--recipe pr-stack`** (and its legacy alias `--recipe plan-pr-stack`) | **`/plan-pr-stack`** (this command) |
-|---|---|---|
-| What it is | a **product workflow recipe** — a `tddy-coder` session | a slash command run in an agent session |
-| Produces | a **planned stack**: `Changeset.stack` on an orchestrator session, `artifacts/prs/<node_id>/{PRD.md,changeset.md}`, `artifacts/pr-stack-plan.md` | an **ad-hoc chain**: real branches and draft PRs, with each node's documents in `docs/dev/1-WIP/` |
-| Tooling it gets | the `mcp__tddy-tools__pr_*` tools, the PR-Stack chat screen, `pr_stack_status`, journalled `pr_merge` / `pr_repoint` | plain `git` + `gh`, and the `/pr-stack-*` commands |
-| Start it with | `tddy-coder --recipe pr-stack …`, or the web New-session screen | `/plan-pr-stack` |
-
-**Prefer the recipe.** It gives live status, journalled merges, and repointing that cannot forget a
-dependent. Reach for **this command** when you want the stack planned by hand in the worktree you are
-already in — no orchestrator session, no child sessions — and you accept driving the loop yourself.
-
-An ad-hoc chain built here can be **promoted later**: start a `pr-stack` orchestrator and `pr_adopt`
-each PR, then `pr_set_parents` to restore the DAG. Say so in the final report.
+> **Not the `pr-stack` workflow recipe.** `tddy-coder` ships a product feature by a similar name —
+> a workflow recipe (`pr-stack`, legacy aliases `plan-pr-stack` / `orchestrate-pr-stack`) that plans
+> and drives a stack from inside a coding session, with its own state and its own tooling. That is a
+> **separate implementation**, shipped to whatever repository a user runs tddy on, and documented in
+> [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md). This command is how *this*
+> repository's contributors plan a stack by hand. Neither describes the other.
 
 ### The two waves
 
@@ -63,11 +51,13 @@ be on `master` again (a named branch checkout, not detached `origin/master`, not
 - `gh` CLI authenticated (`gh auth status`).
 - The user has described a body of work that plausibly spans more than one PR.
 
-> **There is no `gh stack` extension in this repo, and nothing here reproduces one.** GitHub has no
-> stack object for these PRs: the ordering lives in your plan and in each PR's base ref, and nothing
-> restacks a dependent after a merge. Do not install it, do not look for an equivalent, and never run
-> `gh stack sync` / `gh stack rebase` — see `pr-stack` skill § *There is no stack-wide rewrite command
-> here*.
+- The `gh stack` extension available (`gh extension list | grep gh-stack`).
+
+> **The stack must end up registered on GitHub.** Base refs alone give correct per-PR diffs and
+> nothing else — no grouping, no ordering, no stack view for reviewers. Step 5 registers it with
+> `gh stack link`. Because `gh stack` models a **line**, the decomposition must be linear: see the
+> `pr-stack` skill § *A registered stack is linear*. Do not run `gh stack sync` / `gh stack rebase`
+> here — they rewrite branches other worktrees may own; `/pr-stack-rebase` is the tool for that.
 
 ## Execution Flow
 
@@ -98,9 +88,10 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
 1. **Decomposition** — What are the natural, independently-shippable slices? Each must be a
    **vertical slice**: the API/schema change, the code implementing it, and its tests in **one**
    node.
-2. **Dependencies** — For each node, which *other nodes* must have merged before it can? `parents`
-   is a **list**, not a single predecessor — two nodes may share a parent (siblings are legal), and a
-   node integrating two unmerged parents is a genuine diamond.
+2. **Dependencies** — For each node, which *earlier nodes* must have merged before it can? Record
+   the real edges, then choose a **linear order that is a valid topological sort of them**. Where the
+   logical graph branches, flatten it and say what that costs — the flattened siblings can no longer
+   be worked or landed in parallel.
 3. **Ownership** — Which node owns which API surface / files? Each symbol has exactly one owning
    node, and no node ever implements a symbol another owns.
 4. **Stack size** — How many nodes? Prefer the fewest that keep each independently reviewable and
@@ -125,9 +116,10 @@ change, or a regeneration of already-committed generated code exposing no new su
 ones; **do not invent a third**. Anything that seems to need one goes in the node's description for
 the user to decide.
 
-Present the proposed **DAG** (n₁…nₙ with one-line scope + owned surface each), the parent edges, and
-which nodes can be implemented in parallel. **Wait for user approval of the decomposition before
-creating anything.** If the user named a trunk other than the detected one, set `TRUNK` to it.
+Present the proposed **sequence** (n₁…nₙ with one-line scope + owned surface each), the real
+dependency edges behind it, and anywhere the order was forced by flattening rather than by a real
+dependency. **Wait for user approval of the decomposition before creating anything.** If the user
+named a trunk other than the detected one, set `TRUNK` to it.
 
 ### Step 2: Analyze Existing Code
 
@@ -167,7 +159,7 @@ in Step 4b, so nothing shared is created here and nothing has to be handed betwe
 
 What this step produces is agreement, not a file. Settle and write down for your own use:
 
-- the **DAG** — branch and parent list per node, and the derived base each PR will be opened against;
+- the **order** — each node's branch and its predecessor's branch, which is the base its PR opens against;
 - **`TRUNK`**;
 - the **stack slug** — one or two kebab-case words, associative, chosen **once and never changed**.
   It is both the branch namespace `feature/<stack-slug>/<node>` and the PR-title group
@@ -200,22 +192,13 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   git checkout --detach "origin/$TRUNK"
   git checkout -b "feature/<slug>/<node>"
   ```
-- **Child with one parent** — while still on the parent branch:
+- **Every other node** — while still on its predecessor's branch:
   ```bash
-  git checkout -b "feature/<slug>/<child-node>"
+  git checkout -b "feature/<slug>/<node>"
   ```
-- **Child with several parents (a diamond)** — cut off the **deepest** parent (the one that itself
-  depends on the others is the more complete base; that is also the ordering the Start-session dialog
-  uses), and bring the other parents in through a local integration ref:
-  ```bash
-  git checkout -b "feature/<slug>/<child-node>" "feature/<slug>/<deepest-parent>"
-  git checkout -B "stack-int/<child-node>"          # integration ref, never pushed as the PR head
-  git merge --no-ff "feature/<slug>/<other-parent>"
-  git checkout "feature/<slug>/<child-node>"
-  ```
-  The PR's base ref points at the **deepest parent** (the primary spine); the other parents are
-  edges you track in the plan and in `## Dependencies`. Its PR is only offered for merge once **all**
-  its parents have merged.
+  There is no diamond case: the plan is a line, so each node has exactly one predecessor. A node that
+  consumes something from *two* earlier PRs simply sits after both of them — both are ancestors, and
+  `## Dependencies` records what it takes from each.
 - **Do not create a worktree per node here.** Two reasons, both from the `pr-stack` skill: a worktree
   **pins its branch**, and git refuses to update a branch checked out elsewhere — wave 2 must be able
   to check every branch out **here**; and a worktree in this repo costs several GB once `target/` and
@@ -357,12 +340,25 @@ Every node is now a one-commit draft PR. Before wave 2 touches any branch:
    gh pr edit <N> --title "<type>(<scope>): <delivery> (#<slug> <K>/<N>)"
    gh pr view <N> --json number,title --jq '"#\(.number) → \(.title)"'
    ```
-4. **Delete the Step 2 whole-work discovery source** — every node now has its own
+4. **Register the stack on GitHub — MANDATORY.** Base refs alone give reviewers the right per-PR
+   diffs and nothing else. Register the whole chain, bottom to top:
+
+   ```bash
+   gh stack link --base "$TRUNK" <pr-1> <pr-2> ... <pr-n>
+   ```
+
+   Two traps: it defaults to `--base main`, so pass `$TRUNK` explicitly; and **never `--open`**,
+   which would mark every draft ready for review and trigger each one's wrap. `link` reuses the PRs
+   that already exist and never removes one, so re-running it with the full list is also how you
+   extend the stack later. `gh stack view` reads *local* tracking and will say "not part of a stack"
+   after a `link` — that is expected, not a failure; the stack lives on GitHub.
+
+5. **Delete the Step 2 whole-work discovery source** — every node now has its own
    `{slug}-initial-discovery.md`. **Ask the user before deleting** (CLAUDE.md). It was never staged,
    so this drops an untracked file; wrap of the root node must never be the thing that removes it. If
    any node still lacks a companion, **keep** the file and stop here.
-5. **Report wave 1 to the user** — the final title list with PR numbers and URLs, each node's
-   branch/base, and the DAG. State plainly that **no node is ready for `/green` yet**: the drafts are
+6. **Report wave 1 to the user** — the final title list with PR numbers and URLs, each node's
+   branch/base, and the order. State plainly that **no node is ready for `/green` yet**: the drafts are
    plans, and wave 2 is about to rewrite every branch above the roots. Then continue into wave 2
    without waiting — the per-node acceptance-test review in Step 6e is where the user gates each node.
 
@@ -560,9 +556,9 @@ Present a complete summary:
 - **The final title of every PR**, as one list, showing the shared slug and ascending `K/N`. This is
   what Step 5's revision pass produced; re-read them now — if wave 2 shifted scope between nodes, fix
   the affected title with `gh pr edit` and report the corrected list.
-- **The DAG** — each node's parents, its branch, and its PR base. Note explicitly that this is an
-  **ad-hoc chain**: GitHub has no stack object for it, enforces no merge order, and will restack
-  nothing after a merge.
+- **The sequence** — each node's predecessor, its branch, and its PR base, plus the `gh stack link`
+  output confirming the stack is registered. Note explicitly that GitHub enforces no merge order and
+  will restack nothing after a merge, registered or not.
 - **The Step 8 cascade verdict per layer** — already current or rebased, and each layer's build/test
   state. This is the line that says the stack is coherent.
 - **This worktree is back on `$ORIGINAL_BRANCH`** (confirm `git branch --show-current`). `/green` on
@@ -573,9 +569,8 @@ Present a complete summary:
   implementation.
 - Which nodes can be `/green`-ed in parallel, and which have a sequencing fact recorded in
   `## Dependencies`.
-- **The promotion option**: this chain can be adopted into a planned stack later — a `pr-stack`
-  orchestrator session plus `pr_adopt` per PR and `pr_set_parents` to restore the DAG — which buys
-  `pr_stack_status`, journalled merges, and repointing that cannot forget a dependent.
+- **Where the order was forced** — any pair that is only sequential because `gh stack` needs a line,
+  so a reviewer knows those two could have gone in parallel.
 - Anything you could not prove locally (server-side checks, org policy), stated as a risk.
 
 ### Step 10: Hand off to `/green`
@@ -639,12 +634,12 @@ them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to
 
 ## Rules
 
-- **Say which `plan-pr-stack` you are.** `--recipe pr-stack` (and its legacy aliases
-  `--recipe plan-pr-stack` / `--recipe orchestrate-pr-stack`) plans a **planned stack** with the
-  `pr_*` tools; **this slash command** plans an **ad-hoc chain** by hand. Prefer the recipe; use this
-  when the user wants it planned in the worktree they are in.
-- **There is no `gh stack` extension here.** Never invoke it, never install it, never look for a
-  stack-wide rewrite command. `gh pr create --draft --base <parent>` is how a stacked PR is opened.
+- **Register the stack.** `gh pr create --draft --base <predecessor>` opens each PR; the stack is
+  not finished until `gh stack link --base "$TRUNK" <prs…>` has run (Step 5). Do not run
+  `gh stack sync` / `gh stack rebase` — `/pr-stack-rebase` owns rewriting branches here.
+- **Decompose linearly.** `gh stack` models a line, so plan one. Flatten work that branches, and say
+  in the report what that cost — siblings become predecessor and successor, and an independent root
+  loses its independence.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
 - **The boundary contract governs the decomposition.** Every node is a vertical slice — schema, code,
   tests, in one PR. Splitting by layer is forbidden; a node that ships only surface is not a valid
@@ -697,8 +692,8 @@ them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to
 ```
 /plan-pr-stack
   record ORIGINAL_BRANCH (stop if detached) and TRUNK
-  interview → decompose into a DAG of vertical slices → whole-work discovery
-  → settle DAG, slug, owned surfaces, per-node draft-PR contracts
+  interview → decompose into a LINEAR sequence of vertical slices → whole-work discovery
+  → settle order, slug, owned surfaces, per-node draft-PR contracts
   → WAVE 1 (per node, in this worktree, in dependency order)
         git checkout -b feature/<slug>/<node>   (off its parent; root off origin/$TRUNK)
         PRD + changeset (4 headings) + discovery → commit 1 (docs only)
