@@ -25,6 +25,17 @@ export interface RpcPlaygroundScreenProps {
   participants?: ParticipantOption[];
   selectedParticipant?: string;
   onSelectParticipant?: (id: string) => void;
+  /**
+   * Whether the connection in scope can serve a participant roster — the answer
+   * `RpcPlaygroundAppPage` gets from `useHasCapability(hostConnection, "presence")`.
+   *
+   * The picker is *removed* when it is `false`, not rendered empty: the participants it lists are
+   * LiveKit coder participants, so on a wire with no presence there is nobody to address and a
+   * permanently empty "—" select is a control that cannot do anything. What takes its place names
+   * the connection as the reason, since this is the screen's only entry point and it has to stay
+   * explicable (PRD AC 3, AC 4).
+   */
+  presenceAvailable: boolean;
   onInvoke: (
     serviceName: string,
     methodName: string,
@@ -57,6 +68,7 @@ export function RpcPlaygroundScreen({
   participants,
   selectedParticipant,
   onSelectParticipant,
+  presenceAvailable,
   onInvoke,
   onNavigate,
 }: RpcPlaygroundScreenProps) {
@@ -122,25 +134,37 @@ export function RpcPlaygroundScreen({
       </div>
 
       <div className="mt-4 flex min-w-[10rem] flex-col gap-1">
-        <label className="text-sm font-medium" htmlFor="rpc-participant">
-          Participant / host
-        </label>
-        <select
-          id="rpc-participant"
-          data-testid="rpc-playground-participant-select"
-          className={selectClassName}
-          value={selectedParticipant ?? ""}
-          onChange={(e) => onSelectParticipant?.(e.target.value)}
-        >
-          {(participants ?? []).length === 0 ? (
-            <option value="">—</option>
-          ) : null}
-          {(participants ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+        {presenceAvailable ? (
+          <>
+            <label className="text-sm font-medium" htmlFor="rpc-participant">
+              Participant / host
+            </label>
+            <select
+              id="rpc-participant"
+              data-testid="rpc-playground-participant-select"
+              className={selectClassName}
+              value={selectedParticipant ?? ""}
+              onChange={(e) => onSelectParticipant?.(e.target.value)}
+            >
+              {(participants ?? []).length === 0 ? <option value="">—</option> : null}
+              {(participants ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : (
+          /* The label goes with the control: a `<label htmlFor>` pointing at a select that is not
+             there is a promise to a screen reader that nothing keeps. */
+          <p
+            data-testid="rpc-playground-participant-unavailable"
+            className="text-sm text-muted-foreground"
+          >
+            Participant selection is not available on this connection: this host is reached over a
+            wire that carries no LiveKit presence, so there are no participants to address.
+          </p>
+        )}
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[18rem_1fr]">

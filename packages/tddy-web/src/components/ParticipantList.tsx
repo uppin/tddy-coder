@@ -3,6 +3,7 @@ import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import { shouldShowParticipantVideoAffordance } from "../hooks/participantCameraVideo";
 import { useHasCapability, type CapabilityBearing } from "../rpc/connections/useHasCapability";
+import { presenceAvailability } from "../hooks/presenceAvailability";
 import {
   parseOwnedProjectCount,
   type RoomParticipant,
@@ -100,14 +101,20 @@ export interface ParticipantListProps {
   participantHasCameraVideo?: Record<string, boolean>;
   /**
    * The connection this roster is read over — the host connection whose common room these
-   * participants are joined to. The camera column and the preview dialog are gated on its `media`
-   * capability: a camera track arrives over the same wire the roster does, so a wire that carries
-   * no tracks has no video to preview and the column is absent rather than permanently empty.
+   * participants are joined to, or `null` when nothing can reach the host at all.
    *
-   * There is no session in scope here: the roster is the *host's*, so the host's connection is the
-   * only one that can answer.
+   * Two capabilities are read off it. `presence` decides whether there is a roster here to speak
+   * of: without it the panel says so and names the connection as the reason, instead of the
+   * "Connecting to presence room…" placeholder it used to sit on forever. `media` decides the
+   * camera column and the preview dialog — a camera track arrives over the same wire the roster
+   * does, so a wire that carries no tracks has no video to preview and the column is absent rather
+   * than permanently empty.
+   *
+   * Required, and deliberately: a roster rendered without saying which wire it came over is exactly
+   * the panel this node exists to fix. There is no session in scope here — the roster is the
+   * *host's*, so the host's connection is the only one that can answer.
    */
-  connection?: CapabilityBearing | null;
+  connection: CapabilityBearing | null;
 }
 
 /**
@@ -118,12 +125,16 @@ export function ParticipantList({
   roomStatus,
   connectionError,
   participantHasCameraVideo,
-  connection = null,
+  connection,
 }: ParticipantListProps) {
   const [videoPreviewIdentity, setVideoPreviewIdentity] = useState<string | null>(null);
   const canShowVideo = useHasCapability(connection, "media");
+  const carriesPresence = useHasCapability(connection, "presence");
+  // The status the room reports and the capability the wire advertises, resolved in the one order
+  // that does not blame the connection for a join that is merely still in flight.
+  const availability = presenceAvailability(roomStatus, carriesPresence);
 
-  if (roomStatus === "idle" || roomStatus === "connecting") {
+  if (availability === "connecting") {
     return (
       <div data-testid="participant-list" data-room-status="connecting">
         <p style={{ fontSize: 14, color: "#555" }}>Connecting to presence room…</p>
@@ -131,11 +142,25 @@ export function ParticipantList({
     );
   }
 
-  if (roomStatus === "error") {
+  if (availability === "error") {
     return (
       <div data-testid="participant-list" data-room-status="error">
         <p style={{ fontSize: 14, color: "#c00" }} data-testid="participant-list-error">
           {connectionError ?? "Failed to join presence room."}
+        </p>
+      </div>
+    );
+  }
+
+  if (availability === "unavailable") {
+    return (
+      <div data-testid="participant-list" data-room-status="unavailable">
+        <p
+          style={{ fontSize: 14, color: "#666" }}
+          data-testid="participant-list-unavailable"
+        >
+          The participant roster is not available on this connection: this host is reached over a
+          wire that carries no LiveKit presence.
         </p>
       </div>
     );

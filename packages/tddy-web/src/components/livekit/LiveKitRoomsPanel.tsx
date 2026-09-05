@@ -14,6 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import type { LiveKitRoom, LiveKitRoomParticipant } from "../../lib/liveKitRoomsState";
 import { metadataCardText } from "../../lib/liveKitMetadataCard";
 import { safeTestIdPart } from "../../lib/testId";
+import { useHostConnection } from "../../rpc/connections/registry";
+import { useHasCapability } from "../../rpc/connections/useHasCapability";
+import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useLiveKitRooms } from "../../rpc/useLiveKitRooms";
 
 function formatInstant(ms: number): string {
@@ -21,6 +24,33 @@ function formatInstant(ms: number): string {
 }
 
 export function LiveKitRoomsPanel() {
+  // The panel follows the daemon selector (`useLiveKitRooms` streams from the selected daemon), so
+  // the connection that answers for it is that host's — the same one the roster above it is read
+  // over. It resolves its own rather than taking a prop because it sources its own data too; a
+  // second seam for the same host would be a second thing to keep in step.
+  //
+  // The feed itself is plain daemon RPC and would survive without LiveKit. The panel is gated all
+  // the same, because what it *shows* is rooms and who is joined to them: on a host reached with no
+  // presence there is nothing for it to be about, and an empty "Rooms" heading reads as "the server
+  // has no rooms" rather than "this connection cannot see them" (PRD AC 3).
+  //
+  // Removed, not rendered empty or disabled. `LiveKitAppPage`, the only screen that mounts this
+  // panel, explains the absence once for the whole screen — saying it again here would tell the
+  // operator twice that the same wire carries no presence.
+  const { selectedInstanceId } = useSelectedDaemon();
+  const connection = useHostConnection(selectedInstanceId);
+  const carriesPresence = useHasCapability(connection, "presence");
+  if (!carriesPresence) return null;
+  return <RoomsFeed />;
+}
+
+/**
+ * The panel proper, split out so the feed is not merely hidden but never opened: `useLiveKitRooms`
+ * subscribes from an effect, and a hook cannot be skipped by the component that decides whether the
+ * panel applies. A `StreamLiveKitRooms` held open for a panel nobody can see is a call the daemon
+ * has to serve for nothing.
+ */
+function RoomsFeed() {
   const { rooms, hasSnapshot, error } = useLiveKitRooms();
   const [collapsed, setCollapsed] = useState<string[]>([]);
 

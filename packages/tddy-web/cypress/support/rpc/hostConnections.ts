@@ -13,6 +13,7 @@
 
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
+import { ConnectionProviderRegistry } from "../../../src/rpc/connections/registry";
 import type { SessionConnection } from "../../../src/rpc/connections/session";
 import type {
   ConnectionCapability,
@@ -92,4 +93,27 @@ export class HostConnectionBuilder {
 /** A host connection for `hostId`. See {@link HostConnectionBuilder} for the defaults. */
 export function aHostConnection(hostId = "local"): HostConnectionBuilder {
   return new HostConnectionBuilder(hostId);
+}
+
+/**
+ * A registry whose only wire is the one that hands out `connections`, keyed by their `hostId`.
+ *
+ * The point of mounting a screen over this rather than over `withSelectedDaemon` is that the wire
+ * is stated rather than implied: `withSelectedDaemon` hands the tree a `Room`, and a room means the
+ * LiveKit provider claims every host with all three capabilities. A screen mounted here reaches its
+ * host exactly as the builder said it does — over a frame pipe, or over a common room — which is
+ * the only way to write the `{"rpc"}`-only half of a gating scenario.
+ *
+ * Pair it with `<SelectedDaemonProvider room={null} …>`: with no room, no `livekit-client` `Room` is
+ * constructed anywhere in the tree and the LiveKit provider claims nothing, so this registry's
+ * answer is the only one.
+ */
+export function aRegistryServing(...connections: HostConnection[]): ConnectionProviderRegistry {
+  const registry = new ConnectionProviderRegistry();
+  const byHostId = new Map(connections.map((connection) => [connection.hostId, connection]));
+  registry.register({
+    id: "fixture",
+    connectHost: (hostId: string) => byHostId.get(hostId) ?? null,
+  });
+  return registry;
 }

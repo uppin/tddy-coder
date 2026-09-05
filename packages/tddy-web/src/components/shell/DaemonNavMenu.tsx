@@ -1,10 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { presenceAvailability } from "@/hooks/presenceAvailability";
+import { useHostConnection } from "@/rpc/connections/registry";
+import { useHasCapability } from "@/rpc/connections/useHasCapability";
+import { LIVEKIT_SOURCE_ID } from "@/rpc/hostDirectory/liveKitSource";
+import { useHostDirectorySource } from "@/rpc/hostDirectory/useHostDirectory";
+import { useSelectedDaemon } from "@/rpc/selectedDaemon";
 
 /**
  * Hamburger menu for the daemon-mode shell: Sessions, Worktrees, Tasks, Projects, Models & Agents,
  * VMs, LiveKit, the RPC Playground, and the serving daemon's own Settings.
+ *
+ * The LiveKit entry is offered only where the screen behind it has something to say. It is
+ * *removed* rather than disabled: everything on that screen — the roster and the room list — is
+ * presence, so on a wire that carries none it would lead somewhere empty, and an entry like that
+ * invites a support question with no good answer (PRD AC 4). The route itself stays reachable, and
+ * `LiveKitAppPage` explains itself to anyone who arrives by link.
+ *
+ * The entry and the screen read the same rule (`presenceAvailability`) so they cannot disagree: a
+ * room still joining, or one that failed with a reason, keeps the entry — the screen has a join to
+ * report on, and the reason a join failed is exactly what an operator would go there to find.
  */
 export function DaemonNavMenu({
   onNavigate,
@@ -13,6 +29,12 @@ export function DaemonNavMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { selectedInstanceId } = useSelectedDaemon();
+  const connection = useHostConnection(selectedInstanceId);
+  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
+  const carriesPresence = useHasCapability(connection, "presence");
+  const liveKitApplies =
+    presenceAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
 
   useEffect(() => {
     if (!open) return;
@@ -109,16 +131,18 @@ export function DaemonNavMenu({
           >
             VMs
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
-            role="menuitem"
-            data-testid="shell-menu-livekit"
-            onClick={() => go("/livekit")}
-          >
-            LiveKit
-          </Button>
+          {liveKitApplies && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
+              role="menuitem"
+              data-testid="shell-menu-livekit"
+              onClick={() => go("/livekit")}
+            >
+              LiveKit
+            </Button>
+          )}
           <Button
             type="button"
             variant="ghost"

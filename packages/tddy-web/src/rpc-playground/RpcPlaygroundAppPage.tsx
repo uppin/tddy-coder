@@ -12,6 +12,8 @@ import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { useSelectedDaemon } from "../rpc/selectedDaemon";
+import { useHostConnection } from "../rpc/connections/registry";
+import { useHasCapability } from "../rpc/connections/useHasCapability";
 import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
 import { PARAM_PARTICIPANT } from "../routing/appLocation";
 import { useAppLocation } from "../routing/useAppLocation";
@@ -83,6 +85,12 @@ export function RpcPlaygroundAppPage({
   const { selectedInstanceId } = useSelectedDaemon();
   const room = useHostPresence(selectedInstanceId);
   const allParticipants = useRoomParticipants(room);
+  // Everything about addressing a participant is presence: the options are common-room coder
+  // participants and the transport that carries the call is a LiveKit data channel to one of them.
+  // On a wire with no roster there is nobody to pick, so the picker goes and says why rather than
+  // offering an empty select — the screen's only entry point has to stay explicable.
+  const connection = useHostConnection(selectedInstanceId);
+  const presenceAvailable = useHasCapability(connection, "presence");
 
   // The addressed participant is `?participant=`, so a link reproduces which host is being probed.
   const { location, setParams } = useAppLocation();
@@ -229,6 +237,7 @@ export function RpcPlaygroundAppPage({
       <RpcPlaygroundScreen
         services={services}
         participants={participants}
+        presenceAvailable={presenceAvailable}
         selectedParticipant={selectedParticipantId ?? undefined}
         onSelectParticipant={setSelectedParticipantId}
         onInvoke={handleInvoke}

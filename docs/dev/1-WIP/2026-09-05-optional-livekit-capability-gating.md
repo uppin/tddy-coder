@@ -89,6 +89,40 @@ sessions. **The host connection is what gates the media surfaces**, not the sess
 The session connection is still read in exactly one place, `SessionRuntime`'s `carriesMedia` — that
 one genuinely is session-scoped, and it predates this node.
 
+### The presence surfaces, and the order the two facts are read in
+
+Also settled during `/green`. Presence cannot be gated on the capability alone. A common room that
+is **still joining** has not yet produced a connection carrying `presence` — `LiveKitConnections`
+is bound to a `null` room until `Room.connect()` resolves — and a join that **failed** produces no
+connection at all. A surface asking the capability first would therefore announce "not available on
+this connection" for the second or two every LiveKit page spends connecting, and would have replaced
+the ICE-failure reason that `CommonRoomConnectionVisibilityAcceptance` exists to pin (the 2026-08-13
+`udoo` incident) with a capability verdict.
+
+`src/hooks/presenceAvailability.ts` is the resulting order, in one place: `error` → `connecting` →
+`unavailable` → `available`. Status answers for a roster that exists; the capability answers whether
+one exists at all. `ParticipantList`, `LiveKitAppPage`, `DaemonNavMenu` and `SessionsDrawerScreen`
+all read it, so the nav entry and the screen it points at cannot disagree — and a failed join keeps
+the entry, because the reason it failed is what an operator would go there to find.
+
+| Surface | Gated on | Absent state |
+|---|---|---|
+| `ParticipantList` | host connection + common-room status | names the connection as the reason; the `idle` branch no longer claims "Connecting…" forever |
+| `LiveKitRoomsPanel` | host connection | removed, and its `StreamLiveKitRooms` feed never subscribed (the panel body is a child component, so the hook does not run) |
+| `LiveKitAppPage` | host connection + common-room status | the route stays reachable and explains itself, as a media deep link degrades to Details |
+| `DaemonNavMenu`'s LiveKit entry | host connection + common-room status | removed from the menu |
+| `RpcPlaygroundScreen`'s participant picker | host connection (decided in `RpcPlaygroundAppPage`) | replaced by the reason there is nobody to address |
+| `SessionsDrawerScreen` cross-host rows | host connection + common-room status | `ListSessions` rows plus a footnote naming what is out of view |
+
+Three props became **required** rather than defaulted — `ParticipantList.connection`,
+`RpcPlaygroundScreen.presenceAvailable`, `SessionDrawer.crossHostSessionsVisible` — following
+`InspectorTabs.mediaAvailable` from the media milestone. A default would mean "unknown ⇒ show it",
+which is the silence this node exists to remove: a list that has lost rows looks exactly like a list
+that never had them. Six existing specs state the answer as a result; no assertion was changed.
+
+`useHostPresence` now spells its check `useHasCapability(connection, "presence")`. Its signature is
+untouched — node 2 owns that.
+
 ## Draft PR contract
 
 Lands first, so node 5 and node 7 can branch off a real ref:
@@ -144,6 +178,19 @@ Every failure is on this node's own `TODO(capability-gating)` body.
 hides the panel — so it went green against an unimplemented predicate. It now asserts the tab strip
 that does render first, so absence means absence. Worth remembering for the rest of this node's
 `/green`: every `not.exist` in a gating test needs a positive assertion beside it.
+
+### Green status — presence surfaces
+
+| Suite | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **1028 pass, 0 fail** (baseline 1024 + `src/hooks/presenceAvailability.test.ts`) |
+| `cypress/component/PresenceCapabilityGatingAcceptance.cy.tsx` | **14 pass** — both directions for the roster, the rooms panel and its feed, the screen, the nav entry, the playground picker and the drawer footnote |
+| 40 existing spec files re-run (250 tests) | **all pass**, no assertion changed |
+
+Two of the new tests were checked for vacuity by mutation: reading the capability without the status
+rule fails "keeps the LiveKit entry while the common room is still being joined" and "says nothing
+about other hosts while the common room is still being joined", and gating `LiveKitAppPage` the same
+way fails `CommonRoomConnectionVisibilityAcceptance`'s incident regression.
 
 ### Commands
 

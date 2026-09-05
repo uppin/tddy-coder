@@ -31,6 +31,14 @@ import { DaemonNavMenu } from "../../src/components/shell/DaemonNavMenu";
 // Test fixtures
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether the connection in scope can serve a participant roster. These scenarios are about the
+ * service tree and the request editor, so they state the ordinary case — a host reached over
+ * LiveKit, where the picker is offered. The wire that carries no roster, and the explanation that
+ * replaces the picker on it, are covered by `PresenceCapabilityGatingAcceptance.cy.tsx`.
+ */
+const A_CONNECTION_THAT_CARRIES_A_ROSTER = true;
+
 // Mock reflection response: a fake service tree with EchoService.
 const MOCK_SERVICES = [
   {
@@ -68,6 +76,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );
@@ -84,6 +93,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );
@@ -105,6 +115,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );
@@ -124,6 +135,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );
@@ -148,6 +160,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
       <RpcPlaygroundScreen
         services={MOCK_SERVICES}
         onInvoke={() => Promise.resolve({ kind: "success" as const, json: responseJson })}
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );
@@ -169,6 +182,7 @@ describe("RpcPlaygroundScreen — component (Cypress)", () => {
         onInvoke={() =>
           Promise.resolve({ kind: "error" as const, code: "not_found", message: "Unknown method" })
         }
+        presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
         onNavigate={() => {}}
       />
     );

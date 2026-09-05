@@ -59,6 +59,13 @@ export const sessionsDrawerPage = {
   drawer: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawer, { timeout: 5000, ...options }),
 
+  /**
+   * The drawer's footnote naming what this connection cannot see — the honest half of a list that
+   * has lost its cross-host rows.
+   */
+  crossHostUnavailable: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsDrawerCrossHostUnavailable, { timeout: 5000, ...options }),
+
   /** The close button in the drawer header (collapses to strip on desktop, hides on mobile). */
   drawerCloseBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerCloseBtn, { timeout: 5000, ...options }),
