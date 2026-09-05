@@ -6,16 +6,16 @@ name: VM tests
 # of minutes, and are new enough in CI to deserve their own blast radius. Not a
 # required check. See docs/dev/guides/ci.md.
 #
-# Scope is the two things reachable from a bare cloud image, one check each:
-# the boot-control suite, and a single cloud-init test that bakes a layer and
-# then boots a VM off it. Neither needs a pre-baked image chain — both start
-# from the supplied cloud image, so they cost a 331 MB download rather than the
-# multi-hour, multi-GB bake. The remaining `./vm-tests` suites are not run here;
-# see docs/dev/guides/ci.md for what each would need.
+# Scope is what is reachable from a bare cloud image, one check each: the
+# boot-control suite, a cloud-init test that bakes a layer and boots a VM off
+# it, and the same again for a layer that installs Nix. None needs a pre-baked
+# image chain — all start from the supplied cloud image, so they cost a 331 MB
+# download rather than the multi-hour, multi-GB bake. The remaining `./vm-tests`
+# suites are not run here; see docs/dev/guides/ci.md for what each would need.
 #
-# Both legs are the same job with four values changed, so they share the KVM
-# udev fix, the fail-fast virtualisation check and the false-green guard rather
-# than keeping two copies that drift.
+# The legs are one job with four values changed, so they share the KVM udev fix,
+# the fail-fast virtualisation check and the false-green guard rather than
+# keeping three copies that drift.
 
 on:
   pull_request:
@@ -71,6 +71,16 @@ jobs:
             slug: cloudinit-vm-boot
             test_binary: cloud_init_acceptance
             filter: "--exact a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh"
+            expected_passing: 1
+          # The same shape, carrying real work across the seal: the bake installs
+          # Nix — the testkit's own `nix_base_user_data`, not a copy — and the VM
+          # booted from that layer runs `nix` out of the store the bake created.
+          # A `runcmd` that failed silently still boots and still accepts SSH, so
+          # only asking the guest to run Nix tells the two apart.
+          - name: Cloudinit + nix
+            slug: cloudinit-nix
+            test_binary: nix_layer_acceptance
+            filter: ""
             expected_passing: 1
     steps:
       - uses: actions/checkout@v7
@@ -156,11 +166,11 @@ jobs:
           # check before spending the runtime rather than after.
           test -f "$TDDY_CLOUDINIT_BASE_IMAGE" \
             || { echo "::error::base image missing at $TDDY_CLOUDINIT_BASE_IMAGE"; exit 1; }
-          # Deliberately not `./vm-tests`, which runs all nine suites including
+          # Deliberately not `./vm-tests`, which runs all ten suites including
           # the multi-hour bake. --test-threads=1 is not optional: these bind
           # fixed host ports (2231-2236 for boot control, 2296-2297 for the
-          # cloud-init boot) and QEMU derives its monitor socket path from the
-          # port alone.
+          # cloud-init boot, 2293-2294 for the Nix layer) and QEMU derives its
+          # monitor socket path from the port alone.
           ./dev cargo test -p tddy-vm --test ${{ matrix.test_binary }} \
             -- --ignored --nocapture --test-threads=1 ${{ matrix.filter }} \
             2>&1 | tee vm-tests.log

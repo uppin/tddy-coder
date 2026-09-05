@@ -104,7 +104,7 @@ redundant: `master` is the only ref that writes the cargo cache, so without it
 the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
 It also means the branch itself has VM coverage rather than only its PRs.
 
-Scope is what a bare cloud image can reach, which is two checks out of the nine
+Scope is what a bare cloud image can reach, which is three checks out of the ten
 suites in `./vm-tests`. Both are legs of one matrix job, so they share the KVM
 handling and the false-green guard:
 
@@ -112,9 +112,17 @@ handling and the false-green guard:
 |-------|------|--------|
 | `VM boot control` | all of `vm_boot_control_acceptance` (6 tests) | The launcher, serial-console control, 9p, SSH login with the per-VM key, graceful shutdown |
 | `Cloudinit VM boot` | one test of `cloud_init_acceptance`, `a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh` | That a bake produces a *usable* layer: cloud-init bakes a prepared base, a VM is created from it, boots, and answers `id -un` over SSH as the account the bake provisioned |
+| `Cloudinit + nix` | all of `nix_layer_acceptance` (1 test) | That a bake carries real work across the seal: it installs Nix from `tddy_vm_testkit::recipes::nix_base_user_data` — the document the testkit's own image chain starts from — and the VM booted off that layer resolves `nix` into `/nix/…` and runs it |
 
-Neither needs a pre-baked image chain, which is why these two and not the other
-seven. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
+None needs a pre-baked image chain, which is why these three and not the other
+six.
+
+The Nix leg earns its ~8 minutes by catching a failure the smaller one cannot
+see. cloud-init concatenates `runcmd` into a single script with no error
+handling of its own — which is why the recipe opens with `set -e` — so a bake
+whose provisioning silently failed still produces a layer that boots and still
+accepts SSH. Only asking the finished guest to *run what was installed*
+distinguishes "cloud-init ran" from "cloud-init did what it was told". CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
 against the `SHA512SUMS` published beside it, then cached) because the testkit
 never downloads anything itself by design.
 
