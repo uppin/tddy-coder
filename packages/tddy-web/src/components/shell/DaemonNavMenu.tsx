@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 
 /**
  * Hamburger menu for the daemon-mode shell: Sessions, Worktrees, Tasks, Projects, Models & Agents,
- * VMs, LiveKit, and the RPC Playground.
+ * VMs, LiveKit, the RPC Playground, and the serving daemon's own Settings.
  */
 export function DaemonNavMenu({
   onNavigate,
@@ -128,6 +128,16 @@ export function DaemonNavMenu({
             onClick={() => go("/rpc-playground")}
           >
             RPC Playground
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-auto w-full justify-start rounded-sm px-3 py-2 font-normal"
+            role="menuitem"
+            data-testid="shell-menu-settings"
+            onClick={() => go("/settings")}
+          >
+            Settings
           </Button>
         </div>
       ) : null}

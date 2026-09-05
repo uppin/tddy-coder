@@ -1,0 +1,35 @@
+[package]
+name = "tddy-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Tddy Desktop — a Tauri application hosting tddy-daemon in its own process"
+
+[lib]
+name = "tddy_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# Opens external http(s) links in the operator's browser instead of inside the webview.
+tauri-plugin-opener = "2"
+# The daemon this application is a host for: one process, one service roster.
+tddy-daemon = { path = "../../tddy-daemon" }
+tddy-rpc = { path = "../../tddy-rpc" }
+tddy-tauri-rpc = { path = "../../tddy-tauri-rpc" }
+tddy-core = { path = "../../tddy-core" }
+# "signal" only: the runtime itself is Tauri's (`tauri::async_runtime`), which is tokio.
+tokio = { version = "1", features = ["signal"] }
+anyhow = "1"
+log = "0.4"
+libc = "0.2"
+
+[dev-dependencies]
+# Already a workspace dependency; no new crate enters the tree.
+rstest = { workspace = true }

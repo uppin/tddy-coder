@@ -11,6 +11,8 @@ import {
   isLiveKitPath,
   MODELS_ROUTE,
   isModelsPath,
+  SETTINGS_ROUTE,
+  isSettingsPath,
   SESSIONS_DRAWER_ROUTE,
   isSessionsDrawerPath,
   sessionsDrawerPathForSession,
@@ -152,6 +154,24 @@ describe("appRoutes — Models & Agents route helpers", () => {
 
   it("does not match sub-paths under /models", () => {
     expect(isModelsPath("/models/qwen3")).toBe(false);
+  });
+});
+
+describe("appRoutes — daemon settings route helpers", () => {
+  it("SETTINGS_ROUTE is /settings", () => {
+    expect(SETTINGS_ROUTE).toBe("/settings");
+  });
+
+  it("recognises /settings as the daemon settings path", () => {
+    expect(isSettingsPath(SETTINGS_ROUTE)).toBe(true);
+  });
+
+  it("does not match root as a daemon settings path", () => {
+    expect(isSettingsPath("/")).toBe(false);
+  });
+
+  it("does not match sub-paths under /settings", () => {
+    expect(isSettingsPath("/settings/livekit")).toBe(false);
   });
 });
 

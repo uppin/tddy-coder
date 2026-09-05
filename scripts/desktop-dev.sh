@@ -27,28 +27,14 @@ if [[ -f .env ]]; then
   done < .env
 fi
 
-# Embedded daemon resolves repo root from cwd / TDDY_WORKSPACE_ROOT; Electrobun's cwd is the repo when launched from here.
+# The app resolves the repo root from cwd / TDDY_WORKSPACE_ROOT. `cargo tauri dev` runs from
+# packages/tddy-desktop/src-tauri, so name it here rather than relying on the upward walk.
 export TDDY_WORKSPACE_ROOT="${TDDY_WORKSPACE_ROOT:-$PROJECT_ROOT}"
 
-# Default daemon config for Electrobun embedded tddy-daemon (dev.desktop.yaml at repo root).
+# Daemon config for the in-process tddy-daemon (dev.desktop.yaml at the repo root).
 if [[ -z "${TDDY_DAEMON_CONFIG:-}" ]] && [[ -f "$PROJECT_ROOT/dev.desktop.yaml" ]]; then
   export TDDY_DAEMON_CONFIG="$PROJECT_ROOT/dev.desktop.yaml"
 fi
-
-# Prefer an existing Cargo-built binary so Electrobun dev (wrong import.meta.dir) still finds tddy-daemon.
-if [[ -z "${TDDY_DAEMON_BINARY:-}" ]]; then
-  if [[ -f "$PROJECT_ROOT/target/debug/tddy-daemon" ]]; then
-    export TDDY_DAEMON_BINARY="$PROJECT_ROOT/target/debug/tddy-daemon"
-  elif [[ -f "$PROJECT_ROOT/target/release/tddy-daemon" ]]; then
-    export TDDY_DAEMON_BINARY="$PROJECT_ROOT/target/release/tddy-daemon"
-  fi
-fi
-
-# Codex OAuth: Electrobun must join LiveKit and bind /auth/callback on the port Codex uses, or the browser hits connection refused.
-# Main process also reads dev.desktop.yaml when these are unset; .env LIVEKIT_* fills gaps here.
-export TDDY_RPC_BASE="${TDDY_RPC_BASE:-http://127.0.0.1:8899/rpc}"
-export TDDY_LIVEKIT_ROOM="${TDDY_LIVEKIT_ROOM:-tddy-lobby}"
-export TDDY_LIVEKIT_URL="${TDDY_LIVEKIT_URL:-${LIVEKIT_URL:-${LIVEKIT_PUBLIC_URL:-}}}"
 
 VITE_PID=""
 CLEANED_UP=0
@@ -99,5 +85,7 @@ if [[ "$ready" -ne 1 ]]; then
   exit 1
 fi
 
-echo "Starting Electrobun desktop (VITE_URL=${VITE_URL}) ..."
-bun run --filter tddy-desktop dev "$@"
+# `devUrl` in tauri.conf.json is the 5173 default; override it here so `tauri dev` waits on the
+# server this script actually started when VITE_PORT / VITE_URL point somewhere else.
+echo "Starting Tddy Desktop (VITE_URL=${VITE_URL}) ..."
+bun run --filter tddy-desktop dev --config "{\"build\":{\"devUrl\":\"${VITE_URL}\"}}" "$@"

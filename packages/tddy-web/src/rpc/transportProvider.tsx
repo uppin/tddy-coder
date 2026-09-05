@@ -2,8 +2,15 @@
  * RPC transport provider — dependency-injection seam for ConnectRPC clients.
  *
  * Wrap the application root (or a component subtree) in `RpcTransportProvider`
- * to override the HTTP and/or LiveKit transport used by all RPC hooks.  The
- * default values reproduce the existing production behaviour exactly.
+ * to override the transports used by all RPC hooks.  The default values
+ * reproduce the existing production behaviour exactly.
+ *
+ * Two transports live here. The **serving-daemon** transport (`httpTransport`,
+ * `useHttpTransport`) reaches the daemon that serves this page, in whichever
+ * flavour its host calls for — same-origin `/rpc` in a browser, the host
+ * application's IPC bridge inside the Tauri desktop app (see
+ * `./daemonTransport`). The **LiveKit** transport reaches a daemon in the common
+ * room, which is somebody else's process in either host and therefore unchanged.
  *
  * Production usage (app root in index.tsx):
  * ```tsx
@@ -27,55 +34,25 @@
 
 import { createContext, useContext, useMemo, useRef, type ReactNode } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
-import { createConnectTransport } from "@connectrpc/connect-web";
 import type { DescService } from "@bufbuild/protobuf";
 import { createLiveKitTransport } from "tddy-livekit-web";
 import type { Room } from "livekit-client";
 import { TrafficMeterRegistry } from "./trafficMeter";
-import { createTrafficInterceptor } from "./httpTrafficInterceptor";
-import { createAuthGateInterceptor } from "./authGateInterceptor";
+import { createDefaultDaemonTransport, type AuthTokenGate } from "./daemonTransport";
 import { wrapTransportWithAuthGate } from "./authGatedTransport";
 
-/**
- * Settable holder for the app's access-token resolver. The production transport's auth-gate
- * interceptor consults `current` per request; `AuthProvider` installs the real single-flight
- * resolver once mounted. While `current` is `null` (before mount, or with no auth provider), the
- * gate injects nothing and leaves each request's own `sessionToken` untouched.
- */
-export type AuthTokenGate = { current: (() => Promise<string | null>) | null };
+// The daemon transport and its flavour selection live in `./daemonTransport`; re-exported here
+// because this module is the transport seam every consumer already imports from.
+export {
+  createDefaultDaemonTransport,
+  createDefaultHttpTransport,
+  createDefaultWebviewIpcTransport,
+} from "./daemonTransport";
+export type { AuthTokenGate, DaemonHostEnvironment, DaemonHostWindow } from "./daemonTransport";
 
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
-
-/**
- * Factory for the production HTTP transport (binary Connect protocol, same-origin /rpc).
- * When a registry is provided, attaches a traffic-metering interceptor. Exported so a test can
- * point a `liveKitFactory` override at the same HTTP transport its `cy.intercept`s already expect,
- * without needing a real (or fully faked) LiveKit data-channel connection.
- */
-export function createDefaultHttpTransport(
-  registry?: TrafficMeterRegistry,
-  authTokenGate?: AuthTokenGate,
-): Transport {
-  const interceptors = registry ? [createTrafficInterceptor(registry.get("http"))] : [];
-  if (authTokenGate) {
-    // Gate every RPC behind a request-time-fresh access token; a `null` resolver (no auth provider
-    // yet) leaves the request's own token in place. Runs outermost so recorded/sent bytes reflect
-    // the refreshed token.
-    interceptors.unshift(
-      createAuthGateInterceptor(() =>
-        authTokenGate.current ? authTokenGate.current() : Promise.resolve(null),
-      ),
-    );
-  }
-  return createConnectTransport({
-    baseUrl:
-      typeof window !== "undefined" ? `${window.location.origin}/rpc` : "",
-    useBinaryFormat: true,
-    interceptors,
-  });
-}
 
 /** Options forwarded to the LiveKit transport factory. */
 export interface LiveKitTransportOptions {
@@ -123,6 +100,7 @@ export function createDefaultLiveKitTransport(
 // ---------------------------------------------------------------------------
 
 interface RpcTransportContextValue {
+  /** The transport to the daemon serving this page — HTTP or webview IPC, chosen at runtime. */
   readonly httpTransport: Transport;
   readonly liveKitFactory: (room: Room, targetIdentity: string, options?: LiveKitTransportOptions) => Transport;
   readonly meterRegistry: TrafficMeterRegistry;
@@ -134,7 +112,7 @@ interface RpcTransportContextValue {
    */
   readonly liveKitFactoryIsOverridden: boolean;
   /**
-   * The auth-token gate the HTTP transport's interceptor consults. `AuthProvider` sets its
+   * The auth-token gate the serving-daemon transport's interceptor consults. `AuthProvider` sets its
    * `current` to the shared session store's `ensureFreshAccessToken`, so every RPC issued through
    * this provider's transport carries a request-time-fresh access token.
    */
@@ -149,8 +127,8 @@ const RpcTransportContext = createContext<RpcTransportContextValue | null>(null)
 
 export interface RpcTransportProviderProps {
   /**
-   * Override the HTTP transport used by all hooks in this subtree.
-   * Defaults to `createConnectTransport({ baseUrl: ".../rpc", useBinaryFormat: true })`.
+   * Override the serving-daemon transport used by all hooks in this subtree.
+   * Defaults to `createDefaultDaemonTransport()` — the flavour this page's host calls for.
    */
   httpTransport?: Transport;
   /**
@@ -192,8 +170,8 @@ export function RpcTransportProvider({
     httpRef.current = httpTransport;
   } else if (httpRef.current === null) {
     // First render without an explicit transport — create the default once, with metering and the
-    // auth gate.
-    httpRef.current = createDefaultHttpTransport(registryRef.current, authTokenGateRef.current);
+    // auth gate, in the flavour this page's host calls for.
+    httpRef.current = createDefaultDaemonTransport(registryRef.current, authTokenGateRef.current);
   }
 
   const registry = registryRef.current;
@@ -247,7 +225,7 @@ export function useAuthTokenGate(): AuthTokenGate {
 }
 
 /**
- * Return the HTTP transport for this component's context.
+ * Return the transport to the daemon serving this page, for this component's context.
  *
  * When no `RpcTransportProvider` wraps this component, a fresh default
  * transport is created and memoised per component instance — identical to the
@@ -258,12 +236,12 @@ export function useHttpTransport(): Transport {
   const ctx = useContext(RpcTransportContext);
   // Stable fallback per component instance when no provider is present.
   const fallbackRef = useRef<Transport | null>(null);
-  fallbackRef.current ??= createDefaultHttpTransport();
+  fallbackRef.current ??= createDefaultDaemonTransport();
   return ctx?.httpTransport ?? fallbackRef.current;
 }
 
 /**
- * Create and memoize a ConnectRPC client bound to the HTTP transport in this context.
+ * Create and memoize a ConnectRPC client bound to this page's serving-daemon transport.
  *
  * Equivalent to `useMemo(() => createClient(Service, useHttpTransport()), [transport])`.
  */

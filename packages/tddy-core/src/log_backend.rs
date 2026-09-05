@@ -6,7 +6,7 @@
 //! map to level filters and output destinations (stderr, stdout, file, buffer, mute).
 
 use log::{Level, Log, Metadata, Record};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -22,29 +22,29 @@ const DEFAULT_LOG_FORMAT: &str = "{timestamp} [{level}] [{target}] {message}";
 // -----------------------------------------------------------------------------
 
 /// Top-level log configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub loggers: HashMap<String, LoggerDefinition>,
     pub default: DefaultLogPolicy,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<LogPolicy>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<LogRotation>,
 }
 
 /// Named logger: output target and optional format.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoggerDefinition {
     pub output: LogOutput,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
 }
 
 /// Default policy when no selector matches.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultLogPolicy {
     #[serde(default = "default_level")]
@@ -57,18 +57,18 @@ fn default_level() -> log::LevelFilter {
 }
 
 /// Per-selector policy (first match wins).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogPolicy {
     pub selector: LogSelector,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<log::LevelFilter>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logger: Option<String>,
 }
 
 /// Selector for matching log records.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum LogSelector {
     Target { target: String },
@@ -76,7 +76,7 @@ pub enum LogSelector {
     Heuristic { heuristic: HeuristicSelector },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeuristicSelector {
     pub message_contains: String,
@@ -119,8 +119,30 @@ impl<'de> Deserialize<'de> for LogOutput {
     }
 }
 
+impl Serialize for LogOutput {
+    /// The inverse of the [`Deserialize`] impl above, so a config that is read and written back
+    /// keeps the form an operator wrote: a bare name, or `{ file: <path> }`.
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            LogOutput::Stderr => serializer.serialize_str("stderr"),
+            LogOutput::Stdout => serializer.serialize_str("stdout"),
+            LogOutput::Buffer => serializer.serialize_str("buffer"),
+            LogOutput::Mute => serializer.serialize_str("mute"),
+            LogOutput::File(path) => {
+                use serde::ser::SerializeStruct;
+                let mut out = serializer.serialize_struct("LogOutput", 1)?;
+                out.serialize_field("file", path)?;
+                out.end()
+            }
+        }
+    }
+}
+
 /// Log rotation settings (startup rotation).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogRotation {
     #[serde(default = "default_max_rotated")]
@@ -128,7 +150,7 @@ pub struct LogRotation {
     /// When non-empty, only these log file paths are rotated on startup. Paths are compared to
     /// [`LogOutput::File`] entries after normalizing when both exist (see [`paths_equal_for_rotation`]).
     /// When empty, every file output from `loggers` is rotated (backward compatible).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub only_paths: Vec<PathBuf>,
 }
 

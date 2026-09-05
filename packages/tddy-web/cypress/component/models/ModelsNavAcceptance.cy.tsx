@@ -77,6 +77,7 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
         "VMs",
         "LiveKit",
         "RPC Playground",
+        "Settings",
       ]);
   });
 

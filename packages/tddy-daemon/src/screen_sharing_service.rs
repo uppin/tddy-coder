@@ -39,7 +39,7 @@ pub type ScreenSharingKeyCache = Arc<Mutex<HashMap<String, DerivedKey>>>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Per-OS-user sessions base resolver: `Arc<dyn Fn(&str) -> Option<PathBuf>>`.
 ///
-/// Wired in `main.rs` with the daemon's resolved `tddy_data_dir` (config-only tddy home) so
+/// Wired in `runtime.rs` with the daemon's resolved `tddy_data_dir` (config-only tddy home) so
 /// screen-sharing vaults live under the same data root as session trees, not a static `$HOME/.tddy`.
 pub type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 

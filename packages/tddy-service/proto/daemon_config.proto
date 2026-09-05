@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package daemon_config;
+
+// The daemon's own configuration, read and written by its UI.
+//
+// The YAML file the daemon was started with stays the source of truth: `UpdateConfig` validates,
+// writes that file, and applies what it can to the running process. Nothing here introduces a
+// second store.
+service DaemonConfigService {
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc UpdateConfig(UpdateConfigRequest) returns (UpdateConfigResponse);
+  // The payload the web bundle otherwise reads from `GET /api/config`. Served as an RPC because a
+  // desktop webview reaching the daemon over the host application's IPC bridge has no HTTP origin
+  // to fetch it from.
+  rpc GetClientConfig(GetClientConfigRequest) returns (GetClientConfigResponse);
+}
+
+message GetConfigRequest {
+  // Daemon access token, gated exactly like every other daemon RPC.
+  string session_token = 1;
+}
+
+message GetConfigResponse {
+  // The effective configuration — the file as loaded, with environment overrides applied.
+  DaemonSettings settings = 1;
+  // Absolute path of the YAML file this configuration was loaded from, and the one an update
+  // writes back to. Empty when the daemon was started with no config file.
+  string config_path = 2;
+}
+
+message UpdateConfigRequest {
+  string session_token = 1;
+  // The complete settings to persist. A partial message would be indistinguishable from a request
+  // to clear the fields it omits.
+  DaemonSettings settings = 2;
+}
+
+message UpdateConfigResponse {
+  // Field paths (e.g. `listen.web_port`) that were persisted but could not be applied to the
+  // running process. Never silently dropped: what the daemon could not change, it names.
+  repeated string restart_required = 1;
+}
+
+message GetClientConfigRequest {
+  // Accepted but not read: this call is deliberately ungated. It is the payload that tells a page
+  // there is a daemon to sign in to, so it is made before any token exists, and it is the same
+  // snapshot served unauthenticated at `GET /api/config`.
+  string session_token = 1;
+}
+
+// Mirror of `tddy_coder::web_server::ClientConfig`, the payload served at `GET /api/config`.
+message GetClientConfigResponse {
+  optional string livekit_url = 1;
+  optional string livekit_room = 2;
+  optional string common_room = 3;
+  optional bool daemon_mode = 4;
+  repeated ClientAllowedAgent allowed_agents = 5;
+  optional string debug = 6;
+  optional string daemon_instance_id = 7;
+}
+
+message ClientAllowedAgent {
+  string id = 1;
+  string label = 2;
+}
+
+// The subset of the daemon's YAML the UI reads and writes. Sections not represented here are
+// preserved verbatim in the file across an update.
+message DaemonSettings {
+  LiveKitSettings livekit = 1;
+  ListenSettings listen = 2;
+}
+
+message LiveKitSettings {
+  // Absent when the YAML has no `livekit:` block at all — which is what leaves the daemon
+  // disconnected rather than connecting to a default.
+  optional string url = 1;
+  optional string public_url = 2;
+  optional string api_key = 3;
+  // Write-only. `GetConfig` reports `api_secret_set` instead of the value, so a UI can show that a
+  // secret exists without the daemon handing it out.
+  optional string api_secret = 4;
+  optional string common_room = 5;
+  // Read-only: true when the stored configuration holds an API secret. Ignored on update.
+  bool api_secret_set = 6;
+}
+
+message ListenSettings {
+  optional uint32 web_port = 1;
+  optional string web_host = 2;
+}

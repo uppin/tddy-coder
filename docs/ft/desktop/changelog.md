@@ -1,5 +1,9 @@
 # Desktop — changelog
 
+## 2026-09-05 — Tauri desktop app: the daemon in one process
+
+- **tddy-desktop**: Electrobun replaced by a Tauri application (`src-tauri`) that hosts `tddy-daemon` on its own runtime — no child process, no binary resolution, no port wait, and **no listening socket**. Two IPC commands (`tddy_rpc_connect`, `tddy_rpc_send`) carry `rpc_envelope` frames as raw bytes. Feature **[tddy-desktop-tauri.md](tddy-desktop-tauri.md)** (supersedes **[tddy-desktop-electrobun.md](tddy-desktop-electrobun.md)**). **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).
+
 ## 2026-04-11 — OAuth loopback TCP owned by tddy-daemon
 
 - **tddy-desktop**: Production main process does not **`Bun.listen`** or join LiveKit for OAuth; **`TDDY_DESKTOP_OAUTH_RELAY`/`@livekit/rtc-node`** path removed. **`tddy-daemon`**: **`oauth_loopback_tunnel`** + **`codex_oauth_participant_metadata`**, wired from **`livekit_peer_discovery`** common-room **`Room`**. **`installLiveKitOAuthRelay`** retained for tests only. Feature **[tddy-desktop-electrobun.md](tddy-desktop-electrobun.md)**; daemon **[oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md)**; **[codex-oauth-relay.md](../daemon/codex-oauth-relay.md)**. **Cross-package**: [docs/dev/changesets.md](../../dev/changesets.md).

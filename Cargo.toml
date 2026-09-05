@@ -16,6 +16,7 @@ members = [
     "packages/tddy-core",
     "packages/tddy-rpc",
     "packages/tddy-stdio",
+    "packages/tddy-tauri-rpc",
     "packages/tddy-coder",
     "packages/tddy-tui",
     "packages/tddy-demo",
@@ -61,6 +62,7 @@ members = [
     "packages/tddy-sandbox-app",
     "packages/tddy-sandbox-qemu",
     "packages/tddy-supervisor",
+    "packages/tddy-desktop/src-tauri",
 ]
 exclude = [
     # Real cargo workspace used as a tddy-build example fixture; built by the

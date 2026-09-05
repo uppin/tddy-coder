@@ -149,6 +149,32 @@ pub fn build_auth_entries(
     })
 }
 
+/// The rule every gated daemon RPC admits a caller by: their session token resolves to a login.
+///
+/// One rule, so a service cannot end up with a second one. `user_resolver` is `None` when the
+/// daemon has no GitHub auth configured, and then *nothing* on this daemon can authenticate a
+/// caller: the returned authenticator admits nobody, and says so at startup naming `service_name`.
+/// Serving a gated service open in that case would be the exact hole this closes.
+pub fn session_token_authenticator(
+    user_resolver: Option<&SessionUserResolver>,
+    service_name: &str,
+) -> tddy_service::SessionTokenAuthenticator {
+    match user_resolver {
+        Some(resolver) => {
+            let resolver = resolver.clone();
+            Arc::new(move |token: &str| resolver(token).is_some())
+        }
+        None => {
+            log::warn!(
+                target: "tddy_daemon::auth",
+                "serving {service_name} with no way to verify a session token — every call will be \
+                 refused. Configure `github:` to make it usable."
+            );
+            Arc::new(|_: &str| false)
+        }
+    }
+}
+
 /// Build the `token.TokenService` entry the daemon serves, or `None` when it holds no LiveKit API
 /// credentials to mint with.
 ///
@@ -170,20 +196,7 @@ pub fn build_token_service_entry(
     let livekit = config.livekit.as_ref()?;
     let (api_key, api_secret) = (livekit.api_key.as_ref()?, livekit.api_secret.as_ref()?);
 
-    let authenticate: tddy_service::SessionTokenAuthenticator = match user_resolver {
-        Some(resolver) => {
-            let resolver = resolver.clone();
-            Arc::new(move |token: &str| resolver(token).is_some())
-        }
-        None => {
-            log::warn!(
-                target: "tddy_daemon::auth",
-                "serving token.TokenService with no way to verify a session token — every mint \
-                 will be refused. Configure `github:` to make it usable."
-            );
-            Arc::new(|_: &str| false)
-        }
-    };
+    let authenticate = session_token_authenticator(user_resolver, "token.TokenService");
 
     // Room and identity are per-request, so the generator is constructed with placeholders it
     // never mints under; `TokenProvider::generate_token` overrides both.
