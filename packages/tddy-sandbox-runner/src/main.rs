@@ -13,11 +13,14 @@ struct Cli {
     #[command(flatten)]
     runner: SandboxRunnerArgs,
     /// Serve a sandboxed `workspace` session's tool calls against this worktree — the session's
-    /// checkout, as mounted inside this jail — and host no agent: no PTY, no in-jail `tddy-tools
-    /// --mcp` server, and no egress shim for one to reach the network through. The host sends
-    /// `in_jail_tool_request` over the `SessionChannel` and the runner answers
-    /// `in_jail_tool_response`, the reverse of the `tool_request`/`tool_response` pair an in-jail
-    /// agent uses to reach the host. Requires `--stdio`.
+    /// checkout, as mounted inside this jail — and host no agent: no PTY and no in-jail
+    /// `tddy-tools --mcp` server. The host sends `in_jail_tool_request` over the `SessionChannel`
+    /// and the runner answers `in_jail_tool_response`, the reverse of the
+    /// `tool_request`/`tool_response` pair an in-jail agent uses to reach the host. Reached over
+    /// `--stdio` by a host that pipes this process, or `--grpc-listen-port` by one that dials its
+    /// loopback listener; one of the two is required. An egress shim exists only where
+    /// `--egress-shim-port` asks for one: a jail holding just a checkout needs no network, a jail
+    /// that also runs the build reaches it through the host's CONNECT relay.
     #[arg(long)]
     workspace_tools: Option<PathBuf>,
 }

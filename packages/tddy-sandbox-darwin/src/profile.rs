@@ -8,6 +8,10 @@ use tddy_sandbox::{MachPolicy, NetworkSpec, ReadKind, ReadSpec, SandboxError, Sa
 /// process-exec rules (`plan.policy.exec_paths` + exec reads), the policy block, and the network
 /// policy — and **never** the blanket `(allow file-read*)` wildcard.
 ///
+/// Reads are split by what they grant, not merely listed: a [`tddy_sandbox::ReadKind::Metadata`]
+/// grant renders into its own `(allow file-read-metadata …)` block and is kept out of the
+/// `file-read*` one, because on a directory `file-read*` also permits listing its entries.
+///
 /// The writable tree is the plan's own `project_root`, `scratch_dir` and `egress_dir` plus its
 /// writable mounts, and nothing else. In particular it holds no part of the host's per-user temp
 /// base (`/var/folders/…`): that is shared with every other session and application on the machine,
@@ -81,7 +85,7 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
     for p in &writable_tree {
         out.push_str(&format!("  (subpath \"{p}\")\n"));
     }
-    for r in &plan.reads {
+    for r in plan.reads.iter().filter(|r| r.kind != ReadKind::Metadata) {
         out.push_str(&render_read_rule(r));
     }
     for sec in &plan.env.secrets {
@@ -95,6 +99,27 @@ pub fn render_plan(plan: &SandboxPlan) -> Result<String, SandboxError> {
         ));
     }
     out.push_str(")\n\n");
+
+    // Lookup-only grants. `file-read-metadata` is the `lstat` half of `file-read*`: enough to
+    // resolve a path through a directory, not enough to list what else is in it. They get their own
+    // block because folding them into the allow-list above would hand over exactly the listing they
+    // exist to withhold — a jail resolving `/a/b/checkout` would learn the name of every other
+    // session's tree beside it. Order relative to that block is immaterial (both are allows, and
+    // Seatbelt's last-match-wins settles deny-against-allow); after it is where it reads as the
+    // narrower grant it is. Emitted only when something asked for it: `(allow file-read-metadata)`
+    // with an empty body is a blanket allow over the whole filesystem.
+    let metadata_reads: Vec<&ReadSpec> = plan
+        .reads
+        .iter()
+        .filter(|r| r.kind == ReadKind::Metadata)
+        .collect();
+    if !metadata_reads.is_empty() {
+        out.push_str("(allow file-read-metadata\n");
+        for r in metadata_reads {
+            out.push_str(&render_read_rule(r));
+        }
+        out.push_str(")\n\n");
+    }
 
     // Non-file policy.
     if plan.policy.allow_dynamic_code_generation {
@@ -180,11 +205,18 @@ fn context_dir_from_runner_argv(argv: &[String]) -> Option<PathBuf> {
     None
 }
 
-/// Render a single read grant as its SBPL rule.
+/// Render a single read grant as its SBPL path filter.
+///
+/// The filter only says *which* paths a rule matches; what may be done with them is the enclosing
+/// block's business. That is why [`ReadKind::Metadata`] renders the same `(literal …)` filter as
+/// [`ReadKind::Literal`] — the two differ in the operation they are granted (`file-read-metadata`
+/// vs `file-read*`), and [`render_plan`] emits each in its own block.
 fn render_read_rule(r: &ReadSpec) -> String {
     match &r.kind {
         ReadKind::Subpath => format!("  (subpath \"{}\")\n", canonical_rule_path(&r.host)),
-        ReadKind::Literal => format!("  (literal \"{}\")\n", canonical_rule_path(&r.host)),
+        ReadKind::Literal | ReadKind::Metadata => {
+            format!("  (literal \"{}\")\n", canonical_rule_path(&r.host))
+        }
         ReadKind::Regex(pattern) => format!("  (regex #\"{pattern}\")\n"),
     }
 }
@@ -238,6 +270,68 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tddy_sandbox::SandboxSpec;
+
+    // ─── Path lookup without listing ────────────────────────────────────────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// A metadata grant is rendered as its own `file-read-metadata` rule, so the jail may resolve
+    /// the path without the `file-read*` block's power to read what is there.
+    #[test]
+    fn a_metadata_read_is_rendered_as_a_file_read_metadata_rule() {
+        // Given
+        let plan = a_plan(
+            vec![
+                ReadSpec::literal("/", ReadReason::DyldRoot),
+                ReadSpec::metadata("/Users/someone/code", ReadReason::Custom),
+            ],
+            NetworkSpec::default(),
+        );
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        assert!(
+            profile.contains("(allow file-read-metadata"),
+            "a metadata grant must emit its own rule; profile was:\n{profile}"
+        );
+        assert!(
+            profile.contains("(literal \"/Users/someone/code\")"),
+            "the granted path must be named; profile was:\n{profile}"
+        );
+    }
+
+    /// …and it must not leak into the `file-read*` block, which on a directory also permits listing
+    /// its entries — the whole reason this kind exists rather than reusing `literal`.
+    #[test]
+    fn a_metadata_read_grants_no_ordinary_read_on_the_same_path() {
+        // Given
+        let plan = a_plan(
+            vec![
+                ReadSpec::literal("/", ReadReason::DyldRoot),
+                ReadSpec::metadata("/Users/someone/code", ReadReason::Custom),
+            ],
+            NetworkSpec::default(),
+        );
+
+        // When
+        let profile = render_plan(&plan).expect("render must succeed");
+
+        // Then
+        let read_block = profile
+            .split("(allow file-read*")
+            .nth(1)
+            .expect("the profile must have a file-read* block")
+            .split(")\n\n")
+            .next()
+            .expect("the file-read* block must end");
+        assert!(
+            !read_block.contains("/Users/someone/code"),
+            "a metadata-only path must not appear in the file-read* block; block was:\n{read_block}"
+        );
+    }
 
     #[test]
     fn rendered_plan_denies_writes_and_allows_the_project_tree() {

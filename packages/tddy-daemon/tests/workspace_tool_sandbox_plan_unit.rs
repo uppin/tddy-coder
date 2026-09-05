@@ -205,6 +205,38 @@ fn the_workspace_tool_plan_runs_the_sandbox_runner_in_stdio_mode() {
     );
 }
 
+/// Regression guard for `sandboxed-codebase-mode`, which teaches the `--workspace-tools` runner to
+/// start an egress shim so a jailed *build* can fetch dependencies. The daemon's workspace jail
+/// serves file and shell tools for a session whose agent is elsewhere; it has no build of its own
+/// to feed, and a jail with a network it does not need is a wider jail for no reason. It must keep
+/// asking for none.
+///
+/// Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 5).
+#[test]
+fn the_workspace_tool_plan_asks_for_no_egress_shim() {
+    // Given
+    let session = a_session_on_disk();
+
+    // When
+    let plan = a_workspace_tool_plan(&session);
+
+    // Then
+    assert!(
+        !plan
+            .spec
+            .command
+            .iter()
+            .any(|arg| arg == "--egress-shim-port"),
+        "the daemon's workspace jail needs no network, got argv: {:?}",
+        plan.spec.command
+    );
+    assert!(
+        plan.spec.loopback_allow_ports.is_empty(),
+        "nothing inside this jail listens or dials, got: {:?}",
+        plan.spec.loopback_allow_ports
+    );
+}
+
 /// The runner runs the session's tools, so it has to know which session it is answering for —
 /// every activity row and tool-call record the host writes is keyed by that id.
 #[test]

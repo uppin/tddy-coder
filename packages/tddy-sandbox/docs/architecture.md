@@ -7,7 +7,7 @@ Platform-agnostic sandbox abstraction for confined agent sessions.
 | Crate | Role |
 |-------|------|
 | `tddy-sandbox` | `SandboxSpec`, `SandboxHandle`, `SandboxError`, `SandboxContextDir`, spawn facade |
-| `tddy-sandbox-runner` | Platform-agnostic in-jail runner (gRPC `SessionChannel` server + `claude` PTY + `HTTPS_PROXY` CONNECT egress shim) **and** the host-side relay (`run_host_relay`). Ships the `tddy-sandbox-runner` binary. |
+| `tddy-sandbox-runner` | Platform-agnostic in-jail runner (gRPC `SessionChannel` server + `claude` PTY + `HTTPS_PROXY` CONNECT egress shim) **and** the host-side relay (`run_host_relay`, `run_host_relay_with_in_jail_tools`). Ships the `tddy-sandbox-runner` binary, which serves either an agent or — under `--workspace-tools` — a checkout with no agent in the jail at all. |
 | `tddy-sandbox-darwin` | macOS Seatbelt: SBPL template render + `sandbox-exec` spawn (re-exports the runner) |
 | `tddy-sandbox-cgroups` | Linux rootless jail: unprivileged user namespace + network namespace (loopback-only) + private mount namespace + cgroup v2 limits |
 
@@ -104,6 +104,43 @@ daemon-removed (`.worktrees` guard).
 > automated test drives a live daemon; the on-host run also depends on the daemon's own cgroups
 > sandbox, which has open issues), and the macOS build was not re-verified after the `#[cfg]` split.
 
+### The `--workspace-tools` jail: a checkout with no agent in it
+
+`tddy-sandbox-runner --workspace-tools <worktree>` serves tool calls against the checkout mounted
+inside the jail and hosts no agent: no PTY, no in-jail `tddy-tools --mcp`, and nothing calling back
+out over the tool-IPC socket. The host asks with `in_jail_tool_request` and the runner answers
+`in_jail_tool_response` — the mirror of the `tool_request`/`tool_response` pair an in-jail agent uses
+to reach the host. Because that answer carries no request id, **exactly one call is outstanding at a
+time**; `InJailToolDispatcher` on the host relay holds that discipline, bounded by
+`IN_JAIL_TOOL_TIMEOUT`, and a channel that misses an answer is declared lost rather than left to
+misattribute a late one to the next caller.
+
+Two callers drive this jail, and they ask for different shapes of it:
+
+| Caller | Transport | Egress |
+|--------|-----------|--------|
+| `tddy-daemon`, for a sandboxed `workspace` session | `--stdio` (the daemon pipes the process) | none — a jail holding only a checkout needs no network |
+| `tddy-sandbox-app`, for `--codebase-mode sandboxed` | `--grpc-listen-port` (loopback, the transport it drives every jail over) | `--egress-shim-port`, because this jail also runs the build |
+
+The egress shim exists exactly when `--egress-shim-port` asks for one, and its proxy environment
+reaches the tool engine's subprocesses, which is what lets a jailed `cargo` or `bun` fetch through
+the host's CONNECT relay with TLS still end-to-end.
+
+### Codebase modes: which side of the jail the agent is on
+
+`tddy-sandbox-app` places the agent and the checkout independently:
+
+| `--codebase-mode` | Agent | Checkout | What the jail confines |
+|---|---|---|---|
+| `mounted` | jail | jail, mounted read-write | the agent, and the code with it |
+| `managed` | jail | host, never mounted | the agent; the code is reached by host-relayed `mcp__tddy-tools__*` |
+| `sandboxed` | **host**, unconfined | **jail**, mounted read-write | the codebase and every build, test and tool call against it |
+
+`sandboxed` is the inversion: the agent runs as an ordinary host process with the real terminal and
+the user's own `~/.claude`, keeps the `mcp__tddy-tools__*` surface and loses every native filesystem
+and shell tool, and each call is dispatched *into* the jail over a Unix socket the app serves.
+Product behaviour is [sandboxed-codebase-mode.md](../../../docs/ft/coder/sandboxed-codebase-mode.md).
+
 ## SandboxSpec
 
 | Field | Purpose |
@@ -128,7 +165,7 @@ allow-lists:
 
 | Sub-spec | Meaning |
 |----------|---------|
-| `ReadSpec { host, jail, kind, exec, reason }` | A read grant. `kind` is `Subpath`/`Literal`/`Regex` (SBPL needs a regex rule for `/dev/ttys[0-9]+`). macOS → SBPL `file-read*` rule; Linux → read-only bind mount. |
+| `ReadSpec { host, jail, kind, exec, reason }` | A read grant. `kind` is `Subpath`/`Literal`/`Regex`/`Metadata` (SBPL needs a regex rule for `/dev/ttys[0-9]+`). macOS → SBPL `file-read*` rule; Linux → read-only bind mount. `Metadata` is the exception on both: it grants *lookup* rather than reading — what resolving a path through a directory needs, without `file-read*`'s power to list what is in it — so macOS renders it into a separate `(allow file-read-metadata …)` block and Linux maps it to no bind mount at all, a read-only bind being strictly wider than asked. |
 | `MountSpec { host, jail, writable }` | A host directory made available in the jail. macOS grants read (+write+exec when `writable`) at the real path (no remap); Linux bind-mounts it (rw when `writable`). |
 | `CopySpec { src, dest, optional, mode }` | A file copied into the writable jail tree before spawn. |
 | `SymlinkSpec { link, target }` | A symlink created inside the jail tree. |

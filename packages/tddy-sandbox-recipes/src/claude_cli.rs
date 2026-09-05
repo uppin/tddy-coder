@@ -178,6 +178,10 @@ const SUBAGENT_TOOLS: &[&str] = &[
 /// these, or the agent falls back to the native built-in (`PermissionServer::decide` pre-allows
 /// native calls on in-repo paths). The pairwise native+mcp disallow already covers same-named
 /// built-ins (`Grep`, `Write`, …); this maps the *differently named* native routes.
+/// `MultiEdit` is deliberately kept although Claude Code 2.1.x no longer has it (it warns
+/// `matches no known tool`). Unlike `tddy`'s own vocabulary — which Claude will never have natively
+/// — `MultiEdit` *was* a Claude tool and could return; a rule for a tool that does not exist costs
+/// one warning line, while a missing rule for one that comes back is an unwithdrawn write route.
 fn native_aliases(exec_tool: &str) -> &'static [&'static str] {
     match exec_tool {
         "Shell" => &["Bash", "BashOutput", "KillShell"],
@@ -282,6 +286,76 @@ pub fn write_claude_mcp_config(
     tddy_core::atomic_file::write_atomic(&path, config.to_string())
         .with_context(|| format!("write MCP config: {}", path.display()))?;
     Ok(path)
+}
+
+/// The exec tools whose names `tddy` and Claude Code happen to share.
+///
+/// [`workspace_exec_tool_names`] is `tddy`'s own vocabulary, and most of it exists only as
+/// `mcp__tddy-tools__*`: Claude has no native `StrReplace`, `Delete`, `Shell`, `Await`,
+/// `ReadLints` or `SemanticSearch`. Naming one in `--disallowedTools` withdraws nothing and makes
+/// the CLI warn `matches no known tool — check for typos` at every start, which is how a real
+/// mistyped rule stops being noticed. `Shell` and `StrReplace` still lose their native routes —
+/// through [`native_aliases`], which maps them onto `Bash*` and `Edit`.
+const NATIVE_EXEC_TOOL_NAMES: &[&str] = &["Read", "Write", "Grep", "Glob"];
+
+/// Every native filesystem and shell tool, withdrawn — the disallow-list for an agent that runs
+/// **on the host** while its codebase lives in a jail (`docs/ft/coder/sandboxed-codebase-mode.md`).
+///
+/// The sibling [`build_claude_disallowlist`] withdraws a tool in *both* forms, because the point
+/// there is that a replaced tool has exactly one caller left: the agent that replaced it. Here the
+/// point is the opposite. The `mcp__tddy-tools__` forms are the only route to the checkout that
+/// exists, so withdrawing them would leave the agent with no route at all; it is the natives that
+/// must go, because on the host they would reach the checkout directly and the jail would confine
+/// nothing.
+///
+/// Only names Claude actually has are emitted ([`NATIVE_EXEC_TOOL_NAMES`] plus every
+/// [`native_aliases`] entry): a rule for a tool that does not exist withdraws nothing and costs a
+/// warning line per session.
+pub fn build_host_agent_disallowlist() -> Vec<String> {
+    let mut disallowed: Vec<String> = NATIVE_EXEC_TOOL_NAMES
+        .iter()
+        .map(|tool| (*tool).to_string())
+        .collect();
+    for tool in workspace_exec_tool_names() {
+        for alias in native_aliases(tool) {
+            if !disallowed.iter().any(|t| t == alias) {
+                disallowed.push((*alias).to_string());
+            }
+        }
+    }
+    disallowed
+}
+
+/// [`append_claude_mcp_args`] for an agent spawned on the host against a jailed codebase: the same
+/// `mcp__tddy-tools__*` allow-list and MCP config, plus [`build_host_agent_disallowlist`] on top of
+/// whatever the session's subagents already replaced.
+pub fn append_host_agent_mcp_args(
+    argv: &mut Vec<String>,
+    scratch_dir: &Path,
+    tddy_tools_path: &Path,
+    subagent_enabled: bool,
+    replaced: &[&str],
+    mcp_env: &BTreeMap<String, String>,
+) -> Result<()> {
+    // Withdrawn first, because [`append_claude_mcp_args`] must have the last word: it ends with the
+    // variadic `--mcp-config`, which would swallow anything appended after it. The replacements it
+    // will withdraw itself are skipped here, so a tool a subagent replaced is not named twice.
+    let replacements = build_claude_disallowlist(replaced);
+    for tool in build_host_agent_disallowlist() {
+        if replacements.contains(&tool) {
+            continue;
+        }
+        argv.push("--disallowedTools".into());
+        argv.push(tool);
+    }
+    append_claude_mcp_args(
+        argv,
+        scratch_dir,
+        tddy_tools_path,
+        subagent_enabled,
+        replaced,
+        mcp_env,
+    )
 }
 
 /// Append `--allowedTools`, `--permission-prompt-tool`, and `--mcp-config` for sandbox spawn.
@@ -595,6 +669,173 @@ mod tests {
             .filter(|w| w[0] == "--disallowedTools")
             .map(|w| w[1].clone())
             .collect()
+    }
+
+    fn allowed_tools_in(argv: &[String]) -> HashSet<String> {
+        argv.windows(2)
+            .filter(|w| w[0] == "--allowedTools")
+            .map(|w| w[1].clone())
+            .collect()
+    }
+
+    // ─── The host-run agent against a jailed codebase ────────────────────────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 7)
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// Every native route to the filesystem and the shell is withdrawn. On the host these would
+    /// reach the checkout directly, and a jail the agent can simply step around confines nothing.
+    #[test]
+    fn the_host_agent_disallowlist_withdraws_every_native_filesystem_and_shell_tool() {
+        // Given / When
+        let disallowed: HashSet<String> = build_host_agent_disallowlist().into_iter().collect();
+
+        // Then
+        for native in [
+            "Read",
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "Grep",
+            "Glob",
+            "Bash",
+            "BashOutput",
+            "KillShell",
+        ] {
+            assert!(
+                disallowed.contains(native),
+                "native {native} must be withdrawn from a host-run agent; set was: {disallowed:?}"
+            );
+        }
+    }
+
+    /// A `--disallowedTools` entry naming a tool Claude does not have withdraws nothing and makes
+    /// the CLI warn `matches no known tool — check for typos` on every start. `tddy`'s own
+    /// vocabulary is full of such names — they exist only in the `mcp__tddy-tools__` form, which is
+    /// the very thing this list must leave alone.
+    #[test]
+    fn the_host_agent_disallowlist_names_no_tool_claude_does_not_have() {
+        // Given / When
+        let disallowed: HashSet<String> = build_host_agent_disallowlist().into_iter().collect();
+
+        // Then
+        for tddy_only in [
+            "StrReplace",
+            "Delete",
+            "Shell",
+            "Await",
+            "ReadLints",
+            "SemanticSearch",
+        ] {
+            assert!(
+                !disallowed.contains(tddy_only),
+                "{tddy_only} is a tddy tool name with no native Claude counterpart; naming it \
+                 withdraws nothing and costs a warning. Set was: {disallowed:?}"
+            );
+        }
+    }
+
+    /// The mirror image of the sibling disallow-list: the `mcp__tddy-tools__` forms are the only
+    /// route to the jailed checkout that exists, so withdrawing one would leave the agent unable to
+    /// work rather than unable to escape.
+    #[test]
+    fn the_host_agent_disallowlist_leaves_the_mcp_forms_reachable() {
+        // Given / When
+        let disallowed: HashSet<String> = build_host_agent_disallowlist().into_iter().collect();
+
+        // Then
+        for tool in workspace_exec_tool_names() {
+            let prefixed = format!("mcp__tddy-tools__{tool}");
+            assert!(
+                !disallowed.contains(&prefixed),
+                "{prefixed} is the only route to the checkout and must stay reachable; \
+                 set was: {disallowed:?}"
+            );
+        }
+    }
+
+    /// A host-run agent keeps the same jailed tool surface a sandboxed one has — the placement
+    /// changed, the toolset did not.
+    #[test]
+    fn append_host_agent_mcp_args_keeps_every_mcp_exec_tool_allowed() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_host_agent_mcp_args(&mut argv, dir.path(), &tools, false, &[], &BTreeMap::new())
+            .expect("append must succeed");
+
+        // Then
+        let allowed = allowed_tools_in(&argv);
+        for tool in workspace_exec_tool_names() {
+            let prefixed = format!("mcp__tddy-tools__{tool}");
+            assert!(
+                allowed.contains(&prefixed),
+                "allow-list must contain {prefixed}; got: {allowed:?}"
+            );
+        }
+    }
+
+    /// The two halves land in one argv: the MCP tools allowed, the natives withdrawn, and the MCP
+    /// config registered so the tools resolve at all.
+    #[test]
+    fn append_host_agent_mcp_args_withdraws_the_natives_and_registers_the_mcp_config() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_host_agent_mcp_args(&mut argv, dir.path(), &tools, false, &[], &BTreeMap::new())
+            .expect("append must succeed");
+
+        // Then
+        let disallowed = disallowed_tools_in(&argv);
+        for native in ["Read", "Write", "Edit", "Grep", "Glob", "Bash"] {
+            assert!(
+                disallowed.contains(native),
+                "native {native} must be withdrawn; got: {disallowed:?}"
+            );
+        }
+        assert!(
+            argv.iter().any(|arg| arg == "--mcp-config"),
+            "the MCP config must be registered or no tool resolves at all; argv was: {argv:?}"
+        );
+    }
+
+    /// A subagent's own replacements still apply on top: a session that took `Grep` away from the
+    /// main agent must not get it back by virtue of running on the host.
+    #[test]
+    fn append_host_agent_mcp_args_still_honors_a_subagents_replacements() {
+        // Given
+        let dir = tempfile::tempdir().unwrap();
+        let tools = dir.path().join("tddy-tools");
+        let mut argv = vec!["claude".to_string()];
+
+        // When
+        append_host_agent_mcp_args(
+            &mut argv,
+            dir.path(),
+            &tools,
+            true,
+            &["Grep"],
+            &BTreeMap::new(),
+        )
+        .expect("append must succeed");
+
+        // Then
+        let allowed = allowed_tools_in(&argv);
+        assert!(
+            !allowed.contains("mcp__tddy-tools__Grep"),
+            "a replaced tool must not be pre-approved; got: {allowed:?}"
+        );
+        assert!(
+            disallowed_tools_in(&argv).contains("mcp__tddy-tools__Grep"),
+            "a replaced tool's MCP form must be withdrawn even for a host-run agent"
+        );
     }
 
     /// A subagent replacing `Grep`/`Glob` must hard-disable Claude's native built-in Grep/Glob, so

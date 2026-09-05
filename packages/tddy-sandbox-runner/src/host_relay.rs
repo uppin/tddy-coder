@@ -16,11 +16,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::Stream;
 use prost::Message;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-use tddy_service::proto::connection::ExecuteToolResponse;
+use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::{
     EgressRequest, EgressResponse, HostPoll, SandboxInput, SessionFrame, SubscribeTerminal,
@@ -244,6 +244,216 @@ impl HostRelayConfig {
     }
 }
 
+/// How long one in-jail tool call may wait for its answer before its channel is declared lost.
+///
+/// Comfortably above the tool engine's own ceilings (a blocking `Shell` defaults to 30s and takes
+/// its limit from the caller), because a call that outlives this leaves the host unable to tell
+/// which answer belongs to which request — the frame carries no request id, so the channel is torn
+/// down rather than reused.
+///
+/// Public, and the daemon's own in-jail exchange (`tddy_daemon::workspace_tool_sandbox`) uses this
+/// very constant rather than a matching number of its own. Two hosts drive this protocol into the
+/// same jail, and a call still legitimate on one of them must not already be abandoned on the
+/// other — an invariant a second declaration states but nothing enforces.
+pub const IN_JAIL_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Sends tool calls **into** a jail over an already-running host relay.
+///
+/// The mirror image of [`HostToolHandler`], and the half a `--workspace-tools` jail needs: there
+/// the jail asks the host to reach the worktree for it, here the host — which cannot touch the
+/// worktree unconfined, or in the standalone app's case must not — asks the jail.
+///
+/// One call is outstanding at a time. `in_jail_tool_response` carries no request id (the frame was
+/// designed for a host that keeps exactly one in flight), so the discipline is not an optimisation
+/// choice: a second concurrent call would have no way to tell which answer is its own.
+///
+/// A [`HostToolHandler`] that dispatched back through here would deadlock itself: the relay's
+/// reader loop awaits the handler inline, and that same loop is the only thing that can deliver
+/// the `in_jail_tool_response` the handler would be waiting for. The pairing exists in no session
+/// today — a jail that serves in-jail calls hosts no agent to make outward ones, and the app wires
+/// [`NullToolHandler`] — but a future caller that wires both must dispatch off the handler's task,
+/// not from inside it. [`IN_JAIL_TOOL_TIMEOUT`] would bound such a deadlock, not excuse it.
+pub struct InJailToolDispatcher {
+    /// The relay's outbound half — the same one the poll loop and the tunnels send on, because the
+    /// jail has exactly one `SessionChannel` and everything it is told travels over it.
+    host_tx: mpsc::Sender<SessionFrame>,
+    /// Where the relay's reader loop hands back the answer to the outstanding call.
+    exchange: Arc<InJailToolExchange>,
+    /// Held across the send-and-await, so the next caller only sends once this call is answered.
+    turn: tokio::sync::Mutex<()>,
+    /// How long a call waits for its answer before the channel is declared lost.
+    answer_timeout: Duration,
+}
+
+impl InJailToolDispatcher {
+    /// Wait a different length of time for the jail's answer than [`IN_JAIL_TOOL_TIMEOUT`].
+    ///
+    /// For a caller that knows its jail's own ceiling is lower — including this crate's dispatch
+    /// tests, which hold it to a fraction of a second so a jail that never answers can be shown to
+    /// settle within the run rather than ten minutes later.
+    pub fn with_answer_timeout(mut self, timeout: Duration) -> Self {
+        self.answer_timeout = timeout;
+        self
+    }
+
+    /// Run one tool call inside the jail and return its answer.
+    ///
+    /// A tool that failed answers with `is_error`, exactly as the host tool engine does — only the
+    /// dispatch is this type's concern. A jail that cannot serve in-jail calls at all (one started
+    /// without `--workspace-tools`) says so the same way, and so does a channel that closed before
+    /// the answer arrived, or one that let [`IN_JAIL_TOOL_TIMEOUT`] pass without answering: the
+    /// caller is an MCP tool call that must end, not wait.
+    ///
+    /// The timeout is the one failure the *session* does not survive — every later call is refused
+    /// — so it is also logged at `error` on the host. The agent's own answer says the same thing
+    /// in the terms the agent can act on: restart the session.
+    pub async fn execute(&self, request: ExecuteToolRequest) -> ExecuteToolResponse {
+        // Kept out of the frame the request is about to move into, so the host can name the call
+        // it gave up on. The only thing on the host that ever learns a channel died is this log.
+        let tool_name = request.tool_name.clone();
+        let _turn = self.turn.lock().await;
+        if self.exchange.is_lost() {
+            // Written for the model that reads it, not for whoever wrote the frame format. In a
+            // `sandboxed` session these calls are the agent's only route to the checkout, so a
+            // lost channel is not one failed tool — it is every tool, for the rest of the session.
+            // An agent told only that answers can no longer be attributed will keep trying; one
+            // told the session has to be restarted can say so and stop.
+            return failed_dispatch(
+                "an earlier call went unanswered past its budget, so this jail's tool channel is \
+                 finished: a late answer carries no request id and would be handed to whichever \
+                 call is waiting next. Every tool call from here on will fail the same way — \
+                 restart the session to get the tools back",
+            );
+        }
+        let answer = self.exchange.park();
+
+        if self
+            .host_tx
+            .send(SessionFrame {
+                payload: Some(SessionPayload::InJailToolRequest(request)),
+            })
+            .await
+            .is_err()
+        {
+            self.exchange.abandon();
+            return failed_dispatch("the jail is no longer reading its session channel");
+        }
+
+        match tokio::time::timeout(self.answer_timeout, answer).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => failed_dispatch("its session channel ended before the call was answered"),
+            Err(_) => {
+                // Waiting on unbounded faith would hold the turnstile for the life of the session,
+                // wedging every later call with nothing to report. Give up on this one — and on
+                // the channel with it, because a late answer carries no request id and would be
+                // handed to whichever call is parked next. A misattributed answer is worse than
+                // the hang it replaced.
+                self.exchange.declare_lost();
+                // The one record on the host that this happened. Nothing else notices: the agent
+                // is a separate process that only sees its own failed call, the jail is still
+                // running, and every later call is refused without a frame ever reaching the
+                // relay — so an operator watching a session that has gone inert has nothing else
+                // to find. `error`, not `warn`, because the session cannot recover from it.
+                //
+                // `{:?}` rather than a seconds count: the budget is a `Duration` and prints
+                // itself as one ("600s"), so a narrowed budget does not report itself as "0s".
+                log::error!(
+                    target: "tddy_sandbox_runner::host_relay",
+                    "in-jail tool call {tool_name} was not answered within {:?}; this jail's tool \
+                     channel is now lost and every later call will be refused — the session has \
+                     to be restarted",
+                    self.answer_timeout
+                );
+                failed_dispatch(&format!(
+                    "it did not answer within {:?}, so this jail's tool channel is finished — \
+                     every later call will fail the same way, and the session has to be restarted",
+                    self.answer_timeout
+                ))
+            }
+        }
+    }
+}
+
+/// The one in-jail tool call that may be outstanding, shared between the [`InJailToolDispatcher`]
+/// that parks a waiting caller here and the relay's reader loop that fulfils it. A plain slot
+/// rather than a map because `in_jail_tool_response` carries no request id to key one by.
+#[derive(Default)]
+struct InJailToolExchange {
+    pending: std::sync::Mutex<Option<oneshot::Sender<ExecuteToolResponse>>>,
+    /// Set once an answer went missing rather than merely failing. From then on the slot is
+    /// unusable: an answer to the lost call could still arrive, and with no request id on the
+    /// frame it would be indistinguishable from an answer to the next one.
+    lost: AtomicBool,
+}
+
+impl InJailToolExchange {
+    /// Claim the slot for a call about to be sent, returning the receiver its caller waits on.
+    fn park(&self) -> oneshot::Receiver<ExecuteToolResponse> {
+        let (tx, rx) = oneshot::channel();
+        *self.pending.lock().unwrap() = Some(tx);
+        rx
+    }
+
+    /// Hand an arrived `in_jail_tool_response` to the caller waiting for it. An answer nobody is
+    /// waiting for is dropped — with no request id on the frame there is no call it could belong to.
+    fn answer(&self, response: ExecuteToolResponse) {
+        if let Some(tx) = self.pending.lock().unwrap().take() {
+            let _ = tx.send(response);
+        }
+    }
+
+    /// Give up on the outstanding call: dropping its sender wakes `execute` with a failure rather
+    /// than leaving it parked on a channel nothing will ever write to.
+    fn abandon(&self) {
+        self.pending.lock().unwrap().take();
+    }
+
+    /// Give up on the outstanding call *and* on every call after it. Used where the answer may
+    /// still be in flight, so the exchange can no longer match answers to callers.
+    fn declare_lost(&self) {
+        self.lost.store(true, Ordering::SeqCst);
+        self.abandon();
+    }
+
+    /// Whether this exchange has stopped being able to attribute answers.
+    fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::SeqCst)
+    }
+}
+
+/// A call that never reached the jail, or never came back from it. Shaped like any other failed
+/// tool call so the agent blocked on it gets an answer it can report.
+fn failed_dispatch(reason: &str) -> ExecuteToolResponse {
+    ExecuteToolResponse {
+        is_error: true,
+        error_message: format!("the tool call could not be run in its jail: {reason}"),
+        ..Default::default()
+    }
+}
+
+/// [`run_host_relay`] plus an [`InJailToolDispatcher`] for sending tool calls the other way.
+///
+/// A separate entry point rather than a field on [`HostRelayConfig`] because the two directions are
+/// not both live in any one session: a jail that hosts an agent answers no in-jail calls, and a
+/// jail that serves them hosts no agent to make the outward ones.
+pub async fn run_host_relay_with_in_jail_tools<H: HostToolHandler, C: SessionChannelClient>(
+    client: C,
+    tool_handler: H,
+    config: HostRelayConfig,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+) -> Result<(JoinHandle<()>, InJailToolDispatcher), String> {
+    // A jail that serves tool calls has no daemon behind the host dispatching them — the roster and
+    // conversation RPCs are refused the same way the standalone app refuses them elsewhere.
+    run_host_relay_inner(
+        client,
+        tool_handler,
+        Arc::new(NullRpcHandler),
+        config,
+        stdin_rx,
+    )
+    .await
+}
+
 /// Open the in-jail `SessionChannel` over `client` (tonic or stdio — see [`SessionChannelClient`]),
 /// subscribe to the main terminal, and drive the host side: poll, relay CONNECT tunnels and
 /// egress, forward terminal output to [`HostRelayConfig::terminal_sink`], and dispatch tool
@@ -274,13 +484,29 @@ pub async fn run_host_relay<H: HostToolHandler, C: SessionChannelClient>(
 /// here so a managed session's `tddy-tools` can follow the live roster and open conversations
 /// with remote agents over the same `SessionChannel` that carries its tool calls.
 pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient>(
+    client: C,
+    tool_handler: H,
+    rpc_handler: Arc<dyn HostRpcHandler>,
+    config: HostRelayConfig,
+    stdin_rx: mpsc::UnboundedReceiver<Bytes>,
+) -> Result<JoinHandle<()>, String> {
+    let (reader, _dispatcher) =
+        run_host_relay_inner(client, tool_handler, rpc_handler, config, stdin_rx).await?;
+    Ok(reader)
+}
+
+/// The relay itself, in the one shape both directions need: the reader loop that answers the jail
+/// and the dispatcher that asks it are two ends of the same `SessionChannel`, so they are built
+/// together and the entry points above keep whichever half their caller has a use for.
+async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
     mut client: C,
     tool_handler: H,
     rpc_handler: Arc<dyn HostRpcHandler>,
     config: HostRelayConfig,
     mut stdin_rx: mpsc::UnboundedReceiver<Bytes>,
-) -> Result<JoinHandle<()>, String> {
+) -> Result<(JoinHandle<()>, InJailToolDispatcher), String> {
     let (host_tx, host_rx) = mpsc::channel(64);
+    let host_tx_dispatch = host_tx.clone();
     let host_stream = ReceiverStream::new(host_rx);
     let mut session = client.open_session_channel(host_stream).await?;
 
@@ -300,10 +526,12 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
     let terminal_sink = config.terminal_sink;
     let host_tx_reader = host_tx.clone();
     let end_signal = Arc::new(EndSignal::new());
+    let in_jail_tools = Arc::new(InJailToolExchange::default());
 
     let reader = tokio::spawn({
         let end_signal = Arc::clone(&end_signal);
         let rpc_handler = Arc::clone(&rpc_handler);
+        let in_jail_tools = Arc::clone(&in_jail_tools);
         async move {
             // CONNECT tunnels: tunnel_id → sender feeding agent→host bytes into the outbound TCP socket.
             let mut tunnels: HashMap<String, mpsc::UnboundedSender<Bytes>> = HashMap::new();
@@ -454,6 +682,11 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
                         // Agent closed its end: drop the sender so the socket writer shuts down.
                         tunnels.remove(&close.tunnel_id);
                     }
+                    Some(SessionPayload::InJailToolResponse(resp)) => {
+                        // The jail answering a call this host sent it — hand it to the caller
+                        // parked on it (see [`InJailToolDispatcher`]).
+                        in_jail_tools.answer(resp);
+                    }
                     Some(SessionPayload::TerminalOutput(out)) => {
                         if !out.data.is_empty() {
                             let _ = terminal_sink.send(Bytes::from(out.data));
@@ -462,6 +695,9 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
                     _ => {}
                 }
             }
+            // The channel is gone: an in-jail call still waiting for an answer will never get one,
+            // and the caller is a tool call that must end rather than wait.
+            in_jail_tools.abandon();
         }
     });
 
@@ -501,7 +737,15 @@ pub async fn run_host_relay_with_rpc<H: HostToolHandler, C: SessionChannelClient
         }
     });
 
-    Ok(reader)
+    Ok((
+        reader,
+        InJailToolDispatcher {
+            host_tx: host_tx_dispatch,
+            exchange: in_jail_tools,
+            turn: tokio::sync::Mutex::new(()),
+            answer_timeout: IN_JAIL_TOOL_TIMEOUT,
+        },
+    ))
 }
 
 /// Open the real outbound TCP connection for a relayed `CONNECT` tunnel and pump bytes both ways
@@ -634,7 +878,14 @@ pub async fn relay_egress_request(req: EgressRequest) -> EgressResponse {
     }
 }
 
-/// Tool handler that rejects all in-jail tool requests (generic confined actions).
+/// Tool handler for a session that answers none: every `tool_request` the jail sends **out** to
+/// the host is refused.
+///
+/// The outward direction, and only that one — the inward `in_jail_tool_request` this file also
+/// carries is [`InJailToolDispatcher`]'s, and a session can serve one, the other, or neither. Two
+/// kinds of session wire this: a generic confined pty action, which runs a command and hosts no
+/// agent to make tool calls; and a `sandboxed` codebase session, where the tools run *inside* the
+/// jail and a request coming the other way is one nothing in the session could have made.
 pub struct NullToolHandler;
 
 #[async_trait]
@@ -647,7 +898,9 @@ impl HostToolHandler for NullToolHandler {
     ) -> ExecuteToolResponse {
         ExecuteToolResponse {
             is_error: true,
-            error_message: format!("tools unsupported in generic pty action: {tool_name}"),
+            error_message: format!(
+                "this session serves no host-side tools, so {tool_name} cannot be run here"
+            ),
             ..Default::default()
         }
     }

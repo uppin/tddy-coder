@@ -1,0 +1,5 @@
+# 2026-09-05 — argv for an agent that runs outside the jail
+
+**Type:** Feature
+
+`build_host_agent_disallowlist` and `append_host_agent_mcp_args` build the argv for an agent running on the host against a jailed codebase. The sibling disallow-list withdraws a replaced tool in both forms; this one is the opposite case — the `mcp__tddy-tools__*` forms are the only route to the checkout that exists, so it is the natives that must go, since on the host they would reach it directly and the jail would confine nothing. Only names Claude actually has are emitted: `tddy`'s own vocabulary (`StrReplace`, `Delete`, `Shell`, `Await`, `ReadLints`, `SemanticSearch`) exists only in MCP form, and naming one withdraws nothing while costing a `matches no known tool` warning at every start — which is how a real mistyped rule stops being noticed. `Shell` and `StrReplace` still lose their native routes through the alias table. Feature [sandboxed-codebase-mode.md](../../../../docs/ft/coder/sandboxed-codebase-mode.md). Cross-package [docs/dev/changesets/](../../../../docs/dev/changesets/). (tddy-sandbox-recipes)

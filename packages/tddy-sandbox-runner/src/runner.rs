@@ -1702,6 +1702,47 @@ async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -
     Ok(())
 }
 
+/// Where a jailed process must point a proxy to reach the shim [`start_egress_shim`] bound.
+///
+/// The literal loopback IP, never `localhost`, for the same reason the shim binds it: nothing in
+/// the jail can resolve a name (see `start_egress_shim`).
+fn egress_shim_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
+}
+
+/// Destinations a jailed process must dial directly instead of through the shim. Its own loopback
+/// listeners live inside the jail; tunnelling them would hand them to the host's `127.0.0.1`,
+/// which is a different machine's idea of the same address.
+const EGRESS_PROXY_BYPASS: &str = "127.0.0.1,localhost";
+
+/// The environment that points a jailed tool call's subprocesses at the CONNECT egress shim.
+///
+/// The jail's profile denies the network outright, so the shim is the only way out — and a build
+/// only finds it if it is told to. The jail's environment comes from `tddy_sandbox::
+/// scratch_runner_env`, which sets no proxy, so a `cargo` or `bun` left unconfigured would attempt
+/// a direct connect and be denied. Both casings are set because tooling splits on it (`curl` and
+/// `cargo` read the lowercase names, much of the Node and Go world the uppercase ones) and reading
+/// only the one that was skipped is indistinguishable from having no proxy at all.
+///
+/// Nothing at all when no shim was asked for: the daemon's `--workspace-tools` jail holds only a
+/// checkout, needs no network, and must keep the profile's flat denial rather than a proxy
+/// pointing at a port on which nothing listens.
+fn egress_proxy_env(shim_port: Option<u16>) -> Vec<(String, String)> {
+    let Some(port) = shim_port else {
+        return Vec::new();
+    };
+    let shim = egress_shim_url(port);
+    ["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"]
+        .into_iter()
+        .map(|name| (name.to_string(), shim.clone()))
+        .chain(
+            ["NO_PROXY", "no_proxy"]
+                .into_iter()
+                .map(|name| (name.to_string(), EGRESS_PROXY_BYPASS.to_string())),
+        )
+        .collect()
+}
+
 async fn start_egress_shim(relay: Arc<SandboxSessionRelay>, port: Option<u16>) -> Result<u16> {
     // Bind to the literal loopback IP, never "localhost": inside the Seatbelt jail the
     // process runs under a clean `env -i` with no resolver, so getaddrinfo("localhost")
@@ -2025,46 +2066,116 @@ async fn serve_over_stdio(service: SandboxRunnerService, ready_marker: &Path) ->
     Ok(())
 }
 
+/// How a `--workspace-tools` jail is reached from the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceToolsTransport {
+    /// The jail's own piped stdin/stdout — what the daemon drives its workspace jails over.
+    Stdio,
+    /// A loopback gRPC listener on this port — what `tddy-sandbox-app` attaches over, the same
+    /// transport it uses for every other session it spawns.
+    LoopbackGrpc(u16),
+}
+
+/// Resolve which transport a `--workspace-tools` jail will be served over.
+///
+/// The mode originally required `--stdio`, because its only caller was the daemon, which pipes the
+/// jail's stdio. `tddy-sandbox-app` owns no such pipe — it dials the runner's own gRPC listener —
+/// so a jail it spawns is reached the way its other jails are. Neither flag is a default for the
+/// other: started with no transport at all, the jail would serve nobody, and failing fast beats a
+/// process that comes up and waits forever.
+pub fn resolve_workspace_tools_transport(
+    stdio: bool,
+    grpc_listen_port: Option<u16>,
+) -> Result<WorkspaceToolsTransport, String> {
+    match (stdio, grpc_listen_port) {
+        // Given both, stdio wins: it is the transport whose caller pipes this process, and one of
+        // the two has to, since the jail can only be served over one of them.
+        (true, _) => Ok(WorkspaceToolsTransport::Stdio),
+        (false, Some(port)) => Ok(WorkspaceToolsTransport::LoopbackGrpc(port)),
+        (false, None) => Err(
+            "--workspace-tools needs a transport to be reached over: --stdio \
+             for a host that pipes this jail's stdio, or --grpc-listen-port for one that dials its \
+             loopback listener"
+                .to_string(),
+        ),
+    }
+}
+
 /// Serve a sandboxed `workspace` session's tool calls (`--workspace-tools <worktree>`), and
 /// nothing else.
 ///
 /// The mirror image of every other mode here: there is no agent in this jail to host, so there is
-/// no PTY, no `tddy-tools --mcp` server calling back out over the tool-IPC socket, and no egress
-/// shim for it to reach the network through. The jail exists so that the tool call itself runs
-/// under the kernel's confinement instead of on the host that holds the checkout — the host asks
-/// with `in_jail_tool_request`, this answers with `in_jail_tool_response`, and the worktree the
-/// engine is pointed at is the one mounted inside the jail.
+/// no PTY and no `tddy-tools --mcp` server calling back out over the tool-IPC socket. The jail
+/// exists so that the tool call itself runs under the kernel's confinement instead of on the host
+/// that holds the checkout — the host asks with `in_jail_tool_request`, this answers with
+/// `in_jail_tool_response`, and the worktree the engine is pointed at is the one mounted inside
+/// the jail.
+///
+/// Where the caller also asked for `--egress-shim-port`, the jail runs the codebase's build as
+/// well as reading it, so the shim is started and the tool calls' subprocesses are pointed at it
+/// through [`egress_proxy_env`] — the network that reaches is still the host's socket, over the
+/// same `SessionChannel` the tool calls arrive on.
 async fn run_workspace_tool_runner_inner(
     args: &SandboxRunnerArgs,
     worktree: PathBuf,
 ) -> Result<()> {
-    if !args.stdio {
-        anyhow::bail!(
-            "--workspace-tools requires --stdio: the host drives a workspace tool jail over its \
-             piped stdio and has no other way to hand it a tool call"
-        );
-    }
+    let transport = resolve_workspace_tools_transport(args.stdio, args.grpc_listen_port)
+        .map_err(|message| anyhow::anyhow!(message))
+        .inspect_err(|e| boot_log_error("resolve_workspace_tools_transport", format!("{e:#}")))?;
     init_sandbox_egress_logging();
     boot_log(
         "INFO",
         &format!(
-            "boot: workspace tool mode, serving tools against {}",
+            "boot: workspace tool mode, serving tools against {} over {transport:?}",
             worktree.display()
         ),
     );
     let _ = std::fs::remove_file(&args.ready_marker);
+
+    let relay = Arc::new(SandboxSessionRelay::default());
+    // Only a jail that runs the codebase's build needs egress, and then only through the host's
+    // CONNECT relay — so the shim exists exactly when the caller asked for one. The daemon's
+    // workspace jail asks for none and stays networkless.
+    let shim_port = match args.egress_shim_port {
+        Some(requested) => {
+            let bound = start_egress_shim(Arc::clone(&relay), Some(requested))
+                .await
+                .inspect_err(|e| boot_log_error("start_egress_shim", format!("{e:#}")))?;
+            boot_log(
+                "INFO",
+                &format!("boot: egress shim listening on {}", egress_shim_url(bound)),
+            );
+            Some(bound)
+        }
+        None => None,
+    };
+
     let service = SandboxRunnerService {
         session_id: args.session_id.clone(),
         // No PTY in this jail, so terminal input has nowhere to go.
         stdin_tx: None,
-        relay: Arc::new(SandboxSessionRelay::default()),
+        relay,
         in_jail_tools: Some(Arc::new(InJailToolExecutor {
             worktree,
             session_id: args.session_id.clone(),
             registry: tddy_task::TaskRegistry::new(),
+            tool_env: egress_proxy_env(shim_port),
         })),
     };
-    serve_over_stdio(service, &args.ready_marker).await
+    match transport {
+        WorkspaceToolsTransport::Stdio => serve_over_stdio(service, &args.ready_marker).await,
+        // Nothing in this jail can end the session — there is no agent to exit — so it serves
+        // until the host that spawned it tears it down.
+        WorkspaceToolsTransport::LoopbackGrpc(port) => {
+            serve_over_loopback_grpc(
+                service,
+                &args.ready_marker,
+                Some(port),
+                std::future::pending(),
+            )
+            .await
+        }
+    }
 }
 
 /// Runs one tool call inside the jail, against the worktree as mounted here.
@@ -2076,16 +2187,25 @@ struct InJailToolExecutor {
     session_id: String,
     /// Backs `Shell`'s detached (`block_until_ms = 0`) jobs for the lifetime of the jail.
     registry: tddy_task::TaskRegistry,
+    /// Laid over the environment of every command the tool engine spawns: the proxy variables that
+    /// point a jailed build at the egress shim, or nothing where there is no shim (see
+    /// [`egress_proxy_env`]).
+    ///
+    /// Carried on the executor rather than exported into the runner's own process environment,
+    /// because the shim belongs to this jail's tool calls and nothing else here: an overlay says
+    /// exactly that, and says it without mutating global state underneath a running runtime.
+    tool_env: Vec<(String, String)>,
 }
 
 impl InJailToolExecutor {
     async fn execute(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
-        let outcome = tddy_tool_engine::execute_tool(
+        let outcome = tddy_tool_engine::execute_tool_with_env(
             &self.worktree,
             &req.tool_name,
             &req.args_json,
             &self.registry,
             &self.session_id,
+            &self.tool_env,
         )
         .await;
         ExecuteToolResponse {
@@ -2398,15 +2518,41 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         return Ok(());
     }
 
+    let generic_pty_shutdown = generic_pty;
+    let shutdown_notify = Arc::clone(&shutdown_notify);
+    serve_over_loopback_grpc(
+        service,
+        &args.ready_marker,
+        args.grpc_listen_port,
+        async move {
+            if generic_pty_shutdown {
+                shutdown_notify.notified().await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        },
+    )
+    .await
+}
+
+/// Bind the runner's loopback gRPC listener, publish its port through the ready marker, and serve
+/// `service` on it until `shutdown` completes.
+///
+/// The one loopback-TCP server in this crate: a jail hosting an agent and a `--workspace-tools`
+/// jail are both reached over it, and the host learns the port the same way in either case — by
+/// reading the marker written here (see [`connect_sandbox_client`]).
+async fn serve_over_loopback_grpc(
+    service: SandboxRunnerService,
+    ready_marker: &Path,
+    listen_port: Option<u16>,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<()> {
     boot_log(
         "INFO",
-        &format!(
-            "boot: bind sandbox grpc fixed_port={:?}",
-            args.grpc_listen_port
-        ),
+        &format!("boot: bind sandbox grpc fixed_port={listen_port:?}"),
     );
     // Literal loopback IP (not "localhost") — no resolver inside the jail; see start_egress_shim.
-    let listener = match args.grpc_listen_port {
+    let listener = match listen_port {
         Some(port) => tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
             .await
             .context("bind sandbox grpc tcp on fixed port"),
@@ -2420,37 +2566,29 @@ async fn run_sandbox_runner_inner(args: SandboxRunnerArgs) -> Result<()> {
         .context("grpc local addr")
         .inspect_err(|e| boot_log_error("grpc_local_addr", format!("{e:#}")))?
         .port();
-    std::fs::write(&args.ready_marker, port.to_string())
+    std::fs::write(ready_marker, port.to_string())
         .context("write ready marker")
         .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
     boot_log(
         "INFO",
         &format!(
             "boot: ready marker written path={} port={port}",
-            args.ready_marker.display()
+            ready_marker.display()
         ),
     );
     log::info!(
         target: "tddy_sandbox_runner::runner",
         "sandbox gRPC listening on localhost:{port} (ready_marker={})",
-        args.ready_marker.display()
+        ready_marker.display()
     );
     sandbox_log_line("INFO", &format!("gRPC listening on localhost:{port}"));
 
     boot_log("INFO", "boot: serve sandbox gRPC");
-    let generic_pty_shutdown = generic_pty;
-    let shutdown_notify = Arc::clone(&shutdown_notify);
     Server::builder()
         .add_service(TonicSandboxServiceServer::new(service))
         .serve_with_incoming_shutdown(
             tokio_stream::wrappers::TcpListenerStream::new(listener),
-            async move {
-                if generic_pty_shutdown {
-                    shutdown_notify.notified().await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            },
+            shutdown,
         )
         .await
         .context("serve sandbox grpc")
@@ -2511,6 +2649,154 @@ pub async fn connect_sandbox_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Which transport serves a --workspace-tools jail ────────────────────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 4)
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// The daemon's workspace jails keep today's transport: it pipes the jail's stdio and drives
+    /// it over that.
+    #[test]
+    fn a_workspace_tools_jail_started_with_stdio_is_served_over_its_piped_stdio() {
+        // Given / When
+        let transport = resolve_workspace_tools_transport(true, None)
+            .expect("--stdio must remain a valid transport for a workspace-tools jail");
+
+        // Then
+        assert_eq!(transport, WorkspaceToolsTransport::Stdio);
+    }
+
+    /// The standalone app owns no pipe into the jail, so it dials the runner's own gRPC listener —
+    /// the same transport it attaches to every other jail it spawns over.
+    #[test]
+    fn a_workspace_tools_jail_started_with_a_grpc_port_is_served_over_loopback_grpc() {
+        // Given / When
+        let transport = resolve_workspace_tools_transport(false, Some(45_501))
+            .expect("a loopback gRPC port must be a valid transport");
+
+        // Then
+        assert_eq!(transport, WorkspaceToolsTransport::LoopbackGrpc(45_501));
+    }
+
+    /// Given both, stdio wins: it is the transport whose caller pipes the process, and a jail
+    /// cannot be served over two.
+    #[test]
+    fn a_workspace_tools_jail_given_both_transports_is_served_over_stdio() {
+        // Given / When
+        let transport = resolve_workspace_tools_transport(true, Some(45_501))
+            .expect("both flags together must resolve rather than fail");
+
+        // Then
+        assert_eq!(transport, WorkspaceToolsTransport::Stdio);
+    }
+
+    /// With no transport the jail would come up serving nobody. Failing at startup names the
+    /// missing flag; waiting forever names nothing.
+    #[test]
+    fn a_workspace_tools_jail_with_no_transport_fails_fast_and_names_both_flags() {
+        // Given / When
+        let message = resolve_workspace_tools_transport(false, None)
+            .expect_err("a jail with no transport must be refused");
+
+        // Then
+        assert!(
+            message.contains("--stdio") && message.contains("--grpc-listen-port"),
+            "the refusal must name both transports; message was: {message}"
+        );
+    }
+
+    // ─── Egress for a --workspace-tools jail that also runs the build ───────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (§ Egress)
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// The shim as the jail must address it: `localhost` would fail to resolve inside it.
+    const SHIM_URL: &str = "http://127.0.0.1:45601";
+
+    /// A jailed `cargo` or `bun` reaches crates.io and npm only through the in-jail CONNECT shim,
+    /// and only if it is told where the shim is — the jail's environment sets no proxy of its own,
+    /// so an unconfigured build connects directly and the profile denies it.
+    #[test]
+    fn a_jail_given_an_egress_shim_points_its_tool_subprocesses_at_it_in_both_casings() {
+        // Given / When
+        let proxy_env = egress_proxy_env(Some(45_601));
+
+        // Then
+        assert_eq!(
+            proxy_env,
+            vec![
+                ("HTTPS_PROXY".to_string(), SHIM_URL.to_string()),
+                ("HTTP_PROXY".to_string(), SHIM_URL.to_string()),
+                ("https_proxy".to_string(), SHIM_URL.to_string()),
+                ("http_proxy".to_string(), SHIM_URL.to_string()),
+                ("NO_PROXY".to_string(), "127.0.0.1,localhost".to_string()),
+                ("no_proxy".to_string(), "127.0.0.1,localhost".to_string()),
+            ],
+            "the shim must be named by its literal loopback address — the jail has no resolver — \
+             in both casings, with loopback kept off the proxy"
+        );
+    }
+
+    /// The daemon's workspace jail holds a checkout and nothing else, asks for no shim, and must
+    /// stay networkless — a proxy pointing at a port nothing listens on would turn the profile's
+    /// flat denial into a connection refused from somewhere else entirely.
+    #[test]
+    fn a_jail_with_no_egress_shim_leaves_its_tool_subprocesses_without_a_proxy() {
+        // Given / When
+        let proxy_env = egress_proxy_env(None);
+
+        // Then
+        assert_eq!(proxy_env, Vec::<(String, String)>::new());
+    }
+
+    // ─── What a jail that serves no in-jail tools answers ──────────────────────
+    //
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 6)
+    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+
+    /// Only a `--workspace-tools` jail executes tool calls itself; every other runner mode hosts an
+    /// agent whose tools the *host* runs, so a jail started without the flag has nothing to hand
+    /// the request to. The host keeps one in-jail call outstanding at a time and the answer carries
+    /// no request id, so a silently dropped request is not a failed tool call — it is a host
+    /// waiting out its whole timeout for an answer that was never going to come. Answering
+    /// `is_error` is what turns it back into a failed call.
+    #[test]
+    fn a_jail_that_serves_no_in_jail_tools_refuses_the_call_rather_than_dropping_it() {
+        // Given — a runner with no in-jail executor, which is how every agent-hosting mode runs
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // When
+        dispatch_in_jail_tool_request(
+            None,
+            ExecuteToolRequest {
+                tool_name: "Read".to_string(),
+                args_json: r#"{"path":"README.md"}"#.to_string(),
+                ..Default::default()
+            },
+            &out_tx,
+        );
+
+        // Then
+        let frame = out_rx
+            .try_recv()
+            .expect("the refusal must be on the outbound stream before the call returns")
+            .expect("the refusal travels as an ok frame carrying an is_error response");
+        let response = match frame.payload {
+            Some(SessionPayload::InJailToolResponse(response)) => response,
+            other => panic!("expected an in-jail tool response, got {other:?}"),
+        };
+        assert!(
+            response.is_error,
+            "a call this jail cannot serve must be answered as an error"
+        );
+        assert!(
+            response.error_message.contains("--workspace-tools"),
+            "the refusal must name the flag whose absence caused it, or an operator is left \
+             guessing why their tools do nothing; message was: {}",
+            response.error_message
+        );
+    }
 
     /// **session_relay_flushes_tool_request_on_host_poll**: queued MCP calls are sent to the
     /// host only after a `HostPoll` inbound frame.
