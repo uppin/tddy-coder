@@ -87,6 +87,7 @@ async fn the_chain_bakes_a_nix_base_builds_tddy_in_the_builder_and_runs_it_on_th
             NIX_PROBE_VM,
             NIX_PROBE_PORT,
             PROBE_BOOT_TIMEOUT,
+            &progress,
         )
         .await
         .expect("a VM created from the sealed nix base must boot and answer over SSH");

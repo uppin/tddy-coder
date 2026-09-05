@@ -195,8 +195,16 @@ pub async fn boot_probe_of_prepared_base(
     vm_name: &str,
     ssh_host_port: u16,
     ssh_ready_timeout: Duration,
+    progress: &(dyn Fn(&str) + Sync),
 ) -> Result<BootedGuest> {
     let library = layout.library();
+    // Taken from the layer rather than assumed: an overlay smaller than the image it chains
+    // onto is unbootable, and the layer's size is a property of whichever `BakeSpec` built
+    // it, not something a probe is entitled to guess.
+    let disk_size =
+        tddy_vm::image_import::virtual_size_bytes(&layout.prepared_base_path(prepared_base))
+            .map_err(|e| anyhow!("reading the virtual size of {prepared_base}: {e}"))?
+            .to_string();
     // A previous run that died before its teardown would have left this behind, and
     // `qemu-img create` refuses to overwrite.
     let _ = library.remove_vm(vm_name);
@@ -208,7 +216,7 @@ pub async fn boot_probe_of_prepared_base(
         run: RunPolicy {
             memory: "2048M".to_string(),
             cpus: 2,
-            disk_size: "20G".to_string(),
+            disk_size,
             ssh_host_port,
             port_forwards: vec![],
             arch: VmArch::host(),
@@ -230,7 +238,12 @@ pub async fn boot_probe_of_prepared_base(
         .read_manifest(vm_name)
         .map_err(|e| anyhow!("reading back the probe's manifest: {e}"))?;
 
+    progress(&format!("booting {vm_name} off {prepared_base}"));
     let guest = BootedGuest::boot(&library, &manifest, vec![]).await?;
+    progress(&format!(
+        "waiting up to {ssh_ready_timeout:?} for sshd in {vm_name}"
+    ));
     guest.wait_for_ssh_ready(ssh_ready_timeout).await?;
+    progress(&format!("{vm_name} is answering over SSH"));
     Ok(guest)
 }

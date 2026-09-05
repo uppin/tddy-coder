@@ -273,6 +273,27 @@ impl VmLibrary {
             .await
             .map_err(VmError::BuildFailed)?;
 
+        // `qemu-img create` accepts a size smaller than the backing file without complaint,
+        // and a bake grows the root partition to fill whatever disk it was given — so the
+        // guest boots into an initramfs shell with `PARTUUID=… does not exist` instead of
+        // reaching userspace, minutes later and nowhere near this line. Cheap to check here,
+        // expensive to diagnose anywhere else.
+        let base_size = crate::image_import::virtual_size_bytes(&prepared_base_path)?;
+        let overlay_size = crate::image_import::virtual_size_bytes(&overlay_path)?;
+        if overlay_size < base_size {
+            let _ = std::fs::remove_file(&overlay_path);
+            return Err(VmError::BuildFailed(format!(
+                "disk_size {} gives {} a {overlay_size}-byte disk, smaller than the \
+                 {base_size}-byte image it chains onto ({}). The partition table it \
+                 inherits would refer to sectors the disk does not have, so the guest would \
+                 drop to an initramfs shell rather than boot. Give the VM at least the \
+                 size of its prepared base.",
+                manifest.run.disk_size,
+                manifest.name,
+                prepared_base_path.display(),
+            )));
+        }
+
         let keys = generate_vm_ssh_keypair(&vm_dir, &manifest.name)?;
         let public_key = std::fs::read_to_string(&keys.public_key_path).map_err(|e| {
             VmError::BuildFailed(format!(
