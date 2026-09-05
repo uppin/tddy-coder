@@ -203,7 +203,7 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
  */
 export function useModelRegistryFanOut(): ModelRegistryFanOut {
   const { sessionToken } = useAuthContext();
-  const { daemons, roomStatus } = useSelectedDaemon();
+  const { daemons, directoryStatus } = useSelectedDaemon();
   const connectHost = useHostConnector();
   const token = sessionToken ?? "";
 
@@ -343,13 +343,12 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     return mergeRegistryEntries(snapshots);
   }, [daemonIds, statesByDaemon]);
 
-  // The common room is this fleet's host directory, and only a *joined* room is one: while the token
-  // is being minted `useCommonRoom` already reports `connecting` with no room and therefore no
-  // roster, so a directory that "can name hosts" then would be claiming a fleet it cannot enumerate.
-  // Treating `connecting` as a directory made every page load render "no daemons in the common room"
-  // — an empty fleet, positively asserted — for the whole of the mint, where the honest answer is
-  // that this screen is not connected to the common room yet.
-  const hasDirectory = roomStatus === "connected";
+  // Only a directory that can actually name hosts is one: while the common room's token is being
+  // minted it already reports `connecting` with no roster, so a directory that "can name hosts" then
+  // would be claiming a fleet it cannot enumerate. Treating `connecting` as a directory made every
+  // page load render "no daemons in the common room" — an empty fleet, positively asserted — for the
+  // whole of the mint, where the honest answer is that this screen has no directory yet.
+  const hasDirectory = directoryStatus === "connected";
   const status = useMemo(
     () =>
       registryReadStatus({

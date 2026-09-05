@@ -72,7 +72,7 @@ export function DaemonSelector({
 
 /** Connected wrapper reading the shared `SelectedDaemonProvider` context — what screens render. */
 export function DaemonSelectorConnected() {
-  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon, roomStatus } =
+  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon, directoryStatus } =
     useSelectedDaemon();
   return (
     <DaemonSelector
@@ -80,7 +80,7 @@ export function DaemonSelectorConnected() {
       selectedInstanceId={selectedInstanceId}
       servingInstanceId={servingInstanceId}
       onSelect={selectDaemon}
-      commonRoomUnreachable={roomStatus === "error"}
+      commonRoomUnreachable={directoryStatus === "error"}
     />
   );
 }

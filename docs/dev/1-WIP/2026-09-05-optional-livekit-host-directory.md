@@ -90,7 +90,7 @@ Implementation and the removal of `room` from the context land in the same PR un
 - [x] Run acceptance tests (verify they fail) — 5/5 failing on `useHostDirectory` / `useHostPresence`
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/hostDirectory/useHostDirectory.test.ts`
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
@@ -121,6 +121,45 @@ site changes — and one full sweep runs at the Step 8 completion gate.
 Every failure is on this node's own `TODO(host-directory)` bodies — `mergeHostDirectory`,
 `directoryStatusOf`, `hostsOf`, `useHostDirectory`, `useHostPresence`. None is on the parent's
 surface.
+
+### Green status
+
+Rebased onto the parent's post-`/green` tip (`a2d9143c`) before implementing, so the 6 inherited
+`src/rpc/connections/registry.test.ts` failures recorded above are gone — `connection-model` made
+them pass under its own `/green`. There is no pre-existing red left on this branch.
+
+| Suite | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **1001 pass, 0 fail** (includes `useHostDirectory.test.ts` 9/9) |
+| `cypress/component/HostDirectoryAcceptance.cy.tsx` | **5 pass, 0 fail** |
+| `cypress/component/CommonRoomConnectionVisibilityAcceptance.cy.tsx` | **4 pass, 0 fail** |
+| `cypress/component/DaemonSelectorLiveUpdatesAcceptance.cy.tsx` | **2 pass, 0 fail** |
+
+A further 72 component specs were swept while implementing; the only failures were the three
+adapted below.
+
+#### Three existing specs adapted to State B
+
+All three failed for one reason: with a serving daemon named, the directory is never empty, so
+preconditions that depended on an empty list became unreachable. Each was re-scoped to the
+configuration where the common room is the *only* directory contributor, which is the configuration
+each was actually about. No assertion was weakened and no Given/When/Then structure changed.
+
+- `CommonRoomConnectionVisibilityAcceptance` — "tells the daemon selector the room is unreachable"
+  now mounts with `servedByADaemon: false` (a new option on `mountWithLiveCommonRoom`). A page
+  served by a daemon offers that daemon whatever the room does, so it is never empty to explain;
+  the incident guard still holds for the case where it is. The 2026-08-13 reason-reporting is
+  additionally covered by the two sibling specs, which pass unchanged.
+- `DaemonSelectorLiveUpdatesAcceptance` — both tests dropped `servingInstanceId="udoo"`, which
+  collided with the room's own `UDOO` and masked the peer under test. The subject (a daemon present
+  across `RoomEvent.Reconnected` re-enters the list) is unchanged.
+
+#### Accepted intermediate state
+
+The directory now names the serving daemon, but `## Boundaries` forbids a second
+`ConnectionProvider`, so nothing can connect to it until a later node registers one. An operator
+whose common room fails therefore sees their own daemon selected with a per-screen "no connection"
+state, where before they saw "Common room unreachable". Ship as planned — confirmed 2026-09-05.
 
 ### Commands
 

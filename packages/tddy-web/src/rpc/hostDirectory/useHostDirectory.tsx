@@ -6,6 +6,7 @@
  * `useHostDirectory` and owns nothing about how the list is assembled.
  */
 
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ConnectionStatus } from "../connections/types";
 import type { HostDescriptor, HostDirectory, HostDirectorySource } from "./types";
 
@@ -22,8 +23,16 @@ import type { HostDescriptor, HostDirectory, HostDirectorySource } from "./types
  * for a feature it never asked for.
  */
 export function mergeHostDirectory(sources: readonly HostDirectorySource[]): HostDirectory {
-  // TODO(host-directory): implement
-  throw new Error(`mergeHostDirectory(${sources.length} sources) is not implemented yet`);
+  const status = directoryStatusOf(sources);
+  return {
+    hosts: hostsOf(sources),
+    sources,
+    status,
+    // Only surfaced when the directory as a whole is unusable. A failure on one source while
+    // another still names hosts belongs to that source and is read off `sources` — publishing it
+    // here would put a LiveKit error on a screen that is talking to its local host perfectly well.
+    error: status === "error" ? firstErrorOf(sources) : null,
+  };
 }
 
 /**
@@ -34,23 +43,44 @@ export function mergeHostDirectory(sources: readonly HostDirectorySource[]): Hos
  * `error` — that is what makes an absent LiveKit configuration a choice rather than a fault.
  */
 export function directoryStatusOf(sources: readonly HostDirectorySource[]): ConnectionStatus {
-  // TODO(host-directory): implement
-  throw new Error(`directoryStatusOf(${sources.length} sources) is not implemented yet`);
+  if (sources.some((source) => source.status === "connected")) return "connected";
+  if (sources.some((source) => source.status === "connecting")) return "connecting";
+  if (sources.some((source) => source.status === "error")) return "error";
+  return "idle";
 }
 
 /** The hosts of `sources`, de-duplicated by `hostId`, first source winning. */
 export function hostsOf(sources: readonly HostDirectorySource[]): readonly HostDescriptor[] {
-  // TODO(host-directory): implement
-  throw new Error(`hostsOf(${sources.length} sources) is not implemented yet`);
+  const hosts: HostDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const source of sources) {
+    for (const host of source.hosts) {
+      // Order within a source is the source's own — the LiveKit one already orders by the room's
+      // participant ordering, and re-sorting here would make the selector jump under the operator.
+      if (seen.has(host.hostId)) continue;
+      seen.add(host.hostId);
+      hosts.push(host);
+    }
+  }
+  return hosts;
+}
+
+/** The first source with something to say about why it is unusable. */
+function firstErrorOf(sources: readonly HostDirectorySource[]): string | null {
+  return sources.find((source) => source.error !== null)?.error ?? null;
 }
 
 // ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
-import { createContext, type ReactNode } from "react";
-
 const HostDirectoryContext = createContext<readonly HostDirectorySource[] | null>(null);
+
+/**
+ * What a component outside the provider reads. Module-level and never mutated, so the merge below
+ * memoises on it and a directory-less subtree does not re-derive an empty directory every render.
+ */
+const NO_SOURCES: readonly HostDirectorySource[] = Object.freeze([]);
 
 export interface HostDirectorySourcesProps {
   /**
@@ -75,6 +105,18 @@ export function HostDirectorySources({ sources, children }: HostDirectorySources
  * which is the same shape as "nothing has been asked of this yet" and never an error.
  */
 export function useHostDirectory(): HostDirectory {
-  // TODO(host-directory): implement
-  throw new Error("useHostDirectory is not implemented yet");
+  const sources = useContext(HostDirectoryContext) ?? NO_SOURCES;
+  return useMemo(() => mergeHostDirectory(sources), [sources]);
+}
+
+/**
+ * One named source's own status and hosts, or `undefined` when nothing registered under that id.
+ *
+ * For a surface that is *about* one source rather than about the fleet — the LiveKit presence
+ * screen is the only one today, and it has to say "the common room could not be joined" even while
+ * the directory as a whole is perfectly healthy on another source.
+ */
+export function useHostDirectorySource(sourceId: string): HostDirectorySource | undefined {
+  const { sources } = useHostDirectory();
+  return useMemo(() => sources.find((source) => source.id === sourceId), [sources, sourceId]);
 }

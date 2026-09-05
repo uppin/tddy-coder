@@ -54,10 +54,13 @@ function DerivedDaemonIdsReadout() {
 }
 
 it("lists a daemon whose presence is re-synced when the common room reconnects", () => {
-  // Given — connected to the common room with no daemons visible yet
+  // Given — connected to the common room with no daemons visible yet. No serving daemon is named,
+  // so the common room is the only contributor and its roster is the whole list: the condition this
+  // test is about. A page that is served by a daemon always offers that one, which would make the
+  // precondition unreachable and the subject unobservable.
   const commonRoom = aFakeCommonRoom();
   cy.mount(
-    <SelectedDaemonProvider room={commonRoom.room} servingInstanceId="udoo">
+    <SelectedDaemonProvider room={commonRoom.room}>
       <DaemonSelectorReadout />
     </SelectedDaemonProvider>,
   );
@@ -66,15 +69,18 @@ it("lists a daemon whose presence is re-synced when the common room reconnects",
   // When — the daemon comes back as part of the roster re-synced on a LiveKit reconnect
   cy.then(() => commonRoom.reconnectWith([UDOO]));
 
-  // Then — the selector reflects the reconnected daemon
-  daemonSelectorPage.expectShowsSelected("udoo (this daemon)");
+  // Then — the selector reflects the reconnected daemon. Its self-label's " (this daemon)" suffix
+  // is stripped, because on this page it is a peer rather than the daemon that served it.
+  daemonSelectorPage.expectShowsSelected("udoo");
 });
 
 it("re-lists a daemon that dropped and rejoined across a common-room reconnect", () => {
-  // Given — one daemon is connected and present in the selector's list
+  // Given — one daemon is connected and present in the selector's list, contributed by the common
+  // room alone: no serving daemon is named, so the list empties when that daemon drops and the
+  // re-sync is observable.
   const commonRoom = aFakeCommonRoom().withDaemons([UDOO]);
   cy.mount(
-    <SelectedDaemonProvider room={commonRoom.room} servingInstanceId="udoo">
+    <SelectedDaemonProvider room={commonRoom.room}>
       <DaemonSelectorReadout />
       <DerivedDaemonIdsReadout />
     </SelectedDaemonProvider>,

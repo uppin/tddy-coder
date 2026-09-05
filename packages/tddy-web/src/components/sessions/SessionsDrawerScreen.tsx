@@ -16,6 +16,7 @@ import {
 } from "../../rpc/transportProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
@@ -90,7 +91,12 @@ export function SessionsDrawerScreen({
   // itself — hence the bare call.
   useSessionNotifications();
 
-  const { room, selectedInstanceId } = useSelectedDaemon();
+  const { selectedInstanceId } = useSelectedDaemon();
+  // The common room, asked for by name rather than taken off the shared context. Three things in
+  // this screen want it and all three are presence: the cross-host session roster below, the
+  // session-client stand-in in tests, and the terminal panes' own participant reads. A host reached
+  // over a wire with no roster yields `null`, and each of those already handles its absence.
+  const room = useHostPresence(selectedInstanceId);
   const daemons = useDaemons();
   const liveKitFactory = useLiveKitTransportFactory();
   // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
