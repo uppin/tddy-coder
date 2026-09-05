@@ -12,7 +12,12 @@
 import { describe, it, expect } from "bun:test";
 import { feedSupportsHistory, type TerminalFeed, type TerminalStream } from "./terminal";
 
-/** A stream that records what was written and can deliver frames to whatever listens. */
+/**
+ * An inert stream: it satisfies the shape a feed needs, and does nothing.
+ *
+ * These tests ask what a feed *offers*, never what flows over it — `feedSupportsHistory` reads the
+ * feed's own shape — so neither writing nor delivery is wired up here.
+ */
 function aTerminalStream(): TerminalStream {
   return {
     send: () => {},

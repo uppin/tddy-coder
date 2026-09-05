@@ -42,7 +42,7 @@ import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
 
 // `[tddy]` diagnostics for the terminal byte stream (enabled by the DEBUG mask).
 // The 220-col garbling on reconnect lived here, so log incoming bytes / buffering / resize.
-const dTerm = tddyDebug("tddy:term:grpc");
+const dTerm = tddyDebug("tddy:term:session");
 const dResize = tddyDebug("tddy:term:resize");
 const dHistory = tddyDebug("tddy:term:history");
 

@@ -108,7 +108,7 @@ describe("a forward fill with no offset anchor", () => {
     expect([first?.data, afterTheEnd]).toEqual([enc("all of it\n"), null]);
   });
 
-  it("keeps asking while chunks arrive that do not report atEnd", async () => {
+  it("reports the offset the next fetch resumes from", async () => {
     // Given a host serving a page that does not reach the tip
     const host = aHostServing(
       aChunk("older-1\n", 0n, 600n, /* atOldest */ true, /* atEnd */ false),
@@ -119,7 +119,8 @@ describe("a forward fill with no offset anchor", () => {
     // When the first page lands
     const first = await loader.loadNext(host.fetchChunk);
 
-    // Then the fill continues from where that page ended
+    // Then the page states where the fill resumes — its own end, which is what the caller driving
+    // the fill reads back
     expect(first?.nextFromOffset).toBe(600n);
   });
 });

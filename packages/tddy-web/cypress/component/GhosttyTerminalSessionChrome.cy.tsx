@@ -72,7 +72,9 @@ describe("GhosttyTerminalSession — chrome", () => {
       cy.get("input").type("x");
     });
 
-    // Then
+    // Then — the character reached the feed, and the hidden input cleared so the next one can be
+    // typed. Clearing alone proves nothing: an affordance that swallows the character clears too.
+    driver.expectSentToFeed("x");
     driver.mobileKeyboardButton().within(() => {
       cy.get("input").should("have.value", "");
     });
@@ -191,6 +193,42 @@ describe("GhosttyTerminalSession — chrome", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The connection carrying the feed
+// ---------------------------------------------------------------------------
+
+describe("GhosttyTerminalSession — the connection carrying the feed", () => {
+  it("states the connection status its caller gave it, where no chrome carries one", () => {
+    // Given a caller that says the connection is still coming up, and no connection chrome to
+    // show it — the status dot only exists with an overlay
+    const driver = aGhosttyTerminalSession({ connectionStatus: "connecting" }).mount();
+
+    // Then the raw readout states it, in the layout
+    driver.expectStatusReadout("connecting");
+  });
+
+  it("stops writing input to a feed whose far end has ended, and says the coder is gone", () => {
+    // Given a mounted terminal whose keystrokes reach the session
+    const driver = aGhosttyTerminalSession({
+      showMobileKeyboard: true,
+      preventFocusOnTap: false,
+    })
+      .mount()
+      .expectReady();
+    driver.typeOnMobileKeyboard("a").expectSentToFeed("a");
+
+    // When the far end goes away
+    driver.endSession();
+
+    // Then the terminal says so
+    driver.expectCoderUnavailable();
+
+    // And what is typed after that is not queued for a PTY that has exited. The earlier keystroke
+    // is still there, so this is the guard refusing the write, not a feed nothing ever reached.
+    driver.typeOnMobileKeyboard("b").expectNotSentToFeed("b").expectSentToFeed("a");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ShortcutDrawer integration
 // ---------------------------------------------------------------------------
 
@@ -242,7 +280,7 @@ describe("GhosttyTerminalSession — ShortcutDrawer integration", () => {
  * precedes `[data-testid="ghostty-terminal"]` with no control centers intersecting the terminal rect.
  */
 describe("Terminal status bar acceptance (PRD)", () => {
-  it("ghostty_livekit_chrome_lives_in_status_bar_not_over_canvas", () => {
+  it("keeps the connection chrome in the status bar, never over the terminal canvas", () => {
     // Given
     const driver = aGhosttyTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub(), buildId: "acceptance-build" },
@@ -284,7 +322,7 @@ describe("Terminal status bar acceptance (PRD)", () => {
     assertControlCentersNotInsideTerminalCanvas();
   });
 
-  it("connection_menu_and_fullscreen_still_functional", () => {
+  it("still opens the connection menu and goes fullscreen from the status bar", () => {
     // Given
     // Use withDisconnect() so the driver's internal onDisconnect stub is wired to the component.
     const driver = aGhosttyTerminalSession({
@@ -309,7 +347,7 @@ describe("Terminal status bar acceptance (PRD)", () => {
     driver.expectRequestFullscreenCalled();
   });
 
-  it("mobile_keyboard_affordance_in_status_bar", () => {
+  it("puts the mobile keyboard affordance in the status bar, above the canvas", () => {
     // Given / When
     const driver = aGhosttyTerminalSession({
       connectionOverlay: { onDisconnect: cy.stub() },

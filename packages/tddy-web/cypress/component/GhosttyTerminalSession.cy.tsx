@@ -28,7 +28,7 @@ function mountTerminal(node: React.ReactElement) {
 }
 
 /** A minimal feed double: bytes the test pushes in, and the bytes the terminal writes back. */
-function makeFakeGrpcStream() {
+function aTerminalFeedDouble() {
   const sentChunks: Uint8Array[] = [];
   const outputListeners: Array<(frame: TerminalFrame) => void> = [];
 
@@ -58,7 +58,7 @@ function makeFakeGrpcStream() {
 describe("GhosttyTerminalSession", () => {
   it("renders the ghostty terminal container", () => {
     // Given
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
 
     // When
     mountTerminal(
@@ -73,11 +73,9 @@ describe("GhosttyTerminalSession", () => {
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
   });
 
-  it("displays output bytes received from the gRPC stream", () => {
-    // Given
-    const fake = makeFakeGrpcStream();
-
-    // When
+  it("paints the output bytes that arrive on the feed", () => {
+    // Given a mounted terminal
+    const fake = aTerminalFeedDouble();
     mountTerminal(
       <GhosttyTerminalSession
         sessionToken="fake-token"
@@ -87,21 +85,17 @@ describe("GhosttyTerminalSession", () => {
     );
     byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
 
-    // When — server pushes "Hello world\r\n" to the terminal
-    // Verifies that stream.onMessage is wired up and the terminal receives the data
-    // without throwing. Rendered text lives on a WebGL canvas so contain.text cannot read it.
-    const payload = new TextEncoder().encode("Hello world\r\n");
-    cy.then(() => {
-      expect(() => fake.pushOutput(payload)).not.to.throw();
-    });
+    // When the far end writes
+    cy.then(() => fake.pushOutput(new TextEncoder().encode("Hello world\r\n")));
 
-    // Then — terminal element still present and stream correctly routed the data
-    byTestId(TEST_IDS.ghosttyTerminal).should("exist");
+    // Then the bytes reached the emulator's buffer. The canvas is WebGL, so the assertion reads
+    // the hidden mirror of what ghostty painted — a terminal that drops every byte fails here.
+    byTestId(TEST_IDS.terminalBufferText, { timeout: 10000 }).should("contain.text", "Hello world");
   });
 
   it("forwards keyboard input as bytes to the terminal stream", () => {
     // Given
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
     mountTerminal(
       <GhosttyTerminalSession
         sessionToken="fake-token"
@@ -114,19 +108,19 @@ describe("GhosttyTerminalSession", () => {
     // When
     byTestId(TEST_IDS.ghosttyTerminal).focus().type("ls");
 
-    // Then
-    cy.then(() => {
-      const allSent = fake.sentChunks
-        .map((c) => new TextDecoder().decode(c))
-        .join("");
-      expect(allSent).to.include("l");
-      expect(allSent).to.include("s");
+    // Then — each keystroke arrives as its own chunk. Asserted chunk by chunk rather than over the
+    // concatenation, which also holds the resize OSC (`\x1b]resize;80;24\x07`) and so contains an
+    // "s" whether or not anything was typed.
+    cy.wrap(null, { timeout: 4000 }).should(() => {
+      const chunks = fake.sentChunks.map((c) => new TextDecoder().decode(c));
+      expect(chunks, "chunks written back to the feed").to.include("l");
+      expect(chunks, "chunks written back to the feed").to.include("s");
     });
   });
 
   it("sends OSC resize sequence when the container is resized", () => {
     // Given
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
     cy.mount(
       <div
         id="resize-wrapper"
@@ -158,7 +152,7 @@ describe("GhosttyTerminalSession", () => {
 
   it("shows a connection status dot", () => {
     // Given / When
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
     mountTerminal(
       <GhosttyTerminalSession
         sessionToken="fake-token"
@@ -174,7 +168,7 @@ describe("GhosttyTerminalSession", () => {
 
   it("calls onDisconnect when the Disconnect menu item is clicked", () => {
     // Given
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
     const onDisconnect = cy.stub().as("onDisconnect");
     mountTerminal(
       <GhosttyTerminalSession
@@ -195,7 +189,7 @@ describe("GhosttyTerminalSession", () => {
 
   it("surfaces the cumulative output offset via onOffsetUpdate (snap on replay, advance on live)", () => {
     // Given — a terminal with an offset-update spy
-    const fake = makeFakeGrpcStream();
+    const fake = aTerminalFeedDouble();
     const offsets: bigint[] = [];
     const onOffsetUpdate = cy.stub().callsFake((offset: bigint) => { offsets.push(offset); }).as("onOffsetUpdate");
     mountTerminal(
