@@ -104,8 +104,9 @@ pub const LOG_LIVEKIT_PEER_METADATA: &str = "tddy_daemon::livekit_peer_discovery
 
 /// LiveKit-backed eligible listing plus the shared common-room [`Room`] handle for **StartSession** forwarding.
 ///
-/// Construct this in `main` when `livekit.common_room` and credentials are set; pass [`None`] to
-/// [`crate::connection_service::ConnectionServiceImpl::new`] for single-host / discovery-disabled mode.
+/// Construct this in [`crate::runtime::build`] when `livekit.common_room` and credentials are
+/// set; pass [`None`] to [`crate::connection_service::ConnectionServiceImpl::new`] for
+/// single-host / discovery-disabled mode.
 pub struct LiveKitDiscoveryHandles {
     pub eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     pub common_room_livekit_room: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
@@ -557,25 +558,52 @@ where
 
 /// Spawn a background task that joins `livekit.common_room`, publishes metadata, and keeps
 /// [`CommonRoomPeerRegistry`] in sync. Also stores [`Room`] in `room_slot` for **StartSession** forwarding.
+///
+/// Starts the OAuth loopback tunnel supervisor alongside it, for a caller that owns both for the
+/// lifetime of its process. The daemon itself does not: its discovery loop is owned by
+/// [`crate::common_room_supervisor`], which stops and restarts it when the configured room changes,
+/// while the tunnel supervisor follows `room_slot` across that and so is started once — see
+/// [`spawn_common_room_discovery_loop`] and [`spawn_oauth_loopback_tunnel`].
 pub fn spawn_common_room_discovery_task(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
 ) {
-    if config.codex_oauth_loopback_proxy_eligible {
-        let room_slot_oauth = room_slot.clone();
-        tokio::spawn(async move {
-            crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(
-                room_slot_oauth,
-            )
-            .await;
-        });
-    } else {
+    spawn_oauth_loopback_tunnel(&config, room_slot.clone());
+    spawn_common_room_discovery_loop(config, registry, room_slot);
+}
+
+/// The OAuth loopback TCP proxy, when this daemon is eligible to run one.
+///
+/// It follows `room_slot` rather than any one room connection, so it outlives a reconnect and is
+/// started once per process — rebinding its callback ports on every common-room change would race
+/// with itself for them.
+pub fn spawn_oauth_loopback_tunnel(
+    config: &DaemonConfig,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !config.codex_oauth_loopback_proxy_eligible {
         log::info!(
             target: "tddy_daemon::oauth_tunnel",
             "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
         );
+        return None;
     }
+    Some(tokio::spawn(async move {
+        crate::oauth_loopback_tunnel::run_oauth_tunnel_supervisor_follow_room_slot(room_slot).await;
+    }))
+}
+
+/// The discovery loop alone: join the common room, publish this daemon's advertisement, keep
+/// `registry` and `room_slot` in sync, and reconnect for ever when the room drops it.
+///
+/// Returned as a handle because it never ends on its own: the only way to stop discovering peers in
+/// a room is for its owner to abort it, which is what a reconfigured common room does.
+pub fn spawn_common_room_discovery_loop(
+    config: Arc<DaemonConfig>,
+    registry: Arc<CommonRoomPeerRegistry>,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let local_id = local_instance_id_for_config(&config);
@@ -600,7 +628,7 @@ pub fn spawn_common_room_discovery_task(
             registry.clear();
             tokio::time::sleep(Duration::from_secs(retry_secs)).await;
         }
-    });
+    })
 }
 
 /// Validates `livekit` + `common_room` URL/key/secret strings for discovery, returning

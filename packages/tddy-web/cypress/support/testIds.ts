@@ -401,6 +401,7 @@ export const TEST_IDS = {
   shellMenuVms: "shell-menu-vms",
   shellMenuModels: "shell-menu-models",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
+  shellMenuSettings: "shell-menu-settings",
 
   // Models & Agents screen (#/models)
   /** The Models & Agents screen root. */
@@ -701,6 +702,17 @@ export const TEST_IDS = {
   projectsNewProjectGitUrl: "projects-new-project-git-url",
   projectsNewProjectUserRelativePath: "projects-new-project-user-relative-path",
   projectsCreateProjectSubmit: "projects-create-project-submit",
+
+  // Daemon settings screen
+  daemonSettingsScreen: "daemon-settings-screen",
+  daemonSettingsLivekitUrl: "daemon-settings-livekit-url",
+  daemonSettingsLivekitApiKey: "daemon-settings-livekit-api-key",
+  /** Says whether the daemon holds a LiveKit API secret; never shows the secret itself. */
+  daemonSettingsLivekitSecretState: "daemon-settings-livekit-secret-state",
+  daemonSettingsSave: "daemon-settings-save",
+  /** The fields an update persisted but could not apply to the running daemon. */
+  daemonSettingsRestartRequired: "daemon-settings-restart-required",
+  daemonSettingsError: "daemon-settings-error",
 } as const;
 
 // ---------------------------------------------------------------------------

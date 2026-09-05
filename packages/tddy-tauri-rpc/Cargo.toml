@@ -1,0 +1,21 @@
+[package]
+name = "tddy-tauri-rpc"
+version = "0.1.0"
+edition = "2021"
+description = "Webview-IPC RPC transport for tddy-rpc — a Tauri webview and its in-process daemon over one duplex frame channel"
+
+[lib]
+name = "tddy_tauri_rpc"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
+log = "0.4"
+# "sync" for the connection mutex and the response queue; "rt" to own the drain task that pumps
+# responses onto the sink. Deliberately no `tauri` dependency — the sink is a trait, so the whole
+# flavour is exercised without a webview (see tests/rpc_over_webview_ipc.rs).
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

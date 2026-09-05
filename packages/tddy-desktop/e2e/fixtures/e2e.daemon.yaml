@@ -1,0 +1,37 @@
+# Daemon configuration for the desktop end-to-end suite.
+#
+# Deliberately narrower than `dev.desktop.yaml`: no LiveKit and no Telegram, so a run neither dials
+# a server that is not there nor waits on one. What remains is the surface the suite exercises —
+# the roster the webview talks to, and a GitHub stub that completes a sign-in without the network.
+#
+# Logs go to a file rather than stderr because the app is launched by WebdriverIO, whose own output
+# is what the terminal shows. `tmp/logs/e2e-daemon` is where a failing run's evidence lives.
+
+log:
+  loggers:
+    default:
+      output: { file: "tmp/logs/e2e-daemon" }
+      format: "{timestamp} [{level}] [{target}] {message}"
+  default:
+    level: debug
+    logger: default
+
+listen:
+  web_port: 8899
+  web_host: 127.0.0.1
+
+web_bundle_path: packages/tddy-web/dist
+
+# The sign-in the suite drives. `stub_codes` registers a code the stub provider hands straight back
+# through the callback, so the flow completes without GitHub.
+github:
+  stub: true
+  stub_codes: "test-code:testuser"
+
+users:
+  - github_user: "testuser"
+    os_user: "CURRENT_USER"
+
+allowed_agents:
+  - id: stub
+    label: "Stub"

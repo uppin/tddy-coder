@@ -137,6 +137,12 @@ pub mod proto {
     pub mod sandbox {
         include!(concat!(env!("OUT_DIR"), "/sandbox.rs"));
     }
+    /// `DaemonConfigService` — the daemon's own settings, read and written by its UI. See
+    /// `docs/ft/daemon/daemon-settings.md`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod daemon_config {
+        include!(concat!(env!("OUT_DIR"), "/daemon_config.rs"));
+    }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }

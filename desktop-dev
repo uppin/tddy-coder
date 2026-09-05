@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Start Tddy Desktop in development: the Tauri app hosting tddy-daemon in its own process, with the
+# tddy-web Vite dev server for HMR.
+#
+# The counterpart of ./web-dev, and deliberately repo-local: an installed app keeps its
+# configuration and data under ~/.tddy, while this uses the checkout's dev.desktop.yaml and
+# tmp/.tddy so a dev run never touches an installed app's state.
+#
+# Usage: ./desktop-dev                   # dev.desktop.yaml at the repo root
+#        ./desktop-dev --release         # extra CLI for `tauri dev` (pass-through)
+#
+# Environment variables:
+#   VITE_PORT       — Port for the Vite dev server (default: 5173)
+#   VITE_URL        — Origin the app loads its UI from (default: http://localhost:<VITE_PORT>).
+#                     `tauri dev` is told to wait on this, so a non-default port works.
+#   TDDY_DAEMON_CONFIG — YAML for the embedded tddy-daemon (default: dev.desktop.yaml at repo root).
+#   TDDY_DATA_DIR   — Where sessions and daemon state live (default: tmp/.tddy in the checkout).
+#                     An installed app defaults to ~/.tddy; this keeps a dev run out of it.
+#   TDDY_WORKSPACE_ROOT — The checkout the app resolves config and relative paths against.
+#
+# Repo-root .env is loaded first and never overrides an already-set variable, the same rule
+# ./web-dev follows.
+set -euo pipefail
+set -m
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+VITE_PORT="${VITE_PORT:-5173}"
+export VITE_URL="${VITE_URL:-http://localhost:${VITE_PORT}}"
+
+cd "$PROJECT_ROOT"
+
+# Load .env if present (does not override already-set env vars) — same as ./web-dev.
+if [[ -f .env ]]; then
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    if [[ -z "${!key+x}" ]]; then
+      export "$key=$value"
+    fi
+  done < .env
+fi
+
+# The app resolves the repo root from cwd / TDDY_WORKSPACE_ROOT. `cargo tauri dev` runs from
+# packages/tddy-desktop/src-tauri, so name it here rather than relying on the upward walk.
+export TDDY_WORKSPACE_ROOT="${TDDY_WORKSPACE_ROOT:-$PROJECT_ROOT}"
+
+# Sessions and daemon state stay inside the checkout, so a dev run never writes into the ~/.tddy an
+# installed app owns. Exported rather than left to the YAML so it holds for any config passed in.
+export TDDY_DATA_DIR="${TDDY_DATA_DIR:-$PROJECT_ROOT/tmp/.tddy}"
+mkdir -p "$TDDY_DATA_DIR"
+
+# Daemon config for the in-process tddy-daemon (dev.desktop.yaml at the repo root).
+if [[ -z "${TDDY_DAEMON_CONFIG:-}" ]] && [[ -f "$PROJECT_ROOT/dev.desktop.yaml" ]]; then
+  export TDDY_DAEMON_CONFIG="$PROJECT_ROOT/dev.desktop.yaml"
+fi
+
+VITE_PID=""
+CLEANED_UP=0
+
+# Stop the background Vite job (bun + node/vite). Idempotent for INT/EXIT both firing.
+stop_vite() {
+  [[ "$CLEANED_UP" -eq 1 ]] && return 0
+  CLEANED_UP=1
+  if [[ -z "${VITE_PID:-}" ]]; then
+    return 0
+  fi
+  if ! kill -0 "$VITE_PID" 2>/dev/null; then
+    return 0
+  fi
+  # Negative PID: signal the whole process group (leader PID == PGID from `set -m` + `&`).
+  kill -TERM -"$VITE_PID" 2>/dev/null || kill -TERM "$VITE_PID" 2>/dev/null || true
+  local i
+  for ((i = 0; i < 40; i++)); do
+    kill -0 "$VITE_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if kill -0 "$VITE_PID" 2>/dev/null; then
+    kill -KILL -"$VITE_PID" 2>/dev/null || kill -KILL "$VITE_PID" 2>/dev/null || true
+  fi
+  wait "$VITE_PID" 2>/dev/null || true
+}
+
+trap stop_vite EXIT
+trap 'stop_vite; exit 130' INT
+trap 'stop_vite; exit 143' TERM
+
+echo "Starting tddy-web Vite dev server on port ${VITE_PORT} ..."
+bun run --filter tddy-web dev &
+VITE_PID=$!
+
+echo "Waiting for ${VITE_URL} ..."
+ready=0
+for _ in $(seq 1 120); do
+  if curl -s -o /dev/null -f --max-time 2 "${VITE_URL}/"; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+
+if [[ "$ready" -ne 1 ]]; then
+  echo "Error: Vite did not become ready at ${VITE_URL}" >&2
+  exit 1
+fi
+
+# `devUrl` in tauri.conf.json is the 5173 default; override it here so `tauri dev` waits on the
+# server this script actually started when VITE_PORT / VITE_URL point somewhere else.
+echo "Starting Tddy Desktop (VITE_URL=${VITE_URL}) ..."
+bun run --filter tddy-desktop dev --config "{\"build\":{\"devUrl\":\"${VITE_URL}\"}}" "$@"

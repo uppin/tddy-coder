@@ -47,7 +47,7 @@ fn default_agent_warmup_request_timeout_secs() -> u64 {
 /// The defaults reproduce `tddy_discovery::warmup::WarmupOptions::default()` exactly — this
 /// section exists so a host whose agents live somewhere faster (or slower) than a cold local
 /// model server can say so, without any code path branching on how it was started.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentWarmupConfig {
     /// Total budget to get a single agent ready before the session fails to start.
@@ -100,7 +100,7 @@ const MIN_WORKTREE_ROOM_INTERVAL_MS: u64 = 100;
 /// FR5), so its interval is the freshness the room offers. The defaults reproduce the shipped
 /// behaviour exactly — this section exists so an operator can say something different, not so a
 /// caller can branch on how the daemon was started.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRoomConfig {
     /// How often the facilitating daemon measures the checkout it hosts. At least
@@ -158,7 +158,7 @@ fn default_relay_idle_timeout_secs() -> u64 {
 ///
 /// In relay mode the daemon forwards RPCs to a remote peer via LiveKit, does not require a
 /// `web_bundle_path`, and shuts down automatically after `idle_timeout_secs` of inactivity.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelayConfig {
     #[serde(default = "default_relay_idle_timeout_secs")]
@@ -176,17 +176,17 @@ impl Default for RelayConfig {
 /// Local Unix-domain socket transport (`local:` YAML section). The daemon serves its
 /// `ConnectionService` over this socket with SO_PEERCRED peer-trust auth, so same-host clients
 /// (e.g. tddy-sandbox-app) can mint a session token without an OAuth round-trip.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalConfig {
     /// Path the daemon binds the local socket at. When unset, resolved at bind time to
     /// `${XDG_RUNTIME_DIR:-/run}/tddy-daemon.sock` (see [`DaemonConfig::local_socket_path`]).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket_path: Option<PathBuf>,
 }
 
 /// Git behavior for daemon-side operations that contact a remote (fetching integration bases).
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GitConfig {
     /// Overrides `GIT_SSH_COMMAND` for the daemon's `git fetch` calls only — it is not exported to
@@ -196,7 +196,7 @@ pub struct GitConfig {
     /// inherits the ambient environment. Regardless of this value, daemon remote fetches run with
     /// stdin closed and `GIT_TERMINAL_PROMPT=0`, so a missing key/passphrase fails fast instead of
     /// hanging the daemon on a prompt it can never answer.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_command: Option<String>,
 }
 
@@ -204,66 +204,66 @@ pub struct GitConfig {
 /// so the backend derives defaults at runtime (delegated base from `/proc/self/cgroup`, controllers
 /// `memory cpu pids`, supervisor leaf `supervisor`) — nothing is hardcoded in the crate. Consulted
 /// only by the Linux cgroups backend; ignored on macOS / QEMU.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxCgroupConfig {
     /// Explicit delegated cgroup base directory; skips `/proc/self/cgroup` derivation when set.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_path: Option<PathBuf>,
     /// cgroup v2 unified mount root (default `/sys/fs/cgroup`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mount_root: Option<PathBuf>,
     /// Controllers enabled in the base's `cgroup.subtree_control`; empty means `[memory, cpu, pids]`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controllers: Vec<String>,
     /// Leaf cgroup the daemon relocates its own process into (default `supervisor`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor_leaf: Option<String>,
     /// Default `memory.max` (bytes) applied when a plan carries no explicit limits.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_max: Option<u64>,
     /// Default `cpu.max` applied when a plan carries no explicit limits.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_max: Option<String>,
     /// Default `pids.max` applied when a plan carries no explicit limits.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pids_max: Option<u64>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DaemonConfig {
     #[serde(default)]
     pub listen: ListenConfig,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_bundle_path: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub livekit: Option<LiveKitConfig>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubConfig>,
     /// Directory holding server-side auth state: the GitHub access token each web login granted
     /// (`github-tokens.json`, mode `0600`), which is the credential PR-status reads act with. Unset
     /// means no token is retained, so PR status reports itself *unavailable* for a real login.
     /// Session tokens are stateless and are never stored here.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_storage: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<LogConfig>,
     /// Path to a `tddy-coder` config file (e.g. `dev.config.yaml`) whose `log:` block is passed
     /// verbatim to spawned children as their `--config`, so operators own child log routing (e.g.
     /// routing `libwebrtc*` / `livekit*` chatter to a separate file at INFO). Relative to the
     /// daemon's cwd. When unset, the spawner synthesizes a minimal log config from the daemon `log:`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coder_config_path: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub users: Vec<UserMapping>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<AllowedTool>,
     /// Allowed coding backends / agents (`tddy-coder --agent` values), with optional UI labels.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_agents: Vec<AllowedAgent>,
     /// Relative to each OS user's home directory (e.g. `repos` → `~/repos/`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repos_base_path: Option<String>,
     /// When true (default), spawned `tddy-*` processes receive `--mouse` (browser / touch terminals).
     #[serde(default = "default_spawn_mouse")]
@@ -288,8 +288,8 @@ pub struct DaemonConfig {
     /// Stable id for this daemon in a shared LiveKit room (multi-host). When set, spawned tools
     /// and ConnectSession use `daemon-{instance_id}-{session_id}` as LiveKit server identity.
     /// Overridable at startup via the `TDDY_DAEMON_INSTANCE_ID` env var (see `apply_env_overrides`
-    /// in `main.rs`); falls back to the machine short hostname when neither is set.
-    #[serde(default)]
+    /// in `runtime.rs`); falls back to the machine short hostname when neither is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_instance_id: Option<String>,
     /// When true, append `-<unix_ms>` once per process to the resolved instance id (YAML override
     /// or hostname default) so multiple local daemons avoid LiveKit `DuplicateIdentity` in
@@ -302,30 +302,30 @@ pub struct DaemonConfig {
     #[serde(default = "default_codex_oauth_loopback_proxy_eligible")]
     pub codex_oauth_loopback_proxy_eligible: bool,
     /// Optional Telegram bot notifications (see `telegram_notifier` module).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telegram: Option<TelegramConfig>,
     /// Claude Code CLI session configuration (spawning interactive `claude` processes in PTYs).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_cli: Option<ClaudeCliConfig>,
     /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_cli: Option<CursorCliConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<RelayConfig>,
     /// Override the tddy home data directory. When absent, the profile default is used
     /// (`tmp/.tddy` in debug builds, `$HOME/.tddy` in release builds).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tddy_data_dir: Option<PathBuf>,
     /// Screen-sharing bridge binary configuration (VNC + RDP paths).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_sharing: Option<ScreenSharingConfig>,
     /// Git behavior for daemon-side remote operations (see `GitConfig`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<GitConfig>,
     /// Linux rootless cgroups sandbox delegation (see `SandboxCgroupConfig`). None = runtime defaults.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox_cgroup: Option<SandboxCgroupConfig>,
     /// Local Unix-domain socket transport (see `LocalConfig`). Absent = defaults (socket path
     /// resolved at bind time).
@@ -334,14 +334,14 @@ pub struct DaemonConfig {
     /// Privileged broker this daemon delegates spawning and cgroup work to (see
     /// `SupervisorClientConfig`). Absent = no supervisor on this host: the daemon keeps its own
     /// forked spawn worker and whatever privilege its own unit grants it.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor: Option<SupervisorClientConfig>,
 
     /// Browser DEBUG mask exposed to tddy-web via `GET /api/config` (`debug` field). A `debug`-package
     /// namespace mask (e.g. `tddy:term:*`, or `tddy:term:write,tddy:term:resize`) that enables scoped
     /// `[tddy]` diagnostics in the browser. Mainly for `./web-dev` to debug terminal garbling /
     /// misalignment. The browser invalidates any local override when this value changes. None = off.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<String>,
 
     /// Largest single session attachment this host will serve or materialize, in bytes. Bounds
@@ -360,7 +360,7 @@ pub struct DaemonConfig {
 /// jailing all go to the supervisor, and a supervisor that cannot be reached fails the operation.
 /// There is deliberately no fallback — quietly spawning a session as the daemon user instead of
 /// the requested user would turn an outage into a silent loss of isolation.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupervisorClientConfig {
     /// Absolute path of the supervisor's unix socket, e.g. `/run/tddy-supervisor.sock`.
@@ -431,18 +431,18 @@ impl DaemonConfig {
 }
 
 /// Telegram Bot API integration (teloxide). Loaded from daemon YAML under `telegram:`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TelegramConfig {
     #[serde(default)]
     pub enabled: bool,
     pub bot_token: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat_ids: Vec<i64>,
 }
 
 /// Screen-sharing bridge binary configuration. Loaded from daemon YAML under `screen_sharing:`.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScreenSharingConfig {
     /// Path to the `tddy-vnc` bridge binary.
@@ -615,7 +615,7 @@ pub fn resolve_claude_binary_path(config: &DaemonConfig) -> String {
 }
 
 /// Claude Code CLI session configuration. Loaded from daemon YAML under `claude_cli:`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClaudeCliConfig {
     /// Path to the `claude` binary. A path (contains `/`) is used verbatim; a bare name (default
@@ -626,22 +626,22 @@ pub struct ClaudeCliConfig {
     /// Absolute path to the `tddy-tools` binary for per-worktree hook commands.
     /// When absent, the daemon resolves it from `current_exe` sibling or falls back to
     /// `"tddy-tools"` (PATH lookup).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tddy_tools_path: Option<String>,
     /// HTTP base URL the per-worktree hook command uses to call `ReportSessionStatus`.
     /// When absent, defaults to `http://127.0.0.1:{web_port}` derived from the listen config.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_url: Option<String>,
     /// Persistent jail `$HOME` reused across sandboxed claude-cli sessions so auth (refreshed OAuth
     /// tokens), session history, and settings survive between sessions. Absent → default
     /// `$HOME/.tddy/sandbox-claude-home`. Override with the `TDDY_SANDBOX_CLAUDE_HOME` env var. A
     /// single daemon-wide home — see [`resolve_claude_home_dir`].
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_home_dir: Option<PathBuf>,
 }
 
 /// Cursor Agent CLI session configuration. Loaded from daemon YAML under `cursor_cli:`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CursorCliConfig {
     /// Path to the Cursor Agent CLI binary (default `"agent"`).
@@ -649,13 +649,13 @@ pub struct CursorCliConfig {
     pub binary_path: String,
     /// Absolute path to `tddy-tools` for per-worktree hook commands. Falls back to claude_cli or
     /// sibling-of-daemon resolution when absent.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tddy_tools_path: Option<String>,
     /// HTTP base URL for `ReportSessionStatus`. Falls back to claude_cli or web_port default.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_url: Option<String>,
     /// Persistent jail `$HOME` for sandboxed cursor-cli sessions (default: `$HOME/.tddy/sandbox-cursor-home`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_home_dir: Option<PathBuf>,
 }
 
@@ -887,12 +887,12 @@ fn resolve_sandbox_config_path_with(
     None
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_port: Option<u16>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_host: Option<String>,
     /// Externally-reachable HTTP base URL peer daemons use to reach this daemon's Connect-HTTP
     /// surface (today: `auth.LiveKitTokenService/MintLiveKitToken`, used by `tddy-remote-git-repo`
@@ -904,23 +904,23 @@ pub struct ListenConfig {
     /// (e.g. `http://ws-01.internal:9000`). The facilitating daemon publishes this in
     /// `AgentClonePlacement.facilitating_daemon_url` so an owning daemon that has never seen the
     /// project can clone it (PRD AC37).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advertise_url: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveKitConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_secret: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_url: Option<String>,
     /// Shared LiveKit room for presence (browser + tddy-* tools). Exposed to web as `common_room` in `/api/config`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub common_room: Option<String>,
     /// Total wall-clock time the daemon spends retrying `set_metadata` for the common-room advertisement
     /// in one publish round. The LiveKit Rust SDK uses a fixed **5 s** timeout **per attempt**; this value
@@ -942,41 +942,41 @@ impl Default for LiveKitConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GitHubConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redirect_uri: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stub: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stub_codes: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UserMapping {
     pub github_user: String,
     pub os_user: String,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllowedTool {
     pub path: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllowedAgent {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 

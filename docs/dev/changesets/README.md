@@ -1,6 +1,6 @@
 # Development changesets (cross-package)
 
-Wrapped changesets that span multiple packages or don’t map to a single `packages/*/docs/changesets.md` only.
+Wrapped changesets that span multiple packages or don’t map to a single `packages/*/docs/changesets/` only.
 
 Each changeset is **its own file**, named `YYYY-MM-DD-<slug>.md`.
 

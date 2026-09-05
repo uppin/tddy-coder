@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the dashboard window may call: the two RPC commands that carry envelope frames, plus the core plugin set the @tauri-apps/api helpers are built on.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-tddy-rpc-connect",
+    "allow-tddy-rpc-send"
+  ]
+}

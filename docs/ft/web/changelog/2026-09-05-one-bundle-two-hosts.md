@@ -1,0 +1,4 @@
+# 2026-09-05 — One bundle, two hosts
+
+- **tddy-web**: the RPC transport is chosen at runtime — the host application's IPC bridge inside the desktop app, same-origin `/rpc` in a browser — **carrying the same interceptor stack either way**, so a desktop operator never silently loses the auth gate. Client config follows the same fork (`GetClientConfig` where there is no HTTP origin). A **Settings** screen at `#/settings` edits the serving daemon's configuration. Feature **[daemon-settings.md](../../daemon/daemon-settings.md)**, **[tddy-desktop-tauri.md](../../desktop/tddy-desktop-tauri.md)**.
+- **tddy-livekit-web**: the envelope engine moves to **`tddy-rpc-web`** and is shared with the new webview-IPC flavour (`transport.ts` 1067 → 462 lines); public exports unchanged, and an aborted *unary* call now rejects with `ConnectError(Code.Canceled)` instead of a plain `Error`.
