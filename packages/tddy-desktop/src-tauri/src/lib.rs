@@ -103,21 +103,24 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Assemble the daemon, hand its roster to the webview host, and start what the runtime left to
 /// its host to start.
-/// Point the GitHub callback at this process, whatever the configuration says.
+/// Where a GitHub sign-in should come back to: this process, on loopback.
 ///
 /// `redirect_uri` is derived from `WEB_PUBLIC_URL` / `listen` for a *served* daemon, which is an
-/// address a browser on this machine may not even be able to reach — and must not be, since the
-/// callback carries an authorization code. A desktop sign-in has to come back here, so the host
-/// overrides it to loopback rather than inheriting a value that was never meant for it.
-fn redirect_oauth_to_this_process(config: &mut tddy_daemon::config::DaemonConfig) -> Option<u16> {
-    let github = config.github.as_mut()?;
+/// address a browser on this machine may not reach — and must not be, since the callback carries an
+/// authorization code. A desktop sign-in has to come back here.
+///
+/// Returned rather than written into the configuration: the configuration is what a settings update
+/// persists, so a host-chosen address stored there would put a value in the operator's file that
+/// they never set, and send a browser sign-in to loopback on some other machine.
+fn oauth_callback_address(
+    config: &tddy_daemon::config::DaemonConfig,
+) -> Option<std::net::SocketAddr> {
+    config.github.as_ref()?;
     let port = config.listen.web_port.unwrap_or(DEFAULT_CALLBACK_PORT);
-    github.redirect_uri = Some(oauth_callback::callback_url(port));
-    log::info!(
-        "[tddy-desktop] GitHub sign-in will come back to {}",
-        oauth_callback::callback_url(port)
-    );
-    Some(port)
+    Some(std::net::SocketAddr::from((
+        std::net::Ipv4Addr::LOCALHOST,
+        port,
+    )))
 }
 
 /// Wait for a GitHub sign-in to come back, and send the dashboard to its own callback route.
@@ -175,7 +178,7 @@ const DEFAULT_CALLBACK_PORT: u16 = 8899;
 
 fn start_daemon(
     app: &tauri::App,
-    mut config: tddy_daemon::config::DaemonConfig,
+    config: tddy_daemon::config::DaemonConfig,
     config_path: PathBuf,
     spawn_client: Option<(tddy_daemon::spawn_worker::SpawnClient, i32)>,
 ) -> anyhow::Result<()> {
@@ -183,11 +186,12 @@ fn start_daemon(
     // Loopback only, and served by this process: an address configured for a *served* daemon (a LAN
     // address out of `WEB_PUBLIC_URL`) is one a browser on this machine may not reach, and the
     // callback carries an authorization code that must not go on the network.
-    if let Some(port) = redirect_oauth_to_this_process(&mut config) {
-        complete_sign_in_when_the_browser_comes_back(
-            app,
-            std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+    let callback = oauth_callback_address(&config);
+    if let Some(address) = callback {
+        log::info!(
+            "[tddy-desktop] GitHub sign-in will come back to http://{address}/auth/callback"
         );
+        complete_sign_in_when_the_browser_comes_back(app, address);
     }
     // `build` is assembly, `spawn` needs a runtime context, and so does the signal listener, so all
     // three run on Tauri's — the same runtime the two IPC commands are dispatched on, which is what
@@ -197,6 +201,11 @@ fn start_daemon(
             config,
             RuntimeOptions::for_embedded()
                 .with_config_path(Some(config_path))
+                // Reaches the auth services and stops there — never the configuration a settings
+                // update writes back.
+                .with_oauth_redirect(
+                    callback.map(|address| oauth_callback::callback_url(address.port())),
+                )
                 .with_spawn_worker(spawn_client),
         )
         .await?;

@@ -81,3 +81,34 @@ async fn leaves_the_configured_web_port_unbound_when_built_for_an_embedded_host(
         .await
         .expect("the embedded runtime bound the configured web port");
 }
+
+#[tokio::test]
+async fn keeps_a_host_supplied_oauth_redirect_out_of_the_configuration_it_would_persist() {
+    // Given a daemon whose configuration names where GitHub should send a sign-in back
+    let port = a_free_tcp_port().await;
+    let mut config = a_daemon_config_with_a_livekit_block(port);
+    config.github =
+        Some(serde_yaml::from_str("redirect_uri: https://tddy.example/auth/callback").unwrap());
+
+    // When a host serves the callback itself and says where it listens
+    let runtime = runtime::build(
+        config,
+        RuntimeOptions::for_embedded()
+            .with_oauth_redirect(Some("http://127.0.0.1:8899/auth/callback".to_string())),
+    )
+    .await
+    .expect("the runtime did not build");
+
+    // Then the configuration this runtime keeps is untouched. It is what a settings update writes
+    // back, so a host-chosen address landing in it would put a value in the operator's file that
+    // they never set — and send a browser sign-in to loopback on some other machine.
+    assert_eq!(
+        runtime
+            .config
+            .github
+            .expect("the github block")
+            .redirect_uri
+            .as_deref(),
+        Some("https://tddy.example/auth/callback")
+    );
+}
