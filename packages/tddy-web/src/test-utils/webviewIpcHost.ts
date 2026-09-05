@@ -14,11 +14,19 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import type { DescMethodUnary, DescService, Message, MessageInitShape } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Transport } from "@connectrpc/connect";
 import { codeToString } from "@connectrpc/connect/protocol-connect";
-import { RpcRequestSchema, RpcResponseSchema, type RpcRequest } from "tddy-rpc-web";
+import {
+  mintClientEpoch,
+  RpcRequestSchema,
+  RpcResponseSchema,
+  type RpcRequest,
+} from "tddy-rpc-web";
 import type { WebviewIpcBridge } from "tddy-tauri-web";
 
 export interface WebviewIpcHostDouble extends WebviewIpcBridge {
-  /** The client epoch the page registered its response channel with. */
+  /**
+   * The client epoch the page registered its response channel with, or 0 while it has registered
+   * none.
+   */
   connectedEpoch(): number;
 }
 
@@ -37,7 +45,18 @@ export function aWebviewIpcHostServing(
     (input: unknown) => Promise<unknown>
   >;
   let onFrame: ((frame: Uint8Array) => void) | null = null;
-  let epoch = 0;
+  // Minted with the bridge, exactly as the real one does: a connection's identity is the bridge's,
+  // not something a transport built over it decides.
+  const clientEpoch = mintClientEpoch();
+  // 0 until a channel is registered — never a real epoch, so a page that registered none is told
+  // apart from one that did.
+  let registeredEpoch = 0;
+  let reportGone: (reason: string) => void = () => {};
+  // The real bridge resolves this when the page releases the connection, and there is no state in
+  // which the host application is gone while the page it serves is still running to hear about it.
+  const closed = new Promise<string>((resolve) => {
+    reportGone = resolve;
+  });
 
   const write = (response: MessageInitShape<typeof RpcResponseSchema>) =>
     onFrame?.(toBinary(RpcResponseSchema, create(RpcResponseSchema, response)));
@@ -66,9 +85,11 @@ export function aWebviewIpcHostServing(
     ) as DescMethodUnary | undefined;
 
   return {
-    async connect(handler, clientEpoch) {
+    clientEpoch,
+
+    async connect(handler) {
       onFrame = handler;
-      epoch = clientEpoch;
+      registeredEpoch = clientEpoch;
     },
 
     async send(frame) {
@@ -90,11 +111,20 @@ export function aWebviewIpcHostServing(
       );
     },
 
-    // The real bridge resolves this when the host application is gone; this one never leaves.
-    closed: new Promise<string>(() => {}),
+    closed,
+
+    /**
+     * Release the connection: the host drops the peer, so nothing further is delivered and the
+     * transport built over this bridge is told the connection has ended rather than left waiting on
+     * a channel nobody answers into. Idempotent, as the real one is.
+     */
+    async close() {
+      onFrame = null;
+      reportGone("the page released this connection");
+    },
 
     connectedEpoch() {
-      return epoch;
+      return registeredEpoch;
     },
   };
 }

@@ -14,7 +14,12 @@
 
 import { createConnectTransport } from "@connectrpc/connect-web";
 import type { Interceptor, Transport } from "@connectrpc/connect";
-import { createTauriIpcBridge, createTauriTransport, type WebviewIpcBridge } from "tddy-tauri-web";
+import {
+  createTauriTransport,
+  DAEMON_TARGET,
+  thisPagesIpcHost,
+  type WebviewIpcBridge,
+} from "tddy-tauri-web";
 import { daemonTransportFlavour, type TauriHostWindow } from "./daemonTransportFlavour";
 import { transportWithInterceptors } from "./interceptedTransport";
 import { createTrafficInterceptor } from "./httpTrafficInterceptor";
@@ -55,23 +60,24 @@ export interface DaemonHostEnvironment {
 }
 
 /**
- * This page's connection to the host application, opened once.
+ * The real host: this page's own `window`, and the one connection to the daemon this page holds.
  *
- * The bridge is a page-level resource, not a per-transport one: registering a response channel
- * *abandons the previous one*, which is what makes a reloaded page stop receiving answers meant for
- * the page before it. A page that opened two would abandon its own first connection, and every call
- * already issued on it would wait for an answer that can never arrive.
+ * The bridge is a page-level resource, not a per-transport one, and a page builds several
+ * transports — the provider builds one, and `useHttpTransport` builds a fallback for any component
+ * outside it — so which of them gets a connection cannot be left to callers to get right. Two
+ * bridges to the daemon would be two host-side peers for the one thing, each with its own channel
+ * and epoch, and releasing either would take a connection the other call sites are still using.
  *
- * A page builds several transports — the provider builds one, and `useHttpTransport` builds a
- * fallback for any component outside it — so this cannot be left to callers to get right.
+ * That guarantee now comes from the host application's own per-target registry rather than from a
+ * singleton here: `openConnection(DAEMON_TARGET)` opens the daemon connection the first time it is
+ * asked for and hands back the same bridge every time after. The registry keys on the target, which
+ * is what a page holding a session connection alongside this one needs and a singleton could never
+ * express.
  */
-let thisPagesBridge: WebviewIpcBridge | null = null;
-
-/** The real host: this page's own `window`, and the one bridge this page owns. */
 export function thisPagesHost(): DaemonHostEnvironment {
   return {
     window: typeof window === "undefined" ? {} : (window as DaemonHostWindow),
-    createIpcBridge: () => (thisPagesBridge ??= createTauriIpcBridge()),
+    createIpcBridge: () => thisPagesIpcHost().openConnection(DAEMON_TARGET),
   };
 }
 
@@ -141,7 +147,7 @@ function webviewIpcLog(): ((message: string) => void) | undefined {
 
 /**
  * Factory for the production webview-IPC transport: envelope frames across the host application's
- * two IPC commands, carrying the same interceptor stack the HTTP transport does.
+ * IPC commands, carrying the same interceptor stack the HTTP transport does.
  */
 export function createDefaultWebviewIpcTransport(
   bridge: WebviewIpcBridge,

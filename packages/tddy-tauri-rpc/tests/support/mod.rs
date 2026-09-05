@@ -1,7 +1,10 @@
-//! Test support for the webview-IPC flavour: a service to call, a fake sink to observe, a builder
-//! for request frames, and domain assertions on response frames.
+//! Test support for the webview-IPC flavour: the two hosts under test behind one adapter, a service
+//! to call, a fake sink to observe, a builder for request frames, and domain assertions on response
+//! frames.
 
-#![allow(dead_code)] // each test binary uses a subset of these helpers.
+// Each test binary uses a subset of these helpers, and only the binaries with shared behaviour
+// expand `against_both_hosts!`.
+#![allow(dead_code, unused_macros)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,8 +15,11 @@ use tddy_rpc::{
     BidiStreamOutput, MultiRpcService, ResponseBody, RpcMessage, RpcResult, RpcService,
     ServiceEntry, Status,
 };
-use tddy_tauri_rpc::{FrameSink, SinkClosed, WebviewRpcHost};
-use tokio::sync::mpsc;
+use tddy_tauri_rpc::{
+    ConnectionTarget, FrameError, FrameSink, MultiConnectionHost, RosterResolver, SinkClosed,
+    WebviewRpcHost,
+};
+use tokio::sync::{mpsc, oneshot};
 
 /// The service every test calls.
 pub const ECHO_SERVICE: &str = "test.EchoService";
@@ -24,7 +30,7 @@ pub const ECHO_SERVICE: &str = "test.EchoService";
 const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
-// Host under test
+// Hosts under test
 // ---------------------------------------------------------------------------
 
 /// A host serving [`ECHO_SERVICE`] through a `MultiRpcService`, the way the daemon serves its own
@@ -35,6 +41,122 @@ pub fn a_webview_rpc_host() -> WebviewRpcHost<MultiRpcService> {
         name: ECHO_SERVICE,
         service: Arc::new(EchoService),
     }]))
+}
+
+/// The echo roster, as a service a [`RosterResolver`] hands back.
+///
+/// Same roster `a_webview_rpc_host` serves, exposed on its own so a multi-connection test can give
+/// every target its own copy — which is what makes the connections genuinely independent rather
+/// than two names for one service.
+pub fn an_echo_roster() -> Arc<dyn RpcService> {
+    Arc::new(MultiRpcService::new(vec![ServiceEntry {
+        name: ECHO_SERVICE,
+        service: Arc::new(EchoService),
+    }]))
+}
+
+/// A [`MultiConnectionHost`] serving that same roster on its daemon target — the host the desktop
+/// app actually runs, so behaviour both hosts owe a page can be pinned on the one that ships.
+pub fn a_multi_connection_host() -> MultiConnectionHost<DaemonEchoRoster> {
+    MultiConnectionHost::new(DaemonEchoRoster)
+}
+
+/// Resolves the daemon target to the echo roster, and nothing else.
+///
+/// Session targets are what [`MultiConnectionHost`] gained over the single-slot host, so they have
+/// no counterpart to compare against and belong in the tests written for that host alone
+/// (`tests/concurrent_webview_connections.rs`). Answering `None` for them here says so.
+pub struct DaemonEchoRoster;
+
+impl RosterResolver for DaemonEchoRoster {
+    fn roster_for(&self, target: &ConnectionTarget) -> Option<Arc<dyn RpcService>> {
+        match target {
+            ConnectionTarget::Daemon => Some(an_echo_roster()),
+            ConnectionTarget::Session { .. } => None,
+        }
+    }
+}
+
+/// What both hosts owe a page, in the one shape a test can drive either of them through.
+///
+/// Deliberately narrow. The two hosts differ on what *opening* a connection does — `WebviewRpcHost`
+/// abandons whatever the previous page had, `MultiConnectionHost` refuses a reused epoch and
+/// disturbs nothing — so this adapter offers only "connect a page", never "connect a page and see
+/// what that did to the others". A test about that difference belongs to the host that has it.
+#[async_trait]
+pub trait WebviewHost: Send + Sync + 'static {
+    /// Register `sink` as the response channel for the page connection `client_epoch` names.
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32);
+
+    /// Decode and dispatch one request frame from the page.
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError>;
+}
+
+#[async_trait]
+impl<S: RpcService> WebviewHost for WebviewRpcHost<S> {
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32) {
+        WebviewRpcHost::connect(self, sink, client_epoch).await;
+    }
+
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError> {
+        WebviewRpcHost::handle_request_frame(self, frame).await
+    }
+}
+
+#[async_trait]
+impl<R: RosterResolver> WebviewHost for MultiConnectionHost<R> {
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32) {
+        // A page reaching the daemon is the connection both hosts have, so it is the one shared
+        // behaviour is pinned on. The refusals `connect` can return are the multi-connection host's
+        // own contract and are covered where that contract lives, so here they are a broken fixture.
+        MultiConnectionHost::connect(self, ConnectionTarget::Daemon, sink, client_epoch)
+            .await
+            .expect("the daemon roster resolves and no test reuses an epoch");
+    }
+
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError> {
+        MultiConnectionHost::handle_request_frame(self, frame).await
+    }
+}
+
+/// Run one test body against both hosts, once each.
+///
+/// ```ignore
+/// against_both_hosts! {
+///     async fn answers_a_unary_call(host) {
+///         // Given / When / Then, driving `host` through `WebviewHost`
+///     }
+/// }
+/// ```
+///
+/// Each body becomes `<name>::on_the_single_connection_host` and
+/// `<name>::on_the_multi_connection_host`, so a failure names the host it failed on. The two are
+/// separate implementations rather than one delegating to the other, so a body that passes on one
+/// says nothing about the other until it has run there.
+macro_rules! against_both_hosts {
+    ($(
+        $(#[$attribute:meta])*
+        async fn $name:ident($host:ident) $body:block
+    )*) => {
+        $(
+            $(#[$attribute])*
+            mod $name {
+                use super::*;
+
+                async fn behaviour($host: impl WebviewHost) $body
+
+                #[tokio::test]
+                async fn on_the_single_connection_host() {
+                    behaviour(a_webview_rpc_host()).await;
+                }
+
+                #[tokio::test]
+                async fn on_the_multi_connection_host() {
+                    behaviour(a_multi_connection_host()).await;
+                }
+            }
+        )*
+    };
 }
 
 /// Deterministic responses for every call shape the flavour has to carry.
@@ -403,5 +525,128 @@ impl ResponseAssertions for RpcResponse {
             error.message
         );
         self
+    }
+}
+
+/// A sink for a connection no call will ever reach: the read end is dropped on the way out, so
+/// there is nothing to observe on it and the first frame published to it would report
+/// [`SinkClosed`]. For the tests that need a connection to *exist* — to occupy an epoch, or to be
+/// counted — and never call it, where a "recording" sink nobody kept the recording of would only
+/// mislead.
+pub fn a_sink_nobody_reads() -> Arc<RecordingSink> {
+    a_recording_sink().0
+}
+
+// ---------------------------------------------------------------------------
+// A channel the page stopped reading
+// ---------------------------------------------------------------------------
+
+/// A [`FrameSink`] belonging to a page that has stopped taking frames off one of its channels: the
+/// first frame published to it parks the connection's drain task there, and it stays parked until
+/// the test says the peer is gone.
+///
+/// [`RecordingSink`] cannot stand in for this. Its queue is unbounded, so it accepts every frame a
+/// host can produce and applies no backpressure at all — which is the one thing a channel nobody is
+/// reading is about. The park is a genuinely blocked thread, because [`FrameSink::send`] is
+/// synchronous and there is nothing to await; `block_in_place` is what tells the runtime so, and it
+/// moves the rest of that worker's tasks elsewhere instead of stalling them behind this one. Tests
+/// using this sink therefore need `#[tokio::test(flavor = "multi_thread")]`.
+pub struct StalledSink {
+    /// Fires as the first frame arrives, before parking, so a test can wait for the channel to be
+    /// genuinely stuck rather than merely idle.
+    stuck: std::sync::Mutex<Option<oneshot::Sender<()>>>,
+    /// Unparks when the test drops its end: from then on this page is gone.
+    peer_gone: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    /// Fires when the sink itself is dropped — which the drain task does only on its way out, after
+    /// it has decided what a departed connection releases.
+    departure_handled: Option<oneshot::Sender<()>>,
+}
+
+/// The test's end of a [`StalledSink`]: it decides when the page's departure becomes visible, and
+/// can wait for the host to have finished acting on it.
+pub struct StalledPage {
+    stuck: Option<oneshot::Receiver<()>>,
+    peer_gone: std::sync::mpsc::Sender<()>,
+    departure_handled: oneshot::Receiver<()>,
+}
+
+/// A sink whose page has stopped reading, paired with the test's control over its departure.
+pub fn a_sink_the_page_stopped_reading() -> (Arc<StalledSink>, StalledPage) {
+    let (stuck_tx, stuck_rx) = oneshot::channel();
+    let (peer_gone_tx, peer_gone_rx) = std::sync::mpsc::channel();
+    let (departure_tx, departure_rx) = oneshot::channel();
+    (
+        Arc::new(StalledSink {
+            stuck: std::sync::Mutex::new(Some(stuck_tx)),
+            peer_gone: std::sync::Mutex::new(peer_gone_rx),
+            departure_handled: Some(departure_tx),
+        }),
+        StalledPage {
+            stuck: Some(stuck_rx),
+            peer_gone: peer_gone_tx,
+            departure_handled: departure_rx,
+        },
+    )
+}
+
+impl FrameSink for StalledSink {
+    fn send(&self, _frame: Vec<u8>) -> Result<(), SinkClosed> {
+        if let Some(stuck) = self.stuck.lock().expect("stalled sink poisoned").take() {
+            let _ = stuck.send(());
+        }
+        let peer_gone = self.peer_gone.lock().expect("stalled sink poisoned");
+        let _ = tokio::task::block_in_place(|| peer_gone.recv());
+        // Reached only once the test let go of its end: a page that never comes back for its frames
+        // is, in the end, a page that is gone.
+        Err(SinkClosed)
+    }
+
+    fn close(&self) {
+        // Deliberately nothing. The host closing this channel must not unpark it: when a departure
+        // becomes visible is exactly what the tests using this sink are pinning, so only the test
+        // gets to decide it.
+    }
+}
+
+impl Drop for StalledSink {
+    fn drop(&mut self) {
+        if let Some(departure_handled) = self.departure_handled.take() {
+            let _ = departure_handled.send(());
+        }
+    }
+}
+
+impl StalledPage {
+    /// Resolves once a frame is stuck in this channel — the host has published to it and parked
+    /// there. Until then the connection is merely idle, and releasing it would prove nothing.
+    pub async fn once_a_frame_is_stuck_in_the_channel(&mut self) {
+        let stuck = self
+            .stuck
+            .take()
+            .expect("a channel is waited on for its first frame once");
+        tokio::time::timeout(FRAME_TIMEOUT, stuck)
+            .await
+            .expect("nothing was ever published to the stalled channel")
+            .expect("the stalled sink went away before anything was published to it");
+    }
+
+    /// Let the departure surface, and resolve once the host has finished acting on it.
+    ///
+    /// The sink is dropped by the drain task on its way out, which is strictly after that task has
+    /// decided what a departed connection takes with it — so this is a happens-before, not a wait
+    /// for a plausible amount of time. That also means the test must have handed its own `Arc` to
+    /// the host and kept none: while anything else holds the sink, the drain task letting go of it
+    /// is not observable.
+    pub async fn once_the_host_has_handled_the_departure(self) {
+        let StalledPage {
+            peer_gone,
+            departure_handled,
+            ..
+        } = self;
+        drop(peer_gone);
+        tokio::time::timeout(FRAME_TIMEOUT, departure_handled)
+            .await
+            .expect("the host never finished with the departed connection")
+            .expect("the departed connection's sink was never dropped");
     }
 }
