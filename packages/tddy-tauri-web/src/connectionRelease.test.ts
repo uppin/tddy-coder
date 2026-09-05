@@ -6,7 +6,7 @@
  * next attach adds another. So the release is not an internal tidy-up — it is a command the page
  * owes the host, and these tests watch that command rather than anything on the page side of it.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-multi-connection-ipc.md`
+ * Reference: `packages/tddy-desktop/docs/webview-ipc-connections.md`
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
