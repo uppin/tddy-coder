@@ -60,3 +60,45 @@ async fn serves_a_second_page_on_the_same_host_after_the_first_one_is_gone() {
         .assert_message(b"second-page")
         .assert_complete();
 }
+
+#[tokio::test]
+async fn refuses_a_frame_from_a_connection_the_webview_has_already_replaced() {
+    // Given a page that opened a call, then reloaded and reconnected
+    let host = a_webview_rpc_host();
+    let (first_sink, _first_frames) = a_recording_sink();
+    host.connect(first_sink, 1).await;
+    let (second_sink, mut second_frames) = a_recording_sink();
+    host.connect(second_sink, 2).await;
+
+    // When a frame from the page that was replaced arrives late
+    let stale = host
+        .handle_request_frame(&a_request_frame().with_id(1).with_epoch(1).build())
+        .await;
+
+    // Then it is refused rather than answered onto the new page's channel, where its epoch would
+    // not match and it would be dropped — leaving the caller waiting for an answer forever
+    assert_eq!(
+        stale,
+        Err(FrameError::StaleConnection {
+            connected: 2,
+            frame: 1
+        })
+    );
+
+    // And the page that is actually connected is still served
+    host.handle_request_frame(
+        &a_request_frame()
+            .with_id(1)
+            .with_epoch(2)
+            .with_payload(b"live")
+            .build(),
+    )
+    .await
+    .expect("the connected page's frame was not accepted");
+    second_frames
+        .next_response()
+        .await
+        .assert_answers(1, "Echo")
+        .assert_message(b"live")
+        .assert_complete();
+}

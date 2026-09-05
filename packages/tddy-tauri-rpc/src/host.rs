@@ -36,6 +36,17 @@ pub enum FrameError {
     NotConnected,
     /// The frame's bytes are not a decodable `RpcRequest`.
     Malformed(String),
+    /// The frame belongs to a page connection this host has already replaced.
+    ///
+    /// Dispatching it anyway would answer it onto the *current* page's channel, where the epoch
+    /// does not match and the response is dropped — so the caller that sent it would wait for an
+    /// answer that can never arrive. Refusing says so instead.
+    StaleConnection {
+        /// The epoch of the page currently connected.
+        connected: u32,
+        /// The epoch the refused frame carried.
+        frame: u32,
+    },
 }
 
 /// Hosts `S` for a single webview at a time.
@@ -53,6 +64,8 @@ pub struct WebviewRpcHost<S: RpcService> {
 
 /// One webview connection: the sink its responses go to, and the engine peer it is known by.
 struct Connection {
+    /// The page connection this is, as the webview named it in `connect`.
+    client_epoch: u32,
     peer: String,
     sink: Arc<dyn FrameSink>,
     responses: mpsc::Sender<(String, RpcResponse)>,
@@ -90,6 +103,7 @@ impl<S: RpcService> WebviewRpcHost<S> {
             response_rx,
         ));
         *slot = Some(Connection {
+            client_epoch,
             peer,
             sink,
             responses,
@@ -112,6 +126,16 @@ impl<S: RpcService> WebviewRpcHost<S> {
         let (peer, responses) = {
             let slot = self.connection.lock().await;
             let connection = slot.as_ref().ok_or(FrameError::NotConnected)?;
+            // A frame minted by a page this host has already replaced is refused rather than
+            // dispatched: its answer would go to the current page's channel and be dropped there
+            // for the same epoch mismatch, and the caller would wait for it forever. A caller that
+            // is told is a caller that can fail.
+            if request.client_epoch != connection.client_epoch {
+                return Err(FrameError::StaleConnection {
+                    connected: connection.client_epoch,
+                    frame: request.client_epoch,
+                });
+            }
             (connection.peer.clone(), connection.responses.clone())
         };
 

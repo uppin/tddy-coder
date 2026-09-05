@@ -33,6 +33,14 @@ export interface TauriTransportOptions {
   bridge: WebviewIpcBridge;
   /** Minted per page load when omitted. */
   clientEpoch?: number;
+  /**
+   * Receives a line per call event. Omitted, calls are not logged.
+   *
+   * The host application is the one place a stalled call has no other visible symptom — there is no
+   * network panel to read it off, and a call that never settles renders as a screen that never
+   * arrives. The caller supplies the sink so this package needs no logging dependency of its own.
+   */
+  log?: (message: string) => void;
 }
 
 /**
@@ -111,5 +119,6 @@ export function createTauriTransport(options: TauriTransportOptions): Transport 
     pipe: webviewFramePipe(options.bridge, clientEpoch),
     clientEpoch,
     label: "the host application",
+    log: options.log,
   });
 }

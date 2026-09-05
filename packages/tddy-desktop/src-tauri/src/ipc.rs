@@ -92,5 +92,11 @@ fn describe_frame_error(error: FrameError) -> String {
         FrameError::Malformed(reason) => {
             format!("the request frame could not be decoded: {reason}")
         }
+        // The page that sent this was replaced — most often by a reload, whose new connection
+        // displaced it. Saying so is the point: the frame's answer would go to the page that is
+        // connected now and be dropped there, so a caller that is not told waits forever.
+        FrameError::StaleConnection { connected, frame } => format!(
+            "this frame belongs to a page connection that was replaced              (connected epoch {connected}, frame epoch {frame}); reconnect before sending"
+        ),
     }
 }

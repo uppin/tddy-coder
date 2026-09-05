@@ -106,6 +106,27 @@ export function createDefaultHttpTransport(
 }
 
 /**
+ * Per-call logging for the webview-IPC transport, on the same `tddy:rpc*` debug mask the LiveKit
+ * transport uses (DevTools `localStorage.debug = 'tddy:rpc:*'`, or the daemon's `debug:` YAML served
+ * as client config).
+ *
+ * A stalled call inside the host application has no other visible symptom: there is no network
+ * panel to read it off, and a call that never settles renders as a screen that never arrives.
+ */
+function webviewIpcLog(): ((message: string) => void) | undefined {
+  let enabled = false;
+  try {
+    enabled = (window.localStorage.getItem("debug") ?? "").includes("tddy:rpc");
+  } catch {
+    // A webview with storage blocked simply gets no logging; it must not break the transport.
+    return undefined;
+  }
+  return enabled
+    ? (message: string) => console.log(`[tddy][rpc][webview-ipc] ${message}`)
+    : undefined;
+}
+
+/**
  * Factory for the production webview-IPC transport: envelope frames across the host application's
  * two IPC commands, carrying the same interceptor stack the HTTP transport does.
  */
@@ -115,7 +136,7 @@ export function createDefaultWebviewIpcTransport(
   authTokenGate?: AuthTokenGate,
 ): Transport {
   return transportWithInterceptors({
-    inner: createTauriTransport({ bridge }),
+    inner: createTauriTransport({ bridge, log: webviewIpcLog() }),
     interceptors: daemonInterceptors(registry, authTokenGate),
     baseUrl: WEBVIEW_IPC_BASE_URL,
   });
