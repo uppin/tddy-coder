@@ -46,16 +46,23 @@ async runtime exists, because `fork` from a multi-threaded process can deadlock.
 
 ### UI ↔ daemon
 
-Two Tauri commands carry `rpc_envelope` frames as **raw bytes**:
+Three Tauri commands carry `rpc_envelope` frames as **raw bytes**:
 
 | Command | Arguments | Meaning |
 |---------|-----------|---------|
-| `tddy_rpc_connect` | `{ channel, clientEpoch }` | Register this page's `Channel<ArrayBuffer>` as its response channel; the host abandons every stream the previous page opened |
-| `tddy_rpc_send` | the encoded `RpcRequest` frame as the invoke body | One request frame |
+| `tddy_rpc_connect` | `{ channel, clientEpoch, target }` | Open a connection to `target`, with this `Channel<ArrayBuffer>` as its response channel and `clientEpoch` as its identity; every other connection keeps serving, and a `clientEpoch` already in use is refused |
+| `tddy_rpc_send` | the encoded `RpcRequest` frame as the invoke body | One request frame, routed by the epoch it carries |
+| `tddy_rpc_disconnect` | `{ clientEpoch }` | Release that one connection |
 
-The host side is **`tddy-tauri-rpc`** (`WebviewRpcHost`), which knows nothing about Tauri: this
-crate supplies the `FrameSink` over `tauri::ipc::Channel`. The browser side is
-**`tddy-tauri-web`**'s `createTauriIpcBridge()`.
+A page holds several at once — the daemon, plus one per attached session — so a connection has a
+lifetime of its own rather than the page's, which is what `tddy_rpc_disconnect` exists for. The
+page's connections are reaped as a replacing page commits, since a page that has gone can no longer
+release what it opened.
+
+The host side is **`tddy-tauri-rpc`** (`MultiConnectionHost`), which knows nothing about Tauri: this
+crate supplies the `FrameSink` over `tauri::ipc::Channel` and the `RosterResolver` that turns a
+target into a service. The browser side is **`tddy-tauri-web`**'s `thisPagesIpcHost()`, which holds
+one bridge per target.
 
 ### Window
 

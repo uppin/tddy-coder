@@ -6,6 +6,7 @@
 
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import {
+  mintClientEpoch,
   RpcRequestSchema,
   RpcResponseSchema,
   type RpcRequest,
@@ -16,7 +17,7 @@ import type { WebviewIpcBridge } from "../transport.js";
 export interface WebviewIpcDouble extends WebviewIpcBridge {
   /** The next request frame the page sends, awaited rather than polled. */
   nextRequest(): Promise<RpcRequest>;
-  /** The epoch the page registered its response channel with. */
+  /** The epoch the page registered its response channel with, or 0 while it has registered none. */
   connectedEpoch(): number;
   /** Answer `request` with one terminal success frame. */
   answer(request: RpcRequest, message: string): void;
@@ -34,11 +35,22 @@ export interface WebviewIpcDouble extends WebviewIpcBridge {
   wasClosed(): boolean;
 }
 
-export function aWebviewIpcDouble(): WebviewIpcDouble {
+/** What the double stands for, unless a test names the connection it wants. */
+export interface WebviewIpcDoubleOptions {
+  /** The connection this bridge is, as the real one mints for itself. */
+  clientEpoch?: number;
+}
+
+export function aWebviewIpcDouble(options: WebviewIpcDoubleOptions = {}): WebviewIpcDouble {
+  // A real bridge mints its own epoch, so this one does too unless the test names it — a test that
+  // asserts on the epoch its frames carry needs to know which number to expect.
+  const clientEpoch = options.clientEpoch ?? mintClientEpoch();
   const arrived: RpcRequest[] = [];
   const waiting: Array<(request: RpcRequest) => void> = [];
   let onFrame: ((frame: Uint8Array) => void) | null = null;
-  let epoch = 0;
+  // 0 until a channel is registered: never a real epoch, so "connected" and "never connected" are
+  // told apart rather than conflated by handing back the epoch this double was built with.
+  let registeredEpoch = 0;
   let reportClosed: (reason: string) => void = () => {};
   const closed = new Promise<string>((resolve) => {
     reportClosed = resolve;
@@ -59,9 +71,10 @@ export function aWebviewIpcDouble(): WebviewIpcDouble {
   });
 
   return {
-    async connect(handler, clientEpoch) {
+    clientEpoch,
+    async connect(handler) {
       onFrame = handler;
-      epoch = clientEpoch;
+      registeredEpoch = clientEpoch;
     },
     async send(frame) {
       const request = fromBinary(RpcRequestSchema, frame);
@@ -85,7 +98,7 @@ export function aWebviewIpcDouble(): WebviewIpcDouble {
       return new Promise<RpcRequest>((resolve) => waiting.push(resolve));
     },
     connectedEpoch() {
-      return epoch;
+      return registeredEpoch;
     },
     answer(request, message) {
       push({

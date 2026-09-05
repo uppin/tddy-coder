@@ -1,7 +1,10 @@
-//! Test support for the webview-IPC flavour: a service to call, a fake sink to observe, a builder
-//! for request frames, and domain assertions on response frames.
+//! Test support for the webview-IPC flavour: the two hosts under test behind one adapter, a service
+//! to call, a fake sink to observe, a builder for request frames, and domain assertions on response
+//! frames.
 
-#![allow(dead_code)] // each test binary uses a subset of these helpers.
+// Each test binary uses a subset of these helpers, and only the binaries with shared behaviour
+// expand `against_both_hosts!`.
+#![allow(dead_code, unused_macros)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +15,10 @@ use tddy_rpc::{
     BidiStreamOutput, MultiRpcService, ResponseBody, RpcMessage, RpcResult, RpcService,
     ServiceEntry, Status,
 };
-use tddy_tauri_rpc::{FrameSink, SinkClosed, WebviewRpcHost};
+use tddy_tauri_rpc::{
+    ConnectionTarget, FrameError, FrameSink, MultiConnectionHost, RosterResolver, SinkClosed,
+    WebviewRpcHost,
+};
 use tokio::sync::mpsc;
 
 /// The service every test calls.
@@ -24,7 +30,7 @@ pub const ECHO_SERVICE: &str = "test.EchoService";
 const FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ---------------------------------------------------------------------------
-// Host under test
+// Hosts under test
 // ---------------------------------------------------------------------------
 
 /// A host serving [`ECHO_SERVICE`] through a `MultiRpcService`, the way the daemon serves its own
@@ -35,6 +41,122 @@ pub fn a_webview_rpc_host() -> WebviewRpcHost<MultiRpcService> {
         name: ECHO_SERVICE,
         service: Arc::new(EchoService),
     }]))
+}
+
+/// The echo roster, as a service a [`RosterResolver`] hands back.
+///
+/// Same roster `a_webview_rpc_host` serves, exposed on its own so a multi-connection test can give
+/// every target its own copy — which is what makes the connections genuinely independent rather
+/// than two names for one service.
+pub fn an_echo_roster() -> Arc<dyn RpcService> {
+    Arc::new(MultiRpcService::new(vec![ServiceEntry {
+        name: ECHO_SERVICE,
+        service: Arc::new(EchoService),
+    }]))
+}
+
+/// A [`MultiConnectionHost`] serving that same roster on its daemon target — the host the desktop
+/// app actually runs, so behaviour both hosts owe a page can be pinned on the one that ships.
+pub fn a_multi_connection_host() -> MultiConnectionHost<DaemonEchoRoster> {
+    MultiConnectionHost::new(DaemonEchoRoster)
+}
+
+/// Resolves the daemon target to the echo roster, and nothing else.
+///
+/// Session targets are what [`MultiConnectionHost`] gained over the single-slot host, so they have
+/// no counterpart to compare against and belong in the tests written for that host alone
+/// (`tests/concurrent_webview_connections.rs`). Answering `None` for them here says so.
+pub struct DaemonEchoRoster;
+
+impl RosterResolver for DaemonEchoRoster {
+    fn roster_for(&self, target: &ConnectionTarget) -> Option<Arc<dyn RpcService>> {
+        match target {
+            ConnectionTarget::Daemon => Some(an_echo_roster()),
+            ConnectionTarget::Session { .. } => None,
+        }
+    }
+}
+
+/// What both hosts owe a page, in the one shape a test can drive either of them through.
+///
+/// Deliberately narrow. The two hosts differ on what *opening* a connection does — `WebviewRpcHost`
+/// abandons whatever the previous page had, `MultiConnectionHost` refuses a reused epoch and
+/// disturbs nothing — so this adapter offers only "connect a page", never "connect a page and see
+/// what that did to the others". A test about that difference belongs to the host that has it.
+#[async_trait]
+pub trait WebviewHost: Send + Sync + 'static {
+    /// Register `sink` as the response channel for the page connection `client_epoch` names.
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32);
+
+    /// Decode and dispatch one request frame from the page.
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError>;
+}
+
+#[async_trait]
+impl<S: RpcService> WebviewHost for WebviewRpcHost<S> {
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32) {
+        WebviewRpcHost::connect(self, sink, client_epoch).await;
+    }
+
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError> {
+        WebviewRpcHost::handle_request_frame(self, frame).await
+    }
+}
+
+#[async_trait]
+impl<R: RosterResolver> WebviewHost for MultiConnectionHost<R> {
+    async fn connect_page(&self, sink: Arc<dyn FrameSink>, client_epoch: u32) {
+        // A page reaching the daemon is the connection both hosts have, so it is the one shared
+        // behaviour is pinned on. The refusals `connect` can return are the multi-connection host's
+        // own contract and are covered where that contract lives, so here they are a broken fixture.
+        MultiConnectionHost::connect(self, ConnectionTarget::Daemon, sink, client_epoch)
+            .await
+            .expect("the daemon roster resolves and no test reuses an epoch");
+    }
+
+    async fn handle_request_frame(&self, frame: &[u8]) -> Result<(), FrameError> {
+        MultiConnectionHost::handle_request_frame(self, frame).await
+    }
+}
+
+/// Run one test body against both hosts, once each.
+///
+/// ```ignore
+/// against_both_hosts! {
+///     async fn answers_a_unary_call(host) {
+///         // Given / When / Then, driving `host` through `WebviewHost`
+///     }
+/// }
+/// ```
+///
+/// Each body becomes `<name>::on_the_single_connection_host` and
+/// `<name>::on_the_multi_connection_host`, so a failure names the host it failed on. The two are
+/// separate implementations rather than one delegating to the other, so a body that passes on one
+/// says nothing about the other until it has run there.
+macro_rules! against_both_hosts {
+    ($(
+        $(#[$attribute:meta])*
+        async fn $name:ident($host:ident) $body:block
+    )*) => {
+        $(
+            $(#[$attribute])*
+            mod $name {
+                use super::*;
+
+                async fn behaviour($host: impl WebviewHost) $body
+
+                #[tokio::test]
+                async fn on_the_single_connection_host() {
+                    behaviour(a_webview_rpc_host()).await;
+                }
+
+                #[tokio::test]
+                async fn on_the_multi_connection_host() {
+                    behaviour(a_multi_connection_host()).await;
+                }
+            }
+        )*
+    };
 }
 
 /// Deterministic responses for every call shape the flavour has to carry.
@@ -141,18 +263,6 @@ fn one_message_then_never_completes(payload: &[u8]) -> mpsc::Receiver<Result<Vec
 // ---------------------------------------------------------------------------
 // Fake sink
 // ---------------------------------------------------------------------------
-
-/// The echo roster, as a service a [`RosterResolver`](tddy_tauri_rpc::RosterResolver) hands back.
-///
-/// Same roster `a_webview_rpc_host` serves, exposed on its own so a multi-connection test can give
-/// every target its own copy — which is what makes the connections genuinely independent rather
-/// than two names for one service.
-pub fn an_echo_roster() -> Arc<dyn RpcService> {
-    Arc::new(MultiRpcService::new(vec![ServiceEntry {
-        name: ECHO_SERVICE,
-        service: Arc::new(EchoService),
-    }]))
-}
 
 /// A [`FrameSink`] that queues every frame for the test to read, and reports closure so a test can
 /// tell "no frame yet" apart from "this connection is over".

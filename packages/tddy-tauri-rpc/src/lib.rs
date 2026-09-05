@@ -4,12 +4,13 @@
 //! This is the same shape as [`tddy_stdio`](../../tddy-stdio) — one duplex channel carrying
 //! `rpc_envelope` frames — with one difference: an IPC bridge is already message-oriented, so
 //! there is no length-prefix frame codec and no chunking. Request frames arrive one per call into
-//! [`WebviewRpcHost::handle_request_frame`]; response frames leave through a [`FrameSink`] the
-//! webview registers once per page load.
+//! the host's `handle_request_frame` — [`MultiConnectionHost::handle_request_frame`] is the one the
+//! desktop runs — and are routed by the client epoch they carry; response frames leave through a
+//! [`FrameSink`] the webview registers once per connection, of which a page may hold several.
 //!
 //! The sink is a trait so this crate does not depend on any particular host application: a Tauri
 //! app implements it over `tauri::ipc::Channel`, and tests implement it over an in-memory queue.
-
+//!
 //! ## One connection, or many
 //!
 //! [`WebviewRpcHost`] serves a single webview connection reaching a single service — the shape every

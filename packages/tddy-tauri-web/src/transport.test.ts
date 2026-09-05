@@ -127,11 +127,8 @@ describe("webview IPC transport", () => {
 
   it("carries the epoch it registered with on every request frame", async () => {
     // Given a page connected as a known connection
-    const bridge = aWebviewIpcDouble();
-    const client = createClient(
-      EchoService,
-      createTauriTransport({ bridge, clientEpoch: 4242 }),
-    );
+    const bridge = aWebviewIpcDouble({ clientEpoch: 4242 });
+    const client = createClient(EchoService, createTauriTransport({ bridge }));
 
     // When it issues two calls
     const first = client.echo({ message: "one" });

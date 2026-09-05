@@ -1,5 +1,4 @@
 export {
-  createTauriIpcBridge,
   createTauriTransport,
   DAEMON_TARGET,
   sessionTarget,

@@ -1,10 +1,10 @@
 /**
  * The page's side of many concurrent, independently addressed IPC connections.
  *
- * `createTauriIpcBridge` opens exactly one connection, and `daemonTransport.ts` keeps a
- * module-level singleton around it — deliberately, because registering a response channel used to
- * *abandon the previous one*, so a page that opened two would abandon its own first connection and
- * leave every call already issued on it waiting forever.
+ * A page used to open exactly one connection, and `daemonTransport.ts` kept a module-level
+ * singleton around it — deliberately, because registering a response channel used to *abandon the
+ * previous one*, so a page that opened two would abandon its own first connection and leave every
+ * call already issued on it waiting forever.
  *
  * Once connections are addressed, that invariant becomes **one bridge per target** instead of one
  * per page. These tests pin the difference.

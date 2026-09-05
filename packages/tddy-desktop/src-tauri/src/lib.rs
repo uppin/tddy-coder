@@ -118,8 +118,9 @@ pub fn run() -> anyhow::Result<()> {
 /// departing one's: reaping late would take out the connections the new page has just opened.
 /// [`PageLoadEvent::Started`] is the commit of the new document — before its scripts are injected
 /// and therefore before it can invoke anything — and the reap is awaited here rather than spawned,
-/// so it has finished by the time this returns and the new page begins to run. The work is the
-/// daemon's runtime's, not this thread's; what is awaited is its completion.
+/// so it has finished by the time this returns and the new page begins to run. `block_on` drives
+/// the reap to completion on this very thread — blocking here is the point, since a spawned reap
+/// could still be running once the arriving page starts opening connections of its own.
 fn reap_the_departing_pages_connections(webview: &Webview, page: &PageLoadPayload<'_>) {
     // `Finished` is the arriving page already running — by then it has opened its own connections,
     // and reaping would take them with it.
