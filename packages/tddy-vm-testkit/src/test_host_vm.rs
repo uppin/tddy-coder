@@ -165,6 +165,26 @@ impl TestHostVm {
             .copy_in(&binaries.all_paths(), GUEST_STAGE_DIR)
             .await?;
 
+        // Before anything execs them: binaries built off-guest carry an absolute
+        // /nix/store interpreter and RPATH, and a guest missing those paths cannot run
+        // them at all — `execve` returns ENOENT for the *interpreter*, which systemd
+        // reports as `203/EXEC` on a binary that is plainly present. Unpacked at `/`
+        // because store paths are absolute by construction.
+        if let Some(closure) = &binaries.loader_closure {
+            let name = closure
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("the loader closure has no filename"))?;
+            progress("unpacking the loader closure the binaries were linked against");
+            self.guest
+                .run_over_ssh_once(
+                    &format!("sudo tar -xzf {GUEST_STAGE_DIR}/{name} -C /"),
+                    INSTALL_TIMEOUT,
+                )
+                .await?
+                .assert_succeeded();
+        }
+
         // `./install` reads its inputs relative to `$(pwd)`, so the staged files are
         // arranged into the checkout shape it expects rather than the flat directory scp
         // delivered.

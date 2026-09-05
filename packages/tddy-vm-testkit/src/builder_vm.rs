@@ -57,6 +57,16 @@ pub struct BuiltBinaries {
     pub binaries: Vec<PathBuf>,
     /// Absolute host paths of the files `./install` reads out of a checkout.
     pub install_bundle: Vec<PathBuf>,
+    /// A tarball of the `/nix/store` paths these binaries were linked against, unpacked at
+    /// `/` in the guest before anything execs them.
+    ///
+    /// `Some` when the binaries were built somewhere the guest does not share a store with
+    /// — a CI runner, say. Their ELF interpreter and RPATH are absolute store paths, so a
+    /// guest missing them cannot `execve` the binary at all: the kernel returns ENOENT for
+    /// the *interpreter*, and systemd reports `203/EXEC` on a file that is plainly there.
+    ///
+    /// `None` when the guest built them itself and already has every path they name.
+    pub loader_closure: Option<PathBuf>,
 }
 
 impl BuiltBinaries {
@@ -75,6 +85,7 @@ impl BuiltBinaries {
     /// ones.
     pub fn from_dist_dir(dist_dir: impl Into<PathBuf>) -> Result<Self> {
         let dist_dir = dist_dir.into();
+        let loader_closure = dist_dir.join(LOADER_CLOSURE_FILENAME);
         let binaries = deployed_binaries()
             .into_iter()
             .map(|name| dist_dir.join(name))
@@ -87,6 +98,7 @@ impl BuiltBinaries {
         let missing = binaries
             .iter()
             .chain(install_bundle.iter())
+            .chain(std::iter::once(&loader_closure))
             .filter(|path| !path.exists())
             .map(|path| path.display().to_string())
             .collect::<Vec<_>>();
@@ -102,18 +114,25 @@ impl BuiltBinaries {
             dist_dir,
             binaries,
             install_bundle,
+            loader_closure: Some(loader_closure),
         })
     }
 
-    /// Everything that has to reach the test host, binaries and bundle together.
+    /// Everything that has to reach the test host: binaries, bundle, and the loader closure
+    /// when the binaries came from a machine the guest shares no store with.
     pub fn all_paths(&self) -> Vec<PathBuf> {
         self.binaries
             .iter()
             .chain(self.install_bundle.iter())
+            .chain(self.loader_closure.iter())
             .cloned()
             .collect()
     }
 }
+
+/// The tarball `BuiltBinaries::from_dist_dir` expects beside the binaries, holding the
+/// `/nix/store` closure they were linked against.
+pub const LOADER_CLOSURE_FILENAME: &str = "nix-closure.tar.gz";
 
 /// The builder guest.
 pub struct BuilderVm {
@@ -304,6 +323,8 @@ impl BuilderVm {
             dist_dir,
             binaries,
             install_bundle,
+            // The guest built these in its own store and already has every path they name.
+            loader_closure: None,
         })
     }
 

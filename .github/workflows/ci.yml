@@ -241,6 +241,26 @@ jobs:
           strip dist/tddy-* 2>/dev/null || true
           du -sh dist
 
+      # These binaries are linked by the nix dev shell: their ELF interpreter and their
+      # RPATH are absolute /nix/store paths on *this runner* (glibc, gcc-lib, zlib). The
+      # guest has Nix but not these paths, and a binary whose interpreter is missing
+      # cannot be exec'd at all — the kernel returns ENOENT for the interpreter, which
+      # systemd reports as `203/EXEC` on a file that is plainly present. Shipping the
+      # closure beside them is what makes them runnable anywhere else.
+      - name: Pack the loader closure the binaries were linked against
+        run: |
+          set -euo pipefail
+          refs=$(for b in dist/tddy-*; do ldd "$b" 2>/dev/null || true; done \
+                   | grep -oE '/nix/store/[^ )]+' | sort -u)
+          if [ -z "$refs" ]; then
+            echo "::error::no /nix/store references in the dist binaries — refusing to ship a closure that explains nothing"
+            exit 1
+          fi
+          nix-store -qR $refs | sort -u > closure.txt
+          echo "closure: $(wc -l < closure.txt) store paths"
+          tar -czf dist/nix-closure.tar.gz -C / $(sed 's|^/||' closure.txt)
+          du -sh dist/nix-closure.tar.gz
+
       - name: Upload the deployment set
         uses: actions/upload-artifact@v7
         with:
