@@ -2,6 +2,7 @@
 
 **Stack:** `optional-livekit` — node 3 of 7 (parent: `connection-model`, base
 `feature/optional-livekit/connection-model`)
+PR: [#439](https://github.com/uppin/tddy-coder/pull/439)
 PRD: [`2026-09-05-optional-livekit-session-connection-prd.md`](2026-09-05-optional-livekit-session-connection-prd.md)
 Discovery: [`2026-09-05-optional-livekit-session-connection-initial-discovery.md`](2026-09-05-optional-livekit-session-connection-initial-discovery.md)
 
@@ -74,7 +75,20 @@ implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | `connection-model` (#437) | `HostConnection`, `ConnectionStatus`, `ConnectionCapability`, `ConnectionProvider` + registry, `useHostConnection` / `useHostClient`, `LiveKitConnectionProvider` | `openSession` hangs off `HostConnection`; a hint with no room falls back to the host connection's own client; capabilities reuse node 1's vocabulary | rename or widen `ConnectionCapability`; change `useHostClient`; re-implement the LiveKit *host* provider; register a second provider |
 
-**Sequencing:** none blocked. Everything this PR needs exists as of node 1's contract commit.
+**Sequencing:** none blocked.
+
+Two consequences of extending the parent's interface, both deliberate and both recorded here rather
+than left to be discovered:
+
+1. **`openSession` is added to `HostConnection`,** which node 1 owns. Adding a member is this PR's to
+   do (see `## Boundaries`); it makes two of node 1's *test fixtures* fail to typecheck, so this PR
+   adds a throwing `openSession` to each — one line in `src/rpc/connections/registry.test.ts` and one
+   in `cypress/component/HostConnectionAcceptance.cy.tsx`. No production file of node 1's is touched.
+2. **This node's acceptance tests take their `HostConnection` straight from the fixture provider,
+   not through `ConnectionProviderRegistry`.** The registry is node 1's and still unimplemented on
+   this branch; routing a host to a connection is also incidental to what these specs assert. Driving
+   through it would have made every failure here read as node 3's when it was node 1's. Injecting at
+   that seam keeps each failure attributable to this node.
 
 **Sibling note (not a dependency):** node 2 (`host-directory`, #438) also branches off node 1 and
 edits `SessionsDrawerScreen.tsx`, in a different region (`:315-317`, `:856` — presence). This PR's
@@ -98,18 +112,39 @@ candidate on the contract alone.**
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `cypress/component/SessionConnectionAcceptance.cy.tsx`
+- [x] Run acceptance tests (verify they fail) — 5/5 on `attachmentHintFromReply`
+- [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
+- [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/sessionAttachment.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
 ## Verification
+
+### Baseline after rebasing onto the parent's contract commit
+
+`bun run --filter tddy-web test:unit` — 971 pass, 6 fail. The 6 are the **parent's** red
+(`src/rpc/connections/registry.test.ts` from #437), inherited and not this node's to fix.
+
+The full Cypress component sweep ran once at node 1 (207 specs, 1213/1214; the one failure
+pre-existing in `SelectedHostUrlStateAcceptance.cy.tsx`). Per-node full sweeps were dropped for
+nodes 2–5 by agreement; one full sweep runs at the Step 8 completion gate.
+
+### Red status at the contract commit
+
+| Suite | Result |
+|---|---|
+| `src/rpc/connections/sessionAttachment.test.ts` | **5 tests, 5 failing** |
+| `cypress/component/SessionConnectionAcceptance.cy.tsx` | **5 tests, 5 failing** |
+
+Every failure is on this node's own `TODO(session-connection)` bodies — `attachmentHintFromReply`,
+`capabilitiesForHint`. None is on a parent's surface.
+
+### Commands
 
 ```bash
 ./dev bun run --filter tddy-web test:unit
