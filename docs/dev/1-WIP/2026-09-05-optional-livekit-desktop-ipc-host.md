@@ -1,8 +1,11 @@
 # Changeset: optional-livekit-desktop-ipc-host
 
 **Stack:** `optional-livekit` — node 7 of 7 (parents: `capability-gating`, `multi-connection-ipc`;
-PR base `feature/optional-livekit/capability-gating`, with `multi-connection-ipc` merged in through
-the local integration ref `stack-int/desktop-ipc-host`)
+PR base `feature/optional-livekit/multi-connection-ipc`). The diamond this node was planned as has
+since been **linearized**: `multi-connection-ipc` sits above `terminal-convergence` above
+`capability-gating`, so both parents are now plain ancestors and the local `stack-int/desktop-ipc-host`
+integration ref is no longer needed. Live PR state is authoritative; the earlier header described the
+plan, not the branch.
 PR: [#443](https://github.com/uppin/tddy-coder/pull/443)
 PRD: [`2026-09-05-optional-livekit-desktop-ipc-host-prd.md`](2026-09-05-optional-livekit-desktop-ipc-host-prd.md)
 Discovery: [`2026-09-05-optional-livekit-desktop-ipc-host-initial-discovery.md`](2026-09-05-optional-livekit-desktop-ipc-host-initial-discovery.md)
@@ -108,7 +111,8 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 - [x] Run acceptance tests (verify they fail) — 7/8 failing; the 8th is a green regression guard, below
 - [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/localHost.test.ts`
-- [ ] Implement production code making tests pass (`/green`)
+- [~] Implement production code making tests pass (`/green`) — **items 1, 2, 3 and 5 delivered and
+      green; item 4 (the desktop registration point) is BLOCKED, see below**
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
@@ -138,6 +142,8 @@ IPC provider everywhere would fail here.
    `HostDirectorySource`, which is not on this branch's PR head — node 2 reaches this worktree only
    through `stack-int/desktop-ipc-host`. Importing it would leave this PR unable to compile on its
    own head. Its intended behaviour is written down in `localHost.ts` beside where it will go.
+   **RESOLVED at `/green`:** the linearization put node 2 in this branch's ancestry, so
+   `HostDirectorySource` is on the PR head and the function is implemented here with its own tests.
 2. **The acceptance spec resolves hosts through a local `resolveThrough` helper, not through
    `ConnectionProviderRegistry`.** The registry is node 1's and still unimplemented; provider
    precedence is precisely what these specs assert, so it is spelled out here rather than borrowed
@@ -161,3 +167,64 @@ and Cypress e2e are outside the four required checks, so a green PR proves neith
 ## Successor PRs
 
 None — top of the stack.
+
+## Green status — 2026-09-05
+
+Delivered and verified on this branch, rebased onto `multi-connection-ipc`:
+
+| Responsibility item | State |
+|---|---|
+| 1. `IpcConnectionProvider` — host + session connections, `{"rpc"}`, `close()` lifecycle | **done** |
+| 2. `LocalHostDirectorySource` from `daemonInstanceId` | **done** (deferral resolved by the linearization) |
+| 3. `liveKitIsConfigured` | **done** |
+| 4. The desktop build's registration point and provider precedence | **BLOCKED** — see below |
+| 5. LiveKit source/provider inert when unconfigured | **already true at HEAD**; verified, no change needed |
+
+Evidence:
+
+| Suite | Result |
+|---|---|
+| `src/rpc/connections/localHost.test.ts` | **14 pass, 0 fail** (the 7 contract tests unchanged + 7 added) |
+| `bun run --filter tddy-web test:unit` | **1091 pass, 0 fail** |
+| `cypress/component/DesktopIpcHostAcceptance.cy.tsx` | **8 pass, 0 fail** |
+| `cargo test -p tddy-tauri-rpc` | ok — node 6 untouched |
+
+The 17 inherited failures recorded at the contract commit (#437, #439, #440) are **all gone**: those
+parents' green phases have landed, and this branch now carries them.
+
+Item 5 needed no code. With `livekitUrl` / `commonRoom` empty, `useCommonRoom.ts:41` short-circuits
+before `generateToken` and before `roomFactory()`, so no `Room` is constructed and no token minted;
+`liveKitSource` reports `idle`, and `directoryStatusOf` never derives `error` from an `idle` source.
+Parent nodes' own tests already pin it. `liveKitIsConfigured` is this node's named statement of the
+rule; it is deliberately **not** wired into `useCommonRoom`, because that would make `tddy-web` import
+`localHost.ts` and destroy the structural guarantee the browser regression guard exists to protect.
+
+### Item 4 is blocked on a plan premise that does not hold
+
+`## State B` and `## Responsibility` assume the desktop build has **its own entry module** to register
+from — "they arrive through node 1's registry and node 2's source list, so the browser bundle is
+unchanged and no `isDesktop` branch exists anywhere".
+
+That premise is not true of this codebase. `packages/tddy-desktop/src-tauri/tauri.conf.json` sets
+`frontendDist: "../../tddy-web/dist"`: the Tauri shell loads **the same bundle the daemon serves to
+browsers**. One build, one entry (`packages/tddy-web/src/index.tsx`). There is no desktop entry point
+in which a desktop-only registration could live.
+
+Registering unconditionally from the shared entry is not an option: the IPC provider registers first,
+so in a browser it would claim the serving host and shadow LiveKit — precisely what the regression
+guard *"a browser, where the IPC override does not exist"* forbids.
+
+Two seams exist, both decisions above this module:
+
+1. **Reuse the existing runtime host check** — register when `daemonTransportFlavour(window) ===
+   "webview-ipc"`. This adds no new branch: `daemonTransportFlavour.ts` already makes exactly this
+   decision, once, and already uses it to decide how the page reaches its own daemon. It does
+   contradict the changeset's literal "no `isDesktop` branch anywhere", while honouring its intent
+   (no desktop conditionals scattered through the app, no divergence between the builds).
+2. **A second bundle with its own entry** — a new Vite entry and html, plus `tauri.conf.json`,
+   `./install` and `./publish.sh` changes. This matches the plan's literal wording but is a build
+   architecture change well outside node 7's scope.
+
+Recorded as `TODO(desktop-ipc-host)` at `localHost.ts:16`. Until it is resolved the three factories
+have no production caller, so **this node is not yet a valid merge candidate** under the boundary
+contract — a node that ships only surface is not a valid PR.
