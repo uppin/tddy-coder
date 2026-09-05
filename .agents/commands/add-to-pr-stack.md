@@ -1,5 +1,5 @@
 ---
-description: Add a new PR on top of a named parent node or branch - a planned node in a pr-stack orchestrator's DAG, or an ad-hoc draft PR based on the parent's branch
+description: Add a new PR on top of a named predecessor branch - cut the branch, open a draft PR against it, and re-register the stack
 ---
 ## Add to PR Stack — a new PR on a named parent
 
@@ -23,25 +23,18 @@ Load the **`pr-stack` skill** (`.agents/skills/pr-stack/SKILL.md`) first, and re
 [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md) — the stack is a product feature
 here, not a `gh` extension, and this command has to say which of its two shapes it is operating on.
 
-## Which stack is this? Two paths, and they are not interchangeable
+## What owns the stack
 
-| | **Planned stack** | **Ad-hoc chain** |
-|---|---|---|
-| What owns it | a `pr-stack` **orchestrator session**, holding the DAG in its `Changeset.stack` | nothing — just PRs whose bases point at each other |
-| How you add a node | the orchestrator's `pr_add_planned` tool, then `pr_spawn_child` | `git switch -c` off the parent + `gh pr create --base <parent>` |
-| Who can do it | the **orchestrator agent** (during its `orchestrate` goal), or the operator via the web panel's *+ New planned PR* form | anyone in a worktree |
-| Branch name | `feature/<stack-slug>/<node>` — **required and validated** | no enforced convention; use the same shape anyway |
-| Bringing an existing PR in | `pr_adopt` binds it to a node | n/a |
+The order is the chain of PR base refs, plus the **registered stack** on GitHub (`gh stack`, see the
+`pr-stack` skill). Adding a PR therefore has three parts: cut the branch off its predecessor, open
+the PR against that branch, and **re-register** so the new PR joins the stack.
 
-**If a `pr-stack` orchestrator owns the parent, use the planned path.** Opening the PR by hand leaves
-the node absent from the DAG, so `pr_stack_status`, the base-ref derivation, the Repoint control and
-the merge ordering all work from a plan that does not describe reality. Bringing it back in afterwards
-is `pr_adopt`, which is recoverable but is repair work.
+```bash
+gh stack link --base master <pr> <pr> ... <new-pr>    # additive; never removes a PR
+```
 
-**A child session does not have the `pr_*` tools.** They are advertised only to the orchestrator agent
-during `orchestrate`. If you are a child session working one node and the user asks for a new node
-above yours, say so and hand the request back to the orchestrator (or the web panel's form) rather
-than opening a stray PR.
+Opening the PR and forgetting the registration leaves it correctly based but outside the stack —
+reviewers get the right diff and no context.
 
 ## Before anything: the node must be a whole PR
 
@@ -74,9 +67,9 @@ node a **sibling**, which is legitimate and often what the user wants. Say plain
 |---|---|---|
 | A node/branch with no successors | the new node extends the stack | proceed |
 | A node/branch that already has successors | the new node is a **sibling** of those | proceed, but **state it**, and confirm the two really are independent — siblings that touch the same surface will conflict at merge time |
-| The new work genuinely depends on **several** open nodes | a **diamond** node | planned path only: give `pr_add_planned` the full `parents` list. Ad-hoc, GitHub allows one base — pick the deepest parent and say what the other dependency is |
+| The new work genuinely depends on **several** open PRs | it sits **after all of them** | a stack is a line: place the new PR above the last one it depends on, so every dependency is an ancestor. Record what it takes from each in `## Dependencies` |
 | A **merged** PR's branch | the parent is gone | base on `origin/master` instead (or the nearest non-merged ancestor) and say so — this is `/repoint`'s rule applied at creation time |
-| A branch that does not exist on `origin` | nothing to base on | **stop**. In a planned stack this is a *blocked* node; the parent must create its branch first |
+| A branch that does not exist on `origin` | nothing to base on | **stop**. The predecessor must push its branch first |
 
 ## Step 0: Preflight
 
@@ -99,8 +92,7 @@ gh pr list --state open --json number,headRefName,baseRefName,title,isDraft
 git worktree list
 ```
 
-- **Planned stack?** The current session's `changeset.yaml` carries `orchestrator_session_id`, or the
-  user named a node id. The DAG lives in the orchestrator's `Changeset.stack`, mirrored to
+- Read the chain off the open PRs' base refs, mirrored to
   `artifacts/stack-plan.yaml` and `artifacts/pr-stack-plan.md`.
 - **Ad-hoc chain?** Detect it the way `/pr` does: for each open PR's `headRefName` other than the
   current branch, `git merge-base --is-ancestor origin/<headRefName> HEAD`; the ones that pass are
@@ -112,7 +104,7 @@ git worktree list
 Apply the parent table above. Then confirm the new branch name: use the name from `$ARGUMENTS` if
 given; otherwise propose one and confirm.
 
-**Branch naming.** In a planned stack the convention is **required and validated**
+**Branch naming.** The convention is
 (`validate_stack_plan`): `feature/<stack-slug>/<node>` — every node in one stack shares a single
 `feature/<stack-slug>/` namespace (`feature/auth/token-store`, `feature/auth/middleware`), so the
 stack's branches group together in every branch listing. Ad-hoc chains have no enforced convention;
@@ -120,29 +112,7 @@ use the same shape anyway.
 
 If the proposed branch already exists, stop.
 
-## Step 2a: Planned path — append the node, then start its session
-
-The orchestrator agent, in chat:
-
-1. **`pr_add_planned`** — appends exactly one node: `title`, `description`, `branch_suggestion`
-   (`feature/<stack-slug>/<node>`), `parents` (the chosen ancestor node ids — a list), optional
-   `child_recipe` (defaults to `tdd`). It is **additive only**: it never touches an existing node.
-   Editing one is `pr_update_planned`; moving one in the DAG is `pr_set_parents`; removing one is
-   `pr_delete_planned`. A rejected mutation writes nothing — a dangling parent id or a cycle is
-   refused before the write.
-2. **`pr_spawn_child`** — starts the child coding session for that node with `stack_parent` set. The
-   child's worktree is created off the nearest non-merged ancestor's branch, and the node records the
-   real `branch` and `session_id` once it exists. For a diamond node the operator can pick which
-   parent branch to base off (the Start-session dialog's **Base branch** selector).
-
-The operator's equivalent, without the LLM, is the web PR-Stack panel's **+ New planned PR** form —
-title, description, branch suggestion, child recipe, and a multi-select ancestor picker — with
-**Add & start session** doing both steps in one click.
-
-The node is **planned**, not open: `branch: None`, `session_id: None`, `pr_status: None`. The PR is
-opened later, by the child session, once there is something to publish — that is Step 3.
-
-## Step 2b: Ad-hoc path — branch off the parent
+## Step 2: Branch off the predecessor
 
 ```bash
 git fetch origin <parent-branch>
@@ -179,8 +149,9 @@ also how a node publishes its interface early so dependents can branch off a rea
 yours to change. `pr_status.phase` records a draft as `open`, so a draft node is a live node as far as
 the stack is concerned.
 
-If a `pr-stack` orchestrator owns this stack and you opened the PR by hand, **bind it back**: the
-orchestrator agent runs `pr_adopt` on the new PR, which creates a node bound to its head branch and PR
+**Re-register the stack** so the new PR joins it — `gh stack link --base master <prs…>`, in order,
+bottom to top. `link` reuses the PRs that already exist and removes none, so re-running it with the
+full list is the whole step. The new PR
 reference. Adoption is refused if that head branch or pull number is already tracked, so it cannot
 double-track.
 
@@ -205,19 +176,17 @@ gh pr edit <pr> --title "<type>(<pkg>): <unchanged subject> (#<slug> <K>/<newN>)
 ```
 
 Plain `gh pr edit --title` is correct here. **Skip merged PRs** — their titles are already commits on
-`master`, and editing the PR page only suggests history was corrected when it was not. In a planned
-stack, `pr_update_planned` with `sync_pr` is the tool-side equivalent: it edits the node's title and
-publishes it to the PR in one call.
+`master`, and editing the PR page only suggests history was corrected when it was not.
 
 ## Step 4: Report
 
 State:
 
-- **which path** ran — planned (which orchestrator session) or ad-hoc;
+- the **stack** the PR joined, and the `gh stack link` output confirming it;
 - the new node id / branch, its **parents**, and whether it extends the stack or is a **sibling**;
 - the new **draft** PR URL, or that no PR was opened and why;
 - the stack topology after the change (`gh pr list --state open --json number,headRefName,baseRefName`,
-  or `pr_stack_status` for the orchestrator);
+  );
 - every title you renumbered, and any merged PR you deliberately skipped;
 - any node now showing stale against its base — `/pr-stack-rebase` is the per-branch fix, run from the
   worktree that owns each branch. Do not rebase branches the user did not ask about.
@@ -227,17 +196,17 @@ Remind: merge order is still bottom-up. This PR must not merge before its parent
 
 ## Rules
 
-- **Say which stack model applies** — planned (orchestrator + `pr_*` tools) or ad-hoc (plain git +
+- **Re-register the stack** after opening the PR (plain git +
   `gh`). Never mix the two in one run.
-- **Never hand-open a PR for a node a `pr-stack` orchestrator owns** without binding it back with
-  `pr_adopt`.
+- **Never leave a new PR unregistered.** A correctly-based PR outside the stack gives reviewers the
+  right diff and no context.
 - **A node is a whole PR.** No stubs-only layer, no "greenable once PR N lands". Split by capability.
 - **Never default the parent to `master` or the current branch silently.**
 - **Siblings are allowed** — this is a DAG. Say when you are creating one.
 - **New PRs are drafts.** Never flip a predecessor's draft/ready state.
 - **Title the new PR and renumber the stack in the same run.** `K/N` that no longer matches is worse
   than absent. Never renumber a merged PR.
-- **Branch name follows `feature/<stack-slug>/<node>`** — required in a planned stack, conventional
+- **Branch name follows `feature/<stack-slug>/<node>`** — one namespace per stack, conventional
   elsewhere.
 - Never `git add -A`/`.`, never discard uncommitted work, never `--no-verify`.
 - Stay on the new branch when the command finishes.

@@ -12,15 +12,9 @@ and the golden rules referenced below. The product-level model — the DAG, the 
 `pr_*` tools, merge and repoint — is
 [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md).
 
-> **In a planned stack, prefer the orchestrator's own tools for the repoint half of this.** A
-> `pr-stack` orchestrator session holds the DAG in its changeset and exposes `pr_merge`,
-> `pr_repoint` and `pr_stack_status`; a repoint through `pr_repoint` re-targets the open PR's base,
-> rebases the node's branch onto the recomputed effective base and force-pushes with
-> `--force-with-lease`, all under the crash-safe `StackOpJournal` — and it updates the plan, so the
-> panel and every later read agree. The manual repointing below is the fallback for an **ad-hoc**
-> chain with no orchestrator. Note that a branch pinned by a worktree cannot be rebased, so free it
-> first (`git worktree list`); tddy-coder sessions live in worktrees, so this is the normal case,
-> not the exception.
+> **A branch pinned by a worktree cannot be rebased**, so free it first (`git worktree list`).
+> tddy-coder sessions live in worktrees, so this is the normal case, not the exception. And once a
+> PR leaves the stack, **re-register what remains** — `gh stack link --base master <prs…>`.
 
 ## Step 1: Resolve the PR, its base, and its successors — MANDATORY
 
@@ -28,13 +22,11 @@ and the golden rules referenced below. The product-level model — the DAG, the 
 - **Resolve its base, and note which of the two stack models applies** — it changes how successors
   are handled:
 
-  | Model | How the base and successors are resolved |
-  |---|---|
-  | **Planned stack** — a `pr-stack` orchestrator owns the DAG in its changeset | `pr_stack_status` lists every node with its live GitHub state, its computed internal status (`needs-repoint`, `has-conflicts`, `ready-to-merge`, …) and its effective base. Successors are the nodes whose `parents` contain this node. The tools exist **only inside the orchestrator session** — a child session working one node does not have them. |
-  | **Ad-hoc chain** — a PR opened on another open PR's branch, no orchestrator | `gh pr view <N> --json baseRefName`, plus the ancestry probe from `.agents/commands/pr.md`. Successors are open PRs whose `baseRefName` is **this** branch. |
+  The base is `gh pr view <N> --json baseRefName`, plus the ancestry probe from
+  `.agents/commands/pr.md`. Successors are the open PRs whose `baseRefName` is **this** branch.
 
-  Order of resolution: an explicit argument → `pr_stack_status` (planned stack) → this node's
-  attached `changeset.md` → `gh pr view <branch> --json baseRefName`.
+  Order of resolution: an explicit argument → this PR's `docs/dev/1-WIP/` changeset →
+  `gh pr view <branch> --json baseRefName`.
 - Fetch the base PR's status (if the base is a branch with an open PR):
   ```bash
   repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)   # uppin/tddy-coder
@@ -47,9 +39,8 @@ and the golden rules referenced below. The product-level model — the DAG, the 
   gh pr list --state open --base <this-branch> --json number,headRefName,url \
     --jq '.[] | "#\(.number) \(.headRefName) \(.url)"'
   ```
-  In a planned stack, cross-check that list against the node's children in `pr_stack_status` — a
-  child that has not opened its PR yet owns no `baseRefName` and will not appear here, but its
-  branch is still based on yours.
+  A successor whose PR is not open yet owns no `baseRefName` and will not appear here, though its
+  branch is still based on yours. If the plan names one, check for it explicitly.
 
 ## Step 2: Check CI, and understand the merge gate before you use it
 
@@ -155,8 +146,8 @@ squashed commit; this PR closes as merged; the base PR's diff grows to cover bot
 **Wait for an explicit answer.** Then:
 
 **If (A) repoint + squash:**
-1. Run `/repoint` to move this PR's base to `origin/master` and restack. In a planned stack this is
-   `pr_repoint` on the orchestrator, which does the same three things (re-target the PR base, rebase
+1. Run `/repoint` to move this PR's base to `origin/master` and restack — it does three things
+   (re-target the PR base, rebase
    the branch onto the new effective base, force-push with lease) *and* persists the new parent set
    in the plan.
 2. `gh pr merge <N> --squash` (now lands to master). Then go to **Step 4** for successor repoint +
@@ -172,9 +163,7 @@ squashed commit; this PR closes as merged; the base PR's diff grows to cover bot
 3. **Successor handling** — defer to **Step 4**; the new base for any successor here is
    `<base-branch>` (the branch this PR folded into), not master.
 4. Update the base PR's title/body to reflect the combined scope, and merge this PR's per-PR
-   documents into the base PR's (`PRD.md` and `changeset.md` under the node's
-   `artifacts/prs/<node_id>/` on the orchestrator; see
-   [`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md)). Respect the
+   documents into the base PR's (the PRD and changeset pair in `docs/dev/1-WIP/`). Respect the
    forward-only linking rule — the base is the predecessor. The four required headings survive the
    fold: the combined `## Responsibility` and `## Boundaries` must describe the union, and anything
    the folded PR listed under `## Dependencies` that the base now implements has to come **out** of
@@ -184,13 +173,10 @@ squashed commit; this PR closes as merged; the base PR's diff grows to cover bot
      two halves were "add the surface" and "implement it", folding them is a *fix*, and worth saying
      so in the report. See
      [`docs/ft/coder/pr-stacking.md` § PR boundary contract](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
-5. **Fix up the plan, not just the prose.** In a planned stack the fold means one fewer node:
-   `pr_delete_planned` removes the folded node and **reparents its children onto that node's
-   parents**, which is what keeps the DAG describing edges that still exist (a bare removal would
-   leave `Stack::topo_order` counting an in-degree for a node nobody can reach). It refuses a node
-   whose PR is still open, so run it **after** the merge closes this PR. Then `pr_update_planned`
-   the base node's title/description to the combined scope. In an ad-hoc chain there is no plan —
-   note the fold in the base PR's body instead.
+5. **Fix up the stack, not just the prose.** The fold means one fewer PR, so re-register what
+   remains — `gh stack link --base master <prs…>` with the folded PR left out — **after** the merge
+   closes it. Retitle the remaining PRs so `K/N` reflects the new count, and note the fold in the
+   base PR's body.
 
 ## Step 4: Successors — repoint (opt-in) and branch deletion
 
@@ -200,7 +186,7 @@ The new base for successors is `origin/master` (Case A) or `<base-branch>` (Case
 Nothing retargets or rebases them for you. GitHub will re-point an open PR's *base ref* when its
 base branch is **deleted**, but it never rebases the branch — so the successor's history still
 carries the commits this PR just squashed, and its diff shows them until someone rebases. When the
-branch is **not** deleted, not even the base ref moves. That gap is precisely what `pr_repoint` /
+branch is **not** deleted, not even the base ref moves. That gap is precisely what
 `/repoint` exists for; there is no server-side restack to wait for.
 
 ### 4a. Successor repoint (opt-in)
@@ -212,7 +198,7 @@ the user **opt in** to repointing each onto the new base:
 > stay open and their diffs stay clean? *(all / pick which / none — leaving them keeps this branch)*
 
 - **Opt in** → repoint each chosen successor onto the new base:
-  - **Planned stack** → `pr_repoint` on the orchestrator for that node. It recomputes the effective
+  - `/repoint` for that PR. It recomputes the effective
     base by climbing `parents` and skipping merged ancestors, `patch_pr_base`es the open PR, rebases
     the branch with `git rebase --onto` under a `git merge-base` guard, and force-pushes with
     `--force-with-lease=<branch>:<expected-sha>` — a concurrent child push aborts the repoint rather
@@ -220,7 +206,7 @@ the user **opt in** to repointing each onto the new base:
   - **Ad-hoc chain** → `/repoint <new-base>` for each successor.
 
   Do this **after** the squash-merge landed, so the merged commit drops out of each successor's
-  diff. A rebase conflict is surfaced, not swallowed: in a planned stack `pr_resolve_conflicts`
+  diff. A rebase conflict is surfaced, not swallowed: resolution
   syncs the branch, returns the conflicted paths and marks the node `has-conflicts`; resolve them in
   that node's worktree and re-run the tool to confirm a clean tree.
 - **Decline (or no successors chosen)** → leave those successors as-is. The branch still has open
@@ -243,10 +229,8 @@ gh pr list --state open --base <this-branch> --json number --jq 'length'   # mus
   the invocation), skip deletion and say the branch was kept by request.
 - **Still referenced** (user declined a repoint) → **keep the branch** and report that it survives
   because open successors depend on it.
-- **A planned node keeps its `branch` field either way.** Deleting the remote branch does not edit
-  the plan, and `pr_delete_planned` explicitly leaves branch, worktree and child session alone,
-  reporting them back as unowned. If the node should disappear from the plan, that is a separate,
-  deliberate call.
+- **Deleting the remote branch is not the same as removing the PR from the stack.** Re-register the
+  remaining PRs explicitly; nothing infers it from a deleted branch.
 
 Never pass `--delete-branch` to `gh pr merge` — branch deletion happens here, only after 4a is
 resolved.
@@ -257,11 +241,10 @@ State the CI status that was verified (and the scope of `scripts/ci-status.sh` y
 path was used — a direct `gh pr merge --squash`, or `#automerge`, or `#forcemerge` **only if the user
 explicitly asked** — and that the PR reached a mergeable state; which case ran (A or B); the squash
 target (master or the base PR); which stack model applied (planned / ad-hoc); which successors were
-offered and which were repointed, and through which mechanism (`pr_repoint` / `/repoint`); whether
+offered and which were repointed (`/repoint`); whether
 the branch was deleted, kept by request, or kept because it is still referenced; whether
 `delete_branch_on_merge` forced the ordering; and the resulting open-PR set
-(`gh pr list --state open`). In a planned stack, also report the plan edits made
-(`pr_delete_planned` / `pr_update_planned` / `pr_set_parents`) so the DAG in the changeset matches
+(`gh pr list --state open`), and the re-registration (`gh stack link`) so the stack matches
 what landed. Never use `--no-verify`.
 
 ## Related
