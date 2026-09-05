@@ -3,6 +3,7 @@ import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
+import { useHostConnection } from "../../rpc/connections/registry";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
@@ -27,6 +28,9 @@ export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => v
   const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   const room = useHostPresence(selectedInstanceId);
   const participants = useRoomParticipants(room);
+  // The wire the roster arrives over — the participant camera column is gated on its `media`
+  // capability, since a camera track arrives the same way the roster does.
+  const connection = useHostConnection(selectedInstanceId);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -40,6 +44,7 @@ export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => v
             participants={participants}
             roomStatus={commonRoom?.status ?? "idle"}
             connectionError={commonRoom?.error ?? null}
+            connection={connection}
           />
         </div>
         <LiveKitRoomsPanel />

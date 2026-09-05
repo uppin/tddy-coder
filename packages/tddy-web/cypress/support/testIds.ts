@@ -782,6 +782,9 @@ export const participantRole = (identity: string) => `participant-role-${identit
 /** `[data-testid="participant-metadata-<identity>"]` */
 export const participantMetadata = (identity: string) => `participant-metadata-${identity}`;
 
+/** `[data-testid="participant-video-cell-<identity>"]` */
+export const participantVideoCell = (identity: string) => `participant-video-cell-${identity}`;
+
 /** `[data-testid="participant-video-trigger-<identity>"]` */
 export const participantVideoTrigger = (identity: string) =>
   `participant-video-trigger-${identity}`;

@@ -1,8 +1,7 @@
 # Changeset: optional-livekit-capability-gating
 
 **Stack:** `optional-livekit` — node 4 of 7 (parents: `host-directory`, `session-connection`;
-PR base `feature/optional-livekit/session-connection`, with `host-directory` merged in through the
-local integration ref `stack-int/capability-gating`)
+PR base `feature/optional-livekit/session-connection`)
 PR: [#440](https://github.com/uppin/tddy-coder/pull/440)
 PRD: [`2026-09-05-optional-livekit-capability-gating-prd.md`](2026-09-05-optional-livekit-capability-gating-prd.md)
 Discovery: [`2026-09-05-optional-livekit-capability-gating-initial-discovery.md`](2026-09-05-optional-livekit-capability-gating-initial-discovery.md)
@@ -64,19 +63,31 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `host-directory` (#438) | source-merged directory, `room` removed from `SelectedDaemonContextValue`, `useHostPresence(hostId)` returning `null` without the `presence` capability, directory-level status | presence gating reads `useHostPresence`; the nav gate reads the selected host's connection | add a directory source; change `useHostPresence`'s signature; put `room` back on the context |
-| `session-connection` (#439) | `SessionConnection` with `capabilities`, one connected `SessionAttachmentState`, capability-driven handshake overlay and terminal selection | session-scoped media gating reads the session connection's capabilities | change `openSession`, the hint type, routing, the client cache, or terminal selection |
+| `session-connection` (#439) | `SessionConnection` with `capabilities`, one connected `SessionAttachmentState`, capability-driven handshake overlay and terminal selection | `SessionRuntime`'s terminal-side media branch reads the session connection's capabilities, through the predicate | change `openSession`, the hint type, routing, the client cache, or terminal selection |
 
-**Sequencing:** both parents have pushed their contract commits. This node's PR base is
-`session-connection`; `host-directory`'s commits arrive through the local `stack-int/capability-gating`
-integration ref, and this PR is only offered for merge once **both** parents have merged.
+**Sequencing:** the stack is linear — `connection-model` → `host-directory` → `session-connection` →
+this node — so both parents are ordinary ancestors of this PR's base and arrive through it. The
+`stack-int/capability-gating` integration ref the plan originally called for is not needed and is not
+used; `useHostPresence` and everything else node 2 owns is present at this branch's `HEAD`. This PR is
+still only offered for merge once both parents have merged, which bottom-up landing gives for free.
 
-One consequence to hold on to during `/green`: **`useHostPresence` is not on this PR's head.** It is
-node 2's, and it reaches this branch only through the integration ref. So the *contract* committed
-here is scoped to what stands alone — `useHasCapability` and the gating rule its tests pin. Wiring the
-presence-derived surfaces (`ParticipantList`, `LiveKitRoomsPanel`, `LiveKitAppPage`, the playground
-roster, the sessions drawer's cross-host reconciliation) needs `useHostPresence`, so `/green` must run
-in a worktree that has the integration ref, or wait for `host-directory` to merge. Wiring the *media*
-surfaces has no such dependency.
+### Which connection gates which surface
+
+Settled during `/green`, because the plan's original answer did not survive contact with dormant
+sessions. **The host connection is what gates the media surfaces**, not the session connection:
+
+- `capabilitiesForHint` (`src/rpc/connections/sessionAttachment.ts:69`) derives a session's
+  capabilities from whether its hint names a room, and whether there is a room is decided by how the
+  *host* is reached. Host capability is therefore the upstream fact: a host reached without LiveKit
+  can never hand out a room-backed session.
+- A dormant session has no `SessionConnection` at all — `SessionsDrawerScreen` attaches only when
+  `session.isActive`. Reading the session connection there answers `false` to a question that is
+  actually *unanswerable*, which is not gating; it hid the VNC and screen-sharing tabs for every
+  dormant session and broke 23 tests in four acceptance specs that this PR is required to leave
+  passing.
+
+The session connection is still read in exactly one place, `SessionRuntime`'s `carriesMedia` — that
+one genuinely is session-scoped, and it predates this node.
 
 ## Draft PR contract
 

@@ -7,6 +7,7 @@ import {
   participantEntry,
   participantRole,
   participantMetadata,
+  participantVideoCell,
   participantVideoTrigger,
   participantCodexOauth,
   participantOwnedProjectCount,
@@ -27,6 +28,10 @@ export const participantListPage = {
   role: (identity: string) => byTestId(participantRole(identity)),
 
   metadata: (identity: string) => byTestId(participantMetadata(identity)),
+
+  /** The row's camera column cell — absent entirely when the wire carries no tracks. */
+  videoCell: (identity: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(participantVideoCell(identity), options),
 
   videoTrigger: (identity: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(participantVideoTrigger(identity), options),

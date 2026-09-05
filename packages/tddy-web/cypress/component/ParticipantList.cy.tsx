@@ -11,6 +11,13 @@ function mountParticipantList(props: React.ComponentProps<typeof ParticipantList
   cy.mount(<ParticipantList {...props} />);
 }
 
+/**
+ * The wire a roster is read over, as a LiveKit common room advertises it. The camera column is
+ * gated on its `media` capability, so a scenario about the affordance has to say which wire it is
+ * on — `ParticipantVideoCapabilityAcceptance.cy.tsx` covers the wire that carries no tracks.
+ */
+const A_WIRE_THAT_CARRIES_TRACKS = { capabilities: new Set(["rpc", "media", "presence"] as const) };
+
 describe("ParticipantList", () => {
   it("shows connecting state", () => {
     // Given / When
@@ -157,6 +164,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "with-cam-user": true, "no-cam-user": false },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // Then
@@ -182,6 +190,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "camera-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // Then
@@ -207,6 +216,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "preview-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // When
@@ -234,6 +244,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "cleanup-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
     participantListPage.videoTrigger("cleanup-peer").should("be.visible").click();
     participantListPage.videoDialog().should("be.visible");

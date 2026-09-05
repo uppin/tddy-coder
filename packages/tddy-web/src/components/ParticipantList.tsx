@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import { shouldShowParticipantVideoAffordance } from "../hooks/participantCameraVideo";
+import { useHasCapability, type CapabilityBearing } from "../rpc/connections/useHasCapability";
 import {
   parseOwnedProjectCount,
   type RoomParticipant,
@@ -97,6 +98,16 @@ export interface ParticipantListProps {
    * Used by tests and until ConnectionScreen plumbs live track state from the Room.
    */
   participantHasCameraVideo?: Record<string, boolean>;
+  /**
+   * The connection this roster is read over — the host connection whose common room these
+   * participants are joined to. The camera column and the preview dialog are gated on its `media`
+   * capability: a camera track arrives over the same wire the roster does, so a wire that carries
+   * no tracks has no video to preview and the column is absent rather than permanently empty.
+   *
+   * There is no session in scope here: the roster is the *host's*, so the host's connection is the
+   * only one that can answer.
+   */
+  connection?: CapabilityBearing | null;
 }
 
 /**
@@ -107,8 +118,10 @@ export function ParticipantList({
   roomStatus,
   connectionError,
   participantHasCameraVideo,
+  connection = null,
 }: ParticipantListProps) {
   const [videoPreviewIdentity, setVideoPreviewIdentity] = useState<string | null>(null);
+  const canShowVideo = useHasCapability(connection, "media");
 
   if (roomStatus === "idle" || roomStatus === "connecting") {
     return (
@@ -154,7 +167,7 @@ export function ParticipantList({
             <th style={{ padding: 6 }}>Projects</th>
             <th style={{ padding: 6 }}>Metadata</th>
             <th style={{ padding: 6 }}>Codex sign-in</th>
-            <th style={{ padding: 6 }}>Video</th>
+            {canShowVideo && <th style={{ padding: 6 }}>Video</th>}
           </tr>
         </thead>
         <tbody>
@@ -165,10 +178,11 @@ export function ParticipantList({
               p.ownedProjectCount !== undefined
                 ? p.ownedProjectCount
                 : parseOwnedProjectCount(p.metadata);
-            const showVideoAffordance = shouldShowParticipantVideoAffordance(
-              participantHasCameraVideo,
-              p.identity,
-            );
+            // The camera-video hook is only consulted for a wire that can carry a camera track;
+            // on one that cannot, there is no question to ask.
+            const showVideoAffordance =
+              canShowVideo &&
+              shouldShowParticipantVideoAffordance(participantHasCameraVideo, p.identity);
             return (
               <tr key={p.identity} style={{ borderBottom: "1px solid #eee" }}>
                 <td style={{ padding: 6 }} data-testid={`participant-entry-${id}`}>
@@ -225,25 +239,27 @@ export function ParticipantList({
                     "—"
                   )}
                 </td>
-                <td style={{ padding: 6 }} data-testid={`participant-video-cell-${id}`}>
-                  {showVideoAffordance ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon-xs"
-                      data-testid={`participant-video-trigger-${id}`}
-                      aria-label={`Open video preview for ${p.identity}`}
-                      onClick={() => {
-                        console.info("[tddy-web:participant-video] ParticipantList: open video preview", {
-                          identity: p.identity,
-                        });
-                        setVideoPreviewIdentity(p.identity);
-                      }}
-                    >
-                      <VideoCameraIcon className="size-3.5" />
-                    </Button>
-                  ) : null}
-                </td>
+                {canShowVideo && (
+                  <td style={{ padding: 6 }} data-testid={`participant-video-cell-${id}`}>
+                    {showVideoAffordance ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon-xs"
+                        data-testid={`participant-video-trigger-${id}`}
+                        aria-label={`Open video preview for ${p.identity}`}
+                        onClick={() => {
+                          console.info("[tddy-web:participant-video] ParticipantList: open video preview", {
+                            identity: p.identity,
+                          });
+                          setVideoPreviewIdentity(p.identity);
+                        }}
+                      >
+                        <VideoCameraIcon className="size-3.5" />
+                      </Button>
+                    ) : null}
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -252,7 +268,7 @@ export function ParticipantList({
 
       <ParticipantVideoPreviewDialog
         identity={videoPreviewIdentity ?? ""}
-        open={videoPreviewIdentity !== null}
+        open={canShowVideo && videoPreviewIdentity !== null}
         onOpenChange={(next) => {
           if (!next) {
             console.info("[tddy-web:participant-video] ParticipantList: video preview closed");

@@ -544,6 +544,22 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 sessionToken={sessionToken}
+                /* The media tabs are gated on the connection to the host that owns this session —
+                   `host`, the same connection the screen already resolved for every other
+                   cross-host read, so the tabs and the RPCs behind them cannot disagree about
+                   which daemon they are talking to.
+
+                   The *host* is the upstream fact, not the session: `capabilitiesForHint`
+                   (`rpc/connections/sessionAttachment.ts`) derives a session's capabilities from
+                   whether its attach hint names a room, and whether there is a room at all is
+                   decided by how the host is reached — a host reached without LiveKit can never
+                   hand out a room-backed session.
+
+                   Reading the session's own connection instead would also answer "no media" for a
+                   *dormant* session, which has no connection at all. That turns an unanswerable
+                   question into a refusal and hides tabs whose capability is in fact present,
+                   which is a behaviour change rather than gating. */
+                hostConnection={host}
                 room={room}
                 serverIdentity={attachmentHint?.serverIdentity}
                 traffic={traffic}
