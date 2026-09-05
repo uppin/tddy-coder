@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { presenceAvailability } from "@/hooks/presenceAvailability";
+import { capabilityAvailability } from "@/hooks/capabilityAvailability";
 import { useHostConnection } from "@/rpc/connections/registry";
 import { useHasCapability } from "@/rpc/connections/useHasCapability";
 import { LIVEKIT_SOURCE_ID } from "@/rpc/hostDirectory/liveKitSource";
@@ -18,7 +18,7 @@ import { useSelectedDaemon } from "@/rpc/selectedDaemon";
  * invites a support question with no good answer (PRD AC 4). The route itself stays reachable, and
  * `LiveKitAppPage` explains itself to anyone who arrives by link.
  *
- * The entry and the screen read the same rule (`presenceAvailability`) so they cannot disagree: a
+ * The entry and the screen read the same rule (`capabilityAvailability`) so they cannot disagree: a
  * room still joining, or one that failed with a reason, keeps the entry — the screen has a join to
  * report on, and the reason a join failed is exactly what an operator would go there to find.
  */
@@ -34,7 +34,7 @@ export function DaemonNavMenu({
   const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   const carriesPresence = useHasCapability(connection, "presence");
   const liveKitApplies =
-    presenceAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
+    capabilityAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
 
   useEffect(() => {
     if (!open) return;

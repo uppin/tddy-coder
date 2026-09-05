@@ -3,7 +3,7 @@ import { ExternalLink } from "lucide-react";
 import type { CommonRoomStatus } from "../hooks/useCommonRoom";
 import { shouldShowParticipantVideoAffordance } from "../hooks/participantCameraVideo";
 import { useHasCapability, type CapabilityBearing } from "../rpc/connections/useHasCapability";
-import { presenceAvailability } from "../hooks/presenceAvailability";
+import { capabilityAvailability } from "../hooks/capabilityAvailability";
 import {
   parseOwnedProjectCount,
   type RoomParticipant,
@@ -132,7 +132,7 @@ export function ParticipantList({
   const carriesPresence = useHasCapability(connection, "presence");
   // The status the room reports and the capability the wire advertises, resolved in the one order
   // that does not blame the connection for a join that is merely still in flight.
-  const availability = presenceAvailability(roomStatus, carriesPresence);
+  const availability = capabilityAvailability(roomStatus, carriesPresence);
 
   if (availability === "connecting") {
     return (

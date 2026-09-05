@@ -12,6 +12,12 @@
  * no connection at all — pinned below by "offers the media tabs for a dormant session on a host
  * reached over LiveKit".
  *
+ * Availability is read through `capabilityAvailability`, the same rule the presence surfaces use:
+ * the common room's status first, the capability second. While a join is in flight there is no host
+ * connection yet, so the capability alone would render seven tabs on load and nine a second later.
+ * A host that never joins a room reports `idle` and is refused, which is every "reached without
+ * LiveKit" scenario below — none of them puts a common room in the tree.
+ *
  * Every absence here is asserted next to something that does render, because a `not.exist` on its
  * own is satisfied just as well by a component that threw.
  *
@@ -27,7 +33,10 @@ import type { SessionRuntimeState } from "../../src/components/sessions/sessionR
 import type { SessionEntry } from "../../src/gen/connection_pb";
 import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { VncService } from "../../src/gen/vnc_pb";
-import type { HostConnection } from "../../src/rpc/connections/types";
+import type { ConnectionStatus, HostConnection } from "../../src/rpc/connections/types";
+import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
+import { HostDirectorySources } from "../../src/rpc/hostDirectory/useHostDirectory";
+import type { HostDirectorySource } from "../../src/rpc/hostDirectory/types";
 import { appLocationPage } from "../support/pages/appLocationPage";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 import { aHostConnection } from "../support/rpc/hostConnections";
@@ -81,6 +90,24 @@ function anAttachedRuntime(): SessionRuntimeState[] {
   ];
 }
 
+/**
+ * The common room's own directory source, as the drawer reads it (`useHostDirectorySource`).
+ *
+ * A scenario that supplies none is a tree with no common room in it at all, which reads as `idle` —
+ * the desktop build over IPC, and every "reached without LiveKit" case below.
+ */
+function aCommonRoomThatIs(status: ConnectionStatus): HostDirectorySource {
+  return { id: LIVEKIT_SOURCE_ID, status, error: null, hosts: [] };
+}
+
+/**
+ * What the registry answers while the common room is still being joined: `LiveKitConnections` is
+ * bound to a `null` room until `Room.connect()` resolves, so no provider can reach the host yet.
+ */
+function noHostReachableYet(): null {
+  return null;
+}
+
 /** A session with no process behind it: nothing was attached, so there is no session connection. */
 function noRuntime(): SessionRuntimeState[] {
   return [];
@@ -93,13 +120,17 @@ function aBackendServingBothMediaTabs() {
     .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] }));
 }
 
-function mountInspectorOn(host: HostConnection, runtimes: SessionRuntimeState[]) {
+function mountInspectorOn(
+  host: HostConnection | null,
+  runtimes: SessionRuntimeState[],
+  commonRoom?: HostDirectorySource,
+) {
   const attachment: SessionAttachmentState =
     runtimes.length > 0 && runtimes[0].connection
       ? { status: "connected", connection: runtimes[0].connection }
       : { status: "idle" };
 
-  mountWithRpc(
+  const inspector = (
     <SessionMainPane
       selectedSession={SESSION as SessionEntry}
       attachment={attachment}
@@ -114,7 +145,15 @@ function mountInspectorOn(host: HostConnection, runtimes: SessionRuntimeState[])
       onTerminate={() => undefined}
       runtimes={runtimes}
       focusedRuntimeId={null}
-    />,
+    />
+  );
+
+  mountWithRpc(
+    commonRoom ? (
+      <HostDirectorySources sources={[commonRoom]}>{inspector}</HostDirectorySources>
+    ) : (
+      inspector
+    ),
     aBackendServingBothMediaTabs(),
   );
 }
@@ -182,6 +221,31 @@ it("leaves every non-media tab in the strip on a host reached without LiveKit", 
   page.inspectorUsageTab().should("exist");
   page.inspectorWorktreeTab().should("exist");
   page.inspectorFilesTab().should("exist");
+});
+
+it("keeps the media tabs in the strip while the common room is still being joined", () => {
+  // Given the first second of a LiveKit page load: the join has not settled, so no provider can
+  // reach the host yet and no connection carries `media`
+  // When the inspector opens
+  mountInspectorOn(noHostReachableYet(), anAttachedRuntime(), aCommonRoomThatIs("connecting"));
+
+  // Then both media tabs are already there. Waiting on the capability alone would render seven tabs
+  // and then nine, reflowing the strip under the operator's cursor a second after it settled
+  page.inspectorDetailsTab().should("exist");
+  page.inspectorVncTab().should("exist");
+  page.inspectorScreenSharingTab().should("exist");
+});
+
+it("keeps the media tabs out of the strip on a host that joins no room at all", () => {
+  // Given the desktop build over IPC: nothing is being joined, so the common room reports `idle`
+  // rather than `connecting`, and it will not start later
+  // When the inspector opens
+  mountInspectorOn(aHostReachedWithoutLiveKit(), anAttachedRuntime(), aCommonRoomThatIs("idle"));
+
+  // Then the tabs are absent and stay absent — an `idle` room is a decision, not a wait
+  page.inspectorDetailsTab().should("exist");
+  page.inspectorVncTab().should("not.exist");
+  page.inspectorScreenSharingTab().should("not.exist");
 });
 
 it("offers the media tabs for a dormant session on a host reached over LiveKit", () => {

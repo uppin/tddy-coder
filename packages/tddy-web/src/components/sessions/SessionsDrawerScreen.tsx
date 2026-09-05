@@ -16,7 +16,7 @@ import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
-import { presenceAvailability } from "../../hooks/presenceAvailability";
+import { capabilityAvailability } from "../../hooks/capabilityAvailability";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
@@ -319,9 +319,9 @@ export function SessionsDrawerScreen({
   // Read through the same rule the LiveKit screen uses, so a room that is merely mid-join does not
   // produce a claim about the connection that the next second withdraws.
   const selectedHost = useHostConnection(selectedInstanceId);
+  const carriesPresence = useHasCapability(selectedHost, "presence");
   const crossHostSessionsVisible =
-    presenceAvailability(commonRoom?.status ?? "idle", useHasCapability(selectedHost, "presence")) !==
-    "unavailable";
+    capabilityAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
   const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
     client,
     sessionToken,

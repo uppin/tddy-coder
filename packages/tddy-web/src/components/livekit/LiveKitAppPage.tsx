@@ -6,7 +6,7 @@ import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
-import { presenceAvailability } from "../../hooks/presenceAvailability";
+import { capabilityAvailability } from "../../hooks/capabilityAvailability";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "../ui/tooltip";
@@ -43,7 +43,7 @@ export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => v
   const connection = useHostConnection(selectedInstanceId);
   const carriesPresence = useHasCapability(connection, "presence");
   const roomStatus = commonRoom?.status ?? "idle";
-  const availability = presenceAvailability(roomStatus, carriesPresence);
+  const availability = capabilityAvailability(roomStatus, carriesPresence);
 
   // Only when nothing is being joined and the wire has no presence either. A join still in flight,
   // or one that failed with a reason, is a roster that exists and is reported on by the panels
