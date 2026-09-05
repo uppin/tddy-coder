@@ -54,11 +54,24 @@ export interface DaemonHostEnvironment {
   createIpcBridge: () => WebviewIpcBridge;
 }
 
-/** The real host: this page's own `window`, and the host application's real bridge. */
+/**
+ * This page's connection to the host application, opened once.
+ *
+ * The bridge is a page-level resource, not a per-transport one: registering a response channel
+ * *abandons the previous one*, which is what makes a reloaded page stop receiving answers meant for
+ * the page before it. A page that opened two would abandon its own first connection, and every call
+ * already issued on it would wait for an answer that can never arrive.
+ *
+ * A page builds several transports — the provider builds one, and `useHttpTransport` builds a
+ * fallback for any component outside it — so this cannot be left to callers to get right.
+ */
+let thisPagesBridge: WebviewIpcBridge | null = null;
+
+/** The real host: this page's own `window`, and the one bridge this page owns. */
 export function thisPagesHost(): DaemonHostEnvironment {
   return {
     window: typeof window === "undefined" ? {} : (window as DaemonHostWindow),
-    createIpcBridge: createTauriIpcBridge,
+    createIpcBridge: () => (thisPagesBridge ??= createTauriIpcBridge()),
   };
 }
 

@@ -21,6 +21,12 @@ import { extname, join } from "node:path";
 /** The workspace root, from this package. */
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 
+/**
+ * The daemon configuration the suite runs against — no LiveKit, no Telegram, and file logging.
+ * A run's evidence is in `tmp/logs/e2e-daemon`, since WebdriverIO owns the terminal.
+ */
+const E2E_DAEMON_CONFIG = join(import.meta.dirname, "e2e", "fixtures", "e2e.daemon.yaml");
+
 /** The `--features wdio` debug binary that `e2e:build` produces. */
 const APP_BINARY = join(REPO_ROOT, "target", "debug", "tddy-desktop");
 
@@ -48,7 +54,16 @@ export const config: WebdriverIO.Config = {
     // spawn-worker fork and a LiveKit dial. That is seconds, not milliseconds.
     timeout: 120_000,
   },
-  services: [["tauri", { appBinaryPath: APP_BINARY, driverProvider: "embedded" }]],
+  services: [
+    [
+      "tauri",
+      {
+        appBinaryPath: APP_BINARY,
+        driverProvider: "embedded",
+        env: { TDDY_DAEMON_CONFIG: E2E_DAEMON_CONFIG, TDDY_WORKSPACE_ROOT: REPO_ROOT },
+      },
+    ],
+  ],
   capabilities: [{}],
 
   /** Build the web bundle and serve it where the app expects to find it. */

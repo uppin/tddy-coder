@@ -12,6 +12,7 @@
 
 mod config_source;
 mod ipc;
+mod oauth_callback;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -102,13 +103,92 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Assemble the daemon, hand its roster to the webview host, and start what the runtime left to
 /// its host to start.
+/// Point the GitHub callback at this process, whatever the configuration says.
+///
+/// `redirect_uri` is derived from `WEB_PUBLIC_URL` / `listen` for a *served* daemon, which is an
+/// address a browser on this machine may not even be able to reach — and must not be, since the
+/// callback carries an authorization code. A desktop sign-in has to come back here, so the host
+/// overrides it to loopback rather than inheriting a value that was never meant for it.
+fn redirect_oauth_to_this_process(config: &mut tddy_daemon::config::DaemonConfig) -> Option<u16> {
+    let github = config.github.as_mut()?;
+    let port = config.listen.web_port.unwrap_or(DEFAULT_CALLBACK_PORT);
+    github.redirect_uri = Some(oauth_callback::callback_url(port));
+    log::info!(
+        "[tddy-desktop] GitHub sign-in will come back to {}",
+        oauth_callback::callback_url(port)
+    );
+    Some(port)
+}
+
+/// Wait for a GitHub sign-in to come back, and send the dashboard to its own callback route.
+///
+/// The daemon's answer to this is its web server, which this application does not run. What is
+/// opened here serves one path and closes as soon as a sign-in completes.
+///
+/// The dashboard's existing `/auth/callback` route performs the exchange, so no part of the sign-in
+/// is re-implemented: the code is carried from the browser back into the window, and the same code
+/// path a browser tab uses takes it from there.
+fn complete_sign_in_when_the_browser_comes_back(app: &tauri::App, address: std::net::SocketAddr) {
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let params = match oauth_callback::await_callback(address).await {
+            Ok(params) => params,
+            Err(error) => {
+                log::error!("[tddy-desktop] the sign-in callback could not be served: {error}");
+                return;
+            }
+        };
+        let Some(window) = handle.get_webview_window(MAIN_WINDOW_LABEL) else {
+            log::error!("[tddy-desktop] a sign-in came back with no window to complete it in");
+            return;
+        };
+        match callback_route(&params) {
+            Ok(route) => match window.navigate(route) {
+                Ok(()) => {
+                    log::info!("[tddy-desktop] sign-in came back; completing it in the window")
+                }
+                Err(error) => {
+                    log::error!("[tddy-desktop] could not open the callback route: {error}")
+                }
+            },
+            Err(error) => log::error!("[tddy-desktop] the callback route is not a url: {error}"),
+        }
+    });
+}
+
+/// The dashboard's own callback route, carrying what the browser brought back.
+fn callback_route(params: &oauth_callback::CallbackParams) -> anyhow::Result<Url> {
+    let base = match dashboard_url()? {
+        WebviewUrl::External(url) => url.to_string(),
+        _ => "tauri://localhost/".to_string(),
+    };
+    let mut route = Url::parse(base.trim_end_matches('/'))?.join("/auth/callback")?;
+    route
+        .query_pairs_mut()
+        .append_pair("code", &params.code)
+        .append_pair("state", &params.state);
+    Ok(route)
+}
+
+/// Where the sign-in callback is served when the configuration names no listen port.
+const DEFAULT_CALLBACK_PORT: u16 = 8899;
+
 fn start_daemon(
     app: &tauri::App,
-    config: tddy_daemon::config::DaemonConfig,
+    mut config: tddy_daemon::config::DaemonConfig,
     config_path: PathBuf,
     spawn_client: Option<(tddy_daemon::spawn_worker::SpawnClient, i32)>,
 ) -> anyhow::Result<()> {
     let handle = app.handle().clone();
+    // Loopback only, and served by this process: an address configured for a *served* daemon (a LAN
+    // address out of `WEB_PUBLIC_URL`) is one a browser on this machine may not reach, and the
+    // callback carries an authorization code that must not go on the network.
+    if let Some(port) = redirect_oauth_to_this_process(&mut config) {
+        complete_sign_in_when_the_browser_comes_back(
+            app,
+            std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        );
+    }
     // `build` is assembly, `spawn` needs a runtime context, and so does the signal listener, so all
     // three run on Tauri's — the same runtime the two IPC commands are dispatched on, which is what
     // lets a response the daemon produces reach the sink a command registered.

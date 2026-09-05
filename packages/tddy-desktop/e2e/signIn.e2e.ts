@@ -15,6 +15,7 @@ describe("Tddy Desktop", () => {
     const dashboard = aDashboard();
 
     // When it finishes loading
+    await dashboard.attachToDashboard();
     await dashboard.waitUntilLoaded();
 
     // Then the page got its client configuration from the in-process daemon — a page that did not
@@ -25,6 +26,7 @@ describe("Tddy Desktop", () => {
   it("asks the daemon for an authorize URL when sign-in is chosen", async () => {
     // Given a loaded dashboard
     const dashboard = aDashboard();
+    await dashboard.attachToDashboard();
     await dashboard.waitUntilLoaded();
 
     // When the operator chooses to sign in

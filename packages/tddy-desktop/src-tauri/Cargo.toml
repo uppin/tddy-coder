@@ -25,7 +25,7 @@ tddy-rpc = { path = "../../tddy-rpc" }
 tddy-tauri-rpc = { path = "../../tddy-tauri-rpc" }
 tddy-core = { path = "../../tddy-core" }
 # "signal" only: the runtime itself is Tauri's (`tauri::async_runtime`), which is tokio.
-tokio = { version = "1", features = ["signal"] }
+tokio = { version = "1", features = ["signal", "net", "io-util", "rt"] }
 anyhow = "1"
 log = "0.4"
 libc = "0.2"
@@ -46,3 +46,4 @@ wdio = ["dep:tauri-plugin-wdio-webdriver"]
 [dev-dependencies]
 # Already a workspace dependency; no new crate enters the tree.
 rstest = { workspace = true }
+tokio = { version = "1", features = ["signal", "net", "io-util", "rt", "rt-multi-thread", "macros", "time"] }

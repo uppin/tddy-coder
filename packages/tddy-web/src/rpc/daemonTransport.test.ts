@@ -18,7 +18,7 @@ import {
   GetConfigRequestSchema,
   GetConfigResponseSchema,
 } from "../gen/daemon_config_pb";
-import { createDefaultDaemonTransport } from "./daemonTransport";
+import { createDefaultDaemonTransport, thisPagesHost } from "./daemonTransport";
 import { TrafficMeterRegistry } from "./trafficMeter";
 import { aBrowserPageServedFrom, aTauriHostedPage } from "../test-utils/daemonHosts";
 
@@ -179,5 +179,21 @@ describe("the transport a page reaches its own daemon with", () => {
 
     // Then — the same counters the desktop path produces, from the same interceptor
     expect(bytesMeteredBy(registry)).toEqual({ bytesOut: 5, bytesIn: 23 });
+  });
+});
+
+describe("the page's connection to its host application", () => {
+  it("hands every transport on the page the same IPC bridge", () => {
+    // Given the real host environment, asked for a bridge more than once — which is what happens
+    // on a real page: the provider builds a transport, and every component calling
+    // `useHttpTransport` outside it builds another
+    const first = thisPagesHost().createIpcBridge();
+
+    // When another transport is built for the same page
+    const second = thisPagesHost().createIpcBridge();
+
+    // Then it is the same connection. Registering a second response channel *abandons* the first,
+    // so a page that opened two would stop receiving answers to calls it had already made.
+    expect(second).toBe(first);
   });
 });

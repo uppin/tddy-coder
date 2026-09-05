@@ -234,10 +234,15 @@ export function useAuthTokenGate(): AuthTokenGate {
  */
 export function useHttpTransport(): Transport {
   const ctx = useContext(RpcTransportContext);
-  // Stable fallback per component instance when no provider is present.
   const fallbackRef = useRef<Transport | null>(null);
+  // Only when there is no provider. Building one regardless and discarding it was harmless while
+  // this was an HTTP transport — an unused object — but a webview-IPC transport is not inert: it
+  // opens the page's connection to the host application.
+  if (ctx) {
+    return ctx.httpTransport;
+  }
   fallbackRef.current ??= createDefaultDaemonTransport();
-  return ctx?.httpTransport ?? fallbackRef.current;
+  return fallbackRef.current;
 }
 
 /**
