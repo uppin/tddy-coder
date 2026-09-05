@@ -1,40 +1,52 @@
-import { useState, useCallback } from "react";
+/**
+ * Attaching to a session, and holding the connection that attach produced.
+ *
+ * The daemon's `ConnectSession` / `ResumeSession` reply is read into a transport-neutral
+ * {@link SessionAttachmentHint} (`rpc/connections/sessionAttachment`), and the host connection opens
+ * the session over whichever wire it reaches it by. What used to be two states here —
+ * `connected-livekit`, carrying four LiveKit fields, and a degraded `connected-grpc` — is one
+ * `connected` state carrying a {@link SessionConnection}, so no consumer branches on the wire.
+ *
+ * The hint is published alongside the state because a room-backed session still has surfaces that
+ * join its room for themselves: the terminal (`SessionLiveKitTerminal`) and the chat presenter
+ * (`usePresenterLiveKitRoom`). Folding those into the connection is node 5's; until then they read
+ * the routing from here rather than re-deriving it from a reply nobody kept.
+ *
+ * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection-prd.md`.
+ */
+
+import { useCallback, useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import { ConnectionService } from "../../gen/connection_pb";
+import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
+import type { SessionAttachmentHint, SessionAttachmentState } from "../../rpc/connections/session";
+import type { HostConnection } from "../../rpc/connections/types";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type SessionAttachmentState =
-  | { status: "idle" }
-  | { status: "connecting" }
-  | {
-      status: "connected-livekit";
-      sessionId: string;
-      livekitRoom: string;
-      livekitUrl: string;
-      livekitServerIdentity: string;
-      /** This browser tab's own LiveKit identity for joining the room (distinct from `livekitServerIdentity`). */
-      identity: string;
-    }
-  | { status: "connected-grpc"; sessionId: string }
-  | { status: "error"; error: string };
+export type { SessionAttachmentState } from "../../rpc/connections/session";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
+/**
+ * One attachment: what state it is in, and the routing it was opened with.
+ *
+ * The two travel together so that restoring an attachment — the drawer's fast-path select, which
+ * re-focuses a runtime that is already mounted — restores both, rather than reconnecting a session
+ * whose connection is still open just to learn its room again.
+ */
+export interface SessionAttachment {
+  readonly state: SessionAttachmentState;
+  /** How the daemon said to reach this session; `null` unless {@link state} is connected. */
+  readonly hint: SessionAttachmentHint | null;
+}
+
+const NOT_ATTACHED: SessionAttachment = { state: { status: "idle" }, hint: null };
+
 export interface UseSessionAttachmentResult {
   state: SessionAttachmentState;
-  connectSession(
-    sessionId: string,
-    sessionToken: string,
-    client: ConnectionClient,
-  ): Promise<void>;
-  resumeSession(
-    sessionId: string,
-    sessionToken: string,
-    client: ConnectionClient,
-  ): Promise<void>;
+  /** The routing behind {@link state}'s connection; `null` unless connected. */
+  hint: SessionAttachmentHint | null;
+  connectSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<void>;
+  resumeSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<void>;
   deleteSession(
     sessionId: string,
     sessionToken: string,
@@ -46,76 +58,68 @@ export interface UseSessionAttachmentResult {
     sessionToken: string,
     client: ConnectionClient,
   ): Promise<void>;
-  /** Restore the attachment to an already-connected session's state without an RPC round-trip —
-   *  used by the screen's fast-path select (switching focus to a session whose runtime is already
-   *  mounted in the registry). Mirrors `connectSession`'s terminal state but skips the network hop. */
-  restore(state: SessionAttachmentState): void;
+  /** Restore an already-open attachment without an RPC round-trip — used by the screen's fast-path
+   *  select (switching focus to a session whose runtime is already mounted in the registry). */
+  restore(attachment: SessionAttachment): void;
   reset(): void;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-type AttachResponse = { livekitRoom: string; livekitUrl: string; livekitServerIdentity: string };
-
-function attachmentStateFromResponse(resp: AttachResponse, sessionId: string): SessionAttachmentState {
-  if (resp.livekitRoom !== "") {
-    return {
-      status: "connected-livekit",
-      sessionId,
-      livekitRoom: resp.livekitRoom,
-      livekitUrl: resp.livekitUrl,
-      livekitServerIdentity: resp.livekitServerIdentity,
-      identity: `browser-${sessionId}-${Date.now()}`,
-    };
-  }
-  return { status: "connected-grpc", sessionId };
-}
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 export function useSessionAttachment(): UseSessionAttachmentResult {
-  const [state, setState] = useState<SessionAttachmentState>({ status: "idle" });
+  const [attachment, setAttachment] = useState<SessionAttachment>(NOT_ATTACHED);
 
-  const connectSession = useCallback(
-    async (sessionId: string, sessionToken: string, client: ConnectionClient) => {
-      setState({ status: "connecting" });
+  /**
+   * Attach `sessionId` on `host` with whichever reply the caller's RPC produced.
+   *
+   * The reply is turned into a hint and the host opens the session over it — the one place the
+   * LiveKit fields of the reply are read, and the branch (`resp.livekitRoom !== ""`) that used to
+   * decide which of two statuses every consumer would then have to handle.
+   */
+  const attach = useCallback(
+    async (
+      sessionId: string,
+      host: HostConnection,
+      call: (client: ConnectionClient) => Promise<{
+        livekitRoom: string;
+        livekitUrl: string;
+        livekitServerIdentity: string;
+      }>,
+    ) => {
+      setAttachment({ state: { status: "connecting", sessionId }, hint: null });
       try {
-        const resp = await client.connectSession({ sessionToken, sessionId });
-        setState(attachmentStateFromResponse(resp, sessionId));
+        const reply = await call(host.clientFor(ConnectionService));
+        const hint = attachmentHintFromReply(sessionId, reply);
+        setAttachment({
+          state: { status: "connected", connection: host.openSession(sessionId, hint) },
+          hint,
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setState({ status: "error", error: message });
+        setAttachment({ state: { status: "error", error: message }, hint: null });
       }
     },
     [],
   );
 
+  const connectSession = useCallback(
+    (sessionId: string, sessionToken: string, host: HostConnection) =>
+      attach(sessionId, host, (client) => client.connectSession({ sessionToken, sessionId })),
+    [attach],
+  );
+
   const resumeSession = useCallback(
-    async (sessionId: string, sessionToken: string, client: ConnectionClient) => {
-      setState({ status: "connecting" });
-      try {
-        const resp = await client.resumeSession({ sessionToken, sessionId });
-        setState(attachmentStateFromResponse(resp, sessionId));
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setState({ status: "error", error: message });
-      }
-    },
-    [],
+    (sessionId: string, sessionToken: string, host: HostConnection) =>
+      attach(sessionId, host, (client) => client.resumeSession({ sessionToken, sessionId })),
+    [attach],
   );
 
   const deleteSession = useCallback(
     async (sessionId: string, sessionToken: string, client: ConnectionClient) => {
       try {
         await client.deleteSession({ sessionToken, sessionId });
-        setState({ status: "idle" });
+        setAttachment(NOT_ATTACHED);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setState({ status: "error", error: message });
+        setAttachment({ state: { status: "error", error: message }, hint: null });
       }
     },
     [],
@@ -127,19 +131,28 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
         await client.signalSession({ sessionToken, sessionId, signal });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        setState({ status: "error", error: message });
+        setAttachment({ state: { status: "error", error: message }, hint: null });
       }
     },
     [],
   );
 
-  const restore = useCallback((state: SessionAttachmentState) => {
-    setState(state);
+  const restore = useCallback((next: SessionAttachment) => {
+    setAttachment(next);
   }, []);
 
   const reset = useCallback(() => {
-    setState({ status: "idle" });
+    setAttachment(NOT_ATTACHED);
   }, []);
 
-  return { state, connectSession, resumeSession, deleteSession, signalSession, restore, reset };
+  return {
+    state: attachment.state,
+    hint: attachment.hint,
+    connectSession,
+    resumeSession,
+    deleteSession,
+    signalSession,
+    restore,
+    reset,
+  };
 }

@@ -1,20 +1,19 @@
 import React from "react";
 import type { SessionEntry } from "../../gen/connection_pb";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
 import { AgentChat } from "../chat/AgentChat";
 
-const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
 
 export interface WorkflowChatScreenProps {
   session: SessionEntry;
   /**
-   * The session's own attach state. The chat derives its own independent presenter LiveKit room
-   * connection from this (see `usePresenterLiveKitRoom`) — the same room the terminal connects to,
-   * with a distinct browser participant. `SessionMainPane`'s `room` prop is VNC-purpose and unused
-   * here.
+   * How the attached session is reached. The chat derives its own independent presenter LiveKit
+   * room connection from this (see `usePresenterLiveKitRoom`) — the same room the terminal connects
+   * to, with a distinct browser participant. `SessionMainPane`'s `room` prop is VNC-purpose and
+   * unused here. `null` for a session that is not attached, or one served without a room.
    */
-  attachment?: SessionAttachmentState;
+  attachmentHint?: SessionAttachmentHint | null;
 }
 
 /**
@@ -26,11 +25,10 @@ export interface WorkflowChatScreenProps {
  */
 export function WorkflowChatScreen({
   session,
-  attachment = IDLE_ATTACHMENT,
+  attachmentHint = null,
 }: WorkflowChatScreenProps) {
-  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
-  const livekitServerIdentity =
-    attachment.status === "connected-livekit" ? attachment.livekitServerIdentity : undefined;
+  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachmentHint);
+  const livekitServerIdentity = attachmentHint?.serverIdentity;
 
   return (
     <div

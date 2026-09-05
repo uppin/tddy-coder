@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { TokenService } from "../../gen/token_pb";
@@ -15,8 +15,6 @@ interface SessionLiveKitTerminalProps {
   livekitUrl: string;
   livekitRoom: string;
   livekitServerIdentity: string;
-  /** This browser tab's own LiveKit identity, from `SessionAttachmentState`'s `connected-livekit` variant. */
-  identity: string;
   tokenClient: TokenClient;
   /** Daemon session token + id, threaded to the terminal for the file drop upload feature. */
   sessionToken: string;
@@ -50,7 +48,6 @@ export function SessionLiveKitTerminal({
   livekitUrl,
   livekitRoom,
   livekitServerIdentity,
-  identity,
   tokenClient,
   sessionToken,
   sessionId,
@@ -62,6 +59,7 @@ export function SessionLiveKitTerminal({
   onConnectionStatusChange,
   onBytes,
 }: SessionLiveKitTerminalProps) {
+  const identity = useBrowserIdentityFor(livekitRoom, sessionId);
   const { token, ttlSeconds, getToken } = useLiveKitTerminalToken(tokenClient, livekitRoom, identity);
   const isMobile = useIsMobile();
 
@@ -92,4 +90,27 @@ export function SessionLiveKitTerminal({
       onBytes={onBytes}
     />
   );
+}
+
+/**
+ * This browser tab's own participant identity for `roomName`.
+ *
+ * Stable while the terminal keeps watching the same room — the token is minted for it, and a
+ * regenerated identity would mean a fresh join under a new participant — and fresh when the room
+ * changes, because two rooms are two participants and a room that saw the same identity twice would
+ * drop one of them.
+ *
+ * Minted here rather than handed down with the attachment: it belongs to *this* terminal's own join,
+ * which is a separate connection from the one the session's RPC travels over. Node 5 of the
+ * `optional-livekit` stack folds this join into that connection, at which point the identity goes
+ * with it.
+ */
+function useBrowserIdentityFor(roomName: string, sessionId: string): string {
+  const roomRef = useRef<string | null>(null);
+  const identityRef = useRef<string>("");
+  if (roomRef.current !== roomName) {
+    roomRef.current = roomName;
+    identityRef.current = `browser-${sessionId}-${Date.now()}`;
+  }
+  return identityRef.current;
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../../gen/connection_pb";
-import type { SessionAttachmentState } from "../useSessionAttachment";
+import type { SessionAttachmentHint } from "../../../rpc/connections/session";
 import { Button } from "../../ui/button";
 import { detectIsMobile, useIsMobile } from "../../../hooks/useIsMobile";
 import { usePresenterLiveKitRoom } from "../usePresenterLiveKitRoom";
@@ -27,7 +27,6 @@ import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
-const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
 
 /**
  * The default for a caller that parses no participant metadata.
@@ -83,11 +82,12 @@ export interface PrStackScreenProps {
    */
   sessions?: SessionEntry[];
   /**
-   * The session's own attach state. The chat panel derives its own independent LiveKit room
+   * How the attached session is reached. The chat panel derives its own independent LiveKit room
    * connection from this (see `usePresenterLiveKitRoom`) rather than being handed a room from
-   * above — `SessionMainPane`'s `room` prop is VNC-purpose and unrelated.
+   * above — `SessionMainPane`'s `room` prop is VNC-purpose and unrelated. `null` for a session that
+   * is not attached, or one whose host serves it without a room.
    */
-  attachment?: SessionAttachmentState;
+  attachmentHint?: SessionAttachmentHint | null;
   /**
    * The project's default branch (`ProjectEntry.main_branch_ref`, resolved by `session.projectId`).
    * Names the base in a root node's Start-session dialog and is the repoint target when no parent can
@@ -144,16 +144,15 @@ export function PrStackScreen({
   client,
   sessionToken = "",
   sessions = [],
-  attachment = IDLE_ATTACHMENT,
+  attachmentHint = null,
   defaultBranch = "",
   defaultRemote = "",
   onChildSessionStarted,
   onOpenSession,
   sessionMetadataBySessionId = NO_SESSION_METADATA,
 }: PrStackScreenProps) {
-  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachment);
-  const livekitServerIdentity =
-    attachment.status === "connected-livekit" ? attachment.livekitServerIdentity : undefined;
+  const { room, status: roomStatus, error: roomError } = usePresenterLiveKitRoom(attachmentHint);
+  const livekitServerIdentity = attachmentHint?.serverIdentity;
   // Overrides `session.stackPlanJson` immediately after a successful `AddPlannedPr`, since the
   // `session` prop itself only refreshes once the caller separately refetches the session list.
   // Reset whenever the prop actually changes so a later real refetch isn't masked by a stale one.

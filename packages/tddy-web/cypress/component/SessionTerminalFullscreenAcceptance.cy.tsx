@@ -5,7 +5,7 @@
  * Changeset: `session-terminal-fullscreen`
  *
  * Driven over the deterministic gRPC path (as `SessionTerminalTabsAcceptance`): `connectSession`
- * returns an empty `livekitRoom`, so the session attaches as `connected-grpc` and every terminal RPC
+ * returns an empty `livekitRoom`, so the host serves the session directly and every terminal RPC
  * flows over the daemon client into the in-memory backend.
  *
  * The Fullscreen API is stubbed rather than exercised: Cypress' AUT iframe is not guaranteed to
@@ -49,7 +49,7 @@ const SESSION = {
   pendingElicitation: false,
 };
 
-/** A connected-grpc backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
+/** A host-served backend (empty `livekitRoom`) with an optional set of pre-existing bash tabs. */
 function aGrpcBackend(
   terminals: Array<{ terminalId: string }> = [],
 ): ConnectionServiceBackend {

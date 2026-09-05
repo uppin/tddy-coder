@@ -123,6 +123,11 @@ class LiveKitSessionConnection implements SessionConnection {
     return this.hint.sessionId;
   }
 
+  /** The room this connection joined — see {@link liveKitRoomOf}. */
+  get joinedRoom(): Room {
+    return this.room;
+  }
+
   /**
    * Read at the moment it is asked, never captured — a session process leaves its room without
    * anything re-resolving this connection.
@@ -245,4 +250,21 @@ export function openLiveKitSession(
   support: LiveKitSessionSupport,
 ): SessionConnection {
   return new LiveKitSessionConnection(hostId, hint, support);
+}
+
+/**
+ * The LiveKit room behind `connection`, or `null` when it is not carried over one.
+ *
+ * The one thing a caller can legitimately want that the wire-neutral interface cannot express: the
+ * traffic strip reads round-trip time off a room's own peer connection (`readRoomRtt`), which is a
+ * measurement of the wire and not of the session. It lives here, next to the join, so that asking
+ * for a room still means importing LiveKit — rather than widening `SessionConnection` with a member
+ * every other transport would have to answer `null` to.
+ *
+ * Before this, the traffic strip joined the session's room a *second* time purely to measure it
+ * (`useSessionLiveKitRoom`). Reading the connection's own room is the same measurement over one
+ * fewer participant.
+ */
+export function liveKitRoomOf(connection: SessionConnection | null): Room | null {
+  return connection instanceof LiveKitSessionConnection ? connection.joinedRoom : null;
 }

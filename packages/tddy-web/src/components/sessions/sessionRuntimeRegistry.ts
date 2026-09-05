@@ -6,37 +6,39 @@
  * Observable store (subscribe/notify, snapshot cached for `useSyncExternalStore`); no React or RPC
  * dependency of its own — those are fed in by the screen — so it is unit-testable in isolation.
  *
- * The connection fields (`status`, `livekitUrl`, `livekitRoom`, `livekitServerIdentity`,
- * `identity`, `room`) are optional so the store remains usable in isolation tests that only
- * exercise focus/eviction/byte accounting. The screen populates them from the attach response and
- * the terminal's `onRoom` callback; the runtime layer renders each attached session's terminal
- * from them.
+ * The connection fields (`connection`, `hint`, `room`) are optional so the store remains usable in
+ * isolation tests that only exercise focus/eviction/byte accounting. The screen populates them from
+ * the attach — the connection the host opened, and the routing hint it was opened with — and the
+ * runtime layer renders each attached session's terminal from them.
+ *
+ * The registry **owns** each runtime's session connection: a runtime outlives the focus that
+ * created it, so nothing else is in a position to release one. Evicting a runtime, or replacing its
+ * connection on re-attach, closes the connection that goes — without that, every re-attach would
+ * leave a joined room nobody will ever disconnect.
  *
  * Changeset: `2026-07-12-fast-session-change`
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 
 import type { Room } from "livekit-client";
-
-export type SessionRuntimeStatus = "connected-livekit" | "connected-grpc";
+import type { SessionAttachmentHint, SessionConnection } from "../../rpc/connections/session";
 
 export interface SessionRuntimeState {
   readonly sessionId: string;
-  /** True while the session's LiveKit room + terminal are attached (mounted). */
+  /** True while the session's connection + terminal are attached (mounted). */
   attached: boolean;
-  /** Attachment status — drives which terminal component the runtime layer renders. */
-  status?: SessionRuntimeStatus;
-  /** LiveKit server URL for the session's terminal room (`connected-livekit` only). */
-  livekitUrl?: string;
-  /** LiveKit room name for the session's terminal room (`connected-livekit` only). */
-  livekitRoom?: string;
-  /** The coder participant identity the session's terminal room is routed to. */
-  livekitServerIdentity?: string;
-  /** This browser tab's own LiveKit identity for joining the session's terminal room. */
-  identity?: string;
+  /** The session's own connection — its RPC route, its capabilities and its live status. Which
+   *  terminal component the runtime layer renders is derived from the capabilities, never from a
+   *  status string. */
+  connection?: SessionConnection;
+  /** How the daemon said to reach this session. The terminal still joins the session's room for
+   *  itself (`SessionLiveKitTerminal`), so it reads the room and url from here. */
+  hint?: SessionAttachmentHint;
   /** The session's connected LiveKit `Room`, captured via the terminal's `onRoom` callback.
-   *  Production uses it to build the session-scoped `ConnectionService` client; `null` in tests
-   *  (the test-double `liveKitFactory` ignores its `room` argument). */
+   *  TODO(optional-livekit node 5): nothing reads this any more — session RPC routes through
+   *  {@link connection} rather than through a room captured from the terminal. It is kept only
+   *  because the terminal that reports it is the one node 5 folds into the connection; drop the
+   *  field, `setRoom` and the `onSessionRoom` plumbing with that merge. */
   room?: Room | null;
   /** Cumulative bytes received over the session's LiveKit transport. */
   bytesIn: number;
@@ -51,13 +53,10 @@ export interface SessionRuntimeState {
   insertInput?: (text: string) => void;
 }
 
-/** Connection-only patch applied when an attach response arrives for an existing runtime. */
+/** Connection-only patch applied when an attach resolves for an existing runtime. */
 export interface SessionRuntimeConnection {
-  status: SessionRuntimeStatus;
-  livekitUrl: string;
-  livekitRoom: string;
-  livekitServerIdentity: string;
-  identity: string;
+  connection: SessionConnection;
+  hint: SessionAttachmentHint;
 }
 
 export interface ByteSample {
@@ -104,25 +103,34 @@ export class SessionRuntimeRegistry {
 
   /** Add (or replace) a session's runtime state. Does not change focus. */
   add(sessionId: string, state: SessionRuntimeState): void {
+    this.releaseConnection(this.runtimeBySessionId.get(sessionId), state.connection);
     this.runtimeBySessionId.set(sessionId, state);
     if (this.focusedId === null) this.focusedId = sessionId;
     this.notify();
   }
 
-  /** Patch an existing runtime's connection params (from an attach response) without resetting
-   *  byte counters. No-op when the session has no runtime. */
+  /** Patch an existing runtime's connection (from a re-attach) without resetting byte counters.
+   *  The connection it replaces is closed. No-op when the session has no runtime. */
   updateConnection(sessionId: string, conn: SessionRuntimeConnection): void {
     const state = this.runtimeBySessionId.get(sessionId);
     if (!state) return;
+    this.releaseConnection(state, conn.connection);
     this.runtimeBySessionId.set(sessionId, {
       ...state,
-      status: conn.status,
-      livekitUrl: conn.livekitUrl,
-      livekitRoom: conn.livekitRoom,
-      livekitServerIdentity: conn.livekitServerIdentity,
-      identity: conn.identity,
+      connection: conn.connection,
+      hint: conn.hint,
     });
     this.notify();
+  }
+
+  /** Close `previous`'s connection unless `replacement` is the very same one — a re-attach that
+   *  resolved to the connection already held must not close the connection it is installing. */
+  private releaseConnection(
+    previous: SessionRuntimeState | undefined,
+    replacement: SessionConnection | undefined,
+  ): void {
+    const held = previous?.connection;
+    if (held && held !== replacement) held.close();
   }
 
   /** Store the session's connected LiveKit `Room` (captured from the terminal). No-op when the
@@ -150,8 +158,10 @@ export class SessionRuntimeRegistry {
     this.notify();
   }
 
-  /** Explicitly disconnect (evict) a session's runtime. Other runtimes are unaffected. */
+  /** Explicitly disconnect (evict) a session's runtime, releasing its connection. Other runtimes
+   *  are unaffected. */
   disconnect(sessionId: string): void {
+    this.releaseConnection(this.runtimeBySessionId.get(sessionId), undefined);
     this.runtimeBySessionId.delete(sessionId);
     if (this.focusedId === sessionId) this.focusedId = null;
     this.notify();

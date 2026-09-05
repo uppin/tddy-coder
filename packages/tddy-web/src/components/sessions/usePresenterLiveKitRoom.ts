@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import type { Room } from "livekit-client";
 import { useCommonRoom, type CommonRoomStatus } from "../../hooks/useCommonRoom";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
 
 const IDENTITY_UNUSED = () => "";
@@ -9,16 +9,16 @@ const IDENTITY_UNUSED = () => "";
 /**
  * Connects the PR-Stack Chat Screen's own dedicated LiveKit room for the currently attached
  * session — independent of `SessionMainPane`'s always-null VNC-purpose `room` prop, and of the
- * terminal's own connection. Mirrors `useSessionLiveKitRoom` (used by `StatusBar` for the
- * traffic meter's own independent connection to the same room).
+ * terminal's own connection. A session whose hint names no room has nothing to join, and the hook
+ * yields no room rather than a failed one.
  */
 export function usePresenterLiveKitRoom(
-  attachment: SessionAttachmentState,
+  hint: SessionAttachmentHint | null,
 ): { room: Room | null; status: CommonRoomStatus; error: string | null } {
   // presenterRoomTargetFor's own identity field is discarded here — it isn't stable across
   // renders on its own; this hook manages a stable identity ref instead (below), only
   // regenerated when the room name actually changes.
-  const target = presenterRoomTargetFor(attachment, IDENTITY_UNUSED);
+  const target = presenterRoomTargetFor(hint, IDENTITY_UNUSED);
 
   const prevRoomRef = useRef<string | undefined>(undefined);
   const identityRef = useRef<string | undefined>(undefined);

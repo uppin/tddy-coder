@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient, type Client } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import {
   ConnectionService,
@@ -9,12 +9,8 @@ import {
   type ProjectEntry,
 } from "../../gen/connection_pb";
 import { TokenService } from "../../gen/token_pb";
-import {
-  useHttpClient,
-  useLiveKitTransportFactory,
-  useLiveKitTransportFactoryIsOverridden,
-} from "../../rpc/transportProvider";
-import { useHostConnector } from "../../rpc/connections/registry";
+import { useHttpClient } from "../../rpc/transportProvider";
+import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
@@ -34,7 +30,6 @@ import {
   type ByteDelta,
   type SessionRuntimeConnection,
 } from "./sessionRuntimeRegistry";
-import { useSessionClientCache } from "./sessionClientCache";
 import { sessionNotificationRegistry } from "./sessionNotificationRegistry";
 import { useSessionNotifications } from "../../rpc/useSessionNotifications";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -44,7 +39,7 @@ import { TooltipProvider } from "../ui/tooltip";
 import { SessionDrawer } from "./SessionDrawer";
 import { SessionMainPane } from "./SessionMainPane";
 import { HostStatsFooter } from "./HostStatsFooter";
-import { useSessionAttachment, type SessionAttachmentState } from "./useSessionAttachment";
+import { useSessionAttachment } from "./useSessionAttachment";
 import { nextInspectorState } from "./inspectorState";
 import {
   sessionsDrawerPathForSession,
@@ -98,7 +93,6 @@ export function SessionsDrawerScreen({
   // over a wire with no roster yields `null`, and each of those already handles its absence.
   const room = useHostPresence(selectedInstanceId);
   const daemons = useDaemons();
-  const liveKitFactory = useLiveKitTransportFactory();
   // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
   // serving daemon (you cannot fetch a LiveKit-join token *over* LiveKit), per the PRD's bootstrap
   // exception. Do not migrate this to useDaemonClient.
@@ -230,15 +224,10 @@ export function SessionsDrawerScreen({
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
   const isMobile = useIsMobile();
 
-  const { state: attachment, connectSession, resumeSession, deleteSession, signalSession, restore: restoreAttachment, reset: resetAttachment } = useSessionAttachment();
-
-  const isConnected =
-    attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
+  const { state: attachment, hint: attachmentHint, connectSession, resumeSession, deleteSession, signalSession, restore: restoreAttachment, reset: resetAttachment } = useSessionAttachment();
 
   const connectedSessionId =
-    attachment.status === "connected-grpc" || attachment.status === "connected-livekit"
-      ? attachment.sessionId
-      : null;
+    attachment.status === "connected" ? attachment.connection.sessionId : null;
 
   // Per-session runtime registry: one entry per attached session, surviving focus switches.
   // The inspector reads byte counters + last-received from it for active sessions; inactive sessions
@@ -255,40 +244,27 @@ export function SessionsDrawerScreen({
     () => runtimeRegistry.runtimes,
   );
 
-  // Session-scoped ConnectionService client (targets the coder participant
-  // `daemon-{ownerInstanceId}-{sessionId}` = `attachment.livekitServerIdentity`). Built LAZILY — only
-  // when the user actually invokes a session-scoped RPC (ExecuteTool, ClaimTerminalControl) — so that
-  // lifecycle RPCs (Delete/Signal/Resume/Connect) and the auto-claim-on-attach stay daemon-direct and
-  // do not record the session-participant identity. In production the session's own LiveKit `Room`
-  // (captured via the terminal's `onRoom`) is the transport room; in tests the test-double
-  // `liveKitFactory` ignores its `room` argument, so the common room is an acceptable stand-in.
-  // Resolved through `sessionClientCache` so an unchanged route yields one stable client identity:
-  // this callback is invoked inline while rendering, and consumers key stream effects on the client.
-  const liveKitFactoryIsOverridden = useLiveKitTransportFactoryIsOverridden();
-  const sessionClientCache = useSessionClientCache();
-  const buildSessionClient = useCallback((): Client<typeof ConnectionService> | null => {
-    if (!connectedSessionId) return null;
-    if (attachment.status !== "connected-livekit") return null;
-    const targetIdentity = attachment.livekitServerIdentity;
-    if (!targetIdentity) return null;
-    const sessionRoom =
-      runtimeRegistry.get(connectedSessionId)?.room ?? (liveKitFactoryIsOverridden ? room : null);
-    if (!sessionRoom) return null;
-    return sessionClientCache.clientFor(targetIdentity, sessionRoom, () =>
-      createClient(ConnectionService, liveKitFactory(sessionRoom, targetIdentity)),
-    );
-  }, [
-    connectedSessionId,
-    attachment,
-    room,
-    liveKitFactory,
-    liveKitFactoryIsOverridden,
-    runtimeRegistry,
-    sessionClientCache,
-  ]);
+  // Session-scoped ConnectionService client — the one that reaches the session's own process rather
+  // than the daemon that hosts it. Built LAZILY, only when the user actually invokes a session-scoped
+  // RPC (ExecuteTool, ClaimTerminalControl), so that lifecycle RPCs (Delete/Signal/Resume/Connect)
+  // and the auto-claim-on-attach stay daemon-direct. The connection memoises the client per service,
+  // so an unchanged route yields one stable client identity: this callback is invoked inline while
+  // rendering, and consumers key stream effects on the client.
+  //
+  // Read from the runtime registry rather than from the attachment: the registry holds the
+  // connections that are still open, so a session whose runtime has been evicted yields `null` here
+  // — the answer the inspector's `buildSessionClient?.() ?? client` fallback already expects — in
+  // place of a released connection that would refuse the call.
+  const buildSessionClient = useCallback(
+    (): Client<typeof ConnectionService> | null =>
+      connectedSessionId
+        ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ConnectionService) ?? null)
+        : null,
+    [connectedSessionId, runtimeRegistry],
+  );
 
-  // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) so
-  // `buildSessionClient` can route session-scoped RPCs over the session's own room in production.
+  // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) —
+  // see `SessionRuntimeState.room` for why nothing reads it any more.
   const onSessionRoom = useCallback(
     (sessionId: string, sessionRoom: Room) => {
       runtimeRegistry.setRoom(sessionId, sessionRoom);
@@ -391,22 +367,16 @@ export function SessionsDrawerScreen({
   // first DataReceived event lands. Re-attach (an existing backgrounded runtime) refreshes the
   // connection params without resetting byte counters.
   useEffect(() => {
-    if (attachment.status !== "connected-livekit" && attachment.status !== "connected-grpc") return;
-    if (!attachment.sessionId) return;
-    const conn: SessionRuntimeConnection =
-      attachment.status === "connected-livekit"
-        ? {
-            status: "connected-livekit",
-            livekitUrl: attachment.livekitUrl,
-            livekitRoom: attachment.livekitRoom,
-            livekitServerIdentity: attachment.livekitServerIdentity,
-            identity: attachment.identity,
-          }
-        : { status: "connected-grpc", livekitUrl: "", livekitRoom: "", livekitServerIdentity: "", identity: "" };
-    const existing = runtimeRegistry.get(attachment.sessionId);
+    if (attachment.status !== "connected" || !attachmentHint) return;
+    const sessionId = attachment.connection.sessionId;
+    const conn: SessionRuntimeConnection = {
+      connection: attachment.connection,
+      hint: attachmentHint,
+    };
+    const existing = runtimeRegistry.get(sessionId);
     if (!existing) {
-      runtimeRegistry.add(attachment.sessionId, {
-        sessionId: attachment.sessionId,
+      runtimeRegistry.add(sessionId, {
+        sessionId,
         attached: true,
         ...conn,
         bytesIn: 0,
@@ -414,11 +384,11 @@ export function SessionsDrawerScreen({
         lastDataReceivedAt: Date.now(),
       });
     } else {
-      runtimeRegistry.updateConnection(attachment.sessionId, conn);
+      runtimeRegistry.updateConnection(sessionId, conn);
     }
-    runtimeRegistry.focus(attachment.sessionId);
+    runtimeRegistry.focus(sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachment.status, attachment.sessionId]);
+  }, [attachment, attachmentHint]);
 
   // Compute the inspector traffic source for the selected session: live runtime (active) wins;
   // otherwise the daemon-sourced `SessionEntry` fields (inactive / non-LiveKit sessions).
@@ -446,6 +416,9 @@ export function SessionsDrawerScreen({
     [selectedSession, selectedInstanceId],
   );
   const activeClient = useDaemonClientFor(ConnectionService, selectedOwningHost);
+  // The same daemon as a connection rather than as a client: attaching a session opens a connection
+  // on its host, and the spawned-child runtimes attach theirs on the same one.
+  const activeHost = useHostConnection(selectedOwningHost);
 
   // Human-readable host label for a daemon instance id, with the local daemon's " (this daemon)"
   // suffix stripped — used for the owning-host badge on cross-host rows.
@@ -521,24 +494,12 @@ export function SessionsDrawerScreen({
     // is no longer connected restores nothing, so claiming on it would block the resume this dormant
     // session is about to be given.
     const existing = runtimeRegistry.get(selectedSessionId);
-    if (existing?.status === "connected-livekit") {
+    if (existing?.connection) {
       attachClaimRef.current = { sessionId: selectedSessionId, listGeneration };
       restoreAttachment({
-        status: "connected-livekit",
-        sessionId: selectedSessionId,
-        livekitUrl: existing.livekitUrl ?? "",
-        livekitRoom: existing.livekitRoom ?? "",
-        livekitServerIdentity: existing.livekitServerIdentity ?? "",
-        identity: existing.identity ?? "",
-      } satisfies SessionAttachmentState);
-      return;
-    }
-    if (existing?.status === "connected-grpc") {
-      attachClaimRef.current = { sessionId: selectedSessionId, listGeneration };
-      restoreAttachment({
-        status: "connected-grpc",
-        sessionId: selectedSessionId,
-      } satisfies SessionAttachmentState);
+        state: { status: "connected", connection: existing.connection },
+        hint: existing.hint ?? null,
+      });
       return;
     }
 
@@ -554,9 +515,9 @@ export function SessionsDrawerScreen({
       ? { sessionId: selectedSessionId, listGeneration }
       : null;
     if (session.isActive) {
-      const owningClient = clientForHost(owningHostForSession(session, selectedInstanceId ?? ""));
-      if (owningClient) {
-        connectSession(selectedSessionId, sessionToken, owningClient).catch((err) => {
+      const owningHost = connectHost(owningHostForSession(session, selectedInstanceId ?? ""));
+      if (owningHost) {
+        connectSession(selectedSessionId, sessionToken, owningHost).catch((err) => {
           console.debug("[SessionsDrawerScreen] connectSession error", err);
         });
       }
@@ -597,16 +558,16 @@ export function SessionsDrawerScreen({
       case "attach":
         break;
     }
-    const owningClient = clientForHost(
+    const owningHost = connectHost(
       owningHostForSession(selectedSession, selectedInstanceId ?? ""),
     );
-    if (!owningClient) return;
+    if (!owningHost) return;
     attachClaimRef.current = { sessionId: selectedSession.sessionId, listGeneration };
-    connectSession(selectedSession.sessionId, sessionToken, owningClient).catch((err) => {
+    connectSession(selectedSession.sessionId, sessionToken, owningHost).catch((err) => {
       console.debug("[SessionsDrawerScreen] connectSession error", err);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSession, selectedInstanceId, clientForHost, listGeneration]);
+  }, [selectedSession, selectedInstanceId, connectHost, listGeneration]);
 
   // React to attachment status changes: an attach **error** opens the inspector so the operator sees
   // the problem — that is a failure to surface, not a liveness state. Every other status leaves the
@@ -639,15 +600,15 @@ export function SessionsDrawerScreen({
   };
 
   const handleResume = (sessionId: string) => {
-    if (!activeClient) return;
-    // `ResumeSession` returns the session's LiveKit coordinates and `useSessionAttachment` puts the
-    // screen straight into `connected-livekit` — the attach for this live epoch is already done.
+    if (!activeHost) return;
+    // `ResumeSession` returns the session's routing and `useSessionAttachment` puts the screen
+    // straight into `connected` — the attach for this live epoch is already done.
     // Claiming it here stops the liveness effect from firing a second `ConnectSession` when the next
     // list poll reports the session alive, which would mint a fresh browser identity and bounce the
     // terminal through a reconnect and another `ClaimTerminalControl`. The claim is stamped with the
     // snapshot the operator acted on, so the dormant readings still in flight cannot revoke it.
     attachClaimRef.current = { sessionId, listGeneration };
-    resumeSession(sessionId, sessionToken, activeClient).catch((err) => {
+    resumeSession(sessionId, sessionToken, activeHost).catch((err) => {
       // The resume never landed, so no attach was taken after all — release the claim so the liveness
       // effect can still attach if the session turns out to be alive.
       attachClaimRef.current = null;
@@ -766,8 +727,9 @@ export function SessionsDrawerScreen({
     // Auto-close the sessions drawer so the new session's terminal is unobstructed.
     setSessionListOpen(false);
     navigate(sessionsDrawerPathForSession(sessionId));
-    if (!client) return;
-    connectSession(sessionId, sessionToken, client).catch((err) => {
+    const creatingHost = connectHost(selectedInstanceId);
+    if (!creatingHost) return;
+    connectSession(sessionId, sessionToken, creatingHost).catch((err) => {
       console.debug("[SessionsDrawerScreen] connectSession after create error", err);
     });
     // Refresh the sessions list so the newly-created session appears in the drawer
@@ -845,6 +807,7 @@ export function SessionsDrawerScreen({
             <SessionMainPane
               selectedSession={selectedSession}
               attachment={attachment}
+              attachmentHint={attachmentHint}
               inspectorState={inspectorState}
               onToggleInspector={handleInspectorToggle}
               onInspectorClose={handleInspectorClose}
@@ -855,6 +818,7 @@ export function SessionsDrawerScreen({
               onTerminate={handleTerminate}
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
+              host={activeHost}
               tokenClient={tokenClient}
               sessionToken={sessionToken}
               onCancelCreate={handleCancelCreate}
@@ -874,8 +838,6 @@ export function SessionsDrawerScreen({
               onSessionDisconnect={onSessionDisconnect}
               onSessionBytes={onSessionBytes}
               buildSessionClient={buildSessionClient}
-              liveKitFactory={liveKitFactory}
-              liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
               sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
           )}
