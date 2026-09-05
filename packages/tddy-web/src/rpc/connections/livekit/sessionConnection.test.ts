@@ -18,7 +18,7 @@
  * Driven through `LiveKitConnectionProvider`, because `openSession`'s first decision — room or no
  * room — is made there, and a test that reached past it would not be testing that decision.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`
+ * Technical: `packages/tddy-web/docs/session-connections.md`
  */
 
 import { describe, it, expect } from "bun:test";

@@ -12,10 +12,12 @@ already uses across sessions).
 
 This works for **both** session transports:
 
-- **Local / `connected-grpc` sessions** (claude-cli, cursor-cli, workspace): served by the daemon's
-  existing multi-terminal `ConnectionService` RPCs (`StartTerminalSession` / `StopTerminalSession` /
-  `ListTerminalSessions`, and `terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput`).
-- **Remote / `connected-livekit` sessions** (tddy-coder recipe/tool): the Agent tab is the existing
+- **Host-served sessions** (claude-cli, cursor-cli, workspace) — a session connection carrying
+  `{rpc}` only: served by the daemon's existing multi-terminal `ConnectionService` RPCs
+  (`StartTerminalSession` / `StopTerminalSession` / `ListTerminalSessions`, and
+  `terminal_id`-addressed `StreamTerminalOutput` / `SendTerminalInput`).
+- **Room-backed sessions** (tddy-coder recipe/tool) — a connection whose capabilities include
+  `media`: the Agent tab is the existing
   VirtualTui over `terminal.TerminalService`; bash tabs are served by the coder's own participant,
   which now spawns shell PTYs and answers the same `terminal_id`-addressed `ConnectionService`
   terminal RPCs (see [Session Participant RPC & Metadata](../coder/session-participant-rpc.md) and
@@ -34,9 +36,9 @@ The tab bar renders at the top of the focused session's runtime area (above the 
 styled like the existing inspector tab strip (`InspectorTabs`).
 
 - **Agent tab** (`data-testid="sessions-terminal-tab-agent"`): always present, first, selected by
-  default, **no close control**. Renders the session's coding-agent terminal — `GrpcSessionTerminal`
-  with `terminal_id="main"` for `connected-grpc`, the VirtualTui `SessionLiveKitTerminal` for
-  `connected-livekit`.
+  default, **no close control**. Renders the session's coding-agent terminal, chosen from the
+  session connection's capabilities — `GrpcSessionTerminal` with `terminal_id="main"` for a
+  host-served session, the VirtualTui `SessionLiveKitTerminal` for a media-capable one.
 - **Bash tabs** (`data-testid="sessions-terminal-tab-<terminalId>"`): one per shell terminal, each
   with a close control (`data-testid="sessions-terminal-tab-close-<terminalId>"`). Closing a bash
   tab calls `StopTerminalSession(terminal_id)`, removes the tab, and — if it was active — returns

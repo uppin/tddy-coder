@@ -35,10 +35,10 @@ Two effects can issue `ConnectSession` for a selected session: the activation ef
 
 They share **`attachClaimRef: { sessionId, listGeneration }`**. The claim means *an attach has been taken for the current live epoch*, and is released once a **later** list snapshot reports the session dormant:
 
-- Guarding release on "do we still hold an attachment for this session" **deadlocks** — nothing resets a stale `connected-livekit` attachment when a session dies, so the claim is never released and a second Resume within one selection silently does nothing.
+- Guarding release on "do we still hold an attachment for this session" **deadlocks** — nothing resets a stale connected attachment when a session dies, so the claim is never released and a second Resume within one selection silently does nothing.
 - The generation counter is incremented **during render**, not in an effect, so a claim taken from a click handler records the snapshot the operator was actually looking at. The snapshot a resume was made under still reports dormant (hold); a later one reporting dormant is real evidence of death (release).
 
-`handleResume` claims the attach on success and releases it if the resume rejects — otherwise `resumeSession` (which already drives the attachment to `connected-livekit`) and the liveness effect both fire, minting a fresh browser identity and forcing a terminal reconnect plus a second `ClaimTerminalControl`.
+`handleResume` claims the attach on success and releases it if the resume rejects — otherwise `resumeSession` (which already drives the attachment to `connected`) and the liveness effect both fire, minting a fresh browser identity and forcing a terminal reconnect plus a second `ClaimTerminalControl`.
 
 ## Inspector
 

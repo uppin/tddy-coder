@@ -6,7 +6,7 @@
  * `resp.livekitRoom !== ""`, and every consumer downstream then re-derives what it may do from which
  * of the two it got. These tests pin the single reading that replaces it.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`
+ * Technical: `packages/tddy-web/docs/session-connections.md`
  */
 
 import { describe, it, expect } from "bun:test";

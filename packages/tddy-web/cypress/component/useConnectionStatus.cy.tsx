@@ -12,7 +12,7 @@
  * runtime re-renders five times a second for ever; and it must stop sampling on unmount, because a
  * screen that navigated away would otherwise keep a timer per session it once showed.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`.
+ * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import React from "react";

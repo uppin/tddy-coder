@@ -18,7 +18,7 @@
  * TODO(optional-livekit node 5): folds into the session connection's own join, and this identity
  * goes with it.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`.
+ * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import React from "react";

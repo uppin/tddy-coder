@@ -6,8 +6,8 @@
  * below it, **who releases a session's connection**: the registry owns every runtime's
  * `SessionConnection`, and nothing else is in a position to close one.
  *
- * Changeset: `2026-07-12-fast-session-change`,
- * `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`
+ * Changeset: `2026-07-12-fast-session-change`
+ * Technical: `packages/tddy-web/docs/session-connections.md`
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 

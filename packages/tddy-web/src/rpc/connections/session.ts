@@ -10,7 +10,7 @@
  * A `SessionConnection` is both of those, named once. What opening one costs — a room, a channel,
  * nothing at all — is the provider's business.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection-prd.md`.
+ * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import type { Client, Transport } from "@connectrpc/connect";

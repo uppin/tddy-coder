@@ -8,7 +8,7 @@
  * looking at. Now the reply becomes a `SessionAttachmentHint`, the host opens a `SessionConnection`
  * over it, and what the session can do is the connection's `capabilities` rather than its status.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection.md`.
+ * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import React, { useMemo } from "react";

@@ -12,7 +12,7 @@
  * (`usePresenterLiveKitRoom`). Folding those into the connection is node 5's; until then they read
  * the routing from here rather than re-deriving it from a reply nobody kept.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection-prd.md`.
+ * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";

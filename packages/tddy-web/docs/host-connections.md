@@ -9,12 +9,13 @@ instead of naming a LiveKit `Room` and a participant identity, which is what all
 never joins a common room to reach hosts at all.
 
 Feature docs: [Daemon selector + host-connection routing](../../../docs/ft/web/daemon-selector-livekit-rpc.md).
+Sessions on a host are [session connections](session-connections.md), opened from a host connection.
 
 ## The model
 
 | Type | What it is |
 |---|---|
-| `HostConnection` | A live connection to one daemon host: `hostId`, `providerId`, `status`, `error`, `capabilities`, `clientFor(service)`, `transport()` |
+| `HostConnection` | A live connection to one daemon host: `hostId`, `providerId`, `status`, `error`, `capabilities`, `clientFor(service)`, `transport()`, `openSession(sessionId, hint)` |
 | `ConnectionProvider` | A wire that can reach hosts — `id`, plus `connectHost(hostId)` returning a connection or `null` |
 | `ConnectionProviderRegistry` | The registered providers, in precedence order |
 | `ConnectionCapability` | `rpc` \| `media` \| `presence` — what a connection can do *beyond* plain RPC |
@@ -127,8 +128,9 @@ either goes with the component or outlives the whole daemon-mode session.
 - **`idle` and `error` have no producer.** LiveKit has no terminal failed state — a failed join lands
   in `Disconnected`, which maps to `connecting`. `HostConnection.error` is therefore always `null`
   today. A wire with a real failure mode is what makes those states reachable.
-- **Capabilities are advertised, never consulted.** Nothing gates a media or presence surface on them
-  yet.
+- **Capabilities gate no media surface yet.** A [session connection](session-connections.md)'s
+  capabilities already choose its terminal component; VNC, screen sharing, participant video and the
+  participant list still render regardless.
 - **The host directory is still the common room.** Who the hosts *are* comes from common-room
   participants via `SelectedDaemonProvider`, so a build with no room resolves no hosts even though
   the connection model itself no longer requires one.
