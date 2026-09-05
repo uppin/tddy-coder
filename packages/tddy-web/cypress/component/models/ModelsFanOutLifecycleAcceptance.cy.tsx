@@ -20,7 +20,6 @@
 import React, { useMemo, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
-import { Room } from "livekit-client";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ListAssignableToolsResponseSchema,
@@ -37,6 +36,7 @@ import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { providerRowKey, type ProviderRow } from "../../../src/utils/mergeRegistryEntries";
 import { mountWithRpc } from "../../support/rpc/inMemory";
+import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
 import {
   aModelRegistryBackend,
   anLlmModel,
@@ -109,7 +109,7 @@ function aRegistryWithANeverAnsweringModelList(): {
  */
 function RebuiltDaemonListHarness() {
   const [rebuilds, setRebuilds] = useState(0);
-  const room = useMemo(() => new Room(), []);
+  const room = useMemo(() => aJoinedCommonRoom(), []);
   const daemons: DaemonHost[] = [
     { instanceId: FIXTURE_DAEMON, label: `${FIXTURE_DAEMON} (this daemon)` },
   ];
@@ -132,7 +132,7 @@ function RebuiltDaemonListHarness() {
 /** Lets the test navigate away from the screen while its reads are still in flight. */
 function LeavableScreenHarness() {
   const [onScreen, setOnScreen] = useState(true);
-  const room = useMemo(() => new Room(), []);
+  const room = useMemo(() => aJoinedCommonRoom(), []);
   const daemons: DaemonHost[] = [
     { instanceId: FIXTURE_DAEMON, label: `${FIXTURE_DAEMON} (this daemon)` },
   ];

@@ -14,9 +14,9 @@ import {
   useLiveKitTransportFactory,
   useLiveKitTransportFactoryIsOverridden,
 } from "../../rpc/transportProvider";
+import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
-import { daemonRpcIdentity } from "../../lib/participantRole";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
 import { requestSessionsRefresh } from "../../lib/sessionsRefreshBridge";
@@ -78,9 +78,9 @@ export function SessionsDrawerScreen({
   const { sessionToken: authSessionToken } = useAuthContext();
   const sessionToken = authSessionToken ?? "";
 
-  // ConnectionService is daemon-level RPC — routed over the shared common-room LiveKit
-  // connection to whichever daemon is currently selected (see `SelectedDaemonProvider`).
-  // `null` until a daemon is selected / the room is connected; every call site below guards.
+  // ConnectionService is daemon-level RPC — routed to whichever daemon is currently selected over
+  // whichever wire reaches it (see `SelectedDaemonProvider` and `rpc/connections`).
+  // `null` until a daemon is selected and a wire reaches it; every call site below guards.
   // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
   // selected host); cross-host interaction routes through `activeClient` (computed below).
   const client = useDaemonClient(ConnectionService);
@@ -98,15 +98,15 @@ export function SessionsDrawerScreen({
   // exception. Do not migrate this to useDaemonClient.
   const tokenClient = useHttpClient(TokenService);
 
-  // Address any daemon's ConnectionService directly (`daemon-{instanceId}`) over the shared
-  // common-room connection. Used to connect to a cross-host row's owning daemon at click time, when
-  // the owner is known but the selected session (and thus `activeClient`) hasn't updated yet.
+  // Address any daemon's ConnectionService directly. Used to connect to a cross-host row's owning
+  // daemon at click time, when the owner is known but the selected session (and thus `activeClient`)
+  // hasn't updated yet — a host named that late cannot have a hook of its own, so it is resolved
+  // through the connection registry rather than by `useDaemonClientFor`.
+  const connectHost = useHostConnector();
   const clientForHost = useCallback(
     (instanceId: string): Client<typeof ConnectionService> | null =>
-      room && instanceId
-        ? createClient(ConnectionService, liveKitFactory(room, daemonRpcIdentity(instanceId)))
-        : null,
-    [room, liveKitFactory],
+      connectHost(instanceId)?.clientFor(ConnectionService) ?? null,
+    [connectHost],
   );
 
   // Selection is derived from the URL, not held in state: that is what makes Back, Forward, a

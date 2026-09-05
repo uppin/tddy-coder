@@ -12,7 +12,7 @@ Feature docs: [Session-creation agent catalog](../../../docs/ft/web/session-agen
 
 | Property | How |
 |---|---|
-| One client per host | The home client is passed in; each peer gets `liveKitFactory(room, daemonRpcIdentity(id))` — the identity a daemon actually serves RPC on, not its discovery identity |
+| One client per host | The home client is passed in; each peer is resolved through the connection registry (`useHostConnector`), and its client is built on that connection's transport. Which wire reaches the host, and the identity it is addressed at, are the provider's business — see [host connections](host-connections.md) |
 | Isolated reads | One answer held per host, so an unreachable host is one `HostReadFailure` row and never an empty list. A failed read and an empty answer are separate values — only the second may render as an absence |
 | One row per identity | Rows are de-duplicated by the reader's key, so a host reached twice (its own client and its common-room identity) does not double its rows |
 | No stray reads | One `AbortController` per host list; unmounting or a changed host list aborts the reads in flight. The peer set is depended on as a newline-joined key, because `daemons` is rebuilt on every participant event while its contents rarely change |

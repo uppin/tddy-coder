@@ -13,8 +13,8 @@
  */
 
 import React from "react";
+import type { Room } from "livekit-client";
 import { Code } from "@connectrpc/connect";
-import { Room } from "livekit-client";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ModelRegistryService } from "../../../src/gen/models_pb";
 import { ModelsAppPage } from "../../../src/components/models/ModelsAppPage";
@@ -22,6 +22,7 @@ import { AuthProvider } from "../../../src/hooks/authProvider";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
+import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
 import {
   aModelRegistryBackend,
   anAssistant,
@@ -56,7 +57,7 @@ function mountWithRoom(
 }
 
 const aConnectedDaemon = (backend: InMemoryRpcBackend) =>
-  mountWithRoom(backend, { room: new Room(), daemons: [FIXTURE_HOST] });
+  mountWithRoom(backend, { room: aJoinedCommonRoom(), daemons: [FIXTURE_HOST] });
 
 // ---------------------------------------------------------------------------
 // Setup

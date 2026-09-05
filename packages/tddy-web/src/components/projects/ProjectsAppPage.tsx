@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { createClient, type Client } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { useDaemonClient, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
-import { daemonRpcIdentity } from "../../lib/participantRole";
+import { useHostConnector } from "../../rpc/connections/registry";
+import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
 import { AppShell } from "../shell/AppShell";
 import { ProjectsScreen } from "./ProjectsScreen";
 
@@ -14,7 +13,7 @@ const POLL_INTERVAL_MS = 5000;
  * Polls the project registry over the selected-daemon `client` (list/create), and wires the
  * add-to-host RPC over a client addressed to the **chosen target host** (`clientForHost`) so the
  * request reaches that daemon directly rather than double-hopping through the selected daemon.
- * Every call site skips when its client is `null` (no daemon selected / room not connected) rather
+ * Every call site skips when its client is `null` (no daemon selected / no wire reaches it) rather
  * than throwing or faking success; see `useDaemonClient`'s contract.
  */
 function useProjectsRpc(
@@ -92,7 +91,7 @@ function useProjectsRpc(
 
 /**
  * Data container for the dedicated Projects screen (`/projects`). RPC wiring lives in
- * {@link useProjectsRpc}, over the shared common-room daemon-level RPC client (`useDaemonClient`,
+ * {@link useProjectsRpc}, over the daemon-level RPC client of the selected host (`useDaemonClient`,
  * see `SelectedDaemonProvider`). The selectable hosts are the **daemon-role** participants
  * currently in the common LiveKit room, sourced from the same shared context (`useDaemons`); only
  * daemons own projects, so coder/browser participants are never offered as hosts.
@@ -101,17 +100,14 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   const { sessionToken } = useAuthContext();
   const client = useDaemonClient(ConnectionService);
   const daemons = useDaemons();
-  const { room } = useSelectedDaemon();
-  const liveKitFactory = useLiveKitTransportFactory();
-  // Address the chosen target host directly (`daemon-{instanceId}`) over the shared common-room
-  // connection — the target is only known when the operator submits, so the client is built here
-  // from the room + transport factory rather than a render-time `useDaemonClientFor` hook.
+  const connectHost = useHostConnector();
+  // Address the chosen target host directly — the target is only known when the operator submits,
+  // so the client is resolved here through the connection registry rather than by a render-time
+  // `useDaemonClientFor` hook.
   const clientForHost = useCallback(
     (instanceId: string): Client<typeof ConnectionService> | null =>
-      room
-        ? createClient(ConnectionService, liveKitFactory(room, daemonRpcIdentity(instanceId)))
-        : null,
-    [room, liveKitFactory],
+      connectHost(instanceId)?.clientFor(ConnectionService) ?? null,
+    [connectHost],
   );
   const { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches } =
     useProjectsRpc(client, clientForHost, sessionToken ?? "");
