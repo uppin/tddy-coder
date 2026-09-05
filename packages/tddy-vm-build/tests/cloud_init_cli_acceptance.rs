@@ -35,9 +35,22 @@ fn tddy_vm_build_bin() -> assert_cmd::Command {
 /// knob the CLI's own `--base-image` flag reads.
 const BASE_IMAGE_ENV: &str = "TDDY_CLOUDINIT_BASE_IMAGE";
 
-/// Resolve the base image path from `TDDY_CLOUDINIT_BASE_IMAGE`, or `None` if unset.
-fn configured_base_image() -> Option<PathBuf> {
-    std::env::var(BASE_IMAGE_ENV).ok().map(PathBuf::from)
+/// The base image path, or a panic naming what is missing.
+///
+/// Not `Option` and an early return: a production test with no image configured has not
+/// been satisfied, it has been skipped — and a skip that returns normally is reported as a
+/// pass, which is exactly what a mistyped path or a failed download produces. `./vm-tests`
+/// is where a *deliberate* absence is reported, once, before anything runs.
+fn require_base_image() -> PathBuf {
+    let raw = std::env::var(BASE_IMAGE_ENV).unwrap_or_default();
+    let trimmed = raw.trim();
+    assert!(
+        !trimmed.is_empty(),
+        "{BASE_IMAGE_ENV} is not set, so this production test has no image to bake from. \
+         Point it at a cloud image already on disk — exported, or in the repo-root .env — \
+         and run these tests with ./vm-tests. Nothing is ever downloaded."
+    );
+    PathBuf::from(trimmed)
 }
 
 fn a_minimal_user_data_yaml() -> &'static str {
@@ -138,12 +151,7 @@ fn backing_file_of(image: &std::path::Path) -> String {
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 fn the_cloud_init_subcommand_produces_a_valid_chained_qcow2_pair_in_the_prepared_base_dir() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given the cloud-init subcommand run against the configured base image
     let (_dir, _library_root, prepared_base_dir) =
@@ -172,12 +180,7 @@ fn the_cloud_init_subcommand_produces_a_valid_chained_qcow2_pair_in_the_prepared
             requires TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 fn the_cloud_init_subcommand_chains_a_second_layer_onto_an_already_prepared_one() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a first layer already baked from the configured base image
     let dir = tempdir().unwrap();
@@ -212,12 +215,7 @@ fn the_cloud_init_subcommand_chains_a_second_layer_onto_an_already_prepared_one(
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 fn the_cloud_init_subcommand_imports_the_raw_base_image_into_01_base() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given the cloud-init subcommand run against the configured base image
     let (_dir, library_root, _prepared_base_dir) =
@@ -241,12 +239,7 @@ fn the_cloud_init_subcommand_imports_the_raw_base_image_into_01_base() {
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 fn the_cloud_init_subcommand_locks_both_halves_of_the_produced_pair_read_only() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given the cloud-init subcommand run against the configured base image
     let (_dir, _library_root, prepared_base_dir) =
@@ -274,12 +267,7 @@ fn the_cloud_init_subcommand_locks_both_halves_of_the_produced_pair_read_only() 
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 fn the_cloud_init_subcommand_keeps_scratch_artifacts_out_of_the_flat_prepared_base_dir() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given the cloud-init subcommand run against the configured base image
     let (_dir, _library_root, prepared_base_dir) =

@@ -306,3 +306,89 @@ fn still_backs_a_per_vm_overlay_onto_an_absolute_prepared_base_path() {
          /lib/vm/tddy-test-42/tddy-test-42.qcow2 40G"
     );
 }
+
+/// A VM overlay smaller than the image it chains onto is unbootable, and `qemu-img` will
+/// not say so: the guest inherits a partition table describing sectors the disk does not
+/// have and drops to an initramfs shell with `PARTUUID=… does not exist`. Since a bake
+/// grows the root partition to fill whatever disk it was given, this is the normal
+/// consequence of a smaller overlay rather than an exotic one — and the failure surfaces
+/// minutes later, in a guest, as a boot that never finishes.
+#[tokio::test]
+async fn creating_a_vm_smaller_than_its_prepared_base_is_refused() {
+    // Given a library whose prepared base presents a 64M disk
+    let library = an_image_library();
+    let base = library.with_pristine_base("debian-12");
+    let prepared = library.prepared_dir().join("prepared.qcow2");
+    run_qemu_img(
+        &vm_overlay_create_argv(&base, &prepared, "64M"),
+        &library.prepared_dir(),
+    );
+
+    // When a VM is created from it with a smaller disk
+    let vm_library = tddy_vm::VmLibrary::new(library.root.clone());
+    let manifest = a_manifest_with_disk_size("too-small", "prepared", "32M");
+    let refused = vm_library.create_vm(&manifest).await;
+
+    // Then it is refused, naming both sizes and the base it would have chained onto
+    let message = refused
+        .expect_err("a smaller overlay must be refused")
+        .to_string();
+    assert!(
+        message.contains("smaller than") && message.contains("prepared.qcow2"),
+        "the refusal must explain what it refused and why, got: {message}"
+    );
+
+    // And nothing unbootable is left behind for a later run to boot
+    assert!(
+        !library.root.join("vm/too-small/too-small.qcow2").exists(),
+        "the rejected overlay must not survive the refusal"
+    );
+}
+
+/// The same creation, sized to match — the control that keeps the refusal from passing for
+/// the wrong reason.
+#[tokio::test]
+async fn creating_a_vm_at_least_as_large_as_its_prepared_base_is_allowed() {
+    let library = an_image_library();
+    let base = library.with_pristine_base("debian-12");
+    let prepared = library.prepared_dir().join("prepared.qcow2");
+    run_qemu_img(
+        &vm_overlay_create_argv(&base, &prepared, "64M"),
+        &library.prepared_dir(),
+    );
+
+    let vm_library = tddy_vm::VmLibrary::new(library.root.clone());
+    let manifest = a_manifest_with_disk_size("big-enough", "prepared", "128M");
+
+    vm_library
+        .create_vm(&manifest)
+        .await
+        .expect("an overlay at least as large as its base must be allowed");
+}
+
+/// A manifest that differs from its siblings only in the disk size under test.
+fn a_manifest_with_disk_size(
+    name: &str,
+    prepared_base: &str,
+    disk_size: &str,
+) -> tddy_vm::vm_manifest::VmManifest {
+    tddy_vm::vm_manifest::VmManifest {
+        name: name.to_string(),
+        prepared_base: Some(prepared_base.to_string()),
+        image_path: None,
+        run: tddy_vm::vm_manifest::RunPolicy {
+            memory: "1024M".to_string(),
+            cpus: 1,
+            disk_size: disk_size.to_string(),
+            ssh_host_port: 2222,
+            port_forwards: vec![],
+            arch: tddy_vm::VmArch::host(),
+            accel: tddy_vm::VmAccel::host_default(),
+        },
+        login: tddy_vm::vm_manifest::LoginPolicy {
+            username: "tddy".to_string(),
+            ssh_private_key: None,
+            ssh_public_key: None,
+        },
+    }
+}

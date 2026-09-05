@@ -57,18 +57,82 @@ pub struct BuiltBinaries {
     pub binaries: Vec<PathBuf>,
     /// Absolute host paths of the files `./install` reads out of a checkout.
     pub install_bundle: Vec<PathBuf>,
+    /// A tarball of the `/nix/store` paths these binaries were linked against, unpacked at
+    /// `/` in the guest before anything execs them.
+    ///
+    /// `Some` when the binaries were built somewhere the guest does not share a store with
+    /// — a CI runner, say. Their ELF interpreter and RPATH are absolute store paths, so a
+    /// guest missing them cannot `execve` the binary at all: the kernel returns ENOENT for
+    /// the *interpreter*, and systemd reports `203/EXEC` on a file that is plainly there.
+    ///
+    /// `None` when the guest built them itself and already has every path they name.
+    pub loader_closure: Option<PathBuf>,
 }
 
 impl BuiltBinaries {
-    /// Everything that has to reach the test host, binaries and bundle together.
+    /// Adopt a dist directory somebody else produced, checking it holds everything a
+    /// deployment needs.
+    ///
+    /// The builder guest exists because a macOS host cannot emit Linux ELF. That is not a
+    /// universal constraint: on a Linux x86_64 machine — a CI runner, say — `./release`
+    /// produces exactly the same binaries in minutes, and paying for a guest to rebuild
+    /// them buys nothing. This is the seam for that case, and it validates rather than
+    /// trusts: a dist directory missing a binary would otherwise fail much later, inside a
+    /// guest, as an install that cannot find its own payload.
+    ///
+    /// The directory is flat and named the way [`BuilderVm::build_release`] leaves it —
+    /// [`deployed_binaries`] by their own names, [`install_bundle_paths`] by their staged
+    /// ones.
+    pub fn from_dist_dir(dist_dir: impl Into<PathBuf>) -> Result<Self> {
+        let dist_dir = dist_dir.into();
+        let loader_closure = dist_dir.join(LOADER_CLOSURE_FILENAME);
+        let binaries = deployed_binaries()
+            .into_iter()
+            .map(|name| dist_dir.join(name))
+            .collect::<Vec<_>>();
+        let install_bundle = install_bundle_paths()
+            .into_iter()
+            .map(|(_, staged_name)| dist_dir.join(staged_name))
+            .collect::<Vec<_>>();
+
+        let missing = binaries
+            .iter()
+            .chain(install_bundle.iter())
+            .chain(std::iter::once(&loader_closure))
+            .filter(|path| !path.exists())
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(anyhow!(
+                "{} is not a complete dist directory — missing: {}",
+                dist_dir.display(),
+                missing.join(", ")
+            ));
+        }
+
+        Ok(Self {
+            dist_dir,
+            binaries,
+            install_bundle,
+            loader_closure: Some(loader_closure),
+        })
+    }
+
+    /// Everything that has to reach the test host: binaries, bundle, and the loader closure
+    /// when the binaries came from a machine the guest shares no store with.
     pub fn all_paths(&self) -> Vec<PathBuf> {
         self.binaries
             .iter()
             .chain(self.install_bundle.iter())
+            .chain(self.loader_closure.iter())
             .cloned()
             .collect()
     }
 }
+
+/// The tarball `BuiltBinaries::from_dist_dir` expects beside the binaries, holding the
+/// `/nix/store` closure they were linked against.
+pub const LOADER_CLOSURE_FILENAME: &str = "nix-closure.tar.gz";
 
 /// The builder guest.
 pub struct BuilderVm {
@@ -96,26 +160,7 @@ impl BuilderVm {
     /// Both steps are no-ops once their output exists, so this is cheap to call on every
     /// run and expensive exactly once.
     pub async fn ensure_images(&self, progress: &(dyn Fn(&str) + Sync)) -> Result<PathBuf> {
-        let supplied = configured_base_image().ok_or_else(|| {
-            anyhow!(
-                "no base image configured — set {} in the environment or in the repo-root \
-                 .env to a cloud image already on disk (nothing is ever downloaded)",
-                crate::env_file::BASE_IMAGE_ENV
-            )
-        })?;
-
-        let nix_base_output = self.layout.prepared_base_path(NIX_BASE_IMAGE_NAME);
-        if !nix_base_output.exists() {
-            let imported = import_supplied_base(&self.layout, &supplied, SUPPLIED_BASE_NAME)?;
-            ensure_prepared_base(
-                &self.layout,
-                BakeSpec::new(NIX_BASE_IMAGE_NAME, &imported, nix_base_user_data())
-                    .with_ssh_host_port(NIX_BASE_BAKE_PORT)
-                    .with_timeout(NIX_BASE_BAKE_TIMEOUT),
-                progress,
-            )
-            .await?;
-        }
+        let nix_base_output = ensure_nix_base(&self.layout, progress).await?;
 
         // The builder bake mounts the working copy so `./dev true` has a flake to realise.
         let source_share = read_only_share(self.layout.repo_root(), SOURCE_MOUNT_TAG);
@@ -278,6 +323,8 @@ impl BuilderVm {
             dist_dir,
             binaries,
             install_bundle,
+            // The guest built these in its own store and already has every path they name.
+            loader_closure: None,
         })
     }
 
@@ -326,4 +373,36 @@ impl BuilderVm {
             .read_manifest(&name)
             .map_err(|e| anyhow!("reading back the builder VM's manifest: {e}"))
     }
+}
+
+/// Bake the shared Nix parent every later layer chains onto, and return its path.
+///
+/// The **only** thing that produces `tddy-nix-base`, and it is called on purpose rather
+/// than reached for implicitly. A component that wants a layer it does not own should say
+/// so and fail — silently baking someone else's prerequisite hides both the cost (this one
+/// installs Nix in a guest) and the ordering, and the caller who forgot is the one who
+/// needs to know.
+///
+/// Idempotent: [`ensure_prepared_base`] returns immediately when the layer is already
+/// sealed, so calling it on every run is right and costs nothing after the first.
+pub async fn ensure_nix_base(
+    layout: &TestkitLayout,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<PathBuf> {
+    let supplied = configured_base_image().ok_or_else(|| {
+        anyhow!(
+            "no base image configured — set {} in the environment or in the repo-root .env \
+             to a cloud image already on disk (nothing is ever downloaded)",
+            crate::env_file::BASE_IMAGE_ENV
+        )
+    })?;
+    let imported = import_supplied_base(layout, &supplied, SUPPLIED_BASE_NAME)?;
+    ensure_prepared_base(
+        layout,
+        BakeSpec::new(NIX_BASE_IMAGE_NAME, &imported, nix_base_user_data())
+            .with_ssh_host_port(NIX_BASE_BAKE_PORT)
+            .with_timeout(NIX_BASE_BAKE_TIMEOUT),
+        progress,
+    )
+    .await
 }

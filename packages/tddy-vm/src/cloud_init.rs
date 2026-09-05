@@ -315,6 +315,19 @@ pub const GUEST_LOG_BEGIN_MARKER: &str = "TDDY_GUEST_LOG_BEGIN";
 /// Closes a guest log dumped onto the serial console — see [`GUEST_LOG_BEGIN_MARKER`].
 pub const GUEST_LOG_END_MARKER: &str = "TDDY_GUEST_LOG_END";
 
+/// How many trailing lines of each guest log the bake dumps to the console.
+///
+/// Not the whole file, because cloud-init's logs are inherited down the image chain: a
+/// layer baked onto one that installed Nix starts with megabytes of its parent's history,
+/// and dumping all of it floods a serial console that drains far slower than the shell
+/// writes. The completion token is written after the dumps, so a flood costs the bake its
+/// own result — measured: a test-host bake reached `shutdown` at 10s while the console was
+/// still emitting the dump at 21s, and powered off with the token still buffered.
+///
+/// A few thousand lines is what a post-mortem actually reads: the failure and the steps
+/// around it, not the successful ancestry above it.
+const GUEST_LOG_DUMP_LINES: usize = 2000;
+
 /// The final `runcmd` step of a bake: dump the guest's logs, emit the completion token,
 /// halt. Being *last* is the whole point — see [`completion_runcmd_preamble`].
 const COMPLETION_RUNCMD_STEP: &str = "__tddy_complete_bake";
@@ -330,8 +343,14 @@ __tddy_dump_guest_log() {
   __tddy_snapshot="/tmp/tddy-guest-log-snapshot"
   # Snapshotted first: this dump's own output is appended to cloud-init-output.log while it
   # runs, and a file that grows as fast as it is read is never read to the end.
-  cp "$__tddy_log" "$__tddy_snapshot" 2>/dev/null || : >"$__tddy_snapshot"
-  echo "@GUEST_LOG_BEGIN@ $__tddy_log"
+  #
+  # And bounded, because these logs are *inherited*: a layer's cloud-init logs carry every
+  # ancestor's too, so a bake chained onto one that installed Nix dumps megabytes. The
+  # console drains at serial speed while this shell races on to `shutdown`, and whatever is
+  # still buffered when the machine powers off is lost — including the token, which is
+  # written last. The tail is what a post-mortem reads anyway.
+  tail -n @DUMP_LINES@ "$__tddy_log" >"$__tddy_snapshot" 2>/dev/null || : >"$__tddy_snapshot"
+  echo "@GUEST_LOG_BEGIN@ $__tddy_log (last @DUMP_LINES@ lines)"
   # The token is rewritten wherever the guest's own logs happen to carry it: the host
   # classifies the console line by line, so a log line quoting the token would end the
   # watch here — reporting success on a bake that may have just failed.
@@ -345,6 +364,12 @@ __tddy_signal_and_halt() {
   __tddy_dump_guest_log /var/log/cloud-init.log
   __tddy_dump_guest_log /var/log/cloud-init-output.log
   echo "$1"
+  # The token has to *reach the host*, and `shutdown` does not wait for the console to
+  # drain — it schedules a teardown that races the serial output still in flight. Bounding
+  # the dumps above is what makes that race winnable; this is the margin on top, cheap
+  # against a bake measured in minutes.
+  sync
+  sleep 5
   shutdown -h now
 }
 __tddy_on_runcmd_exit() {
@@ -399,6 +424,7 @@ trap __tddy_on_runcmd_exit EXIT"#;
 /// itself depends on it.
 fn completion_runcmd_preamble(completion_token: &str) -> String {
     COMPLETION_RUNCMD_PREAMBLE
+        .replace("@DUMP_LINES@", &GUEST_LOG_DUMP_LINES.to_string())
         .replace("@GUEST_LOG_BEGIN@", GUEST_LOG_BEGIN_MARKER)
         .replace("@GUEST_LOG_END@", GUEST_LOG_END_MARKER)
         .replace("@COMPLETE@", COMPLETION_RUNCMD_STEP)

@@ -12,7 +12,7 @@ use tddy_vm::vm::{VmAccel, VmArch};
 use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 
 use crate::bake::{ensure_prepared_base, BakeSpec};
-use crate::builder_vm::{BuilderVm, BuiltBinaries};
+use crate::builder_vm::BuiltBinaries;
 use crate::guest::{BootedGuest, SSH_READY_TIMEOUT};
 use crate::layout::{TestkitLayout, NIX_BASE_IMAGE_NAME, TEST_HOST_IMAGE_NAME};
 use crate::recipes::{
@@ -77,16 +77,24 @@ impl TestHostVm {
         Ok(host)
     }
 
-    /// Bake the test-host prepared base, reusing the shared Nix parent.
+    /// Bake the test-host prepared base onto the shared Nix parent, which must already be
+    /// sealed.
     ///
-    /// The parent is baked by [`BuilderVm::ensure_images`] if it does not exist yet — the
-    /// two children share it, and whichever runs first pays for it.
+    /// It is **not** baked here if missing. This component owns the test host, not the
+    /// chain beneath it, and the implicit version of this call went through
+    /// `BuilderVm::ensure_images` — which also bakes the *builder*, a guest the caller
+    /// may have no use for. A missing parent is a caller that skipped a step, and saying so
+    /// costs a line where baking it silently costs a bake.
     async fn ensure_image(layout: &TestkitLayout, progress: &(dyn Fn(&str) + Sync)) -> Result<()> {
         let nix_base = layout.prepared_base_path(NIX_BASE_IMAGE_NAME);
         if !nix_base.exists() {
-            BuilderVm::with_layout(layout.clone())
-                .ensure_images(progress)
-                .await?;
+            return Err(anyhow!(
+                "the shared Nix parent is not baked at {} — the test host chains onto it, \
+                 and this is not the component that produces it. Call \
+                 `tddy_vm_testkit::ensure_nix_base` first (or `BuilderVm::ensure_images`, \
+                 if you also want the builder guest).",
+                nix_base.display()
+            ));
         }
         // Chain straight onto the shared parent: the test host is its own delta on top of
         // the Nix layer, which stays put and unmodified beneath both children.
@@ -156,6 +164,26 @@ impl TestHostVm {
         self.guest
             .copy_in(&binaries.all_paths(), GUEST_STAGE_DIR)
             .await?;
+
+        // Before anything execs them: binaries built off-guest carry an absolute
+        // /nix/store interpreter and RPATH, and a guest missing those paths cannot run
+        // them at all — `execve` returns ENOENT for the *interpreter*, which systemd
+        // reports as `203/EXEC` on a binary that is plainly present. Unpacked at `/`
+        // because store paths are absolute by construction.
+        if let Some(closure) = &binaries.loader_closure {
+            let name = closure
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or_else(|| anyhow!("the loader closure has no filename"))?;
+            progress("unpacking the loader closure the binaries were linked against");
+            self.guest
+                .run_over_ssh_once(
+                    &format!("sudo tar -xzf {GUEST_STAGE_DIR}/{name} -C /"),
+                    INSTALL_TIMEOUT,
+                )
+                .await?
+                .assert_succeeded();
+        }
 
         // `./install` reads its inputs relative to `$(pwd)`, so the staged files are
         // arranged into the checkout shape it expects rather than the flat directory scp

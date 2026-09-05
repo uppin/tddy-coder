@@ -23,8 +23,11 @@ use tddy_vm::cloud_init::{
 use tddy_vm::library::is_sealed_file;
 use tddy_vm::qemu::uefi_firmware_for;
 use tddy_vm::vm::{VmAccel, VmArch};
+use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 
+use crate::guest::BootedGuest;
 use crate::layout::TestkitLayout;
+use crate::recipes::TDDY_SERVICE_USERNAME;
 
 /// What one link in the image chain is baked from.
 pub struct BakeSpec {
@@ -174,4 +177,73 @@ pub fn import_supplied_base(layout: &TestkitLayout, source: &Path, name: &str) -
     library
         .import_base_image(source, name)
         .map_err(|e| anyhow!("importing {} into images/01-base: {e}", source.display()))
+}
+
+/// A disposable VM created from a sealed prepared base and booted to an answering sshd.
+///
+/// The probe a test reaches for when the question is "what did this *layer* end up with",
+/// rather than what a guest provisioned per run can do. Created through [`VmLibrary`]
+/// rather than booted off the layer directly, because a sealed base is read-only and only
+/// ever authorized the key its own bake was seeded with — the per-VM keypair and login seed
+/// `create_vm` writes are what make it loginable at all.
+///
+/// The caller owns the teardown: shut the guest down and call [`VmLibrary::remove_vm`], or
+/// the overlay outlives the test in the developer's own library.
+pub async fn boot_probe_of_prepared_base(
+    layout: &TestkitLayout,
+    prepared_base: &str,
+    vm_name: &str,
+    ssh_host_port: u16,
+    ssh_ready_timeout: Duration,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<BootedGuest> {
+    let library = layout.library();
+    // Taken from the layer rather than assumed: an overlay smaller than the image it chains
+    // onto is unbootable, and the layer's size is a property of whichever `BakeSpec` built
+    // it, not something a probe is entitled to guess.
+    let disk_size =
+        tddy_vm::image_import::virtual_size_bytes(&layout.prepared_base_path(prepared_base))
+            .map_err(|e| anyhow!("reading the virtual size of {prepared_base}: {e}"))?
+            .to_string();
+    // A previous run that died before its teardown would have left this behind, and
+    // `qemu-img create` refuses to overwrite.
+    let _ = library.remove_vm(vm_name);
+
+    let requested = VmManifest {
+        name: vm_name.to_string(),
+        prepared_base: Some(prepared_base.to_string()),
+        image_path: None,
+        run: RunPolicy {
+            memory: "2048M".to_string(),
+            cpus: 2,
+            disk_size,
+            ssh_host_port,
+            port_forwards: vec![],
+            arch: VmArch::host(),
+            accel: VmAccel::host_default(),
+        },
+        login: LoginPolicy {
+            username: TDDY_SERVICE_USERNAME.to_string(),
+            ssh_private_key: None,
+            ssh_public_key: None,
+        },
+    };
+    library
+        .create_vm(&requested)
+        .await
+        .map_err(|e| anyhow!("creating the probe overlay off {prepared_base}: {e}"))?;
+    // Read back rather than reused: `create_vm` records the per-VM key paths in the
+    // manifest it persists, and that key is the only one this guest accepts.
+    let manifest = library
+        .read_manifest(vm_name)
+        .map_err(|e| anyhow!("reading back the probe's manifest: {e}"))?;
+
+    progress(&format!("booting {vm_name} off {prepared_base}"));
+    let guest = BootedGuest::boot(&library, &manifest, vec![]).await?;
+    progress(&format!(
+        "waiting up to {ssh_ready_timeout:?} for sshd in {vm_name}"
+    ));
+    guest.wait_for_ssh_ready(ssh_ready_timeout).await?;
+    progress(&format!("{vm_name} is answering over SSH"));
+    Ok(guest)
 }

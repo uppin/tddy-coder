@@ -24,22 +24,22 @@ use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 use tddy_vm_testkit::recipes::{GUEST_PASSWORD, TDDY_SERVICE_USERNAME};
 use tddy_vm_testkit::BootedGuest;
 
-/// The env var these production tests read their base image path from — the same knob the
-/// `tddy-vm-build cloud-init` CLI reads, and the same one the testkit reads, re-exported
-/// rather than restated so the two cannot drift.
-pub use tddy_vm_testkit::BASE_IMAGE_ENV;
-
-/// Resolve the base image path from [`BASE_IMAGE_ENV`], treating an exported-but-blank
-/// value as unset.
-pub use tddy_vm_testkit::configured_base_image;
+/// The base image path, or a panic naming the variable that is missing.
+///
+/// Re-exported from the testkit rather than restated, so the env var these tests read and
+/// the one the testkit reads cannot drift. A production test with no image configured has
+/// not been satisfied, it has been skipped — and a skip that returns normally is reported
+/// as a pass, which is why this panics. See `tddy_vm_testkit::require_env_path`.
+pub use tddy_vm_testkit::require_base_image;
 
 /// The env var naming an already-baked tddy-host prepared base, for the tests that consume
 /// one instead of spending hours baking it.
 pub const PREPARED_BASE_ENV: &str = "TDDY_TDDY_HOST_PREPARED_BASE";
 
-/// Resolve the prepared-base path from [`PREPARED_BASE_ENV`], or `None` when unset.
-pub fn configured_prepared_base() -> Option<PathBuf> {
-    std::env::var(PREPARED_BASE_ENV).ok().map(PathBuf::from)
+/// The prepared-base path, or a panic naming the variable that is missing — the
+/// [`require_base_image`] of the tests that consume an already-baked base.
+pub fn require_prepared_base() -> PathBuf {
+    tddy_vm_testkit::require_env_path(PREPARED_BASE_ENV)
 }
 
 /// The guest login these tests drive the serial console with — the testkit's own service
