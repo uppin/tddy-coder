@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { capabilityAvailability } from "@/hooks/capabilityAvailability";
+import { useCapabilityAvailability } from "@/hooks/useCapabilityAvailability";
 import { useHostConnection } from "@/rpc/connections/registry";
-import { useHasCapability } from "@/rpc/connections/useHasCapability";
-import { LIVEKIT_SOURCE_ID } from "@/rpc/hostDirectory/liveKitSource";
-import { useHostDirectorySource } from "@/rpc/hostDirectory/useHostDirectory";
 import { useSelectedDaemon } from "@/rpc/selectedDaemon";
 
 /**
@@ -18,9 +15,10 @@ import { useSelectedDaemon } from "@/rpc/selectedDaemon";
  * invites a support question with no good answer (PRD AC 4). The route itself stays reachable, and
  * `LiveKitAppPage` explains itself to anyone who arrives by link.
  *
- * The entry and the screen read the same rule (`capabilityAvailability`) so they cannot disagree: a
- * room still joining, or one that failed with a reason, keeps the entry — the screen has a join to
- * report on, and the reason a join failed is exactly what an operator would go there to find.
+ * The entry and the screen read the same rule (`useCapabilityAvailability`) so they cannot
+ * disagree: a room still joining, or one that failed with a reason, keeps the entry — the screen
+ * has a join to report on, and the reason a join failed is exactly what an operator would go there
+ * to find.
  */
 export function DaemonNavMenu({
   onNavigate,
@@ -31,10 +29,7 @@ export function DaemonNavMenu({
   const ref = useRef<HTMLDivElement>(null);
   const { selectedInstanceId } = useSelectedDaemon();
   const connection = useHostConnection(selectedInstanceId);
-  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
-  const carriesPresence = useHasCapability(connection, "presence");
-  const liveKitApplies =
-    capabilityAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
+  const liveKitApplies = useCapabilityAvailability(connection, "presence") !== "unavailable";
 
   useEffect(() => {
     if (!open) return;

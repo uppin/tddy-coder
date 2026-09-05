@@ -10,10 +10,7 @@ import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { PARAM_INSPECTOR } from "../../routing/appLocation";
 import { isInspectorTabName, isMediaInspectorTabName } from "../../routing/appRoutes";
-import { useHasCapability } from "../../rpc/connections/useHasCapability";
-import { capabilityAvailability } from "../../hooks/capabilityAvailability";
-import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
-import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import type { HostConnection } from "../../rpc/connections/types";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
@@ -59,8 +56,14 @@ interface SessionInspectorDrawerProps {
    * Reading the *session's* connection instead would answer "no media" for a dormant session,
    * which has no connection at all — a refusal to an unanswerable question, which would hide tabs
    * whose capability is in fact present.
+   *
+   * Required, with no default, for the reason `ParticipantList.connection` and
+   * `InspectorTabs.mediaAvailable` are: a default would have to be `null`, `null` means "no media",
+   * and so a call site that simply forgot the prop would silently lose the VNC and Screen Sharing
+   * tabs — indistinguishable from a host that genuinely cannot carry a track. `null` is still a
+   * perfectly good answer; it just has to be given.
    */
-  hostConnection?: HostConnection | null;
+  hostConnection: HostConnection | null;
   room?: Room | null;
   /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
    *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
@@ -111,7 +114,7 @@ export function SessionInspectorDrawer({
   onTerminate,
   client,
   sessionToken,
-  hostConnection = null,
+  hostConnection,
   room = null,
   serverIdentity = "server",
   traffic = null,
@@ -130,17 +133,14 @@ export function SessionInspectorDrawer({
   // The one media decision in this drawer: the tab strip, the panel dispatch and the fallback below
   // all read it, so the strip cannot offer a tab the dispatch would refuse to render.
   //
-  // Two facts, in the order `capabilityAvailability` fixes, and for the same reason the presence
+  // Two facts, in the order `useCapabilityAvailability` fixes, and for the same reason the presence
   // surfaces read it: while the common room is joining there is no host connection yet, so the
   // capability alone would render seven tabs on load and nine a second later, reflowing the strip
   // under the operator's cursor. A join in flight, or one that failed, keeps the tabs — the wire
   // that will carry the tracks is the one being established, and a host that never joins a room at
   // all (the desktop build over IPC) reports `idle`, never `connecting`, so nothing appears there
   // only to vanish.
-  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
-  const carriesMedia = useHasCapability(hostConnection, "media");
-  const mediaAvailable =
-    capabilityAvailability(commonRoom?.status ?? "idle", carriesMedia) !== "unavailable";
+  const mediaAvailable = useCapabilityAvailability(hostConnection, "media") !== "unavailable";
 
   // A media tab named on a host that cannot carry tracks degrades to Details, the same way an
   // unresolvable tab name does — a deep link, or a URL carried over from a host that did have

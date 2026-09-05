@@ -109,24 +109,84 @@ concrete symptom:
 
 `src/hooks/capabilityAvailability.ts` is the resulting order, in one place: `error` → `connecting` →
 `unavailable` → `available`. Status answers for a capability that exists; the predicate answers
-whether it exists at all. `ParticipantList`, `LiveKitAppPage`, `DaemonNavMenu`,
-`SessionsDrawerScreen` and `SessionInspectorDrawer` all read it, so the nav entry and the screen it
-points at cannot disagree — and a failed join keeps both the entry and the tabs, because the reason
-it failed is what an operator would go there to find.
+whether it exists at all. So the nav entry and the screen it points at cannot disagree — and a
+failed join keeps both the entry and the tabs, because the reason it failed is what an operator
+would go there to find.
+
+**`src/hooks/useCapabilityAvailability.ts` is how a surface asks it.** Centralising the rule was
+supposed to stop the surfaces drifting, but the drift surface had merely moved up a level: six
+components still re-assembled the same three lines around it — resolve the connection, read the
+common room out of the host directory, apply `useHasCapability`, default a missing source to
+`idle`. Six copies of an argument list are six chances to pass the wrong capability, read a
+different source, or default the missing status the other way. `useCapabilityAvailability(connection,
+capability)` is now the only place any of that happens, `?? "idle"` included, and a call site states
+only what is genuinely its own: which connection, and which capability. It takes a connection rather
+than a host id because `SessionInspectorDrawer` is *handed* one as a prop and has no id to resolve
+from — a hook keyed on an id would have left that site assembling the answer by hand, which is the
+thing being removed.
+
+`LiveKitRoomsPanel`, `LiveKitAppPage`, `DaemonNavMenu`, `SessionsDrawerScreen`,
+`SessionInspectorDrawer` and `RpcPlaygroundAppPage` all read the hook. `ParticipantList` is the one
+surface that calls the pure rule directly: it is presentational and is *told* which room's status it
+is reporting on, so the screen above it owns that half.
 
 Treating `connecting` as "keep it" is safe in the other direction too: a host that never joins a
 room — the desktop build over IPC — reports `idle` and never `connecting`, so nothing appears there
 only to vanish.
 
+#### The status half is fleet-wide; the capability half is one host's
+
+A known limitation, recorded rather than fixed, and **node 7 must revisit it**.
+
+`useHostDirectorySource(LIVEKIT_SOURCE_ID)` is *one source for the whole page* — the common room
+either joined or it did not. The capability is a property of one host's connection. So while the
+common room is `connecting`, or permanently in `error`, the rule answers "not unavailable" for
+**every** host, including one reached over a wire that provably cannot carry a track.
+
+Scoping the status per host was investigated and does not work today:
+
+- **A host's own `status` cannot supply it.** `LiveKitConnectionProvider.connectHost` returns `null`
+  until it has a room (`rpc/connections/liveKit.tsx`), so during the very window the rule exists to
+  cover there is no `HostConnection` to read a status — or a capability — off at all. That absence
+  *is* the fact the common-room source is standing in for.
+- **`HostDescriptor.sourceId` cannot supply it either.** It names which source *advertised* the host
+  first, not which wire would carry the capability, and the two differ for the case that matters:
+  the serving daemon is advertised by the `serving` source (`connected` from the first paint) and is
+  simultaneously reachable over LiveKit. Reading the serving source's status would make the media
+  tabs vanish and return on every LiveKit page load — exactly the reflow this rule was added to stop,
+  and `SessionInspectorMediaCapabilityAcceptance`'s "keeps the media tabs while the common room is
+  still being joined" would fail on it.
+
+It is acceptable today because the fleet is single-wire: `LiveKitConnectionProvider` is the only
+registered provider, so every `HostConnection` in existence answers the capability question
+identically and a fleet-wide status cannot contradict a per-host one. The surfaces that stay visible
+under `connecting`/`error` also explain themselves — the roster quotes the join failure, the rooms
+panel says what it is waiting on, the LiveKit screen keeps its route.
+
+It stops being acceptable at **node 7**, which registers the IPC provider and so creates the first
+fleet where one host is reached over IPC and another over LiveKit. There, a common room stuck in
+`error` would keep the media tabs on an IPC-reached host that can never serve a track. The fix
+belongs in one place — `useCapabilityAvailability` — which is the other reason the hook exists;
+what it needs is a way to ask "which source would carry `capability` for *this* host", which node 6
+is the first node in a position to define.
+
 | Surface | Gated on | Absent state |
 |---|---|---|
 | `ParticipantList` | host connection + common-room status | names the connection as the reason; the `idle` branch no longer claims "Connecting…" forever |
-| `LiveKitRoomsPanel` | host connection | removed, and its `StreamLiveKitRooms` feed never subscribed (the panel body is a child component, so the hook does not run) |
+| `LiveKitRoomsPanel` — the panel | host connection + common-room status | removed; while the join is in flight or failed the panel keeps its place and says what it is waiting on, rather than dropping in under the roster once the join lands |
+| `LiveKitRoomsPanel` — its `StreamLiveKitRooms` feed | host connection | never subscribed (the feed is a child component, so the hook does not run) — a different question from whether the panel applies, and deliberately a different gate |
 | `LiveKitAppPage` | host connection + common-room status | the route stays reachable and explains itself, as a media deep link degrades to Details |
 | `DaemonNavMenu`'s LiveKit entry | host connection + common-room status | removed from the menu |
-| `RpcPlaygroundScreen`'s participant picker | host connection (decided in `RpcPlaygroundAppPage`) | replaced by the reason there is nobody to address |
+| `RpcPlaygroundScreen`'s participant picker | host connection + common-room status (decided in `RpcPlaygroundAppPage`) | replaced by the reason there is nobody to address |
 | `SessionsDrawerScreen` cross-host rows | host connection + common-room status | `ListSessions` rows plus a footnote naming what is out of view |
 | `SessionInspectorDrawer`'s VNC + Screen Sharing tabs, panel dispatch and `?inspector=` fallback | host connection + common-room status | removed from the strip; a media tab named in the URL degrades to Details, and is honoured the moment the wire can serve it |
+
+`ParticipantList`'s `data-room-status` reports the room's **real** status once the panel decides it
+has a roster to render. Collapsing `idle` and `connecting` into one "Connecting…" branch used to make
+that attribute true by construction; replacing that guard with `availability === "connecting"` left
+`idle` falling through to a branch hard-coded to `connected`, so the DOM claimed a room was joined
+that nothing had joined. The verdict `available` is about the *capability*, not about the join — a
+host that never joins a room reaches it from `idle` — so the attribute renders `roomStatus` itself.
 
 Two media reads deliberately stay on the bare predicate. `ParticipantList`'s camera column sits
 *inside* the rendered roster, which only exists once presence has resolved — while the room joins
@@ -134,11 +194,18 @@ the panel shows "Connecting…", so there is no strip to reflow. And `SessionRun
 is session-scoped and predates this node; a session connection exists only once the session is
 attached, which is not a common-room join.
 
-Three props became **required** rather than defaulted — `ParticipantList.connection`,
-`RpcPlaygroundScreen.presenceAvailable`, `SessionDrawer.crossHostSessionsVisible` — following
+Five props became **required** rather than defaulted — `ParticipantList.connection`,
+`RpcPlaygroundScreen.presenceAvailable`, `SessionDrawer.crossHostSessionsVisible`,
+`SessionInspectorDrawer.hostConnection` and `SessionMainPane.host` — following
 `InspectorTabs.mediaAvailable` from the media milestone. A default would mean "unknown ⇒ show it",
 which is the silence this node exists to remove: a list that has lost rows looks exactly like a list
-that never had them. Six existing specs state the answer as a result; no assertion was changed.
+that never had them.
+
+The last two defaulted the *other* way, `= null`, which is worse in the same manner: `null` means "no
+media", so a call site that simply forgot the prop lost the VNC and Screen Sharing tabs silently and looked
+exactly like a host that cannot carry a track. Eleven specs now name the host they mount with —
+`null` in every one, which is what they were already getting, so no behaviour and no assertion moved;
+what changed is that the answer is stated rather than inherited.
 
 `useHostPresence` now spells its check `useHasCapability(connection, "presence")`. Its signature is
 untouched — node 2 owns that.
@@ -213,6 +280,35 @@ status rule fails "keeps the LiveKit entry while the common room is still being 
 nothing about other hosts while the common room is still being joined" and "keeps the media tabs in
 the strip while the common room is still being joined"; gating `LiveKitAppPage` the same way fails
 `CommonRoomConnectionVisibilityAcceptance`'s incident regression.
+
+### Green status — the validation pass
+
+One hook (`src/hooks/useCapabilityAvailability.ts`) now composes the rule for all six gated
+surfaces — the four that were re-assembling its two arguments by hand, and the two that were reading
+the bare predicate. Four inconsistencies found by validation are closed: the playground picker and
+the rooms panel ask the rule rather than the predicate, `SessionInspectorDrawer.hostConnection` and
+`SessionMainPane.host` became required, and the roster stopped stamping `connected` on a room that is
+`idle`. The fleet-wide status limitation above is recorded, not fixed.
+
+| Suite | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **1046 pass, 0 fail** (baseline 1044 + the two missing `capabilityAvailability` truth-table rows) |
+| `cypress/component/PresenceCapabilityGatingAcceptance.cy.tsx` | **16 pass** — the 14, plus the rooms panel holding its place unsubscribed through a join and the playground picker surviving one |
+| 28 further specs re-run (183 tests) | **all pass**, no assertion changed |
+
+The 28: `SessionInspectorMediaCapabilityAcceptance` (12), `ParticipantVideoCapabilityAcceptance` (4),
+`CapabilityGatingAcceptance` (5), `ParticipantList` (12), `LiveKitRoomsPanelAcceptance` (26),
+`LiveKitScreenAcceptance` (1), `CommonRoomConnectionVisibilityAcceptance` (4),
+`RpcPlaygroundScreen` (8), `RpcPlaygroundUrlStateAcceptance` (3), `UnifiedLayoutAcceptance` (3),
+`SessionInspectorVncAcceptance` (5), `SessionVncTargetRowsAcceptance` (5),
+`SessionInspectorScreenSharingAcceptance` (8), `SessionScreenSharingTargetRowsAcceptance` (5),
+`SessionInspectorUrlStateAcceptance` (9), `SessionInspectorAcceptance` (14),
+`SessionsDrawerCrossHostAcceptance` (8), `SessionInspectorFilesTab` (2),
+`SessionInspectorSplitRoster` (3), `InactiveSessionActivitiesAcceptance` (18),
+`PrStackChatSilentFailureAcceptance` (5), `PrStackPresenterRoomAcceptance` (2),
+`SessionInactiveInspectorOverlay` (6), `SessionMainPaneLiveKitTerminal` (5),
+`SessionMainPaneTerminalControl` (1), `SessionMainPaneTraffic` (7),
+`SessionMainPaneUnscopedSession` (1), `WorkflowChatPresenterRoomAcceptance` (1).
 
 ### Commands
 

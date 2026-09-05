@@ -40,6 +40,10 @@ export const liveKitRoomsPanelPage = {
   error: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.livekitRoomsPanelError, { timeout: 5000, ...options }),
 
+  /** The placeholder the panel keeps its place with while the common room is still being joined. */
+  joining: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.livekitRoomsPanelJoining, { timeout: 5000, ...options }),
+
   // ---------------------------------------------------------------------------
   // Room rows
   // ---------------------------------------------------------------------------

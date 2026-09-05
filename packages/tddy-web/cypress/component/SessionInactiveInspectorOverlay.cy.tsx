@@ -240,6 +240,9 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
     // When
     cy.mount(
       <SessionMainPane
+        // No host connection in scope: this spec is not about the inspector's media tabs,
+        // and `host` is required so that saying so is a choice rather than an omission.
+        host={null}
         {...noopInspectorHandlers}
         selectedSession={DISCONNECTED_SESSION as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -264,6 +267,7 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
     // When
     cy.mount(
       <SessionMainPane
+        host={null}
         {...noopInspectorHandlers}
         selectedSession={CONNECTED_SESSION as unknown as SessionEntry}
         attachment={

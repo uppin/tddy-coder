@@ -254,6 +254,26 @@ it("asks the daemon for no rooms feed at all when the connection has no presence
   });
 });
 
+it("keeps the rooms panel in place, unsubscribed, while the common room is still being joined", () => {
+  // Given a common room whose join has not settled: the panel's capability is absent for the second
+  // or two every LiveKit page load spends here
+  // When the screen renders
+  mountWithLiveCommonRoom(<LiveKitAppPage onNavigate={cy.stub()} />, aCommonRoomThatNeverFinishesConnecting());
+
+  // Then the panel holds its place and says what it is waiting on, rather than being absent and
+  // dropping in underneath the roster once the join lands — the layout must not move under the
+  // operator (PRD AC 7)
+  roomsPanel.panel().should("be.visible");
+  roomsPanel.joining().should("contain.text", "Joining the common room");
+
+  // And the feed behind it is still not opened: the panel body and the subscription are two
+  // different questions, and only the roster-carrying capability answers the second one. `Loading
+  // rooms…` is what `RoomsFeed` renders before its first snapshot, so its absence is the mount's
+  // absence.
+  roomsPanel.loading().should("not.exist");
+  roomsPanel.error().should("not.exist");
+});
+
 // ---------------------------------------------------------------------------
 // The navigation entry
 // ---------------------------------------------------------------------------
@@ -337,6 +357,18 @@ it("offers the playground's participant picker on a host reached over the common
   mountOn(aHostReachedOverLiveKit(backend), backend, <RpcPlaygroundAppPage onNavigate={cy.stub()} />);
 
   // Then the picker is offered, unchanged
+  playground.participantSelect().should("exist");
+  playground.participantSelectionUnavailable().should("not.exist");
+});
+
+it("keeps the playground's participant picker while the common room is still being joined", () => {
+  // Given a join that has not settled — the picker's capability reads `false` here, though a roster
+  // is seconds away
+  // When the playground renders
+  mountWithLiveCommonRoom(<RpcPlaygroundAppPage onNavigate={cy.stub()} />, aCommonRoomThatNeverFinishesConnecting());
+
+  // Then it offers the select rather than announcing an absence it would take back once the room is
+  // joined — the same rule the nav entry, the screen and the drawer read
   playground.participantSelect().should("exist");
   playground.participantSelectionUnavailable().should("not.exist");
 });

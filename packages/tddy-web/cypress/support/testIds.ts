@@ -102,6 +102,8 @@ export const TEST_IDS = {
   livekitRoomsPanelLoading: "livekit-rooms-panel-loading",
   livekitRoomsPanelEmpty: "livekit-rooms-panel-empty",
   livekitRoomsPanelError: "livekit-rooms-panel-error",
+  /** Shown in the panel's place, frame and all, while the common room has not been joined. */
+  livekitRoomsPanelJoining: "livekit-rooms-panel-joining",
   /** The whole `#/livekit` screen's stand-in on a connection that carries no LiveKit presence. */
   livekitUnavailable: "livekit-unavailable",
 

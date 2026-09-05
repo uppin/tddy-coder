@@ -13,7 +13,7 @@ import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { useSelectedDaemon } from "../rpc/selectedDaemon";
 import { useHostConnection } from "../rpc/connections/registry";
-import { useHasCapability } from "../rpc/connections/useHasCapability";
+import { useCapabilityAvailability } from "../hooks/useCapabilityAvailability";
 import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
 import { PARAM_PARTICIPANT } from "../routing/appLocation";
 import { useAppLocation } from "../routing/useAppLocation";
@@ -89,8 +89,14 @@ export function RpcPlaygroundAppPage({
   // participants and the transport that carries the call is a LiveKit data channel to one of them.
   // On a wire with no roster there is nobody to pick, so the picker goes and says why rather than
   // offering an empty select — the screen's only entry point has to stay explicable.
+  //
+  // Through the availability rule, like every other gated surface: the bare predicate answered
+  // `false` for the second the common room spends joining, so the screen said "participant
+  // selection is not available on this connection" and then replaced that sentence with the select.
+  // A claim about the wire that the page withdraws a second later is the one thing the rule exists
+  // to prevent, and nothing about this picker makes it one of the two deliberate exceptions.
   const connection = useHostConnection(selectedInstanceId);
-  const presenceAvailable = useHasCapability(connection, "presence");
+  const presenceAvailable = useCapabilityAvailability(connection, "presence") !== "unavailable";
 
   // The addressed participant is `?participant=`, so a link reproduces which host is being probed.
   const { location, setParams } = useAppLocation();

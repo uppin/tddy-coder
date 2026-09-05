@@ -4,9 +4,8 @@ import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
 import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { useHostConnection } from "../../rpc/connections/registry";
-import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
-import { capabilityAvailability } from "../../hooks/capabilityAvailability";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "../ui/tooltip";
@@ -39,11 +38,12 @@ export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => v
   const participants = useRoomParticipants(room);
   // The wire the roster arrives over. Its `presence` capability decides whether this screen has
   // anything to show at all; its `media` capability decides the participant camera column, since a
-  // camera track arrives the same way the roster does.
+  // camera track arrives the same way the roster does. The status half of that verdict is
+  // `useCapabilityAvailability`'s to read — `roomStatus` below is this screen's own, because the
+  // roster panel reports the join itself and quotes the reason it failed.
   const connection = useHostConnection(selectedInstanceId);
-  const carriesPresence = useHasCapability(connection, "presence");
   const roomStatus = commonRoom?.status ?? "idle";
-  const availability = capabilityAvailability(roomStatus, carriesPresence);
+  const availability = useCapabilityAvailability(connection, "presence");
 
   // Only when nothing is being joined and the wire has no presence either. A join still in flight,
   // or one that failed with a reason, is a roster that exists and is reported on by the panels

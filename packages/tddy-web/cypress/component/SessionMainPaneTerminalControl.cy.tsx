@@ -55,6 +55,9 @@ it("does not render the Claim terminal overlay when no runtime is attached yet",
   // Given — session selected and connected, but the runtime layer has not registered a runtime yet
   cy.mount(
     <SessionMainPane
+      // No host connection in scope: this spec is not about the inspector's media tabs,
+      // and `host` is required so that saying so is a choice rather than an omission.
+      host={null}
       {...noopHandlers}
       selectedSession={aSelectedSession as SessionEntry}
       attachment={anAttachedSession}

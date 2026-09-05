@@ -132,6 +132,10 @@ export function ParticipantList({
   const carriesPresence = useHasCapability(connection, "presence");
   // The status the room reports and the capability the wire advertises, resolved in the one order
   // that does not blame the connection for a join that is merely still in flight.
+  //
+  // `roomStatus` is passed in rather than read from the host directory, so this is the one gated
+  // surface that calls the rule directly instead of through `useCapabilityAvailability`: the panel
+  // is presentational and the screen above it owns which room's status it is being told about.
   const availability = capabilityAvailability(roomStatus, carriesPresence);
 
   if (availability === "connecting") {
@@ -166,9 +170,15 @@ export function ParticipantList({
     );
   }
 
+  // `availability` is `available` from here down, which is a verdict about the *capability* and not
+  // a claim that the room is joined: with the wire carrying presence and no join in flight, the
+  // status underneath is `idle` (a host that never joins a room) just as readily as `connected`.
+  // So the attribute reports `roomStatus` itself. Stamping `connected` here is how the DOM came to
+  // say a room was joined that nothing had joined — the same dishonesty, one state along, as the
+  // "Connecting…" placeholder this panel used to sit on forever.
   if (participants.length === 0) {
     return (
-      <div data-testid="participant-list" data-room-status="connected">
+      <div data-testid="participant-list" data-room-status={roomStatus}>
         <p style={{ fontSize: 14, color: "#666" }} data-testid="participant-list-empty">
           No other participants in this room.
         </p>
@@ -182,7 +192,7 @@ export function ParticipantList({
   });
 
   return (
-    <div data-testid="participant-list" data-room-status="connected">
+    <div data-testid="participant-list" data-room-status={roomStatus}>
       <table style={tableStyle}>
         <thead>
           <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>

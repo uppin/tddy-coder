@@ -35,6 +35,22 @@ describe("capability availability", () => {
     expect(capabilityAvailability("connecting", DOES_NOT_CARRY_IT)).toBe("connecting");
   });
 
+  it("offers the surface with nothing being joined when the wire carries the capability anyway", () => {
+    // Given a host that never joins a common room at all — the desktop build over IPC reports
+    // `idle` forever — over a wire that does carry the capability
+    // Then the surface renders: `idle` is "nothing has been asked of this room", not "wait", and a
+    // rule that made the operator wait for a join that is never coming would hide the surface for
+    // the life of the tab
+    expect(capabilityAvailability("idle", CARRIES_IT)).toBe("available");
+  });
+
+  it("names the connection as the reason once the room is joined and the capability is still absent", () => {
+    // Given a joined common room and a host reached over some other wire — the join settled, so
+    // there is nothing left in flight to excuse the absence
+    // Then the verdict is about the connection, which is the only thing left that it can be about
+    expect(capabilityAvailability("connected", DOES_NOT_CARRY_IT)).toBe("unavailable");
+  });
+
   it("quotes a failed join rather than reporting it as a connection without the capability", () => {
     // Given a join that failed (blocked ICE, an unreachable LiveKit URL)
     // Then the reason LiveKit gave is what the operator needs, not a capability verdict

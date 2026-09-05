@@ -13,10 +13,7 @@ import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
-import { useHasCapability } from "../../rpc/connections/useHasCapability";
-import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
-import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
-import { capabilityAvailability } from "../../hooks/capabilityAvailability";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { UploadProgressProvider } from "../../rpc/uploadProgress";
 import { owningHostForSession } from "../../utils/crossHostSessions";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
@@ -96,9 +93,6 @@ export function SessionsDrawerScreen({
   // session-client stand-in in tests, and the terminal panes' own participant reads. A host reached
   // over a wire with no roster yields `null`, and each of those already handles its absence.
   const room = useHostPresence(selectedInstanceId);
-  // The common room's own directory source, for the same reason `LiveKitAppPage` reads it: it is
-  // the only thing that can tell "a roster is still being joined" from "there is no roster here".
-  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   const daemons = useDaemons();
   // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
   // serving daemon (you cannot fetch a LiveKit-join token *over* LiveKit), per the PRD's bootstrap
@@ -319,9 +313,8 @@ export function SessionsDrawerScreen({
   // Read through the same rule the LiveKit screen uses, so a room that is merely mid-join does not
   // produce a claim about the connection that the next second withdraws.
   const selectedHost = useHostConnection(selectedInstanceId);
-  const carriesPresence = useHasCapability(selectedHost, "presence");
   const crossHostSessionsVisible =
-    capabilityAvailability(commonRoom?.status ?? "idle", carriesPresence) !== "unavailable";
+    useCapabilityAvailability(selectedHost, "presence") !== "unavailable";
   const { sessions: sortedSessions, addOptimisticSession, sessionMetadataBySessionId } = useSessionManager(
     client,
     sessionToken,

@@ -33,6 +33,13 @@
  * entry and the screen it points at. It lives beside `participantCameraVideo.ts` for the same
  * reason that one does: a pure rule about a LiveKit-shaped surface, testable without React.
  *
+ * **Call it through `useCapabilityAvailability` unless you are handed the status.** Centralising the
+ * rule left every surface still assembling its two arguments by hand — resolve the connection, read
+ * the common room out of the host directory, apply `useHasCapability`, default a missing source to
+ * `idle` — which is the same drift one level up. The hook next door does all of that once. Only
+ * `ParticipantList` calls this directly, because it is presentational and is *told* which room's
+ * status it is reporting on.
+ *
  * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-capability-gating-prd.md` (AC 2, AC 3, AC 7).
  */
 

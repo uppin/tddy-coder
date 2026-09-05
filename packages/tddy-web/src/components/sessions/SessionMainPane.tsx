@@ -54,8 +54,14 @@ interface SessionMainPaneProps {
   isCreating?: boolean;
   client?: ConnectionClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
-   *  child conversations over it. `null` until a host is reachable. */
-  host?: HostConnection | null;
+   *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
+   *  host is reachable.
+   *
+   *  Required, with no default, for the reason `SessionInspectorDrawer.hostConnection` (which this
+   *  feeds) and `InspectorTabs.mediaAvailable` are: the only possible default is `null`, `null`
+   *  hides the VNC and Screen Sharing tabs, and so a call site that forgot the prop would lose them
+   *  silently — the pane would look exactly like one whose host cannot carry a track. */
+  host: HostConnection | null;
   /** Client for fetching browser LiveKit tokens — required to render a terminal for a session
    *  carried over its own LiveKit room. */
   tokenClient?: TokenClient;
@@ -123,7 +129,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
-  host = null,
+  host,
   tokenClient,
   sessionToken = "",
   onCancelCreate,
