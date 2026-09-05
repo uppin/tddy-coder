@@ -28,8 +28,7 @@ export function useHasCapability(
   connection: CapabilityBearing | null | undefined,
   capability: ConnectionCapability,
 ): boolean {
-  // TODO(capability-gating): implement
-  throw new Error(`useHasCapability(${capability}) is not implemented yet`);
+  return hasCapability(connection, capability);
 }
 
 /**
@@ -42,6 +41,5 @@ export function hasCapability(
   connection: CapabilityBearing | null | undefined,
   capability: ConnectionCapability,
 ): boolean {
-  // TODO(capability-gating): implement
-  throw new Error(`hasCapability(${capability}) is not implemented yet`);
+  return connection?.capabilities.has(capability) ?? false;
 }
