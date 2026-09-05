@@ -151,6 +151,24 @@ function ConnectedTerminal({
     [client, roomName, identity]
   );
 
+  // The room is this screen's to join: it was handed a url, an identity and a room name, and there
+  // is no session and no daemon behind them to open a connection on. The terminal it feeds knows
+  // none of that — see `useDirectRoomTerminal`.
+  //
+  // Called with the other hooks, above every early return. It used to be a component rendered in
+  // the JSX below, where an early return was harmless; as a hook, returning before it would make
+  // this render call fewer hooks than the last and React would throw instead of painting. The
+  // failing render is precisely the `error` one below — so the screen whose job is to show a token
+  // failure was the screen that could not.
+  const terminal = useDirectRoomTerminal({
+    url,
+    token: initialToken ?? undefined,
+    getToken,
+    ttlSeconds: ttlSeconds ?? undefined,
+    roomName,
+    debug: debugLogging ?? false,
+  });
+
   if (error) {
     return (
       <div className="p-6">
@@ -169,18 +187,6 @@ function ConnectedTerminal({
     display: "flex",
     flexDirection: "column",
   };
-
-  // The room is this screen's to join: it was handed a url, an identity and a room name, and there
-  // is no session and no daemon behind them to open a connection on. The terminal it feeds knows
-  // none of that — see `useDirectRoomTerminal`.
-  const terminal = useDirectRoomTerminal({
-    url,
-    token: initialToken ?? undefined,
-    getToken,
-    ttlSeconds: ttlSeconds ?? undefined,
-    roomName,
-    debug: debugLogging ?? false,
-  });
 
   if (!initialToken || ttlSeconds === null) {
     return (
