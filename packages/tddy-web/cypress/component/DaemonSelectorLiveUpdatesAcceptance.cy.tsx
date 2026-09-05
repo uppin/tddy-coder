@@ -69,9 +69,10 @@ it("lists a daemon whose presence is re-synced when the common room reconnects",
   // When — the daemon comes back as part of the roster re-synced on a LiveKit reconnect
   cy.then(() => commonRoom.reconnectWith([UDOO]));
 
-  // Then — the selector reflects the reconnected daemon. Its self-label's " (this daemon)" suffix
-  // is stripped, because on this page it is a peer rather than the daemon that served it.
-  daemonSelectorPage.expectShowsSelected("udoo");
+  // Then — the selector reflects the reconnected daemon. Exactly `"udoo"`: on this page it is a
+  // peer rather than the daemon that served it, so its self-label's " (this daemon)" suffix is
+  // stripped, and a substring match here would pass either way.
+  daemonSelectorPage.expectShowsSelectedExactly("udoo");
 });
 
 it("re-lists a daemon that dropped and rejoined across a common-room reconnect", () => {

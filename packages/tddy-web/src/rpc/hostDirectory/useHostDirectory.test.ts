@@ -1,13 +1,13 @@
 /**
  * Unit tests for the host-directory merge.
  *
- * The rules that matter are the ones that decide what a LiveKit-less page sees. Today an
- * unconfigured common room yields an empty host list, so `tddy-desktop` offers nothing at all —
- * not even the daemon it is running in the same process as. These tests pin the replacement: an
- * unconfigured source contributes nothing and reports `idle`, the serving host is always there, and
- * one broken source never condemns the directory.
+ * The rules that matter are the ones that decide what a LiveKit-less page sees. Before the host
+ * directory an unconfigured common room yielded an empty host list, so `tddy-desktop` offered
+ * nothing at all — not even the daemon it was running in the same process as. These tests pin the
+ * replacement: an unconfigured source contributes nothing and reports `idle`, the serving host is
+ * always there, and one broken source never condemns the directory.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-05-optional-livekit-host-directory.md`
+ * Technical: `packages/tddy-web/docs/host-directory.md`
  */
 
 import { describe, it, expect } from "bun:test";
@@ -46,8 +46,8 @@ describe("host directory merge", () => {
       anUnconfiguredLiveKitSource(),
     ]);
 
-    // Then there is exactly one host and it is usable. Today this list is empty and the selector
-    // offers nothing, which is why a LiveKit-less desktop app can reach no host at all.
+    // Then there is exactly one host and it is usable. This list used to be empty and the selector
+    // offered nothing, which is why a LiveKit-less desktop app could reach no host at all.
     expect(directory.hosts.map((h) => h.hostId)).toEqual(["instance-this-host"]);
     expect(directory.status).toEqual("connected");
     expect(directory.error).toBeNull();
@@ -134,7 +134,21 @@ describe("host directory merge", () => {
     expect(status).toEqual("connecting");
   });
 
-  it("keeps each source's hosts in the order that source reported them", () => {
+  it("names the first source's reason when every source has failed", () => {
+    // Given nothing that can answer, each source failing for its own reason
+    const directory = mergeHostDirectory([
+      aSourceNamed("serving", "error", [], "the daemon did not answer"),
+      aSourceNamed("livekit", "error", [], "could not reach the LiveKit server"),
+    ]);
+
+    // Then the directory carries a reason rather than only a status. A screen that can offer no
+    // host at all has to say why, and until every source has failed the reason belongs to the
+    // source that had it — which is why this is the only case that publishes one.
+    expect(directory.status).toEqual("error");
+    expect(directory.error).toEqual("the daemon did not answer");
+  });
+
+  it("keeps a source's hosts in the order it reported them", () => {
     // Given one source with several hosts
     const hosts = hostsOf([
       aSourceNamed("livekit", "connected", [

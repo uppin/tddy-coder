@@ -143,14 +143,17 @@ export interface SelectedDaemonProviderProps {
  * Start-Session form enforces. It contributes the serving daemon when the room did not — which is
  * every case where there is no room, and the whole point of the exercise.
  */
-function useDirectorySources(
-  livekitUrl: string | undefined,
-  commonRoom: string | undefined,
-  servingInstanceId: string | undefined,
-  roomOverride: Room | null | undefined,
-  daemonsOverride: DaemonHost[] | undefined,
-  roomFactory: (() => Room) | undefined,
-): { sources: readonly HostDirectorySource[]; room: Room | null } {
+function useDirectorySources({
+  livekitUrl,
+  commonRoom,
+  servingInstanceId,
+  room: roomOverride,
+  daemons: daemonsOverride,
+  roomFactory,
+}: Omit<SelectedDaemonProviderProps, "children">): {
+  sources: readonly HostDirectorySource[];
+  room: Room | null;
+} {
   // TODO: migrate to `useAuthContext()` once every `withSelectedDaemon`-based test provides an
   // `AuthProvider` ancestor. Left on the standalone `useAuth()` hook deliberately for now: this
   // component is mounted once for the whole daemon-mode session (it wraps, and is never remounted
@@ -265,14 +268,14 @@ export function SelectedDaemonProvider({
   roomFactory,
   children,
 }: SelectedDaemonProviderProps) {
-  const { sources, room } = useDirectorySources(
+  const { sources, room } = useDirectorySources({
     livekitUrl,
     commonRoom,
     servingInstanceId,
-    roomOverride,
-    daemonsOverride,
+    room: roomOverride,
+    daemons: daemonsOverride,
     roomFactory,
-  );
+  });
 
   return (
     <HostDirectorySources sources={sources}>

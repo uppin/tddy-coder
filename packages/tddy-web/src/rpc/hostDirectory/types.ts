@@ -10,7 +10,7 @@
  * source and the serving-host source; the desktop app adds one of its own. Nothing here knows what
  * a room is.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-host-directory-prd.md`.
+ * Technical: `packages/tddy-web/docs/host-directory.md`.
  */
 
 import type { ConnectionStatus } from "../connections/types";

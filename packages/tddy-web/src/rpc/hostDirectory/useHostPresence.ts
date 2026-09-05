@@ -6,7 +6,7 @@
  * gating in node 4 would have had no seam to gate on. This is that seam: a component that wants the
  * participant roster asks for it by name, and gets `null` on a connection that has none.
  *
- * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-host-directory-prd.md`.
+ * Technical: `packages/tddy-web/docs/host-directory.md`.
  */
 
 import type { Room } from "livekit-client";

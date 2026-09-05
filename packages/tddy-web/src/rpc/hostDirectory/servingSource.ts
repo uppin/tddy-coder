@@ -12,19 +12,12 @@
  */
 
 import { useMemo } from "react";
+import { SELF_LABEL_SUFFIX } from "../../lib/participantRole";
 import { hostDescriptorOf } from "./daemonHost";
 import type { HostDirectorySource } from "./types";
 
 /** The id this source contributes under. Precedence is stated against it, so it is a constant. */
 export const SERVING_SOURCE_ID = "serving";
-
-/**
- * Every daemon self-labels its own advertisement with this suffix (see `participantRole.ts`'s
- * `parseDaemonAdvertisement`, which requires it), and `DaemonSelector` shows it only on the entry
- * matching `servingInstanceId`. A serving host named from `/api/config` alone has no advertisement
- * to copy a label from, so it is spelled the same way the daemon would have spelled it.
- */
-const SELF_LABEL_SUFFIX = " (this daemon)";
 
 /**
  * The serving daemon's contribution to the directory.

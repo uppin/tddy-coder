@@ -5,11 +5,12 @@
  * PRD: docs/ft/web/daemon-selector-livekit-rpc.md.
  */
 
-import type { DaemonHost } from "../../lib/participantRole";
+import { SELF_LABEL_SUFFIX, type DaemonHost } from "../../lib/participantRole";
+import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory";
+import { LIVEKIT_SOURCE_ID } from "../../rpc/hostDirectory/liveKitSource";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
-const SELF_LABEL_SUFFIX = " (this daemon)";
 
 /**
  * Every daemon's own advertisement self-labels itself "{id} (this daemon)" from its own
@@ -72,15 +73,19 @@ export function DaemonSelector({
 
 /** Connected wrapper reading the shared `SelectedDaemonProvider` context — what screens render. */
 export function DaemonSelectorConnected() {
-  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon, directoryStatus } =
-    useSelectedDaemon();
+  const { daemons, selectedInstanceId, servingInstanceId, selectDaemon } = useSelectedDaemon();
+  // The common room's own status, not the directory's. The placeholder names the common room, and
+  // the merged status cannot answer for it: it is optimistic, so a page that knows its own serving
+  // daemon reads `connected` however badly the room is doing. Reading it here would make the
+  // message unreachable wherever a serving daemon is named — which is every production page.
+  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   return (
     <DaemonSelector
       daemons={daemons}
       selectedInstanceId={selectedInstanceId}
       servingInstanceId={servingInstanceId}
       onSelect={selectDaemon}
-      commonRoomUnreachable={directoryStatus === "error"}
+      commonRoomUnreachable={commonRoom?.status === "error"}
     />
   );
 }

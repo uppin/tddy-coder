@@ -33,9 +33,10 @@ export function HostPresenceRoom({ room, children }: HostPresenceRoomProps) {
 /**
  * The room in scope, ungated.
  *
- * **Internal to this module — call `useHostPresence`.** Reading this directly is the ambient `room`
- * on the shared context all over again: it hands out LiveKit without the caller declaring that it
- * wants presence, which is exactly the seam node 4 gates on.
+ * **Only `useHostPresence` should call this.** Reading it directly is the ambient `room` on the
+ * shared context all over again: it hands out LiveKit without the caller declaring that it wants
+ * presence, which is exactly the seam node 4 gates on. It is exported rather than module-private
+ * only because the gate lives in a sibling file; that is a limit of the file split, not a licence.
  */
 export function usePresenceRoom(): Room | null {
   return useContext(PresenceRoomContext);
