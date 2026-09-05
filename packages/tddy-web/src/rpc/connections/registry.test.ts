@@ -113,21 +113,143 @@ describe("ConnectionProviderRegistry", () => {
     expect(ids).toEqual(["ipc", "livekit"]);
   });
 
-  it("replaces a provider registered again under the same id", () => {
-    // Given a provider that is registered, then registered again claiming a different host —
-    // what a hot reload or a re-registration on reconnect does
+  it("replaces a provider registered again under the same id, in the place it already held", () => {
+    // Given a deliberate precedence — the desktop's own wire ahead of LiveKit — and then a LiveKit
+    // provider that registers again claiming a different host, which is what a reconnect does
     const registry = new ConnectionProviderRegistry();
-    registry.register(aProviderNamed("livekit", ["an-old-peer"]));
-    registry.register(aProviderNamed("livekit", ["a-new-peer"]));
+    registry.register(aProviderNamed("ipc", ["this-host"]));
+    registry.register(aProviderNamed("livekit", ["this-host", "an-old-peer"]));
+    registry.register(aProviderNamed("livekit", ["this-host", "a-new-peer"]));
 
-    // When both hosts are resolved
+    // When the hosts are resolved
     const stale = registry.connectHost("an-old-peer");
     const current = registry.connectHost("a-new-peer");
+    const contested = registry.connectHost("this-host");
 
-    // Then only the latest registration answers, and the registry holds one entry — two
-    // providers under one id would make precedence depend on which copy was asked
+    // Then only the latest registration answers — two providers under one id would make precedence
+    // depend on which copy was asked
     expect(stale).toBeNull();
     expect(current?.providerId).toEqual("livekit");
-    expect(registry.providerIds()).toEqual(["livekit"]);
+
+    // And the re-registration kept its place rather than moving to the back of the queue: a
+    // reconnecting wire must not overtake, or fall behind, the wires it was ordered against, or a
+    // dropped common room would silently start routing the desktop's own host through LiveKit
+    expect(registry.providerIds()).toEqual(["ipc", "livekit"]);
+    expect(contested?.providerId).toEqual("ipc");
+  });
+});
+
+/**
+ * The observable half of the registry.
+ *
+ * A wire registers itself while the component that owns it renders — the only moment early enough
+ * for the subtree's first paint to resolve its hosts — and a render may not update other components.
+ * So the notification is deferred to a microtask and coalesced, and `revision()` is the
+ * `useSyncExternalStore` snapshot every consumer compares. Getting either wrong is invisible in the
+ * routing tests above and very visible in the app: a missed bump leaves a screen holding the `null`
+ * connection it resolved before the room arrived, and a spurious one rebuilds every client.
+ */
+describe("ConnectionProviderRegistry observability", () => {
+  it("bumps its revision when a provider registers", () => {
+    // Given a registry nothing has been offered to yet
+    const registry = new ConnectionProviderRegistry();
+    const before = registry.revision();
+
+    // When a wire comes up
+    registry.register(aProviderNamed("livekit", ["a-peer"]));
+
+    // Then the snapshot every consumer compares has moved. This is the whole mechanism by which a
+    // screen that resolved "unreachable" before the room existed asks again once it does.
+    expect(registry.revision()).toBeGreaterThan(before);
+  });
+
+  it("treats re-registering the very same instance as no change at all", () => {
+    // Given a provider that is already registered
+    const registry = new ConnectionProviderRegistry();
+    const provider = aProviderNamed("livekit", ["a-peer"]);
+    registry.register(provider);
+    const settled = registry.revision();
+
+    // When the same instance is offered again — what `LiveKitConnections` does on every render,
+    // including the renders React discards
+    registry.register(provider);
+    registry.register(provider);
+
+    // Then nothing moved. A bump here would invalidate every `useHostConnection` and every cached
+    // client in the app on a render that changed no routing whatsoever.
+    expect(registry.revision()).toEqual(settled);
+  });
+
+  it("bumps its revision when a different instance replaces one under the same id", () => {
+    // Given a registered wire
+    const registry = new ConnectionProviderRegistry();
+    registry.register(aProviderNamed("livekit", ["an-old-peer"]));
+    const before = registry.revision();
+
+    // When a *different* provider takes over that id — a new room, so every transport built against
+    // the old one is dead
+    registry.register(aProviderNamed("livekit", ["a-new-peer"]));
+
+    // Then consumers are told, because this is the one case where they must re-resolve
+    expect(registry.revision()).toBeGreaterThan(before);
+  });
+
+  it("notifies subscribers once for several registrations in the same task", async () => {
+    // Given a subscriber
+    const registry = new ConnectionProviderRegistry();
+    let notifications = 0;
+    registry.subscribe(() => {
+      notifications += 1;
+    });
+
+    // When two wires register back to back, as an app root registering IPC and then LiveKit does
+    registry.register(aProviderNamed("ipc", ["this-host"]));
+    registry.register(aProviderNamed("livekit", ["a-peer"]));
+
+    // Then nothing has been delivered synchronously — a registration happens during someone's
+    // render, and notifying from there would update other components mid-render
+    expect(notifications).toEqual(0);
+
+    // And when the task drains, one notification arrives for both, carrying the settled revision
+    await Promise.resolve();
+    expect(notifications).toEqual(1);
+    expect(registry.revision()).toEqual(2);
+  });
+
+  it("notifies again for a registration in a later task", async () => {
+    // Given a subscriber that has already seen one coalesced notification
+    const registry = new ConnectionProviderRegistry();
+    let notifications = 0;
+    registry.subscribe(() => {
+      notifications += 1;
+    });
+    registry.register(aProviderNamed("ipc", ["this-host"]));
+    await Promise.resolve();
+
+    // When a second wire comes up later — the common room finishing its join long after the app
+    // rendered
+    registry.register(aProviderNamed("livekit", ["a-peer"]));
+    await Promise.resolve();
+
+    // Then it is delivered too: coalescing is per task, not once per registry
+    expect(notifications).toEqual(2);
+  });
+
+  it("stops delivering to a subscriber that unsubscribed", async () => {
+    // Given a subscriber that has gone away — a consumer unmounting
+    const registry = new ConnectionProviderRegistry();
+    let notifications = 0;
+    const unsubscribe = registry.subscribe(() => {
+      notifications += 1;
+    });
+    unsubscribe();
+
+    // When a wire registers
+    registry.register(aProviderNamed("livekit", ["a-peer"]));
+    await Promise.resolve();
+
+    // Then nothing is delivered, and the revision still moved for whoever reads it next
+    expect(notifications).toEqual(0);
+    expect(registry.revision()).toEqual(1);
   });
 });

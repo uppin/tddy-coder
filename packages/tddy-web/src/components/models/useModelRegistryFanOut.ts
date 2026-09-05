@@ -343,21 +343,31 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     return mergeRegistryEntries(snapshots);
   }, [daemonIds, statesByDaemon]);
 
-  // The common room is this fleet's host directory: joined or joining, it can name hosts; idle or
-  // failed, it names none and the screen has nothing to be empty *of*.
-  const hasDirectory = roomStatus === "connecting" || roomStatus === "connected";
+  // The common room is this fleet's host directory, and only a *joined* room is one: while the token
+  // is being minted `useCommonRoom` already reports `connecting` with no room and therefore no
+  // roster, so a directory that "can name hosts" then would be claiming a fleet it cannot enumerate.
+  // Treating `connecting` as a directory made every page load render "no daemons in the common room"
+  // — an empty fleet, positively asserted — for the whole of the mint, where the honest answer is
+  // that this screen is not connected to the common room yet.
+  const hasDirectory = roomStatus === "connected";
   const status = useMemo(
     () =>
       registryReadStatus({
-        // "Connected" is the claim that this fleet can be addressed at all, and two different
-        // things have to hold for it: the directory that names the hosts is up, and the hosts it
-        // names are reachable. An empty fleet is only "no daemons" when the directory is up —
-        // otherwise there are no daemons *known*, which is a disconnection and says so.
-        connected: hasDirectory && daemonIds.every((instanceId) => connectHost(instanceId) !== null),
+        // "Connected" is the claim that this fleet can be addressed at all, and it is the directory
+        // that answers it. An empty fleet is only "no daemons" when the directory is up — otherwise
+        // there are no daemons *known*, which is a disconnection and says so.
+        //
+        // Host reachability deliberately does *not* enter here. Asking `daemonIds.every(reachable)`
+        // would let one host nobody can reach collapse the whole fleet to "not connected" and throw
+        // away the rows already read from the healthy ones — the exact failure `useHostFanOut` is
+        // built to avoid ("one unreachable host costs one error row and never the list"). An
+        // unreachable host is already carried, per host, by the `noConnectionTo` error row that the
+        // fan-out records for it, which is where a partial outage belongs.
+        connected: hasDirectory,
         daemonCount: daemonIds.length,
         answeredCount: daemonIds.filter((instanceId) => statesByDaemon.has(instanceId)).length,
       }),
-    [hasDirectory, connectHost, daemonIds, statesByDaemon],
+    [hasDirectory, daemonIds, statesByDaemon],
   );
 
   const toolsFor = useCallback(

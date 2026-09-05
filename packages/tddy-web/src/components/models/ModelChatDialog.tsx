@@ -52,9 +52,13 @@ export function ModelChatDialog({
   // The owning daemon's own connection is this chat's liveness signal: it is read at the moment of
   // a send, so a host that dropped out between opening the chat and typing into it refuses the
   // prompt rather than enqueueing it onto a stream nobody is reading.
+  // The host is named in the refusal because "the presenter" is not what is missing here: this chat
+  // is served by a specific daemon the operator picked off the Models screen, and that id is how
+  // every other row on that screen refers to it.
   const peer = useMemo(
     () => ({
       name: target.daemonInstanceId,
+      label: `daemon ${target.daemonInstanceId}`,
       isServing: () => connection?.status === "connected",
     }),
     [connection, target.daemonInstanceId],

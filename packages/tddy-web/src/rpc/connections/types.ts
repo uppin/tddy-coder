@@ -38,6 +38,14 @@ export type ConnectionCapability = "rpc" | "media" | "presence";
  * connection overlays keep reading one vocabulary. `idle` is "nothing has been asked of this yet",
  * which is distinct from `error` — the distinction that kept the presence panel claiming it was
  * connecting for as long as the tab stayed open.
+ *
+ * **No provider produces `idle` or `error` yet.** The only one that exists is
+ * `LiveKitConnectionProvider`, and LiveKit has no terminal failed state to map onto them: a join
+ * that fails lands the room in `Disconnected`, which reads as `connecting` because it may yet
+ * succeed. The two states are declared here because the vocabulary is the wire-neutral one and the
+ * IPC provider (node 6 of the `optional-livekit` stack) does have a bridge that is either not asked
+ * yet or refusing. Until then, a call site switching on all four is writing two unreachable arms —
+ * treat "not `connected`" as the only distinction that carries information today.
  */
 export type ConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -57,12 +65,22 @@ export interface HostConnection {
 
   readonly status: ConnectionStatus;
 
-  /** Why the connection is unusable, when {@link status} is `"error"`; `null` otherwise. */
+  /**
+   * Why the connection is unusable, when {@link status} is `"error"`; `null` otherwise.
+   *
+   * **Structurally always `null` today**, for the reason given on {@link ConnectionStatus}: the only
+   * provider that exists cannot reach `"error"`, so it hard-codes this. Do not write a call site
+   * that relies on a non-null value appearing here — a message shown to an operator has to come from
+   * somewhere that can actually produce one until node 6 introduces a provider with a failure mode.
+   */
   readonly error: string | null;
 
   /**
-   * What this connection can do. Read it through `useHasCapability` rather than inspecting the set
-   * directly, so there is exactly one place that answers the question.
+   * What this connection can do.
+   *
+   * Inspecting the set at a call site is not the intended reading: node 4 of the `optional-livekit`
+   * stack introduces the hook that gates media and presence surfaces on a capability, so that there
+   * is exactly one place answering the question. Nothing in this node reads it yet.
    */
   readonly capabilities: ReadonlySet<ConnectionCapability>;
 

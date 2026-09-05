@@ -12,7 +12,7 @@
  * whichever provider it did register.
  */
 
-import { useMemo, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, type Room } from "livekit-client";
@@ -55,8 +55,10 @@ type LiveKitTransportFactory = (
  *
  * The transport is built on first use and then kept: a host talked to by four screens is one
  * transport and one client per service, which is what makes {@link HostConnection.clientFor} stable
- * enough to key an effect on. It is also why a fan-out that re-reads the same peer twice records one
- * client build rather than two.
+ * enough to key an effect on. It is also why a fan-out that re-reads the same peer twice opens one
+ * transport rather than two — note that this dedupes the *transport*, not the client: `useHostFanOut`
+ * takes {@link transport} and builds its own client through the caller's `clientFor`, so it does get
+ * a fresh client per effect run, over the one transport this connection holds.
  */
 class LiveKitHostConnection implements HostConnection {
   readonly providerId = LIVEKIT_PROVIDER_ID;
@@ -72,10 +74,15 @@ class LiveKitHostConnection implements HostConnection {
   private builtTransport: Transport | null = null;
   private readonly clients = new Map<DescService, Client<DescService>>();
 
+  /**
+   * `currentFactory` is read at transport-build time rather than captured, so a factory whose
+   * *identity* churned — `RpcTransportProvider` rebuilds `lkFactory` on every one of its own
+   * renders — does not have to invalidate a connection that is otherwise still good.
+   */
   constructor(
     readonly hostId: string,
     private readonly room: Room,
-    private readonly factory: LiveKitTransportFactory,
+    private readonly currentFactory: () => LiveKitTransportFactory,
   ) {
     this.identity = daemonRpcIdentity(hostId);
   }
@@ -96,7 +103,7 @@ class LiveKitHostConnection implements HostConnection {
   }
 
   transport(): Transport {
-    this.builtTransport ??= this.factory(this.room, this.identity);
+    this.builtTransport ??= this.currentFactory()(this.room, this.identity);
     return this.builtTransport;
   }
 
@@ -119,9 +126,10 @@ class LiveKitHostConnection implements HostConnection {
  * business and not this provider's: a daemon that is not on the room yields a connection whose
  * `status` says `connecting`, which is a different claim from "no such host".
  *
- * A provider instance is bound to one room and one transport factory. A new room means a new
- * provider registered over the old one, which is what drops every client built against the wire
- * that went away.
+ * A provider instance is bound to one room, and only to one room: a new room means a new provider
+ * registered over the old one, which is what drops every client built against the wire that went
+ * away and what tells the registry to re-resolve every host. The transport *factory* is not part of
+ * that identity — see {@link rebindFactory}.
  */
 export class LiveKitConnectionProvider implements ConnectionProvider {
   readonly id = LIVEKIT_PROVIDER_ID;
@@ -129,16 +137,38 @@ export class LiveKitConnectionProvider implements ConnectionProvider {
   /** One connection per host, so `clientFor` is stable for as long as this provider is registered. */
   private readonly connections = new Map<string, HostConnection>();
 
+  private factory: LiveKitTransportFactory;
+
   constructor(
     private readonly room: Room | null,
-    private readonly factory: LiveKitTransportFactory,
-  ) {}
+    factory: LiveKitTransportFactory,
+  ) {
+    this.factory = factory;
+  }
+
+  /** Whether this provider is the one already bound to `room` — see {@link LiveKitConnections}. */
+  isBoundTo(room: Room | null): boolean {
+    return this.room === room;
+  }
+
+  /**
+   * Swap the transport factory without disturbing anything else.
+   *
+   * `RpcTransportProvider` builds `lkFactory` fresh on every one of its renders, so the factory this
+   * provider was constructed with goes out of date by identity long before it goes out of date by
+   * behaviour. Replacing the provider over that would drop every transport and client built against
+   * a wire that never went anywhere; swapping the field leaves the standing connections alone and
+   * hands the new factory to the next transport that is built.
+   */
+  rebindFactory(factory: LiveKitTransportFactory): void {
+    this.factory = factory;
+  }
 
   connectHost(hostId: string): HostConnection | null {
     if (!this.room || hostId === "") return null;
     const existing = this.connections.get(hostId);
     if (existing) return existing;
-    const connection = new LiveKitHostConnection(hostId, this.room, this.factory);
+    const connection = new LiveKitHostConnection(hostId, this.room, () => this.factory);
     this.connections.set(hostId, connection);
     return connection;
   }
@@ -156,8 +186,23 @@ export class LiveKitConnectionProvider implements ConnectionProvider {
  * Registration happens while this component renders, not in an effect, because the subtree's first
  * paint has to resolve its hosts: a screen that reads its fleet on mount would otherwise record
  * "no connection to daemon X" against every host before the wire that reaches them was offered, and
- * keep that answer. Registering the same provider instance twice is a no-op, so a re-run or a
- * discarded render leaves the registry exactly as it was.
+ * keep that answer. (An effect-based version was tried and regressed exactly that —
+ * `ModelsCatalogStateAcceptance` and `ModelsFanOutLifecycleAcceptance`.)
+ *
+ * Registering from render is only safe if it is idempotent *across instances*, which is why the
+ * provider is held in a ref rather than derived with `useMemo`. A memo factory is allowed to run for
+ * a render React then throws away — StrictMode double-invokes it, and a concurrent render may be
+ * discarded — and each such run would have built a second provider object. `register` matches on id,
+ * so the second object would replace the first, bump {@link ConnectionProviderRegistry.revision} and
+ * invalidate every `useHostConnection`, every `useHostClient` and every cached connection in the app,
+ * tearing down each effect keyed on a client. A ref survives a discarded render, so the registry
+ * keeps being handed the object it already holds and `register` returns early.
+ *
+ * A *new room* is the one thing that must still produce a new instance: every transport built
+ * against the room that went away is dead, and replacing the provider is how the registry learns
+ * that and re-resolves each host — including the ordinary null-room-then-joined first paint. A
+ * factory whose identity merely churned (`RpcTransportProvider` rebuilds `lkFactory` every render)
+ * is not that, and is swapped into the provider standing.
  *
  * Nothing unregisters on unmount. A registration says a wire exists, and the registry it says it
  * into is either this component's own (which goes with it) or an ancestor's that outlives the whole
@@ -172,7 +217,16 @@ export function LiveKitConnections({
 }) {
   const registry = useConnectionProviders();
   const factory = useLiveKitTransportFactory();
-  const provider = useMemo(() => new LiveKitConnectionProvider(room, factory), [room, factory]);
-  useMemo(() => registry.register(provider), [registry, provider]);
+  const providerRef = useRef<LiveKitConnectionProvider | null>(null);
+  if (providerRef.current === null || !providerRef.current.isBoundTo(room)) {
+    providerRef.current = new LiveKitConnectionProvider(room, factory);
+  } else {
+    providerRef.current.rebindFactory(factory);
+  }
+  // Called on every render rather than wrapped in a `useMemo`: a memo is a cache, not a scheduler,
+  // and using one to perform a side effect makes the effect depend on whether React kept the render.
+  // `register` is idempotent for the instance it already holds, so calling it unconditionally is
+  // both cheaper to reason about and the only version that is actually correct.
+  registry.register(providerRef.current);
   return <ConnectionProviders registry={registry}>{children}</ConnectionProviders>;
 }

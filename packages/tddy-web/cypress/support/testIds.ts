@@ -693,6 +693,15 @@ export const TEST_IDS = {
   // Daemon selector (top-right strip on daemon-mode screens)
   daemonSelectorTrigger: "daemon-selector-trigger",
 
+  // Host-connection probes (HostConnectionAcceptance.cy.tsx) — small components that render what
+  // `useHostClient` / `useHostConnection` resolved, so the connection model can be driven without a
+  // screen in the way.
+  hostConnectionSessionCount: "host-connection-session-count",
+  hostConnectionDistinctClients: "host-connection-distinct-clients",
+  hostConnectionRenderCount: "host-connection-render-count",
+  hostConnectionReRender: "host-connection-re-render",
+  hostConnectionResolvedProvider: "host-connection-resolved-provider",
+
   // Projects screen (/projects)
   projectsScreen: "projects-screen",
   projectsList: "projects-list",

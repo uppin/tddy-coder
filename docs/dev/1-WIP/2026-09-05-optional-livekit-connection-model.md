@@ -76,7 +76,10 @@ Lands first, so nodes 2 and 3 can branch off a real ref and compile against real
 3. Failing unit tests pinning: resolution order across registered providers, `null` for an
    unreachable host, `null` for an empty registry, and client-identity stability across renders.
 4. Failing Cypress component test: a daemon-level screen driven entirely through an in-memory
-   provider, asserting no `livekit-client` `Room` is constructed.
+   provider, with no `livekit-client` `Room` in the tree. The "no LiveKit" guarantee is
+   **structural, not asserted** — the only wire that can reach the host is an in-memory provider and
+   no `Room` is ever constructed, so nothing in the tree *could* carry the traffic over LiveKit. A
+   spy on `Room` would prove less and would break the moment the provider moved file.
 
 The implementation of `LiveKitConnectionProvider` and the five call-site migrations land in the same
 PR under `/green` — **this PR does not merge on the contract alone.**
@@ -145,6 +148,27 @@ The one full-suite failure is `GrpcSessionTerminalResume.cy.tsx` →
 (`expected 0 to equal 1`). It reproduces identically on the clean tree with this node's code stashed,
 and passes in isolation — a suite-order dependency that predates the stack, not this node's.
 
+### After the review pass (2026-09-05)
+
+| Suite | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **992 pass, 0 fail** across 116 files |
+| `cypress:component --spec cypress/component/HostConnectionAcceptance.cy.tsx` | **8 pass, 0 fail** |
+| `cypress:component --spec "cypress/component/models/*.cy.tsx"` | **15 specs, 91 pass, 0 fail** |
+| `cypress:component` (full) | **208 specs, 1222 tests, 1222 pass, 0 fail** |
+| `bun run --filter tddy-web build` | clean |
+
+The unit count is 977 plus 15: nine for the new `src/rpc/connections/liveKit.test.ts` and six for
+`registry.test.ts`'s new `subscribe`/`revision` coverage. The Cypress count is 1220 plus the two
+`ProjectsAppPage` cases added for the node's headline claim.
+
+`GrpcSessionTerminalResume.cy.tsx` passed in this run — consistent with it being a suite-order
+dependency rather than a deterministic failure.
+
+`tsc --noEmit` is still not a gate. This node's files contribute only the repo-wide
+`Cannot find module 'bun:test'` entry that every one of the 121 bun unit-test files already carries;
+no other error in a file touched here.
+
 The `SelectedHostUrlStateAcceptance` failure recorded above did **not** reproduce in either the
 baseline or the post-change run on this machine; it appears to be flaky rather than deterministic.
 
@@ -163,18 +187,59 @@ lists — this node contributes none. It is not a gate in this repo.
   registry still wins on precedence.
 - **Registration happens during render**, with notification deferred to a microtask. A `useEffect`
   version regressed first-paint fleet reads (`ModelsCatalogStateAcceptance`,
-  `ModelsFanOutLifecycleAcceptance`).
+  `ModelsFanOutLifecycleAcceptance`). Review follow-up: the provider is held in a `useRef` and
+  `registry.register` is called directly, not wrapped in a `useMemo`. A memo factory may run for a
+  render React discards, and each such run built a *second* provider object that `register` matched
+  by id and swapped in, bumping `revision()` and invalidating every `useHostConnection`,
+  `useHostClient` and cached connection in the app. A new instance is now created for one reason
+  only — a new room — which is the case that genuinely must re-resolve every host. A transport
+  factory whose identity churned (`RpcTransportProvider` rebuilds `lkFactory` every render) is
+  swapped into the standing provider instead.
 - **Added beyond the published contract:** `ConnectionProviderRegistry.subscribe`/`revision` (a
   `useSyncExternalStore` seam, so a wire coming up later reaches a subtree that would not otherwise
   re-render) and `useHostConnector()`, a call-time resolver for callers that name hosts inside an
   effect or callback.
 - **`useAcpSessionOverClient`'s `peer` changed shape** from `{room, identity}` to
-  `{name, isServing()}` — a predicate, so each caller reports liveness in its own wire's terms. Both
-  callers updated; behaviour identical.
-- **`useModelRegistryFanOut`'s `connected` flag** is now `hasDirectory && daemonIds.every(reachable)`,
-  where `hasDirectory` comes from the context's `roomStatus` rather than `room`. With zero known
-  hosts `every()` is vacuously true, which would have turned "not connected" into "no daemons". Two
-  transient edge states differ in wording only — flag if either must be preserved exactly.
+  `{name, label, isServing()}` — a predicate, so each caller reports liveness in its own wire's
+  terms. Two review follow-ups on it:
+  - `label` was added because the refusal copy said "the presenter" for both callers, and
+    `ModelChatDialog` now routes through this path: a daemon host that has dropped out was being
+    reported as an absent presenter. It now reads `Message not sent — daemon <instance-id> is not
+    connected.`, and `ModelChatAcceptance` was updated to that string. `name` stays the diagnostics
+    identity; the session-presenter copy is unchanged.
+  - The session-presenter caller now passes **no peer at all** when there is no room, instead of an
+    `isServing()` that answered `true` on the strength of having nothing to look at. `canSend` guards
+    on `peer && !peer.isServing()`, so an absent peer skips the check exactly as the old `!room ||`
+    short-circuit did — behaviour is identical and no spec changed.
+- **`useModelRegistryFanOut`'s `connected` flag** now comes from the context's `roomStatus` rather
+  than from `room`, and is `roomStatus === "connected"` alone.
+
+  The first version of this was wrong on both halves, and review caught it. It read
+  `hasDirectory && daemonIds.every(reachable)` with `hasDirectory` covering `connecting` *and*
+  `connected`, and the note above called the difference "wording only in two transient edge states".
+  It was not: `useCommonRoom` sets `status = "connecting"` with `room = null` *before* the token mint
+  and the LiveKit connect, so for the whole of that window `hasDirectory` was true and `daemonIds`
+  was empty, `every()` was vacuously true, and the Models screen reported **"No daemons in the
+  common room"** — an empty fleet, positively asserted — where it previously said **"Not connected
+  to the common room"**. That was every page load, not an edge state.
+
+  The `every(reachable)` conjunct is gone as well. It is a tautology today, because the only
+  registered provider claims every host once it has a room — but as soon as node 6/7 registers an
+  IPC provider that claims one host, a single unreachable host would collapse the whole fleet to
+  "not connected" and discard the rows already read from the healthy ones. That is the exact failure
+  `useHostFanOut` is built to avoid ("one unreachable host costs one error row and never the list"),
+  and unreachability is already carried per host by the fan-out's `noConnectionTo` row.
+
+  Both strings are pinned by `ModelsCatalogStateAcceptance` and `ModelsPanelStatesAcceptance`.
+
+  Six tests across `ModelsCatalogStateAcceptance`, `ModelsPanelStatesAcceptance` and
+  `ModelsFanOutLifecycleAcceptance` had to change with it, and the change is a fixture correction
+  rather than an accommodation: each said "Given — connected" and passed `new Room()`, but a freshly
+  constructed SDK room reports `ConnectionState.Disconnected`, which `useCommonRoom` publishes as
+  `"connecting"`. Those fixtures were never standing in for a joined room. They now use
+  `aJoinedCommonRoom()` (`cypress/support/rpc/withSelectedDaemon.tsx`), a double that reports
+  `Connected` — the shape `useCommonRoomDaemons`' own doc comment already assumed of an injected
+  room. No assertion changed.
 - **Nothing unregisters on unmount** — there is no `unregister` in the contract.
 
 ### Commands

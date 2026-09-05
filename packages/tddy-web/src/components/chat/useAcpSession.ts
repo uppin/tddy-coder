@@ -63,13 +63,25 @@ export function useAcpSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
-  return useAcpSessionOverClient(client, resumeSessionId, {
-    name: serverIdentity,
-    // Presence is this caller's liveness signal: the presenter serves the stream from the room, so
-    // a participant that has left is not going to read what is enqueued for it. With no room there
-    // is nothing to check — the client was built by an overridden factory that ignores it.
-    isServing: () => !room || room.remoteParticipants.has(serverIdentity),
-  });
+  return useAcpSessionOverClient(
+    client,
+    resumeSessionId,
+    // Presence is this caller's liveness signal: the presenter serves the stream from the room, so a
+    // participant that has left is not going to read what is enqueued for it.
+    //
+    // With no room there is no signal at all — the client was built by an overridden factory that
+    // ignores the room — so no peer is offered. A predicate answering `true` in that case would be
+    // asserting the presenter *is* serving on the strength of having nothing to look at, which is a
+    // fallback dressed as an observation. `canSend` guards on `peer && !peer.isServing()`, so an
+    // absent peer skips the liveness check exactly as the old `!room ||` short-circuit did.
+    room
+      ? {
+          name: serverIdentity,
+          label: "the presenter",
+          isServing: () => room.remoteParticipants.has(serverIdentity),
+        }
+      : undefined,
+  );
 }
 
 /**
@@ -100,7 +112,14 @@ export interface RegistryChatSession {
  * a send is refused with a message rather than queued into a stream nobody is reading. It is a
  * predicate rather than a room and an identity because each caller knows how its own wire reports
  * liveness — a session presenter watches the room's participants, a daemon-hosted chat reads the
- * status of its `HostConnection`. Omit it when the caller has no liveness signal to offer.
+ * status of its `HostConnection`. Omit it when the caller has no liveness signal to offer; an
+ * omitted peer skips the check, which is the honest answer when there is nothing to observe.
+ *
+ * `peer.name` is for diagnostics and `peer.label` is what an operator is shown, because the two are
+ * not the same string: the identity that makes a log line useful (`daemon-dev-presenter-…`) is not
+ * something to put in front of a person. The two callers here are a session presenter and a chat
+ * with a model on a named daemon host, and "the presenter" is only true of the first — a refusal
+ * has to name the party that is actually missing.
  *
  * `registry`, when given, rides the `new_session` handshake. A session-hosted ACP stream needs none
  * — the agent *is* that session's workflow. The daemon-hosted surface serves every model and
@@ -110,7 +129,7 @@ export interface RegistryChatSession {
 export function useAcpSessionOverClient(
   client: Client<typeof AcpService> | null,
   resumeSessionId?: string,
-  peer?: { name: string; isServing: () => boolean },
+  peer?: { name: string; label: string; isServing: () => boolean },
   registry?: RegistryChatSession,
 ): UseAgentChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -417,13 +436,18 @@ export function useAcpSessionOverClient(
     };
   }, [client, resumeSessionId, registry]);
 
+  // Who the refusals below name. With no peer offered there is no better word than the role a
+  // stream-less chat is waiting on, and both of this hook's callers are waiting on something that
+  // presents: the fallback is only ever read in the "stream not open yet" case.
+  const peerLabel = peer?.label ?? "the presenter";
+
   const canSend = (): boolean => {
     if (!queueRef.current) {
-      setSendError("Message not sent — no connection to the presenter yet.");
+      setSendError(`Message not sent — no connection to ${peerLabel} yet.`);
       return false;
     }
     if (peer && !peer.isServing()) {
-      setSendError("Message not sent — the presenter is not connected.");
+      setSendError(`Message not sent — ${peerLabel} is not connected.`);
       return false;
     }
     return true;
