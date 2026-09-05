@@ -139,6 +139,20 @@ impl<S: RpcService> WebviewRpcHost<S> {
             (connection.peer.clone(), connection.responses.clone())
         };
 
+        log::debug!(
+            "[tauri-rpc] {peer} <- request {} {}/{}",
+            request.request_id,
+            request
+                .call_metadata
+                .as_ref()
+                .map(|m| m.service.as_str())
+                .unwrap_or("(continuation)"),
+            request
+                .call_metadata
+                .as_ref()
+                .map(|m| m.method.as_str())
+                .unwrap_or(""),
+        );
         self.engine.on_request(&peer, request, responses).await;
         Ok(())
     }
@@ -164,6 +178,7 @@ async fn drain_responses<S: RpcService>(
 ) {
     while let Some((_peer, response)) = responses.recv().await {
         let request_id = response.request_id;
+        let end_of_stream = response.end_of_stream;
         let frame = match envelope::encode_response(response) {
             Ok(frame) => frame,
             Err(reason) => {
@@ -173,6 +188,11 @@ async fn drain_responses<S: RpcService>(
                 continue;
             }
         };
+        log::debug!(
+            "[tauri-rpc] {peer} -> response {request_id} ({} bytes, end_of_stream={})",
+            frame.len(),
+            end_of_stream,
+        );
         if sink.send(frame).is_err() {
             release_departed_peer(&engine, &connection, &peer).await;
             return;

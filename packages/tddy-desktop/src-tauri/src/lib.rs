@@ -71,8 +71,16 @@ pub fn run() -> anyhow::Result<()> {
 
     let dashboard = dashboard_url()?;
     let config_path = source.config_path;
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+
+    // Only in a `--features wdio` build, which is the e2e suite's. The plugin serves WebDriver
+    // from inside this process — a listening socket that can drive the UI and invoke commands —
+    // so it must never reach a shipped bundle. Compiled out entirely rather than disabled at
+    // runtime: there is no configuration of a release build that can turn it on.
+    #[cfg(feature = "wdio")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             ipc::tddy_rpc_connect,
             ipc::tddy_rpc_send
