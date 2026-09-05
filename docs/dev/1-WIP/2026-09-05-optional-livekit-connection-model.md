@@ -90,7 +90,7 @@ PR under `/green` — **this PR does not merge on the contract alone.**
 - [x] Run acceptance tests (verify they fail) — 6/6 failing at `useHostConnection`/`useHostClient`
 - [x] USER REVIEW — acceptance tests — approved 2026-09-05
 - [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/registry.test.ts`
-- [ ] Implement production code making tests pass (`/green`)
+- [x] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap` — fold the model into `docs/ft/web/daemon-selector-livekit-rpc.md`
 
@@ -128,6 +128,54 @@ whether it needs a separate report.
 Every failure is on this node's own `TODO(connection-model)` body — `ConnectionProviderRegistry`'s
 methods, `useHostConnection`, `useHostClient`. None is on a parent's surface: this node is a root and
 has no parent.
+
+### Green status (2026-09-05)
+
+| Suite | Result |
+|---|---|
+| `bun run --filter tddy-web test:unit` | **977 pass, 0 fail** across 115 files |
+| `cypress:component --spec cypress/component/HostConnectionAcceptance.cy.tsx` | **6 pass, 0 fail** |
+| `cypress:component` (full) | **208 specs, 1220 tests, 1219 pass, 1 fail** — the pre-existing failure below |
+
+Both red suites are green and no test file was modified. The unit count is the recorded 971 baseline
+plus this node's 6.
+
+The one full-suite failure is `GrpcSessionTerminalResume.cy.tsx` →
+`opens TAIL on first connect, then FROM_OFFSET with the tracked offset after a blip`
+(`expected 0 to equal 1`). It reproduces identically on the clean tree with this node's code stashed,
+and passes in isolation — a suite-order dependency that predates the stack, not this node's.
+
+The `SelectedHostUrlStateAcceptance` failure recorded above did **not** reproduce in either the
+baseline or the post-change run on this machine; it appears to be flaky rather than deterministic.
+
+`tsc --noEmit` reports 1235 errors before and after, with an empty diff between the two sorted
+lists — this node contributes none. It is not a gate in this repo.
+
+### Deviations from the plan, for review
+
+- **`SessionsDrawerScreen` still reads `room` at line 93.** Only its daemon-level `clientForHost` was
+  in scope. The remaining reads are `useRoomParticipants` (presence, expected to remain),
+  `buildSessionClient`'s session-scoped fallback (node 3) and the `room` prop to `SessionMainPane`
+  (nodes 4/5). The State B post-condition is therefore reached for daemon-level RPC only, as scoped.
+- **The LiveKit provider registers from `SelectedDaemonProvider`, not the app root alone.** That is
+  the component that owns the `Room`, and 135 test files mount it with no `ConnectionProviders`
+  ancestor. `LiveKitConnections` reads the registry in scope and re-provides it, so an app-root
+  registry still wins on precedence.
+- **Registration happens during render**, with notification deferred to a microtask. A `useEffect`
+  version regressed first-paint fleet reads (`ModelsCatalogStateAcceptance`,
+  `ModelsFanOutLifecycleAcceptance`).
+- **Added beyond the published contract:** `ConnectionProviderRegistry.subscribe`/`revision` (a
+  `useSyncExternalStore` seam, so a wire coming up later reaches a subtree that would not otherwise
+  re-render) and `useHostConnector()`, a call-time resolver for callers that name hosts inside an
+  effect or callback.
+- **`useAcpSessionOverClient`'s `peer` changed shape** from `{room, identity}` to
+  `{name, isServing()}` — a predicate, so each caller reports liveness in its own wire's terms. Both
+  callers updated; behaviour identical.
+- **`useModelRegistryFanOut`'s `connected` flag** is now `hasDirectory && daemonIds.every(reachable)`,
+  where `hasDirectory` comes from the context's `roomStatus` rather than `room`. With zero known
+  hosts `every()` is vacuously true, which would have turned "not connected" into "no daemons". Two
+  transient edge states differ in wording only — flag if either must be preserved exactly.
+- **Nothing unregisters on unmount** — there is no `unregister` in the contract.
 
 ### Commands
 

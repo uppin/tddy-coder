@@ -5,8 +5,8 @@ import {
   ModelSessionTargetSchema,
 } from "../../gen/tddy/acp/v1/acp_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { daemonRpcIdentity } from "../../lib/participantRole";
-import { useDaemonClientFor, useSelectedDaemon } from "../../rpc/selectedDaemon";
+import { useHostConnection } from "../../rpc/connections/registry";
+import { useDaemonClientFor } from "../../rpc/selectedDaemon";
 import { toolStatusClass } from "../chat/chatEntryPresentation";
 import { useAcpSessionOverClient } from "../chat/useAcpSession";
 import { ModelsDialogShell } from "./ModelsDialogShell";
@@ -23,9 +23,9 @@ import type { RegistryChatTarget } from "../../utils/registryChatTarget";
  * row this session speaks as, the workspace an assistant's tools may run in, and the token that
  * authorizes reading the provider's credential (`NewSessionRequest.model_target` + `cwd`).
  *
- * The session is named to `useAcpSession` as the participant that serves it, so a prompt sent after
- * that daemon has left the common room is refused. Without the peer, a send onto a stream nobody
- * reads reports success and echoes the operator's own words back at them.
+ * The session is named to `useAcpSession` as the host that serves it, so a prompt sent after that
+ * daemon has stopped being reachable is refused. Without the peer, a send onto a stream nobody reads
+ * reports success and echoes the operator's own words back at them.
  */
 export function ModelChatDialog({
   chat: target,
@@ -35,7 +35,7 @@ export function ModelChatDialog({
   onClose: () => void;
 }) {
   const client = useDaemonClientFor(AcpService, target.daemonInstanceId);
-  const { room } = useSelectedDaemon();
+  const connection = useHostConnection(target.daemonInstanceId);
   const { sessionToken } = useAuthContext();
   const registry = useMemo(
     () => ({
@@ -49,9 +49,15 @@ export function ModelChatDialog({
     }),
     [sessionToken, target.providerId, target.modelId, target.assistantId, target.cwd],
   );
+  // The owning daemon's own connection is this chat's liveness signal: it is read at the moment of
+  // a send, so a host that dropped out between opening the chat and typing into it refuses the
+  // prompt rather than enqueueing it onto a stream nobody is reading.
   const peer = useMemo(
-    () => ({ room, identity: daemonRpcIdentity(target.daemonInstanceId) }),
-    [room, target.daemonInstanceId],
+    () => ({
+      name: target.daemonInstanceId,
+      isServing: () => connection?.status === "connected",
+    }),
+    [connection, target.daemonInstanceId],
   );
   const chat = useAcpSessionOverClient(client, undefined, peer, registry);
   const [draft, setDraft] = useState("");

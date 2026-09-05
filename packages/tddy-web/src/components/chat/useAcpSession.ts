@@ -63,7 +63,13 @@ export function useAcpSession(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveKitFactory, canBuildClient, room, serverIdentity]);
 
-  return useAcpSessionOverClient(client, resumeSessionId, { room, identity: serverIdentity });
+  return useAcpSessionOverClient(client, resumeSessionId, {
+    name: serverIdentity,
+    // Presence is this caller's liveness signal: the presenter serves the stream from the room, so
+    // a participant that has left is not going to read what is enqueued for it. With no room there
+    // is nothing to check — the client was built by an overridden factory that ignores it.
+    isServing: () => !room || room.remoteParticipants.has(serverIdentity),
+  });
 }
 
 /**
@@ -90,10 +96,11 @@ export interface RegistryChatSession {
  * session presenter needs. A caller that addresses an agent through an existing daemon-level client
  * (`useDaemonClientFor(AcpService, …)` — the models chat) hands it in directly instead.
  *
- * `peer`, when given, names the participant expected to serve the stream: a send is refused with a
- * message rather than queued into a stream nobody is reading when that participant has left the
- * room. Omit it when presence is not the caller's liveness signal — a daemon that answers RPC over
- * the common room is, by definition, in it.
+ * `peer`, when given, names the party expected to serve the stream and answers whether it still is:
+ * a send is refused with a message rather than queued into a stream nobody is reading. It is a
+ * predicate rather than a room and an identity because each caller knows how its own wire reports
+ * liveness — a session presenter watches the room's participants, a daemon-hosted chat reads the
+ * status of its `HostConnection`. Omit it when the caller has no liveness signal to offer.
  *
  * `registry`, when given, rides the `new_session` handshake. A session-hosted ACP stream needs none
  * — the agent *is* that session's workflow. The daemon-hosted surface serves every model and
@@ -103,7 +110,7 @@ export interface RegistryChatSession {
 export function useAcpSessionOverClient(
   client: Client<typeof AcpService> | null,
   resumeSessionId?: string,
-  peer?: { room: Room | null; identity: string },
+  peer?: { name: string; isServing: () => boolean },
   registry?: RegistryChatSession,
 ): UseAgentChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -279,7 +286,7 @@ export function useAcpSessionOverClient(
           }),
     );
 
-    dbg("opening AcpService.Session (peer identity=%o)", peer?.identity ?? "");
+    dbg("opening AcpService.Session (peer=%o)", peer?.name ?? "");
     (async () => {
       try {
         for await (const m of client.session(queue)) {
@@ -415,7 +422,7 @@ export function useAcpSessionOverClient(
       setSendError("Message not sent — no connection to the presenter yet.");
       return false;
     }
-    if (peer?.room && !peer.room.remoteParticipants.has(peer.identity)) {
+    if (peer && !peer.isServing()) {
       setSendError("Message not sent — the presenter is not connected.");
       return false;
     }
