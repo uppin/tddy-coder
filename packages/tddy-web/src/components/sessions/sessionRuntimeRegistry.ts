@@ -167,6 +167,23 @@ export class SessionRuntimeRegistry {
     this.notify();
   }
 
+  /**
+   * Release **every** runtime's connection and drop them all — what the owning screen owes on
+   * unmount.
+   *
+   * The registry is held in the screen's own ref, so a route change takes the whole store with it.
+   * Without this, each session it was holding would keep a joined LiveKit room and a
+   * self-rescheduling token-refresh timer alive for the life of the page: nothing else has a
+   * reference left to close them with. `useCommonRoom` used to disconnect its room in an effect
+   * cleanup for exactly this reason; owning the connection moved that obligation here.
+   */
+  closeAll(): void {
+    for (const state of this.runtimeBySessionId.values()) state.connection?.close();
+    this.runtimeBySessionId.clear();
+    this.focusedId = null;
+    this.notify();
+  }
+
   /** The focused session id, or `null` when no runtime is focused. */
   get focusedSessionId(): string | null {
     return this.focusedId;

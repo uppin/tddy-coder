@@ -15,7 +15,7 @@
  * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-session-connection-prd.md`.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService } from "../../gen/connection_pb";
 import { attachmentHintFromReply } from "../../rpc/connections/sessionAttachment";
@@ -67,6 +67,18 @@ export interface UseSessionAttachmentResult {
 export function useSessionAttachment(): UseSessionAttachmentResult {
   const [attachment, setAttachment] = useState<SessionAttachment>(NOT_ATTACHED);
 
+  // Whether this hook's owner is still mounted. An attach is an in-flight RPC, and the connection
+  // it produces is opened *after* the reply lands — which can be after the screen that asked for it
+  // has gone. Nothing downstream ever sees such a connection, so nothing downstream can close one:
+  // it is opened here and it has to be released here.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   /**
    * Attach `sessionId` on `host` with whichever reply the caller's RPC produced.
    *
@@ -88,10 +100,15 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
       try {
         const reply = await call(host.clientFor(ConnectionService));
         const hint = attachmentHintFromReply(sessionId, reply);
-        setAttachment({
-          state: { status: "connected", connection: host.openSession(sessionId, hint) },
-          hint,
-        });
+        const connection = host.openSession(sessionId, hint);
+        if (!mounted.current) {
+          // The reply outlived its screen. The connection is already open — a LiveKit one has
+          // started joining a room — and the registry that would otherwise own it will never be
+          // told about this one.
+          connection.close();
+          return;
+        }
+        setAttachment({ state: { status: "connected", connection }, hint });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setAttachment({ state: { status: "error", error: message }, hint: null });

@@ -15,9 +15,9 @@ import React, { useMemo } from "react";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { create, toBinary } from "@bufbuild/protobuf";
-import { Room } from "livekit-client";
+import { ConnectionState, Room } from "livekit-client";
 import { ConnectSessionResponseSchema } from "../../src/gen/connection_pb";
-import { TokenService } from "../../src/gen/token_pb";
+import { TokenService, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { useSessionAttachment } from "../../src/components/sessions/useSessionAttachment";
 import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
 import type { HostConnection } from "../../src/rpc/connections/types";
@@ -45,6 +45,15 @@ const ROOM_BACKED_CONNECT_OK = toArrayBuffer(
   ),
 );
 
+/** The browser token the room-backed join is issued. Nothing asserts on it; it exists so the join
+ *  has a determinate outcome rather than a swallowed failure. */
+const GENERATE_TOKEN_OK = toArrayBuffer(
+  toBinary(
+    GenerateTokenResponseSchema,
+    create(GenerateTokenResponseSchema, { token: "lk-browser-token", ttlSeconds: BigInt(600) }),
+  ),
+);
+
 /** What it replies for a session it serves itself — `cli_session_manager.rs`'s PTY handle. */
 const HOST_SERVED_CONNECT_OK = toArrayBuffer(
   toBinary(
@@ -67,10 +76,31 @@ const CAPABILITIES_EL = "attach-routing-capabilities";
 const ROOM_EL = "attach-routing-room";
 
 /**
+ * A session room that records its join instead of reaching a media server.
+ *
+ * The room-backed reply starts a real join, and a real `Room` here would reach for
+ * `wss://livekit.example.internal`, fail somewhere in the SDK's own retry schedule, and leave the
+ * spec's outcome depending on how long that took. What these specs assert is the routing the reply
+ * produced, so the join is made to settle instead of being left to fail on its own time.
+ */
+function aRoomThatJoinsAtOnce(): Room {
+  const room = {
+    state: ConnectionState.Disconnected,
+    remoteParticipants: new Map<string, { identity: string }>(),
+    connect: async () => {
+      room.state = ConnectionState.Connected;
+    },
+    disconnect: async () => {
+      room.state = ConnectionState.Disconnected;
+    },
+  };
+  return room as unknown as Room;
+}
+
+/**
  * The host connection the attach runs against — the real LiveKit provider, bound to this page's own
  * HTTP transport so `ConnectSession` reaches the intercept, and given the resources a room-backed
- * session's join needs (no media server answers them here; what these specs assert is the routing
- * the reply produced, not the join it started).
+ * session's join needs.
  */
 function aHostConnection(): HostConnection {
   const transport = createConnectTransport({
@@ -79,11 +109,21 @@ function aHostConnection(): HostConnection {
   });
   const provider = new LiveKitConnectionProvider(new Room(), () => transport, {
     tokens: createClient(TokenService, transport),
-    newRoom: () => new Room(),
+    newRoom: aRoomThatJoinsAtOnce,
   });
   const host = provider.connectHost(A_HOST);
   if (!host) throw new Error("the LiveKit provider must claim a host once it has a room");
   return host;
+}
+
+function interceptGenerateToken() {
+  cy.intercept("POST", "**/rpc/token.TokenService/GenerateToken", (req) => {
+    req.reply({
+      statusCode: 200,
+      headers: { "Content-Type": "application/proto" },
+      body: GENERATE_TOKEN_OK,
+    });
+  }).as("generateToken");
 }
 
 function AttachmentHarness() {
@@ -122,6 +162,7 @@ describe("useSessionAttachment — one connected state, whatever the reply route
   it("opens a media-capable connection when the reply names a room", () => {
     // Given
     interceptConnectSession(ROOM_BACKED_CONNECT_OK);
+    interceptGenerateToken();
     cy.mount(<AttachmentHarness />);
 
     // When

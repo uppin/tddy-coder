@@ -244,6 +244,13 @@ export function SessionsDrawerScreen({
     () => runtimeRegistry.runtimes,
   );
 
+  // This screen is route-level, so any navigation away unmounts it and takes the registry ref with
+  // it — and with the registry goes the last reference to every session connection it was holding.
+  // Releasing them here is the only thing standing between "the operator opened the projects page"
+  // and a joined LiveKit room plus a self-rescheduling token timer per session, alive until the tab
+  // is closed.
+  useEffect(() => () => runtimeRegistry.closeAll(), [runtimeRegistry]);
+
   // Session-scoped ConnectionService client — the one that reaches the session's own process rather
   // than the daemon that hosts it. Built LAZILY, only when the user actually invokes a session-scoped
   // RPC (ExecuteTool, ClaimTerminalControl), so that lifecycle RPCs (Delete/Signal/Resume/Connect)
@@ -322,6 +329,14 @@ export function SessionsDrawerScreen({
   // stream: neither the claim nor the attachment it says anything about belongs to it.
   const onSessionDisconnect = useCallback(
     (sessionId: string) => {
+      // Evicting a runtime *releases* its connection, and the attachment names the very same
+      // object. So whether the attachment survives is not only a question about the claim: a
+      // released connection's `clientFor` and `transport` throw, and an attachment still reporting
+      // `{status:"connected", connection}` for one would have every consumer — the inspector's
+      // session client, the traffic strip's room, node 4's media gates — reading "connected" off a
+      // connection that can no longer answer anything.
+      const releasedTheAttachedConnection =
+        sessionId === connectedSessionId && runtimeRegistry.get(sessionId)?.connection != null;
       runtimeRegistry.disconnect(sessionId);
       const session = sortedSessions.find((s) => s.sessionId === sessionId);
       if (!session) {
@@ -331,7 +346,9 @@ export function SessionsDrawerScreen({
         return;
       }
       attachClaimRef.current = claimAfterFeedEnd({ claim: attachClaimRef.current, session });
-      if (shouldResetAttachmentOnFeedEnd({ session, connectedSessionId })) resetAttachment();
+      if (releasedTheAttachedConnection || shouldResetAttachmentOnFeedEnd({ session, connectedSessionId })) {
+        resetAttachment();
+      }
     },
     [runtimeRegistry, sortedSessions, connectedSessionId, resetAttachment],
   );

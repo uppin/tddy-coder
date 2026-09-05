@@ -164,8 +164,10 @@ describe("SessionMainPane — LiveKit-routed sessions render a real terminal", (
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
       expect(req.room).to.equal(LIVEKIT_HINT.room);
       // The browser's own participant identity is minted per join, so only its shape can be pinned:
-      // it must name this session, and it must not collide with the session process's own identity.
-      expect(req.identity).to.match(new RegExp(`^browser-${FAKE_SESSION.sessionId}-\\d+$`));
+      // it must name this session, must not collide with the session process's own identity, and
+      // carries a random tail so two joins landing in the same millisecond are still two
+      // participants — see `SessionTerminalIdentity.cy.tsx` for that half.
+      expect(req.identity).to.match(new RegExp(`^browser-${FAKE_SESSION.sessionId}-\\d+-[a-z0-9]+$`));
     });
   });
 

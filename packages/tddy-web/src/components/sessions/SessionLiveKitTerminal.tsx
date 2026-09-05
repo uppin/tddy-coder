@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { TokenService } from "../../gen/token_pb";
@@ -93,6 +93,19 @@ export function SessionLiveKitTerminal({
 }
 
 /**
+ * A participant identity for this terminal's own join of `sessionId`'s room.
+ *
+ * The random suffix is not decoration: without it two joins that overlap — a remount before the
+ * previous participant has been reaped, two tabs on one session — mint the *same* identity within
+ * the same millisecond, and a LiveKit room that sees an identity twice drops one of the two. The
+ * same reasoning, and the same shape, as `anObserverIdentity` in
+ * `rpc/connections/livekit/sessionConnection.ts`.
+ */
+function aBrowserIdentityFor(sessionId: string): string {
+  return `browser-${sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
  * This browser tab's own participant identity for `roomName`.
  *
  * Stable while the terminal keeps watching the same room — the token is minted for it, and a
@@ -100,17 +113,22 @@ export function SessionLiveKitTerminal({
  * changes, because two rooms are two participants and a room that saw the same identity twice would
  * drop one of them.
  *
+ * Held as state adjusted on a changed room, rather than written into refs while rendering: a render
+ * that mutates a ref has already happened by the time React decides whether to keep it, so a
+ * discarded or replayed render leaves the identity and the room it was minted for disagreeing —
+ * and the mismatch surfaces as a token issued for the wrong room.
+ *
  * Minted here rather than handed down with the attachment: it belongs to *this* terminal's own join,
  * which is a separate connection from the one the session's RPC travels over. Node 5 of the
  * `optional-livekit` stack folds this join into that connection, at which point the identity goes
  * with it.
  */
 function useBrowserIdentityFor(roomName: string, sessionId: string): string {
-  const roomRef = useRef<string | null>(null);
-  const identityRef = useRef<string>("");
-  if (roomRef.current !== roomName) {
-    roomRef.current = roomName;
-    identityRef.current = `browser-${sessionId}-${Date.now()}`;
+  const [identity, setIdentity] = useState(() => aBrowserIdentityFor(sessionId));
+  const [mintedFor, setMintedFor] = useState(roomName);
+  if (mintedFor !== roomName) {
+    setMintedFor(roomName);
+    setIdentity(aBrowserIdentityFor(sessionId));
   }
-  return identityRef.current;
+  return identity;
 }

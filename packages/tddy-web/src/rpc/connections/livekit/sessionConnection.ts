@@ -27,12 +27,56 @@ import type { SessionAttachmentHint, SessionConnection } from "../session";
 import type { ConnectionCapability, ConnectionStatus } from "../types";
 
 /**
- * How long before a token expires its replacement is fetched.
+ * When a token's replacement is fetched, and what happens when that fetch is refused.
  *
- * The same minute `useCommonRoom` leaves itself, for the same reason: a refresh that lands after
- * expiry is a reconnect, not a refresh.
+ * Every number here is a schedule rather than a policy decision a caller makes, so production never
+ * states one. It is an interface only because a test asserting *when* a refresh is due cannot wait a
+ * real hour to see it, and one asserting a retry cannot wait a real ten seconds.
  */
-const TOKEN_REFRESH_LEAD_MS = 60 * 1000;
+export interface TokenRefreshPolicy {
+  /**
+   * How long before a token expires its replacement is fetched.
+   *
+   * The same minute `useCommonRoom` leaves itself, for the same reason: a refresh that lands after
+   * expiry is a reconnect, not a refresh.
+   */
+  readonly leadMs: number;
+
+  /**
+   * The soonest a refresh is ever scheduled for.
+   *
+   * A daemon issuing short-lived tokens would otherwise put `ttl - lead` at or below zero, and since
+   * every renewal carries the same TTL the success path would re-arm at zero for ever — an unbounded
+   * loop at `setTimeout`'s 4ms clamp, aimed at the daemon's own `TokenService`. Renewing a 30-second
+   * token every 5 seconds is wasteful; renewing it 250 times a second is an outage.
+   */
+  readonly minDelayMs: number;
+
+  /** How soon a *refused* refresh is tried again. Shorter than a lead, because the token that was
+   *  not replaced is already inside its last minute. */
+  readonly retryDelayMs: number;
+
+  /** How many consecutive refusals are retried before the connection stops asking. */
+  readonly maxRetries: number;
+}
+
+export const DEFAULT_TOKEN_REFRESH_POLICY: TokenRefreshPolicy = {
+  leadMs: 60 * 1000,
+  minDelayMs: 5 * 1000,
+  retryDelayMs: 10 * 1000,
+  maxRetries: 5,
+};
+
+/**
+ * How long from now `ttlSeconds`'s replacement is due, under `policy`.
+ *
+ * Exported because it is the whole of the schedule and the one part of it a test can pin without
+ * waiting: the floor is not a rounding detail but the thing standing between a short TTL and a spin
+ * loop.
+ */
+export function tokenRefreshDelayMs(ttlSeconds: bigint, policy: TokenRefreshPolicy): number {
+  return Math.max(policy.minDelayMs, Number(ttlSeconds) * 1000 - policy.leadMs);
+}
 
 /**
  * What opening a LiveKit session connection needs from the app around it.
@@ -56,6 +100,9 @@ export interface LiveKitSessionSupport {
    * the only way to drive a join — or a failed one — without a live media server.
    */
   readonly newRoom: () => Room;
+
+  /** Overrides for {@link DEFAULT_TOKEN_REFRESH_POLICY}. Production passes none. */
+  readonly refreshPolicy?: Partial<TokenRefreshPolicy>;
 }
 
 /** A hint that actually names a room. `openLiveKitSession` refuses anything else. */
@@ -102,10 +149,15 @@ class LiveKitSessionConnection implements SessionConnection {
   private readonly targetIdentity: string;
 
   private readonly room: Room;
+  private readonly policy: TokenRefreshPolicy;
   private readonly clients = new Map<DescService, Client<DescService>>();
   private builtTransport: Transport | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private refusedRefreshes = 0;
   private closed = false;
+  /** True from construction until `join()` settles — see {@link close}. */
+  private joining = true;
+  private roomReleased = false;
   private failure: string | null = null;
 
   constructor(
@@ -115,6 +167,7 @@ class LiveKitSessionConnection implements SessionConnection {
   ) {
     this.capabilities = capabilitiesForHint(hint);
     this.targetIdentity = hint.serverIdentity ?? sessionRpcIdentity(hostId, hint.sessionId);
+    this.policy = { ...DEFAULT_TOKEN_REFRESH_POLICY, ...support.refreshPolicy };
     this.room = support.newRoom();
     void this.join(anObserverIdentity());
   }
@@ -123,26 +176,38 @@ class LiveKitSessionConnection implements SessionConnection {
     return this.hint.sessionId;
   }
 
-  /** The room this connection joined — see {@link liveKitRoomOf}. */
-  get joinedRoom(): Room {
-    return this.room;
+  /**
+   * The room this connection joined, or `null` once it has been released — see
+   * {@link liveKitRoomOf}.
+   *
+   * `null` after `close()` for the same reason `clientFor` throws there: a released room is a room
+   * whose peer connection is going away, and a caller measuring it (`StatusBar`'s round-trip
+   * readout) would be reading a wire that no longer exists.
+   */
+  get joinedRoom(): Room | null {
+    return this.closed ? null : this.room;
   }
 
   /**
-   * Read at the moment it is asked, never captured — a session process leaves its room without
-   * anything re-resolving this connection.
+   * Read at the moment it is asked, never captured — a room's state changes without anything
+   * re-resolving this connection.
    *
-   * `connecting` covers both "the room is not up yet" and "the room is up and the session process is
-   * not on it", exactly as `LiveKitHostConnection` treats an absent daemon: from a caller's side
-   * both say the call has nowhere to land right now and may have somewhere in a moment. A join that
-   * genuinely failed is the one thing that is an `error`, and unlike the host connection this one
-   * can reach it — minting a token or connecting a room are operations with a verdict.
+   * This is **reachability**, and deliberately not "the session process is on the roster". The
+   * handshake overlay is driven off it, and the overlay is `pointer-events-auto` over the whole
+   * pane: a status that waited for `remoteParticipants.has(targetIdentity)` could leave an
+   * interactive terminal permanently covered by an un-dismissable sheet whenever the session
+   * process published under an identity this connection did not predict, or left and rejoined the
+   * room. An absent peer makes a *call* fail, with an error the caller can see and retry; a stuck
+   * overlay has no recovery at all, so the two are not traded off against each other. The target
+   * identity still routes every call — see {@link transport}.
+   *
+   * A join that genuinely failed is the one thing that is an `error`, and unlike a host connection
+   * this one can reach it — minting a token or connecting a room are operations with a verdict.
    */
   get status(): ConnectionStatus {
     if (this.closed) return "idle";
     if (this.failure !== null) return "error";
-    if (this.room.state !== ConnectionState.Connected) return "connecting";
-    return this.room.remoteParticipants.has(this.targetIdentity) ? "connected" : "connecting";
+    return this.room.state === ConnectionState.Connected ? "connected" : "connecting";
   }
 
   get error(): string | null {
@@ -176,6 +241,22 @@ class LiveKitSessionConnection implements SessionConnection {
     if (this.closed) return;
     this.closed = true;
     this.clearRefresh();
+    // While the join is still in flight the *join* releases the room, not this. Disconnecting here
+    // would hit a room that has not connected yet — a no-op — and the connect landing a moment
+    // later would then leave a joined room nobody ever disconnects. Where the join has settled,
+    // releasing here is the only chance there is.
+    if (!this.joining) this.releaseRoom();
+  }
+
+  /**
+   * Disconnect the room, at most once for the life of this connection.
+   *
+   * Both `close()` and the join's own unwinding can arrive here, and LiveKit's `disconnect()` is not
+   * free to call twice: a second one races the reconnect logic of a room that is on its way down.
+   */
+  private releaseRoom(): void {
+    if (this.roomReleased) return;
+    this.roomReleased = true;
     this.room.disconnect();
   }
 
@@ -186,13 +267,13 @@ class LiveKitSessionConnection implements SessionConnection {
   }
 
   private async join(identity: string): Promise<void> {
-    const url = this.hint.url;
-    if (!url) {
-      // A room with nowhere to reach it is not a connection that might yet come up.
-      this.failure = `session ${this.sessionId} named room ${this.hint.room} but no LiveKit url`;
-      return;
-    }
     try {
+      const url = this.hint.url;
+      if (!url) {
+        // A room with nowhere to reach it is not a connection that might yet come up.
+        this.failure = `session ${this.sessionId} named room ${this.hint.room} but no LiveKit url`;
+        return;
+      }
       // No `sessionToken` is passed: `token.TokenService` carries the field, so
       // `createAuthGateInterceptor` fills it with a request-time-fresh access token on the way out
       // (`src/rpc/authGateInterceptor.ts`). Reading one here would send a staler credential.
@@ -200,33 +281,57 @@ class LiveKitSessionConnection implements SessionConnection {
       if (this.closed) return;
       this.scheduleRefresh(minted.ttlSeconds, identity);
       await this.room.connect(url, minted.token);
-      if (this.closed) this.room.disconnect();
     } catch (e) {
       this.failure = e instanceof Error ? e.message : String(e);
       this.clearRefresh();
-      this.room.disconnect();
+      this.releaseRoom();
+    } finally {
+      // A `close()` that arrived while any of the above was in flight left the room to this: it is
+      // only here that there is certainly nothing further to connect.
+      this.joining = false;
+      if (this.closed) this.releaseRoom();
     }
   }
 
   /**
    * Re-mint the token a minute before it lapses, and again a minute before its replacement does.
    *
-   * A failed refresh does not tear the room down: LiveKit may well carry on with the session it
+   * A refused refresh does not tear the room down: LiveKit may well carry on with the session it
    * already has, and dropping a working terminal over a token the room has not asked for yet would
-   * be the worse of the two outcomes.
+   * be the worse of the two outcomes. It does re-arm, though — a connection that stopped asking
+   * after one transient refusal would go on working until the token lapsed and then drop the room
+   * with nothing anywhere saying why.
    */
   private scheduleRefresh(ttlSeconds: bigint, identity: string): void {
+    this.armRefresh(tokenRefreshDelayMs(ttlSeconds, this.policy), identity);
+  }
+
+  private armRefresh(delayMs: number, identity: string): void {
     this.clearRefresh();
-    const delayMs = Math.max(0, Number(ttlSeconds) * 1000 - TOKEN_REFRESH_LEAD_MS);
     this.refreshTimer = setTimeout(() => {
       void this.support.tokens
         .refreshToken({ room: this.hint.room, identity })
         .then((next) => {
           if (this.closed) return;
+          this.refusedRefreshes = 0;
           this.scheduleRefresh(next.ttlSeconds, identity);
         })
-        // Deliberately swallowed — see the note above: the room outlives a refused refresh.
-        .catch(() => {});
+        .catch((e) => {
+          if (this.closed) return;
+          this.refusedRefreshes += 1;
+          if (this.refusedRefreshes <= this.policy.maxRetries) {
+            this.armRefresh(this.policy.retryDelayMs, identity);
+            return;
+          }
+          // Out of retries. The room is left alone deliberately, but silence here is what would
+          // turn "the token stopped being renewed" into "the terminal died for no reason".
+          console.warn(
+            `[sessionConnection] session ${this.sessionId} on host ${this.hostId} gave up ` +
+              `renewing its LiveKit token after ${this.refusedRefreshes} refusals; the room will ` +
+              `drop when the current token expires`,
+            e,
+          );
+        });
     }, delayMs);
   }
 
@@ -264,6 +369,10 @@ export function openLiveKitSession(
  * Before this, the traffic strip joined the session's room a *second* time purely to measure it
  * (`useSessionLiveKitRoom`). Reading the connection's own room is the same measurement over one
  * fewer participant.
+ *
+ * A **closed** connection answers `null` too. `StatusBar` reads this straight off the attachment,
+ * and an attachment can outlive the connection it names by a render — handing it a room that is on
+ * its way down would have it measuring a wire nobody is on.
  */
 export function liveKitRoomOf(connection: SessionConnection | null): Room | null {
   return connection instanceof LiveKitSessionConnection ? connection.joinedRoom : null;

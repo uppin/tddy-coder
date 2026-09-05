@@ -27,7 +27,6 @@ import type { SessionMetadata } from "../../../lib/sessionParticipantMetadata";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 
-
 /**
  * The default for a caller that parses no participant metadata.
  *

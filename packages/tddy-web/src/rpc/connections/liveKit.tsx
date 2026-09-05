@@ -24,7 +24,11 @@ import {
   type LiveKitTransportOptions,
 } from "../transportProvider";
 import { openHostServedSession } from "./hostServedSession";
-import { openLiveKitSession, type RoomBackedHint } from "./livekit/sessionConnection";
+import {
+  openLiveKitSession,
+  type RoomBackedHint,
+  type TokenRefreshPolicy,
+} from "./livekit/sessionConnection";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
 import type {
@@ -73,6 +77,11 @@ export interface LiveKitSessionResources {
 
   /** Constructs the `Room` object to join — the injection seam `useCommonRoom` calls `roomFactory`. */
   readonly newRoom: () => Room;
+
+  /** Overrides for a session connection's token-renewal schedule (see
+   *  `DEFAULT_TOKEN_REFRESH_POLICY`). Production passes none; a spec that has to watch a renewal
+   *  happen cannot wait the real hour. */
+  readonly refreshPolicy?: Partial<TokenRefreshPolicy>;
 }
 
 /**
@@ -174,6 +183,7 @@ class LiveKitHostConnection implements HostConnection {
     return openLiveKitSession(this.hostId, roomBacked, {
       tokens: resources.tokens,
       newRoom: resources.newRoom,
+      refreshPolicy: resources.refreshPolicy,
       transportFor: (room, targetIdentity) => this.currentFactory()(room, targetIdentity),
     });
   }

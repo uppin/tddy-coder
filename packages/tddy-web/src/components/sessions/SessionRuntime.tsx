@@ -17,7 +17,8 @@ import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
-import type { HostConnection } from "../../rpc/connections/types";
+import type { ConnectionStatus, HostConnection } from "../../rpc/connections/types";
+import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import {
   exitDocumentFullscreen,
@@ -29,6 +30,29 @@ import { cn } from "../../lib/utils";
 
 type ConnectionClient = Client<typeof ConnectionService>;
 type TokenClient = Client<typeof TokenService>;
+
+/**
+ * What to show over a pane whose session has **two** handshakes in flight: the session connection's,
+ * and — for a room-backed session — the terminal's own join into the same room.
+ *
+ * The pane is interactive only once both are up, so the pessimistic one wins: a failure from either
+ * is a failure, and anything short of connected from either keeps the overlay up. Reporting the
+ * connection alone would lift the overlay over a terminal still handshaking; reporting the terminal
+ * alone is what the pre-connection code did, and left a host-served session with no overlay at all.
+ *
+ * `terminal` is `null` when nothing on the pane has a join of its own, which is the ordinary case.
+ *
+ * TODO(optional-livekit node 5): goes away with the second handshake. Node 5 folds the terminal's
+ * join into the session connection, leaving one status for the pane.
+ */
+function leastConnectedOf(
+  connection: ConnectionStatus,
+  terminal: LiveKitChromeStatus | null,
+): ConnectionStatus {
+  if (connection === "error" || terminal === "error") return "error";
+  if (connection !== "connected") return connection;
+  return terminal === null || terminal === "connected" ? "connected" : "connecting";
+}
 
 export interface SessionRuntimeProps {
   /** This runtime's attached-session state (connection params + status). */
@@ -121,6 +145,22 @@ export function SessionRuntime({
   // wire: the overlay used to be gated on `connected-livekit`, so a session its host served itself
   // — the configuration that works — showed no connection state at all.
   const connectionStatus = useConnectionStatus(connection);
+
+  // The *terminal's* own join, which for a room-backed session is a second, independent handshake
+  // into the same room (`SessionLiveKitTerminal` mints its own identity and connects its own
+  // `Room`). The overlay covers the pane that terminal renders into, so a pane whose terminal has
+  // not finished connecting must stay covered even once the connection this component holds says
+  // `connected` — otherwise the overlay lifts over a terminal that is still handshaking.
+  // `null` until a terminal that has a join of its own reports one; a session with no such terminal
+  // never sets it, and the connection alone answers for the pane.
+  // TODO(optional-livekit node 5): delete this and every `onConnectionStatusChange` below. Node 5
+  // folds the terminal's join into the session connection, at which point there is one handshake
+  // for the pane and `connectionStatus` is the whole answer.
+  const [terminalStatus, setTerminalStatus] = useState<LiveKitChromeStatus | null>(null);
+
+  // What the overlay shows: the *less* connected of the two handshakes, and an error from either.
+  // Never a wait on a participant roster — see `SessionConnection.status`.
+  const handshakeStatus = leastConnectedOf(connectionStatus.status, terminalStatus);
 
   // The session-scoped `ConnectionService` client, used by the explicit steal-claim so "Claim
   // terminal" routes to the session's own process rather than to the daemon. The connection
@@ -387,6 +427,7 @@ export function SessionRuntime({
               onRoom={handleRoom}
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
+              onConnectionStatusChange={setTerminalStatus}
               onBytes={handleBytes}
             />
           )}
@@ -513,7 +554,7 @@ export function SessionRuntime({
             interactive. Driven by the connection itself, so every wire gets a real status: it used
             to be gated on the LiveKit path, leaving a session its host serves directly — a working
             configuration — with no connection state shown at all. */}
-        {connection && <SessionConnectionOverlay status={connectionStatus.status} />}
+        {connection && <SessionConnectionOverlay status={handshakeStatus} />}
 
         {/* The tab strip — and with it the strip's own toggle — is outside the fullscreen element,
             so full screen needs its own way back. Rendered only by the stack that actually holds

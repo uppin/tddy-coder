@@ -4,7 +4,6 @@ import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import { usePresenterLiveKitRoom } from "./usePresenterLiveKitRoom";
 import { AgentChat } from "../chat/AgentChat";
 
-
 export interface WorkflowChatScreenProps {
   session: SessionEntry;
   /**
