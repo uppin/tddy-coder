@@ -1,12 +1,14 @@
 /**
  * Acceptance spec: one terminal, fed by the session connection, with scrollback on every wire.
  *
- * Two components render identical chrome today and differ in how bytes arrive and what each can do.
- * Node 3 removed the first difference's cause — a `SessionConnection` now owns the room, the identity
- * and the token, so `GhosttyTerminalLiveKit` connects something it no longer owns. What is left is
- * the second: **only the gRPC terminal can scroll back.** A LiveKit session cannot see past what is
- * live, because `GhosttyTerminalLiveKit` has no `HistoryFetcher`, no offset tracking, and no page
- * terminal.
+ * Two components used to render identical chrome and differ in how bytes arrived and what each
+ * could do. Node 3 removed the first difference's cause — a `SessionConnection` owns the room, the
+ * identity and the token, so the LiveKit terminal was connecting something it no longer owned. What
+ * was left is the second: **only the gRPC terminal could scroll back.** A LiveKit session could not
+ * see past what was live, because that component had no `HistoryFetcher`, no offset tracking, and
+ * no page terminal.
+ *
+ * Both are now one `GhosttyTerminalSession`, which is what these specs pin.
  *
  * These specs pin the converged component's contract: it takes a feed and nothing else, and history
  * follows the feed rather than the transport.
