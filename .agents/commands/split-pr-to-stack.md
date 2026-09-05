@@ -18,12 +18,14 @@ those definitions.
 (`B1` mergeable first, `B2` based on `B1`). `/split-branch` produces sibling branches, typically
 both off `master`, and registers nothing with any orchestrator.
 
-**Use the `pr-stack` workflow recipe**, not this command, when the work is not written yet and you
-are planning a stack from requirements. Start a `pr-stack` session (`tddy-coder --recipe pr-stack`,
-or the recipe dropdown on the web New-session screen); its `analyze-stack` → `write-stack-plan` →
-`write-stack-docs` pipeline plans the whole DAG and writes each node's documents. `plan-pr-stack` is
-a **legacy CLI alias of that recipe**, not a slash command — do not write it as one. This command
-carves up **existing** commits/files.
+**Plan the stack, not split it**, when the work is not written yet. Two paths, and this command is
+neither: the **`pr-stack` workflow recipe** (`tddy-coder --recipe pr-stack`, or the recipe dropdown
+on the web New-session screen), whose `analyze-stack` → `write-stack-plan` → `write-stack-docs`
+pipeline plans the whole DAG and writes each node's documents — that is the default; or
+**`/plan-pr-stack`**, the by-hand slash command, when the user wants the chain planned in the
+worktree they are in. Note that `--recipe plan-pr-stack` is a **legacy CLI alias of the recipe**, a
+different thing from the slash command — see the `pr-stack` skill § *Two ways to plan a stack*. This
+command carves up **existing** commits/files.
 
 `$ARGUMENTS` may name the PR/branch to split (`#123`, a URL, a branch) and/or describe the two
 slices. Default: current branch. **This command always produces exactly two new layers (B1, B2).**

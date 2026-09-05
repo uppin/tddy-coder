@@ -1,33 +1,29 @@
 ---
 name: pr-stack
 description: >-
-  Principles for planning, tracking, and landing a STACK of dependent PRs — each PR based on another
-  PR's branch, not master. Covers the two contexts a stacked branch can live in: a PLANNED stack,
-  whose DAG lives in a `pr-stack` orchestrator session's changeset and is driven with the
-  `mcp__tddy-tools__pr_*` tools, and an AD-HOC chain, detected from open PR bases with `gh pr list`
-  plus `git merge-base --is-ancestor`. Defines the stack as a DAG (a node's `parents` is a list, not
-  a single predecessor), the PR boundary contract (every node is independently reviewable and
-  independently mergeable — splitting by layer is forbidden, a stubs-only PR is not a valid node),
-  the per-PR documents on the orchestrator (`artifacts/prs/<node_id>/{PRD.md,changeset.md}`) with
-  their four structurally-validated headings `## Responsibility`, `## Boundaries`,
-  `## Dependencies` (do not implement a parent's surface here) and `## Draft PR contract`, the
-  shared stack-level `artifacts/pr-stack-plan.md`, base tracking and effective-base derivation,
-  forward-only doc linking, the golden rules for bottom-up landing (a deleted base branch CLOSES its
-  dependent PR — which is what `pr_repoint` exists to prevent), the worktree rules (plan in the
-  current worktree, one branch checked out at a time, restore the original branch when done, delete
-  a temporary worktree as soon as its branch is pushed), per-worktree rebase versus a stack-wide
-  cascade, the in-stack implementation loop (`/green` rebases onto its base and checks its
-  dependencies first, commits and pushes; `/validate-changes` and `/pr-wrap` rebase before any code
-  diff), milestone pushes, the not-on-its-base's-latest-tip trap, recurring shared-file conflicts,
-  approval dismissal, the `#automerge` / `#forcemerge` comment gate, CI reading with
-  `scripts/ci-status.sh`, and recovery. Load this whenever working a stack. The
-  `/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`, `/green`,
-  `/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`,
-  `/follow-up-branch` and `/pr` commands are the operational entrypoints; this skill is the shared
-  model they all follow. Triggers: stacked PRs, PR stack, pr-stack orchestrator, planned PR,
-  "PR based on another branch", add a PR to a stack, ad-hoc stacked PR, split a PR into a stack,
-  A→B→C split B, base branch deleted / PR auto-closed, retarget a PR base, repoint, follow-up branch
-  off an open PR.
+  Principles for planning, tracking, and landing a STACK of dependent PRs — each PR based on the
+  previous one's branch, not master. REQUIRES the `gh stack` extension (`github/gh-stack`): a stack
+  must be registered as a real GitHub stack object, not merely a chain of base branches, and a stack
+  is therefore LINEAR — `gh stack` has no representation for a branching one. Defines the stack
+  model, the PR boundary contract (every node is independently reviewable and independently
+  mergeable — splitting by layer is forbidden, a stubs-only PR is not a valid node), the per-PR
+  documents in `docs/dev/1-WIP/` with their four headings `## Responsibility`, `## Boundaries`,
+  `## Dependencies` (do not implement a predecessor's surface here) and `## Draft PR contract`, base
+  tracking, forward-only doc linking, the golden rules for bottom-up landing (a deleted base branch
+  CLOSES its dependent PR), the worktree rules (plan in the current worktree, one branch checked out
+  at a time, restore the original branch when done, delete a temporary worktree as soon as its
+  branch is pushed), per-worktree rebase versus a stack-wide cascade, the in-stack implementation
+  loop (`/green` rebases onto its base and checks its dependencies first, commits and pushes;
+  `/validate-changes` and `/pr-wrap` rebase before any code diff), milestone pushes, the
+  not-on-its-base's-latest-tip trap, recurring shared-file conflicts, approval dismissal, the
+  `#automerge` / `#forcemerge` comment gate, CI reading with `scripts/ci-status.sh`, and recovery.
+  Load this whenever working a stack. The `/plan-pr-stack`, `/add-to-pr-stack`,
+  `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`, `/green`, `/validate-changes`,
+  `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`, `/follow-up-branch` and `/pr` commands
+  are the operational entrypoints; this skill is the shared model they all follow. Triggers: stacked
+  PRs, PR stack, gh stack, register a stack, "PR based on another branch", add a PR to a stack,
+  split a PR into a stack, A→B→C split B, base branch deleted / PR auto-closed, retarget a PR base,
+  repoint, follow-up branch off an open PR.
 allowed-tools:
   - Bash(git *)
   - Bash(gh *)
@@ -42,187 +38,169 @@ allowed-tools:
 # pr-stack — the stacked-PR model
 
 Canonical mechanics for planning, tracking, and landing a **stack** of dependent PRs. The commands
-`/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`, `/green`,
-`/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`, `/follow-up-branch`
-and `/pr` are the operational entrypoints; they all follow the definitions below, so follow them
-exactly and keep the commands and this skill in agreement.
+`/plan-pr-stack`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`,
+`/green`, `/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`,
+`/follow-up-branch` and `/pr` are the operational entrypoints; they all follow the definitions
+below, so follow them exactly and keep the commands and this skill in agreement.
 
-Planning a stack is **not** a slash command in this repo. A stack is planned by the **`pr-stack`
-workflow recipe** — start a session on it (`tddy-coder --recipe pr-stack …`, or pick `pr-stack` in
-the web New-session screen) and its `analyze-stack` → `write-stack-plan` → `write-stack-docs` pass
-produces the plan and the per-PR documents. `plan-pr-stack` and `orchestrate-pr-stack` are **legacy
-CLI aliases of that same recipe**, not slash commands; never write them with a leading `/`. The
-authority is [`docs/ft/coder/pr-stacking.md`](../../../docs/ft/coder/pr-stacking.md).
+> **Not to be confused with the `pr-stack` workflow recipe.** `tddy-coder` ships a *product* feature
+> — a workflow recipe, also called `pr-stack` (legacy CLI aliases: `plan-pr-stack`,
+> `orchestrate-pr-stack`) — that plans and drives a stack from inside a coding session, with its own
+> orchestrator state and its own tooling. **That is a separate implementation and is documented
+> separately**, in [`docs/ft/coder/pr-stacking.md`](../../../docs/ft/coder/pr-stacking.md). It is a
+> thing tddy *does for its users*, shipped to whatever repository they run it on; this skill is how
+> *this* repository's contributors work by hand. Nothing here describes the recipe, nothing here is
+> required by it, and `packages/**` never reads anything under `.agents/`, `.claude/` or `.cursor/`.
 
-## Two stack contexts — say which one you are in
+## A stack is a GitHub object — register it
 
-A branch can be part of a stack in **two** ways. Almost every mistake in this file comes from
-running one context's move in the other, so establish which one applies before touching anything.
-
-| | **Planned stack** | **Ad-hoc chain** |
-|---|---|---|
-| Where the topology lives | `Changeset.stack` on a `pr-stack` **orchestrator session** — a DAG of `StackNode`s | nowhere; it is implied by each PR's `baseRefName` |
-| Who owns it | the orchestrator agent, in its `orchestrate` free-prompting loop | whoever opened the PRs |
-| How you read it | the `mcp__tddy-tools__pr_*` tools, or the Planned PRs panel on the PR-Stack chat screen | `gh pr list` + `git merge-base --is-ancestor` |
-| How a node's base is decided | derived on demand from `parents`, skipping merged ancestors (`Stack::effective_base_refs`) | whatever the PR's base ref happens to say |
-| Branch naming | **required**: `feature/<stack-slug>/<node>`, validated by `validate_stack_plan` | unconstrained — use the same shape anyway |
-| Per-PR docs | `artifacts/prs/<node_id>/{PRD.md,changeset.md}` on the orchestrator, attached to each child | none unless you write them |
-
-**A child session working one node is not the orchestrator.** It does **not** have the `pr_*` tools.
-It has its attached documents (`artifacts/attachments/PRD.md`, `changeset.md`, `pr-stack-plan.md`,
-`exploration.md`), plain `git`, and `gh`. When a child needs a stack-level act — a merge, a repoint,
-a new node — it reports upward and the operator drives the orchestrator; it does not improvise one.
-
-### Tooling for the orchestrator — the `pr_*` tools
-
-Available only during the `pr-stack` recipe's `orchestrate` goal, auto-allowed without a permission
-prompt, and each one operating on the orchestrator session's changeset plus live git + GitHub. Full
-table in [`pr-stacking.md` § PR-management tools](../../../docs/ft/coder/pr-stacking.md#pr-management-tools);
-the ones this skill leans on:
-
-| Tool | What it does |
-|---|---|
-| `pr_stack_status` | Every node with its live GitHub state and its computed **internal status** (`up-to-date`, `needs-repoint`, `has-conflicts`, `ready-to-merge`, `blocked`, `merged`); writes the derived statuses back. **This is the cheapest correctness check on a planned stack — read it before and after every stack operation.** |
-| `pr_merge` | Merge a node's PR **into its base**. Journalled (`StackOpJournal`) so a crash mid-merge resumes rather than re-merges. |
-| `pr_repoint` | Retarget a node onto its recomputed effective base after an ancestor merged: rebase `--onto`, `--force-with-lease` push, `PATCH` the open PR's base. |
-| `pr_resolve_conflicts` | Sync a node's branch with its base, detect unmerged paths, mark the node `has-conflicts`, and return the conflicted paths for the agent to resolve **in that node's worktree**. |
-| `pr_add_planned` | Append a planned node. Additive only — it never edits an existing node. |
-| `pr_update_planned` | Edit a node's `title` / `description` (any time) and its `branch_suggestion` (only while it owns no branch). `sync_pr` also publishes the new title/body to the node's PR. |
-| `pr_delete_planned` | Remove a node, reparenting its children onto that node's parents. **Refuses a node whose PR is open.** Branch, worktree and child session are left alone. |
-| `pr_set_parents` | Give a node a whole new parent list — the plan-level move, and the **only** reorder primitive, since stack order is derived from `parents`. |
-| `pr_adopt` | Create a node from an **existing** PR, bound to its head branch and PR reference. This is how an ad-hoc chain is brought into a planned stack. |
-| `pr_spawn_child` | Start a child coding session for a node — the same effect as the web row's "Start session" CTA. |
-| `pr_read` / `pr_search` / `pr_comments` | One PR in full; find PRs in this repo (including untracked ones); a PR's reviews and comment threads. |
-| `pr_set_status` | Agent override of a node's internal status (`source = "override"`), which derivation will then not overwrite. |
-
-Two contract limits worth remembering: a `pr_search` hit carries **no head or base branch** (GitHub's
-search API does not report them — follow up with `pr_read`), and `pr_comments` reports **no thread as
-resolved** (resolution is GraphQL-only).
-
-### Tooling for a branch worked by hand
-
-No extension, no plugin — plain `gh` and `git`. Detect the chain exactly the way
-[`.agents/commands/pr.md`](../../commands/pr.md) § 2 already does:
+**This repo has the `gh stack` extension installed** (`github/gh-stack`), and GitHub has a
+first-class stacked-PR object. Setting each PR's base to its predecessor is necessary but **not
+sufficient**: base refs alone give you the right per-PR diffs and nothing else — no grouping, no
+ordering, no stack view for reviewers.
 
 ```bash
-# 1. the trunk
-git symbolic-ref --short refs/remotes/origin/HEAD    # fallback: master, then main
-
-# 2. does this branch already have a PR? then its base is already decided
-gh pr list --state open --head "$(git branch --show-current)" --json number,baseRefName
-
-# 3. otherwise, find the stack ancestors among the open PRs
-gh pr list --state open --json number,headRefName,baseRefName
-#    for each headRefName that is not the current branch:
-git fetch origin <headRefName>
-git merge-base --is-ancestor "origin/<headRefName>" HEAD && echo "ancestor: <headRefName>"
-#    the stack parent is the CLOSEST ancestor — the smallest:
-git rev-list --count "origin/<headRefName>..HEAD"
+gh extension list | grep gh-stack     # confirm it is available
 ```
 
-**Any base that is not `master` / `main` means you are in a stack**, whether or not anyone planned
-one. Treat it as such: bottom-up landing, base-branch lifetime, repointing after a merge — all of it
-applies. If several candidate parents tie, or the detected base is not the trunk, **confirm with the
-user** before acting; basing a PR on the wrong branch misroutes the whole chain.
+So a stack is not finished until it is registered:
 
-An ad-hoc chain can be promoted later: `pr_adopt` on an orchestrator binds each existing PR to a
-node. Adoption is refused when the PR's head branch is already bound to a node, or when any node
-already records that pull number — a PR is tracked once or not at all.
+```bash
+# Register an existing set of PRs, bottom to top. Does NOT require local tracking state,
+# reuses the PRs that already exist, and never removes one.
+gh stack link --base master <pr> <pr> <pr> ...
+```
+
+`link` is the right entry point whenever the branches were produced by something other than
+`gh stack` itself — which is every stack this repo's commands build. Two flags matter:
+
+- **`--base master`** — it defaults to `main`, which is not this repo's trunk.
+- **never `--open`** on a stack of drafts: it marks every PR ready for review, and in this repo
+  readying a PR is what triggers its documents to be wrapped.
+
+| Command | What it does | When |
+|---|---|---|
+| `gh stack link` | register existing PRs as a stack on GitHub, no local state | **the default here** |
+| `gh stack view` | show the stack — reads *local* tracking, so it says "not part of a stack" after a `link` | diagnostics only |
+| `gh stack checkout <pr>` | adopt a GitHub stack into local tracking | when you want the navigation commands |
+| `gh stack submit` | push branches, create PRs, **and update the base of existing ones** | creating a stack from scratch |
+| `gh stack sync` / `rebase` | rewrite the whole stack | never on branches another worktree owns |
+| `gh stack up` / `down` / `top` / `bottom` / `switch` | navigate the stack | after `checkout` |
+
+**`submit`, `sync` and `rebase` rewrite things.** They need local tracking state, and `submit`
+retargets existing PRs' bases. On a stack whose branches are already correct, reach for `link`.
+
+### A registered stack is linear — keep the plan linear
+
+`gh stack link` takes one bottom-to-top list. There is no way to express a branching stack, a second
+root, or a node with two predecessors.
+
+That is a **planning constraint, not just a tooling one**: decide the linear order up front and cut
+each branch off the previous one. Where work is genuinely independent, it still takes a position in
+the line — pick an order that is a valid topological sort of the real dependencies, so every PR's
+predecessors are its ancestors.
+
+If you inherit a branching shape, linearize before registering: pick the order, rebase each branch
+onto its new predecessor with `git rebase --onto <new-base> <old-base> <branch>` (recording each
+pre-rebase tip first — see **Keeping a branch current**), retarget the PR bases, then `link`.
+
+Prefer the order that keeps existing `K/N` titles and planning documents correct; renumbering a
+stack means re-editing every node's documents as well as its title.
 
 ## What a stack is
 
-A stack is a set of PRs where each PR is branched on top of **one or more other PRs**, not on
-`master`:
+A stack is an **ordered line** of PRs where each one is branched on top of the previous, and only
+the bottom one is branched on `master`:
 
 ```
 origin/master
-   └── feature/auth/token-store        (base: origin/master)          ← n1
-        ├── feature/auth/middleware    (base: feature/auth/token-store) ← n2
-        └── feature/auth/session-api   (base: feature/auth/token-store) ← n3
-             └── feature/auth/web-login  (parents: [n2, n3])          ← n4
+   └── feature/auth/token-store       (base: origin/master)               ← 1
+        └── feature/auth/middleware   (base: feature/auth/token-store)    ← 2
+             └── feature/auth/session-api  (base: feature/auth/middleware) ← 3
+                  └── feature/auth/web-login  (base: …/session-api)        ← 4
 ```
 
-- A node's **parents** is a **list**. Empty = root (branches off the stack bottom). More than one
-  entry = a genuine DAG node integrating several unmerged parents.
-- A node's **effective base** is derived on demand and never stored: climb `parents`, skip every
-  ancestor whose PR is merged, and take the nearest surviving ancestor's branch as `origin/<branch>`.
-  When every ancestor is merged the base collapses to the stack bottom (`origin/master`).
-- PRs **land bottom-up**: a node may merge only once every one of its parents has merged (which is
-  the same as saying: only once its effective base has collapsed to `origin/master`).
-- A non-merged parent that owns **no branch** contributes nothing and blocks its descendants — there
-  is no synthesized `origin/<node_id>` ref, because nothing ever created one.
+- Each PR has exactly **one predecessor** — the PR whose branch it is based on — and the bottom PR's
+  predecessor is the trunk.
+- PRs **land bottom-up**. A PR may merge only once everything below it has merged, which is the same
+  as saying only once its base has become `master`.
+- The order must be a valid **topological sort of the real dependencies**: if PR 4 consumes something
+  PR 2 delivers, PR 2 must be below it. Beyond that constraint the order is yours to choose.
+- Work that depends on nothing still occupies a position. Put such a PR wherever it costs least —
+  usually low, so it can land early, unless keeping numbering and documents stable matters more.
 
-### It is a DAG, not only a chain
+### Why linear, and what to do with work that genuinely branches
 
-Do not assume `PRₖ₋₁`. Assume a **parent list**, and write commands that iterate it. The places this
-bites:
+`gh stack` models a line, so a registered stack is a line. When the *logical* dependency graph
+branches — two PRs that both build on PR 1 and are then integrated by PR 4 — flatten it: put the two
+siblings in either order, and the integrating PR after both. Nothing is lost, because a predecessor
+is an ancestor either way; what changes is that the two siblings can no longer be worked or landed in
+parallel.
 
-- **Diamond nodes.** A node with several unmerged parents still has one GitHub base ref, so the PR's
-  base points at the **first** non-skipped parent (the primary spine) and the other parents' commits
-  arrive through a local `stack-int/<node_id>` integration ref. Its PR is only offered for merge once
-  **all** its parents are merged.
-- **Choosing a base at spawn.** The Start-session dialog on a multi-parent row renders a **Base
-  branch** selector, ordered by the dependency's own **depth** in the DAG (deepest first — a parent
-  that itself depends on another parent is the more complete base), then the stack's other
-  materialized branches, then the project default branch. See
-  [`pr-stacking.md` § Operator-selectable base branch for a diamond node](../../../docs/ft/coder/pr-stacking.md#operator-selectable-base-branch-for-a-diamond-node-added-2026-07-27).
-- **Siblings are legal.** Two open PRs sharing one base are **not** a defect here — they are two
-  children of the same node. What is a defect is treating them as a linear order and merging one
-  "before" the other on that basis alone.
+That is a real cost, and it is the trade for a stack reviewers can actually see. Weigh it while
+decomposing: **prefer a decomposition that is naturally linear** over one that needs flattening.
+
+Two consequences worth stating, because they are easy to get wrong:
+
+- **Siblings become predecessor and successor.** The second one's branch now contains the first's
+  commits. Its *diff* is still only its own (GitHub diffs against its base), so review is unaffected;
+  only its history grows.
+- **An independent root loses its independence.** A PR that could have merged against `master` on its
+  own now waits for everything beneath it. If that matters, put it at the bottom.
 
 ### Branch naming
 
-A planned stack's `branch_suggestion` is **required** and validated: `feature/<stack-slug>/<node>`,
-with every node in the stack sharing one `feature/<stack-slug>/` namespace — e.g.
-`feature/auth/token-store`, `feature/auth/middleware`. That shared namespace is what makes the
-stack's branches group together in every branch list. `validate_stack_plan` rejects a plan that
-breaks it, so a plan submit that invents `pr-2-auth` fails outright.
+Every branch in one stack shares a namespace: `feature/<stack-slug>/<node>` — e.g.
+`feature/auth/token-store`, `feature/auth/middleware`. That is what makes a stack's branches group
+together in a branch list, and it pairs with the `(#<stack-slug> K/N)` group in the PR titles so one
+word identifies the stack in both places. Do not invent `pr-2-auth`.
 
-An ad-hoc chain has no enforced convention. Use the same shape anyway.
+### Registering is the last planning step, not an optional extra
 
-### The plan is the stack object; the base refs are what GitHub sees
+Setting each PR's base to its predecessor buys one thing: GitHub computes each PR's diff against its
+base, so **reviewers see only that PR's own delta**. That is most of the review benefit and is why
+stacking beats one giant branch. It is not the whole job.
 
-Setting each PR's base to its parent buys one concrete thing: GitHub computes each PR's diff against
-its base, so **reviewers see only that PR's own delta**. That alone is most of the review benefit and
-is why stacking beats one giant branch.
+**Register the stack with `gh stack link` once every PR exists** (see the top of this file). Until
+you do, the ordering exists only in your head and in the base refs.
 
-What GitHub does **not** do, in this repo, ever:
+What GitHub still does **not** do, even for a registered stack:
 
-- **Group or order the PRs.** There is no GitHub-side stack object. The ordering lives in
-  `Changeset.stack` on the orchestrator, or nowhere at all.
-- **Enforce merge order.** Nothing stops merging a node before its parent.
-- **Restack anything after a merge.** A dependent left pointing at a merged parent's branch is a
-  dead end that somebody has to repair — `pr_repoint` / `/repoint` is that repair, and it is
-  **manual by design**. Do not wait for GitHub to do it.
+- **Enforce merge order.** Nothing stops merging a PR before the one below it. Bottom-up is on you.
+- **Restack anything after a merge.** A dependent left pointing at a merged predecessor's branch is a
+  dead end somebody has to repair — `/repoint` is that repair, and it is **manual by design**.
 - **Make a successor's CI meaningful for `master`.** Checks build the head merged into **its own
-  base**, so green CI on a stacked PR says nothing about `master` until that PR is repointed onto it.
+  base**, so green CI on a stacked PR says nothing about `master` until it is repointed onto it.
 
 ### Adding a layer — `/add-to-pr-stack`
 
-`/add-to-pr-stack` adds a new node **on top of** a named parent (or the stack's tip) so new work can
-start without waiting for its parents to merge.
+`/add-to-pr-stack` adds a new PR **on top of** a named predecessor (or the stack's tip) so new work
+can start without waiting for it to merge.
 
-- **Planned stack**: `pr_add_planned` appends the node (`branch: None`, `session_id: None`,
-  `pr_status: None` — planned only, nothing spawns), then `pr_spawn_child` starts its session, whose
-  worktree is cut off `origin/<parent branch>` through `Stack::base_ref_for_spawn`. The web
-  equivalent is the "+ New planned PR" form and its **Add & start session** submit.
-- **Ad-hoc chain**: cut the branch off the parent's branch, commit, push, and open the PR with
-  `gh pr create --base <parent-branch>`. `/pr` does the base detection for you.
+Cut the branch off the predecessor's branch, commit, push, and open the PR with
+`gh pr create --base <predecessor-branch>`. `/pr` does the base detection for you. Then **re-register
+the stack** so the new PR joins it:
 
-A node may be added **anywhere** in a planned stack, not only at the tip: `parents` is
-just a list, and `pr_set_parents` can reshape it afterwards. What you must not do is append a node
-and leave its `parents` empty when it actually depends on somebody — an empty list means *root*, and
-its child worktree will be cut off `master`.
+```bash
+gh stack link --base master <pr> <pr> ... <new-pr>
+```
+
+`link` is additive — PRs already in the stack stay in it — so re-running it with the full list in
+order is the way to extend a stack.
+
+Adding **in the middle** rather than at the tip means retargeting the PR above the insertion point
+(`gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -f base=<new-branch>`) and rebasing it, exactly as a
+repoint does. What you must not do is open a PR against `master` when it actually depends on
+something unmerged.
 
 `/follow-up-branch` is the branch-only counterpart: it creates and switches to a branch off a named
 parent, never opens a PR, and never silently defaults the base to the current branch or `master`.
 
 ### Splitting a layer — `/split-pr-to-stack`
 
-The `pr-stack` recipe plans a stack from requirements. `/add-to-pr-stack` (planned node, optionally
-spawned) and `/follow-up-branch` (branch only) add a node on top of an existing one. `/split-branch`
-produces **sibling** branches, typically both off `master`. None of those carve an **existing** PR
-into stacked slices.
+`/plan-pr-stack` plans a stack from requirements. `/add-to-pr-stack` and `/follow-up-branch`
+(branch only) add a PR on top of an existing one. `/split-branch` produces **sibling** branches,
+typically both off `master`. None of those carve an **existing** PR into stacked slices.
 
 **Splitting B in `A → B → C` produces `A → B1 → B2 → C`:**
 
@@ -230,13 +208,12 @@ into stacked slices.
   Its diff shrinks to the bottom slice. Do not close B and open two new PRs.
 - **B2** is a new PR whose base is B1. After the git split, **B2's tree equals original B**, so C
   rebases onto it without picking up a second copy of B1.
-- **C** — and every other child of B — is reparented onto **B2**. On a planned stack that is
-  `pr_set_parents` on each child (the plan-level move), which then realigns any child that already
-  owns a branch exactly as a repoint does: rebase onto the new effective base, `--force-with-lease`
-  push, re-target the open PR. On an ad-hoc chain it is `/repoint` per child.
-- Descendants deeper than C keep their parents and are rebased onto their parent's new tip.
+- **C** — the PR that was above B — is retargeted onto **B2**: rebase onto its new base,
+  `--force-with-lease` push, re-target the open PR. That is `/repoint`.
+- Everything above C keeps its own predecessor and is rebased onto that predecessor's new tip.
+- **Re-register the stack afterwards** with the full list in order, so B2 takes its place in it.
 
-Each invocation produces **exactly two nodes** (B1, B2). A third slice is another
+Each invocation produces **exactly two PRs** (B1, B2). A third slice is another
 `/split-pr-to-stack` on B1 or B2.
 
 If B has **no PR yet**, open a two-node stack: B1 based on the resolved parent A (never silently
@@ -246,12 +223,9 @@ If B has **no PR yet**, open a two-node stack: B1 based on the resolved parent A
 to cut B into an interface half and an implementation half — if the only seam you can find is a
 layer seam, B is one PR and the answer is a smaller B, not two.
 
-**A split is a plan change, and the plan refuses to be re-planned once work is real.**
-`reseed_stack_from_plan_if_unspawned` rejects a whole-plan rewrite the moment any node owns a
-`branch` or a `session_id`, precisely because overwriting such a node would orphan a real branch and
-an in-progress session. So a split of a live stack is done with the surgical tools
-(`pr_add_planned`, `pr_set_parents`, `pr_update_planned`), never by asking the orchestrator to
-re-emit `stack-plan.yaml`.
+**A split is a plan change, so do it surgically.** Move one PR at a time — rebase, push, retarget,
+re-register — and never by discarding the stack and rebuilding it: a branch that another worktree is
+mid-`/green` on cannot be recreated, and closing a PR to reopen it loses its review history.
 
 ## The PR boundary contract — every node is self-contained
 
@@ -287,13 +261,10 @@ mechanical rename / move / extraction with no behaviour change, or a regeneratio
 already-committed generated code exposing no new surface. Anything else that looks like it needs an
 exception goes in the node's `description` for a human to decide.
 
-**The contract is advisory, not machine-enforced.** It is carried in the `analyze-stack` **and**
-`write-stack-plan` system prompts — in both deliberately, because `write-stack-plan` is what
-re-runs on every chat-driven refinement, and a rule present only in `analyze-stack` would be
-silently dropped the first time an operator refined the plan. `validate_stack_plan` sees only
-`node_id`, `title`, `description`, `branch_suggestion` and `parents` — never the diff — so it cannot
-tell a vertical slice from a layer split, and any check would reduce to a keyword heuristic over
-`description`. Which means: **it is on you to hold the line**, in planning and in review.
+**The contract is advisory, and nothing enforces it.** No tool sees the diff at planning time, so
+nothing can tell a vertical slice from a layer split; any automated check would reduce to a keyword
+heuristic over a description. Which means: **it is on you to hold the line**, in planning and in
+review.
 
 ### What "independently mergeable" therefore means here
 
@@ -368,112 +339,60 @@ Details: [`pr-stack-docs.md` § Draft-PR contract](../../../docs/ft/coder/pr-sta
 
 ## Per-PR documents — where stack context lives
 
-Every planned PR has **two authored documents**, written by the orchestrator during
-`write-stack-docs` and **attached to the child session** at spawn:
+Every PR in a stack carries **its own two documents**, committed on its own branch under
+`docs/dev/1-WIP/`, plus its discovery companion:
 
 ```
-{orchestrator_session_dir}/artifacts/
-  stack-plan.yaml         the machine-readable plan
-  pr-stack-plan.md        the shared stack-level document, derived from the plan
-  exploration.md          the code-discovery map
-  stack-status.md
-  stack-status.json
-  prs/
-    n1/
-      PRD.md              what this PR delivers — behaviour, API surface, acceptance criteria
-      changeset.md        how, and where the edges are
-    n2/
-      PRD.md
-      changeset.md
+docs/dev/1-WIP/
+  YYYY-MM-DD-<slug>-prd.md                 what this PR delivers — behaviour, API surface, acceptance criteria
+  YYYY-MM-DD-<slug>.md                     the changeset: how, and where the edges are
+  YYYY-MM-DD-<slug>-initial-discovery.md   the code-discovery record behind it
 ```
 
-Paths are **derived from `node_id` by convention**, not recorded on the node — `StackNode` gains no
-field for them, and neither do `PlannedPr`, `AddPlannedPrRequest` or the web wire type.
+Give every PR of a stack a **distinct slug** — several land on the same date, and each adds its own
+files. Never edit a sibling's documents.
 
 ### The four required headings
 
-`changeset.md` is validated **structurally** on submit: the host asserts the headings are present,
-never that their contents are correct. All four are required, in every node's document:
+`<slug>.md` carries all four, in every PR's document:
 
 ```
 ## Responsibility        what this PR owns
 ## Boundaries            what it explicitly does not do
-## Dependencies          per parent node: what that PR delivers that this one consumes
-## Draft PR contract     what lands first (API + failing tests) to unblock dependents
+## Dependencies          per predecessor: what that PR delivers that this one consumes
+## Draft PR contract     what lands first (API + failing tests) to unblock successors
 ```
 
-A submit missing any of them is rejected **and writes nothing** — as is a submit whose `prd` or
-`changeset` is blank, one naming a `node_id` that is not in the stack, or one that skips a node.
-A partial pass is refused rather than half-written, because a node with no boundaries document is
-precisely the duplicate-development hazard the documents exist to close.
+A bottom PR still carries all four; its `## Dependencies` says it has none. A document missing any
+of them is the duplicate-development hazard the documents exist to close.
 
-This line — presence enforced, content not — is deliberate. "Does this document have a
-`## Boundaries` heading" needs no semantics at all; "is this a vertical slice" needs the diff the
-node has yet to produce.
+### There is no shared stack manifest — and there must not be
 
-### What the child sees
-
-At spawn the child receives four attachments, materialized into its `artifacts/attachments/`:
-
-| Source on the orchestrator | Destination basename |
-|---|---|
-| `prs/<node_id>/PRD.md` | `PRD.md` |
-| `prs/<node_id>/changeset.md` | `changeset.md` |
-| `pr-stack-plan.md` | `pr-stack-plan.md` |
-| `exploration.md` | `exploration.md` |
-
-The child's `initial_prompt` names the attached changeset by path, so the agent reads its boundaries
-before writing code rather than finding the file by chance. A missing document is **skipped, not
-fatal** — a node started before the docs pass ran attaches whatever exists, and the operator is told
-what was unavailable.
-
-The child's own `artifacts/PRD.md` (the `tdd` recipe's manifest artifact) is a **different file**
-from the attached `artifacts/attachments/PRD.md`. Do not conflate them, and do not "tidy" one into
-the other.
-
-### There is a shared stack-level document — and only one
-
-`artifacts/pr-stack-plan.md` **is** the stack-level document, and it is generated from
-`stack-plan.yaml` on every plan write. It is not hand-authored and not supplemented by a second epic
-document, because a hand-authored twin could only drift.
-
-What there is **no** room for is a shared *per-PR status* manifest — a committed `STACK-*.md` in
-`docs/dev/1-WIP/` with a row per PR. Three separate reasons rule it out:
+Do **not** create a committed `docs/dev/1-WIP/STACK-*.md` with a row per PR. Three separate reasons
+rule it out:
 
 - It would have to **outlive every individual PR**, so it could not be wrapped: no State B, and a
   lifetime spanning the whole stack. It would have to be handed from each wrapping PR up to the next
   open one — a cross-branch push during what should be a self-contained wrap.
 - Every PR would edit the same file to update its own row, so **every rebase produces a union
   conflict** on it, and each wrap a modify/delete conflict on top.
-- Its status column would be a hand-maintained copy of what `pr_stack_status` and `gh pr list`
-  already know, going stale between the moment a PR landed and the moment somebody remembered.
+- Its status column would be a hand-maintained copy of what `gh pr list` and the registered GitHub
+  stack already know, going stale between the moment a PR landed and the moment somebody remembered.
 
-`pr-stack-plan.md` avoids all three by being **derived** and living on the **orchestrator session**,
-not in any PR's diff. Nothing in a PR's own tree describes the stack's status, so no two PRs ever
-edit the same planning file.
+**A PR's document states its own row and nothing else.** Never record a sibling's status — that is
+the stale-copy problem returning. Nothing hands off at wrap: `/wrap-context-docs` transfers this PR's
+own changeset and PRD and deletes them, and there is no third document.
 
-**Rules that follow:**
+### Where the whole-stack views come from
 
-- **No `docs/dev/1-WIP/STACK-*.md`.** If you find one, fold each row into the matching node's
-  `changeset.md` on the orchestrator and delete it (ask before deleting, per CLAUDE.md).
-- **A node's document states its own row and nothing else.** Never record a sibling's status — that
-  is the stale-copy problem returning.
-- **Nothing hands off at wrap.** `/wrap-context-docs` transfers this PR's own changeset and PRD and
-  deletes them. There is no third document and no "action required" notice.
-- **When `pr_stack_status` disagrees with a document, live status is right.** Fix the document —
-  with `pr_update_planned` for title/description, or a `write-stack-docs` re-run for the boundaries.
-
-### Where the manifest's global views come from now
-
-| The manifest used to hold | Where to get it now |
+| You want | Read |
 |---|---|
-| stack order, branches, bases | `pr_stack_status`; or `gh pr view <N> --json baseRefName` per PR |
-| which PRs have landed | `pr_stack_status` (`pr_status.phase`), `gh pr list --state merged` |
-| what each PR owns | that node's `changeset.md` → `## Responsibility` / `## Boundaries` |
-| what each PR depends on | that node's `changeset.md` → `## Dependencies` |
-| whether a node needs action | `internal_status` — `needs-repoint`, `has-conflicts`, `ready-to-merge`, `blocked` — derived on every `pr_stack_status`, overridable with `pr_set_status` |
-| the whole-stack shape and rationale | `artifacts/pr-stack-plan.md` on the orchestrator |
-| why the work was split this way | each node's own document states its seam; the durable whole-stack rationale lands in the package docs when the bottom PR wraps |
+| stack order, branches, bases | the registered stack on GitHub; or `gh pr view <N> --json baseRefName` per PR |
+| which PRs have landed | `gh pr list --state merged` |
+| what each PR owns | that PR's `<slug>.md` → `## Responsibility` / `## Boundaries` |
+| what each PR depends on | that PR's `<slug>.md` → `## Dependencies` |
+| whether a PR needs a rebase | `git merge-base --is-ancestor origin/<base> origin/<branch>` — see **Not on its base's latest tip** |
+| why the work was split this way | each PR's own document states its seam; the durable whole-stack rationale lands in the package docs when the bottom PR wraps |
 
 ## The in-stack implementation loop — `/green` → `/validate-changes` → `/pr-wrap`
 
@@ -594,31 +513,22 @@ child than nothing at all. Half-working behaviour silently misleads every PR abo
 as *their* bug. If a slice is not finished and green, leave it out and push when it is.
 
 **Tell the people above you.** When a milestone unblocks a node whose document says it is blocked,
-say so in the push report — and on a planned stack, ask the operator to clear the node's
-`pr_set_status` override if one was set. That node's own document is theirs to update, not yours to
-edit from a sibling branch. The blocked worktree then runs `/pr-stack-rebase` to pick the behaviour
+say so in the push report. That PR's own document is its author's to update, not yours to edit from
+a sibling branch. The blocked worktree then runs `/pr-stack-rebase` to pick the behaviour
 up; without the message it waits on something that is no longer missing.
 
 **Yes, this leaves your descendants behind their base.** Every commit you push does. That is the
 intended trade: frequent small rebases in each worktree (`/pr-stack-rebase`, bottom-up) beat one
 enormous one at the end, and it is exactly what the per-worktree rebase path exists to make cheap.
 
-### Planning pushes each node as it is planned
+### Planning commits each PR as it is planned
 
-The `pr-stack` recipe's planning phase runs in the **orchestrator's own worktree** and writes only
-orchestrator-side artifacts — the plan, the per-PR documents, the exploration map. It never commits
-to a child's branch, because at planning time no child branch exists: a planned node has
-`branch: None` until its child session creates one.
+Planning happens in **one worktree**, switching branches one at a time, and each PR's first commit is
+its own planning documents. Nothing pins a branch for longer than it takes to write them, so no layer
+is force-pushed under a worktree that is mid-`/green`.
 
-That removes a whole class of problems a planner that commits to node branches would create: nothing
-pins a child branch during planning, no layer is force-pushed under a worktree that is mid-`/green`,
-and no planner ever commits to a node it does not own.
-
-The first commit on a node's branch is therefore the **child's own first push**: when a child session
-starts, it cuts
-`feature/<stack-slug>/<node>` off its effective base, does its own red/green work, and pushes. The
-`## Draft PR contract` section is what tells that child what to publish first so its dependents can
-start.
+The `## Draft PR contract` section is what tells whoever implements a PR what to publish first, so
+its successors can start against a real ref rather than waiting for the whole thing.
 
 ## PR titles — the delivered state, the stack slug, and the position
 
@@ -644,7 +554,7 @@ Type and scope stay exactly the repo's existing conventional-commit form — loo
 that reads better:
 
 ```
-feat(pr-stack): per-PR documents attached to the child session (#420)
+feat(web): per-daemon RPC clients over the shared common-room connection (#420)
 fix(coder,daemon,web): a planned PR started on another host stops disappearing from its own stack (#428)
 feat(service,daemon): infer a peer agent session's status from its conversation (#419)
 fix(web): stop a workflow session re-attaching on every list poll (#426)
@@ -654,9 +564,9 @@ ci: merge a PR on a #automerge comment (#408)
 So a five-node stack whose slug is `attach-docs` reads:
 
 ```
-feat(core): per-node PR and changeset documents on the orchestrator (#attach-docs 1/5)
-feat(daemon): attach a node's documents to its child session at spawn (#attach-docs 2/5)
-feat(web): pre-populate the Start-session dialog with the node's documents (#attach-docs 3/5)
+feat(core): derive a session's effective base from its predecessor (#attach-docs 1/5)
+feat(daemon): serve a session's worktree stats over the existing stream (#attach-docs 2/5)
+feat(web): pre-populate the Start-session dialog from the selected host (#attach-docs 3/5)
 fix(tools): reject a docs submit that skips a node (#attach-docs 4/5)
 docs(coder): the per-PR documents and their four headings (#attach-docs 5/5)
 ```
@@ -681,13 +591,13 @@ whether they are related, sequenced, or independent. The slug is:
 fourth of six and cannot merge before three others — which a base-branch name does not say. On a DAG,
 `K` is the node's position in the plan's **reading order** (`display_order`, which is what the
 Planned PRs panel shows and what move-up/move-down changes), not a claim that the stack is a line;
-the real dependency edges are `parents`, and `pr_stack_status` is where you read them.
+the real dependency edges are the base refs, and `gh pr list --json baseRefName` is where you read them.
 
 **On `master` it is not last, and that is expected.** GitHub's squash merge appends ` (#<pr>)` to the
 subject, so the commit lands as:
 
 ```
-feat(daemon): attach a node's documents to its child session at spawn (#attach-docs 2/5) (#431)
+feat(daemon): serve a session's worktree stats over the existing stream (#attach-docs 2/5) (#431)
 ```
 
 Two groups saying different things: `(#attach-docs 2/5)` is the stack and the position, `(#431)` is
@@ -728,9 +638,9 @@ first; if the whole thing will not fit comfortably, the body is where the detail
 
 | Moment | Command / tool | Obligation |
 |---|---|---|
-| A node is planned | the `pr-stack` recipe, `pr_add_planned`, the web "New planned PR" form | Set the node `title` to the full format immediately. The subject states the *planned* delivery — write it as shipped. |
+| A PR is planned | `/plan-pr-stack` | Write the full format immediately. The subject states the *planned* delivery — write it as shipped. |
 | The PR is opened | `/pr`, `gh pr create` | Carry the node's title through verbatim. |
-| A node is added, split, or reordered | `/add-to-pr-stack`, `/split-pr-to-stack`, `pr_set_parents`, move up/down | **Renumber every PR in the stack** (see below). |
+| A PR is added, split, or reordered | `/add-to-pr-stack`, `/split-pr-to-stack` | **Renumber every PR in the stack** (see below), and re-register it. |
 | Before ready for review | `/pr-wrap` | **Re-read the title and correct it** to what the branch actually delivered. Scope drifts during green; the title written at planning is a guess, and this is the last moment it can be fixed. |
 
 `/pr-wrap`'s check is the load-bearing one. Everything else is a default that a green phase may have
@@ -743,8 +653,8 @@ Set a title with plain `gh pr edit` — no `gh api -X PATCH` workaround is neede
 gh pr edit <N> --title "feat(daemon): attach a node's documents at spawn (#attach-docs 2/5)"
 ```
 
-On a **planned** stack, prefer `pr_update_planned` with `sync_pr: true`: it edits the node's `title`
-/ `description` **and** publishes them to the PR in one act, so the plan and GitHub cannot drift.
+Do it bottom-up in one pass, so the stack never sits half-renumbered — a partially renumbered stack
+is harder to read than an un-numbered one.
 
 ### Renumbering when the stack changes shape
 
@@ -756,10 +666,7 @@ So the commands that change the shape own the renumber, and must do it in the sa
 subject unchanged, only the trailing group moving:
 
 ```bash
-# planned stack: keeps node and PR in step
-#   pr_update_planned { node_id: "n3", title: "feat(web): … (#attach-docs 3/6)", sync_pr: true }
-
-# ad-hoc chain, or a node whose PR you are fixing directly:
+# retarget one PR's title; repeat bottom-up for the whole stack
 gh pr edit <pr> --title "feat(<scope>): <unchanged subject> (#<slug> <K>/<N>)"
 gh pr view <pr> --json number,title --jq '"#\(.number) → \(.title)"'
 ```
@@ -779,20 +686,16 @@ gh pr view <branch> --json baseRefName,number,url --jq '.baseRefName'
 Commands MUST resolve a branch's base in this order:
 
 1. **An explicit argument passed by the user** (e.g. `/merge some-branch`, `/repoint --onto master`).
-2. **The planned stack**, when there is one — `pr_stack_status`, whose per-node view carries the
-   effective base computed from `parents` with merged ancestors skipped. This is the most
-   authoritative source for a planned stack, because it is the only one that knows what the base
-   *should* be as opposed to what it currently says. A node whose PR base ≠ its effective base is
-   exactly the `needs-repoint` internal status.
-3. **The node's own document**, from a child session: `changeset.md` → `## Dependencies` names the
-   parents, and the attached `pr-stack-plan.md` shows the shape. Use it to sanity-check, not to
-   override live status.
+2. **The registered stack on GitHub**, which knows the intended order — as opposed to what a base
+   ref currently says. A PR whose base is not its predecessor's branch needs a repoint.
+3. **The PR's own document**: `<slug>.md` → `## Dependencies` names what it consumes. Use it to
+   sanity-check, not to override live state.
 4. **The open PR's base** — `gh pr view <branch> --json baseRefName`.
-5. **Ad-hoc detection** — the `gh pr list` + `git merge-base --is-ancestor` recipe above.
+5. **Detection from the open PRs** — `gh pr list` + `git merge-base --is-ancestor`.
 6. If none resolve, **ask the user** — never silently fall back to `master`.
 
 > `/merge` brings a branch up to date with its **resolved base**, not with `master`. Only `/repoint`
-> (or `pr_repoint`) *changes* a base — and after a parent merges, that change is mandatory, because
+> *changes* a base — and after a predecessor merges, that change is mandatory, because
 > nothing performs it for you.
 
 ## Document linking rule (forward-only)
@@ -817,61 +720,54 @@ review (see [`.agents/commands/wrap-context-docs.md`](../../commands/wrap-contex
 ready order *is* the wrap order. Ready a child before its parent and the child's documents leave
 `1-WIP` first, which is exactly the case the forward-only rule cannot survive.
 
-The orchestrator's per-PR documents under `artifacts/prs/<node_id>/` are **not** part of this rule:
-they live on the orchestrator session, never in a PR's diff, and are not wrapped at all.
+This rule is why readying a stack **bottom-up** matters: wrapping is triggered by setting a PR ready
+for review, so the ready order *is* the wrap order.
 
 ## Golden rules for landing (read before merging anything)
 
 The dependency is encoded in **branches**, so branch lifetime and merge order matter — get them wrong
 and GitHub silently **closes** PRs.
 
-1. **Merge bottom-up.** Land the roots first, then their children, and never a node before every one
-   of its parents. Nothing in GitHub enforces this. On a planned stack, `pr_stack_status` marks a node
-   `ready-to-merge` only when its PR is open, all its dependencies are merged, and it has no
-   conflicts — trust that, not the order the PRs happen to be listed in.
+1. **Merge bottom-up.** Land the bottom PR first and never one before its predecessor. Nothing in
+   GitHub enforces this, not even for a registered stack. A PR is ready to merge only when it is
+   open, everything below it has merged, and it has no conflicts — check that, rather than trusting
+   the order the PRs happen to be listed in.
 2. **A branch must stay intact until no open PR bases on it.** A parent's branch is its children's
    base — deleting it while a child's PR is open **closes that PR**, and a PR whose base branch no
    longer exists **cannot be reopened or re-based via the API**. This is the #1 way stacks break, and
-   it is exactly why `pr_repoint` exists: **repoint every dependent first, then delete the branch.**
+   it is the whole reason `/repoint` exists: **repoint every dependent first, then delete the branch.**
    Never pass `--delete-branch` to `gh pr merge` while any open PR still bases on that branch, and be
    careful with a repo-level `delete_branch_on_merge` — nothing in this repo restacks a dependent for
    you.
-3. **Merging is `pr_merge` on a planned stack, and a normal merge otherwise.** There is no GitHub
-   stack object here and no `merge-async` requirement: `pr_merge` goes through
-   `GithubPrApi::merge_pr` (plain REST), journalled by `StackOpJournal` so a crash between "merged"
-   and "dependents repointed" resumes instead of re-merging. By hand it is the `#automerge` comment
-   gate (see **Landing sequence**) or `gh pr merge <N> --squash`. Whichever you use, **one PR at a
-   time** — never start the next before the current one reports merged.
-4. **After a merge, repoint every dependent — nothing does it for you.** The parent's branch is now
-   dead weight (and about to be deleted), so each dependent's PR base must move to its recomputed
-   effective base, and its history must move with it: `pr_repoint` (or `/repoint`) does
-   `git rebase --onto <new base> <old base> <branch>`, `git push --force-with-lease=<branch>:<sha>`,
-   and `PATCH` on the PR base, with a `git merge-base` fallback guarding a stale `<old base>` and
-   `git rerere` replaying earlier conflict resolutions. Every step is idempotent, so re-running a
+3. **Merging is the `#automerge` comment gate** (see **Landing sequence**) or
+   `gh pr merge <N> --squash`. Registering a stack does **not** make GitHub merge it for you.
+   Whichever you use, **one PR at a time** — never start the next before the current one reports
+   merged, because the repoint in between is what keeps the next one's diff honest.
+4. **After a merge, repoint every dependent — nothing does it for you.** The merged branch is now
+   dead weight (and about to be deleted), so the next PR's base must move to `master` and its history
+   must move with it. `/repoint` does `git rebase --onto <new base> <old base> <branch>`,
+   `git push --force-with-lease`, and a `PATCH` on the PR base. Record the pre-rebase tip first, so
+   `<old base>` is right even if the branch has moved. Every step is idempotent, so re-running a
    half-finished repoint is safe.
-5. **A repoint that conflicts stops; it does not guess.** `pr_resolve_conflicts` syncs the branch,
-   detects unmerged paths, marks the node `has-conflicts` and returns the conflicted files; the
-   orchestrate goal runs with `AcceptEdits` so the agent resolves them **in that node's own
-   worktree** and re-runs the tool to confirm a clean tree. `--force-with-lease=<branch>:<expected>`
-   means a concurrent child push **aborts** the repoint rather than clobbering the child's work — when
-   that happens, rebase in the child's worktree instead of retrying the force-push.
+5. **A repoint that conflicts stops; it does not guess.** Resolve the unmerged paths **in the
+   worktree that owns that branch**, then confirm a clean tree before pushing.
+   `--force-with-lease=<branch>:<expected>` means a concurrent push **aborts** the repoint rather
+   than clobbering somebody's work — when that happens, rebase in the worktree that pushed instead
+   of retrying the force-push.
 6. **Check the diff after every merge.** An inflated `changedFiles` on a dependent is the tell that
    its repoint did not really happen and it is carrying an already-merged parent's files:
    `gh pr view <N> --json changedFiles,baseRefName,mergeable`.
 7. **Each PR owns only its own diff.** Don't cherry-pick a parent's commits forward, and never
    implement a symbol another node owns.
-8. **Never re-plan a stack whose nodes own real work.** `reseed_stack_from_plan_if_unspawned` refuses
-   a whole-plan rewrite once any node owns a `branch` or a `session_id`, because the overwrite would
-   orphan a live branch and an in-progress session. Reshape with `pr_add_planned` /
-   `pr_set_parents` / `pr_update_planned` / `pr_delete_planned` instead — and note that
-   `pr_delete_planned` refuses a node whose PR is open, on purpose.
+8. **Never re-plan a stack whose PRs own real work.** Reshape it one PR at a time — rebase, push,
+   retarget, re-register. Discarding the stack and rebuilding it orphans branches other worktrees
+   are mid-`/green` on, and closing a PR to reopen it loses its review history. **Never close a PR
+   to reshape a stack.**
 
 ## Landing sequence
 
-### Planned stack — the default path
-
-**`/merge-pr-stack` automates this.** Reach for it rather than driving the steps by hand; on a planned
-stack it drives `pr_stack_status` → `pr_merge` → `pr_repoint` in a loop.
+**`/merge-pr-stack` automates this.** Reach for it rather than driving the steps by hand; it drives
+the read → merge → repoint loop below one PR at a time.
 
 **Sweep the open review comments across the whole stack first**, before any PR merges. Reviewers
 comment on whichever PR's diff showed them the code, so a thread raised on PR X often has to be fixed
@@ -884,7 +780,7 @@ planning. The direction is asymmetric and only one case is recoverable later:
 | PR X | a **parent** of X | **blocking** — that PR merges first, so the fix must land in it *before* it does |
 
 A merged PR's threads are archived in practice, so a defect raised there and not triaged is lost.
-Read threads with `pr_comments` (or `gh pr view <N> --comments`) and validate each comment against
+Read threads with `gh pr view <N> --comments` and validate each comment against
 the code **at HEAD**, never against the diff hunk quoted in it — every `/pr-stack-rebase` moves lines
 under comments. Signal each verdict as a reaction on the comment itself (👍 actionable, 👎 plus an
 evidence reply for not-a-defect, 🚀 fix pushed — the same protocol `/fix-pr` uses). `/merge-pr-stack`
@@ -901,8 +797,8 @@ recorded-tip `--onto` mechanics from `/pr-stack-rebase` cascade mode.
 Then the merge loop: bottom-up, one PR at a time — never start the next before the current one
 reports merged:
 
-1. **`pr_stack_status`** — confirm the order, that this node is `ready-to-merge`, and that its PR
-   base is what it should be. Re-sweep this PR's threads (reviewers comment while CI runs) and apply
+1. **Confirm the shape** — `gh pr list --state open --json number,headRefName,baseRefName` — that
+   this PR is the lowest unmerged one and that its base is what it should be. Re-sweep this PR's threads (reviewers comment while CI runs) and apply
    any comment fixes the plan still assigns to this PR, including ones raised on another PR's thread.
 2. **Wait for CI, and read it properly.**
 
@@ -920,7 +816,7 @@ reports merged:
    Remember what the gate deliberately does **not** cover: VM-backed tests, cgroups sandbox tests,
    Cypress e2e, `tddy-desktop`. Green CI is not a substitute for `./vm-tests` when you touched that
    area — see [`docs/dev/guides/ci.md`](../../../docs/dev/guides/ci.md).
-3. **Merge.** On a planned stack that is `pr_merge` on the node. Driving it by hand instead, the
+3. **Merge.** The
    repo's merge gate is a **comment**, handled by `.github/workflows/automerge.yml`:
 
    | Comment | Effect | Reaction |
@@ -946,11 +842,11 @@ reports merged:
    `#forcemerge` is held to the same `write` bar as `#automerge` and leaves a durable trace: before
    merging, the workflow comments naming who asked, linking their comment, and quoting the full check
    state. Use it for a known-irrelevant red check, never to outrun a failure you have not read.
-4. **Repoint every dependent** — `pr_repoint` per dependent node, or `/repoint`. Then verify: each
+4. **Repoint every dependent** — `/repoint` per dependent PR. Then verify: each
    dependent should now report the new base, be mergeable, and show **only its own file count**
    (`gh pr view <N> --json changedFiles,baseRefName,mergeable`). If it does not, repair it (below).
 5. **Only now delete the merged branch**, and only if nothing else bases on it.
-6. Repeat from 1 with the next `ready-to-merge` node.
+6. Repeat from 1 with the next PR up.
 
 A red check is work, not a stop: pull the failure (`scripts/ci-status.sh --failures <PR#>`), fix it
 **in the PR that broke it**, push, wait again. Never `#forcemerge` past a real failure and never
@@ -990,19 +886,20 @@ computed input is worth keeping at all.
 Documents are **not** wrapped here — each PR's changeset and PRD were already wrapped when that PR
 was set ready for review, bottom-up. By the time a PR merges its documents have left `1-WIP`.
 
-Between steps, re-read `pr_stack_status`. If it disagrees with a node's document, **live status is
+Between steps, re-read the live PR state. If it disagrees with a PR's document, **live status is
 right** and the document needs updating.
 
-### Ad-hoc chain — manual
+### Two consistent repoint strategies
 
-No orchestrator, so no `pr_merge` and no `pr_repoint`; you are the loop. `/merge` keeps a branch
-current with its **still-open** base mid-flight; `/repoint` **changes** the base to `master` (and
-rebases the history to match) after the parent lands. Two consistent strategies:
+`/merge` keeps a branch current with its **still-open** base mid-flight; `/repoint` **changes** the
+base to `master` (and rebases the history to match) after the predecessor lands. Pick one strategy
+and hold to it:
 
 - **Strategy A — repoint the whole chain to `master` up front.** Before merging anything, `/repoint`
   every PR except the bottom one onto `master`. Now each PR is independent, branch deletes cannot
   cascade, and you merge bottom-up resolving conflicts per PR. Prefer this when the chain is short
-  and the PRs are nearly independent anyway.
+  and the PRs are nearly independent anyway. It also dissolves the registered stack, so do it only
+  when you are committed to landing.
 - **Strategy B — just-in-time.** Merge the bottom PR **without deleting its branch**, `/repoint` its
   dependents onto `master`, verify each dependent is still open and mergeable, and only then delete
   the merged branch and move on. More steps, easier to get wrong, but it keeps each PR's diff honest
@@ -1014,9 +911,6 @@ merged → **then** delete the branch, once no open PR still bases on it.
 
 Wrapping is not part of this sequence: each PR's documents were wrapped when it was set ready for
 review.
-
-Consider promoting the chain instead: an orchestrator plus `pr_adopt` per PR gives you
-`pr_stack_status`, journalled merges, and repointing that cannot forget a dependent.
 
 ## Worktrees pin branches — plan around it
 
@@ -1034,9 +928,9 @@ Consequences:
   trunk if the trunk is checked out somewhere (typically the primary clone). Free the branch first,
   or delegate the rewrite into the worktree that owns it (`git -C`), which is what
   `/pr-stack-rebase` cascade mode does.
-- `pr_repoint` rebases in a **dedicated scratch worktree** for the dependent branch, so it does not
-  fight a live checkout — but its `--force-with-lease` will still abort if that worktree pushed in
-  the meantime. That abort is the feature.
+- A repoint should rebase in a worktree that **owns** the dependent branch, or a scratch one, so it
+  does not fight a live checkout — and its `--force-with-lease` will still abort if that worktree
+  pushed in the meantime. That abort is the feature.
 - `pull_base_into_node_branch` (the row's "pull the base in" control) operates in the node's **own**
   worktree and **refuses** when there is no worktree for the branch. It deliberately does not fall
   back to checking the branch out in the main repo.
@@ -1118,7 +1012,7 @@ concurrent `/green` work gets clobbered.
 | Where the rewrite runs | here | **in a worktree that owns each branch** — delegated via `git -C`, or borrowed here when nothing pins it |
 | Pushes | that one branch, `--force-with-lease` | each branch individually, stopping at the first failure |
 | Needs branches free | no — only the current one | no — pinned branches are delegated to, not fought |
-| Use from | a per-node `/green` worktree | any clean worktree, including the orchestrator's |
+| Use from | a per-PR `/green` worktree | any clean worktree |
 
 **During concurrent implementation, each worktree rebases itself with single-mode
 `/pr-stack-rebase`.** That is the shape that works when every stack branch is checked out somewhere,
@@ -1201,21 +1095,12 @@ git merge-base --is-ancestor "origin/<base>" "origin/<branch>" \
 git rev-list --left-right --count "origin/<base>...origin/<branch>"   # behind<TAB>ahead
 ```
 
-On a planned stack you do not have to run that yourself: the PR-Stack view's **base-sync** leg polls
-exactly this on every tick — `behind_count`, `ahead_count`, and a **non-mutating** conflict probe via
-`git merge-tree --write-tree` (which writes a tree into `.git/objects` but touches no index, working
-tree, `HEAD` or ref, and is therefore safe against a live checkout). `behind_count == 0`
-short-circuits the probe. See
-[`pr-stack-live-status.md` § Base sync](../../../docs/ft/coder/pr-stack-live-status.md#base-sync).
+To ask whether a rebase would conflict **without touching anything**, use
+`git merge-tree --write-tree`: it writes a tree into `.git/objects` but touches no index, working
+tree, `HEAD` or ref, so it is safe to run against a live checkout in another worktree.
 
-Two caveats on those numbers:
-
-- **The probe never fetches.** The counts are only as fresh as the last fetch. The pull action
-  fetches, and the next tick sees the truth.
-- **`has-conflicts` from the live probe is a fact about right now**, not a persisted status. The
-  `internal_status` derivation never writes it from the poll, and the pull path deliberately does not
-  stamp it — a persisted copy could only go stale, and clearing it would risk stomping an agent's
-  `source: "override"`.
+One caveat: **none of this fetches.** The counts are only as fresh as your last `git fetch`, so fetch
+the base ref first or you will be reasoning about yesterday's tip.
 
 Fix it with `/pr-stack-rebase` in the worktree that owns the branch, bottom-up, or with the pull-in
 path above when the branch is cleanly behind. Rebasing rewrites SHAs and force-pushes — harmless on a
@@ -1244,8 +1129,8 @@ each node a **distinct slug** — several nodes of one stack land on the same da
 sibling's entry. See [changelog-merge-hygiene.md](../../../docs/dev/guides/changelog-merge-hygiene.md).
 
 Planning documents are **not** in this category either: each PR carries its own PRD and changeset in
-`docs/dev/1-WIP/`, and the stack's own shared document lives on the orchestrator session, outside
-every PR's diff. The stack itself contributes no shared file to conflict on.
+`docs/dev/1-WIP/` under its own slug, and there is no shared stack manifest. The stack itself
+contributes no shared file to conflict on.
 
 ## Approval dismissal after resolution commits
 
@@ -1277,44 +1162,27 @@ gh pr create --base master --head <head-branch> --title "<same title>" \
   --body "Recreated after #<N> auto-closed when its stacked base branch was deleted."
 ```
 
-Then reattach it to the stack. On a planned stack, the node still records the **closed** PR's URL, and
-`pr_adopt` refuses a PR whose head branch is already bound to a node — so:
+Then **re-register the stack** with the recreated PR in place of the closed one:
 
-1. `pr_delete_planned` the stale node (allowed: its PR is closed, not open), which reparents its
-   children onto its parents;
-2. `pr_adopt` the recreated PR, binding a fresh node to the same head branch;
-3. `pr_set_parents` on that node to restore its real dependencies, and on any child that needs
-   re-pointing at it;
-4. `pr_stack_status` to confirm the shape.
+```bash
+gh stack link --base master <pr> <pr> ... <recreated-pr> ...
+```
 
-**This entire section is the thing `pr_repoint` exists to prevent.** Repoint every dependent *before*
-deleting a merged parent's branch and none of the above ever happens.
+**This entire section is the thing `/repoint` exists to prevent.** Repoint every dependent *before*
+deleting a merged predecessor's branch and none of the above ever happens.
 
 ## Recovery — the stack is real but not local
 
-Worktrees deleted, a different machine, or a child session cleaned up. Nothing is lost: the stack's
-durable link key is the **branch**, not the session.
+Worktrees deleted, or a different machine. Nothing is lost: a stack's durable state is its
+**branches and its PRs**, both of which live on the remote.
 
-**The orchestrator session still exists.** Read the truth back with `pr_stack_status` — it reconciles
-`Changeset.stack` against live git and GitHub — and recreate whichever worktrees you actually need:
+Recover the shape from the open PRs, then recreate only the worktrees you actually need:
 
 ```bash
 git fetch origin
-git worktree add <path> <branch>        # per node you intend to work
+gh pr list --state open --json number,headRefName,baseRefName   # read the chain off the bases
+git worktree add <path> <branch>                                # per PR you intend to work
 ```
 
-A node whose child **session** was deleted keeps its `session_id` and becomes **orphaned**: the row
-offers "Start session" again, and the resumed spawn re-links to the node through its **effective
-spawn branch**, so the recovery sticks rather than producing another unlinked session each click.
-
-**The orchestrator session is gone.** Rebuild it: start a new `pr-stack` session (or seed one from an
-existing session with **Base the stack on**, which makes that session's branch the stack's bottom
-node), then `pr_adopt` each surviving PR, then `pr_set_parents` to restore the DAG. Recover the shape
-first with the ad-hoc detection recipe — `gh pr list --state open --json number,headRefName,baseRefName`
-plus `git merge-base --is-ancestor` — so you are adopting into the right order rather than guessing.
-
-Note the two refusals you will meet while seeding: a base session that carries an
-`orchestrator_session_id` is already a node of another orchestrator's stack and is refused (two
-orchestrators with repoint and merge authority over one branch is ambiguous ownership), and exactly
-**one** session may seed a stack — a linear order over several pre-existing branches would declare
-dependencies their git history does not have.
+If the GitHub-side stack registration was lost along the way, `gh stack link --base master <prs…>`
+restores it — it reuses the existing PRs and creates nothing.
