@@ -15,6 +15,7 @@ import type {
   SessionAttachmentHint,
   SessionConnection,
 } from "../../../src/rpc/connections/session";
+import type { TerminalFeed } from "../../../src/rpc/connections/terminal";
 import type { ConnectionCapability, ConnectionStatus } from "../../../src/rpc/connections/types";
 
 const A_HOST = "local";
@@ -98,6 +99,16 @@ export class SessionConnectionBuilder {
       transport: () => wire(),
       close: () => {
         live = false;
+      },
+      openTerminal: (): TerminalFeed => {
+        // Deliberately not a silent empty feed. These builders state a session's status and what it
+        // can do; none of them owns a PTY. A feed that accepted input and never produced a byte
+        // would let a spec about terminal output pass while rendering nothing, so a spec that
+        // reaches here is told to drive the terminal through a fixture that actually serves one.
+        throw new Error(
+          `session ${this.sessionId} was built by \`aSessionConnection\`, which serves session RPC ` +
+            `and status only — it has no terminal to open`,
+        );
       },
     };
   }

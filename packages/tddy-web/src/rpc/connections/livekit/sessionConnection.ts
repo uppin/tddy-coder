@@ -21,10 +21,14 @@
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import { ConnectionState, type Room } from "livekit-client";
+import { ConnectionService } from "../../../gen/connection_pb";
+import { TerminalService } from "../../../gen/terminal_pb";
 import type { TokenService } from "../../../gen/token_pb";
 import { capabilitiesForHint } from "../sessionAttachment";
 import type { SessionAttachmentHint, SessionConnection } from "../session";
+import type { TerminalFeed, TerminalOptions } from "../terminal";
 import type { ConnectionCapability, ConnectionStatus } from "../types";
+import { openRoomTerminalFeed } from "./roomTerminalFeed";
 
 /**
  * When a token's replacement is fetched, and what happens when that fetch is refused.
@@ -92,6 +96,17 @@ export interface LiveKitSessionSupport {
 
   /** Builds a transport addressed at one participant on a joined room. */
   readonly transportFor: (room: Room, targetIdentity: string) => Transport;
+
+  /**
+   * A client for `service` on the **host** this session runs on, not on the session's own
+   * participant.
+   *
+   * A session room answers `terminal.TerminalService/StreamTerminalIO` and nothing else, so the one
+   * thing a session cannot ask its own room for is its scrollback: the capture ring belongs to the
+   * host daemon. Reaching past the room for that — and only for that — is what gives a
+   * LiveKit-carried session history it has never had, without moving any output byte off the room.
+   */
+  readonly hostClientFor: <S extends DescService>(service: S) => Client<S>;
 
   /**
    * Constructs the `Room` object to join.
@@ -227,6 +242,26 @@ class LiveKitSessionConnection implements SessionConnection {
     const built = createClient(service, this.transport());
     this.clients.set(service, built as Client<DescService>);
     return built;
+  }
+
+  /**
+   * The terminal over this session's own room, with the host's scrollback behind it.
+   *
+   * The two halves come from different places on purpose: bytes from `StreamTerminalIO` on the
+   * session participant, which is the only thing that participant serves, and history from the
+   * host's `GetTerminalHistory`, which is the only place it exists. Before this, a LiveKit-carried
+   * session had the first and simply went without the second.
+   */
+  openTerminal(options: TerminalOptions): TerminalFeed {
+    this.refuseIfClosed();
+    return openRoomTerminalFeed({
+      room: this.room,
+      serverIdentity: this.targetIdentity,
+      terminal: this.clientFor(TerminalService),
+      host: this.support.hostClientFor(ConnectionService),
+      sessionId: this.sessionId,
+      options,
+    });
   }
 
   /**
