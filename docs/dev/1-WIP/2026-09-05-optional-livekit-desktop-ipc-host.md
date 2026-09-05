@@ -3,6 +3,7 @@
 **Stack:** `optional-livekit` — node 7 of 7 (parents: `capability-gating`, `multi-connection-ipc`;
 PR base `feature/optional-livekit/capability-gating`, with `multi-connection-ipc` merged in through
 the local integration ref `stack-int/desktop-ipc-host`)
+PR: [#443](https://github.com/uppin/tddy-coder/pull/443)
 PRD: [`2026-09-05-optional-livekit-desktop-ipc-host-prd.md`](2026-09-05-optional-livekit-desktop-ipc-host-prd.md)
 Discovery: [`2026-09-05-optional-livekit-desktop-ipc-host-initial-discovery.md`](2026-09-05-optional-livekit-desktop-ipc-host-initial-discovery.md)
 
@@ -100,18 +101,50 @@ Implementation lands in the same PR under `/green`. **Not a merge candidate on t
 
 ## TODO
 
-- [ ] Record initial discovery
-- [ ] Create/update PRD documentation
-- [ ] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Record initial discovery
+- [x] Create/update PRD documentation
+- [x] Create changeset
+- [x] Create failing acceptance tests — `cypress/component/DesktopIpcHostAcceptance.cy.tsx`
+- [x] Run acceptance tests (verify they fail) — 7/8 failing; the 8th is a green regression guard, below
+- [x] USER REVIEW — acceptance tests — waived 2026-09-05 (run wave 2 straight through)
+- [x] TDD Red — write failing unit/integration tests — `src/rpc/connections/localHost.test.ts`
 - [ ] Implement production code making tests pass (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
-## Verification
+### Baseline and red status at the contract commit
+
+`bun run --filter tddy-web test:unit` — 971 pass, 17 fail before this node's tests; all 17 are
+inherited red from #437 (6), #439 (5) and #440 (6). This node adds 7 more.
+
+| Suite | Result |
+|---|---|
+| `src/rpc/connections/localHost.test.ts` | **7 tests, 7 failing** |
+| `cypress/component/DesktopIpcHostAcceptance.cy.tsx` | 8 tests, **7 failing**, 1 green |
+
+The failures are on this node's own `TODO(desktop-ipc-host)` bodies —
+`createIpcConnectionProvider`, `liveKitIsConfigured`.
+
+**The one green test is deliberate and is recorded rather than hidden.** *"a browser … reaches the
+desktop machine's host over LiveKit"* exercises no code of this node's: it drives only the LiveKit
+stand-in. It is a regression guard for the requirement that the browser path is untouched — the
+strongest form of which is structural, since `tddy-web` never imports `localHost.ts` and a browser
+bundle therefore cannot contain the IPC provider even by accident. A later change that registered the
+IPC provider everywhere would fail here.
+
+**Two scoping decisions forced by the diamond**, both recorded so `/green` does not rediscover them:
+
+1. **`createLocalHostDirectorySource` is not in this contract.** It returns node 2's
+   `HostDirectorySource`, which is not on this branch's PR head — node 2 reaches this worktree only
+   through `stack-int/desktop-ipc-host`. Importing it would leave this PR unable to compile on its
+   own head. Its intended behaviour is written down in `localHost.ts` beside where it will go.
+2. **The acceptance spec resolves hosts through a local `resolveThrough` helper, not through
+   `ConnectionProviderRegistry`.** The registry is node 1's and still unimplemented; provider
+   precedence is precisely what these specs assert, so it is spelled out here rather than borrowed
+   from an unimplemented dependency. Driving through the registry would have made every failure read
+   as node 1's.
+
+### Commands
 
 ```bash
 ./dev bun run --filter tddy-web test:unit
