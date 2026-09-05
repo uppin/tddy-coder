@@ -36,16 +36,8 @@ then silently drop the fix; if implementation proves the comment wrong after all
 ## Step 1: Stack currency — BEFORE reading any diff or writing any fix
 
 Determine whether this branch is part of a PR stack, and **which of the two kinds of stack** it is —
-the rest of this command says which one it means at each step:
-
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG in its changeset
-  (`Changeset.stack`, a graph of `StackNode`; see
-  [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md)). The branch you are on was
-  spawned from that orchestrator and the node's per-PR documents (`PRD.md`, `changeset.md`) are
-  attached to **this** session. The orchestrator agent — not you, in the child session — holds the
-  `pr_*` tools; `pr_stack_status` is what reports the node's parents and its effective base.
-- **Ad-hoc chain** — someone opened this PR on top of another open PR's branch, with no
-  orchestrator. Detect it the way `.agents/commands/pr.md` already does:
+detect it the way `.agents/commands/pr.md` already does — this PR is in a stack when its base is
+another open PR's branch:
   ```bash
   gh pr list --state open --json number,headRefName,baseRefName
   # for each other open PR's head, test ancestry against HEAD:
@@ -92,7 +84,7 @@ Gather **all three** comment surfaces:
 3. **PR-level conversation comments** — `gh api repos/$repo/issues/<N>/comments` (each has an
    `id` usable with the issue-comment reactions endpoint).
 
-**In a planned stack, the orchestrator can read the same feedback without leaving its chat.**
+**The same feedback is readable with `gh pr view --comments`.**
 `pr_comments` returns a PR's submitted reviews, diff-anchored threads and conversation comments, and
 `pr_read` returns the PR in full — title, body, state, base/head, mergeability, one latest review
 state per reviewer, and the head commit's check runs. Two contract details matter when you use them
@@ -190,11 +182,11 @@ author does not make the code correct. Verdicts:
 **"Belongs to another node" is a real boundary in a stack, not a dodge.** A planned node's
 `## Dependencies` heading lists what a predecessor owns and this PR must **not** implement — that
 heading is the repo's duplicate-development guard
-([`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md)). A comment asking you to
+(the `pr-stack` skill § *Per-PR documents*). A comment asking you to
 implement a symbol another node owns is routed there, not satisfied here. Equally, it is **not** a
 licence to answer a comment with a stub: every node must be independently reviewable and
 independently mergeable, and a node that ships only surface is not a valid PR — see
-[`docs/ft/coder/pr-stacking.md` § PR boundary contract](../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
+the `pr-stack` skill § *The PR boundary contract*.
 
 Post the 👍 reactions as soon as triage lands (this is the "I've seen it, fix coming" signal):
 
@@ -287,7 +279,7 @@ which merges past red or still-running checks — from here.
 - **Stack members rebase first** — `/pr-stack-rebase` single mode before any diff is read or fix
   written; never cascade from here.
 - **Say which stack model you are in.** The `pr_*` tools exist only inside a `pr-stack`
-  orchestrator session; a child session working one node uses `gh` and its attached documents.
+  worktree that owns the branch, using `gh` and this PR's own documents.
 - **Route a fix to the node that owns the code.** A comment asking for a symbol listed under
   another node's `## Dependencies` is recorded against that node, never implemented here — and
   never answered with a stub, which the PR boundary contract forbids.
@@ -309,5 +301,4 @@ which merges past red or still-running checks — from here.
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
 **Guides**: [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md),
 [`docs/dev/guides/testing.md`](../../docs/dev/guides/testing.md)
-**Specs**: [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md),
-[`docs/ft/coder/pr-stack-docs.md`](../../docs/ft/coder/pr-stack-docs.md)
+**Specs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)

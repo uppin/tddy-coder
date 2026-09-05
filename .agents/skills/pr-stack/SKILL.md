@@ -230,8 +230,7 @@ mid-`/green` on cannot be recreated, and closing a PR to reopen it loses its rev
 ## The PR boundary contract — every node is self-contained
 
 This is the rule the whole model rests on, and it is stricter than "each PR is small". The authority
-is [`pr-stacking.md` § PR boundary contract: every node is
-self-contained](../../../docs/ft/coder/pr-stacking.md#pr-boundary-contract-every-node-is-self-contained).
+is the `pr-stack` skill § *The PR boundary contract*.
 
 > A planned PR must be **independently reviewable and independently mergeable**: the API/schema
 > change, the code implementing it, and its tests land in **one** node.
@@ -335,7 +334,7 @@ Opening a PR as a draft is a **human act** — `gh pr create --draft`. `GithubPr
 correctly everywhere: they map to `PrState::Draft`, and `pr_status.phase` deliberately records a
 draft as `open`, so a draft node is live in the stack, not planned.
 
-Details: [`pr-stack-docs.md` § Draft-PR contract](../../../docs/ft/coder/pr-stack-docs.md#draft-pr-contract).
+Details: the `pr-stack` skill § *Per-PR documents*.
 
 ## Per-PR documents — where stack context lives
 

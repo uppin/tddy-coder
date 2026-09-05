@@ -20,25 +20,18 @@ Each of the three runs `/pr-stack-rebase` before it reads a code diff — includ
 **Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) before acting** — it owns the base
 resolution, the PR title convention and the landing order this command depends on.
 
-**Say which kind of stack this is before acting** (see [pr-stacking.md](../../docs/ft/coder/pr-stacking.md)):
+**Establish whether this PR is in a stack before acting.** Detect it the way `/pr` does:
+`gh pr list --state open --json number,headRefName,baseRefName` plus `git merge-base --is-ancestor`;
+any base that is not `master`/`main` means this PR has a predecessor. Its branch follows
+`feature/<stack-slug>/<node>`.
 
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG and spawned this child session. The
-  orchestrator's per-PR documents are attached here as `artifacts/attachments/PRD.md` and
-  `artifacts/attachments/changeset.md` (plus `pr-stack-plan.md` and `exploration.md`), and the branch
-  follows `feature/<stack-slug>/<node>`. The `pr_*` tools belong to the **orchestrator** agent; this
-  session does not have them.
-- **Ad-hoc chain** — a PR opened on top of another open PR's branch, with no orchestrator. Detect it the
-  way `/pr` does: `gh pr list --state open --json number,headRefName,baseRefName` plus
-  `git merge-base --is-ancestor`; any base that is not `master`/`main` is a stack parent.
-
-On either kind:
+If it is:
 
 - **Enter only after `/validate-changes` reported no gaps** against this PR's plan.
 - **Step 0 is a hard gate** — `/pr-stack-rebase` for **this branch only**, never a whole-stack cascade
   from a per-PR worktree.
-- **Wrapping covers only what this PR owns** — the per-PR `PRD.md` / `changeset.md` attached from the
-  orchestrator are session artifacts, not repo files, and are never wrapped. See `/wrap-context-docs`
-  § Stack Mode.
+- **Wrapping covers only what this PR owns** — this PR's own `docs/dev/1-WIP/` pair, never a
+  predecessor's. See `/wrap-context-docs` § Stack Mode.
 - **Correct the PR title before marking ready** (step 8) — this is the last moment it can be fixed.
 - **Mark ready per-PR and bottom-up** (`gh pr ready <N>`). Never flip a whole stack ready at once:
   dependents further up may still be being implemented.
@@ -68,8 +61,8 @@ Ordinary branch → skip to step 1. Stack branch (either kind, detected above) �
    `/pr-wrap`**: do not run `git diff`, do not start `/validate-changes`, and never `git rm` files to
    shrink the diff. Extra files mean leaked ancestor commits — rebase, do not delete.
 3. **Never cascade a rebase over the whole stack from a per-PR worktree.** Re-basing and repointing the
-   other nodes is the orchestrator's job (`pr_repoint`, `pr_resolve_conflicts` — see
-   [pr-stacking.md § PR-management tools](../../docs/ft/coder/pr-stacking.md)). From here,
+   other layers is a whole-stack operation (`/pr-stack-rebase` cascade, `/repoint` — see
+   the `pr-stack` skill). From here,
    `/pr-stack-rebase` is the only rebase path.
 4. The nested `/validate-changes` runs in steps 1 and 5 rebase again (cheap when already current) — do
    not skip either invocation.
@@ -121,7 +114,7 @@ Do not proceed to step 1 until this gate passes.
   finding, **defer the split to a follow-up branch after the stack lands**, and note the deferral in the
   summary (step 9).
 - **Never apply a cleanup that deletes parent-owned files, or code this PR's `## Dependencies` section
-  says a parent delivers** (the attached `artifacts/attachments/changeset.md` for a planned stack node).
+  says a predecessor delivers** (this PR's `## Dependencies`).
   That is not dead code — it belongs to another PR, and deleting it here surfaces as loss in the base.
 
 ### 5. Final Validation
@@ -149,7 +142,7 @@ cargo test
 - Also cleans up `docs/superpowers/specs/` and `docs/superpowers/plans/` working docs once implementation is complete
 - **Stack branch**: it runs in **Stack Mode** (see `/wrap-context-docs` § Stack Mode) — it wraps only the
   documents this PR owns in `docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, never a parent's, and never the
-  per-PR `PRD.md` / `changeset.md` attached from the orchestrator session. In a stack, wrap **bottom-up**
+  `docs/dev/1-WIP/` pair. In a stack, wrap **bottom-up**
 
 ### 8. Stack Only: Correct the Title & Mark Ready for Review
 
@@ -169,7 +162,7 @@ leaves the commit untouched. The title was written at planning, before the imple
 - **No process artifact**: `red`, `green`, `stubs`, `failing tests`, `WIP`, `phase N`.
 - **Not a branch slug** — `pr 4 production wiring` is what a tool leaves behind when nobody replaces it.
 - **Keep the stack position group if the PR carries one.** Read it from the PR's **own current title**:
-  the per-PR documents live on the orchestrator session, not on this branch, so the title is the one
+  the title is the one
   carrier that travels with the PR.
 
 ```bash
@@ -210,7 +203,7 @@ gh pr view <N> --json isDraft,baseRefName,title   # expect isDraft=false, base s
   ready at once — dependents further up may still be being implemented, and publishing them puts
   unfinished work in front of reviewers.
 - **Do not merge from here.** Merging the stack and repointing each base after a merge is the
-  orchestrator's job (`pr_merge` / `pr_repoint`, or an `#automerge` comment per
+  landing step's job (`/merge-pr-stack`, or an `#automerge` comment per
   [ci.md § Automerge](../../docs/dev/guides/ci.md)). A child session readies its own PR and stops.
 - **Never delete the branch** — a dependent PR bases on it.
 
@@ -301,7 +294,7 @@ Next step: Use `/pr` command to create pull request
 
 [If fit to ship, stack branch with a draft PR already open:]
 ✅ **PR #N marked ready for review** — its dependents are readied only after this one, bottom-up.
-Merging and repointing are the orchestrator's to run.
+Merging and repointing belong to `/merge-pr-stack`.
 
 [If needs refinement:]
 ⚠️ **Refinements needed:**
@@ -337,4 +330,4 @@ Merging and repointing are the orchestrator's to run.
 
 **Related**: Subagent `refactor`, Commands `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `/wrap-context-docs`
 **Commands**: `/pr` (next step), `/update-context-docs`
-**Stack**: Commands `/green`, `/validate-changes`, `/pr-stack-rebase` · Docs [pr-stacking.md](../../docs/ft/coder/pr-stacking.md), [pr-stack-docs.md](../../docs/ft/coder/pr-stack-docs.md), [ci.md](../../docs/dev/guides/ci.md)
+**Stack**: Commands `/green`, `/validate-changes`, `/pr-stack-rebase` · Docs the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`), [ci.md](../../docs/dev/guides/ci.md)

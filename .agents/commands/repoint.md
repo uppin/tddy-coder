@@ -1,5 +1,5 @@
 ---
-description: Repoint a stacked branch onto origin/master (default) after its predecessor merged - change the PR base + restack, via the orchestrator's pr_repoint tool or by hand
+description: Repoint a stacked branch onto origin/master (default) after its predecessor merged - change the PR base, restack the history to match, and re-register the stack
 ---
 ## Repoint Branch
 
@@ -15,42 +15,18 @@ Contrast with `/merge`, which keeps a branch current with its **existing** base 
 `/pr-stack-rebase`, which replays this branch onto the **latest tip of its existing base**. `/repoint`
 **changes** the base. See the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`).
 
-> ### First: is this a planned stack? Then the product does this for you
-> In a **planned** stack — a `pr-stack` orchestrator session owning the DAG in its `Changeset.stack` —
-> repointing is a first-class operation, not a manual git sequence:
->
-> - **Orchestrator agent (chat):** `pr_repoint` on the node. It resolves the node's effective base
->   (climb `parents`, skip merged ancestors, take the nearest non-merged ancestor's branch; collapse to
->   the stack bottom when all ancestors are merged), re-targets the open PR, rebases the branch onto
->   the new base and force-pushes with a lease — the shared
->   `realign_node_to_effective_base` tail. It keeps its prior crash-safety semantics
->   (`StackOpJournal`, idempotent repoint, `--force-with-lease`).
-> - **Operator (web):** the planned-PR row's **"Repoint to `<target>`"** control, offered whenever the
->   base cannot be resolved right now — *any* cause, not only a merged parent. The label names the
->   target before you click, and the target is sent with the click so the daemon does exactly what the
->   label promised.
->
-> **`pr_repoint` and `pr_set_parents` are different operations.** Repointing answers *"the base branch
-> drifted — retain the parent that owns this target"*. Setting parents answers *"the plan changed —
-> this node belongs here now"*, with the caller naming the complete new set (an empty list makes the
-> node a root). Do not use one for the other's question.
->
-> A **child** session working one node does **not** have the `pr_*` tools — they are advertised only to
-> the orchestrator agent during its `orchestrate` goal. From a child worktree, or in an ad-hoc chain,
-> the manual workflow below is the path. See
-> [`docs/ft/coder/pr-stack-live-status.md` § Repointing a dead-end planned PR](../../docs/ft/coder/pr-stack-live-status.md#repointing-a-dead-end-planned-pr-added-2026-07-26)
-> and [`docs/ft/coder/pr-stacking.md` § PR-management tools](../../docs/ft/coder/pr-stacking.md#pr-management-tools).
+> **Repointing is not reshaping.** It answers *"the base branch drifted — keep the same
+> predecessor"*. Changing which PR something is based on is a plan change, and belongs to
+> `/split-pr-to-stack` or `/add-to-pr-stack`, followed by a re-registration. Do not use one for the
+> other's question.
 
-### What repointing does to the plan
+### What repointing changes
 
-Worth knowing even when you repoint by hand, because it is what the product will agree or disagree
-with afterwards:
-
-- **The new base is persisted in the plan.** Given a target, the daemon retains exactly the parents
-  that own that branch and drops the rest, atomically — so every later read (the row, a spawn,
-  `base_ref_for_spawn`, the orchestrator agent) agrees without re-deriving anything.
-- **A target no parent owns means "detach"**: all parents are dropped and the node's base collapses to
-  the project default branch.
+- **The PR's base ref**, which is what GitHub diffs against and what the merge will use.
+- **The branch's history**, rebased onto the new base so the diff stays honest.
+- **The registered stack**, if the repoint takes this PR out of it — a PR repointed onto `master` is
+  no longer above anything, so re-register what remains.
+- **A target that is the trunk means "leave the stack"**: this PR becomes independent.
 - A target that names **neither** the resolved default branch **nor** any parent's branch is
   **rejected** — a stale label cannot silently rewrite the plan. Nothing is persisted, and the row
   stays blocked with the reason shown inline.
@@ -121,19 +97,17 @@ with afterwards:
    required checks from scratch, so an armed `#automerge` may need re-arming
    ([`docs/dev/guides/ci.md` § Automerge](../../docs/dev/guides/ci.md#automerge)).
 9. **Update this PR's own documents.**
-   - *Planned stack*: if the node's `changeset.md` `## Dependencies` names a parent that has now
-     merged, record that it landed in `master`. Edit **only this node's** documents — a parent's are
-     not yours to edit, and there is no shared per-PR document.
-   - *Ad-hoc chain*: update the active changeset in `docs/dev/1-WIP/` where it states the base.
+   If this PR's `## Dependencies` names a predecessor that has now merged, record that it landed in
+   `master`, and update the changeset in `docs/dev/1-WIP/` where it states the base. Edit **only this
+   PR's** documents — a predecessor's are not yours to edit.
 10. **Re-check the topology.**
     ```bash
     gh pr list --state open --json number,headRefName,baseRefName,title
     git log --oneline origin/<new-base>..HEAD    # must be ONLY this PR's own commits
     ```
     That second command is the leak check: if it shows predecessor commits, the restack replayed the
-    wrong range — go back to step 4 with the correct `<old-base>`. In a planned stack the orchestrator
-    agent should re-run `pr_stack_status` so the plan's internal statuses catch up; a manual repoint
-    can leave the plan disagreeing with the branches.
+    wrong range — go back to step 4 with the correct `<old-base>`. Then re-register the stack
+    (`gh stack link --base master <prs…>`) so the registration matches the new bases.
 
 ## After Repoint
 
@@ -147,5 +121,4 @@ on it.
 **Commands**: `/merge`, `/pr-stack-rebase`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/merge-pr-stack`,
 `/pr`, `/pr-wrap`, `/fix-pr`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Product docs**: [PR-Stack live status & repoint](../../docs/ft/coder/pr-stack-live-status.md) ·
-[PR stacking](../../docs/ft/coder/pr-stacking.md)
+**Product docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)

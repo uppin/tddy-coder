@@ -24,7 +24,7 @@ touched.
 
 **Hard-gate callers.** `/green`, `/validate-changes`, and `/pr-wrap` **always** invoke this command in
 **single mode** on a stack branch **before any implementation or code diff**. A clean-looking
-`gh pr list` or a green `pr_stack_status` row is not permission to skip it: leaked ancestor commits can
+A clean-looking `gh pr list` is not permission to skip it: leaked ancestor commits can
 still sit in `HEAD` relative to a stale merge-base, and treating that as this PR's work (or deleting
 the "extra" files to tidy the diff) is how predecessor code gets destroyed. `/green` also needs the
 latest ancestor implementation before it starts, or it will re-implement a symbol a parent node
@@ -45,62 +45,17 @@ is not part of "get my branch current".
 > layer **inside a worktree that owns that branch**, and it pushes each branch **individually,
 > stopping at the first failure** rather than atomically.
 
-> ### The orchestrator-side path (planned stacks only)
-> In a **planned** stack — a `pr-stack` orchestrator session owning the DAG in its `Changeset.stack` —
-> the sync-and-detect-conflicts job belongs to the orchestrator's own tooling, not to this command:
->
-> | Orchestrator tool | What it does |
-> |---|---|
-> | `pr_stack_status` | every node with its live GitHub state and its computed internal status (`needs-repoint`, `has-conflicts`, `ready-to-merge`, …) |
-> | `pr_resolve_conflicts` | syncs a node's branch with its base, detects conflicts (`git ls-files -u`), marks the node `has-conflicts`, and returns the conflicted paths for the agent to resolve in that node's worktree |
-> | `pr_repoint` | changes a node's base after an ancestor merged — that is `/repoint`, not this command |
->
-> Those tools are available **only to the orchestrator agent** during its `orchestrate` goal. A child
-> session working one node does **not** have them: it has its attached `PRD.md` / `changeset.md` and
-> ordinary git. **This command is the branch-side one** — it is what the child worktree runs, and what
-> anyone in an ad-hoc chain runs. See
-> [`docs/ft/coder/pr-stacking.md` § PR-management tools](../../docs/ft/coder/pr-stacking.md#pr-management-tools).
->
-> The web PR-Stack panel also offers a non-rewriting alternative per row — *pull the base in*
-> (`PullBaseIntoBranch`, merge by default, rebase on request), described in
-> [`docs/ft/coder/pr-stack-live-status.md` § Pulling the base into a branch](../../docs/ft/coder/pr-stack-live-status.md#pulling-the-base-into-a-branch).
-> That is `/merge` semantics with a UI attached; it is not a substitute for the leak check below.
-
-Contrast with the neighbours:
-
-| Command | Scope | What it changes |
-|---|---|---|
-| `/pr-stack-rebase` (single) | this worktree's branch | replays this branch's commits on the **latest tip of its existing base** |
-| `/pr-stack-rebase` (cascade) | the named layers, bottom-up | the same, per layer, each in a worktree that owns the branch |
-| `/merge` | this branch | **merges** the base in instead of rebasing (keeps history, adds a merge commit) |
-| `/repoint` | this branch | **changes** the base (usually to `origin/master` after the predecessor landed) |
-| `/merge-pr-stack` | the whole stack | lands the stack bottom-up, repointing dependents as each layer merges |
-
-## Step 0: Parse the argument — which mode?
-
-- **No argument** → single mode on the current branch.
-- **One token that names a branch** (`/pr-stack-rebase feature/auth/token-store`) → single mode with an
-  explicit base *candidate*. Read Step 2 before using it: in this repo an argument does **not**
-  outrank the PR's real base.
-- **A range or list** — `from #2 to #4`, `#2..#4`, `2..4`, `feature/auth/token-store..feature/auth/middleware`,
-  or two or more PR numbers / branch names → **cascade mode**.
-
-PR numbers may be written as `#2` meaning *the second PR of this stack* (its position), or as a real
-PR number like `#433`. **Disambiguate explicitly and say which reading you used** — a small integer is
 almost always a stack position, but never guess silently. Resolve positions bottom-up, where position
 1 is the branch based on `master`:
 
-- **Planned stack** — the node order in the orchestrator's `artifacts/stack-plan.yaml` (or what
-  `pr_stack_status` reports), which is the DAG's topological order.
-- **Ad-hoc chain** — the ancestry walk in Step 1.
+Positions come from the ancestry walk in Step 1, which is the same order the registered stack has.
 
 If the argument names layers that are not contiguous, say so and rebase the contiguous span that
 covers them — a gap would leave a middle layer on a stale parent while its successor moved.
 
-**A DAG, not only a chain.** A node in a planned stack has a `parents` **list** and may have several
-parents. "Bottom-up" therefore means *topological* order, not "the next number". A multi-parent
-(diamond) node is rebased only after **every** parent in the requested set has been processed; if one
-of its parents is outside the set, say so and treat that parent's tip as fixed.
+**Bottom-up means predecessor-first.** A stack is a line, so each layer is rebased only after the one
+below it has been processed. If a layer's predecessor is outside the requested set, say so and treat
+that predecessor's tip as fixed.
 
 ## Step 1: Preflight
 
@@ -114,10 +69,9 @@ gh pr list --state open --json number,headRefName,baseRefName,isDraft,reviewDeci
 
 **Is this branch in a stack at all?** Three signals, any one of which is enough:
 
-1. **Planned stack** — this session's `changeset.yaml` carries `orchestrator_session_id`, i.e. it is a
-   child of a `pr-stack` orchestrator. Its attached `changeset.md` has a `## Dependencies` section
-   naming the parent nodes.
-2. **Ad-hoc chain** — the branch's open PR has a `baseRefName` that is not `master`/`main`. Detect it
+1. The branch's `docs/dev/1-WIP/` changeset has a `## Dependencies` section naming what it consumes
+   from the PR below it.
+2. The branch's open PR has a `baseRefName` that is not `master`/`main`. Detect it
    exactly as `/pr` does: `gh pr list --state open --json number,headRefName,baseRefName`, then
    `git merge-base --is-ancestor origin/<headRefName> HEAD` for each other open PR's head; the ones
    that pass are stack ancestors, and the **stack parent** is the closest (smallest
@@ -129,7 +83,7 @@ gh pr list --state open --json number,headRefName,baseRefName,isDraft,reviewDeci
 ordinary branch, and it does not force-push.
 
 **Cascade mode.** The current branch does **not** need to be in the stack — cascade mode may be run
-from an orchestrator worktree, or any worktree sitting on an unrelated branch. What it does need:
+from any worktree sitting on an unrelated branch. What it does need:
 
 - **A clean tree here**, because cascade may borrow this worktree (Step 3b). Commit first — never
   `--no-verify`, never amend, do not stash silently.
@@ -145,16 +99,14 @@ from an orchestrator worktree, or any worktree sitting on an unrelated branch. W
 For every branch to be rebased, resolve what to rebase **onto**, in this order:
 
 1. **The PR's own base** — `gh pr view <branch> --json baseRefName --jq '.baseRefName'`. This is the
-   live fact: `/repoint` and the `pr_repoint` tool both write it, so it is what GitHub will actually
-   diff the branch against. It comes **first** because nothing else in this repo is more authoritative
-   — there is no registered stack object sitting above GitHub's own answer.
-2. **The stack plan / changeset.**
-   - *Planned stack*: the node's `parents` in the orchestrator's `artifacts/stack-plan.yaml`, resolved
-     the way the product resolves it — climb `parents`, skip **merged** ancestors, take the nearest
-     non-merged ancestor's `branch` as `origin/<branch>`; when every ancestor is merged the base
-     collapses to the stack bottom (`origin/master`). This is `Stack::effective_base_refs` /
-     `base_ref_for_spawn`, documented in
-     [`docs/ft/coder/pr-stacking.md` § Stack data model](../../docs/ft/coder/pr-stacking.md#stack-data-model).
+   live fact: `/repoint` writes it, so it is what GitHub will actually diff the branch against. It
+   comes **first** because it is what the merge will use — the registered stack records the intended
+   order, but the base ref is what is real.
+2. **The changeset.**
+   - The `## Dependencies` section names the predecessor. Skip **merged** ancestors and take the
+     nearest non-merged one's branch as `origin/<branch>`; when every ancestor is merged the base
+     collapses to `origin/master`. Background in
+     the `pr-stack` skill.
      A non-merged ancestor that owns no branch contributes nothing — there is no ref to rebase onto,
      and that is a **blocked** node, not a base. Say so and stop.
    - *Ad-hoc chain*: the stack parent found by the ancestry walk in Step 1, or the branch's
@@ -200,7 +152,7 @@ Untracked files are deliberately **not** a blocker here (hence the `grep -v '^??
 loudly rather than clobbering an untracked file, and blocking on them would make this permanently dead
 in any real agent worktree — the same reasoning the product's own dirtiness probe uses
 (`git status --porcelain --untracked-files=no`, see
-[`docs/ft/coder/pr-stack-live-status.md` § Base sync](../../docs/ft/coder/pr-stack-live-status.md#base-sync)).
+the `pr-stack` skill).
 
 ### 3b. Borrow — no worktree pins this branch
 
@@ -280,7 +232,7 @@ Run these for the layer's branch, in the worktree Step 3 chose (`git -C "$W"` wh
    it from `git reflog show origin/<base>` or the backup branch. This is the same
    `git rebase --onto <new_base> <old_base> <branch>` shape the product's repoint bridge uses, with the
    same `git merge-base` guard against a stale `<old_base>` — see
-   [`docs/ft/coder/pr-stacking.md` § Merge and repoint](../../docs/ft/coder/pr-stacking.md#merge-and-repoint).
+   the `pr-stack` skill.
 
    Never `git rebase --update-refs` — it rewrites sibling stack branches all at once, which is the
    atomic, all-branches behaviour this command deliberately does not have.
@@ -290,7 +242,7 @@ Run these for the layer's branch, in the worktree Step 3 chose (`git -C "$W"` wh
    parent-owned symbol while resolving.** The whole point of `## Dependencies` in the per-PR
    `changeset.md` is that a surface listed there is somebody else's to create; re-creating it here is
    the duplicate-development failure the per-PR documents exist to prevent
-   ([`docs/ft/coder/pr-stack-docs.md` § Why boundaries belong in a per-PR document](../../docs/ft/coder/pr-stack-docs.md#why-boundaries-belong-in-a-per-pr-document)).
+   (the `pr-stack` skill § *Per-PR documents*).
    **Never delete parent-owned files to resolve a conflict.**
 
    **In cascade mode a conflict stops the run.** Resolve this layer, or abort it
@@ -324,9 +276,8 @@ Run these for the layer's branch, in the worktree Step 3 chose (`git -C "$W"` wh
 
 ## Step 5: Report successors as stale
 
-Rebasing a branch leaves every successor **outside the processed set** on a stale parent. In a planned
-stack `pr_stack_status` will derive `needs-repoint` / `has-conflicts` for them on its next run, and the
-web panel's per-row base-sync badge will show them *behind*. That is expected, not a defect: each such
+Rebasing a branch leaves every successor **outside the processed set** on a stale predecessor. That
+is expected, not a defect: each such
 successor's own worktree clears it with single-mode `/pr-stack-rebase`. Name them in the output so the
 user knows who runs it next, and in what order.
 
@@ -339,9 +290,6 @@ Then re-read the topology (read-only, safe from any worktree):
 ```bash
 gh pr list --state open --json number,headRefName,baseRefName,title
 ```
-
-In a planned stack, the orchestrator agent can instead run `pr_stack_status`, which reports the same
-topology plus each node's internal status.
 
 ## Step 6: Restore the borrowed worktree — MANDATORY in cascade mode
 
@@ -408,7 +356,5 @@ Report:
 **Commands**: `/merge`, `/repoint`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/split-branch`,
 `/squash-pr`, `/green`, `/validate-changes`, `/pr-wrap`, `/merge-pr-stack`, `/fix-pr`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Product docs**: [PR stacking](../../docs/ft/coder/pr-stacking.md) ·
-[PR-Stack live status & repoint](../../docs/ft/coder/pr-stack-live-status.md) ·
-[PR-stack documents](../../docs/ft/coder/pr-stack-docs.md) ·
+**Product docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) ·
 [Continuous integration](../../docs/dev/guides/ci.md)
