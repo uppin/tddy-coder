@@ -165,10 +165,12 @@ jobs:
             -- --ignored --nocapture --test-threads=1 ${{ matrix.filter }} \
             2>&1 | tee vm-tests.log
 
-      # Every one of these tests returns *successfully* when the image variable
-      # is unset (vm_boot_control_acceptance.rs:81, cloud_init_acceptance.rs:117).
-      # A broken download or a mistyped path would otherwise report a green
-      # check having booted nothing, which is worse than a red one.
+      # These tests now *fail* when the image variable is unset
+      # (`require_base_image`), so a broken download or mistyped path is red at
+      # the test rather than green here. The grep stays as a regression guard —
+      # it matches the wording of the skip-and-return these tests used to do, so
+      # reintroducing that pattern fails the job instead of quietly reporting a
+      # check that booted nothing. The count is the assertion that carries.
       - name: Assert a guest was actually booted
         run: |
           if grep -q "skipping production test" vm-tests.log; then

@@ -142,13 +142,22 @@ and then **fails fast** if a read-write open still does not succeed, so a runner
 without virtualisation reports that in seconds instead of timing out at 90
 minutes.
 
-**Every test passes when the image is missing.** Each one does
-`let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`
-(`vm_boot_control_acceptance.rs:81`, `cloud_init_acceptance.rs:117`), so an unset
-variable or a failed download yields a green check that booted nothing. The
-workflow asserts the path exists before running, and afterwards greps the log for
-both the skip message and `test result: ok. <n> passed` — `n` being the leg's own
-`expected_passing`, 6 or 1. A false green is worse than a red one.
+**A missing image used to pass.** Every one of these tests opened with
+`let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`,
+so an unset variable or a failed download yielded a green check that booted
+nothing — and an unset variable is exactly what a typo or a failed download
+produces, which is when a green result misleads most. They now call
+`require_base_image()` (`tddy-vm-testkit/src/env_file.rs`), which panics naming
+the variable, so an unconfigured prerequisite is a red test.
+
+Reporting a *deliberate* absence stays where it belongs: `./vm-tests` checks the
+variable once, up front, and says so in one line rather than each test deciding
+for itself.
+
+The workflow still asserts the path exists before running, and afterwards greps
+for `test result: ok. <n> passed` — `n` being the leg's own `expected_passing`, 6
+or 1 — plus the old skip wording, kept as a regression guard against the pattern
+coming back. A false green is worse than a red one.
 
 ### What it would take to run the rest
 

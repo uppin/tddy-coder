@@ -28,7 +28,7 @@
 use std::time::Duration;
 
 use serial_test::serial;
-use tddy_vm_testkit::env_file::{configured_base_image, BASE_IMAGE_ENV};
+use tddy_vm_testkit::env_file::BASE_IMAGE_ENV;
 use tddy_vm_testkit::{BuilderVm, BuiltBinaries, TestHostVm, TestkitLayout, VmArch};
 
 /// ELF header bytes: magic, then `e_machine` at offset 18.
@@ -45,14 +45,13 @@ fn progress(line: &str) {
 }
 
 /// The gate every test in this file shares.
+///
+/// A missing image is a failure, not a skip: returning early would report success for a
+/// test that booted nothing, and an unset variable is precisely what a mistyped path or a
+/// failed download looks like. `./vm-tests` reports a deliberate absence once, up front.
 macro_rules! require_base_image {
     () => {
-        if configured_base_image().is_none() {
-            eprintln!(
-                "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-            );
-            return;
-        }
+        let _ = tddy_vm_testkit::require_env_path(BASE_IMAGE_ENV);
     };
 }
 

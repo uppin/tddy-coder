@@ -86,3 +86,34 @@ pub fn configured_base_image() -> Option<std::path::PathBuf> {
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| std::path::PathBuf::from(trimmed))
 }
+
+/// The path `var` names, or a panic saying what is missing — the form a **test** asks in.
+///
+/// A production test whose image is not configured has not been satisfied; it has been
+/// skipped. Returning early makes that skip report success, and a skip reported as a pass
+/// is indistinguishable from a real one in every place anybody looks: `cargo test`'s
+/// summary, a CI check mark, a reviewer's glance at a green PR. The gap is not theoretical
+/// — an unset variable is exactly what a mistyped path or a failed download produces, which
+/// is the moment a green result is most misleading.
+///
+/// So a missing prerequisite fails here rather than vanishing. Skipping remains available
+/// where it belongs: `./vm-tests` checks the variable before it runs anything and says so
+/// in one line, instead of every test in the suite deciding for itself.
+pub fn require_env_path(var: &str) -> std::path::PathBuf {
+    let raw = std::env::var(var).unwrap_or_default();
+    let trimmed = raw.trim();
+    assert!(
+        !trimmed.is_empty(),
+        "{var} is not set, so this production test has no image to run against. Point it at \
+         an image already on disk — exported, or in the repo-root .env — and run these tests \
+         with ./vm-tests. Nothing is ever downloaded; see the module docs for what this \
+         variable must name."
+    );
+    std::path::PathBuf::from(trimmed)
+}
+
+/// The configured base image, or a panic — [`require_env_path`] for [`BASE_IMAGE_ENV`],
+/// which is the prerequisite nearly every VM production test shares.
+pub fn require_base_image() -> std::path::PathBuf {
+    require_env_path(BASE_IMAGE_ENV)
+}

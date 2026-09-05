@@ -158,12 +158,7 @@ const PREPARED_BASE_IMAGE_ENV: &str = "TDDY_CLOUDINIT_BASE_IMAGE";
             reuse makers-lt's already-built debian-12-base.qcow2); run with --ignored"]
 #[serial_test::serial(vm_library_create_vm)]
 async fn create_vm_builds_a_mutable_overlay_backed_by_the_absolute_prepared_base_path() {
-    let Some(base_src) = std::env::var(PREPARED_BASE_IMAGE_ENV).ok() else {
-        eprintln!(
-            "{PREPARED_BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_src = tddy_vm_testkit::require_env_path(PREPARED_BASE_IMAGE_ENV);
 
     // Given a library with a prepared base already in place (copied from the
     // developer-supplied source — never downloaded by this test)

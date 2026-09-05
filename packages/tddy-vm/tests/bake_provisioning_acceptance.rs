@@ -26,7 +26,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{a_console_loginable_user_data, a_test_guest, configured_base_image, BASE_IMAGE_ENV};
+use common::{a_console_loginable_user_data, a_test_guest, require_base_image};
 use serial_test::serial;
 use tddy_vm::cloud_init::{
     build_cloud_init_image, reset_cloud_init_and_reboot, CloudInitBuildOptions, CloudInitUserData,
@@ -66,10 +66,7 @@ const DISTRO_DEFAULT_ACCOUNT: &str = "debian";
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn bakes_the_recipes_runcmd_into_the_image_it_seals() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a recipe whose provisioning is one command: write a marker file
     let dir = tempdir().unwrap();
@@ -98,10 +95,7 @@ async fn bakes_the_recipes_runcmd_into_the_image_it_seals() {
             ~6 min; requires TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn resumes_a_recipe_whose_first_pass_rebooted_the_guest() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a recipe that reboots the guest on its first pass — as the kernel-swap step of a
     // real recipe does — and only writes its marker on the pass after that
@@ -139,10 +133,7 @@ async fn resumes_a_recipe_whose_first_pass_rebooted_the_guest() {
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn keeps_the_images_own_default_account_alongside_the_ones_the_recipe_defines() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a guest seeded with a recipe that defines an account of its own
     let dir = tempdir().unwrap();

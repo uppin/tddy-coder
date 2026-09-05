@@ -36,12 +36,8 @@ use tddy_vm::cloud_init::{
 use tddy_vm::qemu::{ensure_uefi_vars_file, resolve_uefi_code_path};
 use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
 use tddy_vm::{UefiFirmware, VmAccel, VmArch, VmLibrary};
-use tddy_vm_testkit::BootedGuest;
+use tddy_vm_testkit::{require_base_image, BootedGuest};
 use tempfile::tempdir;
-
-/// The env var this production test reads its base image path from — the same config
-/// knob the `tddy-vm-build cloud-init` CLI's `--base-image` flag reads.
-const BASE_IMAGE_ENV: &str = "TDDY_CLOUDINIT_BASE_IMAGE";
 
 /// The account [`a_minimal_cloud_init_user_data`] provisions, named once so the VM that
 /// later logs into a baked layer cannot ask for an account the bake never created.
@@ -64,11 +60,6 @@ const PREPARED_BASE_NAME: &str = "cloud-init-bootable";
 /// its own login seed. 300 s is an order of magnitude over the observed figure, so a merely
 /// slow boot does not fail the suite while a guest that never comes up still does.
 const VM_BOOT_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// Resolve the base image path from `TDDY_CLOUDINIT_BASE_IMAGE`, or `None` if unset.
-fn configured_base_image() -> Option<PathBuf> {
-    std::env::var(BASE_IMAGE_ENV).ok().map(PathBuf::from)
-}
 
 /// The UEFI firmware pair the bake boots through on this host, with its writable variables
 /// store placed in `work_dir`.
@@ -114,12 +105,7 @@ fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_overlay() {
-    let Some(base_image_src) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image_src = require_base_image();
 
     // Given a scratch directory, a place for the finished layer, and a minimal
     // provisioning spec
@@ -170,12 +156,7 @@ async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_ov
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn the_overlay_records_the_image_it_was_baked_from_as_a_relative_backing_file() {
-    let Some(base_image_src) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image_src = require_base_image();
 
     // Given a completed cloud-init build
     let dir = tempdir().unwrap();
@@ -234,12 +215,7 @@ async fn the_overlay_records_the_image_it_was_baked_from_as_a_relative_backing_f
             --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh() {
-    let Some(base_image_src) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image_src = require_base_image();
 
     // Given a library whose prepared base was baked from the supplied cloud image. The bake
     // is the subject here, so it runs for real rather than being stood in for: nothing but a
