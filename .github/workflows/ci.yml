@@ -229,7 +229,11 @@ jobs:
       - name: Stage the deployment set
         run: |
           mkdir -p dist
-          for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools tddy-sandbox-runner; do
+          # `recipes::deployed_binaries`, which is itself pinned against ./install's
+          # INSTALLED_BINARIES by a unit test — the script refuses to run with any of
+          # them missing, and a short list only announces itself after a bake and a boot.
+          for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools \
+                   tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner; do
             cp "target/debug/$b" dist/
           done
           cp install daemon.yaml.production supervisor.yaml.production dist/

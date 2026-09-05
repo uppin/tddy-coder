@@ -168,6 +168,45 @@ fn exports_everything_the_install_script_reads_from_a_checkout() {
 }
 
 #[test]
+fn deploys_every_binary_the_install_script_requires() {
+    // Given the install script's own list, read from the script rather than restated
+    let script = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("the testkit must sit two levels under the repo root")
+            .join("install"),
+    )
+    .expect("./install must be readable");
+    let required: Vec<String> = script
+        .lines()
+        .find(|line| line.starts_with("INSTALLED_BINARIES=("))
+        .expect("./install must declare INSTALLED_BINARIES")
+        .trim_start_matches("INSTALLED_BINARIES=(")
+        .trim_end_matches(')')
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+
+    // When the binaries the builder deploys are listed
+    let deployed = deployed_binaries();
+
+    // Then every one the script will look for is there — including `tddy-supervisor`, which
+    // the script prepends in `--systemd` mode. A short list is not caught until the guest
+    // is booted and the install exits 1 on the first missing path, which is minutes and one
+    // bake too late
+    for name in required
+        .iter()
+        .chain(std::iter::once(&"tddy-supervisor".to_string()))
+    {
+        assert!(
+            deployed.contains(&name.as_str()),
+            "./install requires {name}, which the deployed set does not carry: {deployed:?}"
+        );
+    }
+}
+
+#[test]
 fn stages_no_bundle_file_under_a_name_that_would_overwrite_a_binary() {
     // Given the flat directory the builder writes everything into
     let staged_bundle_names: Vec<&str> = install_bundle_paths()
