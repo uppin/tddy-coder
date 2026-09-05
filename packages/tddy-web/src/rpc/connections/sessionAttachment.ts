@@ -11,6 +11,7 @@
  */
 
 import type { SessionAttachmentHint } from "./session";
+import type { ConnectionCapability } from "./types";
 
 /** The fields of `ConnectSessionResponse` / `ResumeSessionResponse` this reads. */
 export interface AttachReply {
@@ -18,6 +19,18 @@ export interface AttachReply {
   readonly livekitUrl: string;
   readonly livekitServerIdentity: string;
 }
+
+/** A session published into a room: tracks and a roster come with the wire that carries its RPC. */
+const ROOM_BACKED_CAPABILITIES: ReadonlySet<ConnectionCapability> = new Set<ConnectionCapability>([
+  "rpc",
+  "media",
+  "presence",
+]);
+
+/** A session the host answers itself: calls, and nothing a frame pipe cannot carry. */
+const HOST_SERVED_CAPABILITIES: ReadonlySet<ConnectionCapability> = new Set<ConnectionCapability>([
+  "rpc",
+]);
 
 /**
  * The hint for `sessionId`, from what the daemon replied.
@@ -34,8 +47,16 @@ export function attachmentHintFromReply(
   sessionId: string,
   reply: AttachReply,
 ): SessionAttachmentHint {
-  // TODO(session-connection): implement
-  throw new Error(`attachmentHintFromReply(${sessionId}) is not implemented yet`);
+  const room = reply.livekitRoom.trim();
+  if (!room) return { sessionId };
+  const url = reply.livekitUrl.trim();
+  const serverIdentity = reply.livekitServerIdentity.trim();
+  return {
+    sessionId,
+    room,
+    ...(url ? { url } : {}),
+    ...(serverIdentity ? { serverIdentity } : {}),
+  };
 }
 
 /**
@@ -45,7 +66,8 @@ export function attachmentHintFromReply(
  * that does not is plain RPC. This is the function node 4's media and presence gating ultimately
  * reads through, so it is stated once, here, rather than re-derived per surface.
  */
-export function capabilitiesForHint(hint: SessionAttachmentHint): ReadonlySet<string> {
-  // TODO(session-connection): implement
-  throw new Error(`capabilitiesForHint(${hint.sessionId}) is not implemented yet`);
+export function capabilitiesForHint(
+  hint: SessionAttachmentHint,
+): ReadonlySet<ConnectionCapability> {
+  return hint.room ? ROOM_BACKED_CAPABILITIES : HOST_SERVED_CAPABILITIES;
 }

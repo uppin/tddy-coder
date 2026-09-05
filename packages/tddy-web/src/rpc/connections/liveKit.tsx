@@ -15,13 +15,18 @@
 import { useRef, type ReactNode } from "react";
 import { createClient, type Client, type Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
-import { ConnectionState, type Room } from "livekit-client";
+import { ConnectionState, Room } from "livekit-client";
 import { daemonRpcIdentity } from "../../lib/participantRole";
+import { TokenService } from "../../gen/token_pb";
 import {
+  useHttpClient,
   useLiveKitTransportFactory,
   type LiveKitTransportOptions,
 } from "../transportProvider";
+import { openHostServedSession } from "./hostServedSession";
+import { openLiveKitSession, type RoomBackedHint } from "./livekit/sessionConnection";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
+import type { SessionAttachmentHint, SessionConnection } from "./session";
 import type {
   ConnectionCapability,
   ConnectionProvider,
@@ -49,6 +54,26 @@ type LiveKitTransportFactory = (
   targetIdentity: string,
   options?: LiveKitTransportOptions,
 ) => Transport;
+
+/**
+ * What opening a *session* connection needs on top of what reaching a host needs.
+ *
+ * A host is reached on the common room this provider is already bound to, so nothing beyond a
+ * transport is required. A session lives in a room of its own: it has to be joined, which means a
+ * browser token has to be minted and refreshed, and a `Room` object has to be constructed. Neither
+ * is available inside `connectHost` — both come from hooks — so they are handed in at registration.
+ *
+ * `null` is a legitimate value: a provider constructed without these still reaches every host and
+ * still opens a session whose hint names no room. Only a room-backed session needs them, and a
+ * caller asking for one without them gets a refusal rather than a connection that joins nothing.
+ */
+export interface LiveKitSessionResources {
+  /** Mints and refreshes the browser token a session room is joined with. */
+  readonly tokens: Client<typeof TokenService>;
+
+  /** Constructs the `Room` object to join — the injection seam `useCommonRoom` calls `roomFactory`. */
+  readonly newRoom: () => Room;
+}
 
 /**
  * One host, reached at its RPC-server identity over a common-room connection.
@@ -83,6 +108,7 @@ class LiveKitHostConnection implements HostConnection {
     readonly hostId: string,
     private readonly room: Room,
     private readonly currentFactory: () => LiveKitTransportFactory,
+    private readonly currentSessionResources: () => LiveKitSessionResources | null = () => null,
   ) {
     this.identity = daemonRpcIdentity(hostId);
   }
@@ -114,6 +140,43 @@ class LiveKitHostConnection implements HostConnection {
     this.clients.set(service, built as Client<DescService>);
     return built;
   }
+
+  /**
+   * A connection to one session on this host.
+   *
+   * A hint naming a room is a session with a wire of its own: it is joined, and addressed at the
+   * participant its own process serves on. A hint naming none is a session this host answers itself
+   * — `cli_session_manager.rs` hosts `terminal.TerminalService` against a PTY handle — so it routes
+   * over this connection and advertises `rpc` alone. That second case is the one the app currently
+   * calls `connected-grpc` and treats as degraded; it is neither degraded nor a different kind of
+   * thing, only a session whose RPC happens to arrive by the same road as its host's.
+   *
+   * Not memoised, unlike {@link clientFor}: two attachments of the same session are two attachments,
+   * each with its own claim and its own `close()`, and handing the second one the first's connection
+   * would make either close release both.
+   */
+  openSession(sessionId: string, hint: SessionAttachmentHint): SessionConnection {
+    if (hint.sessionId !== sessionId) {
+      throw new Error(
+        `openSession(${sessionId}) was given a hint for session ${hint.sessionId}`,
+      );
+    }
+    const { room } = hint;
+    if (room === undefined) return openHostServedSession(this, hint);
+    const resources = this.currentSessionResources();
+    if (!resources) {
+      throw new Error(
+        `session ${sessionId} names LiveKit room ${room}, but this provider was registered ` +
+          `without the token client and room factory needed to join one`,
+      );
+    }
+    const roomBacked: RoomBackedHint = { ...hint, room };
+    return openLiveKitSession(this.hostId, roomBacked, {
+      tokens: resources.tokens,
+      newRoom: resources.newRoom,
+      transportFor: (room, targetIdentity) => this.currentFactory()(room, targetIdentity),
+    });
+  }
 }
 
 /**
@@ -139,11 +202,15 @@ export class LiveKitConnectionProvider implements ConnectionProvider {
 
   private factory: LiveKitTransportFactory;
 
+  private sessionResources: LiveKitSessionResources | null;
+
   constructor(
     private readonly room: Room | null,
     factory: LiveKitTransportFactory,
+    sessionResources: LiveKitSessionResources | null = null,
   ) {
     this.factory = factory;
+    this.sessionResources = sessionResources;
   }
 
   /** Whether this provider is the one already bound to `room` — see {@link LiveKitConnections}. */
@@ -164,11 +231,27 @@ export class LiveKitConnectionProvider implements ConnectionProvider {
     this.factory = factory;
   }
 
+  /**
+   * Swap what a session join is performed with, on the same terms as {@link rebindFactory}.
+   *
+   * `newRoom` is an inline arrow at the registration site, so this object's identity churns every
+   * render while what it does never changes. Standing connections read through it at open time and
+   * are left alone.
+   */
+  rebindSessionResources(sessionResources: LiveKitSessionResources | null): void {
+    this.sessionResources = sessionResources;
+  }
+
   connectHost(hostId: string): HostConnection | null {
     if (!this.room || hostId === "") return null;
     const existing = this.connections.get(hostId);
     if (existing) return existing;
-    const connection = new LiveKitHostConnection(hostId, this.room, () => this.factory);
+    const connection = new LiveKitHostConnection(
+      hostId,
+      this.room,
+      () => this.factory,
+      () => this.sessionResources,
+    );
     this.connections.set(hostId, connection);
     return connection;
   }
@@ -217,11 +300,16 @@ export function LiveKitConnections({
 }) {
   const registry = useConnectionProviders();
   const factory = useLiveKitTransportFactory();
+  // The session-room token mint is an ordinary daemon RPC over this page's own transport, not
+  // something reached through the common room — `useCommonRoom` mints its own token the same way.
+  const tokens = useHttpClient(TokenService);
+  const sessionResources: LiveKitSessionResources = { tokens, newRoom: () => new Room() };
   const providerRef = useRef<LiveKitConnectionProvider | null>(null);
   if (providerRef.current === null || !providerRef.current.isBoundTo(room)) {
-    providerRef.current = new LiveKitConnectionProvider(room, factory);
+    providerRef.current = new LiveKitConnectionProvider(room, factory, sessionResources);
   } else {
     providerRef.current.rebindFactory(factory);
+    providerRef.current.rebindSessionResources(sessionResources);
   }
   // Called on every render rather than wrapped in a `useMemo`: a memo is a cache, not a scheduler,
   // and using one to perform a side effect makes the effect depend on whether React kept the render.
