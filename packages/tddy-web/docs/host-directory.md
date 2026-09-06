@@ -46,7 +46,11 @@ the operator.
 - One working source is a usable directory. A desktop app whose LiveKit peers are unreachable can
   still use its own host and must not be shown a connection error for a feature it never asked for.
 - An unconfigured source reports `idle`, so it never drags the directory into `error`. **That is
-  what makes an absent LiveKit configuration a choice rather than a fault.**
+  what makes an absent LiveKit configuration a choice rather than a fault.** A source the operator
+  switched *off* (`livekit.enabled: false`, reported to the page as `livekit_enabled`) reports `idle`
+  for the same reason and by the same route: the hook withholds the coordinates, so `useCommonRoom`
+  short-circuits on the guard it already had. A deliberate "off" and a never-configured deployment
+  are the same quiet outcome — and neither is a failure to show an operator on every screen.
 - `error` therefore means *every* source failed, and only then does the directory publish a reason
   (the first source with one). A failure on one source while another still names hosts belongs to
   that source and is read off `sources`.
