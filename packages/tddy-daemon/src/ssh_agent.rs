@@ -161,10 +161,12 @@ impl AgentStatus {
 /// [`crate::spawner::run_capture_as_user`] *constructs* a child environment rather than inheriting a
 /// login session's — so the daemon does not simply have the value to hand.
 ///
-/// ⚠ Under a supervisor the daemon may not be able to see it at all: `resolve_env`
-/// (`packages/tddy-supervisor/src/policy.rs`) is an **allowlist**, and its own test fixture uses
-/// `SSH_AUTH_SOCK` as the example of a *denied* key. When that is the case the honest report is
-/// "no agent reachable", not a fabricated empty key list.
+/// ⚠ Under a supervisor the daemon usually cannot reach another user's socket — not because of the
+/// spawn policy's env allowlist (`resolve_env` gates a *session the daemon asks to spawn*, and a
+/// declared managed service is started with `EnvironmentBase::Inherited`), but because `./install`
+/// runs the daemon as an unprivileged service account and `/run/user/<uid>` is `0700`. The honest
+/// report there is the permission error, never a fabricated empty key list. See
+/// `packages/tddy-daemon/docs/host-tooling-probe.md` § *Reaching the socket on a supervised host*.
 pub trait AgentSocketResolver: Send + Sync {
     /// The agent socket for `os_user`, or `Ok(None)` when the lookup succeeded and named none.
     ///
@@ -436,7 +438,8 @@ impl<S: std::io::Write> std::io::Write for UntilDeadline<S> {
 /// is only reachable by that user and by root, and the daemon installed by `./install` runs as an
 /// unprivileged service account — so on a supervised host this resolves sockets it cannot connect
 /// to, and the probe reports "could not check" with the permission error rather than a fabricated
-/// empty key list. See `docs/dev/1-WIP/2026-09-06-agent-keys.md`.
+/// empty key list. See `packages/tddy-daemon/docs/host-tooling-probe.md` § *Reaching the socket on
+/// a supervised host*.
 #[cfg(unix)]
 pub struct WellKnownAgentSockets;
 

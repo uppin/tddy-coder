@@ -43,10 +43,10 @@ reposBasePath, isLocal}` — the wire's `firstSeenUnixMs` is deliberately not ma
 screen has no "known since" column and an unrendered field is surface every later change would have
 to keep mapping for nothing.
 
-**`HostRowTooling`** renders a host's tooling facts — the git identity its commits would carry and
-the state of the GitHub CLI there. It takes `{instanceId, git, githubCli}` and nothing else: the two
-blocks arrive as props rather than being fetched, so the section is a pure rendering of one
-`GetHostTooling` answer and mounts wherever the row places it.
+**`HostRowTooling`** renders a host's tooling facts — the git identity its commits would carry, the
+state of the GitHub CLI there, and the ssh-agent it has. It takes `{instanceId, git, githubCli,
+sshAgent}` and nothing else: the blocks arrive as props rather than being fetched, so the section is
+a pure rendering of one `GetHostTooling` answer and mounts wherever the row places it.
 
 Its state machine is written **guard-first**: `unanswered()` runs before either block's own states
 are consulted, and only `ProbeOutcome.OK` passes through to a finding. That direction is the point.
@@ -57,6 +57,28 @@ probe whose result was not understood. Listing the one outcome that licenses a f
 
 An absent block (`undefined`) is the same admission as an unset outcome — nothing has answered for
 this host yet — and renders a waiting marker rather than borrowing the shape of an answer.
+
+**`HostRowSshAgent`** is the third section it mounts, taking `{instanceId, sshAgent}` — optional for
+the same reason the git and `gh` blocks are, since a row renders before any probe has answered. It
+repeats the outcome-first guard rather than sharing one, and for the same reason: only
+`ProbeOutcome.OK` licenses a finding, so an outcome a newer daemon added and this bundle cannot name
+renders "Could not check" instead of "No agent" — which would send an operator to start an agent
+that is very possibly already running.
+
+Past the guard it reads two more things in order. `reachable === false` is "No agent"; a reachable
+agent with an empty `keys` is "No keys loaded". Both arrive with no keys, and only `reachable` tells
+them apart, so the emptiness is never the thing consulted.
+
+A held key renders its type, its **whole** fingerprint (monospaced, `break-all`) and its comment.
+The fingerprint is not shortened because two keys can share any prefix of one, and a shortened one
+matches nothing in an operator's own `ssh-add -l`. The comment is rendered in italics with no label
+suggesting it locates anything: the agent does not know which file a key came from, and a comment is
+free text.
+
+⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
+issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
+are covered, and the assembled path — row → RPC → probe → cells — has never run. Mounting it belongs
+to the node that owns the row.
 
 ## Rows
 
@@ -72,13 +94,14 @@ One `<tr>` per host, in a `hosts-table`, columns left to right:
 
 An empty list renders `hosts-empty` ("No hosts recorded yet.") instead of the table.
 
-**Tooling cells.** `HostRowTooling` renders two cells under `hosts-row-<id>-tooling`, each labelled
-with the tool it speaks for:
+**Tooling cells.** `HostRowTooling` renders three sections under `hosts-row-<id>-tooling`, each
+labelled with the tool it speaks for:
 
 | Cell | Test id | Reading |
 |---|---|---|
 | git | `hosts-row-<id>-git` | `Name <email>` · `Not configured` · `Could not check` · `Not supported here` · `…` |
 | gh | `hosts-row-<id>-gh` | the login · `Not authenticated` · `Not installed` · `Could not check` · `Not supported here` · `…` |
+| ssh-agent | `hosts-row-<id>-ssh-agent` | one `hosts-row-<id>-ssh-key-<fingerprint>` per held key · `No keys loaded` · `No agent` · `Could not check` · `Not supported here` · `…` |
 
 "Could not check" and "Not configured" are deliberately different strings, because they send an
 operator to two different places and only one of them is a host to go and fix.
@@ -123,6 +146,13 @@ The page object `cypress/support/pages/hostsScreenPage.ts` selects rows **struct
 (`[data-testid="hosts-table"] tbody tr`) rather than by a `hosts-row-` prefix. A prefix match over
 that namespace also collects each row's own cells, and a `:not()` denylist patching around that would
 silently over-match the moment a column is added.
+
+`cypress/component/HostsScreenSshAgentAcceptance.cy.tsx` mounts `HostRowSshAgent` directly and
+covers the key list, the three summary states told apart from one another, a comment rendered as a
+comment rather than a path, an outcome this bundle cannot name, and a host that has not answered yet.
+
+`hostSshAgentPage` on the same page object owns the ssh-agent section's selectors, including the
+prefix match over `hosts-row-<id>-ssh-key-` that collects the held keys.
 
 `hostToolingPage` on that same page object owns the tooling section's DOM contract, and
 `expectGhLoginLabelledAsHosts` is why it has to. The cell renders a static `gh` label in every
