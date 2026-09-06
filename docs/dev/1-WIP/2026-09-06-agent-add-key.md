@@ -137,9 +137,9 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Host RSA keypair and its lifecycle
 - [x] Public key published with the prompt; fingerprint derivation
 - [x] Browser `SubtleCrypto` `RSA-OAEP` encryption
-- [~] Key continuity: pin on first sight, block on change — the dialog blocks; `hostKeyPinning` itself is **untested**
-- [ ] ⚠ Daemon decrypt → private key decrypt → agent add → drop plaintext — **not implemented**, no red test covers it
-- [ ] ⚠ Passphrase dialog **done**; add-key action and key selector **not implemented**
+- [x] Key continuity: pin on first sight, block on change — 13 tests; unusable storage now reports `unverified`
+- [x] Daemon decrypt → private key decrypt → agent add → drop plaintext
+- [ ] ⚠ Passphrase dialog **done**; add-key action, key selector and `useHostPrompts.ts` **not implemented**
 - [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
 - [x] Confirm whether the git hardening needs any change at all
 
@@ -203,9 +203,9 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Stream handler **and its teardown test green** — before any UI work
 - [x] Host keypair + fingerprint
 - [x] Browser encryption producing a payload the daemon decrypts
-- [ ] ⚠ Full round trip adding a real key to a fake agent — **not started**
-- [~] Key pinning + change warning — warning green; the pinning module is untested
-- [~] Wrong-passphrase, expiry and replay paths — expiry/replay green in the registry; wrong-passphrase needs the unlock path
+- [x] Full round trip adding a real key to a fake agent
+- [x] Key pinning + change warning
+- [x] Wrong-passphrase, expiry and replay paths
 - [x] Confirm the git hardening question
 
 ## Testing plan
@@ -328,31 +328,66 @@ process umask. The three hand-rolled secret writers remain deferred, as planned.
 asserts `== 0`, which a never-incremented counter would satisfy too. `PumpCount::running` increments
 synchronously in the handler *before* the spawn and decrements in `Drop`, so the assertion is real.
 
-### ⚠ `## Responsibility` is NOT yet fully delivered
+### Second wave — the add-key flow closed end to end
 
-Two items remain, and neither has a red test, so neither can be greened without a `/red` pass first:
+`AddHostKey` was added because nothing could **issue** a prompt: the node had the channel and the
+crypto but no operation that raises a question and consumes the answer, so the whole
+decrypt → unlock → agent-add path was unreachable *and* untestable. Its response reports an outcome
+rather than a bare bool, so the browser can distinguish a wrong passphrase from an expired prompt,
+an absent agent and an unreadable key.
 
-1. **Decrypt → unlock → agent add → drop plaintext.** `answer_host_prompt` authenticates and records
-   the ciphertext, but nothing consumes it — `connection_service.rs` carries a `TODO(agent-add-key)`
-   at that seam. Nothing calls `issue()` yet, so there is no waiting operation to hand it to.
-2. **The add-key action and key selector on the Hosts row**, and the `useHostPrompts.ts` subscription
-   hook, which the Delta lists but which does not exist.
+The wait is a per-prompt `oneshot` created in `issue`. The sender is itself the "unanswered" marker,
+so single use stays derived from one field instead of a flag that could disagree with a stored
+answer, and the registry keeps **no copy** of the ciphertext — it moves through the channel to the
+waiter. Parking the receiver in the record buffers an answer that arrives before the waiter claims
+it, which a bare `Notify` would drop.
+
+`ssh_agent_add.rs` is a new module rather than an addition to node 5's `ssh_agent.rs`: adding an
+identity is this node's responsibility, and the probe surface below it belongs to the PR that owns
+it. Socket resolution is **called**, not reimplemented.
+
+| Gate | Result |
+|---|---|
+| `cargo build` (workspace) · `fmt --check` · `clippy -p tddy-daemon -p tddy-core -p tddy-service` | clean |
+| `cargo test -p tddy-daemon --lib` | **737 passed, 0 failed** |
+| `cargo test -p tddy-daemon --test stream_host_prompts_rpc` | 3 passed |
+| `cargo test -p tddy-core --lib` | 328 passed |
+| `bun test packages/tddy-web/src/lib` | **309 passed, 0 failed** |
+
+**`hostKeyPinning` now has 13 tests**, and gained an `unverified` verdict. Unusable storage used to
+report `pinned-now` — a positive claim the dialog acts on, made when nothing was recorded, and false
+on every later sighting, so an active substitution was indistinguishable from an ordinary first use
+permanently. An empty fingerprint takes the same route rather than burning the one first-use trust
+slot.
+
+### ⚠ Still open — the flow is not reachable from the browser
+
+The daemon can serve the whole round trip, but nothing in the UI starts it:
+
+1. **`useHostPrompts.ts`** — the subscription hook the Delta specifies. Does not exist.
+2. **The add-key action and key selector** on the Hosts row. Do not exist.
+3. **`reports_a_failure_without_adding_a_key_when_the_passphrase_is_wrong`** — the Cypress AC-4 test
+   named in the acceptance table. Not written.
+4. **`unverified` is displayed nowhere.** `checkHostKey` has no caller outside its own test, so the
+   verdict exists but no operator ever sees it.
 
 Under the boundary contract an unimplemented owned symbol is a blocker rather than a follow-up, so
-this node is **not ready for `/pr-wrap`**.
+this node is **not ready to be marked ready for review**.
 
-### ⚠ `hostKeyPinning` is unverified production code
+### Two outcome gaps recorded rather than fixed
 
-No red test references `checkHostKey` or `acceptChangedHostKey`. AC-9 exercises the dialog's
-`keyChanged` prop, not the pinning logic behind it — so the module carrying the TOFU property, this
-node's most arguable decision, has no coverage. Two behaviours were decided during green and want a
-second opinion:
+`AddHostKeyOutcome` has no arm for an answer this host cannot decrypt (encrypted for the wrong host,
+or corrupt) or for an agent that answered and refused; both map to `UNSPECIFIED` with a plain
+`failure_reason`. Reporting `WRONG_PASSPHRASE` for the first would send the operator to retype
+something that will keep failing, and `NO_AGENT` for the second would be false. Adding arms is a
+proto change plus a TS regeneration.
 
-- **Storage unavailable degrades to `pinned-now`.** `KeyPinVerdict` has no "unknown" arm, so a browser
-  that throws on `localStorage` falls back to trust-on-every-use. It never yields a false `unchanged`,
-  but it is silent; a fourth arm would let the dialog say the browser cannot remember host keys.
-- **`acceptChangedHostKey` writes the new pin** rather than deleting the old one as its stub comment
-  said. Deleting would accept whichever key turned up next, not the one the operator looked at.
+An **unencrypted** key at `subject` is added as-is rather than reported as a wrong passphrase, since
+`PrivateKey::decrypt` refuses an already-decrypted key and the naive mapping would lie. It still
+raises a prompt first; skipping the prompt for such a key is better UX that no test pins.
+
+The passphrase buffer is a plain `Vec<u8>` — dropped, not zeroized. `zeroize` is not a `tddy-daemon`
+dependency and was not added without consent.
 
 ## Refactoring needed
 
