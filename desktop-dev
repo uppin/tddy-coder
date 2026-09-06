@@ -24,7 +24,10 @@ set -euo pipefail
 set -m
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# This script lives AT the repo root, so the root is its own directory — the same place
+# ./web-dev resolves with `cd "$(dirname "$0")"`. Going up a level pointed TDDY_WORKSPACE_ROOT,
+# TDDY_DATA_DIR and the dev.desktop.yaml lookup at the checkout's parent, where none of them exist.
+PROJECT_ROOT="$SCRIPT_DIR"
 
 VITE_PORT="${VITE_PORT:-5173}"
 export VITE_URL="${VITE_URL:-http://localhost:${VITE_PORT}}"

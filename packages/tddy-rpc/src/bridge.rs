@@ -190,6 +190,42 @@ impl RpcService for MultiRpcService {
     }
 }
 
+/// An `Arc`'d service is itself a service, so anything that takes an `S: RpcService` by value can
+/// be handed a shared handle instead.
+///
+/// A host that decides at runtime *which* roster a connection reaches only ever holds an
+/// `Arc<dyn RpcService>` — the resolved roster is not a type it can name. Without this it could not
+/// give that roster to a [`ServerEngine`](crate::server_engine::ServerEngine), even though
+/// [`ServiceEntry`] already stores rosters in exactly that shape.
+#[async_trait]
+impl<S: RpcService + ?Sized> RpcService for Arc<S> {
+    fn is_bidi_stream(&self, service: &str, method: &str) -> bool {
+        (**self).is_bidi_stream(service, method)
+    }
+
+    async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
+        (**self).handle_rpc(service, method, message).await
+    }
+
+    async fn handle_rpc_stream(
+        &self,
+        service: &str,
+        method: &str,
+        messages: &[RpcMessage],
+    ) -> RpcResult {
+        (**self).handle_rpc_stream(service, method, messages).await
+    }
+
+    async fn start_bidi_stream(
+        &self,
+        service: &str,
+        method: &str,
+        input_rx: mpsc::Receiver<RpcMessage>,
+    ) -> Result<BidiStreamOutput, Status> {
+        (**self).start_bidi_stream(service, method, input_rx).await
+    }
+}
+
 /// Bridge that routes RPC messages to a service.
 /// Receives already-extracted service/method and RpcMessage slices from the transport layer.
 pub struct RpcBridge<S: RpcService> {

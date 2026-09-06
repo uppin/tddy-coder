@@ -32,17 +32,31 @@ pub struct SinkClosed;
 /// Why a request frame was not accepted.
 #[derive(Debug, PartialEq, Eq)]
 pub enum FrameError {
-    /// A frame arrived before any webview registered a sink, so no response could be delivered.
+    /// No connection can answer this frame, and none can be named.
+    ///
+    /// On [`WebviewRpcHost`] that means the frame arrived before any webview registered a sink. On
+    /// [`MultiConnectionHost`](crate::MultiConnectionHost) it also covers the case that host alone
+    /// has: several connections are open and the frame's epoch matches none of them, so there is no
+    /// single incumbent to report as [`Self::StaleConnection`].
     NotConnected,
     /// The frame's bytes are not a decodable `RpcRequest`.
     Malformed(String),
-    /// The frame belongs to a page connection this host has already replaced.
+    /// The frame's epoch names a connection this host is not serving, while it is serving exactly
+    /// one other — reported in `connected`.
     ///
-    /// Dispatching it anyway would answer it onto the *current* page's channel, where the epoch
+    /// The two hosts arrive here differently. [`WebviewRpcHost`] holds one connection at a time and
+    /// replaces it on every `connect`, so this is a frame from a page that has been superseded.
+    /// [`MultiConnectionHost`](crate::MultiConnectionHost) replaces nothing: a frame gets here by
+    /// naming an epoch no open connection has — never opened, or already released.
+    ///
+    /// Dispatching it anyway would answer it onto the *other* connection's channel, where the epoch
     /// does not match and the response is dropped — so the caller that sent it would wait for an
     /// answer that can never arrive. Refusing says so instead.
     StaleConnection {
-        /// The epoch of the page currently connected.
+        /// The one connection this host has open: the current page's epoch on
+        /// [`WebviewRpcHost`], and on [`MultiConnectionHost`](crate::MultiConnectionHost) the sole
+        /// open connection — which is why that host reports this only when there is exactly one to
+        /// name.
         connected: u32,
         /// The epoch the refused frame carried.
         frame: u32,
