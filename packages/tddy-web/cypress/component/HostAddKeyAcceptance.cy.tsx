@@ -25,13 +25,35 @@ const dialog = {
   changedWarning: () => cy.get('[data-testid="host-key-changed-warning"]'),
 };
 
-function mountDialog(opts: { keyChanged?: boolean; onSubmit?: (p: string) => void } = {}) {
+/**
+ * A real RSA-OAEP(SHA-256) public key in SPKI DER — the same shape the daemon publishes with a
+ * prompt. Generated once for the suite so the encryption path is genuinely exercised: a stubbed
+ * `crypto.subtle` would hollow out the one test carrying this node's security claim.
+ */
+let hostPublicKey: Uint8Array;
+
+async function anRsaOaepPublicKey(): Promise<Uint8Array> {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+      hash: "SHA-256",
+    },
+    true,
+    ["encrypt", "decrypt"],
+  );
+  return new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
+}
+
+function mountDialog(opts: { keyChanged?: boolean; onSubmit?: (encrypted: Uint8Array) => void } = {}) {
   mountWithRpc(
     withSelectedDaemon(
       <HostPassphraseDialog
         hostId={HOST}
         subject="id_ed25519"
         fingerprint={FINGERPRINT}
+        spkiDer={hostPublicKey}
         keyChanged={opts.keyChanged ?? false}
         onSubmit={opts.onSubmit ?? (() => {})}
         onCancel={() => {}}
@@ -42,6 +64,12 @@ function mountDialog(opts: { keyChanged?: boolean; onSubmit?: (p: string) => voi
 }
 
 describe("Host add-key passphrase prompt", () => {
+  before(() => {
+    cy.wrap(anRsaOaepPublicKey()).then((spkiDer) => {
+      hostPublicKey = spkiDer as unknown as Uint8Array;
+    });
+  });
+
   it("surfaces a passphrase prompt naming the host and the key", () => {
     mountDialog();
 

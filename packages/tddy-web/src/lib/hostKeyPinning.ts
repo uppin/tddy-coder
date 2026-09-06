@@ -24,23 +24,63 @@ export type KeyPinVerdict =
   /** Different from the pinned key — the flow must stop and say so. */
   | { kind: "changed"; pinnedFingerprint: string };
 
+/** One `localStorage` entry per host, so a pin can be dropped without touching the others. */
+const PIN_KEY_PREFIX = "tddy.hostKeyPin.";
+
+function pinKey(hostId: string): string {
+  return `${PIN_KEY_PREFIX}${hostId}`;
+}
+
+/**
+ * The pinned fingerprint for `hostId`, or `null` when there is none *or* storage is unusable.
+ *
+ * Private-mode and storage-blocked browsers throw on access rather than returning `null`; letting
+ * that escape would take the whole hosts screen down over a hardening feature.
+ */
+function readPin(hostId: string): string | null {
+  try {
+    return window.localStorage.getItem(pinKey(hostId));
+  } catch {
+    return null;
+  }
+}
+
+/** Record `fingerprint` as the pin for `hostId`. A storage that refuses the write is not fatal. */
+function writePin(hostId: string, fingerprint: string): void {
+  try {
+    window.localStorage.setItem(pinKey(hostId), fingerprint);
+  } catch {
+    // Nothing is pinned, so the next sighting is a first sighting again — see `checkHostKey`.
+  }
+}
+
 /**
  * Check `fingerprint` against what is pinned for `hostId`, pinning it when nothing is.
  *
  * Per-browser by design: a pin is a record of what *this* operator saw, and syncing it through the
  * daemon would route the trust anchor back through the channel it exists to distrust.
+ *
+ * ⚠ Where storage is unavailable every sighting reads as a first sighting (`pinned-now`), which is
+ * trust-on-every-use: no worse than the no-pinning alternative, and never a false `unchanged`.
  */
 export function checkHostKey(hostId: string, fingerprint: string): KeyPinVerdict {
-  // TODO(agent-add-key): implement
-  void hostId;
-  void fingerprint;
-  throw new Error("agent-add-key: checkHostKey not implemented");
+  const pinnedFingerprint = readPin(hostId);
+  if (pinnedFingerprint === null) {
+    writePin(hostId, fingerprint);
+    return { kind: "pinned-now" };
+  }
+  if (pinnedFingerprint === fingerprint) {
+    return { kind: "unchanged" };
+  }
+  return { kind: "changed", pinnedFingerprint };
 }
 
-/** Forget the pin for `hostId`, so the next sighting pins afresh. Used when an operator accepts a changed key. */
+/**
+ * Accept `fingerprint` as the new pin for `hostId`, after an operator has said the change is theirs.
+ *
+ * The new key is pinned outright rather than the old pin merely dropped: dropping it would silently
+ * accept whichever key turned up next, which is the sighting the operator did *not* look at.
+ */
 export function acceptChangedHostKey(hostId: string, fingerprint: string): void {
-  // TODO(agent-add-key): implement
-  void hostId;
-  void fingerprint;
-  throw new Error("agent-add-key: acceptChangedHostKey not implemented");
+  writePin(hostId, fingerprint);
 }

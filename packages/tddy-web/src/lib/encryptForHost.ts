@@ -22,8 +22,13 @@ export async function encryptForHost(
   spkiDer: Uint8Array,
   plaintext: string,
 ): Promise<Uint8Array> {
-  // TODO(agent-add-key): implement
-  void spkiDer;
-  void plaintext;
-  throw new Error("agent-add-key: encryptForHost not implemented");
+  // Imported per call rather than cached: a `CryptoKey` outlives the prompt it belongs to, and the
+  // import is cheap next to the guarantee that we always encrypt under the key just published.
+  const publicKey = await crypto.subtle.importKey("spki", spkiDer, ALGORITHM, false, ["encrypt"]);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: ALGORITHM.name },
+    publicKey,
+    new TextEncoder().encode(plaintext),
+  );
+  return new Uint8Array(ciphertext);
 }
