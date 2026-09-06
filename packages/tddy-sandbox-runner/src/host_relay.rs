@@ -200,9 +200,13 @@ pub trait HostRpcHandler: Send + Sync + 'static {
 
 /// An RPC handler that refuses every call with `UNIMPLEMENTED`. The correct handler for a session
 /// with no daemon in the loop (the standalone app) and for tests that do not exercise the roster
-/// or conversation RPCs: the in-jail `tddy-tools` sees the refusal, reports the roster as
-/// unavailable, and refuses every `subagent_*` call — which is the safe behaviour the runner TODO
-/// described, now reached over the bridge rather than left unreachable.
+/// or conversation RPCs.
+///
+/// Nothing routine reaches it: `tddy-sandbox-app` declares its roster fixed for the session's
+/// lifetime (`TDDY_SUBAGENT_ROSTER_STATIC`, see `tddy_tools::session_agents`), so the in-jail
+/// `tddy-tools` answers `subagent_*` from its spawn seed and opens no roster subscription. A call
+/// that does arrive is a caller assuming a daemon that is not there, and the refusal names it
+/// rather than hanging.
 #[derive(Default, Clone)]
 pub struct NullRpcHandler;
 

@@ -14,6 +14,12 @@
 //! shell tools are hard-disabled ([`build_host_agent_argv`]); and the checkout's own configuration
 //! — its `.mcp.json` and its `.claude/settings.json` hooks, neither of which is a *tool* — is never
 //! loaded, because the agent's working directory is a repository nobody audited.
+//!
+//! The session's specialized agents ride along on the first of those three. A roster is read by
+//! `tddy_tools::server::subagents_from_env` in whichever process runs `tddy-tools --mcp`, and in
+//! this mode that process is the host one this module configures — so seeding it is the same env
+//! overlay every other mode writes ([`crate::spawn::subagent_env_overlay`]), carried in the MCP
+//! server's `env` block instead of the jail's.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -51,6 +57,13 @@ pub struct HostAgentArgs {
     pub egress_dir: Option<PathBuf>,
     /// Exec tools the session's subagent defs replace.
     pub replaced_tools: Vec<String>,
+    /// The session's resolved specialized-agent defs (`crate::config::resolve_session_agents`).
+    ///
+    /// Seeded into the host `tddy-tools --mcp` server's env, which is where a roster has always
+    /// been read from — the other modes' server happens to run inside the jail, this one's does
+    /// not, and neither the reader nor the format cares. Empty means no agent is wired, and the
+    /// conversation tools are then not advertised at all.
+    pub specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
 }
 
 /// The `env` block for the host `tddy-tools --mcp` server.
@@ -59,16 +72,26 @@ pub struct HostAgentArgs {
 /// `SessionToolTransport::SandboxIpc` from it and speaks `ExecuteTool` over the socket. Who is on
 /// the other end was never its concern — in every other mode that is the in-jail runner relaying
 /// *outwards*, and here it is this app relaying *inwards*.
+///
+/// The same variable is what makes a wired-in specialized agent reach the codebase: it is what
+/// `subagent_codebase_access_from_env` detects, so the agent's own read/glob/grep loop is dispatched
+/// into the jail exactly like the main agent's tool calls, rather than reading this host directly.
+/// Its *model* traffic is not — see the PRD's § Specialized subagents.
 pub(crate) fn host_mcp_env(
     tool_ipc_socket: &Path,
     mcp_log_level: Option<&str>,
     egress_dir: Option<&Path>,
+    specialized_defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     env.insert(
         "TDDY_SANDBOX_TOOL_IPC".to_string(),
         tool_ipc_socket.to_string_lossy().into_owned(),
     );
+    // The roster, in the same `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` shape the jail's env carries in
+    // every other mode. One overlay builder for both placements, so a def resolved here means what
+    // it means there.
+    env.extend(crate::spawn::subagent_env_overlay(specialized_defs));
     // Same two files the in-jail server writes (`tddy_sandbox_runner::runner::spawn_claude_pty`),
     // under the same session egress dir: a dispatch that never reached the jail leaves a record
     // here instead of vanishing into the stderr the agent captured from its MCP child.
@@ -113,6 +136,7 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
         mcp_log_level,
         egress_dir,
         replaced_tools,
+        specialized_defs,
     } = args;
 
     let mut argv = tddy_core::claude_argv::build_claude_base_argv(
@@ -151,17 +175,18 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
         &tool_ipc_socket,
         mcp_log_level.as_deref(),
         egress_dir.as_deref(),
+        &specialized_defs,
     );
     let replaced: Vec<&str> = replaced_tools.iter().map(String::as_str).collect();
     tddy_sandbox_recipes::append_host_agent_mcp_args(
         &mut argv,
         &host_config_dir,
         &tddy_tools_path,
-        // The subagent tool surface is seeded through the *in-jail* `tddy-tools --mcp` process's
-        // env, and this mode has no in-jail MCP server to seed (PRD § not in scope) — so no roster
-        // is advertised. A def's `replaces:` still applies: a tool the session took away stays
-        // taken away wherever the agent happens to run.
-        false,
+        // The conversation tools are advertised exactly when there is someone to converse with —
+        // the same condition the roster's own server applies, expressed here because the argv is
+        // fixed before that server exists. A def's `replaces:` applies either way: a tool the
+        // session took away stays taken away wherever the agent happens to run.
+        !specialized_defs.is_empty(),
         &replaced,
         &mcp_env,
     )?;
@@ -194,6 +219,24 @@ mod tests {
             mcp_log_level: None,
             egress_dir: None,
             replaced_tools: vec![],
+            specialized_defs: vec![],
+        }
+    }
+
+    /// A def as `config::resolve_session_agents` hands one over: an endpoint this host reaches by
+    /// itself, which is the whole of what a specialized agent needs from wherever it is run.
+    fn a_specialized_agent_named(name: &str) -> tddy_discovery::agent_def::SpecializedAgentDef {
+        tddy_discovery::agent_def::SpecializedAgentDef {
+            name: name.to_string(),
+            label: None,
+            model: "qwen2.5-coder:7b".to_string(),
+            base_url: "http://localhost:11434".to_string(),
+            api_key: None,
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![tddy_discovery::agent_def::SubagentTool::Read],
+            max_turns: 10,
+            replaces: vec![],
         }
     }
 
@@ -216,7 +259,7 @@ mod tests {
     #[test]
     fn the_host_agents_mcp_server_dispatches_through_the_apps_tool_socket() {
         // Given / When
-        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, None);
+        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, None, &[]);
 
         // Then
         assert_eq!(
@@ -234,7 +277,7 @@ mod tests {
         let egress = PathBuf::from("/tmp/session/egress");
 
         // When
-        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, Some(&egress));
+        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, Some(&egress), &[]);
 
         // Then
         let log_file = env
@@ -243,6 +286,93 @@ mod tests {
         assert!(
             log_file.starts_with("/tmp/session/egress"),
             "the log must land under the session egress dir; got: {log_file}"
+        );
+    }
+
+    /// The roster is read from the env of whichever process runs `tddy-tools --mcp`, and in this
+    /// mode that process runs here. Seeding it is the same overlay the other modes write into the
+    /// jail — a different placement, not a different mechanism.
+    #[test]
+    fn the_host_agents_mcp_server_carries_the_roster_the_session_wired() {
+        // Given
+        let defs = vec![a_specialized_agent_named("explorer")];
+
+        // When
+        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, None, &defs);
+
+        // Then
+        assert_eq!(
+            env.get("TDDY_SUBAGENT").map(String::as_str),
+            Some("explorer"),
+            "env was: {env:?}"
+        );
+        assert!(
+            env.get("TDDY_SUBAGENTS_JSON")
+                .is_some_and(|json| json.contains("explorer")),
+            "the server must be seeded with the def itself, not only its name; env was: {env:?}"
+        );
+    }
+
+    /// And a session that wired none seeds none: an empty roster is the absence of the variable,
+    /// not an empty value, so the server has nothing to fail to parse.
+    #[test]
+    fn the_host_agents_mcp_server_carries_no_roster_when_the_session_wired_none() {
+        // Given / When
+        let env = host_mcp_env(Path::new(TOOL_SOCKET), None, None, &[]);
+
+        // Then
+        assert!(
+            !env.contains_key("TDDY_SUBAGENTS_JSON") && !env.contains_key("TDDY_SUBAGENT"),
+            "env was: {env:?}"
+        );
+    }
+
+    /// The argv is fixed before the MCP server exists, so the conversation tools have to be allowed
+    /// at launch for an agent the session wired at launch.
+    #[test]
+    fn the_host_agent_may_call_the_conversation_tools_of_an_agent_the_session_wired() {
+        // Given
+        let host_config = tempfile::tempdir().expect("host config tempdir");
+        let mut args = a_host_agent(host_config.path());
+        args.specialized_defs = vec![a_specialized_agent_named("explorer")];
+
+        // When
+        let argv = build_host_agent_argv(args).expect("argv must build");
+
+        // Then
+        let allowed = values_after(&argv, "--allowedTools");
+        for tool in [
+            "subagent_new_session",
+            "subagent_prompt",
+            "subagent_await",
+            "subagent_cancel",
+        ] {
+            let prefixed = format!("mcp__tddy-tools__{tool}");
+            assert!(
+                allowed.contains(&prefixed),
+                "the host agent must be allowed to call {prefixed}; allow-list was: {allowed:?}"
+            );
+        }
+    }
+
+    /// With no agent wired there is nobody to converse with, and a tool the session's MCP server
+    /// never advertises must not be pre-approved either.
+    #[test]
+    fn the_host_agent_is_offered_no_conversation_tools_when_the_session_wired_no_agent() {
+        // Given
+        let host_config = tempfile::tempdir().expect("host config tempdir");
+
+        // When
+        let argv =
+            build_host_agent_argv(a_host_agent(host_config.path())).expect("argv must build");
+
+        // Then
+        let allowed = values_after(&argv, "--allowedTools");
+        assert!(
+            !allowed
+                .iter()
+                .any(|tool| tool.starts_with("mcp__tddy-tools__subagent_")),
+            "allow-list was: {allowed:?}"
         );
     }
 
@@ -389,20 +519,23 @@ mod tests {
     }
 
     /// A subagent's replacements still apply: running on the host does not hand back a tool the
-    /// session took away.
+    /// session took away. Both spellings are withdrawn, because both are things this agent could
+    /// otherwise type — the native tool and the jailed one that is this mode's only route.
     #[test]
     fn the_host_agent_still_loses_a_tool_one_of_its_subagents_replaced() {
         // Given
         let host_config = tempfile::tempdir().expect("host config tempdir");
         let mut args = a_host_agent(host_config.path());
+        args.specialized_defs = vec![a_specialized_agent_named("explorer")];
         args.replaced_tools = vec!["Grep".to_string()];
 
         // When
         let argv = build_host_agent_argv(args).expect("argv must build");
 
         // Then
+        let disallowed = values_after(&argv, "--disallowedTools");
         assert!(
-            values_after(&argv, "--disallowedTools").contains("mcp__tddy-tools__Grep"),
+            disallowed.contains("mcp__tddy-tools__Grep") && disallowed.contains("Grep"),
             "argv was: {argv:?}"
         );
     }

@@ -694,10 +694,20 @@ agents are *doing* is exactly what the frame exists to deliver. A frame *older* 
 force stays ignored — applying it would resurrect a detached agent.
 
 `TDDY_SUBAGENTS_JSON` remains, demoted to a **seed**: it makes the roster usable in the window
-between spawn and the stream's first frame, and it is what `tddy-sandbox-app` — which has no daemon
-in the loop — continues to run on. A `tddy-tools` that cannot open the stream **fails loudly** rather
-than falling back to the seed forever: a registry frozen at the seed answers for agents that were
-detached, and silently running the wrong roster is the failure this design exists to prevent.
+between spawn and the stream's first frame. A `tddy-tools` that cannot open the stream **fails
+loudly** rather than falling back to the seed forever: a registry frozen at the seed answers for
+agents that were detached, and silently running the wrong roster is the failure this design exists
+to prevent.
+
+A session whose roster *cannot* change is the one exception, and it is a declaration rather than a
+fallback. `tddy-sandbox-app` resolves its whole roster before the session starts and has no attach
+or detach to change it with, so it sets `TDDY_SUBAGENT_ROSTER_STATIC` alongside the seed and
+`tddy-tools` opens no subscription at all — the seed is the whole roster, for the whole run, and its
+agents are reached directly over their defs' `base_url`. Only the host that built the roster can
+say this, so only the host says it: nothing is inferred from a stream that failed, timed out or was
+refused, because a daemon session whose stream broke looks exactly like that and must keep refusing.
+The transport cannot answer it either — `TDDY_SANDBOX_TOOL_IPC` is configured by a jailed daemon
+session *and* by the standalone app, since the socket is how tool calls are dispatched.
 
 The stream is the first long-lived server stream over `SandboxIpc`. That transport opens a fresh
 `UnixStream` per dispatch today and its `call_server_stream` carries no deadline, so the roster

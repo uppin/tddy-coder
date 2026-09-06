@@ -41,6 +41,6 @@ pub use registry::{
 };
 pub use seed::session_agent_roster;
 pub use stream::{
-    follow_session_agent_roster, ReconnectPacing, RosterStreamOutcome,
-    PASS_LONG_ENOUGH_TO_BE_SERVICE,
+    decide_roster_subscription, follow_session_agent_roster, ReconnectPacing, RosterMutability,
+    RosterStreamOutcome, PASS_LONG_ENOUGH_TO_BE_SERVICE, STATIC_ROSTER_ENV,
 };

@@ -706,9 +706,16 @@ impl tddy_rpc::RpcService for HostToolIpcService {
         message: &tddy_rpc::RpcMessage,
     ) -> tddy_rpc::RpcResult {
         if service != "connection.ConnectionService" || method != "ExecuteTool" {
-            // The roster and conversation RPCs the in-jail server forwards to a facilitating daemon
-            // have no counterpart here: there is no daemon in this session, and the specialized
-            // subagents that would use them are refused where the session is configured.
+            // The roster and conversation RPCs have no counterpart here: they are served by a
+            // facilitating daemon, and this session has none — the app resolved its own roster from
+            // YAML and seeded it into the MCP server's env, and a wired-in specialized agent runs
+            // its loop *inside* that server rather than on some other host, reached directly over
+            // its def's `base_url`.
+            //
+            // Nothing asks for them either: the same env overlay carries
+            // `TDDY_SUBAGENT_ROSTER_STATIC` (`spawn::subagent_env_overlay`), which tells the MCP
+            // server that its seed is this session's whole roster and stops it subscribing to a
+            // stream that would only ever be refused here.
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "a sandboxed codebase session serves only ExecuteTool, got {service}/{method}"
             ))));

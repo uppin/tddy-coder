@@ -12,6 +12,7 @@
 //! where it is implemented; what is wrong-able *here* is what the registry does with a frame, and
 //! a real stream would only make that non-deterministic.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
@@ -19,8 +20,10 @@ use tddy_service::proto::connection::{
     SessionAgentActivity, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
 };
 use tddy_tools::session_agents::{
-    ConversationState, LiveAgentRoster, ReconnectPacing, RosterError, RosterStreamOutcome,
+    decide_roster_subscription, ConversationState, LiveAgentRoster, ReconnectPacing, RosterError,
+    RosterMutability, RosterStreamOutcome,
 };
+use tddy_tools::session_tool_client::SessionToolTransport;
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -1132,4 +1135,74 @@ fn leaves_a_snapshot_subscriber_asleep_for_a_frame_older_than_the_one_in_force()
             .expect("the roster outlives the subscriber"),
         "a frame too old to apply must not wake a parked wait"
     );
+}
+
+// ---------------------------------------------------------------------------
+// A session whose roster cannot change
+// ---------------------------------------------------------------------------
+//
+// Feature: docs/ft/coder/sandboxed-codebase-mode.md § Specialized subagents.
+//
+// `tddy-sandbox-app` resolves its whole roster once, at startup, from `agents_dir` + inline
+// `subagents:`; nothing can attach or detach for the life of the session. It still configures a
+// tool-IPC socket, because that socket is how *tool* calls are dispatched — so a follower deciding
+// from the transport alone subscribes to a stream nobody serves, gives up, and refuses every
+// `subagent_*` call. The session declares the fact about itself instead.
+
+/// A tool-IPC socket, as `tddy-sandbox-app` and a jailed daemon session both configure one.
+fn a_tool_ipc_socket() -> SessionToolTransport {
+    SessionToolTransport::SandboxIpc {
+        socket_path: PathBuf::from("/tmp/tddy-1780828020298-roster/tool.sock"),
+    }
+}
+
+/// Both halves of "stayed on the seed": nothing was subscribed to, and the seeded agent is still
+/// addressable — the refusal is what a daemon-less session used to end up with a few seconds in.
+fn assert_stayed_on_the_seed(
+    subscription: Option<SessionToolTransport>,
+    registry: &LiveAgentRoster,
+    seeded_agent: &str,
+) {
+    assert_eq!(
+        subscription, None,
+        "a roster that cannot change must not be subscribed to"
+    );
+    if let Err(refusal) = registry.resolve(Some(seeded_agent)) {
+        panic!("the seeded agent must stay addressable, was refused: {refusal}");
+    }
+}
+
+/// The headline: a session that declares its roster static opens no subscription, and keeps
+/// answering `subagent_*` calls from the seed that is its whole roster.
+#[test]
+fn stays_on_the_seed_when_the_session_declares_that_its_roster_cannot_change() {
+    // Given
+    let registry = a_seeded_registry(&["explorer"]);
+
+    // When
+    let subscription = decide_roster_subscription(
+        Some(a_tool_ipc_socket()),
+        RosterMutability::Static,
+        &registry,
+    );
+
+    // Then
+    assert_stayed_on_the_seed(subscription, &registry, "explorer@ws-01");
+}
+
+/// The regression guard for every daemon session: a roster that genuinely changes is still
+/// followed over whatever transport the session configured, and the declaration is the only thing
+/// that suppresses that.
+#[test]
+fn subscribes_over_the_configured_transport_when_the_roster_can_still_change() {
+    // Given
+    let registry = a_seeded_registry(&["explorer"]);
+    let socket = a_tool_ipc_socket();
+
+    // When
+    let subscription =
+        decide_roster_subscription(Some(socket.clone()), RosterMutability::Live, &registry);
+
+    // Then
+    assert_eq!(subscription, Some(socket));
 }

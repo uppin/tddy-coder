@@ -2,7 +2,7 @@
 
 **Product Area**: Coder
 **Status**: Implemented
-**Updated**: 2026-09-05
+**Updated**: 2026-09-06
 
 > Related: [managed-codebase-subagents.md](managed-codebase-subagents.md) (the `managed` mode this
 > inverts), [sandbox-builder.md](sandbox-builder.md) (how a jail is configured),
@@ -97,6 +97,74 @@ network. A jail that runs `cargo build` does. In `sandboxed` mode the runner sta
 egress shim and the app's relay fulfils the tunnels, so a jailed build reaches crates.io and npm
 through the host's socket with TLS still end-to-end. It is the same relay an agent confined by the other
 modes reaches the network through, serving the build instead.
+
+### Specialized subagents
+
+A session's roster (`--specialized-agent`, config `specialized_agents:`, inline `subagents:`) works
+here, and works by the same mechanism as everywhere else. `tddy_tools::server::subagents_from_env`
+reads `TDDY_SUBAGENTS_JSON` in **whichever process runs `tddy-tools --mcp`**; in this mode that
+process is the host one the app registers in the agent's MCP config, so the roster is seeded in that
+config's `env` block instead of the jail's. Nothing about the def, the format or the reader changes
+with the placement — `spawn::subagent_env_overlay` builds the same three variables for both.
+
+The consequences are the ones the mechanism implies:
+
+- The conversation tools (`subagent_new_session`, `subagent_prompt`, `subagent_await`,
+  `subagent_cancel`) join `--allowedTools` exactly when the session wired an agent. The argv is
+  fixed before the MCP server exists, so this is decided from the resolved roster at launch.
+- A def's `replaces:` still withdraws its tools from the main agent, in the native form *and* in the
+  `mcp__tddy-tools__` form — the latter being this mode's only route, so leaving it would withdraw
+  nothing.
+- A subagent's own read/glob/grep loop is dispatched **into the jail**, because
+  `TDDY_SANDBOX_TOOL_IPC` is what `subagent_codebase_access_from_env` detects: the agent reads the
+  checkout where the checkout is, under the same confinement the main agent's tool calls run under.
+- The roster is **not** followed over an RPC, and the same overlay says so:
+  `TDDY_SUBAGENT_ROSTER_STATIC` declares that this session's roster is fixed for its lifetime, and
+  `tddy_tools::session_agents::decide_roster_subscription` reads it and opens no
+  `StreamSessionAgents` subscription. The declaration is unconditional across `mounted`, `managed`
+  and `sandboxed` — `config::resolve_session_agents` resolves the roster once, before the session
+  starts, and this app has no attach or detach to change it with, so the seed *is* the whole roster
+  in all three. It is a statement of fact about the session, made by the only process that knows it;
+  nothing infers it from a stream that failed, because a daemon session whose stream broke looks
+  exactly like that and must keep refusing.
+
+One genuine difference is worth stating, because it is the mode's own inversion applied to a
+subagent. A specialized agent is an HTTP client against the endpoint its def names (`base_url`,
+typically a local Ollama), and that traffic **leaves from the host directly** rather than through the
+jail's CONNECT relay — the process making the call is the host MCP server, not anything confined. It
+is simpler than the jailed path, not harder, and it is the same network the agent itself already has.
+What does not leave the session is the record of it: the host MCP server writes to
+`TDDY_TOOLS_LOG_FILE` and `TDDY_TOOLS_ACCOUNTING_FILE` under `<session_dir>/egress/`, the same two
+files the in-jail server writes in the other modes, so a subagent's turns and their token cost land
+where the rest of the session's egress does.
+
+What the mode does **not** carry over is the soft half of tool replacement. The other two modes
+render a managed-codebase appendix into the jail's context dir, naming the agent that took a tool
+over; here the agent's working directory is the unaudited checkout and its settings come from the
+user's own home, so there is nowhere to put such an appendix that is not the repository itself. The
+hard half is unaffected — a replaced tool is withdrawn at the argv, and the session's MCP server
+does not advertise it either, since it reads the same roster — so the main agent learns which agent
+serves that ground from the roster its conversation tools address, rather than from its context.
+
+One refusal survives, and it is broader here than its reason: a def that both `replaces: [Shell]`
+and binds `SHELL` is rejected wherever it is resolved (`config::resolve_session_agents`). Its cause
+is the *other* modes' host boundary, which rejects every `Shell` dispatch when a def replaced it
+(`bridge::AppToolHandler::policy_rejects`) — blanket, because a dispatch carries no caller identity,
+so the agent's own `Shell` is indistinguishable from the main agent's. This mode's relay applies no
+such policy: a `Shell` goes into the jail and runs there, which is the whole point of the placement.
+The pairing is refused here anyway rather than made mode-dependent, and that is a conservative
+choice, not a constraint of this mode.
+
+The gate this used to leave shut is the roster one, and it is closed. `tddy-tools` used to subscribe
+to `StreamSessionAgents` whenever a session-tool transport was configured — which a standalone-app
+session always configures, since `TDDY_SANDBOX_TOOL_IPC` is how *tool* calls are dispatched — while
+no standalone-app session serves that RPC: `sandboxed` answers `NOT_FOUND` for anything but
+`ExecuteTool`, and `mounted`/`managed` answer `UNIMPLEMENTED` through `NullRpcHandler`. A few seconds
+in, the follower declared the roster unreachable and refused every `subagent_*` call. The session now
+declares its roster static instead, and a specialized agent here is reached the way this mode reaches
+everything else it does not broker: directly, over the `base_url` its def names. What the refusal
+still protects is unchanged — a session that *should* have a live roster and lost it keeps refusing,
+because a registry frozen at its last known roster answers for agents that have since been detached.
 
 ### What the checkout must not be able to make this host do
 
@@ -231,6 +299,16 @@ the other macOS paths.
 13. **The session's control surface is not the jail's.** The tool-IPC socket is `0600`, not
     `0777 & ~umask` as `bind` leaves it: a connection to it is an unrestricted `ExecuteTool` into
     the jail.
+14. **Specialized agents.** A named agent, and an inline `subagents:` def, are served rather than
+    refused. The resolved roster is carried into the host `tddy-tools --mcp` server's env
+    (`TDDY_SUBAGENT`, `TDDY_SUBAGENTS_JSON`), and the conversation tools are allowed at the argv
+    exactly when the session wired one — with none wired, neither the variables nor the tools
+    appear. A def's `replaces:` is withdrawn in both the native and the `mcp__tddy-tools__` form.
+15. **The roster is not brokered.** The same env overlay declares the roster static
+    (`TDDY_SUBAGENT_ROSTER_STATIC`), so the MCP server opens no `StreamSessionAgents` subscription
+    and answers `subagent_*` from its seed for the life of the session. The declaration is emitted
+    whenever a seed is, in every codebase mode, and not at all when no agent is wired. A session
+    that makes no such declaration still follows its roster over whatever transport it configured.
 
 ## What is deliberately not in scope
 
@@ -240,10 +318,6 @@ the other macOS paths.
 - **Cursor.** `--agent-kind cursor` keeps today's placement. Cursor's own tool surface is not
   withdrawable the way Claude's `--disallowedTools` makes Claude's, so an inverted placement could
   not make the confinement claim.
-- **Specialized subagents.** The `subagents:` / `--specialized-agent` wiring seeds the *in-jail*
-  `tddy-tools --mcp` via `TDDY_SUBAGENTS_JSON`. There is no in-jail MCP server in this mode. Asking
-  for a specialized agent alongside `--codebase-mode sandboxed` is refused rather than silently
-  dropped; re-homing the roster onto the host MCP server is a follow-up.
 - **Consolidating the daemon's own in-jail dispatch.** `tddy_daemon::workspace_tool_sandbox`
   implements the one-call-at-a-time exchange on its own raw channel. Moving it onto the relay's new
   dispatcher is a follow-up, not a prerequisite.

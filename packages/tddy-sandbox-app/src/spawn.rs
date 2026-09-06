@@ -103,9 +103,15 @@ pub(crate) fn specialized_agent_replacement_pairs(
         .collect()
 }
 
-/// Builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`/(single-agent) `TDDY_SUBAGENT_REPLACES` jail
-/// env overlay for the in-jail `tddy-tools --mcp` process from already-resolved specialized-agent
-/// defs. Empty when no agent is configured.
+/// Builds the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON`/(single-agent) `TDDY_SUBAGENT_REPLACES` env
+/// overlay for the `tddy-tools --mcp` process that serves the session, from already-resolved
+/// specialized-agent defs, plus the `TDDY_SUBAGENT_ROSTER_STATIC` declaration below. Empty when no
+/// agent is configured.
+///
+/// Which process that is depends on the placement and on nothing else: the jail's, in the modes
+/// that put the agent inside it, and the host one this app configures for `sandboxed`
+/// (`crate::host_agent::host_mcp_env`). `tddy_tools::server::subagents_from_env` reads the same
+/// variables either way.
 pub(crate) fn subagent_env_overlay(
     defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
 ) -> std::collections::BTreeMap<String, String> {
@@ -122,6 +128,17 @@ pub(crate) fn subagent_env_overlay(
     if let Ok(defs_json) = serde_json::to_string(defs) {
         env.insert("TDDY_SUBAGENTS_JSON".to_string(), defs_json);
     }
+    // Tell the MCP server that this seed is the session's whole roster, permanently
+    // (`tddy_tools::session_agents::STATIC_ROSTER_ENV`). Without it the server subscribes to
+    // `StreamSessionAgents` — it always sees a session-tool transport, since `TDDY_SANDBOX_TOOL_IPC`
+    // is how tool calls are dispatched — and no standalone-app session serves that RPC, so a few
+    // seconds in the roster reads as unreachable and every `subagent_*` call is refused.
+    //
+    // Unconditional across `mounted`, `managed` and `sandboxed` because the reason is the same in
+    // all three: `config::resolve_session_agents` resolves the roster once, before the session
+    // starts, and this app has no attach or detach to change it with. An agent here is reached
+    // directly over its def's `base_url` anyway, so there is nothing a roster RPC would add.
+    env.insert("TDDY_SUBAGENT_ROSTER_STATIC".to_string(), "1".to_string());
     if defs.len() == 1 {
         let (_, replaced) = &specialized_agent_replacement_pairs(defs)[0];
         if !replaced.is_empty() {
@@ -1239,6 +1256,27 @@ mod tests {
         assert!(
             defs_json.contains("explorer"),
             "TDDY_SUBAGENTS_JSON must serialize the def; got: {defs_json}"
+        );
+    }
+
+    /// Every seed this app emits also declares that the session's roster cannot change, in every
+    /// codebase mode. The app resolves its roster once at startup and nothing can attach or detach
+    /// afterwards, so the MCP server must answer from the seed rather than subscribe to a roster
+    /// stream no standalone-app session serves.
+    #[test]
+    fn subagent_env_overlay_declares_that_the_sessions_roster_cannot_change() {
+        // Given
+        let defs = vec![a_def("explorer", &[])];
+
+        // When
+        let overlay = subagent_env_overlay(&defs);
+
+        // Then
+        assert_eq!(
+            overlay
+                .get("TDDY_SUBAGENT_ROSTER_STATIC")
+                .map(String::as_str),
+            Some("1")
         );
     }
 

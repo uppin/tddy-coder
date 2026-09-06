@@ -1,5 +1,10 @@
-//! Following the roster: one subscription, reconnected forever, and the pacing that decides when a
-//! reconnect loop stops counting as service.
+//! Following the roster: whether to subscribe at all, one subscription reconnected forever, and the
+//! pacing that decides when a reconnect loop stops counting as service.
+//!
+//! The first question is [`decide_roster_subscription`]'s, and it is not answered by the transport:
+//! a session whose roster was resolved before it started and cannot change says so
+//! ([`STATIC_ROSTER_ENV`]) and is left on its seed, because there is nothing for a subscription to
+//! learn.
 //!
 //! Everything here is about *how it fails*. The happy path is one `StreamSessionAgents` call whose
 //! frames are applied to the registry; what needs the code is a pass that opens and never delivers,
@@ -175,41 +180,97 @@ impl ReconnectPacing {
     }
 }
 
-/// Follow the session's roster for the process lifetime, calling `on_change` once per applied
-/// revision.
+/// The env var a session sets to declare that its roster is fixed for the session's lifetime.
 ///
-/// `on_change` is what emits the MCP `notifications/tools/list_changed`: this module holds no MCP
-/// peer, and the roster's business is the roster.
-pub fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static) {
-    let roster = session_agent_roster();
-    let Some(transport) = detect_session_tool_transport() else {
-        // No daemon in the loop at all — `tddy-sandbox-app`'s case. There is no roster to follow and
-        // nothing that can go stale: the spawn seed is the whole roster, for the whole run.
+/// Set to any non-empty value alongside the `TDDY_SUBAGENTS_JSON` seed, by a host that resolves the
+/// whole roster before the session starts and has no way to change it afterwards — today that is
+/// `tddy-sandbox-app` (`spawn::subagent_env_overlay`), in every codebase mode.
+///
+/// It is a **declaration of fact about the session**, not a preference and not a fallback: nothing
+/// infers it from a stream that failed, timed out or was refused, because a daemon session whose
+/// roster stream broke looks exactly like that and must keep refusing. Only the host that knows how
+/// its roster was built can say the roster cannot change, so only the host says it.
+pub const STATIC_ROSTER_ENV: &str = "TDDY_SUBAGENT_ROSTER_STATIC";
+
+/// Whether this session's roster can change while it runs.
+///
+/// The distinction the roster stream turns on, and it is not derivable from the transport: a
+/// tool-IPC socket is configured by a jailed daemon session *and* by `tddy-sandbox-app`, because
+/// the socket is how tool calls are dispatched and says nothing about who — if anyone — serves a
+/// roster over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterMutability {
+    /// Agents are attached and detached while the session runs, so the seed goes out of date and
+    /// only the stream knows the roster. Every daemon session.
+    Live,
+    /// The roster was resolved once, before the session started, and nothing can attach or detach
+    /// for the rest of it — so the seed *is* the whole roster, permanently, and there is nothing
+    /// for a subscription to learn. Declared by [`STATIC_ROSTER_ENV`].
+    Static,
+}
+
+impl RosterMutability {
+    /// What the spawn environment declared. [`Self::Live`] unless a host explicitly said otherwise:
+    /// a session that says nothing about its roster is one whose roster can change, which is the
+    /// reading that refuses rather than the one that answers from a stale seed.
+    fn declared_by_the_spawn_environment() -> Self {
+        match crate::server::env_non_empty(STATIC_ROSTER_ENV) {
+            Some(_) => Self::Static,
+            None => Self::Live,
+        }
+    }
+}
+
+/// Decide what following this session's roster amounts to, and record on `roster` the refusal that
+/// follows when it cannot be followed at all.
+///
+/// Returns the transport to subscribe over, or `None` when there is nothing to subscribe to. The
+/// two ways to reach `None` are opposite states, not one:
+///
+/// - **the seed is the whole roster** — no transport at all, or a session that declared its roster
+///   [`RosterMutability::Static`]. The roster is left `Seeded` and every `subagent_*` call is
+///   answered from it, because nothing it holds can have gone out of date;
+/// - **the roster cannot be reached** — a transport that should carry a roster and has no client
+///   for one, or a half-configured LiveKit environment. Refused rather than left on the seed: a
+///   registry frozen at spawn answers for agents that have since been detached and refuses ones
+///   that have been attached, and says nothing about either.
+pub fn decide_roster_subscription(
+    transport: Option<SessionToolTransport>,
+    mutability: RosterMutability,
+    roster: &LiveAgentRoster,
+) -> Option<SessionToolTransport> {
+    let Some(transport) = transport else {
+        // Nothing to dispatch a tool call through, let alone a roster stream.
         log::debug!(
             target: "tddy_tools::session_agents",
             "no session-tool transport is configured; the spawn seed is this session's whole roster"
         );
-        return;
+        return None;
     };
+    if mutability == RosterMutability::Static {
+        log::debug!(
+            target: "tddy_tools::session_agents",
+            "{STATIC_ROSTER_ENV} declares this session's roster fixed for its lifetime, so the \
+             spawn seed is the whole roster and no StreamSessionAgents subscription is opened"
+        );
+        return None;
+    }
     match &transport {
-        // The sandbox tool-IPC socket now bridges `StreamSessionAgents` (and the conversation RPCs)
-        // to the facilitating daemon over the `SessionChannel` — see
+        // The sandbox tool-IPC socket bridges `StreamSessionAgents` (and the conversation RPCs) to
+        // the facilitating daemon over the `SessionChannel` — see
         // `tddy_sandbox_runner::ToolExecService` and `run_host_relay_with_rpc`. The subscription
-        // proceeds exactly as it does over LiveKit: a fresh connection per stream, the first
-        // frame replaces the seed, reconnect-on-drop with backoff. A daemon that does not serve
-        // the RPC (the standalone app, via `NullRpcHandler`) refuses it, the roster goes
-        // `Unavailable`, and `subagent_*` calls are refused — the safe behaviour for a session
-        // with no daemon in the loop.
-        SessionToolTransport::SandboxIpc { .. } | SessionToolTransport::LiveKit { .. } => {}
-        // Refused rather than left on the seed: a registry frozen at spawn answers for agents that
-        // have since been detached and refuses ones that have been attached, and says nothing.
+        // proceeds exactly as it does over LiveKit: a fresh connection per stream, the first frame
+        // replaces the seed, reconnect-on-drop with backoff.
+        SessionToolTransport::SandboxIpc { .. } | SessionToolTransport::LiveKit { .. } => {
+            Some(transport)
+        }
         // TODO(session-agent-roster): give the HTTP transport a `StreamSessionAgents` client (or a
         // `ListSessionAgents` poll) so a daemon-HTTP session can address agents at all.
         SessionToolTransport::DaemonHttp { .. } => {
             let reason = "the roster stream has no client for the daemon-HTTP transport";
             log::error!(target: "tddy_tools::session_agents", "{reason}; subagent calls are refused");
             roster.mark_unavailable(reason);
-            return;
+            None
         }
         SessionToolTransport::IncompleteLiveKit { missing } => {
             let reason = format!(
@@ -218,9 +279,25 @@ pub fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static)
             );
             log::error!(target: "tddy_tools::session_agents", "{reason}; subagent calls are refused");
             roster.mark_unavailable(&reason);
-            return;
+            None
         }
     }
+}
+
+/// Follow the session's roster for the process lifetime, calling `on_change` once per applied
+/// revision.
+///
+/// `on_change` is what emits the MCP `notifications/tools/list_changed`: this module holds no MCP
+/// peer, and the roster's business is the roster.
+pub fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static) {
+    let roster = session_agent_roster();
+    let Some(transport) = decide_roster_subscription(
+        detect_session_tool_transport(),
+        RosterMutability::declared_by_the_spawn_environment(),
+        roster,
+    ) else {
+        return;
+    };
     tokio::spawn(async move { follow_roster(transport, roster, on_change).await });
 }
 

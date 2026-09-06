@@ -15,7 +15,6 @@ use anyhow::Result;
 use clap::Parser;
 #[cfg(target_os = "linux")]
 use tddy_sandbox_app::codebase_mode::managed_codebase_for_daemon_path;
-#[cfg(target_os = "macos")]
 use tddy_sandbox_app::codebase_mode::CodebaseMode;
 use tddy_sandbox_app::codebase_mode::{refuse_unservable_codebase_home_dir, resolve_codebase_mode};
 use tddy_sandbox_app::config;
@@ -192,7 +191,6 @@ const VERBOSE_RUST_LOG: &str = "\
     tower=warn,\
     tonic=warn";
 
-#[cfg(target_os = "macos")]
 /// Where this session's own log lines go, given the placement its codebase mode implies.
 ///
 /// Every other mode keeps the terminal: the agent is behind a jail and its output reaches the user
@@ -491,9 +489,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     // Named agents come from the CLI flag and the config list; inline defs come from the config.
     let mut named_agents = args.specialized_agent;
     named_agents.extend(cfg.specialized_agents);
-    let inline_subagents: Vec<String> = cfg.subagents.iter().map(|def| def.name.clone()).collect();
-    refuse_unservable_sandboxed_session(mode, agent_kind, &named_agents, &inline_subagents)
-        .map_err(|e| anyhow::anyhow!(e))?;
+    refuse_unservable_sandboxed_session(mode, agent_kind).map_err(|e| anyhow::anyhow!(e))?;
     // Resolved the same way the modes that honour it resolve it (CLI over config), because a
     // working directory the config named is just as ignored as one the flag named.
     let cwd = args.cwd.or(cfg.cwd);
@@ -582,6 +578,8 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
             permission_mode,
             claude_args,
             mcp_log_level: args.mcp_log_level.or(cfg.mcp_log_level),
+            specialized_defs,
+            replaced_tools,
         })
         .await;
     }
@@ -705,21 +703,22 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 
 /// What a `sandboxed` session cannot serve, refused before anything is spawned.
 ///
-/// Both refusals are named in the PRD's "deliberately not in scope", and both are loud on purpose.
-/// `--agent-kind cursor` keeps today's placement because Cursor's tool surface is not withdrawable
-/// the way Claude's `--disallowedTools` makes Claude's — an inverted placement could not make the
-/// confinement claim, so quietly keeping the old one would leave the caller confining the agent
-/// under a flag that promises to confine the code. A specialized agent's roster is seeded into the
-/// *in-jail* `tddy-tools --mcp` server's env, and this mode runs no MCP server inside the jail —
-/// so the roster would silently not exist.
+/// One combination, and it is structural: `--agent-kind cursor` keeps today's placement because
+/// Cursor's tool surface is not withdrawable the way Claude's `--disallowedTools` makes Claude's —
+/// an inverted placement could not make the confinement claim, so quietly keeping the old one would
+/// leave the caller confining the agent under a flag that promises to confine the code.
 ///
-/// Any other mode is served exactly as it is today: this refuses combinations, never the modes.
+/// A specialized agent is **not** such a combination, though this once refused one. The roster is
+/// read by `tddy_tools::server::subagents_from_env` in whichever process runs `tddy-tools --mcp`,
+/// and this mode has one of those — on the host, spawned by the host agent from the MCP config the
+/// app writes ([`host_agent::host_mcp_env`]). What it never had is an *in-jail* one, which the
+/// roster never needed.
+///
+/// Any other mode is served exactly as it is today: this refuses a combination, never a mode.
 #[cfg(target_os = "macos")]
 fn refuse_unservable_sandboxed_session(
     mode: CodebaseMode,
     agent_kind: AgentKind,
-    named_agents: &[String],
-    inline_subagents: &[String],
 ) -> Result<(), String> {
     if mode != CodebaseMode::Sandboxed {
         return Ok(());
@@ -733,20 +732,6 @@ fn refuse_unservable_sandboxed_session(
              with --codebase-mode mounted or managed."
                 .to_string(),
         );
-    }
-    let requested: Vec<&str> = named_agents
-        .iter()
-        .chain(inline_subagents)
-        .map(String::as_str)
-        .collect();
-    if !requested.is_empty() {
-        return Err(format!(
-            "--codebase-mode sandboxed cannot be combined with specialized agents (asked for: \
-             {}): the roster is seeded into the in-jail `tddy-tools --mcp` server, and this mode \
-             runs no MCP server inside the jail. Drop --specialized-agent / `specialized_agents:` \
-             / `subagents:`, or use --codebase-mode mounted or managed.",
-            requested.join(", ")
-        ));
     }
     Ok(())
 }
@@ -788,6 +773,13 @@ struct SandboxedCodebaseRun {
     permission_mode: String,
     claude_args: Vec<String>,
     mcp_log_level: Option<String>,
+    /// The session's resolved specialized-agent defs, resolved the same way every other mode
+    /// resolves them ([`config::resolve_session_agents`]) and warmed up by the same gate. They are
+    /// seeded into the host `tddy-tools --mcp` server rather than an in-jail one, which is the only
+    /// thing about them this placement changes.
+    specialized_defs: Vec<tddy_discovery::agent_def::SpecializedAgentDef>,
+    /// The union of what those defs `replaces:`, withdrawn from the host agent at its argv.
+    replaced_tools: Vec<String>,
 }
 
 /// What the jail is provisioned with, from what the command line resolved.
@@ -888,8 +880,8 @@ async fn run_sandboxed_codebase(run: SandboxedCodebaseRun) -> Result<()> {
         claude_args: run.claude_args,
         mcp_log_level: run.mcp_log_level,
         egress_dir: Some(session.egress_dir().to_path_buf()),
-        // Specialized agents are refused in this mode, so no def took a tool away.
-        replaced_tools: Vec::new(),
+        replaced_tools: run.replaced_tools,
+        specialized_defs: run.specialized_defs,
     })?;
 
     // The agent owns the terminal, so Ctrl-C is *its* interrupt: SIGINT reaches every process in
@@ -983,15 +975,32 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    // ─── What a sandboxed session refuses to be combined with ───────────────────
+    // ─── What a sandboxed session serves, and the one thing it refuses ──────────
     //
-    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (§ What is deliberately not in scope)
+    // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 14, § What is deliberately not
+    // in scope)
     // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
-    const NO_AGENTS: &[String] = &[];
+    const NO_AGENTS_DIR: &str = "/nonexistent-agents-dir-for-tests";
 
     fn an_agent_named(name: &str) -> Vec<String> {
         vec![name.to_string()]
+    }
+
+    /// An agent def as the app config carries one inline, defining and activating it in one place.
+    fn an_inline_agent_def(name: &str) -> tddy_discovery::agent_def::SpecializedAgentDef {
+        tddy_discovery::agent_def::SpecializedAgentDef {
+            name: name.to_string(),
+            label: None,
+            model: "qwen2.5-coder:7b".to_string(),
+            base_url: "http://localhost:11434".to_string(),
+            api_key: None,
+            system_prompt: None,
+            system_prompt_path: None,
+            tools: vec![tddy_discovery::agent_def::SubagentTool::Read],
+            max_turns: 10,
+            replaces: vec![],
+        }
     }
 
     /// Cursor's tool surface is not withdrawable the way Claude's `--disallowedTools` makes
@@ -1001,13 +1010,11 @@ mod tests {
     #[test]
     fn a_sandboxed_session_refuses_a_cursor_agent() {
         // Given / When
-        let message = refuse_unservable_sandboxed_session(
-            CodebaseMode::Sandboxed,
-            AgentKind::Cursor,
-            NO_AGENTS,
-            NO_AGENTS,
-        )
-        .expect_err("a sandboxed session must refuse an agent whose tools it cannot withdraw");
+        let message =
+            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Cursor)
+                .expect_err(
+                    "a sandboxed session must refuse an agent whose tools it cannot withdraw",
+                );
 
         // Then
         assert!(
@@ -1017,76 +1024,74 @@ mod tests {
         );
     }
 
-    /// A specialized agent's roster is seeded into the *in-jail* `tddy-tools --mcp` server's env,
-    /// and this mode runs no MCP server inside the jail — so the agent that was asked for would
-    /// simply not exist.
-    #[test]
-    fn a_sandboxed_session_refuses_a_named_specialized_agent() {
-        // Given / When
-        let message = refuse_unservable_sandboxed_session(
-            CodebaseMode::Sandboxed,
-            AgentKind::Claude,
-            &an_agent_named("explorer"),
-            NO_AGENTS,
-        )
-        .expect_err("a sandboxed session must refuse a specialized agent it cannot seed");
-
-        // Then
-        assert!(
-            message.contains("explorer"),
-            "the refusal must name the agent that was asked for; message was: {message}"
-        );
-    }
-
-    /// The same refusal for an agent declared inline in the config rather than by name: where the
-    /// roster came from does not change that there is no in-jail server to seed it into.
-    #[test]
-    fn a_sandboxed_session_refuses_an_inline_subagent_def() {
-        // Given / When
-        let message = refuse_unservable_sandboxed_session(
-            CodebaseMode::Sandboxed,
-            AgentKind::Claude,
-            NO_AGENTS,
-            &an_agent_named("local-coder"),
-        )
-        .expect_err("a sandboxed session must refuse an inline subagent def too");
-
-        // Then
-        assert!(
-            message.contains("local-coder"),
-            "the refusal must name the agent that was asked for; message was: {message}"
-        );
-    }
-
-    /// The combination the mode exists for: a plain Claude agent and no roster at all.
+    /// The combination the mode exists for: a plain Claude agent.
     #[test]
     fn a_sandboxed_session_with_a_plain_claude_agent_is_served() {
         // Given / When
-        let served = refuse_unservable_sandboxed_session(
-            CodebaseMode::Sandboxed,
-            AgentKind::Claude,
-            NO_AGENTS,
-            NO_AGENTS,
-        );
+        let served =
+            refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Claude);
 
         // Then
         assert_eq!(served, Ok(()));
     }
 
-    /// Neither refusal is about Cursor or subagents as such — both are about *this* placement. A
-    /// mounted session keeps serving exactly what it serves today.
+    /// The refusal is about Cursor's tool surface, not about this placement as such: a mounted
+    /// session keeps serving exactly what it serves today.
     #[test]
-    fn a_mounted_session_still_serves_a_cursor_agent_with_specialized_agents() {
+    fn a_mounted_session_still_serves_a_cursor_agent() {
         // Given / When
-        let served = refuse_unservable_sandboxed_session(
-            CodebaseMode::Mounted,
-            AgentKind::Cursor,
-            &an_agent_named("explorer"),
-            &an_agent_named("local-coder"),
-        );
+        let served = refuse_unservable_sandboxed_session(CodebaseMode::Mounted, AgentKind::Cursor);
 
         // Then
         assert_eq!(served, Ok(()));
+    }
+
+    /// The roster a sandboxed session ends up wiring in, by the two steps `run_macos` takes: refuse
+    /// what this placement cannot serve, then resolve what was asked for. Returns the names,
+    /// because that is what "wired in" means to a caller.
+    fn what_a_sandboxed_session_wires_in(
+        named: &[String],
+        inline: &[tddy_discovery::agent_def::SpecializedAgentDef],
+        agents_dir: &Path,
+    ) -> Result<Vec<String>, String> {
+        refuse_unservable_sandboxed_session(CodebaseMode::Sandboxed, AgentKind::Claude)?;
+        config::resolve_session_agents(named, inline, agents_dir)
+            .map(|defs| defs.into_iter().map(|def| def.name).collect())
+            .map_err(|e| e.to_string())
+    }
+
+    /// A named agent is served, not refused: the roster is read from the env of whichever process
+    /// runs `tddy-tools --mcp`, and this mode has one — on the host, spawned by the host agent.
+    #[test]
+    fn a_sandboxed_session_wires_in_a_named_specialized_agent() {
+        // Given
+        let agents_dir = tempfile::tempdir().expect("agents dir");
+        std::fs::write(
+            agents_dir.path().join("explorer.yaml"),
+            "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
+        )
+        .expect("write the def");
+
+        // When
+        let wired =
+            what_a_sandboxed_session_wires_in(&an_agent_named("explorer"), &[], agents_dir.path());
+
+        // Then
+        assert_eq!(wired, Ok(vec!["explorer".to_string()]));
+    }
+
+    /// The other shape the mode used to refuse: a def written inline in the app config, which no
+    /// `<tddyhome>/agents` directory needs to hold.
+    #[test]
+    fn a_sandboxed_session_wires_in_an_inline_subagent_def() {
+        // Given
+        let inline = [an_inline_agent_def("local-coder")];
+
+        // When
+        let wired = what_a_sandboxed_session_wires_in(&[], &inline, Path::new(NO_AGENTS_DIR));
+
+        // Then
+        assert_eq!(wired, Ok(vec!["local-coder".to_string()]));
     }
 
     // ─── What a sandboxed session says about itself before it starts ────────────
@@ -1314,6 +1319,8 @@ mod tests {
             permission_mode: "auto".to_string(),
             claude_args: vec![],
             mcp_log_level: None,
+            specialized_defs: vec![],
+            replaced_tools: vec![],
         }
     }
 }
