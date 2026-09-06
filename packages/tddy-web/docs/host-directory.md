@@ -21,16 +21,22 @@ The directory separates *which hosts exist* from *how you reach one*. Reaching o
 | `HostDirectorySource` | one contributor: `id`, `status`, `error`, `hosts` |
 | `HostDirectory` | the merge every host-selection surface reads: `hosts`, `sources`, `status`, `error` |
 
-A directory is the merge of several sources. A browser page has the LiveKit source and the
-serving-host source; a desktop build adds one of its own. Nothing in the model knows what a room is.
+A directory is the merge of several sources. A browser page and a desktop build alike have the
+LiveKit source and the serving-host source — the serving source names the daemon that served the
+page, whichever wire reaches it, so a desktop build needs no source of its own. Nothing in the model
+knows what a room is.
 
 ## The merge rules
 
 `mergeHostDirectory` (`useHostDirectory.tsx`) is pure and unit-tested without a rendered provider.
 
-**Hosts** de-duplicate by `hostId`, **first source wins**. Order is therefore precedence, and it is
-load-bearing: a desktop app puts its own source first so its description of its own machine beats the
-common room's advertisement of it. Within a source, order is the source's own — the LiveKit source
+**Hosts** de-duplicate by `hostId`, **first source wins**. Order is therefore precedence, and it
+decides *which account of a host the selector shows* — not which wire reaches it. The LiveKit source
+is ahead of the serving source deliberately: a common room advertises `repos_base_path` and
+`max_attachment_bytes`, which `GetClientConfig` does not carry, so letting the poorer local
+description win would cost the host the attachment cap the Start-Session form enforces. Which wire
+reaches a host is a separate question, settled by connection-provider order — see
+[host-connections.md](host-connections.md). Within a source, order is the source's own — the LiveKit source
 already orders by the room's participant ordering, and re-sorting would make the selector jump under
 the operator.
 

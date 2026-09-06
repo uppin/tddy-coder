@@ -33,7 +33,7 @@ This document is the **WHAT**; the implementation lives in `packages/tddy-deskto
 | **`tddy_daemon::runtime`** | The daemon as a library. One bootstrap, two hosts — the binary and this app get the same roster. |
 | **`tddy-tauri-rpc`** | Hosts many addressed connections over frame channels, each reaching the roster its target names. Depends on `tddy-rpc` only, never on `tauri`. |
 | **tddy-web UI** | The same React app the browser gets; it picks its transport at runtime. |
-| **LiveKit room** | Unchanged. A session on *another* daemon is still reached over LiveKit from inside the app. |
+| **LiveKit room** | Optional, and for *other* daemons only. A peer host — and a session on it — is still reached over LiveKit from inside the app when a common room is configured. The app's own host never is. |
 
 ## How the UI reaches the daemon
 
@@ -185,6 +185,38 @@ Client configuration follows the same fork: `GET /api/config` in a browser,
 `DaemonConfigService.GetClientConfig` where there is no HTTP origin. That call is deliberately
 ungated — it is what tells a page there *is* a daemon to sign in to, and it carries no secrets.
 
+## Which wire reaches which host
+
+The app's **own** host is reached over the IPC bridge; **peer** hosts, when a common room is
+configured, over LiveKit. Both at once, in one session of the app, with no reload and no mode switch
+— reachability is per host and per connection, so the two fall out of one mechanism.
+
+`tddy-web` registers a connection provider for the local host whenever
+`daemonTransportFlavour(window)` says this page is running in the host application, which is the same
+runtime question that already chose the daemon transport above. A browser answers otherwise and
+registers nothing, so its behaviour is unchanged: the desktop machine's host is still reached over
+LiveKit from a browser. The guarantee is behavioural rather than structural — there is one bundle, so
+the module is present either way and what differs is whether anything registers it.
+
+The local provider is registered **ahead of** the LiveKit one, so the app's own host resolves
+in-process even where a common room could also reach that machine. The daemon is in this process; a
+round trip out to a media server and back to a roster already in the binary is latency for nothing,
+and registration order expresses that without a user-facing preference.
+
+**The IPC path carries RPC only.** No room, participant, token or LiveKit identity appears on it —
+not in the provider, not in a session's attachment hint. Video, screen sharing and the participant
+roster therefore do not apply to the app's own host and are absent rather than broken; the daemon
+*could* publish media into a room to fill the gap, but that would make the desktop app quietly
+require the thing this design made optional. The same daemon remains fully media-capable when a
+browser reaches it over the common room, which is why capabilities describe a connection rather than
+a host.
+
+**With no LiveKit configuration the app is complete on its own host**: no room joined, no token
+minted, no `Room` constructed, and a directory that reports `idle` rather than an error for a feature
+nobody asked for. **With LiveKit configured, a failure of the common room degrades the peers only** —
+the local host stays selectable and usable, and the failure is reported against that source rather
+than as a fault of the directory.
+
 ## Security
 
 - **No listening socket.** Verified with `lsof -a -nP -iTCP -sTCP:LISTEN -p <pid>` against the
@@ -203,6 +235,8 @@ for Finder. Linux bundles are unverified — the nix dev shell carries the WebKi
 
 - [Addressed webview IPC connections](../../../packages/tddy-desktop/docs/webview-ipc-connections.md)
   — the implementation of the bridge described above
+- [The local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md) — the web side: the
+  provider that reaches the app's own host, and why it uses the page's existing daemon transport
 - [Daemon settings](../daemon/daemon-settings.md)
 - [Local web development](../web/local-web-dev.md)
 - [Codex OAuth relay (daemon)](../daemon/codex-oauth-relay.md)

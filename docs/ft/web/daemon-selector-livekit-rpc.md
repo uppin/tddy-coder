@@ -53,9 +53,17 @@ common room contributes no hosts and reports `idle` rather than `error` — an o
 to configure LiveKit is not shown a connection failure for it — and the daemon serving the page is
 contributed regardless, so the selector is never empty on a daemon-served page.
 
-Naming a host is not the same as reaching one: until a wire is registered that can reach the serving
+Naming a host is not the same as reaching one: with no wire registered that can reach the serving
 daemon, selecting it resolves no connection and each screen renders its own "no connection" state.
-That wire arrives later in the `optional-livekit` stack.
+That is still what a **browser** served by a daemon outside its common room sees.
+
+The **desktop app** registers such a wire. Inside the Tauri shell the daemon runs in the same
+process, and `createIpcConnectionProvider` reaches it over the host application's IPC bridge —
+registered ahead of the LiveKit provider, so its own host resolves in-process even when a common room
+is configured and could also reach that machine. It carries `{"rpc"}` and nothing else, so the same
+daemon is media-capable when a browser reaches it over the common room and not when its own desktop
+app reaches it in-process — the asymmetry capabilities-on-the-connection exists to express. See
+[`tddy-web` local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md).
 
 ## Scope boundary: daemon-level vs. per-session RPC
 
@@ -169,3 +177,5 @@ forwarding.
   shared LiveKit room; per-session rooms are unaffected by this feature.
 - **[Capability gating](../../../packages/tddy-web/docs/capability-gating.md)** — the one predicate
   and the availability rule behind every surface in the table above.
+- **[The local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md)** — the desktop
+  build's own provider, and why its host stays off the media server.
