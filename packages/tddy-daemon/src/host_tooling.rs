@@ -61,6 +61,9 @@ pub struct GithubCliStatus {
 pub struct HostTooling {
     pub git: GitIdentity,
     pub github_cli: GithubCliStatus,
+    /// Added by `#hosts-screen 5/8`. `HostToolingProbe` owns the git and `gh` halves; this block is
+    /// filled from [`crate::ssh_agent`].
+    pub ssh_agent: crate::ssh_agent::AgentStatus,
 }
 
 /// Probes a host for what it has installed and configured.

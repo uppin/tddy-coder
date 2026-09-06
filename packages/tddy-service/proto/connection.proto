@@ -1135,10 +1135,32 @@ message HostGithubCli {
   string failure_reason = 5;
 }
 
+// One key an ssh-agent is holding. The agent knows the public key blob and a free-text comment; it
+// does NOT know which file the key came from, so no path is reported here.
+message SshAgentKey {
+  // e.g. "ssh-ed25519".
+  string key_type = 1;
+  // SHA256 fingerprint in the form `ssh-add -l` prints, including the "SHA256:" prefix.
+  string fingerprint = 2;
+  // Free text set when the key was generated — commonly `user@host`. NOT a file path.
+  string comment = 3;
+}
+
+// Whether a host has a reachable ssh-agent, and what it is holding.
+message HostSshAgent {
+  ProbeOutcome outcome = 1;
+  // Whether an agent answered at all. `false` with OK means no agent is reachable — different from
+  // an agent that answered with an empty key list, which is `true` with an empty `keys`.
+  bool reachable = 2;
+  repeated SshAgentKey keys = 3;
+  string failure_reason = 4;
+}
+
 message GetHostToolingResponse {
   string daemon_instance_id = 1;
   HostGitIdentity git = 2;
   HostGithubCli github_cli = 3;
+  HostSshAgent ssh_agent = 4;
 }
 
 message ListSessionWorkflowFilesRequest {

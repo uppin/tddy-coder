@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 5/8
 **Branch:** `feature/hosts-screen/agent-keys` → base `feature/hosts-screen/host-identity`
+**PR:** [#457](https://github.com/uppin/tddy-coder/pull/457)
 
 ## Initial Discovery
 
@@ -77,7 +78,7 @@ push for want of a usable key, tddy currently reports a generic git error and no
 
 ## Scope
 
-- [ ] Add and pin the ssh-agent client crate and the ssh key crate
+- [x] Add and pin the ssh-agent client crate and the ssh key crate
 - [ ] Agent socket resolution for a target OS user
 - [ ] `REQUEST_IDENTITIES` exchange with a bounded timeout
 - [ ] Identity → type / `SHA256:` fingerprint / comment
@@ -225,17 +226,36 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- Dependencies added and resolved through the host's local crates proxy: **`ssh-agent-lib 0.6.0`**,
+  **`ssh-key 0.6.7`**. `ssh-key`'s `encryption` / `rsa` features stay **off** here — enabling them
+  belongs to `#hosts-screen 6/8`, where an encrypted private key is actually decrypted.
+  (Note: `cargo search` does not work through the proxy — `cargo add` does. A `search` failure is not
+  evidence a crate is unavailable.)
+- `cargo clippy -p tddy-daemon --all-targets -- -D warnings` — clean.
+- `ssh_agent.rs` — **5 tests, 5 red** at the two `unimplemented!()` sites.
+
+### The test harness is a real agent, not a mock
+
+`FakeAgent` binds an actual `UnixListener`, reads the 5-byte header, checks for
+`SSH_AGENTC_REQUEST_IDENTITIES` and writes a correctly framed `IDENTITIES_ANSWER`. A mocked client
+would exercise none of the encoding, and the encoding is the entire reason this node chose the wire
+protocol over `ssh-add`. A `silent()` variant accepts and never answers, so the timeout path is
+proven rather than asserted.
+
+The fingerprint fixture is pinned against **OpenSSH's own output** (`ssh-keygen -lf` for a published
+ed25519 blob), not against our derivation — otherwise the test would prove only self-consistency.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-agent-keys-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
