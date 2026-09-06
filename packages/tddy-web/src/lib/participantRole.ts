@@ -21,6 +21,17 @@ export interface DaemonHost {
 }
 
 /**
+ * How a daemon self-labels its own advertisement — `"{id} (this daemon)"`.
+ *
+ * One constant because three places depend on the same spelling and none of them can see the
+ * others: {@link parseDaemonAdvertisement} requires it, `shell/DaemonSelector` strips it from every
+ * host that is not the serving one, and `rpc/hostDirectory/servingSource` writes it for a serving
+ * host named by `/api/config`, which has no advertisement to copy a label from. Change it in one
+ * place and every host would render with a stray suffix.
+ */
+export const SELF_LABEL_SUFFIX = " (this daemon)";
+
+/**
  * Parse a `tddy-daemon` common-room advertisement (`livekit_peer_discovery`):
  * `{"instance_id":"…","label":"… (this daemon)"}`. Returns `null` when the metadata is not a
  * well-formed daemon advertisement.
@@ -36,7 +47,9 @@ export function parseDaemonAdvertisement(metadata: string): DaemonHost | null {
       max_attachment_bytes?: unknown;
     };
     if (typeof o.instance_id !== "string" || !o.instance_id.trim()) return null;
-    if (typeof o.label !== "string" || !o.label.includes("(this daemon)")) return null;
+    // `includes`, not `endsWith`: a daemon may append its own trailing detail after the suffix, and
+    // the leading space is not required of an advertisement whose label is only the suffix itself.
+    if (typeof o.label !== "string" || !o.label.includes(SELF_LABEL_SUFFIX.trim())) return null;
     const host: DaemonHost = { instanceId: o.instance_id.trim(), label: o.label.trim() };
     if (typeof o.repos_base_path === "string" && o.repos_base_path.trim()) {
       host.reposBasePath = o.repos_base_path.trim();

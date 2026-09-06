@@ -203,7 +203,7 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
  */
 export function useModelRegistryFanOut(): ModelRegistryFanOut {
   const { sessionToken } = useAuthContext();
-  const { daemons, roomStatus } = useSelectedDaemon();
+  const { daemons, directoryStatus } = useSelectedDaemon();
   const connectHost = useHostConnector();
   const token = sessionToken ?? "";
 
@@ -343,13 +343,16 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     return mergeRegistryEntries(snapshots);
   }, [daemonIds, statesByDaemon]);
 
-  // The common room is this fleet's host directory, and only a *joined* room is one: while the token
-  // is being minted `useCommonRoom` already reports `connecting` with no room and therefore no
-  // roster, so a directory that "can name hosts" then would be claiming a fleet it cannot enumerate.
-  // Treating `connecting` as a directory made every page load render "no daemons in the common room"
-  // — an empty fleet, positively asserted — for the whole of the mint, where the honest answer is
-  // that this screen is not connected to the common room yet.
-  const hasDirectory = roomStatus === "connected";
+  // Only a directory that can actually name hosts is one. `connecting` never qualifies: a source
+  // mid-join has no roster, so treating it as a directory made every page load render "no daemons in
+  // the common room" — an empty fleet, positively asserted — for the whole of the token mint, where
+  // the honest answer is that this screen has no directory yet.
+  //
+  // `connected` now means *some* source can name hosts, not all of them: the serving source is
+  // connected from the first render, so this screen shows a one-host fleet while the common room is
+  // still joining and the fleet grows when it lands. That is the intended trade — a real partial
+  // fleet beats asserting there is none — and it is why the check is not "every source is up".
+  const hasDirectory = directoryStatus === "connected";
   const status = useMemo(
     () =>
       registryReadStatus({

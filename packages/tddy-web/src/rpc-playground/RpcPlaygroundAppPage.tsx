@@ -12,6 +12,7 @@ import { useAuthContext } from "../hooks/authProvider";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import { useSelectedDaemon } from "../rpc/selectedDaemon";
+import { useHostPresence } from "../rpc/hostDirectory/useHostPresence";
 import { PARAM_PARTICIPANT } from "../routing/appLocation";
 import { useAppLocation } from "../routing/useAppLocation";
 import { buildRegistry, findMethod } from "./registry";
@@ -64,8 +65,9 @@ function servicesFromRegistry(
  *
  * Shares the common-room connection owned by `SelectedDaemonProvider` (see `../rpc/selectedDaemon`)
  * rather than opening its own — this screen needs the *full* participant list (any "coder"
- * session, not just daemon-role participants), so it reads `room` from the shared context and
- * runs its own {@link useRoomParticipants} over it.
+ * session, not just daemon-role participants), so it asks the selected host for its presence
+ * source (`useHostPresence`) and runs its own {@link useRoomParticipants} over it. A host reached
+ * over a wire with no roster has none, and the screen has nothing to probe.
  */
 export function RpcPlaygroundAppPage({
   onNavigate,
@@ -78,7 +80,8 @@ export function RpcPlaygroundAppPage({
     [user],
   );
 
-  const { room } = useSelectedDaemon();
+  const { selectedInstanceId } = useSelectedDaemon();
+  const room = useHostPresence(selectedInstanceId);
   const allParticipants = useRoomParticipants(room);
 
   // The addressed participant is `?participant=`, so a link reproduces which host is being probed.

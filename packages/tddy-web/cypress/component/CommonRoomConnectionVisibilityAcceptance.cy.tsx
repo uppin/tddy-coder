@@ -12,12 +12,14 @@
  *
  * These tests pin the connection outcome as something the provider *publishes*: the reason reaches
  * the presence panel, the daemon selector says why it has nothing to offer, and any daemon-mode
- * consumer can read `roomStatus`/`roomError` from the context.
+ * consumer can read the common room's own status and reason — off its host-directory source, since
+ * the room itself is no longer on the shared context.
  */
 
 import React from "react";
 import { LiveKitAppPage } from "../../src/components/livekit/LiveKitAppPage";
-import { useSelectedDaemon } from "../../src/rpc/selectedDaemon";
+import { LIVEKIT_SOURCE_ID } from "../../src/rpc/hostDirectory/liveKitSource";
+import { useHostDirectorySource } from "../../src/rpc/hostDirectory/useHostDirectory";
 import {
   aCommonRoomThatFailsToConnect,
   aCommonRoomThatNeverFinishesConnecting,
@@ -36,11 +38,11 @@ const ICE_FAILURE = "could not establish pc connection";
 
 /** Renders the common-room connection state the provider publishes to daemon-mode consumers. */
 function CommonRoomStateProbe() {
-  const { roomStatus, roomError } = useSelectedDaemon();
+  const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   return (
     <div>
-      <span data-testid="probe-room-status">{roomStatus}</span>
-      <span data-testid="probe-room-error">{roomError ?? "none"}</span>
+      <span data-testid="probe-room-status">{commonRoom?.status ?? "absent"}</span>
+      <span data-testid="probe-room-error">{commonRoom?.error ?? "none"}</span>
     </div>
   );
 }
@@ -70,11 +72,15 @@ describe("common-room connection visibility", () => {
   });
 
   it("tells the daemon selector the room is unreachable rather than showing an empty list", () => {
-    // Given — the same unreachable common room
+    // Given — the same unreachable common room, on a page no daemon named itself to, so the room
+    // is the only thing that could contribute a host. A page served by a daemon offers that daemon
+    // whatever the room does (see `HostDirectoryAcceptance`), and so is never empty to explain.
     const unreachableRoom = aCommonRoomThatFailsToConnect(ICE_FAILURE);
 
     // When — the operator opens a daemon-mode screen
-    mountWithLiveCommonRoom(<LiveKitAppPage onNavigate={cy.stub()} />, unreachableRoom);
+    mountWithLiveCommonRoom(<LiveKitAppPage onNavigate={cy.stub()} />, unreachableRoom, {
+      servedByADaemon: false,
+    });
 
     // Then — the selector distinguishes "cannot reach the room" from "no daemons are running"
     daemonSelectorPage.expectUnreachable();

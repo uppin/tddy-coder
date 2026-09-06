@@ -37,6 +37,17 @@ export const daemonSelectorPage = {
     daemonSelectorPage.trigger().should("contain.text", label);
   },
 
+  /**
+   * Asserts the trigger shows exactly this label and nothing more.
+   *
+   * Use when the assertion is about how the label was *rendered* rather than which daemon is
+   * selected — `expectShowsSelected` is a substring match, so it cannot tell `"udoo"` from
+   * `"udoo (this daemon)"` and would pass whether or not the self-label suffix was stripped.
+   */
+  expectShowsSelectedExactly(label: string) {
+    daemonSelectorPage.trigger().should("have.text", label);
+  },
+
   /** Asserts the selector has no daemon selected — the "Select daemon" placeholder is shown. */
   expectEmpty() {
     daemonSelectorPage.trigger().should("contain.text", "Select daemon");
