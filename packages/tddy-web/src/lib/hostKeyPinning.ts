@@ -13,6 +13,12 @@
  * ⚠ This is the stack's most arguable design decision. It does not make an active substitution
  * impossible — only visible, and only after the first sighting. The alternative considered was to
  * accept passive-only protection and disclose it in the dialog.
+ *
+ * Where the ingredients for a conclusion are missing — no key presented, or storage that refuses to
+ * be read or written — the check degrades to `unverified` rather than to `pinned-now`. `pinned-now`
+ * is a positive claim the dialog acts on ("first time seeing this host, key recorded"), and making
+ * it when nothing was recorded would keep it false on every later sighting too, leaving an active
+ * substitution indistinguishable from ordinary first use permanently. `unverified` says so out loud.
  */
 
 /** What a pin check concluded about a host's key. */
@@ -22,7 +28,9 @@ export type KeyPinVerdict =
   /** Same key as last time. */
   | { kind: "unchanged" }
   /** Different from the pinned key — the flow must stop and say so. */
-  | { kind: "changed"; pinnedFingerprint: string };
+  | { kind: "changed"; pinnedFingerprint: string }
+  /** No continuity conclusion is available — no key was presented, or storage is unusable. */
+  | { kind: "unverified" };
 
 /** One `localStorage` entry per host, so a pin can be dropped without touching the others. */
 const PIN_KEY_PREFIX = "tddy.hostKeyPin.";
@@ -31,26 +39,45 @@ function pinKey(hostId: string): string {
   return `${PIN_KEY_PREFIX}${hostId}`;
 }
 
+/** What storage could tell us about a host's pin — including that it could tell us nothing. */
+type PinRead =
+  /** A fingerprint is on record for this host. */
+  | { kind: "pinned"; fingerprint: string }
+  /** Storage answered, and holds no pin for this host. */
+  | { kind: "absent" }
+  /** Storage refused to answer, so "no pin" and "a pin we cannot see" are indistinguishable. */
+  | { kind: "unreadable" };
+
 /**
- * The pinned fingerprint for `hostId`, or `null` when there is none *or* storage is unusable.
+ * What is pinned for `hostId`, keeping "storage says nothing is pinned" apart from "storage will
+ * not say".
  *
  * Private-mode and storage-blocked browsers throw on access rather than returning `null`; letting
- * that escape would take the whole hosts screen down over a hardening feature.
+ * that escape would take the whole hosts screen down over a hardening feature. Collapsing it into
+ * `absent` instead would turn a refused read into a fabricated first sighting.
  */
-function readPin(hostId: string): string | null {
+function readPin(hostId: string): PinRead {
+  let stored: string | null;
   try {
-    return window.localStorage.getItem(pinKey(hostId));
+    stored = window.localStorage.getItem(pinKey(hostId));
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
+  return stored === null ? { kind: "absent" } : { kind: "pinned", fingerprint: stored };
 }
 
-/** Record `fingerprint` as the pin for `hostId`. A storage that refuses the write is not fatal. */
-function writePin(hostId: string, fingerprint: string): void {
+/**
+ * Record `fingerprint` as the pin for `hostId`, reporting whether the write actually landed.
+ *
+ * A storage that refuses the write is not fatal, but it is not a pin either, so the caller has to
+ * know rather than assume.
+ */
+function writePin(hostId: string, fingerprint: string): boolean {
   try {
     window.localStorage.setItem(pinKey(hostId), fingerprint);
+    return true;
   } catch {
-    // Nothing is pinned, so the next sighting is a first sighting again — see `checkHostKey`.
+    return false;
   }
 }
 
@@ -60,19 +87,24 @@ function writePin(hostId: string, fingerprint: string): void {
  * Per-browser by design: a pin is a record of what *this* operator saw, and syncing it through the
  * daemon would route the trust anchor back through the channel it exists to distrust.
  *
- * ⚠ Where storage is unavailable every sighting reads as a first sighting (`pinned-now`), which is
- * trust-on-every-use: no worse than the no-pinning alternative, and never a false `unchanged`.
+ * An empty `fingerprint` is not key material: pinning it would spend the single first-use trust slot
+ * on nothing, after which the host's genuine key would read as `changed` from `""`.
  */
 export function checkHostKey(hostId: string, fingerprint: string): KeyPinVerdict {
-  const pinnedFingerprint = readPin(hostId);
-  if (pinnedFingerprint === null) {
-    writePin(hostId, fingerprint);
-    return { kind: "pinned-now" };
+  if (fingerprint === "") {
+    return { kind: "unverified" };
   }
-  if (pinnedFingerprint === fingerprint) {
+  const pin = readPin(hostId);
+  if (pin.kind === "unreadable") {
+    return { kind: "unverified" };
+  }
+  if (pin.kind === "absent") {
+    return writePin(hostId, fingerprint) ? { kind: "pinned-now" } : { kind: "unverified" };
+  }
+  if (pin.fingerprint === fingerprint) {
     return { kind: "unchanged" };
   }
-  return { kind: "changed", pinnedFingerprint };
+  return { kind: "changed", pinnedFingerprint: pin.fingerprint };
 }
 
 /**
