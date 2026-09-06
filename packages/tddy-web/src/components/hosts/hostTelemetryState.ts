@@ -5,7 +5,7 @@
  * a component test cannot see — every row shares one transport and the request names no host, so a
  * cell reading the selected daemon for every row renders identical DOM.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-telemetry-fanout.md` (AC-3, AC-4, AC-5)
+ * PRD: `docs/ft/web/hosts-screen-telemetry.md` (AC-3, AC-4, AC-5)
  */
 
 /** What the row knows about its host by the time it decides. */

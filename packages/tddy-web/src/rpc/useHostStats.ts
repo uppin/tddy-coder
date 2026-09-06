@@ -20,7 +20,7 @@
  * host is reachable — deciding *which* hosts are worth subscribing to belongs to the caller, which
  * reads the directory. A host it does not subscribe for renders as "no reading", never as zero.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-07-22-streamed-host-stats.md`
+ * PRD: `docs/ft/web/host-stats-footer.md`, `docs/ft/web/hosts-screen-telemetry.md`
  * Changeset: `2026-07-22-streamed-host-stats`
  */
 

@@ -12,7 +12,7 @@
  * `useHostStats(undefined)` follows the daemon selector, `useHostStats(null)` subscribes to nothing.
  * Returning `undefined` from here would put one machine's CPU under another machine's name.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-telemetry-fanout.md` (AC-3, AC-4, AC-5)
+ * PRD: `docs/ft/web/hosts-screen-telemetry.md` (AC-3, AC-4, AC-5)
  */
 
 import { describe, it, expect } from "bun:test";

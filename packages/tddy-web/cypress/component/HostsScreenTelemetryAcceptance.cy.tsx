@@ -19,7 +19,7 @@
  *   propagates neither an abort nor a consumer's `break` to the server handler, so no backend
  *   counter here can fall back when a stream closes.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-telemetry-fanout.md
+ * PRD: `docs/ft/web/hosts-screen-telemetry.md`
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

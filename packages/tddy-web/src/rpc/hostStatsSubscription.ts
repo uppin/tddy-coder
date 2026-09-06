@@ -10,7 +10,7 @@
  * The split is the one `useHasCapability`/`hasCapability` already uses: the logic is a pure function
  * with unit tests, the hook is a thin wrapper.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-telemetry-fanout.md` (AC-6)
+ * PRD: `docs/ft/web/hosts-screen-telemetry.md` (AC-6)
  */
 
 /**
