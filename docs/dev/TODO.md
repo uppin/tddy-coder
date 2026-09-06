@@ -1094,18 +1094,31 @@ adjacent duplications were left in place, both out of scope for that changeset:
 - **`tddy-vm-testkit` is a plain workspace lib**, so nothing structurally stops production code
   depending on it and picking up `SESSION_TOKEN_SECRET` / `GUEST_PASSWORD`. Consider
   `publish = false` plus a crate-level test-only marker.
-### Session rooms are not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
+### A split session's room is not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
 
-`SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`, and a room is only opened by
-`start_workspace_session`. A daemon restart therefore leaves every surviving workspace session's
-checkout without its host: the room may still exist on the LiveKit server, but no `daemon-{instance_id}`
-is in it, so a split agent resumed against that session finds nothing to address and its
-`connect_livekit_client` wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`).
+`SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`. A co-located session recovers
+on its own — `ConnectSession` opens the room, which is the same path that opened it the first time —
+but a split session's room is opened only by its start
+(`SessionRoomRegistry::open_measured_by` on the split path) and its checkout is on another host, so
+`ConnectSession` there finds no local `repo_path` and opens nothing. A split agent resumed against a
+restarted daemon then finds no `daemon-{instance_id}` to address and its `connect_livekit_client`
+wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`).
 
-The fix is a startup sweep that re-opens a room for each session whose `.session.yaml` has a
-`repo_path` and a live worktree — the same shape as the existing startup reconciliation in
-`packages/tddy-daemon/src/startup.rs`. Marked in code at
-`packages/tddy-daemon/src/session_room.rs:259`.
+The fix is a startup sweep that re-opens a room for each split session whose `.session.yaml` names a
+codebase daemon — the same shape as the existing startup reconciliation in
+`packages/tddy-daemon/src/startup.rs`.
+
+### The LiveKit room-creation call has no timeout (source: lazy-session-room changeset, 2026-09-06)
+
+`packages/tddy-livekit/src/room_metadata.rs` has no timeout handling, and neither does
+`create_room` in `packages/tddy-daemon/src/session_room.rs`. A configured LiveKit that accepts a TCP
+connection and then never answers therefore makes the caller wait until its own RPC deadline expires
+rather than failing fast.
+
+This used to hang **session start**, which is the bug the lazy-room work fixed by taking the call off
+that path entirely. What is left is narrower and correctly scoped — the connection that asked to
+reach the session over LiveKit is the one that waits — but a bounded control-plane call would turn
+that wait into a legible error naming the server, and is worth having independently.
 
 ### A claude-cli split agent has no route to its own attachments (source: session-room changeset, 2026-08-14)
 

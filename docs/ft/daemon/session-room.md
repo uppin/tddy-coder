@@ -6,12 +6,20 @@
 ## Summary
 
 Every session that runs an agent has its own LiveKit room, `session-{session_id}`, hosted by that
-session's **facilitating daemon** — the daemon running the agent. The facilitating daemon opens the
-room before the agent process is spawned, serves its full RPC surface there as
-`daemon-{instance_id}`, broadcasts worktree activity to every participant on the
-**`worktree.activity`** data-channel topic, and keeps the room's *metadata* as the current
-working-tree summary. Agents join as peers. A session with no agent — a standalone `workspace`
-session — has no facilitating daemon and no room.
+session's **facilitating daemon** — the daemon running the agent. The room is created the first time
+something needs to reach that session over LiveKit: the facilitating daemon creates it, joins it as
+`daemon-{instance_id}`, serves its full RPC surface there, broadcasts worktree activity to every
+participant on the **`worktree.activity`** data-channel topic, and keeps the room's *metadata* as the
+current working-tree summary. Agents join as peers. A session with no agent — a standalone
+`workspace` session — has no facilitating daemon and no room.
+
+**Starting a session does not open its room.** Creating a session is local work — a worktree, a
+branch, a session directory, an agent process — and on the ordinary placement, where the agent and
+its checkout are on one daemon, a start contacts LiveKit nowhere at all. It therefore costs the same
+whether LiveKit is unconfigured, configured and answering, or configured and unreachable, and a
+session created while the server was down becomes reachable over LiveKit as soon as the server is,
+without being restarted. See [When the room is created](#when-the-room-is-created) for the two
+places that are deliberately not lazy.
 
 The room belongs to the **session**, not to the checkout. A session has exactly one agent-running
 daemon, but its repo may live elsewhere; keying the room on the worktree would leave it homeless
@@ -31,16 +39,78 @@ so every measurement and every file read is local. Split placement separates the
 facilitating daemon then reaches the checkout the same way the agent already does — over `tddy-rpc`
 to the codebase daemon. The room does not move; it stays with the agent it serves.
 
+## When the room is created
+
+A room is opened by the first thing that needs it, and by nothing earlier.
+
+| What opens it | When |
+|---|---|
+| **`ConnectSession`** | Something connects to the session over LiveKit — a browser or desktop client, a `tddy-session-sync` mirror, a `tddy-tools pty-relay --livekit-url`. This is the ordinary case and covers every co-located placement. |
+| **`AttachSessionAgent`** | An agent owned by another daemon is attached to the session, or a seeded agent's clone is claimed for it. Done before that peer is contacted, so it is never asked to join a room nobody hosts; a daemon with no LiveKit credentials refuses the attach outright rather than recording a roster entry that resolves to nothing. |
+| **A [split session](remote-managed-worktree.md)'s start** | The facilitating daemon opens the room itself. The agent it is about to spawn is handed a token minted for exactly that room and no connection precedes it — and LiveKit is that placement's transport to its own checkout rather than an addition to it, so there is nothing to defer. |
+
+Everything else that needs the room arrives through one of those three. Participant admission
+refuses a session this daemon does not host rather than opening one, and the attach above is what
+guarantees there is something to be admitted to. A `tddy-session-sync` mirror and a
+`tddy-tools pty-relay --livekit-url` each call `ConnectSession` before joining, because each then
+waits for `daemon-{instance_id}` to already be there.
+
+**Lazily, not conditionally.** The alternative was to decide up front which sessions need a room,
+and the only signal available that early is the session type — which cannot answer the question. The
+types that look exempt, `claude-cli` and `cursor-cli`, are exactly the ones that run agents and
+therefore *do* have rooms. `ConnectSession` answering those types with empty LiveKit coordinates is
+about a session's **terminal** room, a different room with different participants, and reading it as
+"these types do not use LiveKit" is the mistake that framing invites. Deferring asks no question at
+all: the room appears when it is first wanted, so every consumer's guarantee holds without anyone
+having to predict who the consumers are.
+
+**One room per session, however many callers arrive at once.** Opening is single-flighted per
+session: concurrent callers take turns, and all but the first find the room already open and take
+that answer. Re-checking under the lock is not the same as checking twice — asking whether a room is
+open and then opening it are two steps, registering a room replaces whatever entry was there and
+aborts the previous room's tasks, and a second join under `daemon-{instance_id}` has the server
+disconnect the participant that was already there. Without the interlock two simultaneous connects
+would leave the room the winner registered served by a connection the loser had already been dropped
+from.
+
+**A failure is a failure.** A caller that asked to reach a session over LiveKit and could not get a
+room is told so, naming the room it could not create. It is *session creation* that does not depend
+on a reachable LiveKit server; the room plainly does, and a caller handed coordinates nothing is
+serving would only discover that by waiting.
+
+### The terminal bridge shares this lifecycle
+
+A `claude-cli` session's PTY is also served to LiveKit clients, by a participant in the common room
+under `daemon-{instance_id}-{session_id}`. That is how a client which is *not* on this host drives
+the terminal, and it is LiveKit work for the same reason the room is — so it is established by the
+same connect, under the same lock: a session cannot end up with a room a remote client can find and
+a terminal it cannot type at. The desktop reaches its own host over IPC and drives that terminal
+without a bridge at all, so a desktop-only deployment creates neither, ever.
+
+Where the terminal will be served is a pure function of the deployment config and the session id, so
+`StartSession` reports those coordinates without contacting anything — deferring *when* the
+participant joins does not move *where* it is. A session with no terminal to bridge is not a failure;
+a session that has one and could not be bridged is.
+
+A session started from [Telegram](telegram-session-control.md) is the one start that bridges eagerly.
+Its reply hands a human the room and identity to attach with, so the LiveKit consumer has already
+arrived — the message *is* the asking — and an invitation to a room nobody joined would be no
+invitation. That bridge is announced on success and logged on failure, never fatal to the start.
+
 ## Membership and identity
 
 | Participant | Identity | Joins |
 |---|---|---|
-| Facilitating daemon | `daemon-{instance_id}` | At session start, **before the agent is spawned** |
+| Facilitating daemon | `daemon-{instance_id}` | When the room is created, as its **first participant** |
 | Split session's agent | `split-agent-{session_id}` | When its `tddy-tools --mcp` child connects |
 | Further agents (fastcontext, discovery) | Their own | Minting a second token for the same room; no daemon-side registration |
 
-First-joiner-ness is a consequence of ordering, not a race: the room is opened and joined while the
-only thing that could join it is still unspawned.
+First-joiner-ness is a consequence of ordering, not a race. The daemon creates the room and joins it
+before the call that opened it answers, and a participant learns where the room is from that same
+answer — `ConnectSession` is both what puts the daemon in the room and what tells the caller which
+room to look in, so nothing can arrive ahead of it. On a split placement the ordering is the older
+one: the room is joined while the only thing that could join it, the agent about to be spawned with a
+token for it, does not yet exist.
 
 ## File access
 
@@ -126,8 +196,10 @@ a copy beside the checkout would move bytes across the network to a host nobody 
 
 ## Configuration
 
-Requires the `livekit:` block. Without credentials no room is created and sessions start exactly as
-they did before session rooms existed — the room is an addition, never a prerequisite.
+Requires the `livekit:` block. Without credentials no room is created and nothing that connects to a
+session asks for one — the room is an addition to a session, never a prerequisite for one. With
+credentials the same holds of a session's *start*: it is connecting that needs LiveKit, so a
+deployment whose server is merely down goes on starting sessions.
 
 | Key | Default | Role |
 |---|---|---|
@@ -151,10 +223,15 @@ daemon's common-room participant behaves.
 
 ## Known limitations
 
-- **Rooms are not re-opened when the daemon restarts.** The registry starts empty and a room is only
-  opened at session start, so a surviving session's checkout loses its host until the session is
-  restarted. A split agent resumed against it times out on its ten-second wait for the participant.
-  Tracked in `docs/dev/TODO.md`.
+- **A split session's room is not re-opened when the daemon restarts.** The registry starts empty.
+  A co-located session recovers by itself, because the next connection to it opens its room again by
+  the same path that opened it the first time. A split session's room is opened only by its start and
+  its checkout is on another host, so a split agent resumed against a restarted daemon times out on
+  its ten-second wait for the participant. Tracked in `docs/dev/TODO.md`.
+- **The room-creation call is not bounded by a timeout.** A configured server that accepts a
+  connection and then never answers makes the *connection that asked for the room* wait rather than
+  fail fast. It is scoped to that connection: a session's start makes no such call, so a wait here
+  never costs anyone a session. Tracked in `docs/dev/TODO.md`.
 - **A claude-cli split agent cannot read its own attachments.** They are served in its room over
   `ReadHostDocument`, which a browser or a second agent can call, but that agent speaks only
   `ExecuteTool` — whose tools are worktree-rooted with traversal rejected. Tracked in
