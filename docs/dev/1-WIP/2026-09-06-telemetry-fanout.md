@@ -79,7 +79,7 @@ is unary-shaped and cannot express a subscription.
 
 - [x] `useHostStats` generalized to a per-host client
 - [x] Subscription policy: online hosts only, screen-scoped lifetime
-- [x] Telemetry cell for a Hosts row, reusing the existing indicators (node 1 places it in the row)
+- [x] Telemetry column on the Hosts row, reusing the existing indicators
 - [x] Honest states for offline / connecting / errored
 - [x] Cypress component acceptance tests
 
@@ -110,11 +110,12 @@ is unary-shaped and cannot express a subscription.
 **`packages/tddy-web`**
 - `src/rpc/useHostStats.ts` — per-host client resolution; the no-argument call preserved.
 - `src/components/hosts/HostRowTelemetry.tsx` — the row's telemetry cell and its three states.
-- `src/components/hosts/HostsScreen.tsx` — **not touched.** Planned as "the new column", but node 1's
-  `HostsScreen` is still an unimplemented stub, so adding the column here would have meant writing
-  that node's row rendering — a `## Dependencies` violation. The cell is standalone and node 1 wires
-  it in when its rows land; the acceptance spec mounts `HostRowTelemetry` directly for the same
-  reason.
+- `src/components/hosts/HostsScreen.tsx` — the Telemetry column: one `<th>`, one `<td>` rendering
+  `HostRowTelemetry`, and the import. Nothing else in that file is this node's. It had to wait for
+  node 1 to render rows at all; until then the cell stood alone and the acceptance spec mounted it
+  directly.
+- `cypress/support/pages/hostsScreenPage.ts` — `rows()` now matches `tr[data-testid^="hosts-row-"]`
+  instead of excluding known child suffixes. See the note below.
 - `cypress/support/rpc/connectionServiceBackend.ts` — **not touched**; the existing global
   `hostStatsStreamCount()` proves every count under test.
 - `cypress/support/pages/hostsScreenPage.ts` — telemetry cell selectors (node 1 creates the file).
@@ -272,6 +273,26 @@ proto change; the existing global `hostStatsStreamCount()` still carries the cou
 directories, and `src/components/hosts` was not among them — `hostTelemetryState.test.ts` is the
 first test file to live there, so it would have passed locally and never run in CI. Added the
 directory (one word). A test that does not run is worse than no test, since it reads as coverage.
+
+### Wiring the column onto the row
+
+Node 1 (#453) greened and pushed its row rendering, which unblocked the one part of
+`## Responsibility` that had been deferred. After rebasing onto its new tip the column went in: a
+`Telemetry` header and a cell per row, placed after the `Status` / `Last seen` pair rather than
+between them, since those two are node 1's paired liveness columns.
+
+Two screen-level tests now cover it — an online host's reading appearing **on its own row**, and an
+offline row saying it has none — driving the real `HostsAppPage` rather than a bare cell. They were
+red before the column existed.
+
+**One parent-owned file needed a fix.** `hostsScreenPage.rows()` selected
+`[data-testid^="hosts-row-"]` minus an enumerated list of known child suffixes
+(`-liveness`, `-last-seen`). Adding any new per-row cell therefore made that cell count as a row, and
+node 1's "sorts online hosts above offline ones" began seeing six rows instead of two. Since
+`## Dependencies` explicitly sanctions "adds a column inside the existing `HostsScreen` row", the
+selector had to tolerate one, so it now matches by element — `tr[data-testid^="hosts-row-"]` — which
+needs no exception list and cannot regress the same way for node 3's memory reading. Node 1's five
+tests pass unchanged. **Flagged for node 1's author**, since it is their file.
 
 ## Refactoring needed
 

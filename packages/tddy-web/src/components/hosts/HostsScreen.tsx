@@ -10,6 +10,7 @@
  */
 
 import { formatLastSeen } from "./hostRowFormat";
+import { HostRowTelemetry } from "./HostRowTelemetry";
 
 export interface HostRow {
   /** The daemon instance id — stable, and what every host-addressed RPC is keyed on. */
@@ -63,6 +64,7 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
               <th className="text-left py-2 pr-4">Host</th>
               <th className="text-left py-2 pr-4">Status</th>
               <th className="text-left py-2 pr-4">Last seen</th>
+              <th className="text-left py-2 pr-4">Telemetry</th>
               <th className="text-left py-2 pr-4">Instance ID</th>
               <th className="text-left py-2">Repos base path</th>
             </tr>
@@ -101,6 +103,9 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
                   data-testid={`hosts-row-${row.instanceId}-last-seen`}
                 >
                   {formatLastSeen(row.lastSeenUnixMs, nowUnixMs)}
+                </td>
+                <td className="py-2 pr-4">
+                  <HostRowTelemetry instanceId={row.instanceId} online={row.online} />
                 </td>
                 <td className="py-2 pr-4 font-mono text-xs">{row.instanceId}</td>
                 <td className="py-2 font-mono text-xs">{row.reposBasePath}</td>

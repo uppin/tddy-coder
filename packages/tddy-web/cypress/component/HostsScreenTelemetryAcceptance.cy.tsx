@@ -4,9 +4,10 @@
  * Each cell shows one host's live per-core CPU and free disk, from one `StreamHostStats`
  * subscription per **online, routable** host.
  *
- * These mount `HostRowTelemetry` — this node's own component — rather than the whole `HostsScreen`.
- * Row rendering belongs to `#hosts-screen 1/8` and is not implemented, so driving the screen here
- * would make every failure attributable to *that* node instead of this one.
+ * Most tests here mount `HostRowTelemetry` on its own rather than the whole `HostsScreen`: a failure
+ * in a cell's own behaviour should name this node, not the one that renders rows. The last group is
+ * the exception — it drives the real screen, because *being on the row at all* is a property only the
+ * assembled screen has.
  *
  * **What this file deliberately does not test.** Two properties are invisible through the fake and
  * are pinned by unit tests instead, so nothing here pretends to cover them:
@@ -21,15 +22,21 @@
  * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-telemetry-fanout.md
  */
 
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   aConnectionServiceBackend,
   type ConnectionServiceBackend,
   type ConnectionServiceScenario,
 } from "../support/rpc/connectionServiceBackend";
+import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
+import { ConnectionService, type KnownHostEntry } from "../../src/gen/connection_pb";
 import { HostRowTelemetry } from "../../src/components/hosts/HostRowTelemetry";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { hostTelemetryPage as telemetry } from "../support/pages/hostsScreenPage";
+import {
+  hostsScreenPage,
+  hostTelemetryPage as telemetry,
+} from "../support/pages/hostsScreenPage";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -196,5 +203,81 @@ describe("Hosts screen telemetry", () => {
     // Then the cell waits visibly rather than drawing idle bars
     telemetry.pending(HOST_A).should("exist");
     telemetry.expectNoReading(HOST_A);
+  });
+
+  // -------------------------------------------------------------------------
+  // Wired into the real screen
+  // -------------------------------------------------------------------------
+
+  describe("on the Hosts screen", () => {
+    const NOW_MS = Date.now();
+
+    function aKnownHost(overrides: Partial<KnownHostEntry>): KnownHostEntry {
+      return {
+        instanceId: HOST_A,
+        label: HOST_A,
+        online: true,
+        firstSeenUnixMs: BigInt(NOW_MS - 86_400_000),
+        lastSeenUnixMs: BigInt(NOW_MS),
+        reposBasePath: "repos",
+        maxAttachmentBytes: 0n,
+        isLocal: false,
+        ...overrides,
+      } as KnownHostEntry;
+    }
+
+    /**
+     * A daemon that lists `hosts` and streams the telemetry fixture for any of them.
+     *
+     * Composed here rather than taken from `aConnectionServiceBackend`, which does not serve
+     * `ListKnownHosts` — that RPC belongs to `#hosts-screen 1/8`, and teaching the shared helper
+     * about it from this node would collide with the PR that owns it.
+     */
+    function aDaemonListing(hosts: KnownHostEntry[]): InMemoryRpcBackend {
+      return anInMemoryRpcBackend().implement(ConnectionService, {
+        listKnownHosts: () => ({ hosts }),
+        streamHostStats: async function* () {
+          yield { cpu: { perCorePercent: CPU_PER_CORE }, disk: DISK };
+          await new Promise<never>(() => undefined);
+        },
+      });
+    }
+
+    function mountScreen(backend: InMemoryRpcBackend, reachable: string[]) {
+      mountWithRpc(
+        withSelectedDaemon(
+          <HostsAppPage onNavigate={() => {}} />,
+          reachable.map((instanceId) => ({ instanceId, label: instanceId })),
+        ),
+        backend,
+      );
+    }
+
+    it("shows an online host's reading on its own row", () => {
+      // Given the registry listing one online host
+      const backend = aDaemonListing([aKnownHost({ instanceId: HOST_A, online: true })]);
+
+      // When the Hosts screen is opened
+      mountScreen(backend, [HOST_A]);
+
+      // Then that host's row carries its live reading, not just a cell somewhere on the page
+      hostsScreenPage.row(HOST_A).within(() => {
+        telemetry.cell(HOST_A).should("exist");
+      });
+      telemetry.expectCpuCores(HOST_A, CPU_PER_CORE);
+    });
+
+    it("shows an offline host's row as having no reading", () => {
+      // Given the registry listing a host that has left the roster
+      const backend = aDaemonListing([aKnownHost({ instanceId: HOST_B, online: false })]);
+
+      // When the Hosts screen is opened
+      mountScreen(backend, [HOST_B]);
+
+      // Then its row says so, rather than omitting the column for offline hosts
+      hostsScreenPage.row(HOST_B).within(() => {
+        telemetry.offline(HOST_B).should("exist");
+      });
+    });
   });
 });

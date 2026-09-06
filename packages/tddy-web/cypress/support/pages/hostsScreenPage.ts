@@ -47,17 +47,19 @@ export const hostsScreenPage = {
  * spell out.
  */
 export const hostTelemetryPage = {
-  cell: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-telemetry"]`),
-  cpu: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-cpu"]`),
-  disk: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-disk"]`),
+  cell: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry`),
+  cpu: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-cpu`),
+  disk: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-disk`),
   unavailable: (instanceId: string) =>
-    cy.get(`[data-testid="hosts-row-${instanceId}-telemetry-unavailable"]`),
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-unavailable`),
+  /** A reading arrived carrying disk but no CPU — the CPU slot alone is still waiting. */
+  cpuPending: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-cpu-pending`),
   /** Subscribed, but the host has not reported a reading yet. */
   pending: (instanceId: string) =>
-    cy.get(`[data-testid="hosts-row-${instanceId}-telemetry-pending"]`),
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-pending`),
   /** Not in the roster — distinct from "reachable but silent", and never a number. */
   offline: (instanceId: string) =>
-    cy.get(`[data-testid="hosts-row-${instanceId}-telemetry-offline"]`),
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-offline`),
 
   /** Assert the per-core percentages the row is showing, core 0 first. */
   expectCpuCores: (instanceId: string, percents: number[]) => {

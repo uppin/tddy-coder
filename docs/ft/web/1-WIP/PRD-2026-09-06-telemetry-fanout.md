@@ -74,13 +74,13 @@ So this node introduces the streaming counterpart, and it is the first of its ki
 
 ## Acceptance criteria
 
-- [~] **AC-1** An online host's row shows its per-core CPU bars and free disk, sourced from a live stream.
+- [x] **AC-1** An online host's row shows its per-core CPU bars and free disk, sourced from a live stream.
 - [x] **AC-2** The row updates as fresh readings arrive, without a reload.
-- [~] **AC-3** Exactly **one** subscription is opened per online host — not one per render.
+- [x] **AC-3** Exactly **one** subscription is opened per online host — not one per render.
 - [x] **AC-4** An **offline** host's row shows `—` and opens **no** subscription.
-- [~] **AC-5** A host whose connection is connecting or errored shows a pending/unavailable state and
+- [x] **AC-5** A host whose connection is connecting or errored shows a pending/unavailable state and
       **never fabricated zero values**.
-- [ ] **AC-6** Leaving the Hosts screen tears every subscription down.
+- [x] **AC-6** Leaving the Hosts screen tears every subscription down.
 - [x] **AC-7** `HostStatsFooter` is unchanged — still one subscription against the selected host.
 
 ## Out of scope for this node
@@ -92,6 +92,7 @@ Memory, load average and explicit core count (node 3). Any probe of software ins
 
 - `feature/hosts-screen/host-resources` — memory, load average and core count in the telemetry surface.
 
-Status after `/pr-wrap` validation: `[x]` pinned by a passing test; `[~]` behaviour
-implemented but only weakly pinned (see the changeset's `/pr-wrap validation` section); `[ ]` not
-pinned — AC-6's test cannot fail on a teardown bug.
+All seven are pinned by a passing test. AC-3's per-host clause and AC-6's teardown are pinned by
+unit tests (`hostTelemetryState.test.ts`, `hostStatsSubscription.test.ts`) rather than by the
+component suite, because neither property is observable through the in-memory transport — see the
+changeset's red-phase section for the evidence.
