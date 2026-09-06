@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "Standalone terminal app: spawn darwin sandbox + Claude and proxy PTY via SessionChannel gRPC (no host daemon)"
 
+# The binary is a thin front-end over this library, and the acceptance suite drives the library
+# directly: a `sandboxed` session's jail has to be provisioned and dispatched into from a test, and
+# a bin-only crate is reachable from nothing but its own `main`.
+[lib]
+name = "tddy_sandbox_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "tddy-sandbox-app"
 path = "src/main.rs"
@@ -35,9 +42,13 @@ tddy-task = { path = "../tddy-task" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 
 # macOS spawns the Seatbelt jail in-process via this crate; the Linux path talks to a running
-# tddy-daemon over gRPC instead and never links it.
+# tddy-daemon over gRPC instead and never links it. The RPC trio below is the same story: only the
+# macOS `sandboxed` path serves a tool socket of its own, and only it needs the framing to do it.
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
+prost = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -45,3 +56,9 @@ libc = "0.2"
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+# The acceptance suite watches a real jail come up and go away; `wait::eventually` is the
+# workspace's one polling helper, and its failures name the last state observed.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The acceptance suite dispatches through the very socket the host `tddy-tools --mcp` uses, so it
+# drives the real client rather than a re-implementation of its wire format.
+tddy-tools = { path = "../tddy-tools" }

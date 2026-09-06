@@ -297,6 +297,47 @@ async fn a_shell_tool_in_the_jail_cannot_read_a_host_file_outside_the_worktree()
     );
 }
 
+/// The jail must resolve its own worktree's path, which walks every ancestor — but traversing a
+/// directory is not reading it. `~/.tddy/sessions` is one of those ancestors, and its entries are
+/// the other live sessions on this host, so a jail that can list it can enumerate its neighbours.
+/// The grant is `file-read-metadata`: lookup, not listing.
+#[tokio::test]
+async fn a_jailed_shell_resolves_its_worktree_without_being_able_to_list_its_parent() {
+    // Given — canonicalized, because the grants are written against symlink-resolved paths, and a
+    // jail asked for `/var/...` fails while resolving `/var` itself, before reaching the listing
+    // this test is about.
+    let workspace = a_sandboxed_workspace_session().await;
+    let parent = std::fs::canonicalize(
+        workspace
+            .worktree
+            .parent()
+            .expect("the worktree must have a parent"),
+    )
+    .expect("canonicalize the worktree's parent");
+    let sibling = parent.join("a-sibling-session-the-jail-must-not-enumerate");
+    std::fs::create_dir_all(&sibling).expect("create a sibling beside the worktree");
+
+    // When — the control first: resolution itself must work, or the assertion below is vacuous.
+    let resolved = workspace.shell("pwd -P").await;
+    assert_eq!(
+        resolved.exit_code, 0,
+        "the jail must be able to resolve its own worktree; stderr was: {}",
+        resolved.stderr
+    );
+    let listing = workspace
+        .shell(&format!("ls {}", parent.to_string_lossy()))
+        .await;
+
+    // Then
+    assert!(
+        !listing
+            .stdout
+            .contains("a-sibling-session-the-jail-must-not-enumerate"),
+        "the jail listed its worktree's parent and saw its neighbours; stdout was: {}",
+        listing.stdout
+    );
+}
+
 /// The mutating half of the same boundary: a jailed shell may write its own checkout and nothing
 /// else of the host.
 #[tokio::test]

@@ -352,6 +352,10 @@ pub(crate) fn bridge_stop_reason(
 /// live-resize polling loop) and from `spawn::spawn_claude_sandbox` (to open the jail's PTY at
 /// the right size from the start, via `--initial-cols`/`--initial-rows`) — same ioctl, same
 /// controlling terminal, just called at two different points before/after attach.
+///
+/// Crate-internal: every caller is a terminal path inside this crate (`bridge`, `spawn`,
+/// `daemon_client`). The lib target exists for the session lifecycle a test has to drive, not to
+/// publish this crate's ioctls.
 pub(crate) fn terminal_size_or_default() -> (u16, u16) {
     #[cfg(unix)]
     unsafe {

@@ -23,7 +23,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
 use tddy_sandbox::{CgroupConfig, MountSpec, SandboxError, SandboxPlan};
-use tddy_sandbox_runner::SessionChannelClient;
+// The budget both hosts of this exchange keep. Imported rather than restated: the daemon and the
+// standalone app speak the same one-call-at-a-time protocol into the same jail, so a call still
+// legitimate on one of them must not already have been abandoned on the other.
+use tddy_sandbox_runner::{SessionChannelClient, IN_JAIL_TOOL_TIMEOUT};
 use tddy_service::proto::connection::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::sandbox::session_frame::Payload as SessionPayload;
 use tddy_service::proto::sandbox::SessionFrame;
@@ -192,11 +195,13 @@ pub fn build_workspace_tool_plan(
         })?;
     // Path lookup for the worktree itself. Resolving `/a/b/worktree` walks `/a`, then `/a/b`, and
     // a jail that cannot stat those cannot canonicalize its own checkout — which is the first
-    // thing every path-containing tool does. Each ancestor is granted as a `literal`, never a
-    // `subpath`: the jail may name those directories (and see what they contain) but can read
-    // nothing under them, so the only host tree it reaches into is still the worktree.
+    // thing every path-containing tool does. That lookup is all each ancestor is granted: a
+    // `metadata` read, never a `literal` or a `subpath`. The distinction is not academic here —
+    // `<tddyhome>/sessions` is one of these ancestors and its entries are the other live sessions
+    // on this host, so an ordinary `file-read*` grant would let one session's jail enumerate its
+    // neighbours by id. The only host tree it reaches into is still the worktree.
     for ancestor in worktree_ancestors(&plan_worktree) {
-        plan.reads.push(tddy_sandbox::ReadSpec::literal(
+        plan.reads.push(tddy_sandbox::ReadSpec::metadata(
             ancestor,
             tddy_sandbox::ReadReason::Custom,
         ));
@@ -239,13 +244,6 @@ pub fn workspace_sandbox_platform_support() -> Result<(), SandboxError> {
 
 /// How long the jail is given to write its ready marker before the start is failed.
 const JAIL_READY_TIMEOUT: Duration = Duration::from_secs(120);
-
-/// How long one in-jail tool call may take before its channel is declared lost.
-///
-/// Comfortably above the tool engine's own ceilings (a blocking `Shell` defaults to 30s and takes
-/// its limit from the caller), because a call that outlives this leaves the host unable to tell
-/// which answer belongs to which request — so the channel is torn down rather than reused.
-const IN_JAIL_TOOL_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The production provisioner: a real jail on this host's backend.
 #[derive(Debug, Default)]

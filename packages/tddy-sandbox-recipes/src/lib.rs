@@ -12,10 +12,11 @@ pub mod plan;
 #[cfg(unix)]
 pub use claude_cli::seed_claude_local_install;
 pub use claude_cli::{
-    append_claude_mcp_args, build_claude_allowlist, build_claude_disallowlist,
-    claude_credentials_copies, claude_interactive_policy, claude_runner_env_overlay,
-    claude_scratch_mcp_dir, effective_replaced_tools, process_claude_exec_reads,
-    seed_claude_credentials, write_claude_mcp_config,
+    append_claude_mcp_args, append_host_agent_mcp_args, build_claude_allowlist,
+    build_claude_disallowlist, build_host_agent_disallowlist, claude_credentials_copies,
+    claude_interactive_policy, claude_runner_env_overlay, claude_scratch_mcp_dir,
+    effective_replaced_tools, process_claude_exec_reads, seed_claude_credentials,
+    write_claude_mcp_config,
 };
 #[cfg(unix)]
 pub use cursor_cli::seed_cursor_local_install;

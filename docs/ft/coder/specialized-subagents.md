@@ -166,6 +166,14 @@ of being limited to the single hardcoded FastContext discovery agent and CLI fla
 11. `--specialized-agent <name>` is repeatable; each maps to a def resolved from `<tddyhome>/agents`
     + builtins (`spawn::resolve_specialized_agents`), serialized into `TDDY_SUBAGENTS_JSON` alongside
     `TDDY_SUBAGENT` (comma names) via `spawn::subagent_env_overlay`.
+11a. The same overlay sets `TDDY_SUBAGENT_ROSTER_STATIC`, and that is what the standalone app's
+    roster behaviour *is*: `config::resolve_session_agents` resolves the roster once, before the
+    session starts, and nothing can attach or detach afterwards — so the seed is the whole roster,
+    permanently, and `tddy-tools` opens no `StreamSessionAgents` subscription. The agents are
+    reached directly over their defs' `base_url` (typically a local Ollama), which is the only
+    backend a daemon-less session has; a roster RPC would broker nothing. See
+    [session-agent-roster.md](../daemon/session-agent-roster.md) § The roster stream for the
+    daemon's case, where the roster genuinely changes and is still followed.
 12. ~~`--discovery-subagent`/`--fastcontext-url`/`--fastcontext-model`/`--fastcontext-max-turns` keep
     working as deprecated aliases~~ — removed entirely, no backwards compatibility retained.
     `--specialized-agent` (repeatable) is the only way to select an agent, and every agent's

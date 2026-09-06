@@ -37,6 +37,14 @@ pub struct SandboxAppConfig {
     pub claude_home_dir: Option<PathBuf>,
     #[serde(default)]
     pub cursor_home_dir: Option<PathBuf>,
+    /// `--codebase-mode sandboxed` only: the **base** holding this host's build homes — one
+    /// directory per repository, each the jail's `$HOME` for that checkout's build and its
+    /// dependency caches. Not itself any jail's `$HOME`: one home shared by every repository would
+    /// let an unaudited build leave a `~/.cargo/config.toml` behind for the next session's *other*
+    /// checkout to build with. Shared across sessions within one repository — see
+    /// `--codebase-home-dir`.
+    #[serde(default)]
+    pub codebase_home_dir: Option<PathBuf>,
     #[serde(default)]
     pub cwd: Option<PathBuf>,
     #[serde(default)]

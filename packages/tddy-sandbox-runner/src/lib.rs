@@ -10,12 +10,15 @@ pub mod host_relay;
 pub mod runner;
 
 pub use host_relay::{
-    relay_egress_request, run_host_relay, run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler,
-    HostToolHandler, NullRpcHandler, NullToolHandler, SessionChannelClient, StdioSandboxClient,
+    relay_egress_request, run_host_relay, run_host_relay_with_in_jail_tools,
+    run_host_relay_with_rpc, HostRelayConfig, HostRpcHandler, HostToolHandler,
+    InJailToolDispatcher, NullRpcHandler, NullToolHandler, SessionChannelClient,
+    StdioSandboxClient, IN_JAIL_TOOL_TIMEOUT,
 };
 pub use runner::{
     connect_sandbox_client, connect_sandbox_client_uds, connect_uds_channel, resolve_secret_envs,
-    run_sandbox_runner, run_workspace_tool_runner, SandboxRunnerArgs,
+    resolve_workspace_tools_transport, run_sandbox_runner, run_workspace_tool_runner,
+    SandboxRunnerArgs, WorkspaceToolsTransport,
 };
 
 /// Re-exported so host-relay callers can implement [`HostToolHandler`] without depending on

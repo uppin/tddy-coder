@@ -22,12 +22,24 @@ use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
 /// Each [`tddy_sandbox::ReadSpec`] becomes a `(source, target, flags)` tuple: an `MS_BIND` mount
 /// remounted `MS_RDONLY` (plus `MS_NOEXEC` for non-exec reads). Pure (no syscalls) so the mapping
 /// is unit-testable without mounting — the actual `mount(2)` calls happen in `enter_rootless_jail`.
+///
+/// Two kinds produce no mount at all. A [`ReadKind::Regex`] grant names a pattern rather than a
+/// path, and there is nothing to bind. A [`ReadKind::Metadata`] grant asks for the `lstat` needed
+/// to *resolve* a path and deliberately not for its contents; a bind mount cannot express that
+/// distinction, and binding the directory anyway would grant the whole subtree read-only — strictly
+/// more than was asked for, and the very leak the kind exists to avoid. This jail needs no such
+/// mount today: it still shares the host's filesystem root (see the `FIXME(fs-confinement)` on
+/// [`spawn_plan`]), so a confined process already resolves host paths through their real ancestors.
+///
+/// TODO(fs-confinement): once the jail gets a minimal root via `pivot_root`, metadata grants need
+/// their own answer there — an empty placeholder directory at each granted path, so the path
+/// resolves without the ancestor's entries coming with it.
 pub fn plan_to_bind_mounts(plan: &SandboxPlan) -> Vec<(PathBuf, PathBuf, MsFlags)> {
     use tddy_sandbox::ReadKind;
     let mut mounts: Vec<(PathBuf, PathBuf, MsFlags)> = plan
         .reads
         .iter()
-        .filter(|r| !matches!(r.kind, ReadKind::Regex(_)))
+        .filter(|r| !matches!(r.kind, ReadKind::Regex(_) | ReadKind::Metadata))
         .map(|r| {
             let target = r.jail.clone().unwrap_or_else(|| r.host.clone());
             let mut flags = MsFlags::MS_BIND | MsFlags::MS_RDONLY;
@@ -823,6 +835,29 @@ mod tests {
 
         // Then
         assert!(mounts[0].2.contains(MsFlags::MS_NOEXEC));
+    }
+
+    /// A metadata grant asks to *resolve* a path, not to read what is under it. The narrowest bind
+    /// mount available is a read-only one over the whole subtree, which would hand over every entry
+    /// in it — so this backend binds nothing and lets the jail's shared root resolve the path.
+    #[test]
+    fn maps_a_metadata_read_to_no_bind_mount_at_all() {
+        // Given — the lookup an in-jail tool needs to canonicalize a checkout's own path
+        let plan = a_plan(
+            vec![ReadSpec::metadata("/srv/checkouts", ReadReason::Custom)],
+            ResourceLimits::default(),
+        );
+
+        // When
+        let mounts = plan_to_bind_mounts(&plan);
+
+        // Then
+        assert_eq!(
+            mounts.len(),
+            0,
+            "a metadata grant must not become a read-only bind of the directory it resolves; got \
+             {mounts:?}"
+        );
     }
 
     #[test]
