@@ -732,14 +732,33 @@ pub fn clone_as_user_with_env(
     anyhow::bail!("clone_as_user is only supported on Unix")
 }
 
-/// Run `program args...` as the target OS user and capture stdout. Errors (including non-zero
-/// exit) carry stderr so a failing probe surfaces the underlying cause rather than an empty result.
+/// What [`run_output_as_user`] made of an attempt to run a program as another user.
+///
+/// The three outcomes stay separate because callers act on them differently: a program that never
+/// started is not installed, one that exited non-zero ran and disagreed, and a setup failure says
+/// nothing about the program at all.
 #[cfg(unix)]
-pub fn run_capture_as_user(
+pub struct CaptureAsUser {
+    /// The path actually executed, after `resolve_tool_path` — what an error message should name.
+    pub resolved_program: PathBuf,
+    /// `Err` when the program could not be started (not on `PATH`, not executable, or the
+    /// privilege drop failed), which is *not* the same as a program that ran and exited non-zero.
+    pub result: std::io::Result<std::process::Output>,
+}
+
+/// Run `program args...` as the target OS user and hand back its whole result — exit status,
+/// stdout and stderr.
+///
+/// [`run_capture_as_user`] is this with the non-success cases collapsed into an error. A caller
+/// that has to *classify* an exit code, or read a tool that reports on stderr (`gh auth status`
+/// does), needs the parts kept apart, and the user resolution / `HOME` / privilege drop below is
+/// the same either way.
+#[cfg(unix)]
+pub fn run_output_as_user(
     os_user: &str,
     program: &Path,
     args: &[String],
-) -> anyhow::Result<String> {
+) -> anyhow::Result<CaptureAsUser> {
     use std::os::unix::process::CommandExt;
 
     // Anchor a relative `program` to the daemon's own toolchain root (its own process cwd —
@@ -810,14 +829,29 @@ pub fn run_capture_as_user(
         }
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| anyhow::anyhow!("{}: {}", resolved_program.display(), e))?;
+    Ok(CaptureAsUser {
+        resolved_program,
+        result: cmd.output(),
+    })
+}
+
+/// Run `program args...` as the target OS user and capture stdout. Errors (including non-zero
+/// exit) carry stderr so a failing probe surfaces the underlying cause rather than an empty result.
+#[cfg(unix)]
+pub fn run_capture_as_user(
+    os_user: &str,
+    program: &Path,
+    args: &[String],
+) -> anyhow::Result<String> {
+    let run = run_output_as_user(os_user, program, args)?;
+    let output = run
+        .result
+        .map_err(|e| anyhow::anyhow!("{}: {}", run.resolved_program.display(), e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!(
             "{} exited with {}: {}",
-            resolved_program.display(),
+            run.resolved_program.display(),
             output.status,
             stderr.trim()
         );

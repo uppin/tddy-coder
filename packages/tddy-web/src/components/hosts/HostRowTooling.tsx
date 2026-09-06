@@ -16,6 +16,7 @@
  */
 
 import type { HostGitIdentity, HostGithubCli } from "../../gen/connection_pb";
+import { ProbeOutcome } from "../../gen/connection_pb";
 
 export interface HostRowToolingProps {
   instanceId: string;
@@ -23,9 +24,114 @@ export interface HostRowToolingProps {
   githubCli: HostGithubCli | undefined;
 }
 
+/** What one cell says, and what hovering it explains. */
+interface ToolingCell {
+  text: string;
+  title: string;
+}
+
+/** Nothing has answered for this host yet — distinct from every answer a probe can give. */
+function awaitingProbe(subject: string): ToolingCell {
+  return { text: "…", title: `Waiting for a ${subject} result from this host` };
+}
+
+/**
+ * The outcomes that carry no finding, rendered before either block's own states are consulted.
+ *
+ * A probe that could not run is never dressed up as a negative: "could not check" and "not
+ * configured" send an operator to two different places, and only one of them is a host to go and
+ * fix. A missing block is the same admission — nothing has answered for this host yet — so it says
+ * so rather than borrowing the shape of an answer.
+ */
+function unanswered(
+  outcome: ProbeOutcome,
+  failureReason: string,
+  subject: string,
+): ToolingCell | null {
+  switch (outcome) {
+    // A block whose sender set no outcome states nothing, the same as no block at all.
+    case ProbeOutcome.UNSPECIFIED:
+      return awaitingProbe(subject);
+    case ProbeOutcome.FAILED:
+      return {
+        text: "Could not check",
+        title: failureReason
+          ? `The ${subject} failed: ${failureReason}`
+          : `The ${subject} failed, so nothing is known about this host`,
+      };
+    case ProbeOutcome.UNSUPPORTED:
+      return { text: "Not supported here", title: `This host cannot run the ${subject}` };
+    default:
+      return null;
+  }
+}
+
+function gitCell(git: HostGitIdentity | undefined): ToolingCell {
+  const subject = "git identity probe";
+  if (git === undefined) {
+    return awaitingProbe(subject);
+  }
+  const noFinding = unanswered(git.outcome, git.failureReason, subject);
+  if (noFinding !== null) {
+    return noFinding;
+  }
+  if (!git.configured) {
+    return {
+      text: "Not configured",
+      title: "This host has no git user.name / user.email set for its OS user",
+    };
+  }
+  return {
+    text: `${git.userName} <${git.userEmail}>`,
+    title: "The identity commits made on this host would carry",
+  };
+}
+
+function githubCliCell(githubCli: HostGithubCli | undefined): ToolingCell {
+  const subject = "gh probe";
+  if (githubCli === undefined) {
+    return awaitingProbe(subject);
+  }
+  const noFinding = unanswered(githubCli.outcome, githubCli.failureReason, subject);
+  if (noFinding !== null) {
+    return noFinding;
+  }
+  if (!githubCli.installed) {
+    return { text: "Not installed", title: "The GitHub CLI is not on this host's PATH" };
+  }
+  if (!githubCli.authenticated) {
+    return {
+      text: "Not authenticated",
+      title: "The GitHub CLI is installed on this host but logged out",
+    };
+  }
+  return {
+    text: githubCli.login,
+    title: `This host's GitHub CLI is authenticated as ${githubCli.login}`,
+  };
+}
+
 export function HostRowTooling({ instanceId, git, githubCli }: HostRowToolingProps) {
-  // TODO(host-identity): implement
-  void git;
-  void githubCli;
-  return <span data-testid={`hosts-row-${instanceId}-tooling`} />;
+  const gitState = gitCell(git);
+  const ghState = githubCliCell(githubCli);
+
+  return (
+    <span
+      data-testid={`hosts-row-${instanceId}-tooling`}
+      className="flex items-center gap-3 text-xs text-muted-foreground"
+    >
+      {/* Both cells are labelled with the tool they speak for. Unlabelled, an authenticated `gh`
+          renders as a bare login beside the row's other identities — the tddy session user in
+          `UserAvatar`, the git identity next to it — and reads as whichever one the operator
+          expected to see there. */}
+      <span data-testid={`hosts-row-${instanceId}-git`} title={gitState.title}>
+        <span className="mr-1 opacity-70">git</span>
+        {gitState.text}
+      </span>
+      <span data-testid={`hosts-row-${instanceId}-gh`} title={ghState.title}>
+        <span className="mr-1 opacity-70">gh</span>
+        {ghState.text}
+      </span>
+    </span>
+  );
 }

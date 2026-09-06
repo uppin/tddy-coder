@@ -80,24 +80,276 @@ pub trait HostToolingProbe: Send + Sync {
 ///
 /// `gh auth status` writes to **stderr**, and its wording is not a stable API. The parse is therefore
 /// deliberately narrow, and anything unrecognised is [`ProbeOutcome::Failed`].
-pub fn classify_gh_auth_status(_exit_code: Option<i32>, _output: &str) -> GithubCliStatus {
-    // TODO(host-identity): implement
-    unimplemented!("host-identity: classify_gh_auth_status")
+pub fn classify_gh_auth_status(exit_code: Option<i32>, output: &str) -> GithubCliStatus {
+    // No exit code at all means the binary never ran, which is the one thing `gh` not being
+    // installed looks like from here.
+    if exit_code.is_none() {
+        return GithubCliStatus {
+            outcome: ProbeOutcome::Ok,
+            installed: false,
+            authenticated: false,
+            login: None,
+        };
+    }
+
+    // Look for a login *before* looking for a logged-out phrase. `gh auth status` reports every
+    // host it knows, so output can carry both, and the honest reading of "logged in to one host,
+    // out of another" is authenticated — the reverse would send an operator to re-authenticate a
+    // host that already is.
+    if let Some(login) = parse_gh_login(output) {
+        return GithubCliStatus {
+            outcome: ProbeOutcome::Ok,
+            installed: true,
+            authenticated: true,
+            login: Some(login.to_string()),
+        };
+    }
+
+    // Covers both wordings gh uses: "You are not logged into any GitHub hosts" and the per-host
+    // "Not logged in to github.com" — the second phrase contains the first.
+    if output.to_ascii_lowercase().contains("not logged in") {
+        return GithubCliStatus {
+            outcome: ProbeOutcome::Ok,
+            installed: true,
+            authenticated: false,
+            login: None,
+        };
+    }
+
+    // Deliberately the default. Anything this parse does not recognise is a probe that failed,
+    // never a negative finding — see the module docs.
+    GithubCliStatus {
+        outcome: ProbeOutcome::Failed(format!(
+            "gh auth status produced output this daemon does not recognise: {}",
+            summarise(output)
+        )),
+        installed: true,
+        authenticated: false,
+        login: None,
+    }
+}
+
+/// The login out of `✓ Logged in to github.com account octocat (keyring)`.
+///
+/// Both anchors have to be present on one line: "Logged in to" alone appears in `gh`'s own
+/// suggestion text, and matching it there would invent a login out of a word that follows.
+fn parse_gh_login(output: &str) -> Option<&str> {
+    output.lines().find_map(|line| {
+        let after_host = line.split_once("Logged in to ")?.1;
+        let after_account = after_host.split_once(" account ")?.1;
+        after_account.split_whitespace().next()
+    })
+}
+
+/// A one-line excerpt of unrecognised output, for an operator reading a failure reason.
+fn summarise(output: &str) -> String {
+    const MAX: usize = 200;
+    let trimmed = output.trim();
+    match trimmed.char_indices().nth(MAX) {
+        Some((cut, _)) => format!("{}…", &trimmed[..cut]),
+        None => trimmed.to_string(),
+    }
 }
 
 /// Parse `git config --get user.name` / `user.email` output into an identity.
-pub fn parse_git_identity(_name_output: &str, _email_output: &str) -> GitIdentity {
-    // TODO(host-identity): implement
-    unimplemented!("host-identity: parse_git_identity")
+///
+/// A half-configured host — one half set, the other empty — reports `None`, the same as one with
+/// neither. An identity is the pair: git refuses to commit without both, so a host missing either
+/// has no identity its commits would carry, and rendering the half it does have beside a blank
+/// would state a fact that is not true. Which half is missing is a detail of the fix, not of the
+/// finding.
+pub fn parse_git_identity(name_output: &str, email_output: &str) -> GitIdentity {
+    let name = name_output.trim();
+    let email = email_output.trim();
+    GitIdentity {
+        outcome: ProbeOutcome::Ok,
+        name_and_email: (!name.is_empty() && !email.is_empty())
+            .then(|| (name.to_string(), email.to_string())),
+    }
 }
 
 /// The live probe: runs `git` and `gh` as the host's OS user.
 pub struct SubprocessHostToolingProbe;
 
 impl HostToolingProbe for SubprocessHostToolingProbe {
+    #[cfg(unix)]
+    fn probe(&self, os_user: &str) -> HostTooling {
+        // One deadline for the whole probe, with every command started before any is collected.
+        // They are independent reads of the same account, so running them in series would make the
+        // Hosts screen wait for the sum of them and let a slow `gh` — it can reach the network —
+        // decide how long the git answer takes.
+        let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+        let name = start_probe(os_user, "git", &["config", "--get", "user.name"]);
+        let email = start_probe(os_user, "git", &["config", "--get", "user.email"]);
+        let github_cli = start_probe(os_user, "gh", &["auth", "status"]);
+
+        HostTooling {
+            git: git_identity_of(
+                git_config_value(name.collect(deadline), "user.name"),
+                git_config_value(email.collect(deadline), "user.email"),
+            ),
+            github_cli: github_cli_of(github_cli.collect(deadline)),
+        }
+    }
+
+    /// `run_capture_as_user` is Unix-only, so there is nothing to run here. That is a property of
+    /// the platform, not a failure of this host's tooling, and it says so rather than surfacing an
+    /// internal error an operator would try to fix.
+    #[cfg(not(unix))]
     fn probe(&self, _os_user: &str) -> HostTooling {
-        // TODO(host-identity): implement
-        unimplemented!("host-identity: probe")
+        HostTooling {
+            git: GitIdentity {
+                outcome: ProbeOutcome::Unsupported,
+                name_and_email: None,
+            },
+            github_cli: GithubCliStatus {
+                outcome: ProbeOutcome::Unsupported,
+                installed: false,
+                authenticated: false,
+                login: None,
+            },
+        }
+    }
+}
+
+/// Both halves of the identity, or the first reason one of them could not be read.
+///
+/// A half that could not be read is not a half that is unset: it makes the whole identity unknown,
+/// because the pair that could not be assembled might well have been complete.
+#[cfg(unix)]
+fn git_identity_of(name: Result<String, String>, email: Result<String, String>) -> GitIdentity {
+    match (name, email) {
+        (Ok(name), Ok(email)) => parse_git_identity(&name, &email),
+        (Err(reason), _) | (Ok(_), Err(reason)) => GitIdentity {
+            outcome: ProbeOutcome::Failed(reason),
+            name_and_email: None,
+        },
+    }
+}
+
+/// The value one `git config --get <key>` reported.
+///
+/// An unset key is an empty value, not an error: `git config --get` exits 1 for it, and treating
+/// that as a failure would hide the very state this probe exists to report. Any other exit code is
+/// a failure, because git only reaches those for a malformed config or an unreadable file — and a
+/// `git` that cannot be started is one too, since a host whose git is missing has no identity we
+/// can claim to have read.
+#[cfg(unix)]
+fn git_config_value(
+    probed: Result<crate::spawner::CaptureAsUser, String>,
+    key: &str,
+) -> Result<String, String> {
+    let run = probed?;
+    let output = run
+        .result
+        .map_err(|e| format!("could not run {}: {e}", run.resolved_program.display()))?;
+    match output.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        Some(1) => Ok(String::new()),
+        Some(code) => Err(format!(
+            "git config --get {key} exited with {code}: {}",
+            summarise(&String::from_utf8_lossy(&output.stderr))
+        )),
+        None => Err(format!("git config --get {key} was killed by a signal")),
+    }
+}
+
+/// The state `gh auth status` reported, or why it could not be asked.
+#[cfg(unix)]
+fn github_cli_of(probed: Result<crate::spawner::CaptureAsUser, String>) -> GithubCliStatus {
+    let failed = |reason: String| GithubCliStatus {
+        outcome: ProbeOutcome::Failed(reason),
+        installed: false,
+        authenticated: false,
+        login: None,
+    };
+    let run = match probed {
+        Ok(run) => run,
+        Err(reason) => return failed(reason),
+    };
+    let output = match run.result {
+        Ok(output) => output,
+        // The one error that is a finding rather than a failure: no such program means `gh` is not
+        // installed for this user. Anything else — a failed privilege drop, a permission error —
+        // says nothing about whether gh is there.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return classify_gh_auth_status(None, "");
+        }
+        Err(e) => {
+            return failed(format!(
+                "could not run {}: {e}",
+                run.resolved_program.display()
+            ));
+        }
+    };
+    // A signal-killed child has no exit code, and `None` means something else entirely to
+    // `classify_gh_auth_status` — "the binary never ran", i.e. not installed. Keep the two apart.
+    let Some(code) = output.status.code() else {
+        return failed(format!(
+            "gh auth status was killed by a signal: {}",
+            output.status
+        ));
+    };
+    // `gh auth status` reports on stderr, and has moved between the two streams across releases, so
+    // classify what it wrote wherever it wrote it.
+    let mut written = String::from_utf8_lossy(&output.stdout).into_owned();
+    written.push_str(&String::from_utf8_lossy(&output.stderr));
+    classify_gh_auth_status(Some(code), &written)
+}
+
+/// One probe command, running as `os_user` on a thread of its own.
+#[cfg(unix)]
+struct StartedProbe {
+    /// The command line, for a failure reason an operator can act on.
+    command: String,
+    outcome: std::sync::mpsc::Receiver<anyhow::Result<crate::spawner::CaptureAsUser>>,
+}
+
+/// Start one probe command as `os_user` without waiting for it.
+#[cfg(unix)]
+fn start_probe(os_user: &str, program: &str, args: &[&str]) -> StartedProbe {
+    let owned_user = os_user.to_string();
+    let owned_program = std::path::PathBuf::from(program);
+    let owned_args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+    let command = format!("{program} {}", args.join(" "));
+    let (tx, outcome) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(crate::spawner::run_output_as_user(
+            &owned_user,
+            &owned_program,
+            &owned_args,
+        ));
+    });
+    StartedProbe { command, outcome }
+}
+
+#[cfg(unix)]
+impl StartedProbe {
+    /// Wait for this command until `deadline`, then give up on it.
+    ///
+    /// The bound is on waiting, not on the child: `spawner` runs a command to completion and hands
+    /// back no handle to kill. An overrunning probe is therefore abandoned rather than killed — its
+    /// thread finishes in its own time and its result is dropped — which is what the caller needs,
+    /// since the Hosts screen probes every host it lists and one unreachable `gh` must not hold the
+    /// RPC open.
+    fn collect(
+        self,
+        deadline: std::time::Instant,
+    ) -> Result<crate::spawner::CaptureAsUser, String> {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match self.outcome.recv_timeout(remaining) {
+            Ok(Ok(run)) => Ok(run),
+            Ok(Err(e)) => Err(format!("could not run {}: {e}", self.command)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(format!(
+                "{} did not answer within {}s",
+                self.command,
+                PROBE_TIMEOUT.as_secs()
+            )),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(format!(
+                "the {} probe ended without reporting",
+                self.command
+            )),
+        }
     }
 }
 

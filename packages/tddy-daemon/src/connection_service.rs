@@ -30,34 +30,35 @@ use tddy_service::proto::connection::{
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
-    KnownHostEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListKnownHostsRequest, ListKnownHostsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionAgentsRequest, ListSessionUploadsRequest, ListSessionUploadsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    HostGitIdentity, HostGithubCli, KnownHostEntry, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
+    ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
+    ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
+    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
-    OpenAgentConversationRequest, OpenAgentConversationResponse, ProjectEntry as ProtoProjectEntry,
-    PromptAgentConversationRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
-    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
-    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, RestoreSessionWorktreeRequest,
-    RestoreSessionWorktreeResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionAgentRoster, SessionEntry as ProtoSessionEntry,
-    SessionTerminalInput, SessionTerminalOutput, SessionUploadEntry,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal, SignalSessionRequest,
-    SignalSessionResponse, SplitAgentPlacement, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
-    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
-    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
-    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
+    OpenAgentConversationRequest, OpenAgentConversationResponse, ProbeOutcome as ProtoProbeOutcome,
+    ProjectEntry as ProtoProjectEntry, PromptAgentConversationRequest, ReadContextFileBatchRequest,
+    ReadContextFileRequest, ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse,
+    ReadWorktreeFileRequest, ReadWorktreeFileResponse, RemoveWorktreeRequest,
+    RemoveWorktreeResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
+    SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
+    SignalSessionRequest, SignalSessionResponse, SplitAgentPlacement, StartSessionRequest,
+    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamSessionAgentsRequest,
+    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent,
+    TerminalHistoryChunk, TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest, WorkflowFileEntry,
+    WorktreeDirEntry, WorktreeRow, WorktreeSizeStatus as ProtoWorktreeSizeStatus,
+    WorktreeStatsEvent,
 };
 use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
@@ -939,6 +940,50 @@ fn worktree_row_from_diff(
         stale: false,
         size_status: proto_worktree_size_status(status) as i32,
         size_calculated_at_unix_ms: calculated_at_unix_ms.unwrap_or(0),
+    }
+}
+
+/// Map a probe outcome to its wire enum, keeping "could not run" apart from any finding.
+fn proto_probe_outcome(outcome: &crate::host_tooling::ProbeOutcome) -> ProtoProbeOutcome {
+    match outcome {
+        crate::host_tooling::ProbeOutcome::Ok => ProtoProbeOutcome::Ok,
+        crate::host_tooling::ProbeOutcome::Failed(_) => ProtoProbeOutcome::Failed,
+        crate::host_tooling::ProbeOutcome::Unsupported => ProtoProbeOutcome::Unsupported,
+    }
+}
+
+/// The operator-facing reason a probe failed, empty for every other outcome.
+fn probe_failure_reason(outcome: &crate::host_tooling::ProbeOutcome) -> String {
+    match outcome {
+        crate::host_tooling::ProbeOutcome::Failed(reason) => reason.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Put a probed git identity on the wire.
+///
+/// `configured` carries whether an identity was found at all, so a host with none is distinguishable
+/// from one whose probe failed — both would otherwise arrive as two empty strings, and an operator
+/// reading a blank name cannot tell which of the two to go and fix.
+fn git_identity_message(git: &crate::host_tooling::GitIdentity) -> HostGitIdentity {
+    let (user_name, user_email) = git.name_and_email.clone().unwrap_or_default();
+    HostGitIdentity {
+        outcome: proto_probe_outcome(&git.outcome) as i32,
+        configured: git.name_and_email.is_some(),
+        user_name,
+        user_email,
+        failure_reason: probe_failure_reason(&git.outcome),
+    }
+}
+
+/// Put a probed `gh` state on the wire. The login is the **host's**, not the calling session's.
+fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> HostGithubCli {
+    HostGithubCli {
+        outcome: proto_probe_outcome(&gh.outcome) as i32,
+        installed: gh.installed,
+        authenticated: gh.authenticated,
+        login: gh.login.clone().unwrap_or_default(),
+        failure_reason: probe_failure_reason(&gh.outcome),
     }
 }
 
@@ -13142,13 +13187,34 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let req = request.into_inner();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
+        let os_user = self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        // TODO(host-identity): implement
-        unimplemented!("host-identity: get_host_tooling")
+        // Route before probing. Answered locally, a question about another host would come back
+        // with this daemon's own git identity under that host's name — a wrong answer that reads
+        // exactly like a right one.
+        if let Some(answered) = self
+            .rpc_served_by_peer("GetHostTooling", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        // Both probes shell out and wait, so they run on the blocking pool rather than parking a
+        // runtime worker for however long `gh` takes to reach the network.
+        let probe = Arc::clone(&self.host_tooling);
+        let probed_user = os_user.to_string();
+        let tooling = tokio::task::spawn_blocking(move || probe.probe(&probed_user))
+            .await
+            .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
+
+        Ok(Response::new(GetHostToolingResponse {
+            daemon_instance_id: local_instance_id_for_config(&self.config),
+            git: Some(git_identity_message(&tooling.git)),
+            github_cli: Some(github_cli_message(&tooling.github_cli)),
+        }))
     }
 
     async fn list_session_workflow_files(
