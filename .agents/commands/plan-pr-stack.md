@@ -99,6 +99,10 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
 5. **Sequencing facts** — For each node, does it consume a capability a parent has not shipped yet?
    That is a scheduling fact to record in its `## Dependencies`, **not** a licence to build the
    parent's half.
+6. **Backlog prerequisites** — did Step 2b turn up an entry large enough to need its own node? If so
+   it takes a position in the line **before** the first node that needs it. A prerequisite node is a
+   legitimate node: a vertical slice (the fix, its tests, its docs), independently mergeable. It is
+   *not* the forbidden stubs-only shape, because it delivers behaviour.
 
 **Hold the boundary contract while decomposing.** These pairs are one node, never two:
 
@@ -136,9 +140,34 @@ Create that file **before** the first Explore / Grep / Glob / Read, then persist
 `.agents/skills/planning/references/initial-discovery.md` (combined conclusions at the top; each pass
 as `## Exploration N` at the tail).
 
-Then run `.agents/skills/planning/references/planning-phase.md` **Step 2** (code analysis → State A)
-and **Step 3** (product area), once for the whole body of work. Record which packages each node
-touches.
+Then run `.agents/skills/planning/references/planning-phase.md` **Step 2** (code analysis → State A),
+**Step 2b** (TODO backlog cross-check) and **Step 3** (product area), once for the whole body of work.
+Record which packages each node touches.
+
+**Step 2b matters more for a stack than for a single PR**, because a stack has somewhere to put the
+answer. Scan `docs/dev/TODO.md` for entries in the path of this work, classify each — blocking /
+during / answered / unrelated — then decide its **shape**:
+
+| Size of the fix | Shape |
+|---|---|
+| Small, inside one node's own files | Do it in that node; record it in that node's `## Prerequisites` |
+| Small, in shared code more than one node touches | A **prerequisite PR off `$TRUNK`**, landing before the stack's root. Name it in every affected node's `## Prerequisites` |
+| Large | **Its own node**, placed in the line *before* the first node that needs it — or its own PR outside the stack when it is orthogonal to the feature |
+
+⚠ **Do not absorb a large refactor into a feature node.** It buries a reviewable change under a
+mechanical one, and it breaks the boundary contract's promise that a node is independently
+reviewable. The `connection_service.rs` entry in this repo records exactly that trade as the reason
+nobody has split it.
+
+**A blocking entry is one where every route around it is wrong** — not one you merely find annoying.
+The test: name the two or three ways to proceed without it and check whether each is *incorrect*
+rather than inconvenient. If a node ships a new secret at rest, and the shared write helper would
+create it world-readable while the hand-rolled alternative deepens the very debt the entry records,
+that is blocking.
+
+Carry the verdicts into Step 4b: each node's `## Prerequisites` lists the entries **that node** runs
+into, and a blocking one also earns a line in that node's `## Scope`. Record the ones you decide not
+to fix too — the value is that a reviewer sees the entry was considered rather than missed.
 
 This whole-work file is **temporary**. It is **not** a changeset companion, and wrap of any node must
 not delete it as if it were. **Do not `git add` it onto a stack branch.** When each node's changeset
@@ -209,6 +238,11 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
 
 - Follow `.agents/skills/planning/references/planning-phase.md` **Step 4** (PRD) and **Step 5**
   (changeset), scoped to **this node only**. Present each PRD for approval before its changeset.
+- **Add a `## Prerequisites` section** to any node whose Step 2b scan found something — the entries
+  *that node* runs into, each with a verdict, plus a `## Scope` line for anything blocking. Omit the
+  heading on nodes the scan cleared; an empty section is noise. Keep any node list inside it
+  **accurate** — "nodes 1, 3 and 6 touch this file" is a claim a reviewer will check, so verify it
+  against the diffs rather than writing it from memory.
 - **Every changeset MUST carry the four headings** the stack model requires, in every node's
   document:
 
@@ -632,6 +666,11 @@ nothing does for you once a parent lands. `/merge` and `/repoint` are the by-han
 During planning and code analysis, if you identify enhancements outside the current stack's scope, add
 them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to the stack slug.
 
+`docs/dev/TODO.md` is read as well as written: Step 2b scans it for entries this stack runs into and
+Step 4b records them per node. The two directions are complementary — what this stack defers is what
+somebody's Step 2b finds next, so write entries stating **why** the work was deferred, not only what
+remains. That reason is what tells the next planner whether it blocks them.
+
 ## Rules
 
 - **Register the stack.** `gh pr create --draft --base <predecessor>` opens each PR; the stack is
@@ -641,6 +680,9 @@ them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to
   in the report what that cost — siblings become predecessor and successor, and an independent root
   loses its independence.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
+- **Cross-check `docs/dev/TODO.md` (Step 2b) before decomposing.** Record every relevant entry in the
+  affected node's `## Prerequisites` with a verdict; give a blocking one a `## Scope` line; give a
+  large one its own node or its own PR. Never absorb a large refactor into a feature node.
 - **The boundary contract governs the decomposition.** Every node is a vertical slice — schema, code,
   tests, in one PR. Splitting by layer is forbidden; a node that ships only surface is not a valid
   node. Split by capability instead. Only the two named exceptions apply, and do not invent a third.
@@ -693,6 +735,7 @@ them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to
 /plan-pr-stack
   record ORIGINAL_BRANCH (stop if detached) and TRUNK
   interview → decompose into a LINEAR sequence of vertical slices → whole-work discovery
+  → cross-check docs/dev/TODO.md → size each fix: in-node, prerequisite PR, or its own node
   → settle order, slug, owned surfaces, per-node draft-PR contracts
   → WAVE 1 (per node, in this worktree, in dependency order)
         git checkout -b feature/<slug>/<node>   (off its parent; root off origin/$TRUNK)

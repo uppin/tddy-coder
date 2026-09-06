@@ -103,7 +103,43 @@ Why these technical changes are needed.
 - Reference architectural decisions
 - Explain technical debt or limitations being addressed
 
-#### 6. Scope
+#### 6. Prerequisites (when the TODO scan finds something)
+
+**Optional — include only when `docs/dev/TODO.md` holds entries this change runs into.** An empty
+heading is noise; omit it entirely when the scan came back clear.
+
+Produced by planning Step 2b (`.agents/skills/planning/references/planning-phase.md`). Each entry
+gets a verdict, so a reviewer can see it was considered rather than missed:
+
+```markdown
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) this change runs into.
+
+### ⛔ BLOCKING — {entry heading, quoted from TODO.md}
+
+Why every route around it is wrong, not merely inconvenient. What must land first, and where.
+A blocking entry ALSO earns a line in `## Scope` — it is work, not a note.
+
+### ⚠ DURING — {entry heading}
+
+How this change touches it, makes it worse, or must avoid re-introducing it. Say plainly when the
+verdict is "recorded, not fixed here", and why (e.g. the TODO itself says the fix needs its own PR).
+
+### ℹ ANSWERED — {entry heading}
+
+An open question the entry asks that planning or discovery resolved. State the answer, and update
+the TODO entry itself when wrapping.
+```
+
+**Sizing the fix** — small and in this change's own files: do it here. Small but in shared code: a
+prerequisite PR that lands first. Large: its own PR, or its own node in a stack. Never absorb a
+large refactor into a feature change — it buries a reviewable diff under a mechanical one.
+
+**Keep any claim inside it verifiable.** "Nodes 1, 3 and 6 touch this file" is something a reviewer
+will check; confirm it against the diffs rather than writing it from memory.
+
+#### 7. Scope
 
 **CRITICAL**: High-level deliverables that track overall progress.
 
@@ -132,7 +168,7 @@ Why these technical changes are needed.
 
 **Update Responsibility**: See [update-context-docs.md](.cursor/commands/update-context-docs.md) for Scope Update Responsibility Matrix.
 
-#### 7. Technical Changes
+#### 8. Technical Changes
 
 ```markdown
 ## Technical Changes
@@ -175,7 +211,7 @@ Specific changes per package:
 - Delta should map to affected packages
 - Focus on technical details, not process
 
-#### 8. Implementation Milestones
+#### 9. Implementation Milestones
 
 ```markdown
 ## Implementation Milestones
@@ -193,7 +229,7 @@ Specific changes per package:
 - Check off as completed during implementation
 - Updated by `/update-context-docs`
 
-#### 9. Testing Plan
+#### 10. Testing Plan
 
 ```markdown
 ## Testing Plan
@@ -388,7 +424,7 @@ await pollUntil.expect({
 - **Created during planning**: Completed by `@plan-ft-dev` before implementation begins
 - **Referenced during implementation**: Used by `@ft-dev` and `@test-acceptance` to create actual tests
 
-#### 10. Acceptance Tests
+#### 11. Acceptance Tests
 
 ```markdown
 ## Acceptance Tests
@@ -423,7 +459,7 @@ await pollUntil.expect({
 - Testing Plan (Section 9): Determines APPROPRIATE test level and HOW to test (strategies, approaches, analysis)
 - Acceptance Tests (Section 10): WHAT specific tests to implement at the determined level
 
-#### 11. Technical Debt & Production Readiness
+#### 12. Technical Debt & Production Readiness
 
 ```markdown
 ## Technical Debt & Production Readiness
@@ -441,7 +477,7 @@ Track gaps and technical debt introduced:
 - Check off when addressed
 - Updated by `@prod-ready`
 
-#### 12. Decisions & Trade-offs
+#### 13. Decisions & Trade-offs
 
 ```markdown
 ## Decisions & Trade-offs
@@ -458,7 +494,7 @@ Document technical decisions made during implementation:
 - Document trade-offs and alternatives
 - Provide context for future maintainers
 
-#### 13. Refactoring Needed
+#### 14. Refactoring Needed
 
 ```markdown
 ## Refactoring Needed
@@ -502,7 +538,7 @@ Track code quality issues and refactoring opportunities discovered during develo
 - Check off when refactored
 - Updated by: `@ft-dev`, `@red`, `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, `refactor` (subagent)
 
-#### 14. Validation Results
+#### 15. Validation Results
 
 ```markdown
 ## Validation Results
@@ -602,7 +638,7 @@ Track code quality issues and refactoring opportunities discovered during develo
 - **Critical Issues**: Must-fix items
 - **Recommendations**: Suggested improvements
 
-#### 15. References
+#### 16. References
 
 ```markdown
 ## References
