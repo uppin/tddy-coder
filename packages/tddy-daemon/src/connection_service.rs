@@ -20,12 +20,12 @@ use tddy_service::proto::connection::{
     StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentConversationChunk, AgentInfo, AnswerHostPromptRequest, AnswerHostPromptResponse,
-    AttachSessionAgentRequest, BranchConflict, CalculateWorktreeSizeRequest,
-    CalculateWorktreeSizeResponse, CancelAgentConversationRequest, CancelAgentConversationResponse,
-    ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
-    CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    AddHostKeyRequest, AddHostKeyResponse, AddPlannedPrRequest, AddPlannedPrResponse,
+    AddProjectToHostRequest, AddProjectToHostResponse, AgentConversationChunk, AgentInfo,
+    AnswerHostPromptRequest, AnswerHostPromptResponse, AttachSessionAgentRequest, BranchConflict,
+    CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
+    CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
+    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, ContextFileBatchChunk, ContextFileChunk,
     ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
@@ -89,6 +89,7 @@ use crate::session_reader;
 use crate::session_room::{ActivityDelta, DeltaLookupError, DeltaScope};
 use crate::spawn_worker;
 use crate::spawner::{self, SpawnOptions};
+use crate::ssh_agent_add::SshAgentKeyAdder;
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::tool_engine;
 use crate::user_sessions_path::{
@@ -1236,6 +1237,11 @@ pub struct ConnectionServiceImpl {
     /// The keypair a prompt publishes so its answer can be encrypted end to end, and the only thing
     /// on this host able to read one back.
     host_keypair: Arc<dyn HostKeypair>,
+    /// What puts an unlocked identity into this host's ssh-agent, behind `AddHostKey`.
+    ///
+    /// Injected because the add is the one step of the flow that touches the operator's real
+    /// agent — everything before it (prompt, encryption, decrypt, unlock) runs for real in a test.
+    ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder>,
     /// Live `StreamHostPrompts` pumps.
     ///
     /// Exists so a test can observe a **leaked** pump. The prompt stream is silent by design, so a
@@ -1916,6 +1922,8 @@ impl ConnectionServiceImpl {
                 crate::host_registry::host_registry_dir(&tddy_data_dir),
             ));
         let prompt_pumps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder> =
+            Arc::new(crate::ssh_agent_add::WireProtocolAgentKeyAdder);
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -1950,6 +1958,7 @@ impl ConnectionServiceImpl {
             host_tooling,
             host_prompts,
             host_keypair,
+            ssh_agent_key_adder,
             prompt_pumps,
             common_room_livekit_room,
             telegram,
@@ -2178,6 +2187,33 @@ impl ConnectionServiceImpl {
     #[must_use]
     pub fn pending_prompt_pump_count(&self) -> usize {
         self.prompt_pumps.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Substitute the host prompt registry (builder pattern).
+    ///
+    /// Lets a test hold the same registry the handlers use, so it can see the prompt `AddHostKey`
+    /// raised and answer it — the operator's half of a flow that otherwise has no other end.
+    pub fn with_host_prompts(mut self, host_prompts: Arc<dyn HostPromptRegistry>) -> Self {
+        self.host_prompts = host_prompts;
+        self
+    }
+
+    /// Substitute the host keypair (builder pattern).
+    ///
+    /// A test encrypts its answer against the published half exactly as the browser does, so the
+    /// real RSA-OAEP decrypt runs rather than being stood in for.
+    pub fn with_host_keypair(mut self, host_keypair: Arc<dyn HostKeypair>) -> Self {
+        self.host_keypair = host_keypair;
+        self
+    }
+
+    /// Substitute what an unlocked identity is handed to (builder pattern).
+    ///
+    /// The only seam in the add-key flow that replaces real behaviour: a test must not load a key
+    /// into the agent of whoever is running the suite.
+    pub fn with_ssh_agent_key_adder(mut self, adder: Arc<dyn SshAgentKeyAdder>) -> Self {
+        self.ssh_agent_key_adder = adder;
+        self
     }
 
     /// Substitute the host tooling probe (builder pattern) — lets tests state what a host has
@@ -13406,6 +13442,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         }))
     }
 
+    /// Load a private key into this host's ssh-agent.
+    ///
+    /// This is the call that raises a passphrase prompt: it issues one, waits for the answer to
+    /// arrive on `AnswerHostPrompt`, decrypts it with this host's private key, unlocks the key at
+    /// `subject`, hands the identity to the agent and drops the plaintext. It returns only once the
+    /// add has succeeded or failed, so the browser learns the outcome from the call it started.
+    ///
+    /// Nothing about the answer — decrypted or not — is logged here at any level.
+    async fn add_host_key(
+        &self,
+        _request: Request<AddHostKeyRequest>,
+    ) -> Result<Response<AddHostKeyResponse>, Status> {
+        unimplemented!("agent-add-key: add_host_key")
+    }
+
     async fn list_session_workflow_files(
         &self,
         request: Request<ListSessionWorkflowFilesRequest>,
@@ -23178,5 +23229,424 @@ mod ssh_agent_block_handler_tests {
             "finding no agent is a successful probe with a negative finding, not a failure"
         );
         assert!(agent.keys.is_empty());
+    }
+}
+
+/// The add-key flow, end to end: `AddHostKey` raises a prompt, `AnswerHostPrompt` carries the
+/// encrypted answer back, and the identity reaches the agent — or, when the passphrase is wrong,
+/// nothing does.
+///
+/// Only the agent is stood in for. The prompt, the RSA-OAEP encryption, the decrypt and the unlock
+/// of a real passphrase-protected OpenSSH key all run for real: a test that handed the handler a
+/// plaintext passphrase and called it encrypted would prove nothing about the path this node
+/// exists to build.
+///
+/// Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+#[cfg(test)]
+mod host_add_key_handler_tests {
+    use super::*;
+    use crate::host_keypair::FileHostKeypair;
+    use crate::host_prompts::{InMemoryHostPromptRegistry, PendingPrompt};
+    use crate::ssh_agent_add::{AgentAddFailure, SshAgentKeyAdder};
+    use crate::test_util::{test_service, TEST_TOKEN};
+    use log::{Level, LevelFilter, Log, Metadata, Record};
+    use ssh_key::PrivateKey;
+    use std::sync::{Mutex, Once};
+    use std::time::Duration;
+    use tddy_service::proto::connection::AddHostKeyOutcome;
+
+    /// Distinctive, and used nowhere else in the workspace, so
+    /// [`the_passphrase_never_appears_in_captured_logs`] cannot be fooled by another test's output
+    /// and cannot accidentally match an unrelated log line.
+    const PASSPHRASE: &str = "orbital-thistle-9-quay";
+
+    /// What an operator types when they get it wrong. Also distinctive, because the refusal must
+    /// not quote it back either.
+    const WRONG_PASSPHRASE: &str = "meridian-hollow-4-tarn";
+
+    /// How long the whole flow gets before a test calls it hung. Generous: the only slow step is an
+    /// RSA keygen on first use.
+    const ADD_KEY_WINDOW: Duration = Duration::from_secs(10);
+
+    /// How long a test waits for `AddHostKey` to raise the prompt it answers.
+    const PROMPT_WINDOW: Duration = Duration::from_secs(5);
+    const PROMPT_POLL: Duration = Duration::from_millis(5);
+
+    /// Emitted the moment log recording starts, so an assertion about what is *absent* from the
+    /// logs can first prove the recorder was recording at all.
+    const RECORDING_MARKER: &str = "host-add-key log recording is live";
+
+    // -- the agent, and only the agent, is a double ---------------------------------------------
+
+    /// An ssh-agent that remembers every identity it was handed.
+    ///
+    /// The fingerprint is what it records: it is what an operator sees in `ssh-add -l`, so
+    /// "the right key reached the agent" is stated in the terms the operator would check it in.
+    #[derive(Default)]
+    struct RecordingAgent {
+        added: Mutex<Vec<String>>,
+    }
+
+    impl RecordingAgent {
+        fn fingerprints_added(&self) -> Vec<String> {
+            self.added
+                .lock()
+                .expect("the recording lock is only held to push a fingerprint")
+                .clone()
+        }
+    }
+
+    impl SshAgentKeyAdder for RecordingAgent {
+        fn add_identity(
+            &self,
+            _os_user: &str,
+            identity: &PrivateKey,
+        ) -> Result<(), AgentAddFailure> {
+            self.added
+                .lock()
+                .expect("the recording lock is only held to push a fingerprint")
+                .push(identity.fingerprint(ssh_key::HashAlg::Sha256).to_string());
+            Ok(())
+        }
+    }
+
+    // -- the host under test --------------------------------------------------------------------
+
+    /// A host with one passphrase-protected key on disk, an agent that records what it is given,
+    /// and an operator standing by to answer the prompt.
+    struct HostWithAnEncryptedKey {
+        service: ConnectionServiceImpl,
+        prompts: Arc<InMemoryHostPromptRegistry>,
+        keypair: Arc<FileHostKeypair>,
+        agent: Arc<RecordingAgent>,
+        key_path: PathBuf,
+        /// The fingerprint the agent must end up holding.
+        key_fingerprint: String,
+        /// Owns the key file and the daemon's data directory for the life of the test.
+        _storage: tempfile::TempDir,
+    }
+
+    fn a_host_with_an_encrypted_key(passphrase: &str) -> HostWithAnEncryptedKey {
+        let storage = tempfile::tempdir().expect("a temp directory for this host");
+        let key_path = storage.path().join("id_ed25519");
+        let key_fingerprint = an_encrypted_private_key_at(&key_path, passphrase);
+
+        let prompts = Arc::new(InMemoryHostPromptRegistry::new());
+        let keypair = Arc::new(FileHostKeypair::new(storage.path()));
+        let agent = Arc::new(RecordingAgent::default());
+        let service = test_service(storage.path().to_path_buf())
+            .with_host_prompts(Arc::clone(&prompts) as Arc<dyn HostPromptRegistry>)
+            .with_host_keypair(Arc::clone(&keypair) as Arc<dyn HostKeypair>)
+            .with_ssh_agent_key_adder(Arc::clone(&agent) as Arc<dyn SshAgentKeyAdder>);
+
+        HostWithAnEncryptedKey {
+            service,
+            prompts,
+            keypair,
+            agent,
+            key_path,
+            key_fingerprint,
+            _storage: storage,
+        }
+    }
+
+    impl HostWithAnEncryptedKey {
+        /// Run the whole flow: start the add, answer the prompt it raises with `passphrase`, and
+        /// report what the add concluded.
+        ///
+        /// The two halves run concurrently because that is the shape of the real flow — `AddHostKey`
+        /// is still in flight when the operator's answer arrives on a different call.
+        async fn add_key_answering_with(&self, passphrase: &str) -> AddHostKeyResponse {
+            let started = self.service.add_host_key(Request::new(AddHostKeyRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: String::new(),
+                subject: self.key_path.display().to_string(),
+            }));
+
+            let (added, _answered) = tokio::time::timeout(ADD_KEY_WINDOW, async {
+                tokio::join!(started, self.answer_the_prompt_with(passphrase))
+            })
+            .await
+            .expect("the add settles once its prompt has been answered");
+
+            added.expect("a valid session may add a key").into_inner()
+        }
+
+        /// Answer whatever prompt the add raises, encrypted under this host's published key exactly
+        /// as the browser's `SubtleCrypto` would.
+        async fn answer_the_prompt_with(&self, passphrase: &str) -> AnswerHostPromptResponse {
+            let prompt = self.prompt_awaiting_an_answer().await;
+            let published = self
+                .keypair
+                .published()
+                .expect("this host publishes a key with its prompt");
+            self.service
+                .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+                    session_token: TEST_TOKEN.to_string(),
+                    daemon_instance_id: String::new(),
+                    prompt_id: prompt.prompt_id,
+                    encrypted_answer: encrypted_for(&published.spki_der, passphrase.as_bytes()),
+                }))
+                .await
+                .expect("a valid session may answer a prompt")
+                .into_inner()
+        }
+
+        /// The prompt `AddHostKey` raises, once it has raised one.
+        async fn prompt_awaiting_an_answer(&self) -> PendingPrompt {
+            let deadline = tokio::time::Instant::now() + PROMPT_WINDOW;
+            while tokio::time::Instant::now() < deadline {
+                let outstanding = self.prompts.pending(crate::host_registry::now_unix_ms());
+                if let Some(prompt) = outstanding.into_iter().next() {
+                    return prompt;
+                }
+                tokio::time::sleep(PROMPT_POLL).await;
+            }
+            panic!(
+                "AddHostKey never raised a prompt, so there is no way for an operator to supply \
+                 the passphrase it needs"
+            );
+        }
+    }
+
+    // -- fixtures -------------------------------------------------------------------------------
+
+    /// A freshly generated ed25519 key, locked with `passphrase` and written to `path`. Returns the
+    /// `SHA256:` fingerprint the agent must end up holding.
+    ///
+    /// Generated rather than committed: key material checked into a repository is key material in
+    /// every clone of it, and a fixture that never changes is a fixture someone eventually trusts.
+    fn an_encrypted_private_key_at(path: &Path, passphrase: &str) -> String {
+        let key = PrivateKey::random(&mut rand::thread_rng(), ssh_key::Algorithm::Ed25519)
+            .expect("an ed25519 private key");
+        let fingerprint = key.fingerprint(ssh_key::HashAlg::Sha256).to_string();
+        let locked = key
+            .encrypt(&mut rand::thread_rng(), passphrase)
+            .expect("a passphrase-protected copy of it");
+        let openssh = locked
+            .to_openssh(ssh_key::LineEnding::LF)
+            .expect("in the format ssh-keygen writes");
+        std::fs::write(path, openssh.as_bytes()).expect("the key file is written");
+        fingerprint
+    }
+
+    /// Encrypt with RSA-OAEP(SHA-256) against an SPKI DER, standing in for the browser's
+    /// `SubtleCrypto`.
+    ///
+    /// Goes through the `rsa` crate's public API rather than through anything in this workspace, so
+    /// what the handler decrypts is pinned to the *format* the browser produces rather than to our
+    /// own agreement with ourselves.
+    fn encrypted_for(spki_der: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        use rsa::pkcs8::DecodePublicKey;
+        use rsa::{Oaep, RsaPublicKey};
+
+        RsaPublicKey::from_public_key_der(spki_der)
+            .expect("a published SPKI DER public key")
+            .encrypt(
+                &mut rand::thread_rng(),
+                Oaep::new::<sha2::Sha256>(),
+                plaintext,
+            )
+            .expect("a passphrase fits comfortably in an OAEP payload")
+    }
+
+    // -- assertions -----------------------------------------------------------------------------
+
+    trait AddHostKeyAssertions {
+        fn assert_added_the_key(&self, fingerprint: &str) -> &Self;
+        fn assert_refused_with(&self, outcome: AddHostKeyOutcome) -> &Self;
+        fn assert_says_nothing_about(&self, secret: &str) -> &Self;
+    }
+
+    impl AddHostKeyAssertions for AddHostKeyResponse {
+        fn assert_added_the_key(&self, fingerprint: &str) -> &Self {
+            assert!(
+                self.added,
+                "the add reported failure: {}",
+                self.failure_reason
+            );
+            assert_eq!(
+                self.outcome,
+                AddHostKeyOutcome::Added as i32,
+                "a successful add reports ADDED"
+            );
+            assert_eq!(
+                self.fingerprint, fingerprint,
+                "the response names the key that was loaded"
+            );
+            self
+        }
+
+        fn assert_refused_with(&self, outcome: AddHostKeyOutcome) -> &Self {
+            assert!(!self.added, "no key should have been added");
+            assert_eq!(
+                self.outcome, outcome as i32,
+                "the operator is told which of the failures this was, got: {}",
+                self.failure_reason
+            );
+            self
+        }
+
+        fn assert_says_nothing_about(&self, secret: &str) -> &Self {
+            assert!(
+                !self.failure_reason.contains(secret),
+                "the failure reason quoted the passphrase back: {}",
+                self.failure_reason
+            );
+            self
+        }
+    }
+
+    // -- log recording --------------------------------------------------------------------------
+
+    static INSTALL_RECORDER: Once = Once::new();
+    static RECORDED: Mutex<Option<Arc<Mutex<Vec<String>>>>> = Mutex::new(None);
+
+    /// Records every log line this process emits, whatever its target or level.
+    ///
+    /// Deliberately unfiltered: a passphrase reaching a log is a leak wherever it surfaces, and a
+    /// recorder scoped to the modules we expected to be careless would miss the ones we did not.
+    struct EverythingRecorder;
+
+    impl Log for EverythingRecorder {
+        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+            true
+        }
+
+        fn log(&self, record: &Record<'_>) {
+            let line = format!("{} {} {}", record.level(), record.target(), record.args());
+            let slot = RECORDED
+                .lock()
+                .expect("the recorder slot is never poisoned");
+            if let Some(buffer) = slot.as_ref() {
+                buffer
+                    .lock()
+                    .expect("the recording buffer is only held to push a line")
+                    .push(line);
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    /// Start recording log output, and prove the recording is live by putting a marker through it.
+    fn start_recording_logs() -> Arc<Mutex<Vec<String>>> {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        *RECORDED
+            .lock()
+            .expect("the recorder slot is never poisoned") = Some(Arc::clone(&buffer));
+        INSTALL_RECORDER.call_once(|| {
+            let _ = log::set_boxed_logger(Box::new(EverythingRecorder))
+                .map(|()| log::set_max_level(LevelFilter::Trace));
+        });
+        log::log!(Level::Info, "{RECORDING_MARKER}");
+        buffer
+    }
+
+    /// Assert `secret` reached no log line — and that anything at all was recorded, so a recorder
+    /// that failed to install cannot make this pass by capturing nothing.
+    fn assert_no_recorded_line_contains(recorded: &Arc<Mutex<Vec<String>>>, secret: &str) {
+        let lines = recorded
+            .lock()
+            .expect("the recording buffer is only held to read it")
+            .clone();
+        assert!(
+            lines.iter().any(|line| line.contains(RECORDING_MARKER)),
+            "nothing was recorded at all, so this assertion would hold for a daemon that logged \
+             the passphrase on every line"
+        );
+        let leaked: Vec<&String> = lines.iter().filter(|line| line.contains(secret)).collect();
+        assert!(
+            leaked.is_empty(),
+            "the passphrase reached the daemon's logs: {leaked:?}"
+        );
+    }
+
+    // -- the tests ------------------------------------------------------------------------------
+
+    /// The reply carries the ciphertext of a secret, so an unauthenticated caller must not be able
+    /// to submit one — nor to discover, by the shape of the answer, whether a prompt id exists.
+    #[tokio::test]
+    async fn answer_host_prompt_rejects_an_invalid_token() {
+        // Given a host serving the add-key endpoints
+        let dir = tempfile::tempdir().expect("a temp directory for this host");
+        let service = test_service(dir.path().to_path_buf());
+
+        // When an answer arrives on a session this host does not know
+        let refused = service
+            .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+                session_token: "not-a-token".to_string(),
+                daemon_instance_id: String::new(),
+                prompt_id: "any-prompt".to_string(),
+                encrypted_answer: vec![1, 2, 3],
+            }))
+            .await;
+
+        // Then
+        assert_eq!(
+            refused
+                .expect_err("an invalid session must be refused")
+                .code,
+            tddy_rpc::Code::Unauthenticated
+        );
+    }
+
+    /// The round trip this node exists for: a prompt is raised, the answer travels back encrypted
+    /// under this host's published key, the host decrypts it, unlocks a real passphrase-protected
+    /// key with it, and the identity reaches the agent.
+    #[tokio::test]
+    async fn a_correct_passphrase_adds_the_key_to_the_agent() {
+        // Given a host holding a key locked with a passphrase the operator knows
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the operator answers the prompt with it
+        let reported = host.add_key_answering_with(PASSPHRASE).await;
+
+        // Then
+        reported.assert_added_the_key(&host.key_fingerprint);
+        assert_eq!(
+            host.agent.fingerprints_added(),
+            vec![host.key_fingerprint.clone()],
+            "the unlocked identity must actually reach the agent — an add that reports success \
+             while handing the agent nothing is exactly the failure this test exists to catch"
+        );
+    }
+
+    /// A wrong passphrase is an ordinary mistake, not an error: the operator is told which failure
+    /// it was so they can retry, and the agent is left exactly as it was.
+    #[tokio::test]
+    async fn an_incorrect_passphrase_reports_failure_and_adds_nothing() {
+        // Given a host holding a key locked with a passphrase the operator mistypes
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When they answer with the wrong one
+        let reported = host.add_key_answering_with(WRONG_PASSPHRASE).await;
+
+        // Then
+        reported
+            .assert_refused_with(AddHostKeyOutcome::WrongPassphrase)
+            .assert_says_nothing_about(WRONG_PASSPHRASE);
+        assert_eq!(
+            host.agent.fingerprints_added(),
+            Vec::<String>::new(),
+            "a passphrase that did not unlock the key must leave the agent holding nothing new"
+        );
+    }
+
+    /// The whole point of encrypting the answer is undone if the host then writes the plaintext to
+    /// its own log. A stray `debug!` on the decrypt path is precisely how such a secret escapes,
+    /// and it is invisible to every other test here.
+    #[tokio::test]
+    async fn the_passphrase_never_appears_in_captured_logs() {
+        // Given every log line this process emits being recorded
+        let recorded = start_recording_logs();
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the whole flow runs, from raising the prompt to loading the key
+        let reported = host.add_key_answering_with(PASSPHRASE).await;
+
+        // Then
+        reported.assert_added_the_key(&host.key_fingerprint);
+        assert_no_recorded_line_contains(&recorded, PASSPHRASE);
     }
 }

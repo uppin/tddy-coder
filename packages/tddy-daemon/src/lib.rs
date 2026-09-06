@@ -70,6 +70,7 @@ pub mod spawn_worker;
 pub mod spawner;
 pub mod split_session;
 pub mod ssh_agent;
+pub mod ssh_agent_add;
 pub mod stack_doc_attachments;
 pub mod startup;
 pub mod supervisor_client;

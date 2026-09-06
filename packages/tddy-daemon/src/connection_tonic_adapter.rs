@@ -31,9 +31,10 @@ use tonic::transport::server::UdsConnectInfo;
 use crate::config::DaemonConfig;
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
-    AddProjectToHostResponse, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    AgentActivityRecord, AgentConversationChunk, AnswerHostPromptRequest, AnswerHostPromptResponse,
+    AcpReplayFrame, AddHostKeyRequest, AddHostKeyResponse, AddPlannedPrRequest,
+    AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
+    AgentActivityDeltaChunk, AgentActivityDeltaRequest, AgentActivityRecord,
+    AgentConversationChunk, AnswerHostPromptRequest, AnswerHostPromptResponse,
     AttachSessionAgentRequest, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
     CancelAgentConversationRequest, CancelAgentConversationResponse, ClaimTerminalControlRequest,
     ClaimTerminalControlResponse, CleanWorktreeRequest, CleanWorktreeResponse,
@@ -568,6 +569,19 @@ where
         request: tonic::Request<AnswerHostPromptRequest>,
     ) -> Result<tonic::Response<AnswerHostPromptResponse>, tonic::Status> {
         let resp = RpcConnectionService::answer_host_prompt(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn add_host_key(
+        &self,
+        request: tonic::Request<AddHostKeyRequest>,
+    ) -> Result<tonic::Response<AddHostKeyResponse>, tonic::Status> {
+        let resp = RpcConnectionService::add_host_key(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )
