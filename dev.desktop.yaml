@@ -9,14 +9,17 @@
 # `log:` configures the daemon logger. Spawned `tddy-coder` children still get their own YAML with
 # `tmp/logs/coder` (see spawner) — only the daemon process uses this block.
 #
-# `stderr` so LiveKit discovery + `tddy_daemon::oauth_tunnel` lines show next to `[tddy-desktop]` in
-# `./dev bun run desktop:dev`. For file-only logs use: `output: { file: "tmp/logs/daemon" }`.
+# The default logger fans out to both: `stderr` so LiveKit discovery + `tddy_daemon::oauth_tunnel`
+# lines show next to `[tddy-desktop]` in `./dev bun run desktop:dev`, and `tmp/logs/daemon` so the
+# same lines are still on disk after the run. `output:` takes one destination (`stderr`, `stdout`,
+# `buffer`, `mute`, `{ file: <path> }`) or a list of them; for file-only logs write
+# `output: { file: "tmp/logs/daemon" }`.
 # Verbose WebRTC / LiveKit SDK lines go to `tmp/logs/webrtc` (see policies).
 
 log:
   loggers:
     default:
-      output: stderr
+      output: [stderr, { file: "tmp/logs/daemon" }]
       format: "{timestamp} [{level}] [{target}] {message}"
     webrtc:
       output: { file: "tmp/logs/webrtc" }

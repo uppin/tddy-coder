@@ -82,14 +82,63 @@ pub struct HeuristicSelector {
     pub message_contains: String,
 }
 
-/// Output destination for log lines.
-#[derive(Debug, Clone)]
+/// Output destination for log lines. [`LogOutput::Many`] fans one logger out to several
+/// destinations at once, so a dev run can be visible on the terminal *and* recorded in a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogOutput {
     Stderr,
     Stdout,
     File(PathBuf),
     Buffer,
     Mute,
+    Many(Vec<LogOutput>),
+}
+
+impl LogOutput {
+    /// Build a destination from a list, normalizing it: nested lists are flattened (so
+    /// `[[stderr, x]]` is not a shape of its own), a destination repeated in the same list is
+    /// kept only at its first position (writing one line twice to one file or one terminal has
+    /// no use and reads as a logging bug), and a list that ends up with a single destination
+    /// becomes that plain destination. Returns `None` for an empty list: "write nowhere" is
+    /// spelled `mute`, so an empty list is a mistake rather than a silent way to say it.
+    ///
+    /// File paths are compared as written, not canonicalized — the files usually do not exist
+    /// yet when a config is parsed.
+    pub(crate) fn fan_out(destinations: Vec<LogOutput>) -> Option<LogOutput> {
+        let mut flattened = Vec::with_capacity(destinations.len());
+        for destination in destinations {
+            match destination {
+                LogOutput::Many(nested) => {
+                    for inner in Self::flatten(nested) {
+                        if !flattened.contains(&inner) {
+                            flattened.push(inner);
+                        }
+                    }
+                }
+                single => {
+                    if !flattened.contains(&single) {
+                        flattened.push(single);
+                    }
+                }
+            }
+        }
+        match flattened.len() {
+            0 => None,
+            1 => flattened.pop(),
+            _ => Some(LogOutput::Many(flattened)),
+        }
+    }
+
+    fn flatten(destinations: Vec<LogOutput>) -> Vec<LogOutput> {
+        let mut flat = Vec::with_capacity(destinations.len());
+        for destination in destinations {
+            match destination {
+                LogOutput::Many(nested) => flat.extend(Self::flatten(nested)),
+                single => flat.push(single),
+            }
+        }
+        flat
+    }
 }
 
 impl<'de> Deserialize<'de> for LogOutput {
@@ -102,6 +151,7 @@ impl<'de> Deserialize<'de> for LogOutput {
         enum De {
             Str(String),
             File { file: PathBuf },
+            Many(Vec<LogOutput>),
         }
         match De::deserialize(deserializer)? {
             De::Str(s) => match s.as_str() {
@@ -115,13 +165,18 @@ impl<'de> Deserialize<'de> for LogOutput {
                 ))),
             },
             De::File { file } => Ok(LogOutput::File(file)),
+            De::Many(destinations) => LogOutput::fan_out(destinations).ok_or_else(|| {
+                serde::de::Error::custom(
+                    "log output list is empty; use `mute` to discard log lines",
+                )
+            }),
         }
     }
 }
 
 impl Serialize for LogOutput {
     /// The inverse of the [`Deserialize`] impl above, so a config that is read and written back
-    /// keeps the form an operator wrote: a bare name, or `{ file: <path> }`.
+    /// keeps the form an operator wrote: a bare name, `{ file: <path> }`, or a sequence of those.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -136,6 +191,14 @@ impl Serialize for LogOutput {
                 let mut out = serializer.serialize_struct("LogOutput", 1)?;
                 out.serialize_field("file", path)?;
                 out.end()
+            }
+            LogOutput::Many(destinations) => {
+                use serde::ser::SerializeSeq;
+                let mut seq = serializer.serialize_seq(Some(destinations.len()))?;
+                for destination in destinations {
+                    seq.serialize_element(destination)?;
+                }
+                seq.end()
             }
         }
     }
@@ -372,6 +435,11 @@ fn write_to_output(line: &str, output: &LogOutput) {
             }
         }
         LogOutput::Mute => {}
+        LogOutput::Many(destinations) => {
+            for destination in destinations {
+                write_to_output(line, destination);
+            }
+        }
     }
 }
 
@@ -463,12 +531,18 @@ fn config_has_file_output_guard() -> bool {
     false
 }
 
-/// Returns true if any logger in the config has file output.
+/// Returns true if any logger in the config has file output, including a file nested in a
+/// [`LogOutput::Many`].
 pub fn config_has_file_output(config: &LogConfig) -> bool {
-    config
-        .loggers
-        .values()
-        .any(|def| matches!(def.output, LogOutput::File(_)))
+    config.loggers.values().any(|def| has_file(&def.output))
+}
+
+fn has_file(output: &LogOutput) -> bool {
+    match output {
+        LogOutput::File(_) => true,
+        LogOutput::Many(destinations) => destinations.iter().any(has_file),
+        LogOutput::Stderr | LogOutput::Stdout | LogOutput::Buffer | LogOutput::Mute => false,
+    }
 }
 
 /// Resolve conversation_output and debug_output defaults to session_dir/logs/ when not set.
@@ -594,16 +668,30 @@ pub fn init_tddy_logger(config: LogConfig) {
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(max_level));
 }
 
+/// Every file path any logger writes to, including files nested in a [`LogOutput::Many`], each
+/// path listed once so one file is opened (and rotated) exactly once.
 fn collect_file_outputs(config: &LogConfig) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     for def in config.loggers.values() {
-        if let LogOutput::File(ref p) = def.output {
-            if !paths.contains(p) {
-                paths.push(p.clone());
-            }
-        }
+        collect_file_paths(&def.output, &mut paths);
     }
     paths
+}
+
+fn collect_file_paths(output: &LogOutput, paths: &mut Vec<PathBuf>) {
+    match output {
+        LogOutput::File(path) => {
+            if !paths.contains(path) {
+                paths.push(path.clone());
+            }
+        }
+        LogOutput::Many(destinations) => {
+            for destination in destinations {
+                collect_file_paths(destination, paths);
+            }
+        }
+        LogOutput::Stderr | LogOutput::Stdout | LogOutput::Buffer | LogOutput::Mute => {}
+    }
 }
 
 fn compute_max_level_from_config(config: &LogConfig) -> log::LevelFilter {
@@ -770,4 +858,198 @@ pub fn get_buffered_logs() -> Vec<String> {
         Err(e) => e.into_inner(),
     };
     buf.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn parse_output(yaml: &str) -> LogOutput {
+        serde_yaml::from_str(yaml).expect("parse log output")
+    }
+
+    fn config_with_logger_outputs(outputs: &[(&str, LogOutput)]) -> LogConfig {
+        let loggers = outputs
+            .iter()
+            .map(|(name, output)| {
+                (
+                    (*name).to_string(),
+                    LoggerDefinition {
+                        output: output.clone(),
+                        format: None,
+                    },
+                )
+            })
+            .collect();
+        LogConfig {
+            loggers,
+            default: DefaultLogPolicy {
+                level: log::LevelFilter::Info,
+                logger: "default".to_string(),
+            },
+            policies: vec![],
+            rotation: None,
+        }
+    }
+
+    #[test]
+    fn parses_a_sequence_of_destinations_as_a_fan_out_in_the_written_order() {
+        // Given / When
+        let output = parse_output(r#"[stderr, { file: "tmp/logs/daemon" }]"#);
+
+        // Then
+        assert_eq!(
+            output,
+            LogOutput::Many(vec![
+                LogOutput::Stderr,
+                LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+            ])
+        );
+    }
+
+    #[test]
+    fn flattens_a_nested_sequence_into_a_single_fan_out() {
+        // Given / When
+        let output = parse_output(r#"[[stderr, { file: "tmp/logs/daemon" }], buffer]"#);
+
+        // Then
+        assert_eq!(
+            output,
+            LogOutput::Many(vec![
+                LogOutput::Stderr,
+                LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+                LogOutput::Buffer,
+            ])
+        );
+    }
+
+    #[test]
+    fn collapses_a_one_element_sequence_to_the_plain_destination() {
+        // Given / When
+        let output = parse_output("[stderr]");
+
+        // Then
+        assert_eq!(output, LogOutput::Stderr);
+    }
+
+    #[test]
+    fn drops_a_repeated_destination_so_a_line_is_never_written_to_it_twice() {
+        // Given / When
+        let output = parse_output(r#"[stderr, { file: "tmp/logs/daemon" }, stderr]"#);
+
+        // Then
+        assert_eq!(
+            output,
+            LogOutput::Many(vec![
+                LogOutput::Stderr,
+                LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+            ])
+        );
+    }
+
+    #[test]
+    fn collapses_a_sequence_of_one_repeated_destination_to_that_destination() {
+        // Given / When
+        let output = parse_output("[stderr, stderr]");
+
+        // Then
+        assert_eq!(output, LogOutput::Stderr);
+    }
+
+    #[test]
+    fn rejects_an_empty_destination_list_and_names_mute_as_the_way_to_say_nothing() {
+        // Given / When
+        let error =
+            serde_yaml::from_str::<LogOutput>("[]").expect_err("empty list must be an error");
+
+        // Then
+        assert_eq!(
+            error.to_string(),
+            "log output list is empty; use `mute` to discard log lines"
+        );
+    }
+
+    #[rstest]
+    #[case::stderr("stderr\n")]
+    #[case::stdout("stdout\n")]
+    #[case::buffer("buffer\n")]
+    #[case::mute("mute\n")]
+    #[case::file("file: tmp/logs/daemon\n")]
+    fn round_trips_an_existing_single_destination_form_byte_identically(#[case] yaml: &str) {
+        // Given
+        let output = parse_output(yaml);
+
+        // When
+        let written = serde_yaml::to_string(&output).expect("serialize log output");
+
+        // Then
+        assert_eq!(written, yaml);
+    }
+
+    #[test]
+    fn writes_a_fan_out_back_as_a_yaml_sequence() {
+        // Given
+        let output = parse_output(r#"[stderr, { file: "tmp/logs/daemon" }]"#);
+
+        // When
+        let written = serde_yaml::to_string(&output).expect("serialize log output");
+
+        // Then
+        assert_eq!(written, "- stderr\n- file: tmp/logs/daemon\n");
+    }
+
+    #[test]
+    fn opens_a_file_that_is_nested_in_a_fan_out() {
+        // Given
+        let config = config_with_logger_outputs(&[(
+            "default",
+            LogOutput::Many(vec![
+                LogOutput::Stderr,
+                LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+            ]),
+        )]);
+
+        // When
+        let paths = collect_file_outputs(&config);
+
+        // Then
+        assert_eq!(paths, vec![PathBuf::from("tmp/logs/daemon")]);
+    }
+
+    #[test]
+    fn opens_a_file_shared_by_a_fan_out_and_another_logger_only_once() {
+        // Given
+        let config = config_with_logger_outputs(&[
+            (
+                "default",
+                LogOutput::Many(vec![
+                    LogOutput::Stderr,
+                    LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+                ]),
+            ),
+            ("audit", LogOutput::File(PathBuf::from("tmp/logs/daemon"))),
+        ]);
+
+        // When
+        let paths = collect_file_outputs(&config);
+
+        // Then
+        assert_eq!(paths, vec![PathBuf::from("tmp/logs/daemon")]);
+    }
+
+    #[test]
+    fn reports_file_output_for_a_file_nested_in_a_fan_out() {
+        // Given
+        let config = config_with_logger_outputs(&[(
+            "default",
+            LogOutput::Many(vec![
+                LogOutput::Stderr,
+                LogOutput::File(PathBuf::from("tmp/logs/daemon")),
+            ]),
+        )]);
+
+        // When / Then
+        assert!(config_has_file_output(&config));
+    }
 }
