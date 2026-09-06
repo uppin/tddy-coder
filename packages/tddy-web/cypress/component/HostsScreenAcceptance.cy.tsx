@@ -14,7 +14,9 @@ import { HostsAppPage } from "../../src/components/hosts/HostsAppPage";
 import { ConnectionService, type KnownHostEntry } from "../../src/gen/connection_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
+import { appShellPage } from "../support/pages/appShellPage";
 import { hostsScreenPage } from "../support/pages/hostsScreenPage";
+import { HOSTS_ROUTE } from "../../src/routing/appRoutes";
 
 const ONLINE_HOST = "workstation-1";
 const OFFLINE_HOST = "server-2";
@@ -49,8 +51,8 @@ function aBackendListing(hosts: KnownHostEntry[]): InMemoryRpcBackend {
   });
 }
 
-function mountHosts(backend: InMemoryRpcBackend) {
-  mountWithRpc(withSelectedDaemon(<HostsAppPage onNavigate={() => {}} />), backend);
+function mountHosts(backend: InMemoryRpcBackend, onNavigate: (path: string) => void = () => {}) {
+  mountWithRpc(withSelectedDaemon(<HostsAppPage onNavigate={onNavigate} />), backend);
 }
 
 describe("Hosts screen", () => {
@@ -76,7 +78,7 @@ describe("Hosts screen", () => {
     // The row is present at all — that is the whole point of the registry.
     hostsScreenPage.row(OFFLINE_HOST).should("exist");
     hostsScreenPage.liveness(OFFLINE_HOST).should("contain.text", "Offline");
-    hostsScreenPage.lastSeen(OFFLINE_HOST).should("contain.text", "minute");
+    hostsScreenPage.lastSeen(OFFLINE_HOST).should("have.text", "5 minutes ago");
   });
 
   it("sorts online hosts above offline ones", () => {
@@ -87,23 +89,41 @@ describe("Hosts screen", () => {
       ]),
     );
 
-    hostsScreenPage
-      .rows()
-      .then(($rows) => {
-        const ids = [...$rows].map((el) => el.getAttribute("data-testid"));
-        expect(ids).to.deep.equal([
-          `hosts-row-${ONLINE_HOST}`,
-          `hosts-row-${OFFLINE_HOST}`,
-        ]);
-      });
+    hostsScreenPage.rowOrder().should("deep.equal", [ONLINE_HOST, OFFLINE_HOST]);
   });
 
-  it("shows the host that is serving the page as the local one", () => {
+  // Every daemon self-labels "<id> (this daemon)", so the label cannot carry this fact and the
+  // assertion cannot be a substring of it. Only the marker distinguishes the serving host, which is
+  // why the negative case below matters as much as the positive one.
+  it("marks the host that is serving the page as the local one", () => {
     mountHosts(
       aBackendListing([aKnownHost({ instanceId: ONLINE_HOST, online: true, isLocal: true })]),
     );
 
-    hostsScreenPage.row(ONLINE_HOST).should("contain.text", "this daemon");
+    hostsScreenPage.localMarker(ONLINE_HOST).should("be.visible");
+  });
+
+  it("leaves the local marker off a host that is not serving the page", () => {
+    mountHosts(
+      aBackendListing([aKnownHost({ instanceId: OFFLINE_HOST, online: true, isLocal: false })]),
+    );
+
+    // The row first: without it the marker would be absent merely because nothing had rendered.
+    hostsScreenPage.row(OFFLINE_HOST).should("exist");
+    hostsScreenPage.localMarker(OFFLINE_HOST).should("not.exist");
+  });
+
+  // AC-1. The hash-route dispatch that turns `/hosts` into this screen is a pure string rule and is
+  // pinned in `src/routing/appRoutes.test.ts`; what only the mounted screen can prove is that its
+  // own `AppShell` offers the entry that asks for that path.
+  it("reaches the hosts screen from the navigation menu", () => {
+    mountHosts(aBackendListing([aKnownHost({})]), cy.stub().as("onNavigate"));
+    hostsScreenPage.row(ONLINE_HOST).should("exist");
+
+    appShellPage.openMenu();
+    hostsScreenPage.navEntry().click();
+
+    cy.get("@onNavigate").should("have.been.calledWith", HOSTS_ROUTE);
   });
 
   it("asks the daemon for its known hosts exactly once per visit", () => {

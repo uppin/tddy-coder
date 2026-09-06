@@ -18,7 +18,6 @@ function rowFromRpc(host: KnownHostEntry): HostRow {
     instanceId: host.instanceId,
     label: host.label,
     online: host.online,
-    firstSeenUnixMs: host.firstSeenUnixMs,
     lastSeenUnixMs: host.lastSeenUnixMs,
     reposBasePath: host.reposBasePath,
     isLocal: host.isLocal,

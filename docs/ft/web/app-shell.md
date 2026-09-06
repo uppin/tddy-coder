@@ -38,7 +38,7 @@ Before this change, `tddy-web` had no shared shell: routing was a hash switch in
 | `children` | Screen body. |
 
 - **`scroll`** — a padded, vertically scrolling content column (the previous
-  `screenShellClassName`). Used by Projects, VMs, Worktrees, RPC Playground, LiveKit.
+  `screenShellClassName`). Used by Projects, Hosts, VMs, Worktrees, RPC Playground, LiveKit.
 - **`fullbleed`** — a full-height (`h-[100dvh]`) flex column with a thin header bar and a
   `flex-1 min-h-0 overflow-hidden` body so a drawer's two-pane layout and its pinned footer
   (e.g. `HostStatsFooter`) both survive. Used by the Sessions and Tasks drawer screens.
@@ -54,6 +54,7 @@ screen can render without the navigation menu.
 - **Worktrees** → `#/worktrees`
 - **Tasks** → `#/tasks`
 - **Projects** → `#/projects`
+- **Hosts** → `#/hosts` (`shell-menu-hosts`) — see [hosts-screen.md](./hosts-screen.md)
 - **VMs** → `#/vms`
 - **LiveKit** → `#/livekit` (`shell-menu-livekit`)
 - **RPC Playground** → `#/rpc-playground`

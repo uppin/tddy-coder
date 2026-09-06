@@ -6,9 +6,6 @@
  * rather than pretending to a current reading.
  */
 
-/** How a host's liveness reads in a row. */
-export type HostLiveness = "online" | "offline";
-
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;

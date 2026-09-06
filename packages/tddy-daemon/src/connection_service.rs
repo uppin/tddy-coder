@@ -73,7 +73,7 @@ use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
 };
 use crate::livekit_rooms_stream::{pump_rooms, room_roster_from_config, RoomRoster};
-use crate::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
+use crate::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use crate::project_storage::{self, ProjectData};
 use crate::session_attachments::validate_attachment_basename;
 use crate::session_deletion;
@@ -1750,8 +1750,12 @@ impl ConnectionServiceImpl {
         let spawn_client = spawn_client.map(|(c, _pid)| Arc::new(c));
         let (eligible_daemon_source, common_room_livekit_room) = match livekit_discovery {
             Some(h) => (h.eligible_daemon_source, Some(h.common_room_livekit_room)),
+            // No discovery: this machine is the only host, named the way its own configuration
+            // names it — not by its hostname, which is merely the default when no
+            // `daemon_instance_id` is set.
             None => (
-                Arc::new(StubEligibleDaemonSource) as Arc<dyn EligibleDaemonSource>,
+                Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config))
+                    as Arc<dyn EligibleDaemonSource>,
                 None,
             ),
         };
@@ -2024,6 +2028,20 @@ impl ConnectionServiceImpl {
     /// in-memory registry in place of the file-backed one, and drive `online` from a stub roster.
     pub fn with_host_registry(mut self, host_registry: Arc<dyn HostRegistry>) -> Self {
         self.host_registry = host_registry;
+        self
+    }
+
+    /// Substitute the eligible-daemon source (builder pattern) — the live roster every host-facing
+    /// handler joins against.
+    ///
+    /// Without this a test can only ever see the machine it runs on, so "a *remote* host is
+    /// online" would be unprovable and the difference between `online` and `is_local` would go
+    /// unpinned.
+    pub fn with_eligible_daemon_source(
+        mut self,
+        eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
+    ) -> Self {
+        self.eligible_daemon_source = eligible_daemon_source;
         self
     }
 
@@ -13054,8 +13072,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ///
     /// `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it
     /// leaves the room. This answers "what machines does tddy know about", which is what an operator
-    /// staring at an unreachable host needs. Liveness is resolved here, per call, by intersecting
-    /// the durable registry with the live roster — never read from disk.
+    /// staring at an unreachable host needs. Liveness is resolved per call, by intersecting the
+    /// durable registry with the live roster — never read from disk.
+    ///
+    /// The join itself belongs to [`crate::host_registry::HostRegistry::known_hosts`], including
+    /// the guarantee that the serving daemon always has a row: doing half of it here as well would
+    /// leave the invariant provable only against a double that behaves like neither store.
     async fn list_known_hosts(
         &self,
         request: Request<ListKnownHostsRequest>,
@@ -13068,12 +13090,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        let local_id = local_instance_id_for_config(&self.config);
-        let live_roster = self.eligible_daemon_source.list_eligible_daemons();
+        // The durable roster, not the routing one: the registry files a machine under the id that
+        // survives its restarts, and intersecting those two id spaces would report the daemon
+        // serving this very call as an offline stranger, next to a second row for itself.
+        let live_roster = self.eligible_daemon_source.live_known_hosts();
+        let local = crate::host_registry::local_host_sighting(&self.config);
         let now_unix_ms = crate::host_registry::now_unix_ms();
-        let mut hosts: Vec<KnownHostEntry> = self
+        let hosts: Vec<KnownHostEntry> = self
             .host_registry
-            .known_hosts(&live_roster, &local_id, now_unix_ms)
+            .known_hosts(&live_roster, &local, now_unix_ms)
             .into_iter()
             .map(|view| KnownHostEntry {
                 instance_id: view.host.instance_id,
@@ -13086,29 +13111,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 is_local: view.is_local,
             })
             .collect();
-
-        // Invariant: the daemon serving this call is the one host that can never legitimately be
-        // missing from the answer — it is, demonstrably, right here answering. Whatever the registry
-        // has or has not recorded about itself (a first boot writes nothing before the first RPC,
-        // and an unwritable registry never will), an operator must be able to see the machine they
-        // are talking to. So the row is filled from what this daemon knows about itself first-hand.
-        if !hosts.iter().any(|host| host.instance_id == local_id) {
-            let label = live_roster
-                .iter()
-                .find(|daemon| daemon.instance_id.0 == local_id)
-                .map(|daemon| daemon.label.clone())
-                .unwrap_or_else(|| format!("{local_id} (this daemon)"));
-            hosts.push(KnownHostEntry {
-                instance_id: local_id,
-                label,
-                online: true,
-                first_seen_unix_ms: now_unix_ms,
-                last_seen_unix_ms: now_unix_ms,
-                repos_base_path: self.config.repos_base_path_or_default().to_string(),
-                max_attachment_bytes: self.config.max_attachment_bytes,
-                is_local: true,
-            });
-        }
 
         Ok(Response::new(ListKnownHostsResponse { hosts }))
     }
@@ -21981,80 +21983,81 @@ mod workspace_sandbox_roster_dispatch_unit_tests {
 #[cfg(test)]
 mod known_hosts_handler_unit_tests {
     use super::*;
-    use crate::host_registry::{HostRegistry, HostSighting, KnownHost, KnownHostView};
+    use crate::host_registry::{FileHostRegistry, HostRegistry, HostSighting};
     use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
     use tddy_service::proto::connection::{KnownHostEntry, ListKnownHostsRequest};
 
-    const LOCAL_HOST: &str = "workstation-1";
-    const DEPARTED_HOST: &str = "server-2";
+    /// A host that is emphatically **not** the machine running the suite: every assertion about
+    /// `is_local` and about the roster join needs one, and a plausible hostname would make the
+    /// suite fail on a developer's box that happens to answer to it.
+    const A_REMOTE_HOST: &str = "remote-host.test.invalid";
+    /// The id a daemon is given by configuration, overriding its hostname.
+    const A_CONFIGURED_ID: &str = "configured-daemon";
 
-    /// A registry double holding a fixed set of remembered hosts.
+    /// A roster of exactly the hosts a test says are reachable.
     ///
-    /// It deliberately still performs the *intersection* with the live roster itself, because that
-    /// join is the behaviour under test at this layer: the handler must hand the roster in and
-    /// report what comes back, rather than deciding liveness on its own.
-    struct FakeHostRegistry {
-        remembered: Vec<KnownHost>,
+    /// The real sources always list the local daemon; this one lists whatever it was given, so a
+    /// remote host can be online, and so the registry's own guarantee about the local row is
+    /// provable rather than a side effect of the roster.
+    struct RosterOf(Vec<EligibleDaemonInfo>);
+
+    #[async_trait::async_trait]
+    impl EligibleDaemonSource for RosterOf {
+        fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
+            self.0.clone()
+        }
     }
 
-    impl HostRegistry for FakeHostRegistry {
-        fn record_sighting(
-            &self,
-            _sighting: &HostSighting,
-            _now_unix_ms: i64,
-        ) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn record_departure(
-            &self,
-            _instance_id: &DaemonInstanceId,
-            _now_unix_ms: i64,
-        ) -> Result<(), String> {
-            Ok(())
-        }
-
-        fn known_hosts(
-            &self,
-            live_roster: &[EligibleDaemonInfo],
-            local_instance_id: &str,
-            _now_unix_ms: i64,
-        ) -> Vec<KnownHostView> {
-            self.remembered
+    fn a_roster_of(instance_ids: &[&str]) -> Arc<dyn EligibleDaemonSource> {
+        Arc::new(RosterOf(
+            instance_ids
                 .iter()
-                .map(|host| KnownHostView {
-                    online: live_roster
-                        .iter()
-                        .any(|live| live.instance_id.0 == host.instance_id),
-                    is_local: host.instance_id == local_instance_id,
-                    host: host.clone(),
+                .map(|id| EligibleDaemonInfo {
+                    instance_id: DaemonInstanceId((*id).to_string()),
+                    label: format!("{id} (this daemon)"),
                 })
-                .collect()
-        }
+                .collect(),
+        ))
     }
 
-    fn a_remembered_host(instance_id: &str) -> KnownHost {
-        KnownHost {
-            instance_id: instance_id.to_string(),
-            label: format!("{instance_id} (this daemon)"),
-            first_seen_unix_ms: 1_000,
-            last_seen_unix_ms: 2_000,
-            repos_base_path: "repos".to_string(),
-            max_attachment_bytes: 0,
-        }
+    fn a_sighting_of(instance_id: &str) -> HostSighting {
+        HostSighting::named(
+            DaemonInstanceId(instance_id.to_string()),
+            format!("{instance_id} (this daemon)"),
+        )
     }
 
-    fn make_unit_config() -> crate::config::DaemonConfig {
-        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+    fn a_config_naming_this_daemon(
+        daemon_instance_id: Option<&str>,
+    ) -> crate::config::DaemonConfig {
+        let mut yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n".to_string();
+        if let Some(id) = daemon_instance_id {
+            // The desktop ships this pair, and it is what made one machine show up twice.
+            yaml.push_str(&format!(
+                "daemon_instance_id: \"{id}\"\ndaemon_instance_id_append_startup_timestamp: true\n"
+            ));
+        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, yaml).unwrap();
         crate::config::DaemonConfig::load(&path).unwrap()
     }
 
-    fn service_remembering(hosts: Vec<KnownHost>) -> ConnectionServiceImpl {
+    /// A service over a real, empty, temp-dir-backed registry.
+    ///
+    /// The store is the genuine [`FileHostRegistry`] rather than a double: the online/offline join
+    /// and the guarantee that the serving daemon always has a row both live in it, and a stand-in
+    /// that implemented them differently would let the handler's tests pass over a store that does
+    /// not behave that way.
+    fn a_service_with(
+        config: crate::config::DaemonConfig,
+    ) -> (ConnectionServiceImpl, Arc<dyn HostRegistry>) {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().to_path_buf();
+        // The registry outlives the tempdir handle, which the service also holds; leaking the
+        // handle keeps the directory alive for the whole test without threading it through.
+        let registry: Arc<dyn HostRegistry> =
+            Arc::new(FileHostRegistry::new(temp.path().join("hosts")));
         let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
         let user_resolver: SessionUserResolver = Arc::new(|token| {
             if token == "valid" {
@@ -22063,8 +22066,8 @@ mod known_hosts_handler_unit_tests {
                 None
             }
         });
-        ConnectionServiceImpl::new(
-            make_unit_config(),
+        let service = ConnectionServiceImpl::new(
+            config,
             sessions_base_resolver,
             temp.path().to_path_buf(),
             user_resolver,
@@ -22073,7 +22076,9 @@ mod known_hosts_handler_unit_tests {
             None,
             Arc::new(CliSessionManager::new()),
         )
-        .with_host_registry(Arc::new(FakeHostRegistry { remembered: hosts }))
+        .with_host_registry(Arc::clone(&registry));
+        std::mem::forget(temp);
+        (service, registry)
     }
 
     async fn known_hosts_of(service: &ConnectionServiceImpl) -> Vec<KnownHostEntry> {
@@ -22096,14 +22101,17 @@ mod known_hosts_handler_unit_tests {
 
     #[tokio::test]
     async fn list_known_hosts_rejects_an_invalid_token() {
-        let service = service_remembering(vec![]);
+        // Given a service
+        let (service, _registry) = a_service_with(a_config_naming_this_daemon(None));
 
+        // When a request arrives with a token no session ever issued
         let result = service
             .list_known_hosts(Request::new(ListKnownHostsRequest {
                 session_token: "nope".to_string(),
             }))
             .await;
 
+        // Then
         assert!(result.is_err(), "an invalid session must be rejected");
         assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
     }
@@ -22112,46 +22120,92 @@ mod known_hosts_handler_unit_tests {
     /// cannot currently reach has to read as offline, not as merely absent.
     #[tokio::test]
     async fn list_known_hosts_marks_a_recorded_host_absent_from_the_roster_as_offline() {
-        let service = service_remembering(vec![a_remembered_host(DEPARTED_HOST)]);
+        // Given a host recorded, then gone from the roster
+        let (service, registry) = a_service_with(a_config_naming_this_daemon(None));
+        registry
+            .record_sighting(&a_sighting_of(A_REMOTE_HOST), 1_000)
+            .expect("recording the sighting");
+        registry
+            .record_departure(&DaemonInstanceId(A_REMOTE_HOST.to_string()), 2_000)
+            .expect("recording the departure");
+        let service = service.with_eligible_daemon_source(a_roster_of(&[]));
 
+        // When the hosts are listed
         let hosts = known_hosts_of(&service).await;
 
-        let departed = entry_named(&hosts, DEPARTED_HOST);
+        // Then it is still listed, offline, with the stamp the row needs to say when it was last
+        // reachable
+        let departed = entry_named(&hosts, A_REMOTE_HOST);
         assert!(!departed.online, "a host outside the roster is offline");
-        assert_eq!(
-            departed.last_seen_unix_ms, 2_000,
-            "its last-seen stamp is reported so the row can say when it was last reachable"
-        );
+        assert_eq!(departed.last_seen_unix_ms, 2_000);
     }
 
-    /// The stub roster lists this daemon, so a remembered entry for it must come back online.
+    /// `online` is a fact about the roster, not about being the machine that answered — a remote
+    /// host currently in the room reads as online, and is not flagged local.
     #[tokio::test]
-    async fn list_known_hosts_marks_a_host_in_the_live_roster_as_online() {
-        let local_id = crate::multi_host::local_daemon_instance_id().0;
-        let service = service_remembering(vec![a_remembered_host(&local_id)]);
+    async fn list_known_hosts_marks_a_remote_host_in_the_live_roster_as_online() {
+        // Given a recorded host that is also in the live roster
+        let (service, registry) = a_service_with(a_config_naming_this_daemon(None));
+        registry
+            .record_sighting(&a_sighting_of(A_REMOTE_HOST), 1_000)
+            .expect("recording the sighting");
+        let service = service.with_eligible_daemon_source(a_roster_of(&[A_REMOTE_HOST]));
 
+        // When the hosts are listed
         let hosts = known_hosts_of(&service).await;
 
+        // Then
+        let remote = entry_named(&hosts, A_REMOTE_HOST);
+        assert!(remote.online, "a host in the live roster is online");
         assert!(
-            entry_named(&hosts, &local_id).online,
-            "a host in the live roster is online"
+            !remote.is_local,
+            "a peer is not the daemon serving the call"
         );
     }
 
-    /// An operator must be able to see the daemon they are talking to, marked as such.
+    /// An operator must be able to see the daemon they are talking to, marked as such — even with
+    /// nothing recorded and nothing in the roster, which is a first boot's very first RPC.
     #[tokio::test]
     async fn list_known_hosts_always_includes_the_local_daemon() {
-        let local_id = crate::multi_host::local_daemon_instance_id().0;
-        let service = service_remembering(vec![a_remembered_host(LOCAL_HOST)]);
+        // Given an empty registry and an empty roster
+        let config = a_config_naming_this_daemon(Some(A_CONFIGURED_ID));
+        let (service, _registry) = a_service_with(config);
+        let service = service.with_eligible_daemon_source(a_roster_of(&[]));
 
+        // When the hosts are listed
         let hosts = known_hosts_of(&service).await;
 
-        assert!(
-            hosts
-                .iter()
-                .any(|h| h.instance_id == local_id && h.is_local),
-            "the serving daemon must appear, flagged is_local; got {:?}",
+        // Then the serving daemon is there, flagged local and online
+        let local = entry_named(&hosts, A_CONFIGURED_ID);
+        assert!(local.is_local, "the serving daemon is flagged is_local");
+        assert!(local.online, "the daemon answering the call is online");
+    }
+
+    /// One machine is one row. A configured `daemon_instance_id` (and the startup-timestamp suffix
+    /// the desktop ships alongside it) must not put the same host in the list twice — once from the
+    /// registry and once from the roster — with the daemon serving the page marked offline.
+    #[tokio::test]
+    async fn list_known_hosts_reports_one_row_for_a_daemon_whose_instance_id_is_configured() {
+        // Given a daemon that names itself in configuration, having recorded itself at startup the
+        // way the runtime does
+        let config = a_config_naming_this_daemon(Some(A_CONFIGURED_ID));
+        let local_sighting = crate::host_registry::local_host_sighting(&config);
+        let (service, registry) = a_service_with(config);
+        registry
+            .record_sighting(&local_sighting, 1_000)
+            .expect("recording this daemon's own entry");
+
+        // When the hosts are listed
+        let hosts = known_hosts_of(&service).await;
+
+        // Then there is exactly one row for it, online and flagged local
+        assert_eq!(
+            hosts.len(),
+            1,
+            "one machine is one row; got {:?}",
             hosts.iter().map(|h| &h.instance_id).collect::<Vec<_>>()
         );
+        let local = entry_named(&hosts, A_CONFIGURED_ID);
+        assert!(local.is_local && local.online);
     }
 }

@@ -17,7 +17,11 @@ export interface HostRow {
   label: string;
   /** In the live roster at the moment the list was read. */
   online: boolean;
-  firstSeenUnixMs: bigint;
+  /**
+   * When the host was last in the live roster. There is deliberately no `firstSeenUnixMs` here: the
+   * daemon records one, but this screen has no "known since" column, and an unrendered field is
+   * surface later nodes would have to keep mapping for nothing.
+   */
   lastSeenUnixMs: bigint;
   reposBasePath: string;
   /** This row is the daemon serving the page. */
@@ -70,9 +74,18 @@ export function HostsScreen({ rows, nowUnixMs }: HostsScreenProps) {
                   {row.label}
                   {/* Every daemon self-labels "<id> (this daemon)" in its own advertisement, so in
                       a list of hosts the label alone cannot say which one is serving this page.
-                      `is_local` is the daemon's answer to that, and only it can give it. */}
+                      `is_local` is the daemon's answer to that, and only it can give it.
+
+                      Its test id sits outside the `hosts-row-` namespace on purpose: that prefix
+                      belongs to the row elements alone, so a marker named under it would have to be
+                      excluded by hand from any prefix match over rows. */}
                   {row.isLocal ? (
-                    <span className="ml-1 text-xs text-muted-foreground">(local)</span>
+                    <span
+                      className="ml-1 text-xs text-muted-foreground"
+                      data-testid={`hosts-local-marker-${row.instanceId}`}
+                    >
+                      (local)
+                    </span>
                   ) : null}
                 </td>
                 <td

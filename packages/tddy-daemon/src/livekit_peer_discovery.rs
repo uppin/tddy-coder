@@ -135,9 +135,50 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+/// A peer daemon as the common room describes it: what it advertises, plus the identity that
+/// survives its restarts.
+///
+/// `host_id` is a **separate wire key** alongside the advertisement's own, rather than a field of
+/// [`DaemonAdvertisement`], because that type is the payload the web already parses and its shape
+/// is a published format.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerDaemon {
+    pub advertisement: DaemonAdvertisement,
+    /// The daemon's identity **across restarts** — its instance id without the startup-timestamp
+    /// suffix. Published so a peer can file this machine under one durable row however many times
+    /// it reconnects with a fresh `instance_id`. A daemon that does not publish one (an older
+    /// build) falls back to its `instance_id`, which is what it has always been filed under.
+    pub host_id: String,
+}
+
+/// The JSON a daemon publishes as its common-room metadata.
+///
+/// `host_id` rides alongside the advertisement's keys so a reader that knows nothing about it —
+/// the web, or an older daemon — sees exactly the advertisement it always saw.
+#[derive(serde::Serialize)]
+struct PublishedDaemonMetadata<'a> {
+    #[serde(flatten)]
+    advertisement: &'a DaemonAdvertisement,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    host_id: &'a str,
+}
+
+/// The common-room metadata JSON for a daemon: its advertisement, plus its durable host id.
+pub fn daemon_metadata_json(
+    advertisement: &DaemonAdvertisement,
+    host_id: &str,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&PublishedDaemonMetadata {
+        advertisement,
+        host_id,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct DaemonAdvertisementWire {
     instance_id: String,
+    #[serde(default)]
+    host_id: String,
     label: String,
     #[serde(default)]
     repos_base_path: String,
@@ -147,6 +188,12 @@ struct DaemonAdvertisementWire {
 
 /// Parse and normalize a daemon advertisement JSON string from the discovery transport.
 pub fn parse_daemon_advertisement_json(input: &str) -> Result<DaemonAdvertisement, String> {
+    parse_peer_daemon_json(input).map(|peer| peer.advertisement)
+}
+
+/// Parse a peer's common-room metadata: the advertisement, and the identity it keeps across its
+/// restarts.
+pub fn parse_peer_daemon_json(input: &str) -> Result<PeerDaemon, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("empty advertisement JSON".to_string());
@@ -161,11 +208,20 @@ pub fn parse_daemon_advertisement_json(input: &str) -> Result<DaemonAdvertisemen
     if label.is_empty() {
         return Err("advertisement label is empty".to_string());
     }
-    Ok(DaemonAdvertisement {
-        instance_id,
-        label,
-        repos_base_path,
-        max_attachment_bytes: w.max_attachment_bytes,
+    // Metadata without a durable id predates the key; the instance id is what such a peer has
+    // always been filed under, so falling back to it changes nothing for it.
+    let host_id = match w.host_id.trim() {
+        "" => instance_id.clone(),
+        declared => declared.to_string(),
+    };
+    Ok(PeerDaemon {
+        advertisement: DaemonAdvertisement {
+            instance_id,
+            label,
+            repos_base_path,
+            max_attachment_bytes: w.max_attachment_bytes,
+        },
+        host_id,
     })
 }
 
@@ -264,9 +320,13 @@ pub fn classify_start_session_peer_route(
 }
 
 /// Registry of remote daemons observed in the shared common room (excludes the local row).
+///
+/// Keyed by the peer's routing instance id, because that is what an RPC is forwarded to. Each row
+/// keeps the whole advertisement, not just the eligible fields, so the durable host id and the host
+/// facts a peer publishes are available to the registry sightings without a second parse.
 #[derive(Default)]
 pub struct CommonRoomPeerRegistry {
-    remotes: std::sync::RwLock<HashMap<String, EligibleDaemonInfo>>,
+    remotes: std::sync::RwLock<HashMap<String, PeerDaemon>>,
     /// Where each snapshot's arrivals and departures are recorded durably.
     ///
     /// Optional because this registry is also the roster on its own: the discovery tests and any
@@ -276,11 +336,15 @@ pub struct CommonRoomPeerRegistry {
 
 impl std::fmt::Debug for CommonRoomPeerRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // A poisoned lock is reported as such: printing `0` there would make "a writer panicked
+        // holding this" indistinguishable from "nobody is in the room", in the one output someone
+        // reads while working out which of those happened.
+        let remotes: Box<dyn std::fmt::Debug> = match self.remotes.read() {
+            Ok(g) => Box::new(g.len()),
+            Err(_) => Box::new("<poisoned>"),
+        };
         f.debug_struct("CommonRoomPeerRegistry")
-            .field(
-                "remotes",
-                &self.remotes.read().map(|g| g.len()).unwrap_or(0),
-            )
+            .field("remotes", &remotes)
             .field("persists", &self.host_registry.is_some())
             .finish()
     }
@@ -300,20 +364,30 @@ impl CommonRoomPeerRegistry {
 
     /// Replace remote entries from a full room snapshot (authoritative for membership).
     pub fn sync_from_room(&self, room: &Room, local_instance_id: &str) {
-        let mut next: HashMap<String, EligibleDaemonInfo> = HashMap::new();
+        let mut next: HashMap<String, PeerDaemon> = HashMap::new();
         for (_, participant) in room.remote_participants() {
-            if let Some(info) = remote_participant_to_eligible(participant, local_instance_id) {
+            if let Some(peer) = remote_participant_to_peer(participant, local_instance_id) {
                 log::debug!(
                     target: LOG_LIVEKIT_PEER_METADATA,
-                    "CommonRoomPeerRegistry: sync sees remote instance_id={} label_len={}",
-                    info.instance_id.0,
-                    info.label.len()
+                    "CommonRoomPeerRegistry: sync sees remote instance_id={} host_id={} label_len={}",
+                    peer.advertisement.instance_id,
+                    peer.host_id,
+                    peer.advertisement.label.len()
                 );
-                next.insert(info.instance_id.0.clone(), info);
+                next.insert(peer.advertisement.instance_id.clone(), peer);
             }
         }
+        self.apply_snapshot(next);
+    }
+
+    /// Adopt `next` as the room's membership and record the transition.
+    ///
+    /// Split from [`Self::sync_from_room`] so the recording behaviour can be exercised without a
+    /// live LiveKit `Room`: everything below this line is about the difference between two
+    /// snapshots, and nothing about it is LiveKit's.
+    fn apply_snapshot(&self, next: HashMap<String, PeerDaemon>) {
         let n = next.len();
-        let sightings: Vec<HostSighting> = next.values().map(HostSighting::from_eligible).collect();
+        let sightings: Vec<HostSighting> = next.values().map(host_sighting_from_peer).collect();
         // Taking the old map out as the new one goes in is what makes a departure observable at
         // all: the snapshot is authoritative about who is present and says nothing about who left,
         // so the difference against what was here a moment ago is the only evidence there is.
@@ -321,15 +395,29 @@ impl CommonRoomPeerRegistry {
             let mut g = self.remotes.write().expect("registry lock");
             std::mem::replace(&mut *g, next)
         };
-        self.record_snapshot(&sightings, previous.into_keys());
+        // Deliberately outside the guard above: recording writes a file, and the routing map must
+        // not be locked while that happens.
+        self.record_snapshot(&sightings, previous.into_values());
         log::info!(
             "CommonRoomPeerRegistry: synced {} remote daemon(s) from LiveKit room snapshot",
             n
         );
     }
 
-    /// Persist this snapshot: every peer visible now was seen, and every id in `previous_ids` that
-    /// is no longer visible has departed.
+    /// Persist this snapshot: every peer visible now was seen, and every host in `previous` that is
+    /// no longer visible has departed.
+    ///
+    /// One call, not one per peer: the tick that drives this runs every 500 ms, and a registry
+    /// write is a whole-file republish with two fsyncs, so a peer-at-a-time loop would turn a
+    /// three-machine room into a dozen fsyncs a second on a runtime worker that also serves RPCs.
+    /// The store then decides whether this snapshot changed anything at all, and an unchanged one
+    /// writes nothing.
+    ///
+    /// The write stays on this runtime worker rather than moving to `spawn_blocking`. It is only
+    /// reached on a real transition now — an arrival, a departure or a changed column — so it is
+    /// rare rather than periodic, and handing snapshots to a task pool would either need a queue
+    /// (unbounded spawning under a flapping peer) or lose their ordering, which is the one thing a
+    /// sequence of snapshots cannot afford.
     ///
     /// A failed write is logged and dropped. Discovery's job is routing, and a persistence failure
     /// costs a stale row on a screen — whereas propagating it would let a full disk take the peer
@@ -337,30 +425,18 @@ impl CommonRoomPeerRegistry {
     fn record_snapshot(
         &self,
         sightings: &[HostSighting],
-        previous_ids: impl Iterator<Item = String>,
+        previous: impl Iterator<Item = PeerDaemon>,
     ) {
         let Some(host_registry) = self.host_registry.as_ref() else {
             return;
         };
-        let now = now_unix_ms();
-        for sighting in sightings {
-            if let Err(e) = host_registry.record_sighting(sighting, now) {
-                log::warn!(
-                    "host registry: could not record sighting of {}: {e}",
-                    sighting.instance_id.0
-                );
-            }
-        }
-        for gone in previous_ids
-            .filter(|id| !sightings.iter().any(|seen| &seen.instance_id.0 == id))
+        let departed: Vec<DaemonInstanceId> = previous
+            .map(|peer| peer.host_id)
+            .filter(|host_id| !sightings.iter().any(|seen| &seen.instance_id.0 == host_id))
             .map(DaemonInstanceId)
-        {
-            if let Err(e) = host_registry.record_departure(&gone, now) {
-                log::warn!(
-                    "host registry: could not record departure of {}: {e}",
-                    gone.0
-                );
-            }
+            .collect();
+        if let Err(e) = host_registry.record_snapshot(sightings, &departed, now_unix_ms()) {
+            log::warn!("host registry: could not record the room snapshot: {e}");
         }
     }
 
@@ -370,6 +446,20 @@ impl CommonRoomPeerRegistry {
             .expect("registry lock")
             .values()
             .cloned()
+            .map(eligible_daemon_from_peer)
+            .collect()
+    }
+
+    /// The remote peers as the host registry knows them: durable host id and label.
+    fn snapshot_live_known_hosts(&self) -> Vec<EligibleDaemonInfo> {
+        self.remotes
+            .read()
+            .expect("registry lock")
+            .values()
+            .map(|peer| EligibleDaemonInfo {
+                instance_id: DaemonInstanceId(peer.host_id.clone()),
+                label: peer.advertisement.label.clone(),
+            })
             .collect()
     }
 
@@ -381,7 +471,31 @@ impl CommonRoomPeerRegistry {
     }
 }
 
-/// Classify a common-room participant, returning an eligible-daemon row **only** when the
+/// The eligible row a validated peer stands for.
+fn eligible_daemon_from_peer(peer: PeerDaemon) -> EligibleDaemonInfo {
+    EligibleDaemonInfo {
+        instance_id: DaemonInstanceId(peer.advertisement.instance_id),
+        label: peer.advertisement.label,
+    }
+}
+
+/// The durable sighting a validated peer stands for.
+///
+/// Keyed by the peer's durable host id, and carrying the host facts the advertisement already
+/// publishes — without this the Hosts screen's repos-base-path column would be empty for every
+/// machine except the one serving the page.
+fn host_sighting_from_peer(peer: &PeerDaemon) -> HostSighting {
+    HostSighting {
+        instance_id: DaemonInstanceId(peer.host_id.clone()),
+        label: peer.advertisement.label.clone(),
+        repos_base_path: Some(peer.advertisement.repos_base_path.clone()).filter(|p| !p.is_empty()),
+        // Zero is how an advertisement spells "not advertised" (the key is left off the wire), so
+        // it must not be recorded as a cap of zero.
+        max_attachment_bytes: Some(peer.advertisement.max_attachment_bytes).filter(|b| *b != 0),
+    }
+}
+
+/// Classify a common-room participant, returning its daemon advertisement **only** when the
 /// participant is a genuine `tddy-daemon` — not a browser or a coder/session participant.
 ///
 /// Mirrors the web UI's `inferParticipantRole` (`tddy-web/src/hooks/useRoomParticipants.ts`):
@@ -389,11 +503,15 @@ impl CommonRoomPeerRegistry {
 /// `daemon-<uuid>…`) are never daemons — even when they publish advertisement-shaped metadata — and
 /// a daemon must publish a valid advertisement (no identity fallback). Only daemons own projects, so
 /// only daemons are eligible hosts for session/project routing and project fan-out.
-fn eligible_daemon_from_participant_fields(
+///
+/// The whole advertisement comes back rather than the eligible row alone, because the durable host
+/// registry needs the columns the row drops: the peer's restart-surviving `host_id`, its repos base
+/// path and its attachment cap.
+fn peer_daemon_from_participant_fields(
     identity: &str,
     metadata: &str,
     local_instance_id: &str,
-) -> Option<EligibleDaemonInfo> {
+) -> Option<PeerDaemon> {
     let id_trim = identity.trim();
     if id_trim.starts_with("web-") || id_trim.starts_with("browser-") {
         return None;
@@ -411,29 +529,33 @@ fn eligible_daemon_from_participant_fields(
     if id_trim.starts_with(crate::split_session::SPLIT_AGENT_IDENTITY_PREFIX) {
         return None;
     }
-    let adv = parse_daemon_advertisement_json(metadata.trim()).ok()?;
-    let instance_id = adv.instance_id.trim().to_string();
+    let peer = parse_peer_daemon_json(metadata.trim()).ok()?;
+    let instance_id = peer.advertisement.instance_id.trim().to_string();
     if instance_id.is_empty() || instance_id == local_instance_id.trim() {
         return None;
     }
-    let label = if adv.label.trim().is_empty() {
+    let label = if peer.advertisement.label.trim().is_empty() {
         format!("{instance_id} (LiveKit peer)")
     } else {
-        adv.label.trim().to_string()
+        peer.advertisement.label.trim().to_string()
     };
-    Some(EligibleDaemonInfo {
-        instance_id: DaemonInstanceId(instance_id),
-        label,
+    Some(PeerDaemon {
+        advertisement: DaemonAdvertisement {
+            instance_id,
+            label,
+            ..peer.advertisement
+        },
+        ..peer
     })
 }
 
-fn remote_participant_to_eligible(
+fn remote_participant_to_peer(
     remote: RemoteParticipant,
     local_instance_id: &str,
-) -> Option<EligibleDaemonInfo> {
+) -> Option<PeerDaemon> {
     let identity_str = remote.identity().to_string();
     let meta = remote.metadata();
-    let result = eligible_daemon_from_participant_fields(&identity_str, &meta, local_instance_id);
+    let result = peer_daemon_from_participant_fields(&identity_str, &meta, local_instance_id);
     if result.is_none() {
         log::debug!(
             target: LOG_LIVEKIT_PEER_METADATA,
@@ -457,15 +579,33 @@ fn process_startup_unix_ms_suffix() -> &'static str {
         .as_str()
 }
 
-/// Resolved local daemon instance id string (config override or hostname default).
-pub fn local_instance_id_for_config(config: &DaemonConfig) -> String {
-    let base = config
+/// The daemon's **durable** identity: the configured instance id, or the hostname, without the
+/// per-process startup suffix.
+///
+/// This is the id anything that outlives the process must key on — the host registry above all.
+/// `daemon_instance_id_append_startup_timestamp` makes the routing id unique per *run*, so keying
+/// durable state on it would file every restart of one machine as a brand-new host, and this
+/// changeset's "never delete a host" rule would then keep every one of those ghosts forever.
+///
+/// Derived here once so no caller is tempted to recover it by stripping a suffix off the routing
+/// id: `server-2` and `server-<startup ms>` are indistinguishable to a string match, and getting
+/// that wrong renames a real host.
+pub fn local_base_instance_id_for_config(config: &DaemonConfig) -> String {
+    config
         .daemon_instance_id
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0);
+        .unwrap_or_else(|| crate::multi_host::local_daemon_instance_id().0)
+}
+
+/// Resolved local daemon instance id string (config override or hostname default).
+///
+/// This is the **routing** identity: the id this process answers to in the common room and in
+/// `classify_peer_route`. See [`local_base_instance_id_for_config`] for the durable one.
+pub fn local_instance_id_for_config(config: &DaemonConfig) -> String {
+    let base = local_base_instance_id_for_config(config);
     if config.daemon_instance_id_append_startup_timestamp {
         format!("{}-{}", base, process_startup_unix_ms_suffix())
     } else {
@@ -494,12 +634,16 @@ impl LiveKitEligibleDaemonSource {
     }
 
     fn local_row(&self) -> EligibleDaemonInfo {
-        let id = local_instance_id_for_config(&self.config);
-        let label = format!("{id} (this daemon)");
-        EligibleDaemonInfo {
-            instance_id: DaemonInstanceId(id),
-            label,
-        }
+        crate::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
+            local_instance_id_for_config(&self.config),
+        ))
+    }
+
+    /// The local row under the id that survives a restart, for the host registry's join.
+    fn local_durable_row(&self) -> EligibleDaemonInfo {
+        crate::multi_host::eligible_daemon_entry_for(DaemonInstanceId(
+            local_base_instance_id_for_config(&self.config),
+        ))
     }
 }
 
@@ -521,6 +665,20 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
             );
             vec![self.local_row()]
         })
+    }
+
+    fn live_known_hosts(&self) -> Vec<EligibleDaemonInfo> {
+        let local = self.local_durable_row();
+        // Same rows, keyed by the id that survives a restart — each peer's own advertised
+        // `host_id`, and this daemon's un-suffixed instance id.
+        merge_discovered_peers_ordered(local, self.registry.snapshot_live_known_hosts())
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "merge_discovered_peers_ordered failed for the durable roster: {} — returning local only",
+                    e
+                );
+                vec![self.local_durable_row()]
+            })
     }
 
     /// Fan out to each discovered peer's `ListProjects` (with `local_only = true` to avoid recursive
@@ -756,6 +914,7 @@ async fn connect_common_room_publish_metadata(
     url: &str,
     token: &str,
     local_id: &str,
+    host_id: &str,
     repos_base_path: &str,
     max_attachment_bytes: u64,
 ) -> anyhow::Result<(
@@ -780,7 +939,7 @@ async fn connect_common_room_publish_metadata(
         repos_base_path: repos_base_path.to_string(),
         max_attachment_bytes,
     };
-    let meta_json = serde_json::to_string(&adv)?;
+    let meta_json = daemon_metadata_json(&adv, host_id)?;
     let meta_len = meta_json.len();
 
     let mut buffered = VecDeque::new();
@@ -1145,11 +1304,13 @@ async fn common_room_discovery_cycle(
         url.len()
     );
     let repos_base_path = config.repos_base_path_or_default().to_string();
+    let host_id = local_base_instance_id_for_config(&config);
     let (room, events, event_buffer, daemon_adv_metadata) = connect_common_room_publish_metadata(
         &room_name,
         &url,
         &token,
         &local_id,
+        &host_id,
         &repos_base_path,
         config.max_attachment_bytes,
     )
@@ -1660,6 +1821,190 @@ mod tests {
     use crate::multi_host::DaemonInstanceId;
     use std::time::Duration;
 
+    // -----------------------------------------------------------------------
+    // Recording the room into the durable host registry.
+    //
+    // A snapshot is the unit: the tick fires every 500 ms, and the registry's writes are
+    // whole-file republishes, so the discovery path must hand over one snapshot per observation
+    // rather than one call per peer.
+    // -----------------------------------------------------------------------
+
+    /// What the registry was told, in order.
+    #[derive(Default)]
+    struct RecordingHostRegistry {
+        snapshots: std::sync::Mutex<Vec<(Vec<HostSighting>, Vec<DaemonInstanceId>)>>,
+    }
+
+    impl RecordingHostRegistry {
+        fn snapshots(&self) -> Vec<(Vec<HostSighting>, Vec<DaemonInstanceId>)> {
+            self.snapshots.lock().expect("recorded snapshots").clone()
+        }
+    }
+
+    impl HostRegistry for RecordingHostRegistry {
+        fn record_snapshot(
+            &self,
+            seen: &[HostSighting],
+            departed: &[DaemonInstanceId],
+            _now_unix_ms: i64,
+        ) -> Result<(), String> {
+            self.snapshots
+                .lock()
+                .expect("recorded snapshots")
+                .push((seen.to_vec(), departed.to_vec()));
+            Ok(())
+        }
+
+        fn known_hosts(
+            &self,
+            _live_roster: &[EligibleDaemonInfo],
+            _local: &HostSighting,
+            _now_unix_ms: i64,
+        ) -> Vec<crate::host_registry::KnownHostView> {
+            Vec::new()
+        }
+    }
+
+    /// A room holding the named peers, each advertising a durable host id of `<id>-host`.
+    fn a_room_of(instance_ids: &[&str]) -> HashMap<String, PeerDaemon> {
+        instance_ids
+            .iter()
+            .map(|id| {
+                let peer = PeerDaemon {
+                    advertisement: DaemonAdvertisement {
+                        instance_id: (*id).to_string(),
+                        label: format!("{id} (this daemon)"),
+                        repos_base_path: format!("repos/{id}"),
+                        max_attachment_bytes: 4096,
+                    },
+                    host_id: format!("{id}-host"),
+                };
+                (peer.advertisement.instance_id.clone(), peer)
+            })
+            .collect()
+    }
+
+    fn a_registry_recording_into(recorder: &Arc<RecordingHostRegistry>) -> CommonRoomPeerRegistry {
+        CommonRoomPeerRegistry::new()
+            .with_host_registry(Arc::clone(recorder) as Arc<dyn HostRegistry>)
+    }
+
+    fn seen_host_ids(seen: &[HostSighting]) -> Vec<String> {
+        let mut ids: Vec<String> = seen.iter().map(|s| s.instance_id.0.clone()).collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn a_room_snapshot_is_recorded_once_for_every_peer_it_holds() {
+        // Given a peer registry recording into the durable host registry
+        let recorder = Arc::new(RecordingHostRegistry::default());
+        let registry = a_registry_recording_into(&recorder);
+
+        // When a room holding two peers is observed
+        registry.apply_snapshot(a_room_of(&["peer-a", "peer-b"]));
+
+        // Then both were recorded, in a single snapshot — a call per peer would be a whole-file
+        // republish per peer, several times a second, forever
+        let snapshots = recorder.snapshots();
+        assert_eq!(snapshots.len(), 1, "one observation is one recording");
+        assert_eq!(
+            seen_host_ids(&snapshots[0].0),
+            vec!["peer-a-host".to_string(), "peer-b-host".to_string()]
+        );
+        assert!(
+            snapshots[0].1.is_empty(),
+            "nobody left a room that was empty a moment ago"
+        );
+    }
+
+    #[test]
+    fn a_peer_that_leaves_the_room_is_recorded_as_departed_and_the_one_that_stays_is_not() {
+        // Given a room that held two peers
+        let recorder = Arc::new(RecordingHostRegistry::default());
+        let registry = a_registry_recording_into(&recorder);
+        registry.apply_snapshot(a_room_of(&["peer-a", "peer-b"]));
+
+        // When only one of them is still there
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // Then the one still present is a sighting, and only the missing one is a departure
+        let snapshots = recorder.snapshots();
+        let (seen, departed) = &snapshots[1];
+        assert_eq!(seen_host_ids(seen), vec!["peer-a-host".to_string()]);
+        assert_eq!(
+            departed,
+            &vec![DaemonInstanceId("peer-b-host".to_string())],
+            "the peer that stayed must not be recorded as gone"
+        );
+    }
+
+    #[test]
+    fn a_repeated_room_snapshot_records_no_departure() {
+        // Given a room with one peer in it
+        let recorder = Arc::new(RecordingHostRegistry::default());
+        let registry = a_registry_recording_into(&recorder);
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // When the very same membership is observed again, as the 500 ms tick does
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // Then the tick invents nothing; the store decides that this changes nothing and writes
+        // no file (`host_registry`: a_snapshot_that_changes_nothing_does_not_rewrite_the_file)
+        let snapshots = recorder.snapshots();
+        assert!(
+            snapshots.iter().all(|(_, departed)| departed.is_empty()),
+            "a peer that never left is never recorded as gone"
+        );
+    }
+
+    #[test]
+    fn a_peer_sighting_carries_the_host_facts_the_peer_advertises() {
+        // Given a peer advertising where it clones and how large an attachment it will take
+        let recorder = Arc::new(RecordingHostRegistry::default());
+        let registry = a_registry_recording_into(&recorder);
+
+        // When the room is observed
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // Then the sighting carries them, so the Hosts screen has a repos base path for a machine
+        // other than the one serving the page
+        let snapshots = recorder.snapshots();
+        let sighting = &snapshots[0].0[0];
+        assert_eq!(sighting.repos_base_path.as_deref(), Some("repos/peer-a"));
+        assert_eq!(sighting.max_attachment_bytes, Some(4096));
+    }
+
+    #[test]
+    fn a_peer_is_recorded_under_the_host_id_it_advertises_not_its_per_run_instance_id() {
+        // Given a peer whose instance id is unique to this run of it
+        let recorder = Arc::new(RecordingHostRegistry::default());
+        let registry = a_registry_recording_into(&recorder);
+
+        // When the room is observed
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // Then it is filed under the id that survives its restarts — otherwise "never delete a
+        // host" would leave a permanent extra row for every restart of the same machine
+        let snapshots = recorder.snapshots();
+        assert_eq!(snapshots[0].0[0].instance_id.0, "peer-a-host");
+    }
+
+    #[test]
+    fn a_peer_registry_with_no_host_registry_records_nothing_and_still_routes() {
+        // Given a peer registry built without persistence, as the routing-only callers do
+        let registry = CommonRoomPeerRegistry::new();
+
+        // When a room is observed
+        registry.apply_snapshot(a_room_of(&["peer-a"]));
+
+        // Then the live roster is still there to route on
+        assert_eq!(
+            registry.snapshot_remotes()[0].instance_id,
+            DaemonInstanceId("peer-a".to_string())
+        );
+    }
+
     #[test]
     fn parse_daemon_advertisement_accepts_documented_json_shape() {
         let json = r#"{"instance_id":"peer-a","label":"Peer A"}"#;
@@ -1701,12 +2046,16 @@ mod tests {
         let meta = r#"{"instance_id":"udoo","label":"udoo (this daemon)"}"#;
 
         // When
-        let got = eligible_daemon_from_participant_fields("udoo", meta, "local-host");
+        let got = peer_daemon_from_participant_fields("udoo", meta, "local-host");
 
         // Then
         let got = got.expect("a peer daemon advertisement is eligible");
-        assert_eq!(got.instance_id, DaemonInstanceId("udoo".to_string()));
-        assert_eq!(got.label, "udoo (this daemon)");
+        assert_eq!(got.advertisement.instance_id, "udoo");
+        assert_eq!(got.advertisement.label, "udoo (this daemon)");
+        assert_eq!(
+            got.host_id, "udoo",
+            "metadata from before the host_id key falls back to the instance id, which is what such a peer has always been filed under"
+        );
     }
 
     #[test]
@@ -1716,7 +2065,7 @@ mod tests {
         let meta = r#"{"instance_id":"proj-x","label":"proj-x (this daemon)"}"#;
 
         // When
-        let got = eligible_daemon_from_participant_fields(
+        let got = peer_daemon_from_participant_fields(
             "daemon-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
             meta,
             "local-host",
@@ -1737,7 +2086,7 @@ mod tests {
         let meta = r#"{"instance_id":"attacker-host","label":"Build server"}"#;
 
         // When
-        let got = eligible_daemon_from_participant_fields(
+        let got = peer_daemon_from_participant_fields(
             "split-agent-019d7d74-3a7f-7b03-88d2-f50bb7efb2f0",
             meta,
             "local-host",
@@ -1753,7 +2102,7 @@ mod tests {
     #[test]
     fn eligible_daemon_rejects_a_server_coder_identity() {
         // Given
-        let got = eligible_daemon_from_participant_fields("server", "", "local-host");
+        let got = peer_daemon_from_participant_fields("server", "", "local-host");
 
         // Then
         assert!(
@@ -1765,7 +2114,7 @@ mod tests {
     #[test]
     fn eligible_daemon_rejects_a_browser_participant() {
         // Given
-        let got = eligible_daemon_from_participant_fields("web-u-1-x", "", "local-host");
+        let got = peer_daemon_from_participant_fields("web-u-1-x", "", "local-host");
 
         // Then
         assert!(
@@ -1778,7 +2127,7 @@ mod tests {
     fn eligible_daemon_rejects_a_participant_without_a_valid_advertisement() {
         // Given a peer with a plausible-but-unprefixed identity and no advertisement metadata:
         // there is no identity fallback, so it is not treated as a daemon.
-        let got = eligible_daemon_from_participant_fields("random-peer", "", "local-host");
+        let got = peer_daemon_from_participant_fields("random-peer", "", "local-host");
 
         // Then
         assert!(
@@ -1793,7 +2142,7 @@ mod tests {
         let meta = r#"{"instance_id":"local-host","label":"local-host (this daemon)"}"#;
 
         // When
-        let got = eligible_daemon_from_participant_fields("local-host", meta, "local-host");
+        let got = peer_daemon_from_participant_fields("local-host", meta, "local-host");
 
         // Then
         assert!(
