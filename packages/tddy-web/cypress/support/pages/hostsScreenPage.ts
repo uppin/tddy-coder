@@ -81,9 +81,26 @@ export const hostTelemetryPage = {
   },
 };
 
-/** Tooling section selectors — added by `#hosts-screen 4/8`. */
+/**
+ * Tooling section selectors — added by `#hosts-screen 4/8`.
+ *
+ * As with the telemetry cell above, the DOM contract lives here rather than in test bodies. That
+ * matters most for `expectGhLoginLabelledAsHosts`: the cell renders a static `gh` label in *every*
+ * state, so asserting the cell's text contains "gh" proves nothing at all. What actually
+ * distinguishes this host's `gh` login from the tddy session user in `UserAvatar` is the `title`,
+ * and which attribute carries that is this page object's business, not a test's.
+ */
 export const hostToolingPage = {
-  section: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-tooling"]`),
-  gitIdentity: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-git"]`),
-  githubCli: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-gh"]`),
+  section: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-tooling`),
+  gitIdentity: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-git`),
+  githubCli: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-gh`),
+
+  /** Assert the `gh` cell names the login as this *host's*, and says which login it is. */
+  expectGhLoginLabelledAsHosts: (instanceId: string, login: string) => {
+    hostToolingPage
+      .githubCli(instanceId)
+      .should("have.attr", "title")
+      .and("match", /this host's/i);
+    hostToolingPage.githubCli(instanceId).should("have.attr", "title").and("contain", login);
+  },
 };

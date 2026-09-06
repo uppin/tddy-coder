@@ -139,13 +139,8 @@ describe("Hosts screen tooling", () => {
     // Then — the cell says whose login this is. Three GitHub identities can disagree — the tddy
     // session user in `UserAvatar`, a GITHUB_TOKEN in some environment, and the host's own `gh` —
     // so a bare login beside the row's other identities reads as whichever one the operator
-    // expected. Asserting the static "gh" label alone would prove nothing: it renders in every
-    // state, for every login, and even when there is no login at all.
-    hostToolingPage
-      .githubCli(HOST)
-      .should("have.attr", "title")
-      .and("match", /this host's/i);
-    hostToolingPage.githubCli(HOST).should("have.attr", "title").and("contain", "octocat");
+    // expected.
+    hostToolingPage.expectGhLoginLabelledAsHosts(HOST, "octocat");
   });
 
   it("says nothing about a host that has not answered yet", () => {
