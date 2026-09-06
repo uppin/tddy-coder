@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 7/8
 **Branch:** `feature/hosts-screen/desktop-probe` → base `feature/hosts-screen/agent-add-key`
+**PR:** [#459](https://github.com/uppin/tddy-coder/pull/459)
 
 ## Initial Discovery
 
@@ -206,17 +207,42 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo clippy -p tddy-daemon --all-targets -- -D warnings` — clean.
+- `remote_desktop_probe.rs` — 5 tests, **4 red** at the `unimplemented!()` sites.
+  `names_the_default_port_for_each_protocol` passes: the constants are real, published surface.
+
+### The rudeness guard is asserted, not assumed
+
+`writes_no_bytes_to_the_remote_before_closing` has the fake listener **record what it received**, and
+asserts zero bytes arrived. "We do not handshake" is otherwise a comment. A monitoring screen polling
+half-open RFB handshakes against people's desktops on a timer is antisocial, and a bare connect
+already answers the question.
+
+Ports are ephemeral loopback (`127.0.0.1:0`), and the closed-port case binds then drops — so the
+suite is hermetic, needs no network and cannot collide with a developer's running services. That
+matters because the CI gate deliberately excludes VM-backed and desktop suites.
+
+### A fourth state the PRD had not named
+
+The PRD listed two facts to keep apart (can-bridge vs desktop-serving). Writing the spec surfaced a
+third conflation: a probe that **timed out** versus one that successfully found nothing. Both leave
+`desktop_reachable = false`, so a row keying off that boolean alone reports "No desktop" for a host it
+never reached. `distinguishes_a_failed_probe_from_a_negative_finding` pins it.
+
+This is the same shape as node 4's `gh` classification, and it is why `ProbeOutcome` sits on the wire
+beside every finding: **"we checked and the answer is no" is not "we could not check."**
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-desktop-probe-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -218,4 +218,17 @@ export const hostAddKeyOutcome = {
     hostAddKeyPage.outcome(instanceId).invoke("text").should("match", pattern),
   notSaying: (instanceId: string, pattern: RegExp) =>
     hostAddKeyPage.outcome(instanceId).invoke("text").should("not.match", pattern),
+
+/**
+ * Remote-desktop section selectors — added by `#hosts-screen 7/8`.
+ *
+ * The section and the per-protocol readings are addressed separately because they answer different
+ * questions: whether this row reports on remote desktops at all, and what it says about one
+ * protocol. A spec asserting "no desktop" needs the second without the first being absent.
+ */
+export const hostRemoteDesktopPage = {
+  section: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-remote-desktop`),
+  protocol: (instanceId: string, protocol: "vnc" | "rdp") =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-${protocol}`),
 };

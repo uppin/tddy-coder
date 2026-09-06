@@ -1199,11 +1199,36 @@ message HostSshAgent {
   string failure_reason = 4;
 }
 
+// Whether a host's desktop can be reached, per protocol.
+//
+// TWO facts, deliberately kept apart. "tddy cannot bridge here" and "nothing is serving a desktop
+// here" are different problems with different fixes, and collapsing them sends an operator to the
+// wrong one.
+message HostRemoteDesktop {
+  ProbeOutcome outcome = 1;
+  // Protocol this row is about. Reuses screen_sharing.proto's Protocol values (1 = VNC, 2 = RDP)
+  // rather than defining a parallel enum that would drift from it.
+  int32 protocol = 2;
+  // This host's daemon can spawn a bridge for this protocol — i.e. the resolved bridge binary
+  // actually exists. Today that path is only guessed, and a miss surfaces as a spawn error AFTER
+  // an operator asks for a stream.
+  bool can_bridge = 3;
+  // Something accepted a TCP connection on `port`. A bare connect, closed immediately — never a
+  // protocol handshake against someone's desktop.
+  bool desktop_reachable = 4;
+  // The port that was checked, so "unreachable" is not mistaken for authoritative on a host serving
+  // somewhere non-default. Port discovery is out of scope.
+  uint32 port = 5;
+  string failure_reason = 6;
+}
+
 message GetHostToolingResponse {
   string daemon_instance_id = 1;
   HostGitIdentity git = 2;
   HostGithubCli github_cli = 3;
   HostSshAgent ssh_agent = 4;
+  // One entry per probed protocol (VNC, RDP).
+  repeated HostRemoteDesktop remote_desktop = 5;
 }
 
 message StreamHostPromptsRequest {

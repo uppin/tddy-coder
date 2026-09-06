@@ -64,6 +64,9 @@ pub struct HostTooling {
     /// Added by `#hosts-screen 5/8`. `HostToolingProbe` owns the git and `gh` halves; this block is
     /// filled from [`crate::ssh_agent`].
     pub ssh_agent: crate::ssh_agent::AgentStatus,
+    /// Added by `#hosts-screen 7/8`. One reading per probed protocol, filled from
+    /// [`crate::remote_desktop_probe`].
+    pub remote_desktop: Vec<crate::remote_desktop_probe::DesktopReachability>,
 }
 
 /// Probes a host for what it has installed and configured.
