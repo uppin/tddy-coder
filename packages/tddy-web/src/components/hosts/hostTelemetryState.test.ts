@@ -58,15 +58,4 @@ describe("which feed a host row reads", () => {
     // Then it subscribes to nothing rather than guessing
     expect(feed).toBeNull();
   });
-
-  it("never falls back to the daemon selector for an unreadable host", () => {
-    // Given a host that cannot be read, for either reason
-    const offline = telemetryFeedFor({ ...anOnlineRoutableHost(), online: false });
-    const unroutable = telemetryFeedFor({ ...anOnlineRoutableHost(), routable: false });
-
-    // Then neither answer is `undefined` — that spelling means "follow the selector", which would
-    // report the selected daemon's CPU under this row's host name.
-    expect(offline).not.toBeUndefined();
-    expect(unroutable).not.toBeUndefined();
-  });
 });

@@ -70,8 +70,14 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
   useEffect(() => {
     if (!client) return;
 
+    // A reading belongs to the client that produced it. Without this reset a host that went away
+    // and came back would re-show its pre-outage CPU and disk as a live reading until the new feed's
+    // first frame — and indefinitely if the reconnected host never reports.
+    setPerCorePercent([]);
+    setDisk(null);
+
     const subscription = subscribeHostStats(
-      () => client.streamHostStats({ sessionToken: sessionToken ?? "" }),
+      (signal) => client.streamHostStats({ sessionToken: sessionToken ?? "" }, { signal }),
       (event) => {
         setPerCorePercent(event.cpu?.perCorePercent ?? []);
         if (event.disk) {

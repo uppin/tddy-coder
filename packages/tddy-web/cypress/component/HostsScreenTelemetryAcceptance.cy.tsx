@@ -193,6 +193,19 @@ describe("Hosts screen telemetry", () => {
     telemetry.expectNoReading(HOST_B);
   });
 
+  it("shows the cpu slot as pending for a reading that carries only disk", () => {
+    // Given a host reporting its disk but no per-core figures
+    const backend = aTelemetryBackend({ hostCpuPerCore: [] });
+
+    // When its row is mounted
+    mountCells(backend, [anOnlineRow(HOST_A)]);
+
+    // Then the disk figure stands and the CPU slot waits, rather than drawing bars at zero
+    telemetry.expectFreeDisk(HOST_A, "42.1 GB");
+    telemetry.cpuPending(HOST_A).should("exist");
+    telemetry.cpu(HOST_A).should("not.exist");
+  });
+
   it("shows a pending marker for a subscribed host that has not reported yet", () => {
     // Given a host whose feed is open but silent
     const backend = aTelemetryBackend({ hostStatsSilent: true });
@@ -262,9 +275,8 @@ describe("Hosts screen telemetry", () => {
 
       // Then that host's row carries its live reading, not just a cell somewhere on the page
       hostsScreenPage.row(HOST_A).within(() => {
-        telemetry.cell(HOST_A).should("exist");
+        telemetry.expectCpuCores(HOST_A, CPU_PER_CORE);
       });
-      telemetry.expectCpuCores(HOST_A, CPU_PER_CORE);
     });
 
     it("shows an offline host's row as having no reading", () => {
@@ -277,6 +289,7 @@ describe("Hosts screen telemetry", () => {
       // Then its row says so, rather than omitting the column for offline hosts
       hostsScreenPage.row(HOST_B).within(() => {
         telemetry.offline(HOST_B).should("exist");
+        telemetry.expectNoReading(HOST_B);
       });
     });
   });

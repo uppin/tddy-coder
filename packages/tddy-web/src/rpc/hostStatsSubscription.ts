@@ -39,11 +39,15 @@ export interface HostStatsSubscription {
  * @param onEvent receives every event, in the order the daemon sent them, until unsubscribed.
  */
 export function subscribeHostStats(
-  open: () => AsyncIterable<HostStatsEventLike>,
+  open: (signal: AbortSignal) => AsyncIterable<HostStatsEventLike>,
   onEvent: (event: HostStatsEventLike) => void,
 ): HostStatsSubscription {
   let unsubscribed = false;
   let stream: AsyncIterator<HostStatsEventLike> | null = null;
+  // The signal is what actually ends the call. A Connect client hands back an iterable whose
+  // iterator has `next` and nothing else — the library strips `return` and `throw` on purpose — so
+  // releasing the iterator cannot cancel anything, and a parked `next()` would never settle.
+  const aborter = new AbortController();
 
   /** Release the stream. A second call has nothing left to release. */
   const close = () => {
@@ -53,25 +57,28 @@ export function subscribeHostStats(
     void released?.return?.().catch(() => undefined);
   };
 
-  const feedFailed = (error: unknown) => {
+  const reportFeedFailure = (error: unknown) => {
+    // A stream aborted on unsubscribe rejects with an AbortError; that is this code's own doing and
+    // is not worth reporting. Anything else ended a feed somebody was reading.
+    if (unsubscribed) return;
     console.debug("[hostStatsSubscription] host stats stream ended", error);
   };
 
   void (async () => {
     try {
-      stream = open()[Symbol.asyncIterator]();
+      stream = open(aborter.signal)[Symbol.asyncIterator]();
     } catch (error) {
-      feedFailed(error);
+      reportFeedFailure(error);
       return;
     }
-    const reading = stream;
+    const activeStream = stream;
     try {
       while (!unsubscribed) {
         let frame: IteratorResult<HostStatsEventLike>;
         try {
-          frame = await reading.next();
+          frame = await activeStream.next();
         } catch (error) {
-          feedFailed(error);
+          reportFeedFailure(error);
           return;
         }
         // The caller may have let go while that frame was in flight; `unsubscribe` has already
@@ -88,8 +95,12 @@ export function subscribeHostStats(
     unsubscribe: () => {
       if (unsubscribed) return;
       unsubscribed = true;
-      // Closing here, rather than letting the loop notice, is the whole point: the loop may be
-      // parked on a first frame that never comes.
+      // Ending the call is what releases it. Aborting also rejects a parked `next()`, so the loop
+      // unwinds instead of holding the stream and the caller's handler for the life of the page —
+      // which is how a host that subscribed and never reported used to leak one subscription each.
+      aborter.abort();
+      // Still release the iterator: one that does expose `return` deserves the courtesy, and the
+      // in-memory fakes the tests use are exactly that shape.
       close();
     },
   };

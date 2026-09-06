@@ -294,6 +294,48 @@ selector had to tolerate one, so it now matches by element — `tr[data-testid^=
 needs no exception list and cannot regress the same way for node 3's memory reading. Node 1's five
 tests pass unchanged. **Flagged for node 1's author**, since it is their file.
 
+### Second validation pass — teardown did not actually work
+
+The first implementation released the stream with `iterator.return()`. Against the real transport
+that is a **no-op**, and the suite was green only because the fakes offered a `return()` production
+never has. `@connectrpc/connect`'s `handleStreamResponse` wraps every server-stream in
+
+```js
+// Create a new iterable to omit throw/return.
+return { [Symbol.asyncIterator]: () => ({ next: () => it.next() }) };
+```
+
+Every client here goes through `createClient`, so `stream.return` is always `undefined`; the optional
+call type-checked and did nothing. Nothing was cancelled, the daemon kept emitting to unmounted rows,
+and the parked `next()` never settled — so the loop retained the stream and the caller's handler for
+the life of the page. AC-6 was ticked on a fake that could not fail.
+
+**Fixed** by cancelling the call, which is how every other stream hook in this repo does it
+(`useTaskListStream`, `useHostFanOut`, `useLiveKitRooms`, …): `open` now takes an `AbortSignal`,
+`unsubscribe()` aborts, and `useHostStats` passes it to `streamHostStats`. Aborting rejects the parked
+`next()`, so the loop unwinds and releases. `iterator.return()` is still called for iterators that do
+expose one. A new test uses a **`next`-only** fake — the shape the real client actually returns — so
+this class of miss cannot pass again.
+
+**Also fixed in this pass:**
+
+- A pre-outage reading was re-shown as live. `perCorePercent`/`disk` survived a `client` change, so a
+  host that went away and came back rendered its old CPU and disk until the new feed's first frame —
+  and indefinitely if it never reported. The subscribing effect now clears both first. Rows are keyed
+  by `instanceId`, so there was never cross-host bleed; this was within one row.
+- The teardown log lost its guard in the extraction, so an ordinary unmount would report a dropped
+  feed. Restored, matching `useSessionNotifications` and `useWorktreeStatsStream`.
+- Two untested exit paths — a feed that ends cleanly, and a transport that cannot open at all.
+- The CPU-only-pending branch had no accessor and no test; `hostCpuPerCore: []` reaches it.
+- `telemetryFeedFor`'s "never `undefined`" test was subsumed (`toBeNull()` already rejects
+  `undefined`) and could not fail on its own. Removed — the `string | null` return type enforces it.
+- Naming: the iterator was called `reading`, which everywhere else in this node means a CPU/disk
+  sample.
+
+Mutation-checked: a `for await` + break implementation fails three of these tests, dropping the
+post-await recheck fails exactly one, and dropping `close()` from the loop's `finally` fails exactly
+one — each test kills a distinct plausible mistake.
+
 ## Refactoring needed
 
 ### From /red

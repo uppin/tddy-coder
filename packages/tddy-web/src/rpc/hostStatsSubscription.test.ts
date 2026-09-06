@@ -48,6 +48,64 @@ function aStreamOf(...events: HostStatsEventLike[]) {
   return { stream, wasClosed: () => closed };
 }
 
+/**
+ * A stream shaped exactly as a Connect client's: an iterator with **`next` and nothing else**.
+ *
+ * `@connectrpc/connect` wraps every server-stream in `{ [Symbol.asyncIterator]: () => ({ next }) }`
+ * — its own comment reads "Create a new iterable to omit throw/return" — so in production there is
+ * no `return()` to call and releasing the iterator cannot end anything. Only the call's abort signal
+ * can. A fake that offers `return()` would let a subscription that never cancels look correct.
+ */
+function aConnectShapedStream(...events: HostStatsEventLike[]) {
+  let cancelled = false;
+  let handedOver = 0;
+  const open = (signal: AbortSignal): AsyncIterable<HostStatsEventLike> => ({
+    [Symbol.asyncIterator]: () => ({
+      next: () => {
+        if (handedOver < events.length) {
+          return Promise.resolve({ value: events[handedOver++], done: false as const });
+        }
+        // Open, with nothing more to say — settled only by the caller giving up.
+        return new Promise<IteratorResult<HostStatsEventLike>>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            cancelled = true;
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        });
+      },
+    }),
+  });
+  return { open, wasCancelled: () => cancelled };
+}
+
+/** A stream that ends of its own accord after `events` — the daemon completing the feed. */
+function aStreamThatEndsAfter(...events: HostStatsEventLike[]) {
+  let closed = false;
+  let handedOver = 0;
+  const stream = {
+    [Symbol.asyncIterator]() {
+      return {
+        next: async () =>
+          handedOver < events.length
+            ? { value: events[handedOver++], done: false as const }
+            : { value: undefined, done: true as const },
+        return: async () => {
+          closed = true;
+          return { value: undefined, done: true as const };
+        },
+      };
+    },
+  };
+  return { stream, wasClosed: () => closed };
+}
+
+/** A transport that refuses to open the stream at all. */
+function aStreamThatCannotOpen() {
+  return () => {
+    throw new Error("no transport reaches this host");
+  };
+}
+
 /** A stream that opens and never emits — a host subscribed but not yet reporting. */
 function aSilentStream() {
   return aStreamOf();
@@ -149,7 +207,48 @@ describe("host stats subscription", () => {
     expect(seen).toEqual([]);
   });
 
-  it("swallows a failed feed rather than throwing at the caller", async () => {
+  it("cancels the call when the caller unsubscribes, on a stream that offers no return()", async () => {
+    // Given a feed shaped as the real Connect client's — `next` only, no `return`
+    const feed = aConnectShapedStream(A_READING);
+    const subscription = subscribeHostStats(feed.open, () => {});
+    await settle();
+
+    // When the caller lets go
+    subscription.unsubscribe();
+    await settle();
+
+    // Then the call itself was cancelled; there is no iterator to release, so nothing else could
+    // have ended it.
+    expect(feed.wasCancelled()).toBe(true);
+  });
+
+  it("releases a stream that ends of its own accord", async () => {
+    // Given a feed that completes after one reading
+    const feed = aStreamThatEndsAfter(A_READING);
+
+    // When the caller subscribes and the feed runs out
+    const subscription = subscribeHostStats(() => feed.stream, () => {});
+    await settle();
+
+    // Then it was released rather than left half-consumed
+    expect(feed.wasClosed()).toBe(true);
+    subscription.unsubscribe();
+  });
+
+  it("survives a transport that cannot open the stream at all", async () => {
+    // Given a transport that refuses
+    const seen: HostStatsEventLike[] = [];
+
+    // When the caller subscribes
+    const subscription = subscribeHostStats(aStreamThatCannotOpen(), (event) => seen.push(event));
+    await settle();
+
+    // Then no reading arrived and the refusal did not escape to the caller
+    expect(seen).toEqual([]);
+    subscription.unsubscribe();
+  });
+
+  it("keeps the reading it already delivered when the feed fails", async () => {
     // Given a feed that drops after one reading
     const feed = aStreamThatFailsAfter(A_READING);
     const seen: HostStatsEventLike[] = [];
@@ -158,7 +257,7 @@ describe("host stats subscription", () => {
     const subscription = subscribeHostStats(() => feed.stream, (event) => seen.push(event));
     await settle();
 
-    // Then the reading it did deliver stands, and the failure did not escape
+    // Then the reading it did deliver stands
     expect(seen).toEqual([A_READING]);
     subscription.unsubscribe();
   });
