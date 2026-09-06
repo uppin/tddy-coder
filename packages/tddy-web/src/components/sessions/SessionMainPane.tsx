@@ -54,8 +54,14 @@ interface SessionMainPaneProps {
   isCreating?: boolean;
   client?: ConnectionClient;
   /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
-   *  child conversations over it. `null` until a host is reachable. */
-  host?: HostConnection | null;
+   *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
+   *  host is reachable.
+   *
+   *  Required, with no default, for the reason `SessionInspectorDrawer.hostConnection` (which this
+   *  feeds) and `InspectorTabs.mediaAvailable` are: the only possible default is `null`, `null`
+   *  hides the VNC and Screen Sharing tabs, and so a call site that forgot the prop would lose them
+   *  silently — the pane would look exactly like one whose host cannot carry a track. */
+  host: HostConnection | null;
   /** Client for fetching browser LiveKit tokens — required to render a terminal for a session
    *  carried over its own LiveKit room. */
   tokenClient?: TokenClient;
@@ -123,7 +129,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
-  host = null,
+  host,
   tokenClient,
   sessionToken = "",
   onCancelCreate,
@@ -544,6 +550,22 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 sessionToken={sessionToken}
+                /* The media tabs are gated on the connection to the host that owns this session —
+                   `host`, the same connection the screen already resolved for every other
+                   cross-host read, so the tabs and the RPCs behind them cannot disagree about
+                   which daemon they are talking to.
+
+                   The *host* is the upstream fact, not the session: `capabilitiesForHint`
+                   (`rpc/connections/sessionAttachment.ts`) derives a session's capabilities from
+                   whether its attach hint names a room, and whether there is a room at all is
+                   decided by how the host is reached — a host reached without LiveKit can never
+                   hand out a room-backed session.
+
+                   Reading the session's own connection instead would also answer "no media" for a
+                   *dormant* session, which has no connection at all. That turns an unanswerable
+                   question into a refusal and hides tabs whose capability is in fact present,
+                   which is a behaviour change rather than gating. */
+                hostConnection={host}
                 room={room}
                 serverIdentity={attachmentHint?.serverIdentity}
                 traffic={traffic}

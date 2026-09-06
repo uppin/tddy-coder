@@ -79,6 +79,34 @@ a live participant on a non-selected host stays visible (see
 Interaction with such a row routes attach/resume/delete/terminate to that session's **owning**
 daemon via `useDaemonClientFor` — without calling `selectDaemon`, so the selected host is unchanged.
 
+## What a host connection cannot substitute for
+
+Daemon-level RPC is wire-neutral, and the connection model is what makes it so. **Tracks and
+presence are not.** A video frame and a participant roster are things a wire either carries or does
+not, so the surfaces built on them are gated on the selected host's connection rather than
+abstracted: they render where that connection advertises the capability, and where it does not they
+are removed from navigation and name the reason.
+
+| Surface | Needs | Where it is documented |
+|---|---|---|
+| Session inspector's VNC and Screen Sharing tabs | video tracks | [vnc-sessions.md](vnc-sessions.md), [screen-sharing-sessions.md](screen-sharing-sessions.md) |
+| Participant roster and camera preview | presence (and tracks, for the camera column) | [app-shell.md § LiveKit screen](app-shell.md#livekit-screen) |
+| `#/livekit` and its nav entry, and the rooms panel | presence | [app-shell.md](app-shell.md), [livekit-rooms-panel.md](livekit-rooms-panel.md) |
+| RPC Playground's participant picker | presence | below |
+| Cross-host session rows in the sessions drawer | presence | [session-drawer.md § Cross-Host Active Sessions](session-drawer.md#cross-host-active-sessions) |
+
+**The RPC Playground's participant picker** is a presence surface, not an RPC one: its options *are*
+common-room participants. On a host reached over a wire that carries none, the picker and its label
+are replaced together by the reason there is nobody to address — a `<label for>` pointing at a
+control that is not there is a promise to a screen reader that nothing keeps. The rest of the
+playground, which addresses the selected host over its connection, is unaffected.
+
+A join that is still in flight, or one that failed, is **not** an absent capability: those surfaces
+stay, because a page that withdrew them for the second or two every LiveKit page spends connecting
+would contradict itself, and because a failed join's reason is what an operator opens those screens
+to read. The shared rule is
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
+
 ## The daemon identity subtlety
 
 A `tddy-daemon` joins the common room as **two** LiveKit participants:
@@ -139,3 +167,5 @@ forwarding.
   participant discovery + role inference this selector is built on.
 - **[Web terminal / common room](web-terminal.md#shared-livekit-room-livekitcommon_room)** — the
   shared LiveKit room; per-session rooms are unaffected by this feature.
+- **[Capability gating](../../../packages/tddy-web/docs/capability-gating.md)** — the one predicate
+  and the availability rule behind every surface in the table above.

@@ -88,6 +88,7 @@ function mountDrawerWith(sessions: ReturnType<typeof aSplitSession>[]) {
         isOpen
         onClose={cy.stub()}
         onOpen={cy.stub()}
+        crossHostSessionsVisible
         selectedInstanceId={AGENT_HOST}
         hostLabelForInstance={(instanceId: string) => HOST_LABELS[instanceId] ?? instanceId}
       />

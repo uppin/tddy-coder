@@ -61,6 +61,9 @@ const GENERATE_TOKEN_OK = toArrayBuffer(
 function WorkflowChatMainPaneHarness() {
   return (
     <SessionMainPane
+      // No host connection in scope: this spec is not about the inspector's media tabs,
+      // and `host` is required so that saying so is a choice rather than an omission.
+      host={null}
       selectedSession={TDD_SESSION as any}
       attachment={LIVEKIT_ATTACHMENT}
       attachmentHint={LIVEKIT_HINT}

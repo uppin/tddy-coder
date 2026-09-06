@@ -10,9 +10,18 @@ export type InspectorTab = InspectorTabName;
 interface InspectorTabsProps {
   value: InspectorTab;
   onChange: (tab: InspectorTab) => void;
+  /**
+   * Whether the host serving this session can carry video tracks — the answer
+   * `SessionInspectorDrawer` gets from `useHasCapability(hostConnection, "media")`.
+   *
+   * The VNC and Screen Sharing tabs are *removed* from the strip when it is `false`, not disabled:
+   * a tab the operator cannot use invites a support question with no good answer, while an absent
+   * one matches what is actually true of the wire.
+   */
+  mediaAvailable: boolean;
 }
 
-export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
+export function InspectorTabs({ value, onChange, mediaAvailable }: InspectorTabsProps) {
   return (
     <div className="flex border-b border-border flex-shrink-0">
       <button
@@ -87,30 +96,34 @@ export function InspectorTabs({ value, onChange }: InspectorTabsProps) {
       >
         Files
       </button>
-      <button
-        data-testid="sessions-inspector-tab-vnc"
-        aria-selected={value === "vnc"}
-        onClick={() => onChange("vnc")}
-        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-          value === "vnc"
-            ? "border-foreground text-foreground"
-            : "border-transparent text-muted-foreground hover:text-foreground"
-        }`}
-      >
-        VNC
-      </button>
-      <button
-        data-testid="sessions-inspector-tab-screen-sharing"
-        aria-selected={value === "screen-sharing"}
-        onClick={() => onChange("screen-sharing")}
-        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
-          value === "screen-sharing"
-            ? "border-foreground text-foreground"
-            : "border-transparent text-muted-foreground hover:text-foreground"
-        }`}
-      >
-        Screen Sharing
-      </button>
+      {mediaAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-vnc"
+          aria-selected={value === "vnc"}
+          onClick={() => onChange("vnc")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "vnc"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          VNC
+        </button>
+      )}
+      {mediaAvailable && (
+        <button
+          data-testid="sessions-inspector-tab-screen-sharing"
+          aria-selected={value === "screen-sharing"}
+          onClick={() => onChange("screen-sharing")}
+          className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+            value === "screen-sharing"
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Screen Sharing
+        </button>
+      )}
     </div>
   );
 }

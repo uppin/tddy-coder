@@ -62,6 +62,7 @@ function mountDrawer(
         isOpen
         onClose={cy.stub().as("onClose")}
         onOpen={cy.stub().as("onOpen")}
+        crossHostSessionsVisible
       />
     </TooltipProvider>,
   );

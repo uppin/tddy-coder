@@ -137,6 +137,19 @@ promote its idle orchestrator into the **Active** partition, which was previousl
 Cross-host visibility only applies when a common room exists — a single-daemon deployment has one
 host and no cross-host case.
 
+**Without presence the drawer says so.** Liveness *is* participant presence, so on a selected host
+reached over a wire that carries none, the union silently collapses to that host's `ListSessions` —
+which reads exactly like "there is nothing running anywhere else". The drawer therefore keeps the
+rows it does have and adds a footnote under them
+(`data-testid="sessions-drawer-cross-host-unavailable"`): *Sessions on other hosts are not visible
+from this connection.* Under the rows rather than over them — the list is still the answer to "what
+is running", and this is the footnote saying which part of the question it could not reach.
+
+A common room that is merely mid-join, or one whose join failed, is **not** that case: the footnote
+appears only when nothing is being joined and the wire carries no presence, so it cannot flash on
+during every page load. See
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
+
 ### `SessionManager`
 
 The merged list, its refresh, and its change events live in one place: `SessionManager`
@@ -360,10 +373,28 @@ Adds to `src/components/ui/`:
 
 ## Inspector Tabs
 
-The inspector panel has two tabs:
+Two of the strip's tabs are described here:
 
 - **Details** (default) — the existing metadata + controls section described above.
 - **Tools** — per-session tool-call log and an inline invoke panel.
+
+The rest of the strip is listed under the `inspector` param in
+[url-state-routing.md](url-state-routing.md#params).
+
+### Media tabs are offered only where the wire carries video
+
+**VNC** and **Screen Sharing** are published video tracks, so on a host reached over a wire that
+carries none they are **absent from the strip** rather than present and disabled — and the panel
+dispatch and the `?inspector=` fallback agree with the strip, so a media tab named in the URL
+degrades to Details. Details of each feature: [vnc-sessions.md](vnc-sessions.md),
+[screen-sharing-sessions.md](screen-sharing-sessions.md).
+
+The gate is the **host's** connection, which the drawer hands the inspector as a required prop. A
+dormant session has no session connection at all, so reading one there would answer "no media" to a
+question that is unanswerable and strip the tabs from every dormant session. And a common room still
+being joined keeps the tabs: the strip would otherwise render seven tabs on load and nine a second
+later, reflowing under the operator's cursor. See
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
 
 ### Tools Tab
 

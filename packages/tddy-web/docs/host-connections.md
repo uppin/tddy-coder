@@ -128,9 +128,11 @@ either goes with the component or outlives the whole daemon-mode session.
 - **`idle` and `error` have no producer.** LiveKit has no terminal failed state — a failed join lands
   in `Disconnected`, which maps to `connecting`. `HostConnection.error` is therefore always `null`
   today. A wire with a real failure mode is what makes those states reachable.
-- **Capabilities gate no media surface yet.** A [session connection](session-connections.md)'s
-  capabilities already choose its terminal component; VNC, screen sharing, participant video and the
-  participant list still render regardless.
+- **A connection's capabilities are read fleet-wide in one respect.** Every media and presence
+  surface is gated on them (see [capability gating](capability-gating.md)), but the *status* half of
+  that rule — is a join in flight, did it fail — comes from the one LiveKit host directory source
+  the page holds, not from the host being asked about. That is exact while one wire is registered
+  and needs revisiting at the first mixed fleet.
 - **The host directory is still the common room.** Who the hosts *are* comes from common-room
   participants via `SelectedDaemonProvider`, so a build with no room resolves no hosts even though
   the connection model itself no longer requires one.

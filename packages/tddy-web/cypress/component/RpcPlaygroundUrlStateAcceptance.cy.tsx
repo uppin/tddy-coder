@@ -18,6 +18,14 @@ import { appLocationPage } from "../support/pages/appLocationPage";
 // Fixtures
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether the connection in scope can serve a participant roster. These scenarios are about the
+ * service tree and the request editor, so they state the ordinary case — a host reached over
+ * LiveKit, where the picker is offered. The wire that carries no roster, and the explanation that
+ * replaces the picker on it, are covered by `PresenceCapabilityGatingAcceptance.cy.tsx`.
+ */
+const A_CONNECTION_THAT_CARRIES_A_ROSTER = true;
+
 const CONNECTION_SERVICE = "connection.ConnectionService";
 const TASK_SERVICE = "tasks.TaskService";
 
@@ -40,6 +48,7 @@ function mountPlayground() {
     <RpcPlaygroundScreen
       services={SERVICES}
       onInvoke={() => Promise.resolve({ kind: "success" as const, json: "{}" })}
+      presenceAvailable={A_CONNECTION_THAT_CARRIES_A_ROSTER}
       onNavigate={() => undefined}
     />,
   );

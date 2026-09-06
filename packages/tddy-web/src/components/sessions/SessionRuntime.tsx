@@ -17,6 +17,7 @@ import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
+import { useHasCapability } from "../../rpc/connections/useHasCapability";
 import type { ConnectionStatus, HostConnection } from "../../rpc/connections/types";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
@@ -138,7 +139,7 @@ export function SessionRuntime({
   // renders is derived from the capabilities — a session whose wire carries tracks gets the LiveKit
   // terminal, one that carries only calls gets the direct stream — never from a status string.
   const connection = runtime.connection ?? null;
-  const carriesMedia = connection?.capabilities.has("media") ?? false;
+  const carriesMedia = useHasCapability(connection, "media");
   const hint = runtime.hint;
 
   // The connection's own status, sampled as it changes. It drives the handshake overlay for **every**

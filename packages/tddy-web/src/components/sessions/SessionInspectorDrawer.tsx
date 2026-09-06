@@ -9,7 +9,9 @@ import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import { PARAM_INSPECTOR } from "../../routing/appLocation";
-import { isInspectorTabName } from "../../routing/appRoutes";
+import { isInspectorTabName, isMediaInspectorTabName } from "../../routing/appRoutes";
+import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
+import type { HostConnection } from "../../rpc/connections/types";
 import { useAppLocation } from "../../routing/useAppLocation";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
@@ -42,6 +44,26 @@ interface SessionInspectorDrawerProps {
   onTerminate: (sessionId: string) => void;
   client?: Client<typeof ConnectionService>;
   sessionToken?: string;
+  /**
+   * The connection to the host that owns this session, or `null` when nothing can reach it.
+   *
+   * The media tabs are gated on this and on nothing else. The host is the upstream fact: a
+   * session's own capabilities are derived from whether its attach hint names a room
+   * (`capabilitiesForHint`), and whether there is a room at all is decided by how the host is
+   * reached — a host reached without LiveKit can never hand out a room-backed session, and so can
+   * never serve a VNC or screen-sharing track either.
+   *
+   * Reading the *session's* connection instead would answer "no media" for a dormant session,
+   * which has no connection at all — a refusal to an unanswerable question, which would hide tabs
+   * whose capability is in fact present.
+   *
+   * Required, with no default, for the reason `ParticipantList.connection` and
+   * `InspectorTabs.mediaAvailable` are: a default would have to be `null`, `null` means "no media",
+   * and so a call site that simply forgot the prop would silently lose the VNC and Screen Sharing
+   * tabs — indistinguishable from a host that genuinely cannot carry a track. `null` is still a
+   * perfectly good answer; it just has to be given.
+   */
+  hostConnection: HostConnection | null;
   room?: Room | null;
   /** LiveKit participant identity of the daemon/presenter side, for the token-usage stream.
    *  Selected together with `room`; falls back to `"server"` when not connected over LiveKit. */
@@ -92,6 +114,7 @@ export function SessionInspectorDrawer({
   onTerminate,
   client,
   sessionToken,
+  hostConnection,
   room = null,
   serverIdentity = "server",
   traffic = null,
@@ -105,7 +128,29 @@ export function SessionInspectorDrawer({
   // normalises the param itself, so the two never disagree for long.
   const { location, setParams } = useAppLocation();
   const tabParam = location.params[PARAM_INSPECTOR] ?? "";
-  const tab: InspectorTab = isInspectorTabName(tabParam) ? tabParam : "details";
+  const requestedTab: InspectorTab = isInspectorTabName(tabParam) ? tabParam : "details";
+
+  // The one media decision in this drawer: the tab strip, the panel dispatch and the fallback below
+  // all read it, so the strip cannot offer a tab the dispatch would refuse to render.
+  //
+  // Two facts, in the order `useCapabilityAvailability` fixes, and for the same reason the presence
+  // surfaces read it: while the common room is joining there is no host connection yet, so the
+  // capability alone would render seven tabs on load and nine a second later, reflowing the strip
+  // under the operator's cursor. A join in flight, or one that failed, keeps the tabs — the wire
+  // that will carry the tracks is the one being established, and a host that never joins a room at
+  // all (the desktop build over IPC) reports `idle`, never `connecting`, so nothing appears there
+  // only to vanish.
+  const mediaAvailable = useCapabilityAvailability(hostConnection, "media") !== "unavailable";
+
+  // A media tab named on a host that cannot carry tracks degrades to Details, the same way an
+  // unresolvable tab name does — a deep link, or a URL carried over from a host that did have
+  // video, must not land on a panel that can only ever be blank.
+  //
+  // Unlike an unknown tab name, this one is *not* normalised out of the URL by the screen: media
+  // availability is a property of a live connection and can appear later, so the request is kept
+  // and honoured the moment the host's wire can serve it.
+  const tab: InspectorTab =
+    !mediaAvailable && isMediaInspectorTabName(requestedTab) ? "details" : requestedTab;
   const setTab = useCallback(
     (next: InspectorTab) => setParams({ [PARAM_INSPECTOR]: next }),
     [setParams],
@@ -215,7 +260,9 @@ export function SessionInspectorDrawer({
       </div>
 
       {/* Tab strip — only when a session is selected */}
-      {session && <InspectorTabs value={tab} onChange={setTab} />}
+      {session && (
+        <InspectorTabs value={tab} onChange={setTab} mediaAvailable={mediaAvailable} />
+      )}
 
       {/* Content */}
       {session ? (
@@ -453,6 +500,10 @@ export function SessionInspectorDrawer({
             />
           </ScrollArea>
         ) : (
+          /* Reached only for `screen-sharing`: every other tab name has an arm above, and both
+             media tabs have already been degraded to Details when the host cannot carry tracks —
+             which is what keeps this panel, and the `ScreenSharingOverlay` it can open, from
+             rendering on a wire with nothing to subscribe to. */
           <ScrollArea className="flex-1 min-h-0">
             <SessionScreenSharingTab
               sessionId={session.sessionId}

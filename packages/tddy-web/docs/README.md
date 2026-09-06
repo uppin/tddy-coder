@@ -1,5 +1,6 @@
 # tddy-web documentation
 
+- **Capability gating (media and presence surfaces)**: [capability-gating.md](capability-gating.md)
 - **Changeset history**: [changesets/](changesets/)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
 - **Cross-daemon fan-out**: [host-fan-out.md](host-fan-out.md)

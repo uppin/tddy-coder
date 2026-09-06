@@ -11,11 +11,27 @@ function mountParticipantList(props: React.ComponentProps<typeof ParticipantList
   cy.mount(<ParticipantList {...props} />);
 }
 
+/**
+ * The wire a roster is read over, as a LiveKit common room advertises it.
+ *
+ * Every scenario here has to say which wire it is on, because the panel reads two capabilities off
+ * it: `presence` decides whether there is a roster to render at all, and `media` decides the camera
+ * column. The wires that answer "no" to either are covered by their own specs —
+ * `ParticipantVideoCapabilityAcceptance.cy.tsx` for tracks, `PresenceCapabilityGatingAcceptance.cy.tsx`
+ * for the roster.
+ */
+const A_WIRE_THAT_CARRIES_TRACKS = { capabilities: new Set(["rpc", "media", "presence"] as const) };
+
 describe("ParticipantList", () => {
   it("shows connecting state", () => {
     // Given / When
     cy.mount(
-      <ParticipantList participants={[]} roomStatus="connecting" connectionError={null} />
+      <ParticipantList
+        participants={[]}
+        roomStatus="connecting"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />
     );
 
     // Then
@@ -26,7 +42,12 @@ describe("ParticipantList", () => {
   it("shows error state", () => {
     // Given / When
     cy.mount(
-      <ParticipantList participants={[]} roomStatus="error" connectionError="token failed" />
+      <ParticipantList
+        participants={[]}
+        roomStatus="error"
+        connectionError="token failed"
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />
     );
 
     // Then
@@ -37,7 +58,12 @@ describe("ParticipantList", () => {
   it("shows empty state when connected with no participants", () => {
     // Given / When
     cy.mount(
-      <ParticipantList participants={[]} roomStatus="connected" connectionError={null} />
+      <ParticipantList
+        participants={[]}
+        roomStatus="connected"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />
     );
 
     // Then
@@ -65,7 +91,12 @@ describe("ParticipantList", () => {
 
     // When
     cy.mount(
-      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />
+      <ParticipantList
+        participants={participants}
+        roomStatus="connected"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />
     );
 
     // Then
@@ -93,7 +124,12 @@ describe("ParticipantList", () => {
 
     // When
     cy.mount(
-      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />,
+      <ParticipantList
+        participants={participants}
+        roomStatus="connected"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />,
     );
 
     // Then
@@ -120,7 +156,12 @@ describe("ParticipantList", () => {
 
     // When
     cy.mount(
-      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />
+      <ParticipantList
+        participants={participants}
+        roomStatus="connected"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />
     );
 
     // Then
@@ -157,6 +198,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "with-cam-user": true, "no-cam-user": false },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // Then
@@ -182,6 +224,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "camera-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // Then
@@ -207,6 +250,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "preview-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
 
     // When
@@ -234,6 +278,7 @@ describe("ParticipantList", () => {
       roomStatus: "connected",
       connectionError: null,
       participantHasCameraVideo: { "cleanup-peer": true },
+      connection: A_WIRE_THAT_CARRIES_TRACKS,
     });
     participantListPage.videoTrigger("cleanup-peer").should("be.visible").click();
     participantListPage.videoDialog().should("be.visible");
@@ -264,7 +309,12 @@ describe("ParticipantList", () => {
 
     // When
     cy.mount(
-      <ParticipantList participants={participants} roomStatus="connected" connectionError={null} />,
+      <ParticipantList
+        participants={participants}
+        roomStatus="connected"
+        connectionError={null}
+        connection={A_WIRE_THAT_CARRIES_TRACKS}
+      />,
     );
 
     // Then
@@ -289,6 +339,7 @@ describe("ParticipantList", () => {
             ]}
             roomStatus="connected"
             connectionError={null}
+            connection={A_WIRE_THAT_CARRIES_TRACKS}
           />
           <button
             type="button"

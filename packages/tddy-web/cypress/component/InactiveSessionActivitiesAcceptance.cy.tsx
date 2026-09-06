@@ -483,6 +483,9 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        // No host connection in scope: this spec is not about the inspector's media tabs,
+        // and `host` is required so that saying so is a choice rather than an omission.
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -504,6 +507,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -524,6 +528,7 @@ describe("InactiveSessionActivities — workflow views keep precedence", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT_WORKFLOW as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -555,6 +560,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -579,6 +585,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT_PR_STACK as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -599,6 +606,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
@@ -621,6 +629,7 @@ describe("InactiveSessionActivities — one transcript per pane", () => {
     // When
     mountWithRpc(
       <SessionMainPane
+        host={null}
         {...noopHandlers}
         selectedSession={DORMANT as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}

@@ -71,6 +71,13 @@ to Details, an unknown `channel` to the task's first channel, an unregistered `p
 listed one, an unresolvable `method` to no selection. Where the app resolves a default this way it
 **writes the answer back**, so the address bar always names what is actually shown.
 
+A param can also name a tab that exists but is **not offered on this host**. `inspector=vnc` and
+`inspector=screen-sharing` are video, and a host reached over a wire that carries no tracks has
+neither tab in its strip; such a link degrades to Details for exactly as long as that is true, and is
+honoured the moment the wire can serve it. Degrading rather than 404-ing is the same choice the
+`#/livekit` route makes — a shared link should land somewhere. See
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
+
 Example:
 
 ```
