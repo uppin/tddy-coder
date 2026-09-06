@@ -130,18 +130,18 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 
 ## Scope
 
-- [ ] **Prerequisite:** `write_atomic_with_mode` before persisting the host private key (see Prerequisites)
-- [ ] Prompt registry: issue, expire, single-use answer
-- [ ] `StreamHostPrompts` handler **with `tx.closed()` teardown**
-- [ ] `AnswerHostPrompt` handler, auth + unknown-id rejection
-- [ ] Host RSA keypair and its lifecycle
-- [ ] Public key published with the prompt; fingerprint derivation
-- [ ] Browser `SubtleCrypto` `RSA-OAEP` encryption
-- [ ] Key continuity: pin on first sight, block on change
-- [ ] Daemon decrypt → private key decrypt → agent add → drop plaintext
-- [ ] Passphrase dialog + add-key action + key selector
-- [ ] Rust unit/integration tests, teardown test, Cypress round-trip tests
-- [ ] Confirm whether the git hardening needs any change at all
+- [x] **Prerequisite:** `write_atomic_with_mode` before persisting the host private key (see Prerequisites)
+- [x] Prompt registry: issue, expire, single-use answer
+- [x] `StreamHostPrompts` handler **with `tx.closed()` teardown**
+- [x] `AnswerHostPrompt` handler, auth + unknown-id rejection
+- [x] Host RSA keypair and its lifecycle
+- [x] Public key published with the prompt; fingerprint derivation
+- [x] Browser `SubtleCrypto` `RSA-OAEP` encryption
+- [~] Key continuity: pin on first sight, block on change — the dialog blocks; `hostKeyPinning` itself is **untested**
+- [ ] ⚠ Daemon decrypt → private key decrypt → agent add → drop plaintext — **not implemented**, no red test covers it
+- [ ] ⚠ Passphrase dialog **done**; add-key action and key selector **not implemented**
+- [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
+- [x] Confirm whether the git hardening needs any change at all
 
 ## Technical changes
 
@@ -198,15 +198,15 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 
 ## Implementation milestones
 
-- [ ] Proto + both regenerations
-- [ ] Prompt registry with expiry and single-use, unit-tested
-- [ ] Stream handler **and its teardown test green** — before any UI work
-- [ ] Host keypair + fingerprint
-- [ ] Browser encryption producing a payload the daemon decrypts
-- [ ] Full round trip adding a real key to a fake agent
-- [ ] Key pinning + change warning
-- [ ] Wrong-passphrase, expiry and replay paths
-- [ ] Confirm the git hardening question
+- [x] Proto + both regenerations
+- [x] Prompt registry with expiry and single-use, unit-tested
+- [x] Stream handler **and its teardown test green** — before any UI work
+- [x] Host keypair + fingerprint
+- [x] Browser encryption producing a payload the daemon decrypts
+- [ ] ⚠ Full round trip adding a real key to a fake agent — **not started**
+- [~] Key pinning + change warning — warning green; the pinning module is untested
+- [~] Wrong-passphrase, expiry and replay paths — expiry/replay green in the registry; wrong-passphrase needs the unlock path
+- [x] Confirm the git hardening question
 
 ## Testing plan
 
@@ -306,6 +306,54 @@ otherwise unverified, and a stray `debug!` is exactly how such a secret escapes.
 - ⚠ **If the red phase shows this node is too large to review**, split **by capability**: an IPC-only
   add first, then the encrypted remote path. Never by layer.
 
+### Green phase — what landed, and what did not
+
+**Landed and green**, verified scoped to the touched packages:
+
+| Gate | Result |
+|---|---|
+| `cargo build` (workspace) | clean |
+| `cargo fmt --check` | clean |
+| `cargo clippy -p tddy-daemon -p tddy-core --all-targets -- -D warnings` | clean |
+| `cargo test -p tddy-core --lib` | 328 passed, 0 failed |
+| `cargo test -p tddy-daemon --lib` | 731 passed, 0 failed |
+| `cargo test -p tddy-daemon --test stream_host_prompts_rpc` | 3 passed, 0 failed |
+| Cypress `HostAddKeyAcceptance.cy.tsx` | 5 passed, 0 failed (stable over 4 runs) |
+
+**The blocking prerequisite is resolved.** `write_atomic_with_mode` sets the swap file's mode at
+`OpenOptions::mode()` creation time, so there is no window in which a private key exists at the
+process umask. The three hand-rolled secret writers remain deferred, as planned.
+
+**The teardown counter was checked for vacuity.** `stops_the_prompt_pump_once_the_subscriber_is_gone`
+asserts `== 0`, which a never-incremented counter would satisfy too. `PumpCount::running` increments
+synchronously in the handler *before* the spawn and decrements in `Drop`, so the assertion is real.
+
+### ⚠ `## Responsibility` is NOT yet fully delivered
+
+Two items remain, and neither has a red test, so neither can be greened without a `/red` pass first:
+
+1. **Decrypt → unlock → agent add → drop plaintext.** `answer_host_prompt` authenticates and records
+   the ciphertext, but nothing consumes it — `connection_service.rs` carries a `TODO(agent-add-key)`
+   at that seam. Nothing calls `issue()` yet, so there is no waiting operation to hand it to.
+2. **The add-key action and key selector on the Hosts row**, and the `useHostPrompts.ts` subscription
+   hook, which the Delta lists but which does not exist.
+
+Under the boundary contract an unimplemented owned symbol is a blocker rather than a follow-up, so
+this node is **not ready for `/pr-wrap`**.
+
+### ⚠ `hostKeyPinning` is unverified production code
+
+No red test references `checkHostKey` or `acceptChangedHostKey`. AC-9 exercises the dialog's
+`keyChanged` prop, not the pinning logic behind it — so the module carrying the TOFU property, this
+node's most arguable decision, has no coverage. Two behaviours were decided during green and want a
+second opinion:
+
+- **Storage unavailable degrades to `pinned-now`.** `KeyPinVerdict` has no "unknown" arm, so a browser
+  that throws on `localStorage` falls back to trust-on-every-use. It never yields a false `unchanged`,
+  but it is silent; a fourth arm would let the dialog say the browser cannot remember host keys.
+- **`acceptChangedHostKey` writes the new pin** rather than deleting the old one as its stub comment
+  said. Deleting would accept whichever key turned up next, not the one the operator looked at.
+
 ## Refactoring needed
 
 _(populated by each validation phase)_
@@ -367,7 +415,7 @@ it in the dialog — remains reasonable. Recorded to be argued with.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [~] TDD Green — daemon core + browser encryption green; the unlock/add path and the row action still need a `/red` pass
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
