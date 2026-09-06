@@ -69,6 +69,12 @@ jobs:
             // here rather than in the job's `env:`, which has no `runner` context
             // — referencing one there is rejected as an invalid workflow file.
             core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
+            // Selects the v2 cache protocol. Without it sccache's backend builds
+            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
+            // and since GitHub decommissioned v1 every read and write 404s —
+            // silently, as a write-error counter and a permanently empty cache.
+            // Hardcoded rather than passed through: v1 no longer exists.
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -135,6 +141,12 @@ jobs:
             // here rather than in the job's `env:`, which has no `runner` context
             // — referencing one there is rejected as an invalid workflow file.
             core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
+            // Selects the v2 cache protocol. Without it sccache's backend builds
+            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
+            // and since GitHub decommissioned v1 every read and write 404s —
+            // silently, as a write-error counter and a permanently empty cache.
+            // Hardcoded rather than passed through: v1 no longer exists.
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -233,6 +245,12 @@ jobs:
             // here rather than in the job's `env:`, which has no `runner` context
             // — referencing one there is rejected as an invalid workflow file.
             core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
+            // Selects the v2 cache protocol. Without it sccache's backend builds
+            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
+            // and since GitHub decommissioned v1 every read and write 404s —
+            // silently, as a write-error counter and a permanently empty cache.
+            // Hardcoded rather than passed through: v1 no longer exists.
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -386,6 +404,12 @@ jobs:
             // here rather than in the job's `env:`, which has no `runner` context
             // — referencing one there is rejected as an invalid workflow file.
             core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
+            // Selects the v2 cache protocol. Without it sccache's backend builds
+            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
+            // and since GitHub decommissioned v1 every read and write 404s —
+            // silently, as a write-error counter and a permanently empty cache.
+            // Hardcoded rather than passed through: v1 no longer exists.
+            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
