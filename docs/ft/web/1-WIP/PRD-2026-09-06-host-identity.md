@@ -70,11 +70,23 @@ empty string would be a fabricated value an operator acts on:
 - **Cross-host routing is free.** `rpc_served_by_peer`
   (`packages/tddy-daemon/src/connection_service.rs:9171-9183`) already relays any unary
   `ConnectionService` RPC to `daemon-{instance_id}`. No transport work.
-- ⚠ **The supervisor allowlist is a real risk.** `resolve_env`
-  (`packages/tddy-supervisor/src/policy.rs:124`) is an **allowlist** — any env key not listed is
-  denied — and `resolve_tool_path` (`:96`) governs which binaries a brokered child may run. Whether
-  `git` and `gh` are resolvable, and whether the probe's environment survives, **must be verified in
-  the red phase**, not assumed. This is the likeliest "works locally, fails on a real deployment" gap.
+- ✅ **The risk was real; the mechanism named here was not.** This section originally pointed at the
+  supervisor's `resolve_env` / `resolve_tool_path` allowlists
+  (`packages/tddy-supervisor/src/policy.rs`). Neither is on this path — `spawner::run_output_as_user`
+  forks and drops privilege itself, with no supervisor brokering.
+
+  The actual gap was the **daemon's own** `resolve_tool_path`, which anchors a relative program name
+  to the daemon's process cwd and never searches `PATH`: bare `git` / `gh` resolved to
+  `<daemon-cwd>/git`, which under systemd is `/git`. The probe could not have run anywhere, and `gh`
+  would have reported "not installed" on every host on earth. Resolved in green by looking both
+  programs up on the child's `PATH` before spawning. The lesson worth keeping: this was provable by
+  inspection from the start, and was missed only because no test exec'd anything.
+
+- ⚠ **An unprivileged daemon cannot probe another OS user.** The privilege drop calls `setgid` /
+  `setuid` directly. Under `./install --systemd` the daemon is an unprivileged child of
+  `tddy-supervisor`, so probing any OS user but its own returns `EPERM` and reports a probe failure.
+  Pre-existing for `run_capture_as_user`; this feature is the first to exercise it per-host. **AC-7 is
+  not satisfiable on that deployment shape** until it is addressed.
 - **Probes must be bounded.** A hung `gh` (network stall on `auth status`) must time out and report a
   probe failure rather than holding the RPC open.
 - ⚠ **Three unrelated GitHub identities can disagree** — the tddy web session's login, a

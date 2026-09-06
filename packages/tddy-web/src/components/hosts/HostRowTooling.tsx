@@ -42,6 +42,13 @@ function awaitingProbe(subject: string): ToolingCell {
  * configured" send an operator to two different places, and only one of them is a host to go and
  * fix. A missing block is the same admission — nothing has answered for this host yet — so it says
  * so rather than borrowing the shape of an answer.
+ *
+ * Only `OK` passes through to a finding, and the guard is written that way round on purpose.
+ * proto3 enums are open and this message grows — nodes 5 and 7 of the stack extend it — so a newer
+ * daemon can send a `ProbeOutcome` this bundle's generated enum has never heard of. Listing the
+ * outcomes that mean "no finding" would let that unknown value fall through and render "Not
+ * configured" / "Not installed" with total confidence about a probe whose result was not
+ * understood. Listing the one outcome that licenses a finding cannot.
  */
 function unanswered(
   outcome: ProbeOutcome,
@@ -49,20 +56,21 @@ function unanswered(
   subject: string,
 ): ToolingCell | null {
   switch (outcome) {
+    case ProbeOutcome.OK:
+      return null;
     // A block whose sender set no outcome states nothing, the same as no block at all.
     case ProbeOutcome.UNSPECIFIED:
       return awaitingProbe(subject);
-    case ProbeOutcome.FAILED:
+    case ProbeOutcome.UNSUPPORTED:
+      return { text: "Not supported here", title: `This host cannot run the ${subject}` };
+    // FAILED, and every outcome a newer daemon may add that this bundle cannot name.
+    default:
       return {
         text: "Could not check",
         title: failureReason
           ? `The ${subject} failed: ${failureReason}`
           : `The ${subject} failed, so nothing is known about this host`,
       };
-    case ProbeOutcome.UNSUPPORTED:
-      return { text: "Not supported here", title: `This host cannot run the ${subject}` };
-    default:
-      return null;
   }
 }
 

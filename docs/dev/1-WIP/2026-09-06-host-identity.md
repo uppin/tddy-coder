@@ -1,7 +1,7 @@
 # Changeset: host-identity
 
 **Date:** 2026-09-06
-**Status:** 🚧 In Progress
+**Status:** ✅ Implemented — pending user review
 **Type:** New feature
 **Stack:** `#hosts-screen` 4/8
 **Branch:** `feature/hosts-screen/host-identity` → base `feature/hosts-screen/host-resources`
@@ -30,7 +30,8 @@ Affected: [`projects-screen-multi-host.md`](../../ft/web/projects-screen-multi-h
 - The **host tooling probe RPC** on `ConnectionService` — the shape nodes 5 and 7 extend — carrying a
   `daemon_instance_id` so the existing peer routing relays it.
 - A daemon-side probe module reading the host's git identity and `gh` status via
-  `spawner::run_capture_as_user`, as the host's OS user, with a bounded timeout.
+  `spawner::start_output_as_user`, as the host's OS user, with a bounded timeout that kills and reaps
+  an overrunning child rather than abandoning it.
 - A response type that distinguishes every outcome: git configured / not configured / probe failed,
   and `gh` absent / logged out / authenticated as a login.
 - The tooling section on each Hosts row, labelling the `gh` login as the **host's**.
@@ -51,10 +52,13 @@ Affected: [`projects-screen-multi-host.md`](../../ft/web/projects-screen-multi-h
 
 Open items in [`docs/dev/TODO.md`](../TODO.md) this PR runs into.
 
-### ⚠ DURING — `connection_service.rs` is 19,600 lines
+### ⚠ DURING — `connection_service.rs` is 19,600 lines (recorded); **22,452 today**
 
 `docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines* (source:
-subagent-conversation-inference, 2026-08-29), flagged rather than acted on.
+subagent-conversation-inference, 2026-08-29), flagged rather than acted on. The recorded figure is
+stale — the file is **22,452 lines** as of this PR, ~15% past it. Not corrected in `docs/dev/TODO.md`
+itself: node 3 of this stack also edits that file, and a shared-file edit for a number is not worth
+the merge conflict.
 
 This node adds to that file. Across the `#hosts-screen` stack, **nodes 1, 3, 4 and 6** modify it —
 nodes 2, 5, 7 and 8 do not — so the stack makes a known problem measurably worse in four places.
@@ -96,14 +100,16 @@ out, tddy says nothing.
 
 ## Scope
 
-- [ ] Probe RPC + messages, both regenerations
-- [ ] Probe module with an injectable seam and a bounded timeout
-- [ ] git identity probe (configured / not configured / failed)
-- [ ] `gh` probe (absent / logged out / authenticated as)
-- [ ] Handler with auth and peer routing
-- [ ] Tooling section on the Hosts row
-- [ ] Rust unit/integration tests + Cypress component tests
-- [ ] **Verify behaviour under the supervisor's tool/env allowlist**
+- [x] Probe RPC + messages, both regenerations
+- [x] Probe module with an injectable seam and a bounded timeout
+- [x] git identity probe (configured / not configured / failed)
+- [x] `gh` probe (absent / logged out / authenticated as)
+- [x] Handler with auth and peer routing
+- [x] Tooling section on the Hosts row — as a self-contained component; node 1's row mounts it (see Delta)
+- [x] Rust unit/integration tests + Cypress component tests
+- [x] ~~Verify behaviour under the supervisor's tool/env allowlist~~ — **the allowlist was never on this
+  path.** Replaced by the two findings in *Technical debt*: the daemon's own `resolve_tool_path` (found
+  and fixed) and the unprivileged-daemon `setuid` limit (open, needs a deployment decision).
 
 ## Technical changes
 
@@ -114,9 +120,9 @@ out, tddy says nothing.
   (`config.rs:191-201`) holds only `ssh_command`.
 - **`gh`:** absent from product code entirely. `grep` for `gh auth` / `Command::new("gh")` over
   `packages/**` returns zero. `packages/tddy-github` is an OAuth login crate, not a `gh` wrapper.
-- **Running a command as the host user:** `spawner::run_capture_as_user`
-  (`spawner.rs:736-830`) exists and handles `HOME` / `PATH` / privilege drop. Unix only; `:829-834`
-  is a non-Unix stub that bails.
+- **Running a command as the host user:** `spawner::run_capture_as_user` exists and handles
+  `HOME` / `PATH` / privilege drop. Unix only; the non-Unix path bails. It returns stdout only and
+  collapses every other outcome into an error string — see *Delta* for why that was not usable here.
 - **Session-less host exec:** does not exist. `ExecuteToolRequest` requires `session_id`
   (`connection.proto:1545-1551`).
 - **Peer routing:** `rpc_served_by_peer` (`connection_service.rs:9171-9183`) already relays unary RPCs.
@@ -135,27 +141,39 @@ out, tddy says nothing.
   response carrying a git-identity block and a `gh` block, each with an explicit state discriminator.
 
 **`packages/tddy-daemon`**
-- `src/host_tooling.rs`: the probe trait, its real implementation over `run_capture_as_user`, the
-  timeout, and the outcome types.
+- `src/host_tooling.rs`: the probe trait, its real implementation over `start_output_as_user`, the
+  deadline (kill + reap), and the outcome types.
 - `src/connection_service.rs`: handler, auth, peer routing, an injected `Arc<dyn HostTooling>` field
   and a builder override for tests (mirroring `with_host_stats`, `:2016`).
 - `src/connection_tonic_adapter.rs`: the unary adapter entry.
 
 **`packages/tddy-web`**
 - `src/components/hosts/HostRowTooling.tsx` — the row section and its states.
-- `src/components/hosts/HostsScreen.tsx` — the new section (node 1 owns the rest of the row).
 - `src/gen/connection_pb.ts` — regenerated.
+
+**`HostsScreen.tsx` is deliberately not touched here** — planning listed it, implementation did not,
+and the plan was wrong. Node 1 owns the Hosts row; mounting this section into it from node 4 would
+edit a file that node's PR owns, for a row whose rendering is still theirs to finish. So this node
+ships the section as a self-contained component with its own acceptance tests, and node 1's row
+mounts it.
+
+The consequence is worth stating plainly rather than leaving a reader to discover it: **no code path
+in the repo issues `GetHostTooling` yet.** The RPC, the probe and the component are each covered by
+their own tests, but the feature is not reachable from the UI until the row mounts the section, so
+AC-1 – AC-6 and AC-10 are proven per-unit and not end-to-end. That is a sequencing fact of the stack,
+not an omission in this node.
 
 ## Implementation milestones
 
-- [ ] Proto + both regenerations
-- [ ] Probe trait + injectable double; workspace builds
-- [ ] git identity probe, all three outcomes
-- [ ] `gh` probe, all three outcomes
-- [ ] Timeout behaviour proven
-- [ ] Handler auth + peer routing
-- [ ] Row section rendering every state distinctly
-- [ ] Supervisor allowlist verified on a real deployment shape
+- [x] Proto + both regenerations
+- [x] Probe trait + injectable double; workspace builds
+- [x] git identity probe, all three outcomes
+- [x] `gh` probe, all three outcomes
+- [x] Timeout behaviour proven — the child is now killed and reaped on deadline, not abandoned
+- [x] Handler auth + peer routing — routing precedes auth, matching the file's documented contract
+- [x] Row section rendering every state distinctly
+- [ ] ⚠ **Unprivileged-daemon probe of another OS user** — open; not verifiable locally, and AC-7 does
+  not hold on the `--systemd` deployment shape. See *Technical debt*.
 
 ## Testing plan
 
@@ -210,12 +228,27 @@ test. Flag it explicitly in the PR and verify on a supervised deployment.
 
 **`packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`**
 
+Restructured during green: the plan's four specs mounted several states per `it()` and asserted only
+that each state's own string was present. That is not enough to prove the word *distinguishes* —
+a component collapsing "authenticated" into `Not authenticated (octocat)` passed every one of them.
+Now one behaviour per test, and each state also **denies** the neighbouring state it must not be
+confused with.
+
 | Test | Validates |
 |---|---|
-| `shows_the_git_identity_a_host_is_configured_with` | AC-1 |
-| `distinguishes_a_host_with_no_git_identity_from_one_that_failed_to_report` | AC-2, AC-6 |
-| `distinguishes_gh_absent_from_gh_logged_out_from_gh_authenticated` | AC-3, AC-4, AC-5 |
-| `labels_the_gh_login_as_the_hosts_rather_than_the_signed_in_user` | AC-10 |
+| `shows the git identity a host is configured with` | AC-1 |
+| `reports a host with no git identity as not configured` | AC-2 |
+| `distinguishes a host with no git identity from one that failed to report` | AC-2, AC-6 |
+| `reports a host without the github cli as not installed` | AC-3 |
+| `reports a host with the github cli logged out as not authenticated` | AC-4 |
+| `reports the login the github cli on a host is authenticated as` | AC-5 |
+| `labels the gh login as the hosts rather than the signed in user` | AC-10 |
+| `says nothing about a host that has not answered yet` | the pre-answer state |
+
+⚠ **The AC-10 spec as planned was a false positive.** It asserted the `gh` cell contained the string
+`"gh"` — which is the static label rendered in *every* state, for any login or none. It passed
+whatever the component did. It now asserts the `title` attribute names the host and carries the
+login, and fails if either is dropped.
 
 ## Decisions & trade-offs
 
@@ -232,14 +265,64 @@ test. Flag it explicitly in the PR and verify on a supervised deployment.
 
 ## Technical debt & production readiness
 
-- ⚠ **Supervisor allowlist unverified at planning time** — see the testing plan. Must be checked before
-  this PR is set ready for review.
-- ⚠ `run_capture_as_user` is Unix-only; the non-Unix path bails. The probe must report a clean
-  "unsupported platform" rather than surfacing an internal error.
+- ✅ **The supervisor allowlist was the wrong thing to worry about — resolved, and the plan corrected.**
+  Planning flagged `resolve_tool_path` / `resolve_env` in `packages/tddy-supervisor/src/policy.rs` as
+  the likeliest "works locally, fails on a real deployment" gap. Neither is on this path:
+  `spawner::run_output_as_user` forks and drops privilege itself (`setgid` / `initgroups` / `setuid`
+  in `pre_exec`), with no supervisor brokering, so there is no allowlist for the probe to fail.
+
+  What the flag *should* have said, and what green actually found, is that the daemon has its **own**
+  `resolve_tool_path` (`spawner.rs`), which anchors a relative program name to the daemon's process
+  cwd and never searches `PATH`. Bare `"git"` / `"gh"` therefore resolved to `<daemon-cwd>/git` — and
+  under `./install --systemd` the unit sets no `WorkingDirectory=`, so that is `/git`. The probe could
+  not have run on any deployment. Worse, `gh`'s `ErrorKind::NotFound` was mapped to
+  `installed: false`, so **every host would have reported "gh is not installed"** — precisely the
+  fabricated negative this node's whole design exists to prevent. Fixed by resolving both programs on
+  the same `PATH` the child is given (`spawner::find_program_on_spawn_child_path`), and by requiring
+  positive evidence from that lookup before "not installed" may be claimed.
+
+  This was provable locally by inspection all along. It was missed because the one acceptance test
+  that would have exec'd anything — `host_tooling_runs_the_probe_as_the_hosts_os_user` — had not been
+  written.
+
+- ⚠ **An unprivileged daemon cannot probe another OS user.** `run_output_as_user`'s privilege drop
+  calls `libc::setgid` / `setuid` directly, which requires privilege. Under `./install --systemd` the
+  daemon runs as an unprivileged child of `tddy-supervisor`, so for any `os_user` other than the
+  daemon's own the `pre_exec` returns `EPERM` and the probe reports `Failed` — honestly, but AC-7 is
+  then unsatisfiable on that deployment shape. **Pre-existing** for `run_capture_as_user`, whose one
+  caller has the same constraint; this node is simply the first to exercise it on a per-host,
+  multi-user path. Needs a decision on a supervised deployment, and it is not this node's to make.
+
+- ⚠ `run_output_as_user` is Unix-only; the non-Unix path bails. The probe reports a clean
+  `ProbeOutcome::Unsupported` rather than surfacing an internal error.
+
+- ⚠ **No cache and no in-flight dedup.** The PRD's model is the Hosts screen probing every host it
+  lists, i.e. a poll, and overlapping calls stack rather than coalescing. The neighbouring
+  `list_agent_models` caches per `(os_user, daemon, agent)` for exactly this reason. Latent while the
+  row does not mount the section; worth resolving before it does.
+
+- 📏 `connection_service.rs` is now **22,452 lines**, against the ~19,600 recorded in
+  `docs/dev/TODO.md` (2026-08-29). Not corrected there: node 3 of this stack also edits that file and
+  a shared-file edit for a figure is not worth the conflict. Recorded here so the number is not read
+  as current.
 
 ## Refactoring needed
 
-_(populated by each validation phase)_
+Raised by validation and **fixed in this PR**:
+
+- `spawner.rs` — the setup shared by `run_output_as_user` and the new `start_output_as_user`
+  (`resolve_tool_path`, `getpwnam_r`, `HOME`/`PATH`, `current_dir`, the privilege drop) extracted into
+  `as_user_command` rather than duplicated.
+- `run_capture_as_user` reduced to a thin wrapper over `run_output_as_user`, signature and error
+  strings byte-identical, because its one existing caller (`connection_service.rs`, `list_agent_models`)
+  and its pinned test must not move.
+- `HostRowTooling` — the `unanswered` guard inverted so only `ProbeOutcome.OK` licenses a finding.
+  proto3 enums are open and nodes 5 and 7 extend this message, so listing the *no-finding* outcomes
+  would let an unknown value from a newer daemon render "Not configured" with full confidence.
+
+**Deferred, deliberately:** `connection_service.rs` is not split. Nodes 1, 3, 4 and 6 of this stack all
+edit it, and restructuring a file a parent and a dependent both touch turns every one of their diffs
+into a conflict. It needs its own PR after the stack lands — see *Prerequisites*.
 
 ## Validation results
 
@@ -256,6 +339,54 @@ _(populated by each validation phase)_
   isolation would pass even if the component collapsed two states into one rendering — which is
   exactly the bug that sends an operator to configure git on a host where git is not installed.
 
+### Green phase
+
+**Two blockers found by validation, both fixed.** Neither was visible in a test run, and both were
+provable by inspection — which is the finding worth keeping.
+
+1. **The probes could never execute.** `host_tooling.rs` passed bare `"git"` / `"gh"` to the spawner,
+   whose `resolve_tool_path` anchors a *relative* program name to the daemon's own process cwd and
+   never searches `PATH` (deliberate, and pinned by
+   `run_capture_as_user_locates_a_relative_program_path_against_the_daemons_own_cwd_not_the_target_users_home`).
+   So the daemon exec'd `<daemon-cwd>/git`; under `./install --systemd`, which sets no
+   `WorkingDirectory=`, that is `/git`. Fixed with `spawner::find_program_on_spawn_child_path`, which
+   resolves against the same `PATH` the child is given.
+2. **`gh` reported a fabricated negative.** `ErrorKind::NotFound` from `output()` was mapped to
+   `installed: false`, so **every host would have reported "gh is not installed"** — including hosts
+   with an authenticated `gh`. `NotFound` on that path also covers a missing `current_dir` and an
+   unmounted home, so it can never be evidence of absence. "Not installed" now requires a positive
+   result from the `PATH` lookup; anything else is `Failed`. This is precisely the collapse the module
+   was written to prevent, and it had shipped inside it.
+
+Also corrected: routing now precedes authentication (a relay must not judge a peer's user mapping —
+the contract `rpc_served_by_peer` and `resolve_stack_base` already document); `git config --global
+--get`, so the code matches its documented "reads `$HOME/.gitconfig`" contract; `record_rpc_activity()`;
+and a `log::warn!` on every `Failed` outcome, without which blocker 1 was invisible in the daemon log.
+
+**The timeout leak is fixed, not just documented.** A timed-out probe previously abandoned its child
+*and* its reader thread — `spawner` handed back no kill handle. `start_output_as_user` now returns the
+live `Child`; the reader thread gets only the pipes, and the deadline `kill()`s **and** `wait()`s, since
+kill alone leaves a zombie.
+
+**Test evidence.** 7 unit + 3 integration + 8 Cypress, all green. Both new-test authors mutation-checked
+their work rather than trusting a green run:
+
+| Mutation | Result |
+|---|---|
+| `probe(&probed_user)` → `probe("")` | AC-7 fails: `left: [""], right: ["ada"]` — the exact blocker shape |
+| auth moved back above routing | AC-9 fails: `PermissionDenied` instead of `FailedPrecondition` |
+| `running.end()` → `drop(running)` | AC-6 fails: "the overrunning child must be ended and reaped" |
+
+**Why the blockers reached green at all:** every one of the four acceptance tests the plan named but
+red never wrote (AC-6, AC-7, AC-8, AC-9) sat on the path that broke, and
+`host_tooling_runs_the_probe_as_the_hosts_os_user` is specifically the one that would have exec'd
+something. The seam built to make it writable — `with_host_tooling` — sat unused. All four now exist.
+
+**Known limit of the AC-9 test.** `rpc_served_by_peer` calls `forward_to_peer` with a live room slot
+and has no seam beneath it, so a unit test cannot receive a real peer's response. The test pins that
+the handler *reaches* forwarding, that it does so before local auth, and that the local probe was never
+called — not the wire round-trip, which needs a LiveKit integration test.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-host-identity-initial-discovery.md`)
@@ -265,23 +396,28 @@ _(populated by each validation phase)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests (`./test`) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run all tests — `./test -p tddy-daemon` + the Cypress spec, scoped to the packages this node
+  touches (a full-workspace run carries pre-existing noise that reads as damage from this PR)
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues — the vacuous AC-10 assertion and the missing negatives
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues — both blockers, plus the timeout leak
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues — the `connection_service.rs` split stays deferred; see
+  *Refactoring needed*
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
+- [x] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete, decide next steps
+
+**Open, and not this node's to close:** the unprivileged-daemon `setuid` limit means AC-7 does not hold
+on the `./install --systemd` deployment shape. See *Technical debt & production readiness*.
 
 ## Successor PRs
 
