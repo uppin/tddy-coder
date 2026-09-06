@@ -1,16 +1,17 @@
-import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
+import type { ConnectionStatus } from "../../rpc/connections/types";
 
 export interface SessionConnectionOverlayProps {
-  /** The session's LiveKit connection status, driven by `GhosttyTerminalLiveKit`'s handshake. */
-  status: LiveKitChromeStatus;
+  /** The session connection's own status — see `SessionConnection.status`. */
+  status: ConnectionStatus;
 }
 
 /**
  * Connection overlay for a session runtime's panes — rendered over the pane stack while the
- * session's LiveKit room is still handshaking (token request + room join), and kept up with an
- * error message if that handshake fails. Pure presentation, driven by a single `status` prop; the
- * status is owned by the runtime (see `SessionRuntime` / `SessionLiveKitTerminal`). Once the room is
- * connected the overlay renders nothing, so the panes become interactive.
+ * session's connection is still coming up, and kept up with an error message if it fails. Pure
+ * presentation, driven by a single `status` prop; the status is the session connection's own, so
+ * every wire gets one (it used to be the LiveKit room handshake's, which is why a session its host
+ * served directly showed no connection state at all). Once the connection is up the overlay renders
+ * nothing, so the panes become interactive.
  *
  * PRD: `docs/ft/web/session-drawer.md` (session connection state).
  */

@@ -26,7 +26,7 @@
 
 import React from "react";
 import { create } from "@bufbuild/protobuf";
-import { createClient } from "@connectrpc/connect";
+import { createClient, type Transport } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   ConnectionService,
@@ -36,6 +36,7 @@ import {
 import type { SessionEntry } from "../../src/gen/connection_pb";
 import type { SessionRuntimeState } from "../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
@@ -76,7 +77,7 @@ const DISCONNECTED_SESSION = {
 };
 
 // ---------------------------------------------------------------------------
-// Fake ConnectionService client for the SessionMainPane-direct runtime tests
+// Fake ConnectionService transport for the SessionMainPane-direct runtime tests
 // ---------------------------------------------------------------------------
 
 const OTHER_SCREEN = "screen-held-by-another-9999";
@@ -84,7 +85,7 @@ const OTHER_SCREEN = "screen-held-by-another-9999";
 /** A ConnectionService whose control lease is held by another screen (so the focused runtime's
  *  auto-claim is denied and the "Claim terminal" CTA WOULD show), with a never-ending terminal
  *  output stream so the runtime mounts and stays stable. */
-function aClaimDeniedClient() {
+function aClaimDeniedTransport() {
   const backend = anInMemoryRpcBackend().implement(ConnectionService, {
     claimTerminalControl: async () =>
       create(ClaimTerminalControlResponseSchema, {
@@ -112,12 +113,14 @@ function aClaimDeniedClient() {
       );
     },
   });
-  return createClient(ConnectionService, backend.transport());
+  return backend.transport();
 }
 
-const aGrpcRuntimeFor = (sessionId: string): SessionRuntimeState => ({
+/** A runtime whose session is served by its host itself — plain RPC over `transport`. */
+const aHostServedRuntimeFor = (sessionId: string, transport: Transport): SessionRuntimeState => ({
   sessionId,
-  status: "connected-grpc",
+  connection: aSessionConnection(sessionId).servingOver(transport).build(),
+  hint: { sessionId },
   attached: true,
   bytesIn: 0,
   bytesOut: 0,
@@ -232,7 +235,7 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
 
   it("does NOT render the focused-runtime foreground or Claim terminal for a disconnected session, but keeps the runtime layer mounted", () => {
     // Given — a disconnected session that still has a mounted runtime in the registry
-    const client = aClaimDeniedClient();
+    const transport = aClaimDeniedTransport();
 
     // When
     cy.mount(
@@ -241,8 +244,8 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
         selectedSession={DISCONNECTED_SESSION as unknown as SessionEntry}
         attachment={{ status: "idle" } satisfies SessionAttachmentState}
         inspectorState="open"
-        client={client}
-        runtimes={[aGrpcRuntimeFor(DISCONNECTED_SESSION.sessionId)]}
+        client={createClient(ConnectionService, transport)}
+        runtimes={[aHostServedRuntimeFor(DISCONNECTED_SESSION.sessionId, transport)]}
         focusedRuntimeId={DISCONNECTED_SESSION.sessionId}
       />,
     );
@@ -256,17 +259,24 @@ describe("SessionInactiveInspectorOverlay — Claim terminal suppression", () =>
 
   it("still renders the focused-runtime foreground and Claim terminal for a connected session", () => {
     // Given — a connected session with a mounted focused runtime; another screen holds the lease
-    const client = aClaimDeniedClient();
+    const transport = aClaimDeniedTransport();
 
     // When
     cy.mount(
       <SessionMainPane
         {...noopInspectorHandlers}
         selectedSession={CONNECTED_SESSION as unknown as SessionEntry}
-        attachment={{ status: "connected-grpc", sessionId: CONNECTED_SESSION.sessionId } satisfies SessionAttachmentState}
+        attachment={
+          {
+            status: "connected",
+            connection: aSessionConnection(CONNECTED_SESSION.sessionId)
+              .servingOver(transport)
+              .build(),
+          } satisfies SessionAttachmentState
+        }
         inspectorState="closed"
-        client={client}
-        runtimes={[aGrpcRuntimeFor(CONNECTED_SESSION.sessionId)]}
+        client={createClient(ConnectionService, transport)}
+        runtimes={[aHostServedRuntimeFor(CONNECTED_SESSION.sessionId, transport)]}
         focusedRuntimeId={CONNECTED_SESSION.sessionId}
       />,
     );

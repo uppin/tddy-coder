@@ -14,6 +14,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { GenerateTokenRequestSchema, GenerateTokenResponseSchema } from "../../src/gen/token_pb";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import { decodeProtoRequestBody, toArrayBuffer } from "../support/rpc/protoRpc";
 import { withSessionTokenGate } from "../support/rpc/withSessionTokenGate";
 
@@ -37,14 +38,15 @@ const PR_STACK_SESSION = {
   stackPlanJson: "",
 };
 
+const ATTACHED_OVER_A_ROOM = aSessionConnection(PR_STACK_SESSION.sessionId).carriedByRoom(
+  "daemon-pr-stack-presenter-room-0001",
+  { url: "wss://livekit.internal:7880", serverIdentity: "daemon-pr-stack-presenter-room-0001" },
+);
 const LIVEKIT_ATTACHMENT: SessionAttachmentState = {
-  status: "connected-livekit",
-  sessionId: PR_STACK_SESSION.sessionId,
-  livekitRoom: "daemon-pr-stack-presenter-room-0001",
-  livekitUrl: "wss://livekit.internal:7880",
-  livekitServerIdentity: "daemon-pr-stack-presenter-room-0001",
-  identity: "browser-pr-stack-presenter-room-aaaa-0000-0000-000000000001-1719999999999",
+  status: "connected",
+  connection: ATTACHED_OVER_A_ROOM.build(),
 };
+const LIVEKIT_HINT = ATTACHED_OVER_A_ROOM.buildHint();
 
 /** The signed-in operator's daemon access token — what the daemon's mint refuses to act without. */
 const SESSION_TOKEN = "an-operator-access-token";
@@ -65,6 +67,7 @@ function PrStackMainPaneHarness() {
     <SessionMainPane
       selectedSession={PR_STACK_SESSION as any}
       attachment={LIVEKIT_ATTACHMENT}
+      attachmentHint={LIVEKIT_HINT}
       inspectorState="closed"
       onToggleInspector={cy.stub()}
       onInspectorClose={cy.stub()}
@@ -100,7 +103,7 @@ describe("PR-Stack Chat Screen — opens its own presenter LiveKit room from the
     // `room` prop forever
     cy.wait("@generateToken").then((interception) => {
       const req = fromBinary(GenerateTokenRequestSchema, decodeProtoRequestBody(interception.request.body));
-      expect(req.room).to.equal(LIVEKIT_ATTACHMENT.livekitRoom);
+      expect(req.room).to.equal(LIVEKIT_HINT.room);
     });
   });
 

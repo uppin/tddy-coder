@@ -58,7 +58,7 @@ const SESSION = {
 };
 
 /**
- * A connected-grpc backend whose daemon offers `offers` in the picker, holds an empty roster, and
+ * A host-served backend whose daemon offers `offers` in the picker, holds an empty roster, and
  * answers the conversation RPCs with `answer`.
  */
 function aBackendOffering(

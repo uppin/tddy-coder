@@ -1,7 +1,7 @@
 import React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { ConnectionService, SessionEntry } from "../../gen/connection_pb";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
 import { PrStackScreen } from "./prstack/PrStackScreen";
@@ -14,11 +14,11 @@ export interface WorkflowViewContext {
   client?: ConnectionClient;
   sessionToken?: string;
   /**
-   * The session's own attach state. Custom views that need a LiveKit room (e.g. the PR-Stack
+   * How the attached session is reached. Custom views that need a LiveKit room (e.g. the PR-Stack
    * Chat Screen) derive their own independent connection from this rather than being handed a
    * room from above — see `usePresenterLiveKitRoom`.
    */
-  attachment?: SessionAttachmentState;
+  attachmentHint?: SessionAttachmentHint | null;
   /** The full session list — the PR-Stack view resolves each node's in-progress child by branch. */
   sessions?: SessionEntry[];
   /**
@@ -82,7 +82,7 @@ export function resolveWorkflowView(
         client={context.client}
         sessionToken={context.sessionToken}
         sessions={context.sessions}
-        attachment={context.attachment}
+        attachmentHint={context.attachmentHint}
         defaultBranch={context.defaultBranch}
         defaultRemote={context.defaultRemote}
         onChildSessionStarted={context.onChildSessionStarted}
@@ -96,7 +96,7 @@ export function resolveWorkflowView(
     <WorkflowChatScreen
       key={session.sessionId}
       session={session}
-      attachment={context.attachment}
+      attachmentHint={context.attachmentHint}
     />
   );
 }

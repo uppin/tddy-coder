@@ -1,95 +1,62 @@
 import { describe, it, expect } from "bun:test";
 import { presenterRoomTargetFor } from "./presenterRoomTarget";
-import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentHint } from "../../rpc/connections/session";
 
 // Tests for the pure `presenterRoomTargetFor` derivation — the PR-Stack Chat Screen's own
-// dedicated LiveKit room connection is derived from the session's `connectSession`/
-// `resumeSession` attachment (the same room/url the terminal independently connects to via
-// `SessionLiveKitTerminal`), never from `SessionMainPane`'s VNC-purpose `room` prop.
+// dedicated LiveKit room connection is derived from the attached session's routing hint (the same
+// room/url the terminal independently connects to via `SessionLiveKitTerminal`), never from
+// `SessionMainPane`'s VNC-purpose `room` prop.
 
 describe("presenterRoomTargetFor", () => {
-  describe("attachment not yet connected over LiveKit", () => {
-    it("returns null while the attachment is idle", () => {
-      // Given
-      const attachment: SessionAttachmentState = { status: "idle" };
-
-      // When
-      const target = presenterRoomTargetFor(attachment);
+  describe("no room to join", () => {
+    it("returns null while no session is attached", () => {
+      // Given / When
+      const target = presenterRoomTargetFor(null);
 
       // Then
       expect(target).toBeNull();
     });
 
-    it("returns null while the attachment is still connecting", () => {
+    it("returns null for a session its host serves itself (the hint names no room)", () => {
       // Given
-      const attachment: SessionAttachmentState = { status: "connecting" };
+      const hint: SessionAttachmentHint = { sessionId: "host-served-session-0001" };
 
       // When
-      const target = presenterRoomTargetFor(attachment);
-
-      // Then
-      expect(target).toBeNull();
-    });
-
-    it("returns null for a plain gRPC attachment (no LiveKit room at all)", () => {
-      // Given
-      const attachment: SessionAttachmentState = {
-        status: "connected-grpc",
-        sessionId: "grpc-only-session-0001",
-      };
-
-      // When
-      const target = presenterRoomTargetFor(attachment);
-
-      // Then
-      expect(target).toBeNull();
-    });
-
-    it("returns null when the attachment failed", () => {
-      // Given
-      const attachment: SessionAttachmentState = {
-        status: "error",
-        error: "daemon unreachable",
-      };
-
-      // When
-      const target = presenterRoomTargetFor(attachment);
+      const target = presenterRoomTargetFor(hint);
 
       // Then
       expect(target).toBeNull();
     });
   });
 
-  describe("attachment connected over LiveKit", () => {
-    const CONNECTED_ATTACHMENT: SessionAttachmentState = {
-      status: "connected-livekit",
+  describe("a session carried over its own room", () => {
+    const A_ROOM_BACKED_HINT: SessionAttachmentHint = {
       sessionId: "pr-stack-presenter-room-0001",
-      livekitRoom: "daemon-pr-stack-presenter-room-0001",
-      livekitUrl: "wss://livekit.internal:7880",
-      livekitServerIdentity: "daemon-pr-stack-presenter-room-0001",
-      identity: "browser-pr-stack-presenter-room-0001-1719999999999",
+      room: "daemon-pr-stack-presenter-room-0001",
+      url: "wss://livekit.internal:7880",
+      serverIdentity: "daemon-pr-stack-presenter-room-0001",
     };
 
     it("targets the session's own attached room and url — not SessionMainPane's VNC room", () => {
       // Given / When
-      const target = presenterRoomTargetFor(CONNECTED_ATTACHMENT);
+      const target = presenterRoomTargetFor(A_ROOM_BACKED_HINT);
 
       // Then
       expect(target?.roomName).toBe("daemon-pr-stack-presenter-room-0001");
       expect(target?.url).toBe("wss://livekit.internal:7880");
     });
 
-    it("uses the injected identity generator rather than the terminal's own browser identity", () => {
-      // Given — the terminal already has its own `attachment.identity`; the presenter
+    it("uses the injected identity generator rather than the session's own participant identity", () => {
+      // Given — the session's process is already on that room as `serverIdentity`; the presenter
       // connection must be a distinct participant, not a duplicate join under the same identity
       const makeIdentity = () => "browser-presenter-pr-stack-presenter-room-0001-fixed";
 
       // When
-      const target = presenterRoomTargetFor(CONNECTED_ATTACHMENT, makeIdentity);
+      const target = presenterRoomTargetFor(A_ROOM_BACKED_HINT, makeIdentity);
 
       // Then
       expect(target?.identity).toBe("browser-presenter-pr-stack-presenter-room-0001-fixed");
-      expect(target?.identity).not.toBe(CONNECTED_ATTACHMENT.identity);
+      expect(target?.identity).not.toBe(A_ROOM_BACKED_HINT.serverIdentity);
     });
   });
 });

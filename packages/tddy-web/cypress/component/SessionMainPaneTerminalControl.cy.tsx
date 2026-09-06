@@ -13,6 +13,7 @@
 import React from "react";
 import { SessionMainPane } from "../../src/components/sessions/SessionMainPane";
 import type { SessionAttachmentState } from "../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../support/rpc/sessionConnections";
 import type { SessionEntry } from "../../src/gen/connection_pb";
 import { sessionsDrawerPage as page } from "../support/pages/sessionsDrawerPage";
 
@@ -29,9 +30,10 @@ const aSelectedSession: Partial<SessionEntry> = {
   repoPath: "/home/user/my-project",
 };
 
-const aConnectedGrpcAttachment: SessionAttachmentState = {
-  status: "connected-grpc",
-  sessionId: SESSION_ID,
+/** A session its host serves itself — plain RPC, no room. */
+const anAttachedSession: SessionAttachmentState = {
+  status: "connected",
+  connection: aSessionConnection(SESSION_ID).build(),
 };
 
 const noopHandlers = {
@@ -55,7 +57,7 @@ it("does not render the Claim terminal overlay when no runtime is attached yet",
     <SessionMainPane
       {...noopHandlers}
       selectedSession={aSelectedSession as SessionEntry}
-      attachment={aConnectedGrpcAttachment}
+      attachment={anAttachedSession}
       runtimes={[]}
       focusedRuntimeId={null}
     />,

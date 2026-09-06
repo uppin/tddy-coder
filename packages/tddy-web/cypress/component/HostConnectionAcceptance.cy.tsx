@@ -94,6 +94,9 @@ function anInMemoryProviderNamed(
         capabilities: new Set(["rpc"]),
         clientFor,
         transport: () => transport,
+        openSession: () => {
+          throw new Error("this provider serves host-level RPC only; sessions are node 3's");
+        },
       };
       return connection;
     },

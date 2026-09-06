@@ -28,6 +28,7 @@ import {
   type ByteDelta,
 } from "../../../src/components/sessions/sessionRuntimeRegistry";
 import type { SessionAttachmentState } from "../../../src/components/sessions/useSessionAttachment";
+import { aSessionConnection } from "../rpc/sessionConnections";
 import { byTestId, TEST_IDS } from "../testIds";
 
 const IDLE_ATTACHMENT: SessionAttachmentState = { status: "idle" };
@@ -51,14 +52,15 @@ export function aSessionTrafficBar() {
       sessionId: string,
       opts: { focused?: boolean; bytesIn?: number; bytesOut?: number } = {},
     ) {
+      const attached = aSessionConnection(sessionId).carriedByRoom(`room-${sessionId}`, {
+        url: "ws://127.0.0.1:7880",
+        serverIdentity: `daemon-local-${sessionId}`,
+      });
       registry.add(sessionId, {
         sessionId,
         attached: true,
-        status: "connected-livekit",
-        livekitUrl: "ws://127.0.0.1:7880",
-        livekitRoom: `room-${sessionId}`,
-        livekitServerIdentity: `daemon-local-${sessionId}`,
-        identity: `browser-${sessionId}`,
+        connection: attached.build(),
+        hint: attached.buildHint(),
         bytesIn: opts.bytesIn ?? 0,
         bytesOut: opts.bytesOut ?? 0,
         lastDataReceivedAt: null,

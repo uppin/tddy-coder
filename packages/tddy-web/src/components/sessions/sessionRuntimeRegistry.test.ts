@@ -2,13 +2,20 @@
  * Unit tests for `SessionRuntimeRegistry` — the per-session runtime store that keeps one
  * mounted terminal per attached session and survives focus switches (explicit-disconnect eviction).
  *
- * Changeset: `2026-07-12-fast-session-change`
- * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
+ * Two things are pinned here. The store's own bookkeeping — focus, eviction, byte accounting — and,
+ * below it, **who releases a session's connection**: the registry owns every runtime's
+ * `SessionConnection`, and nothing else is in a position to close one.
  *
- * ⚠️ RED PHASE — fails until `./sessionRuntimeRegistry` exists with the API below.
+ * Changeset: `2026-07-12-fast-session-change`
+ * Technical: `packages/tddy-web/docs/session-connections.md`
+ * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 
 import { describe, it, expect } from "bun:test";
+import type { Client, Transport } from "@connectrpc/connect";
+import type { DescService } from "@bufbuild/protobuf";
+import type { SessionConnection } from "../../rpc/connections/session";
+import type { ConnectionCapability } from "../../rpc/connections/types";
 import {
   SessionRuntimeRegistry,
   makeByteTap,
@@ -129,5 +136,148 @@ describe("SessionRuntimeRegistry", () => {
     expect(registry.get("session-a")?.bytesOut).toBe(20);
     expect(registry.get("session-a")?.bytesIn).toBe(0);
     expect(registry.get("session-a")?.lastDataReceivedAt).toBe(null);
+  });
+});
+
+const A_SESSION = "session-0001";
+const ANOTHER_SESSION = "session-0002";
+
+/**
+ * A session connection that records whether anybody released it.
+ *
+ * `closes` counts rather than latches, because "closed once" and "closed twice" are different
+ * claims: a re-attach that closed the connection it is installing would look identical to one that
+ * closed the connection it replaced.
+ */
+function aSessionConnection(sessionId: string) {
+  let closes = 0;
+  const connection: SessionConnection = {
+    hostId: "local",
+    sessionId,
+    status: "connected",
+    error: null,
+    capabilities: new Set<ConnectionCapability>(["rpc"]),
+    clientFor: <S extends DescService>(): Client<S> => {
+      throw new Error("this connection is a lifetime stand-in and issues no calls");
+    },
+    transport: (): Transport => {
+      throw new Error("this connection is a lifetime stand-in and issues no calls");
+    },
+    close: () => {
+      closes += 1;
+    },
+  };
+  return { connection, closes: () => closes };
+}
+
+/** An attached runtime holding `connection` — what the drawer stores when an attach resolves. */
+function aRuntimeHolding(sessionId: string, connection: SessionConnection): SessionRuntimeState {
+  return {
+    sessionId,
+    attached: true,
+    connection,
+    hint: { sessionId },
+    bytesIn: 0,
+    bytesOut: 0,
+    lastDataReceivedAt: null,
+  };
+}
+
+describe("a runtime's session connection", () => {
+  it("is released when another runtime takes its place", () => {
+    // Given a mounted runtime holding a connection
+    const registry = new SessionRuntimeRegistry();
+    const first = aSessionConnection(A_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, first.connection));
+
+    // When the same session is re-attached, wholesale
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, aSessionConnection(A_SESSION).connection));
+
+    // Then the connection that was displaced is released. Without this every re-attach would leave
+    // a joined room nobody will ever disconnect
+    expect(first.closes()).toEqual(1);
+  });
+
+  it("is released when a re-attach patches a different one in", () => {
+    // Given a mounted runtime holding a connection
+    const registry = new SessionRuntimeRegistry();
+    const first = aSessionConnection(A_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, first.connection));
+
+    // When the attach resolves to a genuinely new connection
+    const second = aSessionConnection(A_SESSION);
+    registry.updateConnection(A_SESSION, {
+      connection: second.connection,
+      hint: { sessionId: A_SESSION },
+    });
+
+    // Then the one it replaces goes, and the one it installs stays
+    expect(first.closes()).toEqual(1);
+    expect(second.closes()).toEqual(0);
+  });
+
+  it("survives being re-installed over itself", () => {
+    // Given a mounted runtime holding a connection
+    const registry = new SessionRuntimeRegistry();
+    const held = aSessionConnection(A_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, held.connection));
+
+    // When the drawer's fast-path select restores the attachment it already had — the same object,
+    // handed straight back
+    registry.updateConnection(A_SESSION, {
+      connection: held.connection,
+      hint: { sessionId: A_SESSION },
+    });
+
+    // Then it is left alone. Closing here would detach the session the operator just selected,
+    // which is the whole point of a fast path that avoids an RPC round-trip
+    expect(held.closes()).toEqual(0);
+  });
+
+  it("is released when its runtime is explicitly disconnected", () => {
+    // Given a mounted runtime
+    const registry = new SessionRuntimeRegistry();
+    const held = aSessionConnection(A_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, held.connection));
+
+    // When the session is disconnected
+    registry.disconnect(A_SESSION);
+
+    // Then the connection is released and the runtime is gone
+    expect(held.closes()).toEqual(1);
+    expect(registry.get(A_SESSION)).toBeUndefined();
+  });
+
+  it("is released, along with every other, when the owning screen goes", () => {
+    // Given two sessions attached at once — two open terminals in the drawer
+    const registry = new SessionRuntimeRegistry();
+    const one = aSessionConnection(A_SESSION);
+    const other = aSessionConnection(ANOTHER_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, one.connection));
+    registry.add(ANOTHER_SESSION, aRuntimeHolding(ANOTHER_SESSION, other.connection));
+
+    // When the screen holding the registry unmounts
+    registry.closeAll();
+
+    // Then every connection is released and the store is empty. The registry lives in the screen's
+    // own ref, so anything still held here is held by nothing at all a moment later
+    expect(one.closes()).toEqual(1);
+    expect(other.closes()).toEqual(1);
+    expect(registry.runtimes).toEqual([]);
+  });
+
+  it("is not released twice when the screen unmounts after a disconnect", () => {
+    // Given a session that was already disconnected by hand
+    const registry = new SessionRuntimeRegistry();
+    const held = aSessionConnection(A_SESSION);
+    registry.add(A_SESSION, aRuntimeHolding(A_SESSION, held.connection));
+    registry.disconnect(A_SESSION);
+
+    // When the screen then unmounts
+    registry.closeAll();
+
+    // Then the connection saw exactly one release — an evicted runtime is no longer the registry's
+    // to close a second time
+    expect(held.closes()).toEqual(1);
   });
 });

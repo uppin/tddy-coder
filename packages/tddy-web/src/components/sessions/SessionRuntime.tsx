@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minimize2 } from "lucide-react";
-import { createClient, type Client, type Transport } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import { ConnectionService, type SessionEntry } from "../../gen/connection_pb";
 import type { TokenService } from "../../gen/token_pb";
@@ -16,9 +16,10 @@ import { TerminalControlOverlay } from "./TerminalControlOverlay";
 import { SessionConnectionOverlay } from "./SessionConnectionOverlay";
 import { useTerminalControl, type Session } from "./useTerminalControl";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
-import { useSessionClientCache } from "./sessionClientCache";
-import type { ToolShortcutDef } from "../../lib/toolShortcuts";
+import { useConnectionStatus } from "../../rpc/connections/useConnectionStatus";
+import type { ConnectionStatus, HostConnection } from "../../rpc/connections/types";
 import type { LiveKitChromeStatus } from "../../lib/liveKitStatusPresentation";
+import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import {
   exitDocumentFullscreen,
   isTargetInActiveFullscreen,
@@ -30,6 +31,29 @@ import { cn } from "../../lib/utils";
 type ConnectionClient = Client<typeof ConnectionService>;
 type TokenClient = Client<typeof TokenService>;
 
+/**
+ * What to show over a pane whose session has **two** handshakes in flight: the session connection's,
+ * and — for a room-backed session — the terminal's own join into the same room.
+ *
+ * The pane is interactive only once both are up, so the pessimistic one wins: a failure from either
+ * is a failure, and anything short of connected from either keeps the overlay up. Reporting the
+ * connection alone would lift the overlay over a terminal still handshaking; reporting the terminal
+ * alone is what the pre-connection code did, and left a host-served session with no overlay at all.
+ *
+ * `terminal` is `null` when nothing on the pane has a join of its own, which is the ordinary case.
+ *
+ * TODO(optional-livekit node 5): goes away with the second handshake. Node 5 folds the terminal's
+ * join into the session connection, leaving one status for the pane.
+ */
+function leastConnectedOf(
+  connection: ConnectionStatus,
+  terminal: LiveKitChromeStatus | null,
+): ConnectionStatus {
+  if (connection === "error" || terminal === "error") return "error";
+  if (connection !== "connected") return connection;
+  return terminal === null || terminal === "connected" ? "connected" : "connecting";
+}
+
 export interface SessionRuntimeProps {
   /** This runtime's attached-session state (connection params + status). */
   runtime: SessionRuntimeState;
@@ -37,9 +61,12 @@ export interface SessionRuntimeProps {
    *  shortcut overlay; backgrounded runtimes stay mounted but `display:none`. */
   focused: boolean;
   sessionToken: string;
-  /** Owning daemon `ConnectionService` client — used for gRPC terminal I/O and as the fallback for
-   *  the auto-claim-on-attach. Pass `null`/`undefined` until the owning daemon is reachable. */
+  /** Owning daemon `ConnectionService` client — used for host-served terminal I/O and as the
+   *  fallback for the auto-claim-on-attach. Pass `null`/`undefined` until the daemon is reachable. */
   client?: ConnectionClient | null;
+  /** The connection to the session's owning daemon — a spawned child conversation attaches its own
+   *  session over it. `null` until a host is reachable, which is when no child can be attached. */
+  host?: HostConnection | null;
   /** Browser LiveKit-token client — required to render a LiveKit terminal. */
   tokenClient?: TokenClient;
   /** Shortcut presets — shown as the mobile shortcut overlay on the focused runtime only. */
@@ -54,15 +81,6 @@ export interface SessionRuntimeProps {
   /** Account this session's terminal I/O bytes (see `GhosttyTerminalLiveKit.onBytes`) so the
    *  screen can fold them into the session's inspector counters. */
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
-  /** LiveKit transport factory — builds the session-scoped client transport for the explicit
-   *  steal-claim (`ClaimTerminalControl`, session-participant routing) and, for `connected-livekit`
-   *  sessions, the bash terminals' I/O. */
-  liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
-  /** True when `liveKitFactory` is a test double that ignores its `room` argument — the common
-   *  room is then an acceptable stand-in for the session's own room. */
-  liveKitFactoryIsOverridden?: boolean;
-  /** Shared common room — used as the session-room stand-in when the factory is overridden. */
-  commonRoom?: Room | null;
   /** The drawer's full session list — used to discover this session's spawned child conversations
    *  (`orchestratorSessionId === this session`) and render them as tabs. */
   sessions?: ReadonlyArray<SessionEntry>;
@@ -103,58 +121,55 @@ export function SessionRuntime({
   focused,
   sessionToken,
   client,
+  host = null,
   tokenClient,
   mobileShortcuts,
   onSessionRoom,
   onSessionRegisterInsert,
   onSessionDisconnect,
   onSessionBytes,
-  liveKitFactory,
-  liveKitFactoryIsOverridden = false,
-  commonRoom = null,
   sessions = [],
   agentConversations = [],
   activeAgentConversationId = null,
   onSelectAgentConversation,
   onCloseAgentConversation,
 }: SessionRuntimeProps) {
-  // The runtime's own connected Room, captured via the terminal's `onRoom`. Stored both in a ref
-  // (for the lazy steal-claim client) and in state (so the memoized session-scoped terminal client
-  // below rebuilds once the room connects).
-  const roomRef = useRef<Room | null>(null);
-  const [sessionRoom, setSessionRoom] = useState<Room | null>(null);
+  // This session's own connection, and what it can carry. Which terminal component the Agent pane
+  // renders is derived from the capabilities — a session whose wire carries tracks gets the LiveKit
+  // terminal, one that carries only calls gets the direct stream — never from a status string.
+  const connection = runtime.connection ?? null;
+  const carriesMedia = connection?.capabilities.has("media") ?? false;
+  const hint = runtime.hint;
 
-  // The LiveKit room's connection status, reported by the Agent pane's `SessionLiveKitTerminal`.
-  // Drives the connection overlay that covers the panes until the room connects. Starts "connecting"
-  // (the room's handshake — token request + join — hasn't reported yet). Only meaningful for
-  // `connected-livekit` runtimes; the `connected-grpc` path has no such handshake, so it never shows
-  // the overlay.
-  const [liveKitStatus, setLiveKitStatus] = useState<LiveKitChromeStatus>("connecting");
+  // The connection's own status, sampled as it changes. It drives the handshake overlay for **every**
+  // wire: the overlay used to be gated on `connected-livekit`, so a session its host served itself
+  // — the configuration that works — showed no connection state at all.
+  const connectionStatus = useConnectionStatus(connection);
 
-  // Lazy session-scoped ConnectionService client (targets the coder participant
-  // `daemon-{instanceId}-{sessionId}` = `runtime.livekitServerIdentity`). Used by the explicit
-  // steal-claim so "Claim terminal" routes through the session participant. Built only for
-  // `connected-livekit` runtimes; `null` otherwise (the daemon client is the fallback).
-  // Resolved through `sessionClientCache` so an unchanged route yields one stable client identity:
-  // this callback is invoked inline while rendering, and consumers key stream effects on the client.
-  const sessionClientCache = useSessionClientCache();
-  const buildSessionClient = useCallback((): ConnectionClient | null => {
-    if (runtime.status !== "connected-livekit") return null;
-    const targetIdentity = runtime.livekitServerIdentity;
-    if (!targetIdentity || !liveKitFactory) return null;
-    const room = roomRef.current ?? (liveKitFactoryIsOverridden ? commonRoom : null);
-    if (!room) return null;
-    return sessionClientCache.clientFor(targetIdentity, room, () =>
-      createClient(ConnectionService, liveKitFactory(room, targetIdentity)),
-    );
-  }, [
-    runtime.status,
-    runtime.livekitServerIdentity,
-    liveKitFactory,
-    liveKitFactoryIsOverridden,
-    commonRoom,
-    sessionClientCache,
-  ]);
+  // The *terminal's* own join, which for a room-backed session is a second, independent handshake
+  // into the same room (`SessionLiveKitTerminal` mints its own identity and connects its own
+  // `Room`). The overlay covers the pane that terminal renders into, so a pane whose terminal has
+  // not finished connecting must stay covered even once the connection this component holds says
+  // `connected` — otherwise the overlay lifts over a terminal that is still handshaking.
+  // `null` until a terminal that has a join of its own reports one; a session with no such terminal
+  // never sets it, and the connection alone answers for the pane.
+  // TODO(optional-livekit node 5): delete this and every `onConnectionStatusChange` below. Node 5
+  // folds the terminal's join into the session connection, at which point there is one handshake
+  // for the pane and `connectionStatus` is the whole answer.
+  const [terminalStatus, setTerminalStatus] = useState<LiveKitChromeStatus | null>(null);
+
+  // What the overlay shows: the *less* connected of the two handshakes, and an error from either.
+  // Never a wait on a participant roster — see `SessionConnection.status`.
+  const handshakeStatus = leastConnectedOf(connectionStatus.status, terminalStatus);
+
+  // The session-scoped `ConnectionService` client, used by the explicit steal-claim so "Claim
+  // terminal" routes to the session's own process rather than to the daemon. The connection
+  // memoises it per service, so an unchanged route yields one stable client identity: this callback
+  // is invoked inline while rendering, and consumers key stream effects on the client.
+  const buildSessionClient = useCallback(
+    (): ConnectionClient | null => connection?.clientFor(ConnectionService) ?? null,
+    [connection],
+  );
 
   // The runtime owns its own control lease. The `Session` reference (sessionId + owning daemon
   // client) is passed to `useTerminalControl`, which converts it into a `ConnectedSession` (lease
@@ -169,16 +184,14 @@ export function SessionRuntime({
     buildSessionClient,
   );
 
-  // The client that carries this session's terminal RPCs: the daemon client for gRPC sessions, the
-  // session-scoped client (session-participant routing) for LiveKit sessions. `sessionRoom` is a
-  // dependency so the LiveKit client materialises once the room connects.
-  const terminalClient: ConnectionClient | null = useMemo(() => {
-    if (runtime.status === "connected-grpc") return client ?? null;
-    if (runtime.status === "connected-livekit") return buildSessionClient();
-    return null;
-    // `sessionRoom` intentionally participates so the LiveKit client rebuilds on room connect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runtime.status, client, buildSessionClient, sessionRoom]);
+  // The client that carries this session's terminal RPCs. One expression for every wire: the
+  // connection routes to the session's own process where it has one, and to the host that serves it
+  // where it does not — which is the daemon client, exactly what the gRPC branch used to reach for
+  // by hand.
+  const terminalClient: ConnectionClient | null = useMemo(
+    () => buildSessionClient(),
+    [buildSessionClient],
+  );
 
   const { terminals, activeTerminalId, setActive, open, close, dropEnded } = useSessionTerminals({
     sessionId: runtime.sessionId,
@@ -222,8 +235,6 @@ export function SessionRuntime({
 
   const handleRoom = useCallback(
     (room: Room) => {
-      roomRef.current = room;
-      setSessionRoom(room);
       onSessionRoom?.(runtime.sessionId, room);
     },
     [onSessionRoom, runtime.sessionId],
@@ -261,8 +272,8 @@ export function SessionRuntime({
   // When this runtime becomes focused with the Agent pane active, return keyboard focus to its
   // terminal — so selection alone makes the session ready to type, no click required. Never steals
   // focus for a backgrounded runtime, and stays out of the way when a bash tab or child pane is up.
-  // TODO: gRPC sessions (`connected-grpc`, GrpcSessionTerminal/GhosttyTerminalGrpc) don't yet plumb
-  // a focus handle, so focus-on-select is LiveKit-only for now.
+  // TODO: the direct terminal stream (GrpcSessionTerminal/GhosttyTerminalGrpc) doesn't yet plumb a
+  // focus handle, so focus-on-select only works for a session carried over its own room.
   const agentPaneActive =
     activeChildSessionId === null &&
     activeAgentConversationId === null &&
@@ -399,15 +410,15 @@ export function SessionRuntime({
         className="relative min-h-0 flex-1 bg-background"
         style={{ position: "relative" }}
       >
-        {/* Agent pane — the reserved "main" terminal. LiveKit sessions render the VirtualTui
-            terminal; gRPC sessions render the direct terminal stream (terminalId ""). */}
+        {/* Agent pane — the reserved "main" terminal. A session whose connection carries tracks
+            renders the VirtualTui terminal over its own room; one that carries only calls renders
+            the direct terminal stream (terminalId ""). */}
         <div data-testid={`sessions-terminal-pane-${AGENT_TERMINAL_ID}`} className={paneClass(AGENT_TERMINAL_ID)}>
-          {runtime.status === "connected-livekit" && tokenClient && runtime.livekitRoom && (
+          {carriesMedia && hint?.room && tokenClient && (
             <SessionLiveKitTerminal
-              livekitUrl={runtime.livekitUrl ?? ""}
-              livekitRoom={runtime.livekitRoom}
-              livekitServerIdentity={runtime.livekitServerIdentity ?? ""}
-              identity={runtime.identity ?? ""}
+              livekitUrl={hint.url ?? ""}
+              livekitRoom={hint.room}
+              livekitServerIdentity={hint.serverIdentity ?? ""}
               tokenClient={tokenClient}
               sessionToken={sessionToken}
               sessionId={runtime.sessionId}
@@ -416,20 +427,20 @@ export function SessionRuntime({
               onRoom={handleRoom}
               onRegisterFocus={registerAgentFocus}
               onRegisterInsertInput={registerInsertInput}
-              onConnectionStatusChange={setLiveKitStatus}
+              onConnectionStatusChange={setTerminalStatus}
               onBytes={handleBytes}
             />
           )}
-          {runtime.status === "connected-livekit" && !tokenClient && (
+          {carriesMedia && hint?.room && !tokenClient && (
             <div className="h-full w-full p-4 text-xs text-muted-foreground">
-              Terminal connected to {runtime.livekitRoom}
+              Terminal connected to {hint.room}
             </div>
           )}
-          {runtime.status === "connected-grpc" && (
+          {connection && !carriesMedia && (
             <GrpcSessionTerminal
               sessionId={runtime.sessionId}
               sessionToken={sessionToken}
-              client={client ?? null}
+              client={terminalClient}
               connected={connected}
               onDisconnect={() => onSessionDisconnect?.(runtime.sessionId)}
               mobileShortcuts={focused && activeTerminalId === AGENT_TERMINAL_ID ? mobileShortcuts : undefined}
@@ -483,9 +494,7 @@ export function SessionRuntime({
               onSessionRegisterInsert={onSessionRegisterInsert}
               onSessionBytes={onSessionBytes}
               onDisconnect={dropChild}
-              liveKitFactory={liveKitFactory}
-              liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
-              commonRoom={commonRoom}
+              host={host}
               sessions={sessions}
             />
           </div>
@@ -540,12 +549,12 @@ export function SessionRuntime({
           </div>
         )}
 
-        {/* Connection overlay — covers the panes while the session's LiveKit room is still
-            handshaking, and surfaces a failure if it errors. Renders nothing once connected, so the
-            panes become interactive. LiveKit-only: the `connected-grpc` path has no such handshake. */}
-        {runtime.status === "connected-livekit" && (
-          <SessionConnectionOverlay status={liveKitStatus} />
-        )}
+        {/* Connection overlay — covers the panes while the session's connection is still coming up,
+            and surfaces a failure if it errors. Renders nothing once connected, so the panes become
+            interactive. Driven by the connection itself, so every wire gets a real status: it used
+            to be gated on the LiveKit path, leaving a session its host serves directly — a working
+            configuration — with no connection state shown at all. */}
+        {connection && <SessionConnectionOverlay status={handshakeStatus} />}
 
         {/* The tab strip — and with it the strip's own toggle — is outside the fullscreen element,
             so full screen needs its own way back. Rendered only by the stack that actually holds
@@ -574,6 +583,8 @@ interface SessionChildRuntimeProps {
   focused: boolean;
   sessionToken: string;
   client?: ConnectionClient | null;
+  /** The connection to the daemon that owns this child — the child attaches its own session over it. */
+  host?: HostConnection | null;
   tokenClient?: TokenClient;
   mobileShortcuts?: ToolShortcutDef[];
   onSessionRoom?: (sessionId: string, room: Room) => void;
@@ -583,9 +594,6 @@ interface SessionChildRuntimeProps {
   onSessionBytes?: (sessionId: string, delta: ByteDelta) => void;
   /** Drop this child (its output stream ended) — removes the pane and returns focus to the parent. */
   onDisconnect?: (sessionId: string) => void;
-  liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
-  liveKitFactoryIsOverridden?: boolean;
-  commonRoom?: Room | null;
   sessions?: ReadonlyArray<SessionEntry>;
 }
 
@@ -600,58 +608,46 @@ function SessionChildRuntime({
   focused,
   sessionToken,
   client,
+  host = null,
   tokenClient,
   mobileShortcuts,
   onSessionRoom,
   onSessionRegisterInsert,
   onSessionBytes,
   onDisconnect,
-  liveKitFactory,
-  liveKitFactoryIsOverridden,
-  commonRoom,
   sessions = [],
 }: SessionChildRuntimeProps) {
-  const { state: attachment, connectSession } = useSessionAttachment();
+  const { state: attachment, hint, connectSession } = useSessionAttachment();
 
   useEffect(() => {
-    if (!client) return;
-    void connectSession(sessionId, sessionToken, client).catch(() => undefined);
+    if (!host) return;
+    void connectSession(sessionId, sessionToken, host).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, sessionId, sessionToken]);
+  }, [host, sessionId, sessionToken]);
+
+  // A child's connection is this component's own — no registry holds it — so closing its tab has to
+  // release it here. Without that, opening and closing a conversation would leave the room its
+  // session was reached over joined for as long as the page stayed open.
+  const connection = attachment.status === "connected" ? attachment.connection : null;
+  useEffect(() => () => connection?.close(), [connection]);
 
   // Project the attachment into a `SessionRuntimeState` the nested runtime can render. Until the
   // child's `ConnectSession` resolves there is nothing to render yet.
-  const runtime = useMemo<SessionRuntimeState | null>(() => {
-    if (attachment.status === "connected-livekit") {
-      return {
-        sessionId,
-        attached: true,
-        status: "connected-livekit",
-        livekitUrl: attachment.livekitUrl,
-        livekitRoom: attachment.livekitRoom,
-        livekitServerIdentity: attachment.livekitServerIdentity,
-        identity: attachment.identity,
-        bytesIn: 0,
-        bytesOut: 0,
-        lastDataReceivedAt: null,
-      };
-    }
-    if (attachment.status === "connected-grpc") {
-      return {
-        sessionId,
-        attached: true,
-        status: "connected-grpc",
-        livekitUrl: "",
-        livekitRoom: "",
-        livekitServerIdentity: "",
-        identity: "",
-        bytesIn: 0,
-        bytesOut: 0,
-        lastDataReceivedAt: null,
-      };
-    }
-    return null;
-  }, [attachment, sessionId]);
+  const runtime = useMemo<SessionRuntimeState | null>(
+    () =>
+      connection
+        ? {
+            sessionId,
+            attached: true,
+            connection,
+            ...(hint ? { hint } : {}),
+            bytesIn: 0,
+            bytesOut: 0,
+            lastDataReceivedAt: null,
+          }
+        : null,
+    [connection, hint, sessionId],
+  );
 
   if (!runtime) return null;
 
@@ -661,15 +657,13 @@ function SessionChildRuntime({
       focused={focused}
       sessionToken={sessionToken}
       client={client}
+      host={host}
       tokenClient={tokenClient}
       mobileShortcuts={mobileShortcuts}
       onSessionRoom={onSessionRoom}
       onSessionRegisterInsert={onSessionRegisterInsert}
       onSessionBytes={onSessionBytes}
       onSessionDisconnect={onDisconnect}
-      liveKitFactory={liveKitFactory}
-      liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
-      commonRoom={commonRoom}
       sessions={sessions}
     />
   );

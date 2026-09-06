@@ -32,6 +32,9 @@ function aConnectionTo(
     transport: () => {
       throw new Error("this connection is a routing stand-in and issues no calls");
     },
+    openSession: () => {
+      throw new Error("this connection is a routing stand-in and opens no sessions");
+    },
   };
 }
 
