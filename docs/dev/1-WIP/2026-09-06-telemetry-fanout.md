@@ -205,9 +205,60 @@ buys nothing the acceptance criteria actually ask for.
 
 _(populated during development)_
 
+### Red phase — closing the validation gaps
+
+Driven by the `/pr-wrap` findings above. Two of the three gaps turned out to be **unobservable
+through the component fake**, which changed where their tests belong.
+
+**Proved, not assumed.** Two throwaway probes against `createRouterTransport` showed it propagates
+neither an abort nor a consumer's `break` to the server handler: a `finally` in the fake's
+`streamHostStats` never runs, so a live-stream gauge can never fall back to zero. A backend counter
+therefore *cannot* observe teardown, and the gauge written for it was removed rather than shipped as
+an assertion surface that cannot fail.
+
+A per-subscription CPU discriminator was dropped for the same kind of reason: a cell reading the
+**selected daemon** for every row still opens one subscription per cell, so it consumes the
+discriminator exactly as a correct implementation does. It distinguishes nothing.
+
+Both properties moved to `bun test` unit suites, following the house split `useHasCapability` uses —
+a pure function that is unit-tested, and a thin hook that wraps it.
+
+| Suite | Pins | Status |
+|---|---|---|
+| `src/rpc/hostStatsSubscription.test.ts` (6 tests) | AC-6 — a subscription is **closed**, not merely ignored, including one that never emitted | 🔴 `subscribeHostStats` does not exist |
+| `src/components/hosts/hostTelemetryState.test.ts` (4 tests) | AC-3/4/5 — which host a row reads, and that an unreadable row never answers `undefined` (the selector) | 🔴 `telemetryFeedFor` does not exist |
+| `cypress/component/HostsScreenTelemetryAcceptance.cy.tsx` (9 tests) | AC-1..AC-5 | 🟢 8 · 🔴 1 (`-telemetry-offline` marker) |
+| `cypress/component/HostStatsFooterAcceptance.cy.tsx` (6 tests) | AC-7 — no regression | 🟢 6 |
+
+**What the rewritten acceptance spec fixed:**
+
+- AC-1 was `.should("exist")` twice against a zero-byte disk fixture, so "shows free disk" was
+  satisfied by rendering "0 B free". It now asserts `42.1 GB` and the exact per-core percentages.
+- `not.contain.text("0%")` could not fail — nothing renders that string (`CpuCoresIndicator` emits
+  `style="height: 0%"`, not text). Replaced with "neither metric is rendered".
+- The pending state had no test and no selector; a `hostStatsSilent` scenario now drives it.
+- `OFFLINE_HOST` named a host passed `online: true` in two tests. Hosts are now named by identity
+  (`HOST_A` / `HOST_B`) and each test states the state it means.
+- Raw selectors, `data-` attributes and glyphs left the test bodies for named page-object accessors
+  (`expectCpuCores`, `expectFreeDisk`, `expectNoReading`); every test reads Given/When/Then.
+- An offline row was asserted through the shared cell's `—`, which `DiskSpaceIndicator` also renders
+  for a null reading — so it could not tell "offline" from "live row with no disk figure". It now
+  requires an offline marker of its own.
+
+**Backend helper change** — additive only (+8 lines): a `hostStatsSilent` knob. No per-host tally, no
+proto change; the existing global `hostStatsStreamCount()` still carries the count assertions.
+
 ## Refactoring needed
 
-_(populated by each validation phase)_
+### From /red
+
+- [ ] Extract the stream loop out of `useHostStats` into `subscribeHostStats` so teardown is
+      testable; the hook becomes the thin wrapper.
+- [ ] Extract the feed decision into `telemetryFeedFor`, so `HostRowTelemetry` states which host it
+      reads rather than deriving it inline.
+- [ ] Give the offline branch its own `-telemetry-offline` marker.
+- [ ] `useHostStats` unsubscribe is cooperative (`cancelled` + `break`), so a host that never reports
+      is never let go of. `subscribeHostStats` must close the iterator outright.
 
 ## Validation results
 
