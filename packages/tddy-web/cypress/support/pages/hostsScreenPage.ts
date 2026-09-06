@@ -37,3 +37,12 @@ export const hostsScreenPage = {
   localMarker: (instanceId: string) => byTestId(`hosts-local-marker-${instanceId}`),
   navEntry: () => byTestId(TEST_IDS.shellMenuHosts),
 };
+
+/** Telemetry cell selectors — added by `#hosts-screen 2/8`. */
+export const hostTelemetryPage = {
+  cell: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-telemetry"]`),
+  cpu: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-cpu"]`),
+  disk: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-disk"]`),
+  unavailable: (instanceId: string) =>
+    cy.get(`[data-testid="hosts-row-${instanceId}-telemetry-unavailable"]`),
+};

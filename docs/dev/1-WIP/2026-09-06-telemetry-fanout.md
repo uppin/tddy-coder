@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 2/8
 **Branch:** `feature/hosts-screen/telemetry-fanout` → base `feature/hosts-screen/host-registry`
+**PR:** [#454](https://github.com/uppin/tddy-coder/pull/454)
 
 ## Initial Discovery
 
@@ -33,8 +34,6 @@ Affected: [`host-stats-footer.md`](../../ft/web/host-stats-footer.md)
   `formatDiskFree`.
 - Honest non-values: `—` for an offline host, a pending/unavailable state for a connecting or errored
   connection — never a fabricated zero.
-- Widening the Cypress backend's `hostStatsStreamCount()` into a per-host tally so "one stream per
-  online host" is assertable.
 
 ## Boundaries
 
@@ -66,7 +65,7 @@ Lands first, so node 3 can branch off a real ref:
 
 1. `useHostStats(hostId?)`'s generalized signature, and the per-host telemetry component's props —
    the surface node 3 adds memory/load/core-count fields to.
-2. The per-host `hostStatsStreamCount(hostId)` seam in the shared Cypress backend helper.
+2. `HostRowTelemetry` and its props — the cell node 3 adds a memory reading to.
 3. The failing tests below, red for this node's own missing implementation.
 
 ## Summary
@@ -82,7 +81,6 @@ is unary-shaped and cannot express a subscription.
 - [ ] Subscription policy: online hosts only, screen-scoped lifetime
 - [ ] Telemetry column on the Hosts row, reusing the existing indicators
 - [ ] Honest states for offline / connecting / errored
-- [ ] Per-host stream counter in the Cypress backend helper
 - [ ] Cypress component acceptance tests
 
 ## Technical changes
@@ -141,13 +139,16 @@ a real ConnectRPC client over a fake server.
 | `cy.intercept` wire-level fakes (`cypress/support/rpc/protoRpc.ts`) | Rejected — cannot observe LiveKit-transport RPC at all |
 | A React unit test of the hook in isolation | Rejected — the property that matters ("one stream per online host") is only observable where the registry resolves clients |
 
-**The obstacle this plan must clear.** `StreamHostStatsRequest` carries only `session_token`
-(`connection.proto:2245-2248`), and `mountWithRpc` hands **every** host the same in-memory transport
-(`cypress/support/rpc/inMemory.tsx:39`). A fake therefore cannot currently tell two hosts'
-subscriptions apart. Closing that is part of this node's red phase; the plan of record is a per-host
-tally keyed on the transport the registry handed out. **If that proves impossible without a proto
-change, stop and raise it** — adding a host discriminator to `StreamHostStatsRequest` would be a
-change to node 3's territory and must not be made here unilaterally.
+**The obstacle this plan had to clear — resolved, with no proto change.** `StreamHostStatsRequest`
+carries only `session_token` (`connection.proto`), and `mountWithRpc` hands **every** host the same
+in-memory transport (`cypress/support/rpc/inMemory.tsx:39`), so a fake cannot tell two hosts'
+subscriptions apart.
+
+It does not need to. The properties under test are **counts**, not attributions: two online hosts must
+open two streams, and an online+offline pair exactly one. The backend's existing global
+`hostStatsStreamCount()` (`connectionServiceBackend.ts:637`) proves both. **No per-host tally is
+added and no proto change is made** — the discriminator that would have been needed for attribution
+buys nothing the acceptance criteria actually ask for.
 
 **Coverage.** Every AC in the PRD maps to a named test below.
 
@@ -194,17 +195,24 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `HostsScreenTelemetryAcceptance.cy.tsx` — **6 tests, 6 red**, every one on this node's own missing
+  cell (`hosts-row-…-cpu` / `…-telemetry-unavailable` never found).
+- The spec mounts `HostRowTelemetry` directly rather than `HostsScreen`: row rendering belongs to
+  `#hosts-screen 1/8` and is not implemented, so driving the screen would make every failure
+  attributable to *that* node instead of this one.
+- No Rust change in this node, so no Rust verification applies.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-telemetry-fanout-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
