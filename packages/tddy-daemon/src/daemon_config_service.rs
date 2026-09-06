@@ -213,6 +213,7 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             daemon_instance_id: Some(crate::livekit_peer_discovery::local_instance_id_for_config(
                 &config,
             )),
+            livekit_enabled: None,
         }))
     }
 }

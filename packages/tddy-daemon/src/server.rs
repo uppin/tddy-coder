@@ -51,6 +51,7 @@ pub async fn run_server(
         allowed_agents,
         debug,
         daemon_instance_id: Some(daemon_instance_id),
+        livekit_enabled: None,
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

@@ -28,6 +28,7 @@ listen:
   web_port: 8899
   web_host: 127.0.0.1
 livekit:
+  enabled: true
   url: {FIXTURE_LIVEKIT_URL}
   public_url: {FIXTURE_LIVEKIT_URL}
   api_key: devkey
@@ -98,6 +99,17 @@ impl RecordingCommonRoom {
             .map(|livekit| livekit.as_ref().and_then(|lk| lk.url.clone()))
             .collect()
     }
+
+    /// The state of the operator's switch in each reconfiguration, in order. Switching the common
+    /// room off changes no URL, so the URLs alone cannot tell a disable from an untouched save.
+    fn reconfigured_switch_states(&self) -> Vec<Option<bool>> {
+        self.reconfigured
+            .lock()
+            .expect("recording supervisor poisoned")
+            .iter()
+            .map(|livekit| livekit.as_ref().map(|lk| lk.enabled))
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,6 +121,7 @@ impl RecordingCommonRoom {
 /// request to clear everything it omits.
 fn the_current_settings() -> SettingsBuilder {
     SettingsBuilder {
+        livekit_enabled: true,
         livekit_url: FIXTURE_LIVEKIT_URL.to_string(),
         common_room: "tddy-lobby".to_string(),
         web_port: 8899,
@@ -116,6 +129,7 @@ fn the_current_settings() -> SettingsBuilder {
 }
 
 struct SettingsBuilder {
+    livekit_enabled: bool,
     livekit_url: String,
     common_room: String,
     web_port: u32,
@@ -124,6 +138,12 @@ struct SettingsBuilder {
 impl SettingsBuilder {
     fn with_livekit_url(mut self, url: &str) -> Self {
         self.livekit_url = url.to_string();
+        self
+    }
+
+    /// The operator moving the toggle to off, changing nothing else.
+    fn with_livekit_switched_off(mut self) -> Self {
+        self.livekit_enabled = false;
         self
     }
 
@@ -143,6 +163,7 @@ impl SettingsBuilder {
                 api_secret: None,
                 common_room: Some(self.common_room),
                 api_secret_set: false,
+                enabled: self.livekit_enabled,
             }),
             listen: Some(ListenSettings {
                 web_port: Some(self.web_port),
@@ -423,4 +444,138 @@ async fn refuses_to_write_the_configuration_for_a_caller_without_a_valid_session
         std::fs::read_to_string(&daemon.config_path).expect("the config file not read"),
         before
     );
+}
+
+// ---------------------------------------------------------------------------
+// The operator's switch, end to end: the toggle saved to the file the daemon was loaded from, the
+// live connection told about it, and the page told not to build a room of its own.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn writes_a_switched_off_common_room_back_to_the_yaml_file_the_daemon_was_loaded_from() {
+    // Given a daemon joining its common room
+    let daemon = a_daemon_config_service();
+
+    // When the operator switches it off
+    daemon
+        .service
+        .update_config(an_update_of(
+            the_current_settings().with_livekit_switched_off().build(),
+        ))
+        .await
+        .expect("the update was refused");
+
+    // Then the file says so
+    let reloaded = DaemonConfig::load(&daemon.config_path).expect("the rewritten config not load");
+    assert!(
+        !reloaded
+            .livekit
+            .expect("the rewritten config has no livekit block")
+            .enabled,
+        "the toggle was saved but the file still says enabled"
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_livekit_credentials_in_the_file_when_the_common_room_is_switched_off() {
+    // Given a daemon joining its common room
+    let daemon = a_daemon_config_service();
+
+    // When the operator switches it off
+    daemon
+        .service
+        .update_config(an_update_of(
+            the_current_settings().with_livekit_switched_off().build(),
+        ))
+        .await
+        .expect("the update was refused");
+
+    // Then the url, key, secret and room are still in the file. "Off" that costs the operator their
+    // credentials is the thing this switch exists to replace.
+    let reloaded = DaemonConfig::load(&daemon.config_path).expect("the rewritten config not load");
+    let livekit = reloaded
+        .livekit
+        .expect("the rewritten config has no livekit block");
+    assert_eq!(
+        (
+            livekit.url.as_deref(),
+            livekit.api_key.as_deref(),
+            livekit.api_secret.as_deref(),
+            livekit.common_room.as_deref()
+        ),
+        (
+            Some(FIXTURE_LIVEKIT_URL),
+            Some("devkey"),
+            Some("the-secret"),
+            Some("tddy-lobby")
+        )
+    );
+}
+
+#[tokio::test]
+async fn disconnects_the_common_room_when_the_operator_switches_it_off() {
+    // Given a daemon connected to the fixture's LiveKit server
+    let daemon = a_daemon_config_service();
+
+    // When the operator switches the common room off, changing nothing else
+    daemon
+        .service
+        .update_config(an_update_of(
+            the_current_settings().with_livekit_switched_off().build(),
+        ))
+        .await
+        .expect("the update was refused");
+
+    // Then the running connection was told to become a switched-off one. Saving the toggle has to
+    // reach the live room; the URL and room name are unchanged, so nothing else here would.
+    assert_eq!(
+        daemon.common_room.reconfigured_switch_states(),
+        vec![Some(false)]
+    );
+}
+
+#[tokio::test]
+async fn reports_the_common_room_as_switched_off_to_the_page_the_daemon_serves() {
+    // Given a daemon whose common room the operator has switched off
+    let daemon = a_daemon_config_service();
+    daemon
+        .service
+        .update_config(an_update_of(
+            the_current_settings().with_livekit_switched_off().build(),
+        ))
+        .await
+        .expect("the update was refused");
+
+    // When a page asks for the configuration it starts up with
+    let response = daemon
+        .service
+        .get_client_config(Request::new(GetClientConfigRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("the client config was not served")
+        .into_inner();
+
+    // Then it is told the common room is off, so it builds no `Room` and mints no token — the same
+    // quiet outcome an unconfigured deployment already has, reached deliberately
+    assert_eq!(response.livekit_enabled, Some(false));
+}
+
+#[tokio::test]
+async fn reports_the_common_room_as_switched_on_to_the_page_the_daemon_serves() {
+    // Given a daemon joining its common room
+    let daemon = a_daemon_config_service();
+
+    // When a page asks for the configuration it starts up with
+    let response = daemon
+        .service
+        .get_client_config(Request::new(GetClientConfigRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("the client config was not served")
+        .into_inner();
+
+    // Then it is cleared to join
+    assert_eq!(response.livekit_enabled, Some(true));
 }

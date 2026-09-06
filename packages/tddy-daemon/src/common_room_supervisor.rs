@@ -408,6 +408,10 @@ mod tests {
     fn a_livekit_block() -> LiveKitBlockBuilder {
         LiveKitBlockBuilder {
             livekit: LiveKitConfig {
+                // The fixture is a deployment the operator switched *on*. The flag defaults to off,
+                // so a block that did not say so would name no room and every scenario below would
+                // be asserting the disabled path by accident.
+                enabled: true,
                 url: Some(LOBBY_A.to_string()),
                 api_key: Some("devkey".to_string()),
                 api_secret: Some("the-secret".to_string()),
@@ -450,6 +454,12 @@ mod tests {
 
         fn with_a_blank_room(mut self) -> Self {
             self.livekit.common_room = Some("   ".to_string());
+            self
+        }
+
+        /// The operator's switch turned off, with every credential left in place.
+        fn switched_off(mut self) -> Self {
+            self.livekit.enabled = false;
             self
         }
 
@@ -527,6 +537,20 @@ mod tests {
                 .await
                 .expect("the supervisor did nothing to the common room")
                 .expect("the supervisor ended without touching the common room again")
+        }
+
+        /// The supervisor doing nothing to the common room for a bounded wait.
+        ///
+        /// The counterpart to [`next_room_lifecycle`], and the only honest way to assert a daemon
+        /// stayed out of a room: reading a counter or a status immediately after a reconfiguration
+        /// would pass simply because the join had not finished yet.
+        async fn stays_out_of_every_room(&mut self) {
+            let lifecycle = timeout(A_BOUNDED_WAIT, self.lifecycle.recv()).await;
+            assert!(
+                lifecycle.is_err(),
+                "expected the supervisor to touch no common room, but it did: {:?}",
+                lifecycle.expect("the wait was not a timeout")
+            );
         }
 
         /// This daemon shutting down: the roster holding the supervisor goes away.
@@ -719,6 +743,109 @@ mod tests {
         assert!(
             target.is_none(),
             "an incomplete livekit block was treated as a joinable room"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // The operator's switch. Distinct from an incomplete block throughout: a daemon told not to
+    // join and a daemon that cannot are different operator problems.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn names_no_room_to_join_when_the_operator_switched_the_common_room_off() {
+        // Given a block naming a server, credentials and a room — and switched off
+        let livekit = a_livekit_block().switched_off().build();
+
+        // When the room it names is resolved
+        let target = CommonRoomTarget::from_livekit(Some(&livekit));
+
+        // Then there is none. Every credential is present; the operator simply said no.
+        assert!(
+            target.is_none(),
+            "a switched-off livekit block was treated as a joinable room"
+        );
+    }
+
+    #[tokio::test]
+    async fn joins_no_common_room_when_the_daemon_starts_with_the_switch_off() {
+        // Given a daemon holding a complete but switched-off LiveKit block
+        let mut daemon = a_daemon_supervising(Some(a_livekit_block().switched_off().build()));
+
+        // When it is left to run
+
+        // Then it joins nothing at all, despite holding the credentials for a room the whole time
+        daemon.stays_out_of_every_room().await;
+    }
+
+    #[tokio::test]
+    async fn leaves_the_common_room_when_the_operator_switches_it_off() {
+        // Given a daemon in its common room
+        let mut daemon = a_daemon_supervising(Some(a_livekit_block().with_url(LOBBY_A).build()));
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Joined(the_room(LOBBY_A, THE_LOBBY))
+        );
+
+        // When the operator switches LiveKit off, changing nothing else
+        daemon.reconfigure(Some(
+            a_livekit_block().with_url(LOBBY_A).switched_off().build(),
+        ));
+
+        // Then it leaves. Saving the toggle has to disconnect a live room, or "off" would be a
+        // statement the daemon makes and does not act on until its next restart.
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Left(the_room(LOBBY_A, THE_LOBBY))
+        );
+    }
+
+    #[tokio::test]
+    async fn stays_out_of_the_common_room_after_the_operator_switches_it_off() {
+        // Given a daemon that has just been switched off while in its common room
+        let mut daemon = a_daemon_supervising(Some(a_livekit_block().with_url(LOBBY_A).build()));
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Joined(the_room(LOBBY_A, THE_LOBBY))
+        );
+        daemon.reconfigure(Some(
+            a_livekit_block().with_url(LOBBY_A).switched_off().build(),
+        ));
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Left(the_room(LOBBY_A, THE_LOBBY))
+        );
+
+        // When it is left to run
+
+        // Then it does not go back in. A block that still names a joinable room is what a
+        // reconnect would rebuild from, so leaving and rejoining is the failure this rules out —
+        // and it looks identical to a working disable if only the leave is asserted.
+        daemon.stays_out_of_every_room().await;
+    }
+
+    #[tokio::test]
+    async fn rejoins_the_same_common_room_when_the_operator_switches_it_back_on() {
+        // Given a daemon whose common room the operator has just switched off
+        let mut daemon = a_daemon_supervising(Some(a_livekit_block().with_url(LOBBY_A).build()));
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Joined(the_room(LOBBY_A, THE_LOBBY))
+        );
+        daemon.reconfigure(Some(
+            a_livekit_block().with_url(LOBBY_A).switched_off().build(),
+        ));
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Left(the_room(LOBBY_A, THE_LOBBY))
+        );
+
+        // When it is switched back on
+        daemon.reconfigure(Some(a_livekit_block().with_url(LOBBY_A).build()));
+
+        // Then it rejoins the room it always had the credentials for, without a restart
+        assert_eq!(
+            daemon.next_room_lifecycle().await,
+            RoomLifecycle::Joined(the_room(LOBBY_A, THE_LOBBY))
         );
     }
 }

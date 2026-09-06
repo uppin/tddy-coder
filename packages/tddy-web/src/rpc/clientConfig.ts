@@ -23,6 +23,12 @@ export interface ClientAllowedAgent {
 
 /** The payload, in the one shape both sources are read into. */
 export interface ClientConfig {
+  /**
+   * Whether the serving daemon joins its common room. `false` means the operator switched LiveKit
+   * off, so this page builds no `Room` and mints no token — a url and a room name are still
+   * present, which is exactly why the flag has to be read rather than inferred from them.
+   */
+  livekitEnabled?: boolean;
   livekitUrl?: string;
   livekitRoom?: string;
   commonRoom?: string;
@@ -34,6 +40,7 @@ export interface ClientConfig {
 
 /** The JSON `GET /api/config` serves — snake_case, as `tddy_coder::web_server::ClientConfig`. */
 interface ClientConfigJson {
+  livekit_enabled?: boolean;
   livekit_url?: string;
   livekit_room?: string;
   common_room?: string;

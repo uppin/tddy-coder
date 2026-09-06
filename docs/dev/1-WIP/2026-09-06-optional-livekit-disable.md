@@ -80,13 +80,30 @@ Implementation lands in the same PR. **Not a merge candidate on the contract alo
 - [x] Record initial discovery
 - [x] Create PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — failing unit/integration tests
+- [x] TDD Red — failing unit/integration tests
 - [ ] Implement production code (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
+
+## Refactoring Needed
+
+### From `/red`
+
+- [ ] `LiveKitConfig::common_room_enabled` is declared but wired into none of the eight decision
+      sites discovery lists. Green routes them through it rather than adding a ninth re-derivation.
+- [ ] `ClientConfig.livekit_enabled` (`packages/tddy-coder/src/web_server.rs`) is declared and
+      served as `None` at all three construction sites. Green makes `server.rs` report the real
+      flag; `run.rs`'s standalone web server legitimately keeps `None`.
+- [ ] `LiveKitStartupProbe` in `DesktopIpcHostAcceptance.cy.tsx` grew an `enabled` field on its
+      `config` prop. If a third spec needs the same shape, extract a named fixture rather than
+      widening the inline type again.
+- [ ] `packages/tddy-web/src/gen/daemon_config_pb.ts` was regenerated **without `buf`** (no npm
+      registry in this worktree): the descriptor was rebuilt with `protoc` + a `json_name` strip
+      that reproduces `protoc-gen-es` byte-for-byte, and the two interface fields were written by
+      hand. Re-run `bun run generate` once `buf` is available and confirm the file is unchanged.
 
 ## Risks
 

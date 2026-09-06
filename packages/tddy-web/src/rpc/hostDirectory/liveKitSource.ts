@@ -23,6 +23,15 @@ import type { HostDirectorySource } from "./types";
 export const LIVEKIT_SOURCE_ID = "livekit";
 
 export interface LiveKitHostDirectorySourceOptions {
+  /**
+   * Whether the serving daemon joins its common room (`livekit.enabled`, via `/api/config`).
+   *
+   * `false` short-circuits the join exactly as an absent url or room does — no token minted, no
+   * `Room` constructed, and the source reporting `idle`. It has to be read separately because a
+   * switched-off daemon still reports its url and room name: the coordinates are preserved so the
+   * operator can switch it back on, which means they can no longer stand in for the decision.
+   */
+  enabled?: boolean;
   livekitUrl?: string;
   commonRoom?: string;
   /** This browser's presence identity, or `undefined` until the operator is signed in. */

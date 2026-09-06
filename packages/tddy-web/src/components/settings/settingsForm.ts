@@ -24,6 +24,11 @@ export interface DaemonSettingsFormState {
   livekitCommonRoom: string;
   /** True when the daemon holds a secret. Display only — never the secret itself. */
   livekitApiSecretSet: boolean;
+  /**
+   * Whether the daemon joins its common room. The operator's switch: off preserves every other
+   * field, so turning LiveKit back on is one toggle rather than four credentials retyped.
+   */
+  livekitEnabled: boolean;
   webPort: string;
   webHost: string;
 }

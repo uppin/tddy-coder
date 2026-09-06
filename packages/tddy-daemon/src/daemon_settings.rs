@@ -35,6 +35,7 @@ pub fn redacted_settings(config: &DaemonConfig) -> DaemonSettings {
             api_secret: None,
             common_room: livekit.common_room.clone(),
             api_secret_set: livekit.api_secret.is_some(),
+            enabled: false,
         }),
         listen: Some(ListenSettings {
             web_port: config.listen.web_port.map(u32::from),
@@ -155,6 +156,7 @@ listen:
   web_port: 8899
   web_host: 127.0.0.1
 livekit:
+  enabled: true
   url: ws://127.0.0.1:7880
   public_url: ws://127.0.0.1:7880
   api_key: devkey
@@ -180,6 +182,7 @@ listen:
     /// field under test.
     fn the_current_settings() -> SettingsBuilder {
         SettingsBuilder {
+            livekit_enabled: true,
             livekit_url: CONFIGURED_URL.to_string(),
             api_secret: None,
             common_room: "tddy-lobby".to_string(),
@@ -189,6 +192,7 @@ listen:
     }
 
     struct SettingsBuilder {
+        livekit_enabled: bool,
         livekit_url: String,
         api_secret: Option<String>,
         common_room: String,
@@ -199,6 +203,12 @@ listen:
     impl SettingsBuilder {
         fn with_livekit_url(mut self, url: &str) -> Self {
             self.livekit_url = url.to_string();
+            self
+        }
+
+        /// The operator moving the toggle to off, changing nothing else.
+        fn with_livekit_switched_off(mut self) -> Self {
+            self.livekit_enabled = false;
             self
         }
 
@@ -231,6 +241,7 @@ listen:
                     api_secret: self.api_secret,
                     common_room: Some(self.common_room),
                     api_secret_set: false,
+                    enabled: self.livekit_enabled,
                 }),
                 listen: Some(ListenSettings {
                     web_port: Some(self.web_port),
@@ -477,5 +488,150 @@ listen:
 
         // Then nothing is deferred
         assert_eq!(update.restart_required, Vec::<String>::new());
+    }
+
+    // -----------------------------------------------------------------------
+    // The operator's switch: what the UI is shown, what an update does with it, and — the one that
+    // makes the toggle mean anything — whether saving it disconnects a live room.
+    // -----------------------------------------------------------------------
+
+    /// A daemon holding a complete LiveKit block it was told not to join.
+    fn a_daemon_with_its_common_room_switched_off() -> DaemonConfig {
+        serde_yaml::from_str(
+            r#"
+listen:
+  web_port: 8899
+  web_host: 127.0.0.1
+livekit:
+  enabled: false
+  url: ws://127.0.0.1:7880
+  public_url: ws://127.0.0.1:7880
+  api_key: devkey
+  api_secret: the-secret
+  common_room: tddy-lobby
+"#,
+        )
+        .expect("the daemon fixture did not parse")
+    }
+
+    #[test]
+    fn reports_the_common_room_as_switched_on_when_the_daemon_joins_it() {
+        // Given a daemon joining its common room
+        let config = a_configured_daemon();
+
+        // When its settings are projected for the UI
+        let settings = redacted_settings(&config);
+
+        // Then the toggle has a state to render
+        assert!(
+            settings.livekit.expect("no livekit block").enabled,
+            "a daemon joining its common room reported the toggle as off"
+        );
+    }
+
+    #[test]
+    fn reports_the_common_room_as_switched_off_when_the_daemon_was_told_not_to_join() {
+        // Given a daemon holding a complete LiveKit block it was told not to join
+        let config = a_daemon_with_its_common_room_switched_off();
+
+        // When its settings are projected for the UI
+        let settings = redacted_settings(&config);
+
+        // Then the operator can see it is off, rather than staring at live-looking credentials
+        // with no visible reason why nothing is happening
+        assert!(
+            !settings.livekit.expect("no livekit block").enabled,
+            "a daemon told not to join reported the toggle as on"
+        );
+    }
+
+    #[test]
+    fn adopts_the_common_room_switch_from_an_update() {
+        // Given the operator moving the toggle to off
+        let settings = the_current_settings().with_livekit_switched_off().build();
+
+        // When the update is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the daemon's own configuration says so
+        assert!(
+            !update.config.livekit.expect("no livekit block").enabled,
+            "the toggle was saved but the configuration still says enabled"
+        );
+    }
+
+    #[test]
+    fn keeps_the_url_key_secret_and_room_when_the_toggle_is_switched_off() {
+        // Given the operator moving the toggle to off and touching nothing else
+        let settings = the_current_settings().with_livekit_switched_off().build();
+
+        // When the update is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then every credential survives. Switching back on must be one toggle, not four fields
+        // retyped from wherever the operator kept them.
+        let livekit = update.config.livekit.expect("no livekit block");
+        assert_eq!(
+            (
+                livekit.url.as_deref(),
+                livekit.api_key.as_deref(),
+                livekit.api_secret.as_deref(),
+                livekit.common_room.as_deref()
+            ),
+            (
+                Some(CONFIGURED_URL),
+                Some("devkey"),
+                Some("the-secret"),
+                Some("tddy-lobby")
+            )
+        );
+    }
+
+    #[test]
+    fn reconnects_the_common_room_when_the_toggle_is_switched_off() {
+        // Given the operator switching the common room off, changing nothing else
+        let settings = the_current_settings().with_livekit_switched_off().build();
+
+        // When the update is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the live connection is told to become the new configuration. The reconnect decision
+        // was `(url, common_room)` alone — both unchanged here — which would have saved the toggle
+        // and left the daemon sitting in the room it was just told to leave.
+        assert!(
+            update.reconnect_common_room,
+            "switching the common room off left the live connection untouched"
+        );
+    }
+
+    #[test]
+    fn reconnects_the_common_room_when_the_toggle_is_switched_back_on() {
+        // Given a daemon whose common room is off
+        let config = a_daemon_with_its_common_room_switched_off();
+
+        // When the operator switches it back on
+        let update = accepted(apply_update(&config, &the_current_settings().build()));
+
+        // Then the connection is rebuilt, so re-enabling takes effect without a restart
+        assert!(
+            update.reconnect_common_room,
+            "switching the common room back on did not reconnect it"
+        );
+    }
+
+    #[test]
+    fn keeps_the_common_room_connected_when_the_toggle_is_left_alone() {
+        // Given an update that changes a field outside the LiveKit block, toggle untouched
+        let settings = the_current_settings().with_web_port(9911).build();
+
+        // When it is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then the live connection is left alone — the switch reconnects on a *change*, not on
+        // every save
+        assert!(
+            !update.reconnect_common_room,
+            "an unrelated edit dropped the common-room connection"
+        );
     }
 }
