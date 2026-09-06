@@ -19,8 +19,10 @@ Discovery: [`2026-09-06-optional-livekit-lazy-session-room-initial-discovery.md`
 
 - **Session creation never touches LiveKit.** For any session type, configured or not, reachable or
   not. Starting a session is a local operation: worktree, branch, changeset, agent.
-- The session room is created **on the first connection to LiveKit** — an idempotent `ensure` at each
-  point of use, rather than eagerly at spawn.
+- The session room **and the PTY bridge** are created **on the first connection to LiveKit** — an
+  idempotent `ensure` at each point of use, rather than eagerly at spawn. The bridge is what lets a
+  *remote* client drive the terminal over LiveKit; the desktop's own host is reached over IPC and
+  needs no bridge at all, so a desktop-only deployment creates neither.
 - A session created while LiveKit was down works fully once LiveKit is reachable, with no restart.
 - LiveKit control-plane calls are **bounded**, so an unreachable server fails fast and legibly
   instead of hanging until a client gives up.
@@ -28,7 +30,8 @@ Discovery: [`2026-09-06-optional-livekit-lazy-session-room-initial-discovery.md`
 
 ## Responsibility
 
-- Removing every LiveKit interaction from the session-start path, including the eager room open.
+- Removing every LiveKit interaction from the session-start path — the eager room open **and** the
+  eagerly-spawned PTY bridge.
 - An idempotent `ensure_session_room` used by **every** consumer that needs the room — `ConnectSession`,
   split-placement start, `ensure_session_room_for_agents`, session-sync mirroring, seeded agent
   clones, participant admission, and the split agent's remote-identity route (discovery lists the

@@ -1319,6 +1319,22 @@ pub struct OpenedSessionRoom {
     pub server_identity: String,
 }
 
+/// What makes a session's terminal drivable over LiveKit, named here so [`SessionRoomRegistry`] can
+/// establish it in the same breath as the room without knowing what a PTY is.
+///
+/// The room and the terminal bridge are two participants serving one session, and they are wanted
+/// at the same moment: when something reaches that session *over LiveKit*. The desktop's own host
+/// is reached over IPC and needs neither, which is why neither is created when a session starts.
+#[async_trait::async_trait]
+pub trait SessionTerminalBridge: Send + Sync {
+    /// Put a participant serving `session_id`'s terminal into the room a remote client drives it
+    /// from, unless one is already there or this session has no terminal to bridge.
+    ///
+    /// A session with no terminal is not a failure — not every session type has one, and the room
+    /// is not the terminal's to refuse. A session that has one and could not be bridged is.
+    async fn bridge(&self, session_id: &str) -> Result<(), Status>;
+}
+
 /// The live rooms this daemon hosts, keyed by the session that owns each checkout.
 ///
 /// Owns the joined participant: a `LiveKitParticipant` that is dropped leaves the room, so a room
@@ -1525,17 +1541,33 @@ impl SessionRoomRegistry {
         &self,
         hosting: &SessionRoomHosting<'_>,
         service: S,
+        terminal: &dyn SessionTerminalBridge,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
         let opening = self.opening_lock(hosting.codebase_session_id);
         let _opening_this_session = opening.lock().await;
-        if let Some(already) = self.already_open(hosting) {
-            log::debug!(
-                "session_room: {} is already open; reusing it rather than creating a second",
-                already.room
-            );
-            return Ok(Some(already));
+        let room = match self.already_open(hosting) {
+            Some(already) => {
+                log::debug!(
+                    "session_room: {} is already open; reusing it rather than creating a second",
+                    already.room
+                );
+                Some(already)
+            }
+            None => self.open(hosting, service).await?,
+        };
+        // The room says where the session is; the bridge is what makes its terminal usable once
+        // something is there. Both under this one lock, so a session cannot end up with a room a
+        // remote client can find and a terminal it cannot type at.
+        //
+        // Asked on every pass rather than only on the pass that created the room, because "already
+        // open" is a fact about the room alone: a connect whose bridge failed after its room
+        // succeeded leaves the next connect to finish the job. That is the same ensure this
+        // function is — the work happens when it is wanted — and not a retry: nothing here loops,
+        // waits or comes back on its own.
+        if room.is_some() {
+            terminal.bridge(hosting.codebase_session_id).await?;
         }
-        self.open(hosting, service).await
+        Ok(room)
     }
 
     /// The lock that serialises openings of one session's room. Created on first use and dropped

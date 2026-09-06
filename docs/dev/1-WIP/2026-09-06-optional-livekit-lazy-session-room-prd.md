@@ -38,8 +38,17 @@ actually connects over LiveKit.
 5. Two concurrent first-connections produce **one** room. A second connection reuses it.
 6. A connection that needs the room and cannot create it **fails loudly**, with the reason. Session
    creation is what is unblocked, not LiveKit error reporting.
-7. A session created while LiveKit was down becomes fully functional once LiveKit is reachable,
-   **without a restart**.
+7. A session created while LiveKit was down becomes reachable over LiveKit once LiveKit is
+   reachable, **without a restart** — both its room *and* its PTY bridge appear on the first LiveKit
+   connection.
+
+   **Corrected during implementation.** This first said "fully functional", which conflated two
+   channels. On the desktop the local host is reached over **IPC**, and that is the only channel
+   relevant to it: such a session is fully functional the moment it starts, whether LiveKit is up,
+   down or absent, and it never needs a bridge. The PTY bridge exists so a **remote** client can
+   drive the terminal over LiveKit (`PtyLiveKitService` in the session room). It is therefore lazy
+   for exactly the reason the room is — it is LiveKit work, and LiveKit work happens when a LiveKit
+   consumer arrives, not at spawn. A desktop-only deployment creates neither, ever.
 8. LiveKit control-plane calls are bounded by a timeout, so an unreachable server fails fast rather
    than hanging until a client gives up.
 9. The facilitating daemon is still the room's first participant when the room is created — the PRD

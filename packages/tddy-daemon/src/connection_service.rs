@@ -3705,32 +3705,22 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
 
-    // Expose the PTY to LiveKit clients (web UI, `pty-relay --livekit-url`) through a per-session
-    // participant in the lobby, so they reach it over the same bidi-stream path a tool session
-    // uses. The gRPC endpoints serve the same PTY either way.
+    // What this session tells the fleet about itself, recorded now and published when its terminal
+    // is first bridged into LiveKit. The stack association is the load-bearing part: a PR-Stack view
+    // on another host has no other way to learn that this session is the planned node's child
+    // (D37), and it is knowledge this call has and a later reader does not — no session directory
+    // records which planned node was materialized — so it is kept rather than re-derived.
     //
-    // Spawned rather than awaited, and that is the whole point: joining a room is a network
-    // round-trip to a server this daemon does not control, and a session is made of a checkout and
-    // a process, both of which already exist by now. Awaiting it made creating a session cost
-    // whatever reaching LiveKit cost — nothing when the server answered, the client's entire
-    // patience when it was configured and unreachable. The coordinates are derived from the session
-    // id and the deployment config, not read off the connection, so they are the same answer
-    // whether the bridge has landed yet or not.
-    //
-    // TODO(session-livekit): the spawned join does not retry. A session started while LiveKit was
-    // down keeps its room name but never puts a participant in it until it is restarted.
-    let (lk_room, lk_url, lk_server_identity) = match spawner::livekit_creds_from_config(config) {
-        Some(lk) => {
-            let room_name =
-                spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
-            let server_identity = spawner::livekit_server_identity_for_session(
-                lk.daemon_instance_id.as_deref(),
-                session_id,
-            );
-            // What this session tells the fleet about itself. The stack association is the load-
-            // bearing part: a PR-Stack view on another host has no other way to learn that this
-            // session is the planned node's child (D37).
-            let participant_metadata = claude_cli_participant_metadata(&StartingClaudeCliSession {
+    // Recording it is local work over values already in hand. Putting a participant in the room is
+    // not: it is a network round-trip to a server this daemon does not control, and a session is
+    // made of a checkout and a process, both of which already exist by now. That join belongs to
+    // the moment a LiveKit consumer arrives, which is the same moment the session's room is opened
+    // — see `SessionRoomRegistry::ensure_open`. The desktop reaches its own host over IPC and
+    // drives this terminal without a bridge at all.
+    claude_cli_manager
+        .expose_terminal_to_livekit(
+            session_id,
+            claude_cli_participant_metadata(&StartingClaudeCliSession {
                 session_id,
                 model,
                 recipe: managed_recipe
@@ -3740,40 +3730,22 @@ async fn spawn_claude_cli_session_inner(
                 worktree_path: &worktree_path,
                 branch: &spawned_branch,
                 stack_parent: &stack_parent,
-            });
-            let bridge_handle = Arc::clone(&handle);
-            let bridge_url = lk.url.clone();
-            let bridge_room = room_name.clone();
-            let bridge_identity = server_identity.clone();
-            let bridge_session_id = session_id.to_string();
-            tokio::spawn(async move {
-                match crate::cli_session_manager::spawn_livekit_bridge(
-                    bridge_handle,
-                    &bridge_url,
-                    &bridge_room,
-                    &lk.api_key,
-                    &lk.api_secret,
-                    &bridge_identity,
-                    Some(participant_metadata),
-                )
-                .await
-                {
-                    Ok(()) => log::info!(
-                        target: "tddy_daemon::connection_service",
-                        "claude-cli session {}: LiveKit bridge started (identity={})",
-                        bridge_session_id,
-                        bridge_identity
-                    ),
-                    Err(e) => log::warn!(
-                        target: "tddy_daemon::connection_service",
-                        "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                        bridge_session_id,
-                        e
-                    ),
-                }
-            });
-            (room_name, lk.url.clone(), server_identity)
-        }
+            }),
+        )
+        .await;
+
+    // Where that terminal will be served once it is bridged. Derived from the session id and the
+    // deployment config rather than read off a connection, so it is the same answer whether a
+    // consumer has arrived yet or not — and deriving it contacts nothing.
+    let (lk_room, lk_url, lk_server_identity) = match spawner::livekit_creds_from_config(config) {
+        Some(lk) => (
+            spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id),
+            lk.url.clone(),
+            spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            ),
+        ),
         None => (String::new(), String::new(), String::new()),
     };
 
@@ -4251,10 +4223,68 @@ impl ConnectionServiceImpl {
             .ensure_open(
                 &hosting,
                 tddy_service::ConnectionServiceServer::new(self.clone()),
+                self,
             )
             .await
     }
 
+}
+
+#[async_trait::async_trait]
+impl crate::session_room::SessionTerminalBridge for ConnectionServiceImpl {
+    /// Bridge the session's PTY into the room a remote client drives it from.
+    ///
+    /// The same coordinates `StartSession` reported and the Telegram attach hint hands out — the
+    /// lobby, under `daemon-{instance}-{session}` — because deferring *when* the participant joins
+    /// must not move *where* it is. Both are pure functions of the deployment config and the
+    /// session id, so deriving them contacts nothing.
+    ///
+    /// A daemon with no LiveKit credentials bridges nothing, exactly as it hosts no rooms. A
+    /// failure with credentials in hand is reported: the room this was called alongside has just
+    /// been created, so LiveKit answered a moment ago, and a caller told its session is reachable
+    /// over LiveKit when its terminal is not would find that out by typing into nothing.
+    async fn bridge(&self, session_id: &str) -> Result<(), Status> {
+        let Some(lk) = spawner::livekit_creds_from_config(&self.config) else {
+            return Ok(());
+        };
+        let at = crate::cli_session_manager::LiveKitTerminalAddress {
+            url: lk.url.clone(),
+            room: spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id),
+            api_key: lk.api_key.clone(),
+            api_secret: lk.api_secret.clone(),
+            identity: spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            ),
+        };
+        match self
+            .claude_cli_manager
+            .ensure_livekit_terminal(session_id, &at)
+            .await
+        {
+            Ok(true) => log::info!(
+                target: "tddy_daemon::connection_service",
+                "session {session_id}: terminal served in {} as {}",
+                at.room,
+                at.identity
+            ),
+            Ok(false) => log::debug!(
+                target: "tddy_daemon::connection_service",
+                "session {session_id} exposes no terminal over LiveKit; its room carries no bridge"
+            ),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "session '{session_id}' has its room, but its terminal could not be served in \
+                     {} as {}: {e}",
+                    at.room, at.identity
+                )))
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ConnectionServiceImpl {
     /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
     /// admitted to.
     ///

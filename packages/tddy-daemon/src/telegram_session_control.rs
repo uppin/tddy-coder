@@ -3149,7 +3149,16 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         tddy_core::write_session_metadata(&session_dir, &meta)
             .map_err(|e| anyhow::anyhow!("write session metadata: {e}"))?;
 
-        // Optionally bridge to LiveKit.
+        // Bridged here and now, unlike the daemon's own claude-cli start, which records how its
+        // terminal is exposed and leaves the joining to the first LiveKit consumer.
+        //
+        // Because here that consumer has already arrived. The reply below hands a human the room
+        // and identity to attach with (`tddy-tools pty-relay --server-identity`), and `pty-relay`
+        // joins the room and waits for that participant — it calls nothing that would open the
+        // session first. Deferring would make the message an invitation to an empty room, and
+        // reporting the coordinates only once someone had asked over LiveKit is a contradiction
+        // when the asking *is* the message. What is deferred elsewhere is LiveKit work on a local
+        // operation; a Telegram start's last act is a LiveKit announcement.
         let (lk_room, _lk_url, lk_server_identity) = if let Some(lk) =
             crate::spawner::livekit_creds_from_config(&deps.config)
         {
@@ -3181,7 +3190,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             )
             .await
             {
-                Ok(()) => (room_name, lk.url.clone(), server_identity),
+                // The task running the participant is dropped rather than kept: a Telegram-started
+                // session's bridge is announced to a human in the reply below and never asked
+                // about again from here.
+                Ok(_serving) => (room_name, lk.url.clone(), server_identity),
                 Err(e) => {
                     log::warn!(
                         target: "tddy_daemon::telegram_session_control",
