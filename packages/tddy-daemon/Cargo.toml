@@ -125,3 +125,4 @@ rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"
+rsa = "0.9.10"

@@ -80,6 +80,21 @@ service ConnectionService {
   // probes run there, as that host's OS user. Every block distinguishes "absent" from "we could not
   // find out": an empty string would be a fabricated answer an operator acts on.
   rpc GetHostTooling(GetHostToolingRequest) returns (GetHostToolingResponse);
+  // Hosts screen — the host asks the operator a question and waits for the answer.
+  //
+  // Server-stream + unary reply, mirroring StreamWorktreeStats + CalculateWorktreeSize rather than
+  // the ACP bidi envelope: the reply is then a unary call that can be transport-restricted the way
+  // MintLocalToken is, and correlation is by prompt_id rather than an envelope sequence.
+  //
+  // ⚠ This stream is SILENT almost all the time — that is its normal state. Per
+  // packages/tddy-codegen/docs/server-streaming.md a handler whose stream can be silent MUST
+  // tokio::select! on tx.closed() as well as breaking on a send error, or it leaks one task per
+  // subscription forever. StreamHostStats escapes that only because it emits unconditionally.
+  rpc StreamHostPrompts(StreamHostPromptsRequest) returns (stream HostPromptEvent);
+  // Answers a prompt raised on StreamHostPrompts. The answer is encrypted under the host's public
+  // key (see HostPromptEvent.host_public_key), so neither the common room nor any forwarding daemon
+  // sees the plaintext. A prompt accepts exactly one answer.
+  rpc AnswerHostPrompt(AnswerHostPromptRequest) returns (AnswerHostPromptResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
@@ -1161,6 +1176,50 @@ message GetHostToolingResponse {
   HostGitIdentity git = 2;
   HostGithubCli github_cli = 3;
   HostSshAgent ssh_agent = 4;
+}
+
+message StreamHostPromptsRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+}
+
+// What the host is asking for.
+enum HostPromptKind {
+  HOST_PROMPT_KIND_UNSPECIFIED = 0;
+  // The passphrase unlocking a private key so it can be added to this host's ssh-agent.
+  HOST_PROMPT_KIND_SSH_KEY_PASSPHRASE = 1;
+}
+
+// A question the host is waiting on. Carries the key material the answer must be encrypted under, so
+// the browser never has to fetch it separately.
+message HostPromptEvent {
+  string prompt_id = 1;
+  string daemon_instance_id = 2;
+  HostPromptKind kind = 3;
+  // Human-readable subject — e.g. the key being unlocked. Never a secret.
+  string subject = 4;
+  // SPKI DER of the host's RSA public key, for RSA-OAEP (SHA-256) in the browser's SubtleCrypto.
+  bytes host_public_key = 5;
+  // SHA256 fingerprint of `host_public_key`, shown in the dialog so an operator can verify it out of
+  // band, and pinned by the client so a CHANGED key blocks the flow instead of proceeding silently.
+  string host_public_key_fingerprint = 6;
+  // When this prompt stops being answerable. An unanswered prompt must not pin an operation forever.
+  int64 expires_at_unix_ms = 7;
+}
+
+message AnswerHostPromptRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string prompt_id = 3;
+  // RSA-OAEP(SHA-256) ciphertext of the answer under HostPromptEvent.host_public_key.
+  // The plaintext MUST NOT appear anywhere on this message.
+  bytes encrypted_answer = 4;
+}
+
+message AnswerHostPromptResponse {
+  bool accepted = 1;
+  // Why the answer was refused — a wrong passphrase, an expired prompt, or one already answered.
+  string rejection_reason = 2;
 }
 
 message ListSessionWorkflowFilesRequest {

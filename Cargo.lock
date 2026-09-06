@@ -11949,6 +11949,7 @@ dependencies = [
  "prost 0.13.5",
  "rand 0.8.6",
  "reqwest 0.12.28",
+ "rsa 0.9.10",
  "rstest 0.24.0",
  "scopeguard",
  "serde",

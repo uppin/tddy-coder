@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 6/8 — **the largest and riskiest node**
 **Branch:** `feature/hosts-screen/agent-add-key` → base `feature/hosts-screen/agent-keys`
+**PR:** [#458](https://github.com/uppin/tddy-coder/pull/458)
 
 ## Initial Discovery
 
@@ -52,6 +53,53 @@ Affected: [`projects-screen-multi-host.md`](../../ft/web/projects-screen-multi-h
 - Does **not** introduce a general server-asks-the-UI primitive for the whole app. This node solves the
   passphrase case; generalizing needs a second caller.
 
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) that this PR runs into. Each must be resolved **before
+or during** this work — they are not follow-ups, because this node ships a new secret at rest.
+
+### ⛔ BLOCKING — the daemon's secret stores still truncate in place
+
+`docs/dev/TODO.md` § *The daemon's secret stores still truncate in place* (source:
+atomic-session-file-writes, 2026-08-16).
+
+`tddy_core::atomic_file` carries every other session- and daemon-state write, but
+`github_token_store.rs`, `vnc_vault.rs` and `screen_sharing_vault.rs` were left out **precisely
+because they are the ones correct about mode `0600` on creation** — and `write_atomic` copies
+permission bits only from an *existing* target, so a first write through it creates the swap file at
+the process umask and publishes a world-readable secret store.
+
+**Why this blocks this node specifically:** `FileHostKeypair` persists an **RSA private key**. Both
+available routes are wrong today:
+
+| Route | Consequence |
+|---|---|
+| Use `write_atomic` as-is | The private key is created world-readable on first write |
+| Hand-roll the `FileGitHubTokenStore` pattern | A **fourth** file joins the list this TODO exists to shrink |
+
+**Resolution required before `/green` on this node:** land the `write_atomic_with_mode(path,
+contents, mode)` variant the TODO names — it sets the swap file's mode *before* writing rather than
+copying it from the target — and build `FileHostKeypair` on it. Converting the three existing call
+sites can stay a separate PR; what cannot wait is that this node does not add a fifth hand-rolled
+secret writer, or a world-readable one.
+
+The TODO also notes the live consequence of the status quo: a full disk empties a token store, and an
+empty secrets file reads as "no credential" — surfacing as a re-auth prompt rather than as the write
+failure it is. A truncated *keypair* file would read as "no key", i.e. every prompt for this host
+would fail with no indication why.
+
+### ⚠ DURING — `connection_service.rs` is 19,600 lines
+
+`docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines* (source:
+subagent-conversation-inference, 2026-08-29), flagged rather than acted on.
+
+This node adds two handlers, a stream adapter, a field and an accessor to that file. Across the
+stack, **nodes 1, 3, 4 and 6** modify it — nodes 2, 5, 7 and 8 do not — so the stack makes a known
+problem measurably worse in four places. The TODO is explicit that a split "needs to be its own
+PR", so **this is recorded, not fixed here**.
+Its listed seam candidates do not yet include a host-facing group; when that split happens, the host
+registry, tooling probe and prompt handlers form one.
+
 ## Dependencies
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
@@ -82,6 +130,7 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 
 ## Scope
 
+- [ ] **Prerequisite:** `write_atomic_with_mode` before persisting the host private key (see Prerequisites)
 - [ ] Prompt registry: issue, expire, single-use answer
 - [ ] `StreamHostPrompts` handler **with `tx.closed()` teardown**
 - [ ] `AnswerHostPrompt` handler, auth + unknown-id rejection
@@ -263,17 +312,61 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo clippy -p tddy-daemon --all-targets -- -D warnings` — clean.
+- `host_prompts.rs` 4/4 red · `host_keypair.rs` 3/3 red · `stream_host_prompts_rpc.rs` 2/3 red
+  (`rejects_an_invalid_token` passes — the auth guard is genuinely part of the published surface).
+
+### ✅ The git hardening does NOT need inverting — confirmed
+
+The whole-work discovery assumed this node would have to undo `GIT_TERMINAL_PROMPT=0` and the null
+stdin in `packages/tddy-core/src/worktree.rs:39-52`. **It does not.** Because `#hosts-screen 5/8`
+chose the agent *wire protocol* over `ssh-add`, the passphrase is used to decrypt the private key
+**in process** and the identity is handed to the agent directly — no subprocess, no TTY, no
+`SSH_ASKPASS`. That hardening governs git subprocesses and is untouched. This node's blast radius is
+materially smaller than planned, and it is a direct dividend of node 5's decision.
+
+### `encrypt_for_test` is a real, independent encryptor
+
+It was first written as an `unimplemented!()` test helper, which the `/red` contract forbids outright
+and which hollowed out the very property the test exists to prove: a round trip where both halves go
+through our code demonstrates only that we agree with ourselves. It now goes through the **`rsa`
+crate's public API directly** (added as a dev-dependency), so the test pins the *format* — SPKI DER
+in, RSA-OAEP(SHA-256) out — which is what the browser's `SubtleCrypto` actually produces. Same
+reasoning as node 5's fingerprint fixture being `ssh-keygen`'s output rather than ours.
+
+### The three tests that carry the security claim
+
+1. `sends_an_encrypted_answer_that_does_not_contain_the_passphrase` — decodes the submitted bytes and
+   asserts the plaintext is absent. A round trip proving only "the key was added" would pass equally
+   with the passphrase in the clear, which is the entire thing this node prevents.
+2. `refuses_a_payload_encrypted_for_a_different_host` — without it, "encrypted" is decorative; the
+   property that matters is that only the addressed host can read it.
+3. `stops_the_prompt_pump_once_the_subscriber_is_gone` — a leaked pump is **unobservable** from
+   outside a stream that is silent by design, so the service publishes a `pending_prompt_pump_count()`
+   for the test to see it. A stub returning `0` would have made this pass vacuously and reported the
+   leak as absent forever; it is backed by a real counter green must maintain.
+
+Paired with `keeps_an_idle_subscription_open_rather_than_completing_it`, which brackets the opposite
+failure: a completed stream reads to the browser as the daemon dropping the feed.
+
+### ⚠ Still the decision most worth challenging
+
+Key distribution is **TOFU + a visible fingerprint**, chosen here rather than by the user. It makes an
+active key substitution *visible*, not impossible, and gives no protection on a first-ever connection
+to an already-compromised host. The weaker alternative — accept passive-only protection and disclose
+it in the dialog — remains reasonable. Recorded to be argued with.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-agent-add-key-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

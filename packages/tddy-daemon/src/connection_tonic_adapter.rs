@@ -33,25 +33,26 @@ use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
 use tddy_service::proto::connection::{
     AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest,
     AddProjectToHostResponse, AgentActivityDeltaChunk, AgentActivityDeltaRequest,
-    AgentActivityRecord, AgentConversationChunk, AttachSessionAgentRequest,
-    CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
-    CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
-    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
-    ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry, ContextManifestRequest,
-    CreateProjectRequest, CreateProjectResponse, DeleteSessionRequest, DeleteSessionResponse,
-    DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
-    GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetHostToolingRequest, GetHostToolingResponse, GetPrStatusRequest, GetPrStatusResponse,
-    GetTerminalHistoryRequest, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
-    HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
-    ListKnownHostsRequest, ListKnownHostsResponse, ListProjectBranchesRequest,
-    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
-    ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    AgentActivityRecord, AgentConversationChunk, AnswerHostPromptRequest, AnswerHostPromptResponse,
+    AttachSessionAgentRequest, CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse,
+    CancelAgentConversationRequest, CancelAgentConversationResponse, ClaimTerminalControlRequest,
+    ClaimTerminalControlResponse, CleanWorktreeRequest, CleanWorktreeResponse,
+    ConnectSessionRequest, ConnectSessionResponse, ContextFileBatchChunk, ContextFileChunk,
+    ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
+    DeleteSessionRequest, DeleteSessionResponse, DetachSessionAgentRequest, ExecuteToolChunk,
+    ExecuteToolRequest, ExecuteToolResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse,
+    GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetDemoVmStatusRequest,
+    GetDemoVmStatusResponse, GetHostToolingRequest, GetHostToolingResponse, GetPrStatusRequest,
+    GetPrStatusResponse, GetTerminalHistoryRequest, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, HostPromptEvent, HostStatsEvent, LinkStackNodeRequest,
+    LinkStackNodeResponse, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionAgentsRequest, ListSessionToolCallsRequest,
+    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
+    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
@@ -70,11 +71,12 @@ use tddy_service::proto::connection::{
     SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
     StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
     StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest,
-    StreamSessionActivityRequest, StreamSessionAgentsRequest, StreamSessionNotificationsRequest,
-    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, TerminalControlEvent,
-    TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    WatchTerminalControlRequest, WorktreeFileChunk, WorktreeStatsEvent,
+    StreamAcpReplayRequest, StreamHostPromptsRequest, StreamHostStatsRequest,
+    StreamLiveKitRoomsRequest, StreamSessionActivityRequest, StreamSessionAgentsRequest,
+    StreamSessionNotificationsRequest, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
+    TerminalControlEvent, TerminalHistoryChunk, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, WatchTerminalControlRequest, WorktreeFileChunk,
+    WorktreeStatsEvent,
 };
 use tddy_service::proto::connection::{
     DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest,
@@ -190,6 +192,7 @@ where
     T::StreamAcpReplayStream: 'static,
     T::StreamSessionAgentsStream: 'static,
     T::PromptAgentConversationStream: 'static,
+    T::StreamHostPromptsStream: 'static,
 {
     async fn list_tools(
         &self,
@@ -532,6 +535,39 @@ where
         request: tonic::Request<GetHostToolingRequest>,
     ) -> Result<tonic::Response<GetHostToolingResponse>, tonic::Status> {
         let resp = RpcConnectionService::get_host_tooling(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    /// Server streaming: questions this host is waiting on an operator to answer. Silent by nature.
+    type StreamHostPromptsStream =
+        Pin<Box<dyn Stream<Item = Result<HostPromptEvent, tonic::Status>> + Send>>;
+
+    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
+    #[allow(clippy::result_large_err)]
+    async fn stream_host_prompts(
+        &self,
+        request: tonic::Request<StreamHostPromptsRequest>,
+    ) -> Result<tonic::Response<Self::StreamHostPromptsStream>, tonic::Status> {
+        let resp = RpcConnectionService::stream_host_prompts(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
+        Ok(tonic::Response::new(Box::pin(outbound)))
+    }
+
+    async fn answer_host_prompt(
+        &self,
+        request: tonic::Request<AnswerHostPromptRequest>,
+    ) -> Result<tonic::Response<AnswerHostPromptResponse>, tonic::Status> {
+        let resp = RpcConnectionService::answer_host_prompt(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

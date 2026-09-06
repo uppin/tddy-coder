@@ -21,20 +21,21 @@ use tddy_service::proto::connection::{
 };
 use tddy_service::proto::connection::{
     AddPlannedPrRequest, AddPlannedPrResponse, AddProjectToHostRequest, AddProjectToHostResponse,
-    AgentConversationChunk, AgentInfo, AttachSessionAgentRequest, BranchConflict,
-    CalculateWorktreeSizeRequest, CalculateWorktreeSizeResponse, CancelAgentConversationRequest,
-    CancelAgentConversationResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse,
-    CleanWorktreeRequest, CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
+    AgentConversationChunk, AgentInfo, AnswerHostPromptRequest, AnswerHostPromptResponse,
+    AttachSessionAgentRequest, BranchConflict, CalculateWorktreeSizeRequest,
+    CalculateWorktreeSizeResponse, CancelAgentConversationRequest, CancelAgentConversationResponse,
+    ClaimTerminalControlRequest, ClaimTerminalControlResponse, CleanWorktreeRequest,
+    CleanWorktreeResponse, ConnectSessionRequest, ConnectSessionResponse,
     ConnectionService as ConnectionServiceTrait, ContextFileBatchChunk, ContextFileChunk,
     ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
-    HostGitIdentity, HostGithubCli, HostSshAgent, KnownHostEntry, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    HostGitIdentity, HostGithubCli, HostPromptEvent, HostSshAgent, KnownHostEntry,
+    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListKnownHostsRequest,
+    ListKnownHostsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
     ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
     ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
@@ -53,9 +54,9 @@ use tddy_service::proto::connection::{
     SignalSessionRequest, SignalSessionResponse, SplitAgentPlacement, SshAgentKey,
     StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    StreamSessionAgentsRequest, StreamTerminalOutputRequest, StreamWorktreeStatsRequest,
-    SubagentInfo, TerminalControlEvent, TerminalHistoryChunk, TerminalSessionInfo, ToolInfo,
-    UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
+    StreamHostPromptsRequest, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
+    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
+    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
     WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
     WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
@@ -887,6 +888,34 @@ impl Stream for MpscHostStatsStream {
 
 impl Unpin for MpscHostStatsStream {}
 
+/// Stream adapter for [`HostPromptEvent`] server-streaming.
+///
+/// ⚠ Unlike `MpscHostStatsStream`, the feed behind this one is **silent almost all the time** — a
+/// host raises a prompt only when an operator starts an add-key flow. Per
+/// `packages/tddy-codegen/docs/server-streaming.md`, a handler whose stream can be silent must
+/// `tokio::select!` on `tx.closed()` as well as breaking on a send error, or its task leaks one per
+/// subscription forever. `stream_host_stats` escapes that only because it emits unconditionally.
+pub struct MpscHostPromptStream {
+    rx: tokio::sync::mpsc::UnboundedReceiver<HostPromptEvent>,
+}
+
+impl Stream for MpscHostPromptStream {
+    type Item = Result<HostPromptEvent, Status>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match self.rx.poll_recv(cx) {
+            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
+
+impl Unpin for MpscHostPromptStream {}
+
 /// Stream adapter backed by an mpsc channel for [`WorktreeStatsEvent`] server-streaming. The first
 /// event carries a full snapshot; each subsequent event carries one worktree's updated size row.
 #[derive(Debug)]
@@ -1186,6 +1215,13 @@ pub struct ConnectionServiceImpl {
     host_registry: Arc<dyn HostRegistry>,
     /// Probes what this host has installed and configured, behind `GetHostTooling`.
     host_tooling: Arc<dyn HostToolingProbe>,
+    /// Live `StreamHostPrompts` pumps.
+    ///
+    /// Exists so a test can observe a **leaked** pump. The prompt stream is silent by design, so a
+    /// pump that outlived its subscriber is indistinguishable from a correctly idle one from the
+    /// outside — see `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`. Incremented when a
+    /// subscription opens and decremented when its task returns.
+    prompt_pumps: Arc<std::sync::atomic::AtomicUsize>,
     /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
     /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
@@ -1850,6 +1886,7 @@ impl ConnectionServiceImpl {
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
         let host_tooling: Arc<dyn HostToolingProbe> = Arc::new(SubprocessHostToolingProbe);
+        let prompt_pumps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -1882,6 +1919,7 @@ impl ConnectionServiceImpl {
             eligible_daemon_source,
             host_registry,
             host_tooling,
+            prompt_pumps,
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
@@ -2099,6 +2137,16 @@ impl ConnectionServiceImpl {
     ) -> Self {
         self.idle_tracker = Some(tracker);
         self
+    }
+
+    /// How many `StreamHostPrompts` pumps are currently running.
+    ///
+    /// A pump must not outlive its subscriber: the stream is silent by nature, so without the
+    /// `tokio::select!` on `tx.closed()` the task parks forever on a prompt that never comes,
+    /// leaking one per subscription for the life of the daemon.
+    #[must_use]
+    pub fn pending_prompt_pump_count(&self) -> usize {
+        self.prompt_pumps.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Substitute the host tooling probe (builder pattern) — lets tests state what a host has
@@ -13249,6 +13297,41 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             github_cli: Some(github_cli_message(&tooling.github_cli)),
             ssh_agent: Some(ssh_agent_message(&tooling.ssh_agent)),
         }))
+    }
+
+    type StreamHostPromptsStream = MpscHostPromptStream;
+
+    /// Questions this host is waiting on an operator to answer.
+    ///
+    /// ⚠ The stream is silent almost all the time, so the sampling task **must** select on
+    /// `tx.closed()` as well as breaking on a send error — see [`MpscHostPromptStream`]. The
+    /// regression test for it is `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`.
+    async fn stream_host_prompts(
+        &self,
+        request: Request<StreamHostPromptsRequest>,
+    ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        // TODO(agent-add-key): implement
+        unimplemented!("agent-add-key: stream_host_prompts")
+    }
+
+    /// Submit the encrypted answer to a pending prompt.
+    ///
+    /// The request carries ciphertext only; the plaintext exists in this process for the duration of
+    /// the unlock and is never persisted or logged.
+    async fn answer_host_prompt(
+        &self,
+        request: Request<AnswerHostPromptRequest>,
+    ) -> Result<Response<AnswerHostPromptResponse>, Status> {
+        let req = request.into_inner();
+        let _github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+
+        // TODO(agent-add-key): implement
+        unimplemented!("agent-add-key: answer_host_prompt")
     }
 
     async fn list_session_workflow_files(
