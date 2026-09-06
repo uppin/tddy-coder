@@ -34,6 +34,15 @@ jobs:
     name: Rust lint
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      # CI never reads ~/.tddy/build-cache.yaml — there is no per-host file on a
+      # runner. Naming the backend here is what `scripts/build-cache-env.sh` reads
+      # first, so every `./dev` invocation below compiles through sccache against
+      # the Actions cache. See docs/dev/guides/build-cache.md.
+      TDDY_BUILD_CACHE: github-actions
+      # Namespaces the cache per architecture. The two Linux runners share
+      # `runner.os`, and an arm64 object is useless to the x86_64 job.
+      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -42,6 +51,17 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
+
+      # sccache talks to the same Actions cache service `actions/cache` uses, and
+      # its credentials reach a step only through a JS action — `ACTIONS_RESULTS_URL`
+      # and `ACTIONS_RUNTIME_TOKEN` are not in a `run:` step's environment. This
+      # re-exports them so `./dev` can hand them to sccache.
+      - name: Expose the Actions cache to sccache
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -68,6 +88,12 @@ jobs:
       - name: cargo clippy
         run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # Hit rate for this job, so a cache that has quietly stopped working shows
+      # up as a number in the log rather than as a slow build nobody attributes.
+      - name: sccache stats
+        if: always()
+        run: ./dev sccache --show-stats
+
   rust-test:
     name: Rust tests
     runs-on: ubuntu-latest
@@ -75,6 +101,9 @@ jobs:
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -83,6 +112,13 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
+
+      - name: Expose the Actions cache to sccache # see rust-lint
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -125,6 +161,10 @@ jobs:
         continue-on-error: true
         run: ./dev cargo nextest run --workspace --profile ci --locked
 
+      - name: sccache stats
+        if: always()
+        run: ./dev sccache --show-stats
+
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
@@ -150,6 +190,9 @@ jobs:
     # workspace binaries rather than linking them, and jobs get separate
     # runners — the only way to share a built binary is to publish it.
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -158,6 +201,13 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
+
+      - name: Expose the Actions cache to sccache # see rust-lint
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -185,6 +235,10 @@ jobs:
 
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
+
+      - name: sccache stats
+        if: always()
+        run: ./dev sccache --show-stats
 
       # Binaries that tests exec by path, not all of target/debug — the whole
       # directory is many GB. Each belongs to a package other than the one whose
@@ -280,6 +334,9 @@ jobs:
     # runner has no /dev/kvm node at all, so a guest would fall back to TCG and take
     # hours (measured, see docs/dev/guides/ci.md).
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -288,6 +345,13 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
+
+      - name: Expose the Actions cache to sccache # see rust-lint
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -311,6 +375,10 @@ jobs:
 
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
+
+      - name: sccache stats
+        if: always()
+        run: ./dev sccache --show-stats
 
   web:
     name: Web tests
