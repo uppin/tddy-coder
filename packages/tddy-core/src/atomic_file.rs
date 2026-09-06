@@ -24,12 +24,36 @@ use std::path::{Path, PathBuf};
 ///
 /// Missing parent directories are created. An existing target's permission bits are carried over
 /// to the replacement, so a mode-0600 file (`.session.yaml` carries a hook token) does not widen
-/// to the process umask when it is rewritten.
+/// to the process umask when it is rewritten. A target that does **not** exist yet gets whatever
+/// the process umask allows — for a secret, use [`write_atomic_with_mode`] instead.
 pub fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
+    write_swapped(path, contents.as_ref(), None)
+}
+
+/// [`write_atomic`], with the replacement's permissions fixed by the caller instead of copied from
+/// the target.
+///
+/// `write_atomic` can only carry over bits that already exist, so the **first** write to a path
+/// creates the swap file at the process umask — under the usual `0o022` that is a world-readable
+/// file. For session state that is merely untidy; for a secret it is a disclosure, and the first
+/// write is exactly when a secret is created. `mode` is applied when the swap file is created, so
+/// the bytes are never on disk at any wider mode, not even briefly.
+///
+/// `mode` is a Unix permission bitmask (`0o600` for owner-only). It is ignored on platforms without
+/// Unix permissions, where this behaves as [`write_atomic`].
+pub fn write_atomic_with_mode(
+    path: &Path,
+    contents: impl AsRef<[u8]>,
+    mode: u32,
+) -> io::Result<()> {
+    write_swapped(path, contents.as_ref(), Some(mode))
+}
+
+fn write_swapped(path: &Path, contents: &[u8], mode: Option<u32>) -> io::Result<()> {
     let dir = parent_dir(path);
     fs::create_dir_all(&dir)?;
     let swap = swap_path(path, &dir);
-    match write_swap_then_rename(&swap, path, &dir, contents.as_ref()) {
+    match write_swap_then_rename(&swap, path, &dir, contents, mode) {
         Ok(()) => Ok(()),
         Err(e) => {
             // The swap file is this call's private scratch space; a failed call must not leave it
@@ -76,16 +100,21 @@ fn write_swap_then_rename(
     final_path: &Path,
     dir: &Path,
     contents: &[u8],
+    mode: Option<u32>,
 ) -> io::Result<()> {
     {
-        let mut file = File::create(swap)?;
+        let mut file = create_swap(swap, mode)?;
         file.write_all(contents)?;
         // Without this the bytes may still be in page cache, and a full disk reports `ENOSPC`
         // long after `write` returned success. Forcing it here keeps the failure on the swap
         // file, before the rename makes it the session's state.
         file.sync_all()?;
     }
-    carry_over_permissions(final_path, swap)?;
+    // A caller-stated mode is already on the swap file, set as it was created; carrying the
+    // target's bits over it would undo the very thing that mode was asked for.
+    if mode.is_none() {
+        carry_over_permissions(final_path, swap)?;
+    }
 
     // Windows `rename` refuses an existing target; POSIX replaces it atomically.
     #[cfg(windows)]
@@ -100,6 +129,28 @@ fn write_swap_then_rename(
         let _ = handle.sync_all();
     }
     Ok(())
+}
+
+/// Create the swap file, at `mode` when the caller stated one.
+///
+/// The mode is passed to `open` rather than set afterwards: a `create` followed by
+/// `set_permissions` leaves a window in which the file exists at the process umask, which for a
+/// secret is a window in which anyone can read it.
+#[cfg(unix)]
+fn create_swap(swap: &Path, mode: Option<u32>) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    if let Some(mode) = mode {
+        options.mode(mode);
+    }
+    options.open(swap)
+}
+
+#[cfg(not(unix))]
+fn create_swap(swap: &Path, _mode: Option<u32>) -> io::Result<File> {
+    File::create(swap)
 }
 
 #[cfg(unix)]
@@ -227,6 +278,25 @@ mod tests {
         assert!(
             swap_files(dir.path()).is_empty(),
             "no swap files may survive concurrent writes"
+        );
+    }
+
+    /// A secret's **first** write must land owner-only: `write_atomic` can only copy bits from a
+    /// target that already exists, and a freshly generated private key has no such target.
+    #[cfg(unix)]
+    #[test]
+    fn creates_a_new_file_at_the_requested_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host-prompt-key.pem");
+
+        write_atomic_with_mode(&path, "-----BEGIN PRIVATE KEY-----\n", 0o600).unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "a first write of a secret must not land at the process umask"
         );
     }
 

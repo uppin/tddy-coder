@@ -96,6 +96,10 @@ portable-pty = "0.9"
 # a log facade we do not use. The blocking client and the protocol types are ungated.
 ssh-agent-lib = { version = "0.6.0", default-features = false }
 ssh-key = "0.6.7"
+# `host_keypair.rs`: the host's RSA keypair, and RSA-OAEP(SHA-256) decryption of an answer the
+# browser encrypted with `SubtleCrypto`. Pinned — it is a cryptographic implementation, and a patch
+# release changing key generation or padding behaviour is not something to pick up silently.
+rsa = "=0.9.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
@@ -125,4 +129,3 @@ rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"
-rsa = "0.9.10"

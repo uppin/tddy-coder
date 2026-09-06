@@ -70,6 +70,8 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
+use crate::host_keypair::HostKeypair;
+use crate::host_prompts::{AnswerRejection, HostPromptRegistry};
 use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::host_tooling::{HostToolingProbe, SubprocessHostToolingProbe};
@@ -1030,6 +1032,18 @@ fn ssh_agent_message(agent: &crate::ssh_agent::AgentStatus) -> HostSshAgent {
     }
 }
 
+/// Why an answer was refused, in words for the operator who sent it.
+///
+/// The three cases read very differently to whoever is at the dialog: one says try again, one says
+/// start over, and one says someone else already answered this.
+fn rejection_reason(rejection: &AnswerRejection) -> String {
+    match rejection {
+        AnswerRejection::UnknownPrompt => "no prompt is waiting on that answer".to_string(),
+        AnswerRejection::Expired => "this prompt expired before the answer arrived".to_string(),
+        AnswerRejection::AlreadyAnswered => "this prompt has already been answered".to_string(),
+    }
+}
+
 /// Put a probed `gh` state on the wire. The login is the **host's**, not the calling session's.
 fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> HostGithubCli {
     HostGithubCli {
@@ -1215,6 +1229,13 @@ pub struct ConnectionServiceImpl {
     host_registry: Arc<dyn HostRegistry>,
     /// Probes what this host has installed and configured, behind `GetHostTooling`.
     host_tooling: Arc<dyn HostToolingProbe>,
+    /// Questions this host is waiting on an operator to answer, behind `StreamHostPrompts` and
+    /// `AnswerHostPrompt`. Shared across clones, so the answer arriving on one connection reaches
+    /// the prompt raised on another.
+    host_prompts: Arc<dyn HostPromptRegistry>,
+    /// The keypair a prompt publishes so its answer can be encrypted end to end, and the only thing
+    /// on this host able to read one back.
+    host_keypair: Arc<dyn HostKeypair>,
     /// Live `StreamHostPrompts` pumps.
     ///
     /// Exists so a test can observe a **leaked** pump. The prompt stream is silent by design, so a
@@ -1886,6 +1907,14 @@ impl ConnectionServiceImpl {
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
         let host_tooling: Arc<dyn HostToolingProbe> = Arc::new(SubprocessHostToolingProbe);
+        let host_prompts: Arc<dyn HostPromptRegistry> =
+            Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
+        // Alongside the host registry, and generated on first use rather than here: a host whose
+        // operator never adds a key never pays for an RSA keygen.
+        let host_keypair: Arc<dyn HostKeypair> =
+            Arc::new(crate::host_keypair::FileHostKeypair::new(
+                crate::host_registry::host_registry_dir(&tddy_data_dir),
+            ));
         let prompt_pumps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
@@ -1919,6 +1948,8 @@ impl ConnectionServiceImpl {
             eligible_daemon_source,
             host_registry,
             host_tooling,
+            host_prompts,
+            host_keypair,
             prompt_pumps,
             common_room_livekit_room,
             telegram,
@@ -13310,12 +13341,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<StreamHostPromptsRequest>,
     ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
+        self.record_rpc_activity();
         let req = request.into_inner();
         let _github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
 
-        // TODO(agent-add-key): implement
-        unimplemented!("agent-add-key: stream_host_prompts")
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostPromptEvent>();
+        let prompts = Arc::clone(&self.host_prompts);
+        let keypair = Arc::clone(&self.host_keypair);
+        let daemon_instance_id = local_instance_id_for_config(&self.config);
+        let counted = crate::host_prompt_stream::PumpCount::running(Arc::clone(&self.prompt_pumps));
+
+        tokio::spawn(async move {
+            // Moved into the task rather than dropped at the end of it, so the count falls when the
+            // pump actually stops — including if it panics.
+            let _counted = counted;
+            crate::host_prompt_stream::pump_host_prompts(prompts, keypair, daemon_instance_id, tx)
+                .await;
+        });
+
+        Ok(Response::new(MpscHostPromptStream { rx }))
     }
 
     /// Submit the encrypted answer to a pending prompt.
@@ -13326,12 +13371,39 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<AnswerHostPromptRequest>,
     ) -> Result<Response<AnswerHostPromptResponse>, Status> {
+        self.record_rpc_activity();
         let req = request.into_inner();
         let _github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
 
-        // TODO(agent-add-key): implement
-        unimplemented!("agent-add-key: answer_host_prompt")
+        // A refusal is a `false` on the response, not a `Status` error: an expired or replayed
+        // prompt is an ordinary outcome of an operator taking their time, and the browser has to
+        // tell the operator which of the three it was.
+        //
+        // TODO(agent-add-key): hand the accepted ciphertext to the operation waiting on this
+        // prompt, which decrypts it, unlocks the key, adds the identity and drops the plaintext.
+        // Nothing raises a prompt yet, so there is no such operation to hand it to; it arrives with
+        // the add-key action (`docs/dev/1-WIP/2026-09-06-agent-add-key.md` § Implementation
+        // milestones).
+        //
+        // Nothing about the payload is logged here at any level, deliberately: a passphrase must
+        // never reach a log, and the cheapest way to keep that true is for this handler to have
+        // nothing to say about what it was given.
+        let answered = self.host_prompts.answer(
+            &req.prompt_id,
+            req.encrypted_answer,
+            crate::host_registry::now_unix_ms(),
+        );
+        Ok(Response::new(match answered {
+            Ok(()) => AnswerHostPromptResponse {
+                accepted: true,
+                rejection_reason: String::new(),
+            },
+            Err(rejection) => AnswerHostPromptResponse {
+                accepted: false,
+                rejection_reason: rejection_reason(&rejection),
+            },
+        }))
     }
 
     async fn list_session_workflow_files(

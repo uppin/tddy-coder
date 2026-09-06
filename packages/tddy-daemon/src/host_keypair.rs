@@ -18,7 +18,21 @@
 //! A passphrase is small, so plain **RSA-OAEP (SHA-256)** suffices — a 2048-bit key carries ~190
 //! bytes, comfortably more than any passphrase. No hybrid AEAD envelope is needed.
 
+use rsa::pkcs8::{DecodePrivateKey, EncodePrivateKey, EncodePublicKey, LineEnding};
+use rsa::{Oaep, RsaPrivateKey, RsaPublicKey};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// 2048 bits: an OAEP-SHA256 payload of ~190 bytes, comfortably more than any passphrase, at the
+/// size every `SubtleCrypto` implementation supports without argument.
+const KEY_BITS: usize = 2048;
+
+/// The private half is a secret at rest — readable by its owner and nobody else, from the moment
+/// the file exists.
+const OWNER_ONLY_FILE: u32 = 0o600;
+
+/// What the private half is stored as, under the keypair's storage directory.
+const PRIVATE_KEY_FILE: &str = "host-prompt-key.pem";
 
 /// A host's published identity for encrypted answers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,30 +56,122 @@ pub trait HostKeypair: Send + Sync {
 }
 
 /// A keypair persisted under one directory, generated on first use.
+///
+/// Generation is deferred to the first prompt rather than done at startup: a host whose operator
+/// never adds a key never pays for an RSA keygen, and a daemon that cannot write its data directory
+/// fails at the prompt that needs the key rather than at boot.
 pub struct FileHostKeypair {
-    #[allow(dead_code)] // read by generation/loading once implemented (#hosts-screen 6/8 green)
     private_key_path: PathBuf,
+    /// The parsed key, so a stream forwarding prompts does not re-read and re-parse a PEM per
+    /// event. `None` until the first [`Self::published`] or [`Self::decrypt`].
+    loaded: Mutex<Option<RsaPrivateKey>>,
 }
 
 impl FileHostKeypair {
     /// Keep the private half in `storage_dir`, owner-only.
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
         Self {
-            private_key_path: storage_dir.as_ref().join("host-prompt-key.pem"),
+            private_key_path: storage_dir.as_ref().join(PRIVATE_KEY_FILE),
+            loaded: Mutex::new(None),
         }
+    }
+
+    /// This host's private key, generating and persisting one the first time it is asked for.
+    fn private_key(&self) -> Result<RsaPrivateKey, String> {
+        // Held across the generation so two concurrent first prompts cannot each generate a key and
+        // race to publish a different one — the second would silently invalidate a fingerprint the
+        // first had already shown to an operator.
+        let mut loaded = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(key) = loaded.as_ref() {
+            return Ok(key.clone());
+        }
+        let key = self.read_or_generate()?;
+        *loaded = Some(key.clone());
+        Ok(key)
+    }
+
+    fn read_or_generate(&self) -> Result<RsaPrivateKey, String> {
+        match std::fs::read_to_string(&self.private_key_path) {
+            Ok(pem) => RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| {
+                // Not regenerated on top of it: a key file that exists but does not parse is a
+                // damaged secret, and overwriting it would destroy the only copy of the identity
+                // clients have already pinned.
+                format!(
+                    "{} is not a usable host prompt key: {e}",
+                    self.private_key_path.display()
+                )
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.generate_and_persist(),
+            Err(e) => Err(format!("reading {}: {e}", self.private_key_path.display())),
+        }
+    }
+
+    fn generate_and_persist(&self) -> Result<RsaPrivateKey, String> {
+        let key = RsaPrivateKey::new(&mut rand::thread_rng(), KEY_BITS)
+            .map_err(|e| format!("generating this host's prompt key: {e}"))?;
+        let pem = key
+            .to_pkcs8_pem(LineEnding::LF)
+            .map_err(|e| format!("encoding this host's prompt key: {e}"))?;
+        // `write_atomic_with_mode`, not `write_atomic`: this is the *first* write to the path, and
+        // `write_atomic` can only carry permissions over from a target that already exists — a
+        // private key created at the process umask is a world-readable private key. The atomic half
+        // matters too: a truncated key file reads as "no key", which would fail every prompt on this
+        // host with nothing to say why.
+        tddy_core::atomic_file::write_atomic_with_mode(
+            &self.private_key_path,
+            pem.as_bytes(),
+            OWNER_ONLY_FILE,
+        )
+        .map_err(|e| format!("{}: {e}", self.private_key_path.display()))?;
+        Ok(key)
     }
 }
 
 impl HostKeypair for FileHostKeypair {
     fn published(&self) -> Result<PublishedKey, String> {
-        // TODO(agent-add-key): implement
-        unimplemented!("agent-add-key: published")
+        let public = RsaPublicKey::from(&self.private_key()?);
+        let spki_der = public
+            .to_public_key_der()
+            .map_err(|e| format!("encoding this host's public key: {e}"))?
+            .as_bytes()
+            .to_vec();
+        let fingerprint = fingerprint_of(&spki_der);
+        Ok(PublishedKey {
+            spki_der,
+            fingerprint,
+        })
     }
 
-    fn decrypt(&self, _ciphertext: &[u8]) -> Result<Vec<u8>, String> {
-        // TODO(agent-add-key): implement
-        unimplemented!("agent-add-key: decrypt")
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+        // Blinded: decryption timing that varies with the key is the classic RSA side channel, and
+        // this key sits behind an endpoint anyone with a session can call.
+        self.private_key()?
+            .decrypt_blinded(
+                &mut rand::thread_rng(),
+                Oaep::new::<sha2::Sha256>(),
+                ciphertext,
+            )
+            // Deliberately says nothing about the ciphertext beyond that it was not readable here:
+            // the failure an operator sees is "this host cannot read that answer", and the reasons
+            // (wrong host, corrupted payload) are indistinguishable to them anyway.
+            .map_err(|e| format!("this host cannot read that answer: {e}"))
     }
+}
+
+/// The `SHA256:` fingerprint of an SPKI DER public key, in the form an operator already recognises
+/// from `ssh-add -l`.
+///
+/// Hashes the published bytes themselves, so what the dialog shows is a fingerprint of exactly what
+/// the browser imported — a digest over a re-encoding could differ from the key actually in use.
+fn fingerprint_of(spki_der: &[u8]) -> String {
+    use base64::Engine;
+    use sha2::Digest;
+
+    let digest = sha2::Sha256::digest(spki_der);
+    format!(
+        "SHA256:{}",
+        base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)
+    )
 }
 
 #[cfg(test)]
@@ -94,6 +200,44 @@ mod tests {
             !first.spki_der.is_empty(),
             "the SPKI DER is what SubtleCrypto imports"
         );
+    }
+
+    /// A restart must not rotate this host's identity: a client that pinned the fingerprint on
+    /// first sight blocks the flow with a "the key changed" warning if it does, which is exactly the
+    /// alarm a real substitution would raise. The in-memory cache cannot cover this, because a
+    /// restarted daemon has none.
+    #[test]
+    fn republishes_the_key_it_persisted_when_the_host_starts_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let before_restart = FileHostKeypair::new(dir.path())
+            .published()
+            .expect("a keypair is generated on first use");
+
+        let after_restart = FileHostKeypair::new(dir.path())
+            .published()
+            .expect("and read back from disk by the next process");
+
+        assert_eq!(after_restart.fingerprint, before_restart.fingerprint);
+    }
+
+    /// The private half is a secret at rest, and this is the file's **first** write — the one
+    /// `write_atomic` alone would create at the process umask, i.e. world-readable.
+    #[cfg(unix)]
+    #[test]
+    fn persists_the_private_half_readable_only_by_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let keypair = FileHostKeypair::new(dir.path());
+
+        keypair.published().expect("a keypair is generated");
+
+        let mode = std::fs::metadata(dir.path().join(PRIVATE_KEY_FILE))
+            .expect("the private half is on disk")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     /// The round trip the whole node rests on: what the browser encrypts under the published key,
