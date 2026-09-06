@@ -247,6 +247,49 @@ proven rather than asserted.
 The fingerprint fixture is pinned against **OpenSSH's own output** (`ssh-keygen -lf` for a published
 ed25519 blob), not against our derivation — otherwise the test would prove only self-consistency.
 
+### Green phase (reworked onto `ssh-agent-lib`'s blocking client)
+
+The hand-rolled request/response handling (`Fields`, `identities_in`, `read_exactly`,
+`MAX_ANSWER_BYTES`, the raw message-type constants) is gone: `ssh_agent_lib::blocking::Client`
+speaks the protocol and `ssh_agent.rs` supplies the transport and every bound. That reverses the
+red phase's "read the list by hand" rationale, which has been removed from the module header rather
+than left to contradict the code.
+
+- **`ssh-agent-lib` is now `default-features = false`.** Its `default = ["agent"]` is the *server*
+  side; `blocking` and `proto` are ungated. `Cargo.lock` drops **`service-binding` 3.0.0** and
+  **`raunch` 1.0.1** outright, and `async-trait`, `futures`, `log`, `tokio` and `tokio-util` are no
+  longer pulled *by this crate* (they remain in the tree for others).
+- **Correction to the red-phase note above:** `ssh-key`'s `encryption` does stay off, but **`rsa`
+  is on** — `ssh-agent-lib` enables `ssh-key/crypto`, which is `ed25519 + p256 + p384 + p521 +
+  rsa`, and feature unification applies it to our own entry too. It cannot be turned off while
+  depending on `ssh-agent-lib`.
+- **The client is bounded, not trusted.** Both socket timeouts are armed once on the freshly
+  connected socket (macOS refuses `setsockopt` after the peer has answered and closed), and an
+  `UntilDeadline` transport wrapper fails the exchange once it has run past `AGENT_TIMEOUT` in
+  total, so an agent dribbling a byte at a time cannot renew the per-read timeout. The blocking
+  client runs on the thread `host_tooling::start_agent_probe` already starts for it.
+- **`FakeAgent` now asserts the whole request frame**, length prefix included — the encoding is the
+  library's, so asserting only the type byte would let its framing drift unnoticed.
+- **The `silent()` fixture did not actually stay silent.** Both ends of its channel moved into the
+  accepting thread, so the connection was dropped immediately and the timeout test passed in 0.00s
+  down the "peer closed" path. The accepted stream is now held by the fixture; the test asserts
+  `elapsed >= AGENT_TIMEOUT` so it cannot regress to that path silently.
+- **A passwd lookup that fails is no longer reported as "no agent".** `AgentSocketResolver::
+  socket_for` returns `Result<Option<PathBuf>, String>`: `Ok(None)` is "looked, found none",
+  `Err` is "could not look", and only the first is a negative finding.
+- **A certificate matches `ssh-add -l` on both axes.** The fingerprint comes from
+  `PublicCredential::key_data()` — the certified key, which is what OpenSSH hashes for a key and for
+  a certificate over it alike (`ssh-keygen -lf id.pub` and `ssh-keygen -lf id-cert.pub` print the
+  same digest) — while the key type comes from the whole credential, so the row still reads
+  `ssh-ed25519-cert-v01@openssh.com` where OpenSSH prints `(ED25519-CERT)`. Both fixtures are pinned
+  against `ssh-keygen -lf`, not against our own output.
+- **Known limits, recorded in the module header:** one undecodable identity fails the whole list
+  (`Identity::decode_vec` is all-or-nothing); a comment that is not UTF-8 sinks the list with it,
+  where the hand-rolled reader rendered it lossily and kept the key — a real behavioural regression
+  from the switch, not just a coarser message; the client allocates the answer's announced length
+  before reading it, with no cap of its own; and neither `getpwnam_r` nor `UnixStream::connect` is
+  bounded, so finding the socket can park the probe thread indefinitely.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-agent-keys-initial-discovery.md`)

@@ -24,7 +24,9 @@ import { hostSshAgentPage } from "../support/pages/hostsScreenPage";
 const HOST = "workstation-1";
 const FINGERPRINT = "SHA256:JfISx02kSjWJevGy/MjUdXCv76HaRM3YkYNvepTyHD8";
 
-function mountAgent(sshAgent: ReturnType<typeof create<typeof HostSshAgentSchema>>) {
+function mountAgent(
+  sshAgent: ReturnType<typeof create<typeof HostSshAgentSchema>> | undefined,
+) {
   mountWithRpc(
     withSelectedDaemon(<HostRowSshAgent instanceId={HOST} sshAgent={sshAgent} />),
     anInMemoryRpcBackend(),
@@ -97,5 +99,43 @@ describe("Hosts screen ssh-agent", () => {
     hostSshAgentPage.section(HOST).should("contain.text", "/home/ada/.ssh/id_ed25519");
     hostSshAgentPage.section(HOST).should("not.contain.text", "Path");
     hostSshAgentPage.section(HOST).should("not.contain.text", "File");
+  });
+  /**
+   * The regression guard for the open-enum trap `unanswered` in `HostRowTooling.tsx` documents.
+   *
+   * proto3 enums are open, so a daemon newer than this bundle can send a `ProbeOutcome` the
+   * generated enum cannot name. Rendering that as "No agent" would send an operator to start an
+   * agent that is very possibly already running — a confident claim about a probe nobody understood.
+   */
+  it("treats an outcome this bundle cannot name as unknown rather than as no agent", () => {
+    // Given a daemon reporting an outcome newer than anything this bundle's enum knows,
+    // alongside the `reachable: false` that an absent agent would also carry
+    const anOutcomeFromANewerDaemon = 99 as ProbeOutcome;
+
+    // When the row renders that block
+    mountAgent(
+      create(HostSshAgentSchema, {
+        outcome: anOutcomeFromANewerDaemon,
+        reachable: false,
+        keys: [],
+      }),
+    );
+
+    // Then it admits it does not know, and makes no claim about an agent
+    hostSshAgentPage.section(HOST).should("contain.text", "Could not check");
+    hostSshAgentPage.section(HOST).should("not.contain.text", "No agent");
+    hostSshAgentPage.section(HOST).should("not.contain.text", "No keys loaded");
+  });
+
+  it("says nothing about a host that has not answered yet", () => {
+    // Given a host with no ssh-agent block at all — the state every row starts in
+
+    // When the row renders
+    mountAgent(undefined);
+
+    // Then it waits, rather than borrowing the shape of an answer
+    hostSshAgentPage.section(HOST).should("contain.text", "\u2026");
+    hostSshAgentPage.section(HOST).should("not.contain.text", "No agent");
+    hostSshAgentPage.section(HOST).should("not.contain.text", "No keys loaded");
   });
 });

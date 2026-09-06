@@ -18,17 +18,63 @@
 //! It also pays forward: `#hosts-screen 6/8` adds a key by decrypting the private key **in process**
 //! and handing the agent an ADD_IDENTITY, so it never needs a TTY or `SSH_ASKPASS`.
 //!
-//! # Why the identity list is read here rather than through `ssh-agent-lib`'s client
+//! # The conversation is `ssh-agent-lib`'s blocking client
 //!
-//! The crate's client decodes each identity into an `ssh_key::public::KeyData`, which discards the
-//! blob the agent actually sent. Both facts this module reports are properties of that blob: the
-//! fingerprint OpenSSH prints is the SHA-256 of the bytes as received, and the key type is the
-//! string they open with. Recovering them by re-encoding a decoded key would report our rendering
-//! of the key rather than the agent's, and a single identity the crate cannot decode would turn a
-//! populated agent into a probe failure. Reading the answer's fields directly costs a few dozen
-//! lines and keeps every identity opaque. `ssh-agent-lib` earns its place in `#hosts-screen 6/8`,
-//! where an ADD_IDENTITY request has to be *built* — the direction where a typed encoder is the
-//! part worth borrowing.
+//! `ssh_agent_lib::blocking::Client` speaks the protocol; this module supplies the transport and
+//! all of the bounds. It is the same crate `#hosts-screen 6/8` needs for *building* an
+//! ADD_IDENTITY request, so the encoding is borrowed once rather than hand-written in one
+//! direction and borrowed in the other.
+//!
+//! That client is **blocking**: `request_identities` writes and then reads on the calling thread,
+//! and takes no deadline of its own. So every bound lives on the transport it is handed —
+//!
+//! * a read timeout and a write timeout on the socket, which bound a single read or write; and
+//! * `UntilDeadline`, which fails the exchange once it has run past [`AGENT_TIMEOUT`] in total, no
+//!   matter how little any one read waited. Without it an agent dribbling a byte at a time would
+//!   renew the socket timeout for as long as it liked.
+//!
+//! Both socket timeouts are armed **once, on the freshly connected socket**: macOS refuses
+//! `setsockopt` on a socket whose peer has already answered and hung up, which is exactly where
+//! re-arming between reads would land. That is why the whole-exchange bound is a deadline the
+//! transport checks rather than a timeout it re-applies.
+//!
+//! [`SshAgentProbe::identities`] is therefore synchronous and self-bounding, and the thread the
+//! blocking client runs on is the one `host_tooling::start_agent_probe` already starts for it
+//! beside the `git` and `gh` probes. Nothing here starts a thread of its own, and nothing here
+//! reaches into the async runtime's blocking pool — `HostToolingProbe::probe` is *itself* already
+//! running inside a `spawn_blocking` task, so a nested one would have to block a pool thread on
+//! another pool thread.
+//!
+//! # Which bytes each fact is taken from
+//!
+//! Both facts are recovered by **re-encoding** the identity's credential, but from two different
+//! encodings of it, because `ssh-add -l` draws its line between them exactly there:
+//!
+//! * the **key type** from the credential as a whole, so a certificate is listed as a certificate
+//!   rather than as the key inside it — the distinction OpenSSH prints as `(ED25519-CERT)`;
+//! * the **fingerprint** from `PublicCredential::key_data()`, the key being certified, because that
+//!   is the one OpenSSH hashes for both. It prints the same digest for a key and for a certificate
+//!   over it; hashing the certificate's own bytes would produce a value an operator could not match
+//!   against anything they can print, which would defeat showing a fingerprint at all.
+//!
+//! # Known limits
+//!
+//! * **One unreadable identity fails the whole list.** `Identity::decode_vec` decodes the answer
+//!   all-or-nothing, so an agent holding one key this version of `ssh-key` cannot parse
+//!   is reported as a probe failure rather than as the host's other keys. A failure, never an
+//!   empty list, so it cannot be read as "this host has no keys loaded".
+//! * **A comment that is not UTF-8 sinks the list with it**, for the same reason: the crate decodes
+//!   a comment as a `String`, where reading the field by hand rendered it lossily and kept the key.
+//!   One odd byte in one comment now hides every key on the host.
+//! * **The client allocates the answer's announced length before reading it**, with no cap of its
+//!   own — a socket that is not an agent can make the daemon reserve up to 4 GiB before the read
+//!   fails. Reaching one means being allowed to open it: [`WellKnownAgentSockets`] only ever hands
+//!   back a socket owned by the user being asked about.
+//! * **Finding the socket is not bounded at all.** `getpwnam_r` (through `resolve_pty_os_user`) and
+//!   `UnixStream::connect` both run before any deadline exists and neither takes one, so a wedged
+//!   NSS backend parks the probe thread indefinitely. The bounds above cover the conversation, not
+//!   getting to it; the Hosts screen polls, so a host whose directory service is down accumulates a
+//!   parked thread per poll.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -41,31 +87,16 @@ use crate::host_tooling::ProbeOutcome;
 /// open.
 pub const AGENT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Ask the agent for the identities it holds (`SSH_AGENTC_REQUEST_IDENTITIES`).
-const REQUEST_IDENTITIES: u8 = 11;
-
-/// The agent's list of identities (`SSH_AGENT_IDENTITIES_ANSWER`).
-const IDENTITIES_ANSWER: u8 = 12;
-
-/// The agent declined the request (`SSH_AGENT_FAILURE`).
-const AGENT_FAILURE: u8 = 5;
-
-/// The largest answer this probe will read.
-///
-/// An agent's identity list is a few hundred bytes per key. The bound exists so a socket that is
-/// not an agent — or one answering nonsense — cannot make the daemon allocate whatever length it
-/// claims.
-const MAX_ANSWER_BYTES: usize = 256 * 1024;
-
 /// One identity the agent is holding.
 ///
 /// Deliberately **no originating path**: the agent does not know it. The comment is free text set at
 /// key-generation time and must never be presented as a file location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentKey {
-    /// e.g. `ssh-ed25519`.
+    /// e.g. `ssh-ed25519`, or `ssh-ed25519-cert-v01@openssh.com` for a certificate.
     pub key_type: String,
-    /// `SHA256:…`, the form `ssh-add -l` prints.
+    /// `SHA256:…`, the form `ssh-add -l` prints — for a certificate, the fingerprint of the key it
+    /// certifies, which is what `ssh-add -l` prints for one.
     pub fingerprint: String,
     pub comment: String,
 }
@@ -135,8 +166,13 @@ impl AgentStatus {
 /// `SSH_AUTH_SOCK` as the example of a *denied* key. When that is the case the honest report is
 /// "no agent reachable", not a fabricated empty key list.
 pub trait AgentSocketResolver: Send + Sync {
-    /// The agent socket for `os_user`, or `None` when none can be located.
-    fn socket_for(&self, os_user: &str) -> Option<PathBuf>;
+    /// The agent socket for `os_user`, or `Ok(None)` when the lookup succeeded and named none.
+    ///
+    /// `Err` is for a lookup that could not be *made* — a passwd database that did not answer, say.
+    /// It is a separate answer from `Ok(None)` because it is separate evidence: "I looked and this
+    /// user has no agent" sends an operator to start one, while "I could not look" sends them to
+    /// their directory service. Collapsing the two would report a failure as a negative finding.
+    fn socket_for(&self, os_user: &str) -> Result<Option<PathBuf>, String>;
 }
 
 /// Reads a host user's agent over the wire protocol.
@@ -150,10 +186,11 @@ pub trait SshAgentProbe: Send + Sync {
 /// Split out from the socket conversation so it can be pinned against a fingerprint computed
 /// **outside this codebase** — otherwise the test proves only that we agree with ourselves.
 ///
-/// OpenSSH hashes the blob exactly as it was received and prints the digest base64-encoded without
-/// padding, so this hashes the same bytes rather than a key decoded and re-encoded — a round trip
-/// would report our rendering of the key instead of the agent's. The blob's leading key type is
-/// still read, so a byte string that is not a public key blob is refused rather than fingerprinted.
+/// OpenSSH hashes a key's standard public-key encoding — for a certificate, the encoding of the key
+/// it certifies rather than of the certificate — and prints the digest base64-encoded without
+/// padding. This hashes whatever blob it is handed, leaving which of the two to the caller; the
+/// blob's leading key type is still read, so a byte string that is not a public key blob is refused
+/// rather than fingerprinted.
 pub fn fingerprint_of(public_key_blob: &[u8]) -> Result<String, String> {
     use base64::Engine;
     use sha2::Digest;
@@ -169,74 +206,20 @@ pub fn fingerprint_of(public_key_blob: &[u8]) -> Result<String, String> {
 /// The key type a public key blob opens with, e.g. `ssh-ed25519`.
 ///
 /// Read from the blob rather than mapped through a table of the types we know, so a host holding a
-/// key this daemon has never heard of is still listed under the name its own agent uses.
+/// key this daemon has never heard of is still listed under the name its own agent uses — and so a
+/// certificate is listed as a certificate rather than as the key it certifies.
 pub fn key_type_of(public_key_blob: &[u8]) -> Result<String, String> {
-    let name = Fields::over(public_key_blob).string()?;
+    use ssh_agent_lib::ssh_encoding::Decode;
+
+    let name = String::decode(&mut &public_key_blob[..])
+        .map_err(|e| format!("a public key blob whose key type could not be read: {e}"))?;
     if name.is_empty() {
         return Err("a public key blob with no key type".to_string());
     }
-    String::from_utf8(name.to_vec())
-        .map_err(|_| "a public key blob whose key type is not text".to_string())
+    Ok(name)
 }
 
-/// A reader over the fields of an agent message, in RFC 4251's encoding.
-struct Fields<'a> {
-    rest: &'a [u8],
-}
-
-impl<'a> Fields<'a> {
-    fn over(bytes: &'a [u8]) -> Self {
-        Self { rest: bytes }
-    }
-
-    fn u32(&mut self) -> Result<u32, String> {
-        let (head, tail) = self
-            .rest
-            .split_at_checked(4)
-            .ok_or_else(|| "the agent's answer ended inside a number".to_string())?;
-        self.rest = tail;
-        Ok(u32::from_be_bytes(
-            head.try_into().expect("split_at_checked gave four bytes"),
-        ))
-    }
-
-    /// The next `string`: a four-byte length and that many bytes, which are not assumed to be text.
-    fn string(&mut self) -> Result<&'a [u8], String> {
-        let len = self.u32()? as usize;
-        let (head, tail) = self.rest.split_at_checked(len).ok_or_else(|| {
-            format!(
-                "the agent's answer claims a {len}-byte field but carries {} more bytes",
-                self.rest.len()
-            )
-        })?;
-        self.rest = tail;
-        Ok(head)
-    }
-}
-
-/// Turn an `IDENTITIES_ANSWER` body — everything after the message type — into typed identities.
-///
-/// The count is not trusted as a capacity: an answer claiming four billion identities has to run
-/// out of bytes on its first one, not allocate for them.
-fn identities_in(answer: &[u8]) -> Result<Vec<AgentKey>, String> {
-    let mut fields = Fields::over(answer);
-    let count = fields.u32()?;
-    let mut keys = Vec::new();
-    for _ in 0..count {
-        let blob = fields.string()?;
-        let comment = fields.string()?;
-        keys.push(AgentKey {
-            key_type: key_type_of(blob)?,
-            fingerprint: fingerprint_of(blob)?,
-            // Free text from another user's key file: rendered, never parsed, and lossy rather than
-            // rejected — one key with an odd byte in its comment must not hide the whole list.
-            comment: String::from_utf8_lossy(comment).into_owned(),
-        });
-    }
-    Ok(keys)
-}
-
-/// The live probe: connects to the resolved socket and performs `REQUEST_IDENTITIES`.
+/// The live probe: connects to the resolved socket and asks it for its identities.
 #[cfg(unix)]
 pub struct WireProtocolAgentProbe<R: AgentSocketResolver> {
     resolver: R,
@@ -252,8 +235,15 @@ impl<R: AgentSocketResolver> WireProtocolAgentProbe<R> {
 #[cfg(unix)]
 impl<R: AgentSocketResolver> SshAgentProbe for WireProtocolAgentProbe<R> {
     fn identities(&self, os_user: &str) -> AgentStatus {
-        let Some(socket) = self.resolver.socket_for(os_user) else {
-            return AgentStatus::unreachable();
+        let socket = match self.resolver.socket_for(os_user) {
+            Ok(Some(socket)) => socket,
+            Ok(None) => return AgentStatus::unreachable(),
+            // Nothing was established about this user's agent, so nothing is reported about it.
+            Err(reason) => {
+                return AgentStatus::failed(format!(
+                    "could not look for {os_user}'s ssh-agent socket: {reason}"
+                ))
+            }
         };
         match std::os::unix::net::UnixStream::connect(&socket) {
             Ok(stream) => match ask_for_identities(stream) {
@@ -287,91 +277,142 @@ impl<R: AgentSocketResolver> SshAgentProbe for WireProtocolAgentProbe<R> {
 /// Every failure reads as the tail of "the ssh-agent at `<path>` …", so an operator is told which
 /// socket misbehaved and how.
 #[cfg(unix)]
-fn ask_for_identities(mut stream: std::os::unix::net::UnixStream) -> Result<Vec<AgentKey>, String> {
-    use std::io::Write;
-
+fn ask_for_identities(stream: std::os::unix::net::UnixStream) -> Result<Vec<AgentKey>, String> {
     // Both timeouts are armed here, on a socket that was just connected: macOS refuses to set one
-    // on a socket whose peer has already answered and hung up, which is exactly where re-arming the
-    // read timeout between reads would land.
+    // on a socket whose peer has already answered and hung up.
     stream
         .set_write_timeout(Some(AGENT_TIMEOUT))
         .and_then(|()| stream.set_read_timeout(Some(AGENT_TIMEOUT)))
         .map_err(|e| format!("could not be given a deadline: {e}"))?;
-    // A second, whole-exchange bound. The socket timeout bounds one read, and an agent answering a
-    // byte at a time would renew it for as long as it liked — the Hosts screen probes every host it
-    // lists, so the conversation needs a bound of its own.
-    let deadline = std::time::Instant::now() + AGENT_TIMEOUT;
-    stream
-        .write_all(&[0, 0, 0, 1, REQUEST_IDENTITIES])
-        .map_err(|e| format!("could not be asked for its identities: {e}"))?;
 
-    let mut length = [0u8; 4];
-    read_exactly(&mut stream, &mut length, deadline)?;
-    let length = u32::from_be_bytes(length) as usize;
-    if length == 0 {
-        return Err("answered with an empty message".to_string());
-    }
-    if length > MAX_ANSWER_BYTES {
-        return Err(format!(
-            "announced a {length}-byte answer, past the {MAX_ANSWER_BYTES} bytes an identity list \
-             is allowed to take"
-        ));
-    }
-    let mut body = vec![0u8; length];
-    read_exactly(&mut stream, &mut body, deadline)?;
-
-    match body[0] {
-        IDENTITIES_ANSWER => identities_in(&body[1..]).map_err(|reason| {
-            format!("sent an identity list this daemon could not read: {reason}")
-        }),
-        AGENT_FAILURE => Err("refused to list its identities".to_string()),
-        other => Err(format!(
-            "answered with message type {other} rather than an identity list"
-        )),
+    let mut client = ssh_agent_lib::blocking::Client::new(UntilDeadline::over(
+        stream,
+        AGENT_TIMEOUT,
+        "the ssh-agent took longer than the whole exchange is allowed",
+    ));
+    match client.request_identities() {
+        Ok(identities) => identities
+            .iter()
+            .map(key_held)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|reason| {
+                format!("sent an identity list this daemon could not read: {reason}")
+            }),
+        Err(e) if timed_out_talking(&e) => Err(timed_out()),
+        Err(e) => Err(format!("did not answer with an identity list: {e}")),
     }
 }
 
-/// Fill `buf` from `stream`, or give up once `deadline` has passed.
+/// One identity, split the way `ssh-add -l` splits it.
 ///
-/// `Read::read_exact` is not used because it leaves the buffer in an unspecified state when a read
-/// times out, and this has to tell a short answer apart from a slow one. The socket's own timeout
-/// bounds each read and `deadline` bounds the exchange, so the two together cap it at twice
-/// [`AGENT_TIMEOUT`] — a bound the caller keeps whatever the agent does.
+/// The two facts come from two re-encodings of the same credential — the whole of it for the type,
+/// the key it certifies for the fingerprint. See the module documentation for why they differ.
 #[cfg(unix)]
-fn read_exactly(
-    stream: &mut std::os::unix::net::UnixStream,
-    buf: &mut [u8],
-    deadline: std::time::Instant,
-) -> Result<(), String> {
-    use std::io::Read;
+fn key_held(identity: &ssh_agent_lib::proto::Identity) -> Result<AgentKey, String> {
+    let credential = re_encoded(&identity.credential)?;
+    let public_key = re_encoded(identity.credential.key_data())?;
+    Ok(AgentKey {
+        key_type: key_type_of(&credential)?,
+        fingerprint: fingerprint_of(&public_key)?,
+        // Free text from another user's key file: rendered, never parsed.
+        comment: identity.comment.clone(),
+    })
+}
 
-    let mut filled = 0;
-    while filled < buf.len() {
-        if std::time::Instant::now() >= deadline {
-            return Err(timed_out());
-        }
-        match stream.read(&mut buf[filled..]) {
-            Ok(0) => return Err("closed the connection before answering".to_string()),
-            Ok(read) => filled += read,
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            // A socket read that hits its timeout surfaces as either of these, platform depending.
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                return Err(timed_out())
-            }
-            Err(e) => return Err(format!("could not be read: {e}")),
-        }
-    }
-    Ok(())
+/// The bytes of a decoded key or credential, in the encoding it arrived in.
+#[cfg(unix)]
+fn re_encoded(encodable: &impl ssh_agent_lib::ssh_encoding::Encode) -> Result<Vec<u8>, String> {
+    let mut blob = Vec::new();
+    encodable
+        .encode(&mut blob)
+        .map_err(|e| format!("an identity whose key could not be read back: {e}"))?;
+    Ok(blob)
+}
+
+/// Whether a client error is this exchange running out of time, in either of the two shapes it
+/// takes: the socket's own timeout, and [`UntilDeadline`]'s.
+///
+/// The client's I/O errors reach us wrapped in a protocol error — its request and response both go
+/// through a function that returns `ProtoError` — while `AgentError::IO` is the shape its other
+/// entry points produce. Matching only one of them would report a timeout as an unreadable answer.
+#[cfg(unix)]
+fn timed_out_talking(error: &ssh_agent_lib::error::AgentError) -> bool {
+    use ssh_agent_lib::error::AgentError;
+    use ssh_agent_lib::proto::ProtoError;
+
+    let io = match error {
+        AgentError::Proto(ProtoError::IO(io)) => io,
+        AgentError::IO(io) => io,
+        _ => return false,
+    };
+    matches!(
+        io.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 #[cfg(unix)]
 fn timed_out() -> String {
     format!("did not answer within {}s", AGENT_TIMEOUT.as_secs())
+}
+
+/// A stream that stops carrying an exchange once its deadline has passed.
+///
+/// The socket's own timeouts bound one read or write; this bounds the conversation, so an agent
+/// answering a byte at a time cannot renew them indefinitely. The two together cap the exchange at
+/// twice the deadline — one read may start just inside it and then take a full socket timeout of
+/// its own — which is a bound the caller keeps whatever the agent does.
+///
+/// A checked deadline rather than a re-armed socket timeout, because macOS refuses `setsockopt` on
+/// a socket whose peer has already answered and closed.
+#[cfg(unix)]
+struct UntilDeadline<S> {
+    stream: S,
+    deadline: std::time::Instant,
+    overrun: &'static str,
+}
+
+#[cfg(unix)]
+impl<S> UntilDeadline<S> {
+    fn over(stream: S, within: Duration, overrun: &'static str) -> Self {
+        Self {
+            stream,
+            deadline: std::time::Instant::now() + within,
+            overrun,
+        }
+    }
+
+    /// `Err` once there is no time left, in the shape a socket that timed out would have produced.
+    fn while_there_is_time(&self) -> std::io::Result<()> {
+        if std::time::Instant::now() >= self.deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                self.overrun,
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl<S: std::io::Read> std::io::Read for UntilDeadline<S> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.while_there_is_time()?;
+        self.stream.read(buf)
+    }
+}
+
+#[cfg(unix)]
+impl<S: std::io::Write> std::io::Write for UntilDeadline<S> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.while_there_is_time()?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.while_there_is_time()?;
+        self.stream.flush()
+    }
 }
 
 /// Where an OS user's agent socket is looked for in production.
@@ -401,15 +442,12 @@ pub struct WellKnownAgentSockets;
 
 #[cfg(unix)]
 impl AgentSocketResolver for WellKnownAgentSockets {
-    fn socket_for(&self, os_user: &str) -> Option<PathBuf> {
-        let uid = match crate::pty_runtime::resolve_pty_os_user(os_user) {
-            Ok(user) => user.uid,
-            Err(reason) => {
-                log::debug!("ssh-agent: no passwd entry to resolve a socket for: {reason}");
-                return None;
-            }
-        };
-        our_own_agent_socket(uid).or_else(|| runtime_dir_agent_socket(uid))
+    fn socket_for(&self, os_user: &str) -> Result<Option<PathBuf>, String> {
+        // A passwd lookup that failed is not a user without an agent: `resolve_pty_os_user`
+        // collapses a down directory service into the same `Err` as an unknown name, and neither
+        // establishes anything about this user's keys.
+        let uid = crate::pty_runtime::resolve_pty_os_user(os_user)?.uid;
+        Ok(our_own_agent_socket(uid).or_else(|| runtime_dir_agent_socket(uid)))
     }
 }
 
@@ -468,6 +506,10 @@ mod tests {
     const SSH_AGENTC_REQUEST_IDENTITIES: u8 = 11;
     const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;
 
+    /// The whole frame that asks for the identity list: a four-byte length and the single byte of
+    /// body it announces.
+    const REQUEST_IDENTITIES_FRAME: [u8; 5] = [0, 0, 0, 1, SSH_AGENTC_REQUEST_IDENTITIES];
+
     /// A published ed25519 public key blob and the fingerprint OpenSSH prints for it.
     ///
     /// The fingerprint is computed **outside this codebase** (`ssh-keygen -lf`), so the assertion
@@ -475,6 +517,23 @@ mod tests {
     const ED25519_BLOB_B64: &str =
         "AAAAC3NzaC1lZDI1NTE5AAAAINMHWkNaFcgtIbUiRuGXYCbYWjHPPGWLKxHqBLzWyPhL";
     const ED25519_FINGERPRINT: &str = "SHA256:JfISx02kSjWJevGy/MjUdXCv76HaRM3YkYNvepTyHD8";
+
+    /// An OpenSSH certificate blob (`ssh-keygen -s ca -I ada -n ada id.pub`) and the fingerprint
+    /// OpenSSH prints for it — the certified key's, which is what both `ssh-keygen -lf` on the
+    /// certificate and `ssh-add -l` show for one.
+    ///
+    /// Computed **outside this codebase** like the plain key's, so the certificate case is pinned
+    /// against OpenSSH rather than against our own output.
+    const CERTIFICATE_BLOB_B64: &str = concat!(
+        "AAAAIHNzaC1lZDI1NTE5LWNlcnQtdjAxQG9wZW5zc2guY29tAAAAINU2GI2VIfoTnl0KiKFK8RjruWFJqfFBg2Gp",
+        "PHHwOb6mAAAAIPUutylFq1Qe5pz9bjh2uDE+t2HF51q/0PV1ipnVGwNUAAAAAAAAAAAAAAABAAAAA2FkYQAAAAcA",
+        "AAADYWRhAAAAAGqdyYgAAAAAbH2r5AAAAAAAAACCAAAAFXBlcm1pdC1YMTEtZm9yd2FyZGluZwAAAAAAAAAXcGVy",
+        "bWl0LWFnZW50LWZvcndhcmRpbmcAAAAAAAAAFnBlcm1pdC1wb3J0LWZvcndhcmRpbmcAAAAAAAAACnBlcm1pdC1w",
+        "dHkAAAAAAAAADnBlcm1pdC11c2VyLXJjAAAAAAAAAAAAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIPj2m1jzf/wa5cTq",
+        "ZVJWS1tPUVeZ3MywC+Jnw6h7wnHIAAAAUwAAAAtzc2gtZWQyNTUxOQAAAEB626le+4mAdEn1E5SqCosDZb8wAWqV",
+        "qVQS8KHroxfunIsBdG/8Ltq+cplwpcGzn3vPmAm8i7PsIcTbrWtm+GEF",
+    );
+    const CERTIFIED_KEY_FINGERPRINT: &str = "SHA256:Y32ihbja+Y/2QWSUtnb8UU2TakV8JX0fevvvjO5xk0Q";
 
     fn ssh_string(bytes: &[u8]) -> Vec<u8> {
         let mut out = (bytes.len() as u32).to_be_bytes().to_vec();
@@ -501,50 +560,85 @@ mod tests {
         agent_frame(SSH_AGENT_IDENTITIES_ANSWER, &payload)
     }
 
-    /// A fake ssh-agent on a real Unix socket.
+    /// A fake ssh-agent on a real Unix socket, answering exactly one request.
     ///
-    /// A real socket rather than a mocked trait: the point of choosing the wire protocol over
+    /// A real socket rather than a mocked client: the point of choosing the wire protocol over
     /// `ssh-add` was that the protocol answers unambiguously, and a mocked client would exercise
     /// none of the encoding that claim rests on.
     struct FakeAgent {
         path: PathBuf,
+        requests: mpsc::Receiver<Vec<u8>>,
         _dir: tempfile::TempDir,
     }
 
     impl FakeAgent {
-        /// Serve exactly one `REQUEST_IDENTITIES` with `response`, then close.
+        /// Serve one request with `response`, then close.
         fn serving(response: Vec<u8>) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("agent.sock");
             let listener = UnixListener::bind(&path).unwrap();
+            let (asked, requests) = mpsc::channel();
             std::thread::spawn(move || {
                 if let Ok((mut stream, _)) = listener.accept() {
-                    let mut header = [0u8; 5];
-                    if stream.read_exact(&mut header).is_ok()
-                        && header[4] == SSH_AGENTC_REQUEST_IDENTITIES
-                    {
+                    let mut request = [0u8; REQUEST_IDENTITIES_FRAME.len()];
+                    if stream.read_exact(&mut request).is_ok() {
+                        let _ = asked.send(request.to_vec());
                         let _ = stream.write_all(&response);
                         let _ = stream.flush();
                     }
                 }
             });
-            Self { path, _dir: dir }
+            Self {
+                path,
+                requests,
+                _dir: dir,
+            }
         }
 
-        /// Accept the connection and then never answer — the hang case.
-        fn silent() -> Self {
+        /// The whole frame the probe sent, length prefix included.
+        ///
+        /// Asserted in full because the request is no longer written here: it is `ssh-agent-lib`
+        /// that encodes it, and an assertion on the type byte alone would let its framing drift.
+        fn assert_was_asked_for_identities(&self) -> &Self {
+            let request = self
+                .requests
+                .recv_timeout(AGENT_TIMEOUT)
+                .expect("the agent was never asked for its identities");
+            assert_eq!(
+                request, REQUEST_IDENTITIES_FRAME,
+                "the probe sent something other than a request for the identity list"
+            );
+            self
+        }
+    }
+
+    /// An agent that accepts the connection and then never answers — the hang case.
+    ///
+    /// The accepted connection is handed *out* of the accepting thread and held here, because a
+    /// dropped `UnixStream` closes the socket: the probe would then see a peer that hung up, which
+    /// is a different failure and one that returns immediately.
+    struct SilentAgent {
+        path: PathBuf,
+        _accepted: mpsc::Receiver<UnixStream>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl SilentAgent {
+        fn listening() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("agent.sock");
             let listener = UnixListener::bind(&path).unwrap();
-            let (tx, rx) = mpsc::channel::<UnixStream>();
+            let (accepted, held_open) = mpsc::channel();
             std::thread::spawn(move || {
                 if let Ok((stream, _)) = listener.accept() {
-                    // Hold the connection open, unanswered, until the test drops the receiver.
-                    let _ = tx.send(stream);
-                    let _ = rx.recv();
+                    let _ = accepted.send(stream);
                 }
             });
-            Self { path, _dir: dir }
+            Self {
+                path,
+                _accepted: held_open,
+                _dir: dir,
+            }
         }
     }
 
@@ -552,8 +646,17 @@ mod tests {
     struct FixedSocket(Option<PathBuf>);
 
     impl AgentSocketResolver for FixedSocket {
-        fn socket_for(&self, _os_user: &str) -> Option<PathBuf> {
-            self.0.clone()
+        fn socket_for(&self, _os_user: &str) -> Result<Option<PathBuf>, String> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// A resolver whose lookup could not be made at all — a passwd database that did not answer.
+    struct UnanswerableLookup;
+
+    impl AgentSocketResolver for UnanswerableLookup {
+        fn socket_for(&self, _os_user: &str) -> Result<Option<PathBuf>, String> {
+            Err("the passwd database did not answer".to_string())
         }
     }
 
@@ -561,11 +664,15 @@ mod tests {
         WireProtocolAgentProbe::new(FixedSocket(socket)).identities("someone")
     }
 
-    fn a_blob() -> Vec<u8> {
+    fn blob_from(base64_blob: &str) -> Vec<u8> {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD
-            .decode(ED25519_BLOB_B64)
+            .decode(base64_blob)
             .expect("the fixture blob is valid base64")
+    }
+
+    fn a_blob() -> Vec<u8> {
+        blob_from(ED25519_BLOB_B64)
     }
 
     #[test]
@@ -579,6 +686,31 @@ mod tests {
         assert_eq!(status.keys.len(), 1);
         assert_eq!(status.keys[0].comment, "ada@workstation");
         assert_eq!(status.keys[0].key_type, "ssh-ed25519");
+        assert_eq!(status.keys[0].fingerprint, ED25519_FINGERPRINT);
+        agent.assert_was_asked_for_identities();
+    }
+
+    /// The two axes `ssh-add -l` uses for a certificate: the certified key's fingerprint, and the
+    /// certificate's own type beside it.
+    #[test]
+    fn reports_a_certificate_under_the_certified_keys_fingerprint_and_its_own_key_type() {
+        let certificate = blob_from(CERTIFICATE_BLOB_B64);
+        let agent = FakeAgent::serving(identities_answer(&[(certificate, "ada@workstation")]));
+
+        let status = probe_against(Some(agent.path.clone()));
+
+        assert_eq!(status.keys.len(), 1, "got {status:?}");
+        assert_eq!(
+            status.keys[0].fingerprint, CERTIFIED_KEY_FINGERPRINT,
+            "an operator lines this row up against their own `ssh-add -l`, which prints the \
+             certified key's fingerprint for a certificate — the certificate's own digest matches \
+             nothing they can print"
+        );
+        assert_eq!(
+            status.keys[0].key_type, "ssh-ed25519-cert-v01@openssh.com",
+            "a certificate listed under the type of the key it certifies is indistinguishable \
+             from that key, which is the one thing `ssh-add -l` tells them apart by"
+        );
     }
 
     /// An agent holding nothing is a different problem from no agent at all: one needs a key added,
@@ -610,11 +742,29 @@ mod tests {
         assert!(!status.reachable);
     }
 
+    /// A lookup that could not be made establishes nothing about this user's keys. Reporting it as
+    /// "no agent" would send an operator to start one that may well be running.
+    #[test]
+    fn reports_a_probe_failure_when_the_user_cannot_be_looked_up() {
+        let probe = WireProtocolAgentProbe::new(UnanswerableLookup);
+
+        let status = probe.identities("ada");
+
+        assert_eq!(
+            status.outcome,
+            ProbeOutcome::Failed(
+                "could not look for ada's ssh-agent socket: the passwd database did not answer"
+                    .to_string()
+            )
+        );
+        assert!(!status.reachable);
+    }
+
     /// A socket that accepts and never answers must time out into a reported failure rather than
     /// holding the RPC open — the Hosts screen probes every host it lists.
     #[test]
     fn reports_a_probe_failure_when_the_agent_does_not_answer_in_time() {
-        let agent = FakeAgent::silent();
+        let agent = SilentAgent::listening();
 
         let started = std::time::Instant::now();
         let status = probe_against(Some(agent.path.clone()));
@@ -623,6 +773,12 @@ mod tests {
             matches!(status.outcome, ProbeOutcome::Failed(_)),
             "a silent agent is a probe failure, got {:?}",
             status.outcome
+        );
+        assert!(
+            started.elapsed() >= AGENT_TIMEOUT,
+            "the probe gave up in {:?}, so it never waited on the agent at all — the timeout is \
+             what this proves",
+            started.elapsed()
         );
         assert!(
             started.elapsed() < AGENT_TIMEOUT * 3,

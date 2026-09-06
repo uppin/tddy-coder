@@ -206,6 +206,12 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             .as_deref()
             .map(|gh| start_probe(os_user, gh, &["auth", "status"]));
 
+        // Collected before the two commands for the reason it was started before them: a struct
+        // literal evaluates its fields in order, and a probe still in flight when it is collected is
+        // judged on whatever is left of the shared deadline — so collecting it after `gh`, which can
+        // reach the network, would fail it for time `gh` had spent.
+        let ssh_agent = agent_status_of(ssh_agent, deadline);
+
         let tooling = HostTooling {
             git: match (name, email) {
                 (Some(name), Some(email)) => git_identity_of(
@@ -228,7 +234,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 // distinguishes an absent binary from a spawn that failed for another reason.
                 None => classify_gh_auth_status(None, ""),
             },
-            ssh_agent: agent_status_of(ssh_agent, deadline),
+            ssh_agent,
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
@@ -260,8 +266,10 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
 
 /// Start the ssh-agent probe for `os_user` without waiting for it.
 ///
-/// The agent conversation blocks on a socket, so it runs on a thread of its own like the two
-/// commands beside it — and like them it is abandoned rather than killed if it overruns.
+/// The agent conversation blocks on a socket — `ssh-agent-lib`'s client is a blocking one — so it
+/// runs on a thread of its own like the two commands beside it, and like them it is abandoned
+/// rather than killed if it overruns. This is the thread that client runs on; it starts none of its
+/// own.
 #[cfg(unix)]
 fn start_agent_probe(os_user: &str) -> std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus> {
     use crate::ssh_agent::SshAgentProbe;
@@ -278,9 +286,12 @@ fn start_agent_probe(os_user: &str) -> std::sync::mpsc::Receiver<crate::ssh_agen
 
 /// Wait for the agent probe until `deadline`, then give up on it.
 ///
-/// It bounds itself at [`crate::ssh_agent::AGENT_TIMEOUT`], which is shorter than
-/// [`PROBE_TIMEOUT`], so reaching this deadline means the probe never came back at all — a failure,
-/// and never the empty key list an operator would read as "this host has no keys loaded".
+/// Its own worst case is *twice* [`crate::ssh_agent::AGENT_TIMEOUT`] — one read may begin just
+/// inside its deadline and then take a full socket timeout of its own — so it is longer than
+/// [`PROBE_TIMEOUT`] and this deadline can be the one that expires first. `probe` collects the agent
+/// before the commands beside it, so reaching this deadline means the probe did have the whole of
+/// [`PROBE_TIMEOUT`] and never came back — a failure, and never the empty key list an operator would
+/// read as "this host has no keys loaded".
 #[cfg(unix)]
 fn agent_status_of(
     started: std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus>,

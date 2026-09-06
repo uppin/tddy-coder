@@ -9075,15 +9075,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "raunch"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a67226789ccd419c55f5c826e04f7d58690b0593364f61bc8ed6e7dbbab49c5"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "rav1e"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10317,15 +10308,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "service-binding"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25663b9d8b83193ef83183edb3fd01e5447adb3e5baa35466ff9a6cd2408d6e8"
-dependencies = [
- "raunch",
-]
-
-[[package]]
 name = "servo_arc"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10836,19 +10818,13 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b528981371b3bfdfe927a5ef37221446e0ba44551e673b569fd0fd38e5dcb292"
 dependencies = [
- "async-trait",
  "byteorder",
- "futures",
- "log",
  "secrecy",
- "service-binding",
  "signature 2.2.0",
  "ssh-encoding",
  "ssh-key",
  "subtle",
  "thiserror 2.0.18",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]

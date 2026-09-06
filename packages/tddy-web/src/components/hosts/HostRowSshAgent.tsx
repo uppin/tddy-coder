@@ -36,20 +36,38 @@ interface AgentSummary {
  * send an operator to two different places, and only one of them is a host to go and start
  * something on. An agent holding nothing is a third: it is running, and wants a key.
  */
+/** Nothing has answered for this host yet — distinct from every answer the probe can give. */
+function awaitingAgentProbe(): AgentSummary {
+  return { text: "…", title: "Waiting for an ssh-agent result from this host" };
+}
+
 function summaryOf(sshAgent: HostSshAgent | undefined): AgentSummary | null {
-  if (sshAgent === undefined || sshAgent.outcome === ProbeOutcome.UNSPECIFIED) {
-    return { text: "…", title: "Waiting for an ssh-agent result from this host" };
+  // A block that is absent states nothing, the same as one whose sender set no outcome.
+  if (sshAgent === undefined) {
+    return awaitingAgentProbe();
   }
-  if (sshAgent.outcome === ProbeOutcome.FAILED) {
-    return {
-      text: "Could not check",
-      title: sshAgent.failureReason
-        ? `The ssh-agent probe failed: ${sshAgent.failureReason}`
-        : "The ssh-agent probe failed, so nothing is known about this host's keys",
-    };
-  }
-  if (sshAgent.outcome === ProbeOutcome.UNSUPPORTED) {
-    return { text: "Not supported here", title: "This host cannot run the ssh-agent probe" };
+  // Only `OK` passes through to a finding, and the guard is written that way round on purpose —
+  // the same reasoning `unanswered` in `HostRowTooling.tsx` spells out for the git and `gh` blocks.
+  // proto3 enums are open and a newer daemon can send a `ProbeOutcome` this bundle's generated enum
+  // has never heard of. Listing the outcomes that mean "no finding" would let that unknown value
+  // fall through to `reachable`, and a probe whose result was not understood would render as
+  // "No agent" — sending an operator to start an agent that is very possibly already running.
+  // Listing the one outcome that licenses a finding cannot do that.
+  switch (sshAgent.outcome) {
+    case ProbeOutcome.OK:
+      break;
+    case ProbeOutcome.UNSPECIFIED:
+      return awaitingAgentProbe();
+    case ProbeOutcome.UNSUPPORTED:
+      return { text: "Not supported here", title: "This host cannot run the ssh-agent probe" };
+    // FAILED, and every outcome a newer daemon may add that this bundle cannot name.
+    default:
+      return {
+        text: "Could not check",
+        title: sshAgent.failureReason
+          ? `The ssh-agent probe failed: ${sshAgent.failureReason}`
+          : "The ssh-agent probe failed, so nothing is known about this host's keys",
+      };
   }
   if (!sshAgent.reachable) {
     return {
