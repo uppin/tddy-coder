@@ -15,13 +15,17 @@
  * one it is showing.
  */
 
-import type { HostGitIdentity, HostGithubCli } from "../../gen/connection_pb";
+import type { HostGitIdentity, HostGithubCli, HostSshAgent } from "../../gen/connection_pb";
 import { ProbeOutcome } from "../../gen/connection_pb";
+import { HostRowSshAgent } from "./HostRowSshAgent";
 
 export interface HostRowToolingProps {
   instanceId: string;
   git: HostGitIdentity | undefined;
   githubCli: HostGithubCli | undefined;
+  /** Added by `#hosts-screen 5/8`, and optional for the same reason the two above accept
+   * `undefined`: a row renders before any probe has answered for that host. */
+  sshAgent?: HostSshAgent | undefined;
 }
 
 /** What one cell says, and what hovering it explains. */
@@ -119,7 +123,7 @@ function githubCliCell(githubCli: HostGithubCli | undefined): ToolingCell {
   };
 }
 
-export function HostRowTooling({ instanceId, git, githubCli }: HostRowToolingProps) {
+export function HostRowTooling({ instanceId, git, githubCli, sshAgent }: HostRowToolingProps) {
   const gitState = gitCell(git);
   const ghState = githubCliCell(githubCli);
 
@@ -140,6 +144,7 @@ export function HostRowTooling({ instanceId, git, githubCli }: HostRowToolingPro
         <span className="mr-1 opacity-70">gh</span>
         {ghState.text}
       </span>
+      <HostRowSshAgent instanceId={instanceId} sshAgent={sshAgent} />
     </span>
   );
 }

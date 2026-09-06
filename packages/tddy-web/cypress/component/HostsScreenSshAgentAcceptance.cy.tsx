@@ -22,7 +22,7 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostSshAgentPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
-const FINGERPRINT = "SHA256:ZLBiCcwTvIcQUyRnvSHhpsdgWLLLZtWbBAPtgWNBpAg";
+const FINGERPRINT = "SHA256:JfISx02kSjWJevGy/MjUdXCv76HaRM3YkYNvepTyHD8";
 
 function mountAgent(sshAgent: ReturnType<typeof create<typeof HostSshAgentSchema>>) {
   mountWithRpc(
