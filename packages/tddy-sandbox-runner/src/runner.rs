@@ -2653,7 +2653,7 @@ mod tests {
     // ─── Which transport serves a --workspace-tools jail ────────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 4)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// The daemon's workspace jails keep today's transport: it pipes the jail's stdio and drives
     /// it over that.
@@ -2709,7 +2709,7 @@ mod tests {
     // ─── Egress for a --workspace-tools jail that also runs the build ───────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (§ Egress)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// The shim as the jail must address it: `localhost` would fail to resolve inside it.
     const SHIM_URL: &str = "http://127.0.0.1:45601";
@@ -2753,7 +2753,7 @@ mod tests {
     // ─── What a jail that serves no in-jail tools answers ──────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 6)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// Only a `--workspace-tools` jail executes tool calls itself; every other runner mode hosts an
     /// agent whose tools the *host* runs, so a jail started without the flag has nothing to hand

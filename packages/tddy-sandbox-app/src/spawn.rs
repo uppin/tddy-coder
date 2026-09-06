@@ -978,7 +978,7 @@ mod tests {
     // ─── Codebase-mode placement ────────────────────────────────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criteria 2, 3)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// Mounted mode mounts the repo and the persistent jail home, in that order — the agent works
     /// on the real project tree from inside the jail.

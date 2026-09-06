@@ -274,7 +274,7 @@ mod tests {
     // ─── Path lookup without listing ────────────────────────────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// A metadata grant is rendered as its own `file-read-metadata` rule, so the jail may resolve
     /// the path without the `file-read*` block's power to read what is there.

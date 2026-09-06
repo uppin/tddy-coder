@@ -129,7 +129,7 @@ mod tests {
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criteria 1, 10),
     //          docs/ft/coder/managed-codebase-subagents.md (criteria 11-12)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// `--codebase-mode managed` resolves to managed mode, independent of the deprecated
     /// `--remote-codebase` boolean flag.

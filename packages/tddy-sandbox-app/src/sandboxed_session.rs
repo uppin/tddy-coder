@@ -733,7 +733,7 @@ mod tests {
     // ─── The socket the host-run agent dispatches over ──────────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 8)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// macOS caps an `AF_UNIX` path at 104 bytes, and a session directory is already most of that.
     /// A socket the kernel refuses to bind is a session that cannot start at all.
@@ -859,7 +859,7 @@ mod tests {
     // ─── Where a sandboxed session's build keeps its home ───────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 2)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// One `$HOME` shared by every repository is a poisoning channel: a hostile build in one
     /// checkout writes `~/.cargo/config.toml` (`rustc-wrapper`, `target.*.runner`) or drops a

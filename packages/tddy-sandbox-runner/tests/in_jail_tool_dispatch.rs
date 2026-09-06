@@ -2,7 +2,7 @@
 //! driven from the shared host relay.
 //!
 //! Feature: `docs/ft/coder/sandboxed-codebase-mode.md` (criterion 6).
-//! Changeset: `docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md`.
+//! Changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md`.
 //!
 //! `host_relay_dispatch.rs` covers the other direction — the jail asking the host. This is the
 //! mirror: the relay is the one thing holding the `SessionChannel`, because a jail that runs the

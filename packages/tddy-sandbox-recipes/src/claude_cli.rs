@@ -681,7 +681,7 @@ mod tests {
     // ─── The host-run agent against a jailed codebase ────────────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (criterion 7)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     /// Every native route to the filesystem and the shell is withdrawn. On the host these would
     /// reach the checkout directly, and a jail the agent can simply step around confines nothing.

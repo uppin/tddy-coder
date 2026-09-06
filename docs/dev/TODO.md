@@ -257,7 +257,7 @@ its own failure message, none from that branch. New entries beyond the list abov
 
 ### From 2026-09-05 sandboxed-codebase-mode
 
-Source changeset: `docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md`. Feature
+Source changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md`. Feature
 [sandboxed-codebase-mode.md](../ft/coder/sandboxed-codebase-mode.md).
 
 - **Two implementations of the in-jail tool exchange.** `tddy_daemon::workspace_tool_sandbox::exchange_in_jail_tool_call` drives `in_jail_tool_request`/`in_jail_tool_response` on its own raw `SessionChannel`, and `sandboxed-codebase-mode` adds a second one on the host relay (`InJailToolDispatcher`) because that relay must also own the CONNECT tunnels for jailed builds. Consolidate the daemon onto the relay's dispatcher once both have landed.

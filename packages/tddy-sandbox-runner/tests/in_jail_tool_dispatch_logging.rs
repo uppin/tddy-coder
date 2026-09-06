@@ -1,7 +1,7 @@
 //! What the *host* learns when a jail stops answering its tool calls.
 //!
 //! Feature: `docs/ft/coder/sandboxed-codebase-mode.md` (criterion 6).
-//! Changeset: `docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md`.
+//! Changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md`.
 //!
 //! Its own test binary because `log` has a single process-global logger, and installing a
 //! capturing one would otherwise decide what every other test in the crate logs through.

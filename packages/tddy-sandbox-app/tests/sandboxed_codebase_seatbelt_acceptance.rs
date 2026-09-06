@@ -2,7 +2,7 @@
 //! jail, driven from the host exactly as the host-run agent drives it.
 //!
 //! PRD: `docs/ft/coder/sandboxed-codebase-mode.md` (criteria 9 and 5).
-//! Changeset: `docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md`.
+//! Changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md`.
 //!
 //! The other two modes put the agent in the jail; this one puts the code there. So the claim under
 //! test is not "the agent cannot reach the host" but "the *tool call* cannot" — and only a real

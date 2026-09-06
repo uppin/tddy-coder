@@ -9,7 +9,7 @@
 //! tddy-sandbox-app --repo /path/to/git/checkout --model opus
 //! ```
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
@@ -193,6 +193,81 @@ const VERBOSE_RUST_LOG: &str = "\
     tonic=warn";
 
 #[cfg(target_os = "macos")]
+/// Where this session's own log lines go, given the placement its codebase mode implies.
+///
+/// Every other mode keeps the terminal: the agent is behind a jail and its output reaches the user
+/// through a bridge this process owns, so writing log lines to stderr writes them to a surface
+/// nothing else is drawing on. A `sandboxed` session does not keep it — `claude` runs here with
+/// inherited stdio, holds the real controlling terminal and renders a full-screen UI on it, so a
+/// single `log::info!` lands in the middle of somebody else's frame. The lines are worth keeping
+/// and the terminal is not the place for them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogDestination {
+    /// This process owns the terminal; stderr is free.
+    Stderr,
+    /// Another program owns the terminal; append here instead.
+    File(PathBuf),
+}
+
+/// The app's log file for a session that hands its terminal to the agent.
+pub const SANDBOXED_LOG_FILE: &str = "sandbox-app.log";
+
+/// Resolve where log lines belong, from the mode and the session base they would live under.
+pub fn log_destination(mode: CodebaseMode, session_base: &Path) -> LogDestination {
+    match mode {
+        CodebaseMode::Sandboxed => LogDestination::File(session_base.join(SANDBOXED_LOG_FILE)),
+        CodebaseMode::Mounted | CodebaseMode::Managed => LogDestination::Stderr,
+    }
+}
+
+/// The session base a run will use: the flag, else the config, else `$HOME/.tddy`.
+fn resolve_session_base(from_args: Option<&Path>, from_config: Option<&Path>) -> PathBuf {
+    from_args
+        .or(from_config)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_session_base)
+}
+
+/// Start `env_logger`, pointed wherever [`log_destination`] says this session's lines belong.
+///
+/// A mode that cannot be resolved is not a reason to fail here — the run itself refuses it a few
+/// lines later with a message that explains the flag. Logging to stderr until then costs nothing,
+/// because a session that never starts never hands its terminal to an agent.
+fn init_logging(args: &Args, cfg: &config::SandboxAppConfig) -> Result<()> {
+    use anyhow::Context;
+    let mode = resolve_codebase_mode(
+        args.codebase_mode
+            .as_deref()
+            .or(cfg.codebase_mode.as_deref()),
+        args.remote_codebase,
+    )
+    .unwrap_or(CodebaseMode::Mounted);
+    let session_base =
+        resolve_session_base(args.session_base.as_deref(), cfg.session_base.as_deref());
+
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    match log_destination(mode, &session_base) {
+        LogDestination::Stderr => {}
+        LogDestination::File(path) => {
+            std::fs::create_dir_all(&session_base)
+                .with_context(|| format!("create session base {}", session_base.display()))?;
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .with_context(|| format!("open app log {}", path.display()))?;
+            builder.target(env_logger::Target::Pipe(Box::new(file)));
+            eprintln!(
+                "app log: {} (this session's terminal belongs to the agent)",
+                path.display()
+            );
+        }
+    }
+    builder.init();
+    Ok(())
+}
+
 fn default_session_base() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -270,13 +345,15 @@ async fn main() -> Result<()> {
     if args.verbose && std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", VERBOSE_RUST_LOG);
     }
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Load the optional YAML config first; every CLI flag below overrides its config counterpart.
+    // Ahead of the logger, because which codebase mode this session runs in decides where the
+    // logger is allowed to write.
     let cfg = match args.config.as_deref() {
         Some(path) => config::SandboxAppConfig::load(path)?,
         None => config::SandboxAppConfig::default(),
     };
+    init_logging(&args, &cfg)?;
 
     // macOS spawns the Seatbelt jail in-process; Linux drives a running tddy-daemon over gRPC.
     #[cfg(target_os = "macos")]
@@ -363,10 +440,8 @@ async fn run_linux(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 #[cfg(target_os = "macos")]
 async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
     let session_id = Uuid::now_v7().to_string();
-    let session_base = args
-        .session_base
-        .or(cfg.session_base)
-        .unwrap_or_else(default_session_base);
+    let session_base =
+        resolve_session_base(args.session_base.as_deref(), cfg.session_base.as_deref());
     let session_dir = session_base.join(SESSIONS_SUBDIR).join(&session_id);
     eprintln!("session_id={session_id}");
     eprintln!("session_dir={}", session_dir.display());
@@ -911,7 +986,7 @@ mod tests {
     // ─── What a sandboxed session refuses to be combined with ───────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md (§ What is deliberately not in scope)
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
 
     const NO_AGENTS: &[String] = &[];
 
@@ -1108,7 +1183,46 @@ mod tests {
     // ─── Where a sandboxed session's build keeps its home ───────────────────────
     //
     // Feature: docs/ft/coder/sandboxed-codebase-mode.md
-    // Changeset: docs/dev/1-WIP/2026-09-05-sandboxed-codebase-mode.md
+    // Changeset: docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md
+
+    /// A `sandboxed` session hands its terminal to the agent, so its log lines go to a file. A
+    /// `log::info!` on stderr lands in the middle of the frame Claude Code is drawing.
+    #[test]
+    fn a_sandboxed_session_logs_to_a_file_because_the_agent_owns_the_terminal() {
+        // Given
+        let base = Path::new("/Users/dev/.tddy");
+
+        // When
+        let destination = log_destination(CodebaseMode::Sandboxed, base);
+
+        // Then
+        assert_eq!(
+            destination,
+            LogDestination::File(base.join(SANDBOXED_LOG_FILE)),
+            "a session that does not own its terminal must not write to it"
+        );
+    }
+
+    /// The other two modes keep the terminal — the agent is behind a jail and reaches the user
+    /// through a bridge this process owns — so stderr stays the destination.
+    #[test]
+    fn a_mounted_session_keeps_logging_to_the_terminal_it_owns() {
+        // Given / When
+        let destination = log_destination(CodebaseMode::Mounted, Path::new("/Users/dev/.tddy"));
+
+        // Then
+        assert_eq!(destination, LogDestination::Stderr);
+    }
+
+    /// Managed mode jails the agent too, so it is on the same side of this line as mounted.
+    #[test]
+    fn a_managed_session_keeps_logging_to_the_terminal_it_owns() {
+        // Given / When
+        let destination = log_destination(CodebaseMode::Managed, Path::new("/Users/dev/.tddy"));
+
+        // Then
+        assert_eq!(destination, LogDestination::Stderr);
+    }
 
     /// The build's `$HOME` holds the dependency caches every `sandboxed` session on this host
     /// refills — so by default it sits directly under `~/.tddy`, beside the persistent agent homes
