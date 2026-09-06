@@ -484,9 +484,27 @@ pub fn merge_spawn_child_path(path_extra: Option<&str>) -> String {
 /// answer.
 #[cfg(unix)]
 pub fn find_program_on_spawn_child_path(program: &str) -> Option<PathBuf> {
+    find_program_on_path(program, &merge_spawn_child_path(None))
+}
+
+/// [`find_program_on_spawn_child_path`] with the `PATH` to search passed in rather than read from
+/// the environment.
+///
+/// The split is what makes the lookup testable. Reading `std::env` here would leave a test no way
+/// to decide what is on `PATH` except to set the process-wide variable — and `PATH` is process
+/// state shared with every other test running in parallel, so a test that swapped it would break
+/// whichever unrelated test happened to resolve a binary at that moment. `#[serial]` does not save
+/// it either: that serializes a test only against other `#[serial]` tests, not against the several
+/// hundred running concurrently beside them. The result is an intermittent failure somewhere else
+/// entirely, which is the worst kind to own.
+///
+/// Same reasoning as [`crate::host_tooling::classify_gh_auth_status`]: the part that is worth
+/// pinning is a pure function of its inputs, so it takes them as arguments.
+#[cfg(unix)]
+fn find_program_on_path(program: &str, path_value: &str) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
-    merge_spawn_child_path(None)
+    path_value
         .split(':')
         .filter(|dir| !dir.is_empty())
         .map(|dir| Path::new(dir).join(program))
@@ -2210,31 +2228,10 @@ mod run_capture_as_user_tests {
 
 /// The `PATH` lookup callers need *because* `resolve_tool_path` deliberately has none.
 #[cfg(all(test, unix))]
-mod find_program_on_spawn_child_path_tests {
-    use super::find_program_on_spawn_child_path;
-    use serial_test::serial;
+mod find_program_on_path_tests {
+    use super::find_program_on_path;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
-
-    /// RAII guard: `find_program_on_spawn_child_path` reads the process `PATH` (via
-    /// `merge_spawn_child_path`), so a test that decides what is on it has to put back what it
-    /// found — including when it panics.
-    struct PathGuard(Option<String>);
-    impl PathGuard {
-        fn set_to(value: &str) -> Self {
-            let original = std::env::var("PATH").ok();
-            std::env::set_var("PATH", value);
-            Self(original)
-        }
-    }
-    impl Drop for PathGuard {
-        fn drop(&mut self) {
-            match &self.0 {
-                Some(original) => std::env::set_var("PATH", original),
-                None => std::env::remove_var("PATH"),
-            }
-        }
-    }
 
     fn an_executable_named(name: &str, in_dir: &Path) -> PathBuf {
         let path = in_dir.join(name);
@@ -2243,18 +2240,26 @@ mod find_program_on_spawn_child_path_tests {
         path
     }
 
+    fn a_path_of(dirs: &[&Path]) -> String {
+        dirs.iter()
+            .map(|d| d.display().to_string())
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
     /// The whole point: a bare program name becomes an absolute path, which is the only form
     /// `run_output_as_user` resolves without joining it onto the daemon's own cwd.
     #[test]
-    #[serial]
     fn finds_an_executable_on_the_path_and_returns_it_absolute() {
+        // Given — a PATH whose second entry holds the program
         let dir = tempfile::tempdir().unwrap();
         let expected = an_executable_named("tddy-probe-subject", dir.path());
-        let _path_guard =
-            PathGuard::set_to(&format!("/nonexistent-first:{}", dir.path().display()));
+        let path = format!("/nonexistent-first:{}", dir.path().display());
 
-        let found = find_program_on_spawn_child_path("tddy-probe-subject");
+        // When
+        let found = find_program_on_path("tddy-probe-subject", &path);
 
+        // Then
         assert_eq!(
             found,
             Some(expected),
@@ -2265,13 +2270,13 @@ mod find_program_on_spawn_child_path_tests {
     /// A name nothing on `PATH` holds reports absence rather than inventing a path that would
     /// then fail at exec time as an unrelated-looking error.
     #[test]
-    #[serial]
     fn reports_absence_for_a_program_no_path_entry_holds() {
+        // Given — a PATH of one empty directory
         let dir = tempfile::tempdir().unwrap();
-        let _path_guard = PathGuard::set_to(&dir.path().display().to_string());
 
+        // When / Then
         assert_eq!(
-            find_program_on_spawn_child_path("tddy-probe-subject"),
+            find_program_on_path("tddy-probe-subject", &a_path_of(&[dir.path()])),
             None,
             "an empty PATH entry holds nothing, and that is the answer"
         );
@@ -2280,16 +2285,16 @@ mod find_program_on_spawn_child_path_tests {
     /// A non-executable file of the right name is not the program: `execve` would refuse it, so
     /// reporting it found would turn "not installed" into a permission error one layer down.
     #[test]
-    #[serial]
     fn skips_a_matching_name_that_is_not_executable() {
+        // Given — a file of the right name that cannot be executed
         let dir = tempfile::tempdir().unwrap();
         let not_executable = dir.path().join("tddy-probe-subject");
         std::fs::write(&not_executable, "not a program\n").unwrap();
         std::fs::set_permissions(&not_executable, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let _path_guard = PathGuard::set_to(&dir.path().display().to_string());
 
+        // When / Then
         assert_eq!(
-            find_program_on_spawn_child_path("tddy-probe-subject"),
+            find_program_on_path("tddy-probe-subject", &a_path_of(&[dir.path()])),
             None,
             "a file that cannot be executed is not a program that is installed"
         );
@@ -2298,22 +2303,28 @@ mod find_program_on_spawn_child_path_tests {
     /// Earlier `PATH` entries win, the way the shell and `execvp` resolve — otherwise the probe
     /// would run a different binary than everything else on the host does.
     #[test]
-    #[serial]
     fn prefers_the_earliest_path_entry_that_holds_the_program() {
+        // Given — two PATH entries, both holding an executable of the same name
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
         let expected = an_executable_named("tddy-probe-subject", first.path());
         an_executable_named("tddy-probe-subject", second.path());
-        let _path_guard = PathGuard::set_to(&format!(
-            "{}:{}",
-            first.path().display(),
-            second.path().display()
-        ));
 
+        // When / Then
         assert_eq!(
-            find_program_on_spawn_child_path("tddy-probe-subject"),
+            find_program_on_path(
+                "tddy-probe-subject",
+                &a_path_of(&[first.path(), second.path()])
+            ),
             Some(expected)
         );
+    }
+
+    /// An empty `PATH` is not a crash and not a match — `merge_spawn_child_path` falls back to a
+    /// real list, but the lookup must not assume it was handed one.
+    #[test]
+    fn reports_absence_for_an_empty_path() {
+        assert_eq!(find_program_on_path("tddy-probe-subject", ""), None);
     }
 }
 
