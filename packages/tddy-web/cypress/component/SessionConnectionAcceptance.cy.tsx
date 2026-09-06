@@ -372,9 +372,21 @@ describe("the handshake overlay over an attached session's panes", () => {
       aRoomThatJoinsAtOnce(),
     );
     const hint = attachmentHintFromReply(A_SESSION, A_ROOM_BACKED_REPLY);
-    const connection = host.openSession(A_SESSION, hint);
 
-    cy.mount(<AttachedSessionRuntime connection={connection} hint={hint} />);
+    // Opened inside `cy.then` so it runs *after* the queued `cy.intercept` above is installed.
+    // `openSession` mints the room's browser token synchronously over a real transport aimed at
+    // `/rpc`; called straight from the test body it races the intercept it depends on, and the loser
+    // is a genuine failed mint — the connection reports `error`, not `connecting`, so the overlay
+    // never lifts. That resolved in this spec's favour locally and against it on a loaded CI runner.
+    cy.then(() => {
+      const connection = host.openSession(A_SESSION, hint);
+      cy.mount(<AttachedSessionRuntime connection={connection} hint={hint} />);
+    });
+
+    // The mint went through the stub rather than out to a `/rpc` nobody is serving. Asserted, not
+    // assumed: the alias existed with nothing waiting on it, so a request that escaped the intercept
+    // showed up only as a connection that mysteriously errored.
+    cy.wait("@generateToken");
 
     // Then the connection is connected and the pane is interactive. Keeping the overlay up here
     // would now be waiting on a handshake nobody is performing
