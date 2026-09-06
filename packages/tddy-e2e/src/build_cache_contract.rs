@@ -194,3 +194,89 @@ pub fn wires_build_cache_resolver(contents: &str) -> bool {
     log::debug!("wires_build_cache_resolver ok={ok}");
     ok
 }
+
+/// The assignments inside every **job-level** `env:` block of a workflow file, comments stripped.
+///
+/// Indentation is the discriminator: a job's `env:` sits at four spaces with its entries at six,
+/// while a step's sits deeper. That distinction is the whole point — the two blocks do not have
+/// the same contexts available to them.
+///
+/// Comments come out because they are prose, and prose about a context is not a use of it.
+pub fn job_level_env_lines(workflow: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut inside = false;
+    for line in workflow.lines() {
+        if line == "    env:" {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let is_entry = line.starts_with("      ") && !line.starts_with("       ");
+        if !is_entry {
+            inside = false;
+            continue;
+        }
+        let assignment = strip_comment(line);
+        if !assignment.trim().is_empty() {
+            lines.push(assignment);
+        }
+    }
+    lines
+}
+
+/// Drop a whole-line `#` comment, or an inline one — which in YAML is a `#` preceded by a space.
+fn strip_comment(line: &str) -> String {
+    if line.trim_start().starts_with('#') {
+        return String::new();
+    }
+    match line.find(" #") {
+        Some(at) => line[..at].to_string(),
+        None => line.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::job_level_env_lines;
+
+    const WORKFLOW: &str = "\
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # runner. mentioned in prose is not a use of it
+      GOOD: value # trailing note
+      BAD: ${{ runner.arch }}
+    steps:
+      - uses: actions/checkout@v7
+        env:
+          STEP_LEVEL: ${{ runner.arch }}
+";
+
+    #[test]
+    fn reads_a_jobs_env_entries_without_their_comments() {
+        // Given / When
+        let lines = job_level_env_lines(WORKFLOW);
+
+        // Then the prose comment is gone and the inline note is trimmed off its assignment
+        assert_eq!(
+            lines,
+            vec!["      GOOD: value", "      BAD: ${{ runner.arch }}"]
+        );
+    }
+
+    #[test]
+    fn a_job_level_runner_reference_is_visible() {
+        // Given / When
+        let offenders: Vec<_> = job_level_env_lines(WORKFLOW)
+            .into_iter()
+            .filter(|line| line.contains("runner."))
+            .collect();
+
+        // Then only the real assignment is reported — not the comment, and not the step's `env:`,
+        // where the runner context is perfectly legal
+        assert_eq!(offenders, vec!["      BAD: ${{ runner.arch }}"]);
+    }
+}

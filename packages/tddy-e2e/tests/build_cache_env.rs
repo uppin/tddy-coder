@@ -6,7 +6,8 @@
 use std::fs;
 
 use tddy_e2e::build_cache_contract::{
-    repo_root, resolve_in, resolver_path, verify_syntax, wires_build_cache_resolver, Resolution,
+    job_level_env_lines, repo_root, resolve_in, resolver_path, verify_syntax,
+    wires_build_cache_resolver, Resolution,
 };
 use tempfile::TempDir;
 
@@ -347,4 +348,31 @@ fn ci_names_the_backend_for_every_rust_job() {
         credentials, 4,
         "expected all four Rust jobs to expose the cache service"
     );
+}
+
+#[test]
+fn no_job_level_env_reaches_for_the_runner_context() {
+    // Given every workflow in the repo
+    let workflows = fs::read_dir(repo_root().join(".github/workflows")).unwrap();
+
+    for entry in workflows {
+        let path = entry.unwrap().path();
+        let workflow = fs::read_to_string(&path).unwrap();
+
+        // When
+        let offenders: Vec<_> = job_level_env_lines(&workflow)
+            .into_iter()
+            .filter(|line| line.contains("runner."))
+            .collect();
+
+        // Then — a job's `env:` is evaluated before a runner is assigned, so naming that context
+        // there is not a bad value but an invalid workflow: GitHub rejects the whole file and
+        // starts no jobs at all, which reads as a red check with nothing in it to look at.
+        // `runner.*` belongs in a step, or in a step that exports it.
+        assert!(
+            offenders.is_empty(),
+            "{} uses the runner context in a job-level env: {offenders:?}",
+            path.display()
+        );
+    }
 }

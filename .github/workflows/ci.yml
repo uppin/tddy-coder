@@ -40,9 +40,6 @@ jobs:
       # first, so every `./dev` invocation below compiles through sccache against
       # the Actions cache. See docs/dev/guides/build-cache.md.
       TDDY_BUILD_CACHE: github-actions
-      # Namespaces the cache per architecture. The two Linux runners share
-      # `runner.os`, and an arm64 object is useless to the x86_64 job.
-      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -62,6 +59,11 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            // Namespaces the cache per architecture: the two Linux runners share
+            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
+            // here rather than in the job's `env:`, which has no `runner` context
+            // — referencing one there is rejected as an invalid workflow file.
+            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -103,7 +105,6 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -119,6 +120,11 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            // Namespaces the cache per architecture: the two Linux runners share
+            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
+            // here rather than in the job's `env:`, which has no `runner` context
+            // — referencing one there is rejected as an invalid workflow file.
+            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -192,7 +198,6 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -208,6 +213,11 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            // Namespaces the cache per architecture: the two Linux runners share
+            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
+            // here rather than in the job's `env:`, which has no `runner` context
+            // — referencing one there is rejected as an invalid workflow file.
+            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -336,7 +346,6 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_GHA_VERSION: ${{ runner.arch }}
     steps:
       - uses: actions/checkout@v7
 
@@ -352,6 +361,11 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            // Namespaces the cache per architecture: the two Linux runners share
+            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
+            // here rather than in the job's `env:`, which has no `runner` context
+            // — referencing one there is rejected as an invalid workflow file.
+            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
 
       - uses: cachix/install-nix-action@v31
         with:
