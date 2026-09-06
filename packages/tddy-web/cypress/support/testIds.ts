@@ -70,6 +70,10 @@ export const TEST_IDS = {
   /** The overlay layer holding the older-history (scrollback>0) page terminal. */
   terminalPagePane: "terminal-page-pane",
   terminalOlderBufferText: "terminal-older-buffer-text",
+  /** Hidden, readable mirror of what the LIVE terminal has painted (the canvas is WebGL). */
+  terminalBufferText: "terminal-buffer-text",
+  /** Cover shown over the pane once the far end has ended the session. */
+  terminalCoderUnavailable: "terminal-coder-unavailable",
   /** Hidden mirror of the page terminal's viewportY (lines scrolled up from the bottom). */
   terminalPageViewportY: "terminal-page-viewport-y",
   /** Hidden mirror of the LIVE terminal's viewportY (lines scrolled up from the bottom). */
@@ -93,6 +97,8 @@ export const TEST_IDS = {
   participantList: "participant-list",
   participantListEmpty: "participant-list-empty",
   participantListError: "participant-list-error",
+  /** Shown instead of the roster when the connection carries no LiveKit presence. */
+  participantListUnavailable: "participant-list-unavailable",
   connectedParticipantsPanel: "connected-participants-panel",
 
   // LiveKit rooms panel
@@ -100,6 +106,10 @@ export const TEST_IDS = {
   livekitRoomsPanelLoading: "livekit-rooms-panel-loading",
   livekitRoomsPanelEmpty: "livekit-rooms-panel-empty",
   livekitRoomsPanelError: "livekit-rooms-panel-error",
+  /** Shown in the panel's place, frame and all, while the common room has not been joined. */
+  livekitRoomsPanelJoining: "livekit-rooms-panel-joining",
+  /** The whole `#/livekit` screen's stand-in on a connection that carries no LiveKit presence. */
+  livekitUnavailable: "livekit-unavailable",
 
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",
@@ -166,6 +176,8 @@ export const TEST_IDS = {
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
   sessionsDrawer: "sessions-drawer",
+  /** The drawer's footnote when it cannot see sessions owned by other hosts. */
+  sessionsDrawerCrossHostUnavailable: "sessions-drawer-cross-host-unavailable",
   sessionsDetailPane: "sessions-detail-pane",
   sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
   sessionsDetailMetadata: "sessions-detail-metadata",
@@ -472,6 +484,8 @@ export const TEST_IDS = {
 
   // RPC Playground
   rpcPlaygroundParticipantSelect: "rpc-playground-participant-select",
+  /** Replaces the participant picker when the connection carries no LiveKit presence. */
+  rpcPlaygroundParticipantUnavailable: "rpc-playground-participant-unavailable",
   rpcServiceTree: "rpc-service-tree",
   rpcRequestEditor: "rpc-request-editor",
   rpcInvokeButton: "rpc-invoke-button",
@@ -693,6 +707,15 @@ export const TEST_IDS = {
   // Daemon selector (top-right strip on daemon-mode screens)
   daemonSelectorTrigger: "daemon-selector-trigger",
 
+  // Host-connection probes (HostConnectionAcceptance.cy.tsx) — small components that render what
+  // `useHostClient` / `useHostConnection` resolved, so the connection model can be driven without a
+  // screen in the way.
+  hostConnectionSessionCount: "host-connection-session-count",
+  hostConnectionDistinctClients: "host-connection-distinct-clients",
+  hostConnectionRenderCount: "host-connection-render-count",
+  hostConnectionReRender: "host-connection-re-render",
+  hostConnectionResolvedProvider: "host-connection-resolved-provider",
+
   // Projects screen (/projects)
   projectsScreen: "projects-screen",
   projectsList: "projects-list",
@@ -709,6 +732,8 @@ export const TEST_IDS = {
   daemonSettingsLivekitApiKey: "daemon-settings-livekit-api-key",
   /** Says whether the daemon holds a LiveKit API secret; never shows the secret itself. */
   daemonSettingsLivekitSecretState: "daemon-settings-livekit-secret-state",
+  /** The operator's LiveKit switch: off preserves every other field in the block. */
+  daemonSettingsLivekitEnabled: "daemon-settings-livekit-enabled",
   daemonSettingsSave: "daemon-settings-save",
   /** The fields an update persisted but could not apply to the running daemon. */
   daemonSettingsRestartRequired: "daemon-settings-restart-required",
@@ -772,6 +797,9 @@ export const participantRole = (identity: string) => `participant-role-${identit
 
 /** `[data-testid="participant-metadata-<identity>"]` */
 export const participantMetadata = (identity: string) => `participant-metadata-${identity}`;
+
+/** `[data-testid="participant-video-cell-<identity>"]` */
+export const participantVideoCell = (identity: string) => `participant-video-cell-${identity}`;
 
 /** `[data-testid="participant-video-trigger-<identity>"]` */
 export const participantVideoTrigger = (identity: string) =>

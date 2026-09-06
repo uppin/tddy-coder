@@ -8,9 +8,9 @@
  * a new worktree tagged with `orchestratorSessionId = <parent>`. The web discovers that child via
  * the ordinary `ListSessions` poll and renders it as a tab inside the parent's session runtime.
  *
- * Driven over the deterministic gRPC path: `connectSession` returns an empty `livekitRoom`, so both
- * the parent and a selected child attach as `connected-grpc` and their RPCs flow over the daemon
- * client into the in-memory backend.
+ * Driven over the deterministic host-served path: `connectSession` returns an empty `livekitRoom`,
+ * so both the parent and a selected child are reached over their host's own connection and their
+ * RPCs flow into the in-memory backend.
  */
 
 import React from "react";
@@ -61,7 +61,7 @@ const CHILD = {
   pendingElicitation: false,
 };
 
-/** A connected-grpc backend (empty `livekitRoom`) listing the given sessions. */
+/** A host-served backend (empty `livekitRoom`) listing the given sessions. */
 function aGrpcBackend(sessions: typeof PARENT[] | Array<Record<string, unknown>>): ConnectionServiceBackend {
   return aConnectionServiceBackend({
     sessions,

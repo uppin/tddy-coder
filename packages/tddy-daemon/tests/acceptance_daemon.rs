@@ -52,6 +52,7 @@ listen:
   web_port: 8899
   web_host: "0.0.0.0"
 livekit:
+  enabled: true
   url: ws://127.0.0.1:7880
   common_room: tddy-lobby
 users:

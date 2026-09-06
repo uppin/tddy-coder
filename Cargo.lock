@@ -11800,6 +11800,8 @@ dependencies = [
  "libc",
  "log",
  "rstest 0.24.0",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

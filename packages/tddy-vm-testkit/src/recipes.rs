@@ -106,15 +106,22 @@ pub fn install_bundle_paths() -> Vec<(&'static str, &'static str)> {
 
 /// The release binaries the test host needs on disk.
 ///
-/// `./release` builds the first four. `tddy-sandbox-runner` is not in that list but is
-/// the jailed payload every sandbox spawn execs, so a jail fails without it — it is built
-/// explicitly alongside.
+/// Exactly `./install`'s own `INSTALLED_BINARIES` under `--systemd` (`install:554`), because
+/// the script refuses to run with any of them missing — `install: missing release binary:
+/// …/tddy-remote-git-repo` is how a short list announces itself, after a bake and a boot.
+/// `tddy-remote-git-repo` and `tddy-session-sync` are clients rather than services, and
+/// `tddy-sandbox-runner` is the payload inside every jail the daemon spawns; the script
+/// installs all three regardless, so a deployment has to carry them.
+///
+/// `./release` builds every one of them.
 pub fn deployed_binaries() -> Vec<&'static str> {
     vec![
         "tddy-supervisor",
         "tddy-daemon",
         "tddy-coder",
         "tddy-tools",
+        "tddy-remote-git-repo",
+        "tddy-session-sync",
         "tddy-sandbox-runner",
     ]
 }

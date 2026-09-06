@@ -6,8 +6,13 @@ import { RpcTransportProvider, useHttpClient, useHttpTransport } from "./rpc/tra
 import { loadClientConfig } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
+import { ConnectionProviders } from "./rpc/connections/registry";
+import type { TauriHostWindow } from "./rpc/daemonTransportFlavour";
+import { localHostRegistrationFor } from "./rpc/connections/localHost";
+import { LocalHostConnections } from "./rpc/connections/localHostRegistration";
 import type { DaemonHost } from "./lib/participantRole";
-import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
+import { GhosttyTerminalSession } from "./components/GhosttyTerminalSession";
+import { useDirectRoomTerminal } from "./rpc/connections/livekit/useDirectRoomTerminal";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
 import { BUILD_ID } from "./buildId";
 
@@ -44,7 +49,6 @@ function HmrOverlay() {
 import { applyDebugMaskFromConfig, applyDebugMaskFromUrl } from "./lib/debugMask";
 import { TokenService } from "./gen/token_pb";
 import { useVisualViewport } from "./hooks/useVisualViewport";
-import { useIsMobile } from "./hooks/useIsMobile";
 import { GitHubLoginButton } from "./components/GitHubLoginButton";
 import { AuthCallback } from "./components/AuthCallback";
 import { UserAvatar } from "./components/UserAvatar";
@@ -120,8 +124,7 @@ function ConnectedTerminal({
   const [initialToken, setInitialToken] = useState<string | null>(null);
   const [ttlSeconds, setTtlSeconds] = useState<bigint | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { height: viewportHeight, isKeyboardOpen } = useVisualViewport();
-  const isMobile = useIsMobile();
+  const { height: viewportHeight } = useVisualViewport();
 
   useEffect(() => {
     // `sessionToken` is not passed: the field exists on the request, so the transport's auth gate
@@ -150,6 +153,24 @@ function ConnectedTerminal({
     },
     [client, roomName, identity]
   );
+
+  // The room is this screen's to join: it was handed a url, an identity and a room name, and there
+  // is no session and no daemon behind them to open a connection on. The terminal it feeds knows
+  // none of that — see `useDirectRoomTerminal`.
+  //
+  // Called with the other hooks, above every early return. It used to be a component rendered in
+  // the JSX below, where an early return was harmless; as a hook, returning before it would make
+  // this render call fewer hooks than the last and React would throw instead of painting. The
+  // failing render is precisely the `error` one below — so the screen whose job is to show a token
+  // failure was the screen that could not.
+  const terminal = useDirectRoomTerminal({
+    url,
+    token: initialToken ?? undefined,
+    getToken,
+    ttlSeconds: ttlSeconds ?? undefined,
+    roomName,
+    debug: debugLogging ?? false,
+  });
 
   if (error) {
     return (
@@ -188,20 +209,26 @@ function ConnectedTerminal({
 
   return (
     <div ref={fullscreenTargetRef} data-testid="connected-terminal-container" style={fullscreenContainerStyle}>
-      <GhosttyTerminalLiveKit
-        url={url}
-        token={initialToken}
-        getToken={getToken}
-        ttlSeconds={ttlSeconds}
-        roomName={roomName}
-        debugMode={false}
-        debugLogging={debugLogging ?? false}
-        autoFocus={!isMobile}
-        preventFocusOnTap={isMobile && !isKeyboardOpen}
-        showMobileKeyboard={isMobile}
-        connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
-        fullscreenTargetRef={fullscreenTargetRef}
-      />
+      {terminal.feed ? (
+        <GhosttyTerminalSession
+          feed={terminal.feed}
+          connectionStatus={terminal.status}
+          connectionError={terminal.error ?? undefined}
+          debugLogging={debugLogging ?? false}
+          connectionOverlay={{ onDisconnect, buildId: BUILD_ID, onTerminate }}
+          fullscreenTargetRef={fullscreenTargetRef}
+        />
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <ConnectionTerminalChrome
+            overlayStatus={terminal.status}
+            buildId={BUILD_ID}
+            onDisconnect={onDisconnect}
+            onTerminate={onTerminate}
+            fullscreenTargetRef={fullscreenTargetRef}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -370,6 +397,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const transport = useHttpTransport();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
+    livekitEnabled?: boolean;
     livekitUrl?: string;
     commonRoom?: string;
     daemonInstanceId?: string;
@@ -382,6 +410,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         applyDebugMaskFromConfig(config?.debug);
         setAppConfig({
           daemonMode: config?.daemonMode ?? false,
+          livekitEnabled: config?.livekitEnabled,
           livekitUrl: config?.livekitUrl,
           commonRoom: config?.commonRoom,
           daemonInstanceId: config?.daemonInstanceId,
@@ -392,6 +421,23 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   }, [transport]);
 
   const daemonMode = appConfig.daemonMode;
+
+  /**
+   * The host this page's own application serves, when this page is running inside one.
+   *
+   * `null` in a browser, which is the whole of what keeps the IPC wire out of the browser's hands:
+   * with no registration nothing is registered, and every host is reached exactly as it is today.
+   * The question is `daemonTransportFlavour`'s, already asked to choose this page's own daemon
+   * transport — asked once more here rather than re-asked in a second, differently-worded form.
+   */
+  const localHost = useMemo(
+    () =>
+      localHostRegistrationFor(
+        typeof window === "undefined" ? {} : (window as TauriHostWindow),
+        appConfig.daemonInstanceId,
+      ),
+    [appConfig.daemonInstanceId],
+  );
 
   // Standalone mode uses query params for LiveKit fields, not `/terminal/:id`. Strip misleading hash paths.
   useEffect(() => {
@@ -418,35 +464,42 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         !isAuthenticated ? (
           <DaemonLoginScreen path={path} login={login} authError={authError} />
         ) : (
-          <SelectedDaemonProvider
-            livekitUrl={appConfig.livekitUrl}
-            commonRoom={appConfig.commonRoom}
-            servingInstanceId={appConfig.daemonInstanceId}
-            room={testDaemonRoom}
-            daemons={testDaemonHosts}
-          >
-            {isRpcPlaygroundPath(path) ? (
-              <RpcPlaygroundAppPage onNavigate={navigate} />
-            ) : isTasksPath(path) ? (
-              <TasksDrawerScreen onNavigate={navigate} />
-            ) : isVmsPath(path) ? (
-              <VmsAppPage onNavigate={navigate} />
-            ) : isProjectsPath(path) ? (
-              <ProjectsAppPage onNavigate={navigate} />
-            ) : isModelsPath(path) ? (
-              <ModelsAppPage onNavigate={navigate} />
-            ) : isLiveKitPath(path) ? (
-              <LiveKitAppPage onNavigate={navigate} />
-            ) : isSettingsPath(path) ? (
-              <SettingsAppPage onNavigate={navigate} />
-            ) : path === "/worktrees" ? (
-              <WorktreesAppPage onNavigate={navigate} />
-            ) : isSessionsDrawerPath(path) ? (
-              <SessionsDrawerScreen onNavigate={navigate} />
-            ) : (
-              <SessionsDrawerScreen onNavigate={navigate} />
-            )}
-          </SelectedDaemonProvider>
+          /* `LocalHostConnections` sits above `SelectedDaemonProvider`, which is what offers the
+             common room: precedence is registration order and a parent renders first, so the
+             desktop's own host stays on its in-process bridge even where a common room could also
+             reach that machine. In a browser `localHost` is `null` and it registers nothing. */
+          <LocalHostConnections registration={localHost}>
+            <SelectedDaemonProvider
+              livekitEnabled={appConfig.livekitEnabled}
+              livekitUrl={appConfig.livekitUrl}
+              commonRoom={appConfig.commonRoom}
+              servingInstanceId={appConfig.daemonInstanceId}
+              room={testDaemonRoom}
+              daemons={testDaemonHosts}
+            >
+              {isRpcPlaygroundPath(path) ? (
+                <RpcPlaygroundAppPage onNavigate={navigate} />
+              ) : isTasksPath(path) ? (
+                <TasksDrawerScreen onNavigate={navigate} />
+              ) : isVmsPath(path) ? (
+                <VmsAppPage onNavigate={navigate} />
+              ) : isProjectsPath(path) ? (
+                <ProjectsAppPage onNavigate={navigate} />
+              ) : isModelsPath(path) ? (
+                <ModelsAppPage onNavigate={navigate} />
+              ) : isLiveKitPath(path) ? (
+                <LiveKitAppPage onNavigate={navigate} />
+              ) : isSettingsPath(path) ? (
+                <SettingsAppPage onNavigate={navigate} />
+              ) : path === "/worktrees" ? (
+                <WorktreesAppPage onNavigate={navigate} />
+              ) : isSessionsDrawerPath(path) ? (
+                <SessionsDrawerScreen onNavigate={navigate} />
+              ) : (
+                <SessionsDrawerScreen onNavigate={navigate} />
+              )}
+            </SelectedDaemonProvider>
+          </LocalHostConnections>
         )
       ) : (
         <ConnectionForm />
@@ -462,10 +515,16 @@ applyDebugMaskFromUrl();
 const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
+    // One registry for the page's whole lifetime. It is empty here: the wires register themselves
+    // as they come up — the common room from `SelectedDaemonProvider`, and in a host build whatever
+    // that build knows how to reach its own daemon over. A page where none of them does resolves
+    // every host to `null`, which is the "not connected" state each screen already renders.
     <RpcTransportProvider>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ConnectionProviders>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ConnectionProviders>
     </RpcTransportProvider>,
   );
 }

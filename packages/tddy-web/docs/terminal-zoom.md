@@ -10,7 +10,7 @@ Technical reference for pitch-in / pitch-out / reset in **tddy-web**. Product be
 | Bridge and parsers | `src/lib/terminalZoomBridge.ts` (`TERMINAL_ZOOM_BRIDGE_EVENT`, `TERMINAL_FONT_SIZE_SYNC_EVENT`, `parseTerminalZoomBridgeDetail`, `parseTerminalFontSizeSyncDetail`, `dispatchTerminalZoomBridge`, `dispatchTerminalZoomBridgeOn`, `dispatchTerminalFontSizeSync`, `isTerminalZoomDebugEnabled`) |
 | Terminal integration | `src/components/GhosttyTerminal.tsx` (`minFontSize` / `maxFontSize`, bridge listener, **Ctrl/⌘ +/-/0**, two-finger **pinch**, **trackpad** `wheel`+`ctrlKey`, `applyFontSizePx`, `data-terminal-font-size`, imperative `setTerminalFontSize` on ref; `pinchZoomFont` prop) |
 | Connection chrome | `src/components/connection/ConnectionTerminalChrome.tsx` (no zoom UI; status dot / fullscreen only) |
-| LiveKit shell | `src/components/GhosttyTerminalLiveKit.tsx` (`fontSize` prop → **`GhosttyTerminal`** baseline) |
+| Session terminal | `src/components/GhosttyTerminalSession.tsx` (`fontSize` prop → **`GhosttyTerminal`** baseline, `minFontSize` / `maxFontSize` bounds; see [terminal-session.md](terminal-session.md)) |
 
 ## Event contract
 

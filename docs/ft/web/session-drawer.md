@@ -137,6 +137,19 @@ promote its idle orchestrator into the **Active** partition, which was previousl
 Cross-host visibility only applies when a common room exists — a single-daemon deployment has one
 host and no cross-host case.
 
+**Without presence the drawer says so.** Liveness *is* participant presence, so on a selected host
+reached over a wire that carries none, the union silently collapses to that host's `ListSessions` —
+which reads exactly like "there is nothing running anywhere else". The drawer therefore keeps the
+rows it does have and adds a footnote under them
+(`data-testid="sessions-drawer-cross-host-unavailable"`): *Sessions on other hosts are not visible
+from this connection.* Under the rows rather than over them — the list is still the answer to "what
+is running", and this is the footnote saying which part of the question it could not reach.
+
+A common room that is merely mid-join, or one whose join failed, is **not** that case: the footnote
+appears only when nothing is being joined and the wire carries no presence, so it cannot flash on
+during every page load. See
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
+
 ### `SessionManager`
 
 The merged list, its refresh, and its change events live in one place: `SessionManager`
@@ -161,49 +174,61 @@ selected host. Because selection never calls `selectDaemon`, the screen does not
 ## Session Attachment
 
 `useSessionAttachment` hook manages the single-session attach lifecycle:
-- `connectSession` → calls `ConnectSession` RPC → `connected-livekit` or `connected-grpc`
+- `connectSession` → calls `ConnectSession` RPC → reads the reply into a `SessionAttachmentHint`,
+  opens the session over the host connection, and reports one `connected` state carrying that
+  `SessionConnection`
 - `resumeSession` → calls `ResumeSession` RPC → same state transitions
 - Clicking a connected session in the drawer auto-calls `connectSession`
 - Clicking a disconnected session opens the inspector by default without auto-connecting
 
+There is **one** connected state, whatever wire carries the session. What the session's connection
+can do — tracks and a roster, or calls only — is its `capabilities`, so no consumer branches on the
+wire. See [session-connections.md](../../../packages/tddy-web/docs/session-connections.md).
+
 ## Fast Session Change
 
-The drawer keeps one self-contained **runtime** per attached LiveKit session, so switching
-between sessions is a focus change — not a disconnect/reconnect. Background sessions stay
-mounted and keep streaming; the inspector shows live traffic per session; and session-scoped
-RPCs target each session's own LiveKit participant.
+The drawer keeps one self-contained **runtime** per attached session, so switching between
+sessions is a focus change — not a disconnect/reconnect. Background sessions stay mounted and
+keep streaming; the inspector shows live traffic per session; and session-scoped RPCs target
+each session's own connection.
 
 ### Per-session runtime registry
 
 `SessionRuntimeRegistry` (keyed by `sessionId`) replaces the single `useSessionAttachment`
-singleton for LiveKit-backed sessions. Each `SessionRuntimeState` holds:
+singleton. Each `SessionRuntimeState` holds:
 
 - attachment status
-- its own LiveKit `Room` (joined as `browser-{sessionId}-{ts}`)
-- its own `GhosttyTerminalLiveKit` instance
-- a `ConnectionService` client bound to the session's participant identity
-  (`daemon-{instanceId}-{sessionId}`)
+- its own `SessionConnection` — the session's route, capabilities and live status — and the
+  `SessionAttachmentHint` it was opened with
+- its own terminal instance, chosen from the connection's capabilities
 - byte counters (in/out), accumulated from the terminal's own I/O events (see below)
 - `lastDataReceivedAt` (stamped from inbound terminal output chunks only)
 - terminal control state
 
 One `<SessionRuntime>` is mounted per attached session. The focused session's terminal is
 CSS-visible; the others are `display:none` but stay subscribed to `streamTerminalIO`.
-Selecting a session is a focus switch — no unmount, no `resetAttachment`, no LiveKit
-reconnect, no terminal resize.
+Selecting a session is a focus switch — no unmount, no `resetAttachment`, no reconnect, no
+terminal resize.
 
 ### Eviction
 
 Background attachments persist until **explicit disconnect** — there is no cap. Disconnect
 removes only that session's runtime. Memory therefore grows with the number of concurrently
-attached sessions (one LiveKit Room + one Ghostty terminal each); this is intentional for the
+attached sessions (one connection + one Ghostty terminal each); this is intentional for the
 fast-switching workflow.
+
+The registry **owns** each runtime's connection: evicting a runtime, replacing its connection on
+re-attach, and unmounting the screen (`closeAll()`) all release it. A runtime outlives the focus
+that created it, so nothing else is in a position to close one — and an unreleased connection is a
+joined room plus a token-refresh timer alive for the life of the page.
 
 ### Session-participant RPC routing
 
-For an attached LiveKit session, the `ConnectionService` client is built via
-`liveKitFactory(room, sessionServerIdentity)` where `sessionServerIdentity` is the session's
-own participant (`daemon-{instanceId}-{sessionId}`). Session-scoped RPCs route through it:
+The `ConnectionService` client for an attached session comes from its own connection
+(`connection.clientFor(ConnectionService)`), memoised per service so an unchanged route yields one
+stable client identity. Over a room that reaches the session's own participant
+(`daemon-{instanceId}-{sessionId}`); where the host serves the session itself it is the host's own
+client. Session-scoped RPCs route through it:
 
 - `ListExecTools`, `ListSessionToolCalls`, `ExecuteTool`
 - `ClaimTerminalControl`, `WatchTerminalControl`
@@ -237,10 +262,10 @@ The inspector **Details** tab shows bytes in, bytes out (both via `formatBytes`,
 and a "last data received: Ns ago" relative timestamp that advances while the inspector is open.
 The source is dual:
 
-- **Attached LiveKit session** — the session's `GhosttyTerminalLiveKit` fires an `onBytes` event
+- **Attached LiveKit session** — the session's `GhosttyTerminalSession` fires an `onBytes` event
   per terminal I/O unit: `bytesIn = output.data.length` per received output chunk, and
   `bytesOut = data.length` per batched input yield sent to the coder. These thread up through
-  `SessionLiveKitTerminal` → `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
+  `SessionRuntime` (`onSessionBytes(sessionId, delta)`) → the screen,
   which folds them into the session's runtime counters via `SessionRuntimeRegistry.recordBytes`
   (`makeByteTap`). The registry's `notify()` re-renders the screen (`useSyncExternalStore`), so the
   meter ticks live — even for a backgrounded session. `lastDataReceivedAt` is stamped from inbound
@@ -348,10 +373,28 @@ Adds to `src/components/ui/`:
 
 ## Inspector Tabs
 
-The inspector panel has two tabs:
+Two of the strip's tabs are described here:
 
 - **Details** (default) — the existing metadata + controls section described above.
 - **Tools** — per-session tool-call log and an inline invoke panel.
+
+The rest of the strip is listed under the `inspector` param in
+[url-state-routing.md](url-state-routing.md#params).
+
+### Media tabs are offered only where the wire carries video
+
+**VNC** and **Screen Sharing** are published video tracks, so on a host reached over a wire that
+carries none they are **absent from the strip** rather than present and disabled — and the panel
+dispatch and the `?inspector=` fallback agree with the strip, so a media tab named in the URL
+degrades to Details. Details of each feature: [vnc-sessions.md](vnc-sessions.md),
+[screen-sharing-sessions.md](screen-sharing-sessions.md).
+
+The gate is the **host's** connection, which the drawer hands the inspector as a required prop. A
+dormant session has no session connection at all, so reading one there would answer "no media" to a
+question that is unanswerable and strip the tabs from every dormant session. And a common room still
+being joined keeps the tabs: the strip would otherwise render seven tabs on load and nine a second
+later, reflowing under the operator's cursor. See
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
 
 ### Tools Tab
 
@@ -1093,14 +1136,14 @@ SessionMainPane
  └─ terminal container
 ```
 
-`useSessionLiveKitRoom(attachment)` — new hook that connects a `Room` for the selected
-LiveKit session (mirrors `useCommonRoom`) and provides it to `useLiveKitPing` and the
-meter's room subscription.
+Round-trip time is read off the attached session's **own** connection (`liveKitRoomOf`), so the
+strip measures the wire the session already uses instead of joining its room a second time. A
+session its host serves directly has no room to measure and reads `—`.
 
 ### Acceptance criteria
 
-1. The strip is visible at the top of `SessionMainPane` when a session is `connected-livekit`.
-2. The strip is absent when no session is selected or the session is `connected-grpc`/idle.
+1. The strip is visible at the top of `SessionMainPane` when a session is connected.
+2. The strip is absent when no session is selected or the attachment is idle.
 3. Bytes-in and bytes-out counters start at 0 and grow monotonically within a session.
 4. Live rates reset toward 0 when no RPC traffic occurs for ≥ 2 s.
 5. Ping shows a numeric ms value when the WebRTC candidate-pair RTT is available.
@@ -1121,7 +1164,7 @@ names the holding screen and provides a button to steal control.
 
 - Rendered inside `SessionMainPane` when `terminalControl.isController === false`.
 - Full-cover absolute scrim over the terminal container (`data-testid="terminal-control-overlay"`),
-  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalLiveKit`.
+  matching the `terminal-coder-unavailable` overlay style in `GhosttyTerminalSession`.
 - Contains:
   - A brief message: "Controlled by another screen".
   - The holder screen identifier (`data-testid="terminal-control-holder"`).

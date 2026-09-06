@@ -42,6 +42,11 @@ pub struct ClientConfig {
     /// next to the correct entry. `None` for the standalone (non-daemon) tddy-coder web server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub daemon_instance_id: Option<String>,
+    /// Whether the serving daemon joins its common room (`livekit.enabled`). `false` means the
+    /// operator switched LiveKit off, so the page constructs no `Room` and mints no token. `None`
+    /// for the standalone (non-daemon) tddy-coder web server, which has no such switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub livekit_enabled: Option<bool>,
 }
 
 /// Serve static files from `bundle_path` on the given `host` and `port`.
@@ -127,6 +132,7 @@ mod tests {
             allowed_agents: vec![],
             debug: None,
             daemon_instance_id: None,
+            livekit_enabled: None,
         }
     }
 

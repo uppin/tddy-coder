@@ -6,8 +6,8 @@
  *
  * - **A host re-render must not churn the client.** Hosts build the session-scoped client inline
  *   while rendering (`buildSessionClient?.() ?? client` in `SessionMainPane`), so an
- *   unmemoized build hands the overlay a fresh client on every render. Resolving the build through
- *   `SessionClientCache` returns the *same* `Client` for an unchanged target, so the feeds stay on
+ *   unmemoized build hands the overlay a fresh client on every render. Asking the session's own
+ *   `SessionConnection` returns the *same* `Client` for an unchanged route, so the feeds stay on
  *   one subscription each.
  * - **A genuine transport change must be honored.** When a session's routing is upgraded
  *   (daemon-direct → session-scoped, once the session's own room connects), the client really does
@@ -19,9 +19,10 @@
 
 import React from "react";
 import { createClient, type Transport } from "@connectrpc/connect";
+import { Room } from "livekit-client";
 import { ConnectionService } from "../../src/gen/connection_pb";
 import { AgentActivityOverlay } from "../../src/components/sessions/AgentActivityOverlay";
-import { useSessionClientCache } from "../../src/components/sessions/sessionClientCache";
+import { LiveKitConnectionProvider } from "../../src/rpc/connections/liveKit";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { agentActivityPage } from "../support/pages/agentActivityPage";
 import { agentChatPage } from "../support/pages/agentChatPage";
@@ -37,16 +38,19 @@ const hostPage = {
 };
 
 /**
- * Harness mirroring `SessionMainPane`: the session-scoped client is rebuilt inline on every render,
- * but resolved through the production {@link SessionClientCache}, so an unchanged target yields one
- * stable client identity.
+ * Harness mirroring `SessionMainPane`: the session-scoped client is asked for inline on every
+ * render, from the session's own connection, so an unchanged route yields one stable client
+ * identity.
  */
 function CachedClientHost({ transport }: { transport: Transport }) {
   const [renders, setRenders] = React.useState(0);
-  const clientCache = useSessionClientCache();
-  const client = clientCache.clientFor("daemon-i1-cached-session", transport, () =>
-    createClient(ConnectionService, transport),
-  );
+  const session = React.useMemo(() => {
+    const provider = new LiveKitConnectionProvider(new Room(), () => transport);
+    const host = provider.connectHost("i1");
+    if (!host) throw new Error("the provider must claim the host its own room reaches");
+    return host.openSession("cached-session", { sessionId: "cached-session" });
+  }, [transport]);
+  const client = session.clientFor(ConnectionService);
   return (
     <div>
       <button data-testid="host-rerender" onClick={() => setRenders((n) => n + 1)}>

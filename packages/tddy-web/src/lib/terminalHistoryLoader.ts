@@ -76,18 +76,28 @@ export interface LoadedChunk extends HistoryChunk {
  * Stateful forward-fill loader. Construct with the `untilOffset` (the anchor `endOffset` from the
  * initial `StreamTerminalOutput` frame) and whether that frame already reported `atOldest` (no
  * older history exists). Call `loadNext` repeatedly to fetch and append forward chunks until done.
+ *
+ * `untilOffset` may also be **`null`**: the terminal's stream carries no offsets at all, so there
+ * is no anchor to compare against and the fill runs to the capture tip, ending on the first chunk
+ * that reports `atEnd`. That is `terminal.TerminalOutput` — `bytes data` and nothing more — which
+ * is what a LiveKit-carried session's frames are. It is deliberately **not** spelled `0n`: a
+ * `SessionTerminalOutput` replay frame reports an anchor of zero when the terminal has captured
+ * nothing, which means the opposite (there is no history, do not ask for any). Collapsing the two
+ * would have this loader page a terminal that has produced no output, and leave a LiveKit session
+ * with the no-scrollback behaviour this is here to remove.
  */
 export class TerminalHistoryForwardLoader {
   private fromOffset: bigint;
-  private readonly untilOffset: bigint;
+  /** The anchor to fill toward, or `null` when the stream carries no offsets — see the class doc. */
+  private readonly untilOffset: bigint | null;
   private reachedEnd = false;
 
-  constructor(untilOffset: bigint, atOldest = false) {
+  constructor(untilOffset: bigint | null, atOldest = false) {
     this.untilOffset = untilOffset;
     this.fromOffset = 0n;
-    // No older history to fill when the anchor is empty or the initial frame already reached the
-    // oldest retained byte.
-    if (untilOffset <= 0n || atOldest) {
+    // No older history to fill when a *stated* anchor is empty, or the initial frame already
+    // reached the oldest retained byte. An absent anchor states nothing, so it stops nothing.
+    if ((untilOffset !== null && untilOffset <= 0n) || atOldest) {
       this.reachedEnd = true;
     }
   }
@@ -109,13 +119,18 @@ export class TerminalHistoryForwardLoader {
    */
   async loadNext(fetchChunk: FetchHistoryChunk): Promise<LoadedChunk | null> {
     if (this.done) return null;
-    const chunk = await fetchChunk(this.fromOffset, this.untilOffset);
+    // `0n` on the wire is `GetTerminalHistory`'s "until the capture tip", which is exactly what an
+    // unanchored fill wants — see `connection.proto`'s `until_offset`.
+    const chunk = await fetchChunk(this.fromOffset, this.untilOffset ?? 0n);
     if (chunk === null) {
       this.reachedEnd = true;
       return null;
     }
-    // An empty-data chunk, or one that already reports atEnd, means the fill is complete.
-    const ended = chunk.atEnd || chunk.data.length === 0 || chunk.endOffset >= this.untilOffset;
+    // An empty-data chunk, or one that already reports atEnd, means the fill is complete. Reaching
+    // the anchor does too — when there is one; unanchored, the chunk's own `atEnd` is the only
+    // verdict there is.
+    const reachedAnchor = this.untilOffset !== null && chunk.endOffset >= this.untilOffset;
+    const ended = chunk.atEnd || chunk.data.length === 0 || reachedAnchor;
     this.fromOffset = chunk.endOffset;
     this.reachedEnd = ended;
     return {

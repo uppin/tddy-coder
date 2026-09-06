@@ -40,14 +40,40 @@ request to clear the fields it omits. From that:
 - **What cannot be applied live is named**, not dropped: `restart_required` lists field paths such as
   `listen.web_port`. The UI shows them.
 
+## The common-room switch
+
+**`livekit.enabled` decides whether this daemon joins its common room at all**, and the settings
+screen renders it as a checkbox above the LiveKit fields. It **defaults to `false`**, so the common
+room is opt-in: a block carrying url, key, secret and room names a room the operator *could* join,
+not one the daemon does.
+
+Switching it off preserves everything else in the block, so switching back on is one checkbox rather
+than four credentials retyped. That is the whole point — before the flag, "off" was expressible only
+by deleting a working block.
+
+It governs the **common room only**:
+
+- **Off:** no target for the supervisor, no peer discovery assembled, no advertisement published,
+  and no common-room token minted by either mint. The web app constructs no `Room` and mints no
+  token; the host directory reports the LiveKit source as `idle`, never `error`.
+- **Still on either way:** `livekit.api_secret` signs this daemon's session tokens, so a daemon with
+  the common room off still authenticates its own gated RPCs — including `DaemonConfigService`, the
+  one an operator switches it back on from. Reading "disabled" as "the block is absent" would be a
+  lockout. Per-session rooms, screen sharing and the `#/livekit` rooms panel read the same block for
+  their own purposes and are not governed by the flag.
+
 ## Runtime reconfiguration
 
 Only the LiveKit block applies live. A supervisor owns the running common-room connection and, when
-the URL or the room name changes, **tears the current one down before bringing the new one up**.
+the switch, the URL or the room name changes, **tears the current one down before bringing the new
+one up**. Saving the toggle therefore disconnects a live room, and re-enabling rejoins it — neither
+needs a restart.
 
 The failure mode is deliberate: a block missing any of the four fields it needs to be joinable never
 becomes a target, so the daemon ends up **disconnected**, with a warning naming what was missing —
-never silently still in the old room while the settings screen reports the new one.
+never silently still in the old room while the settings screen reports the new one. A daemon that was
+*told* not to join is logged differently, at info rather than warning: an operator who switched
+LiveKit off has not misconfigured anything, and the two must not read alike.
 
 ## Known limits
 

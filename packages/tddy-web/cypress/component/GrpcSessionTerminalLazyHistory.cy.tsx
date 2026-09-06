@@ -5,12 +5,12 @@
  *
  * `GrpcSessionTerminal` captures the `endOffset` anchor from the initial `StreamTerminalOutput`
  * frame, builds a forward `historyFetcher`, and passes it (plus full frames carrying the offset
- * metadata) to `GhosttyTerminalGrpc`. When the user activates "Load earlier output",
+ * metadata) to `GhosttyTerminalSession`. When the user activates "Load earlier output",
  * `GetTerminalHistory` is called forward from offset 0 bounded by the anchor; a second call chains
  * forward from the previous chunk's `end_offset` until `at_end`. The shared component overlays the
  * page terminal behind the live one, shows a loading indicator while filling, then swaps it to the
  * foreground once `at_end` is reached. This test verifies the wiring (RPC offsets + buffer content);
- * the paging UX is covered by GhosttyTerminalGrpcLazyHistory.cy.tsx.
+ * the paging UX is covered by TerminalHistoryPaging.cy.tsx.
  */
 
 import React, { useMemo } from "react";

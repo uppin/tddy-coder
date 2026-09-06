@@ -13,7 +13,7 @@ export interface LiveKitTerminalToken {
 
 /**
  * Fetches a browser LiveKit access token scoped to `roomName`/`identity`, for handing to
- * `GhosttyTerminalLiveKit` (which owns its own refresh scheduling via `getToken`/`ttlSeconds`).
+ * a caller that owns its own room join and its refresh scheduling (`getToken`/`ttlSeconds`).
  *
  * Does nothing (token/ttlSeconds/error stay null) until `tokenClient`, `roomName`, and `identity`
  * are all present and non-empty — e.g. before a session has finished attaching.

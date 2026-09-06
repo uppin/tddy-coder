@@ -8,6 +8,12 @@
 //! completion token, then asserts the guest shut itself down and the overlay is a valid
 //! qcow2 that still names the image it was baked from.
 //!
+//! [`a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh`] closes the loop the other
+//! two leave open: they inspect the artifact the bake produced, and it *uses* it — creates a
+//! VM from the baked layer, boots that VM, and logs into it over SSH. A bake that produced
+//! an unbootable image, or one whose cloud-init never created the account, passes both
+//! inspections and fails this.
+//!
 //! This is a production test: it never runs on its own. `#[ignore]`d (excluded from
 //! `./test`/`./verify`/plain `cargo test`) *and* gated on `TDDY_CLOUDINIT_BASE_IMAGE`
 //! — the same config the `tddy-vm-build cloud-init` CLI reads for `--base-image` —
@@ -28,17 +34,32 @@ use tddy_vm::cloud_init::{
     build_cloud_init_image, CloudInitBuildOptions, CloudInitUser, CloudInitUserData, IsoTool,
 };
 use tddy_vm::qemu::{ensure_uefi_vars_file, resolve_uefi_code_path};
-use tddy_vm::{UefiFirmware, VmAccel, VmArch};
+use tddy_vm::vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
+use tddy_vm::{UefiFirmware, VmAccel, VmArch, VmLibrary};
+use tddy_vm_testkit::{require_base_image, BootedGuest};
 use tempfile::tempdir;
 
-/// The env var this production test reads its base image path from — the same config
-/// knob the `tddy-vm-build cloud-init` CLI's `--base-image` flag reads.
-const BASE_IMAGE_ENV: &str = "TDDY_CLOUDINIT_BASE_IMAGE";
+/// The account [`a_minimal_cloud_init_user_data`] provisions, named once so the VM that
+/// later logs into a baked layer cannot ask for an account the bake never created.
+const PROVISIONED_USERNAME: &str = "tddy";
 
-/// Resolve the base image path from `TDDY_CLOUDINIT_BASE_IMAGE`, or `None` if unset.
-fn configured_base_image() -> Option<PathBuf> {
-    std::env::var(BASE_IMAGE_ENV).ok().map(PathBuf::from)
-}
+/// Virtual size of every overlay these tests build. A qcow2 layer may not be smaller than
+/// the image it chains onto, so the bake and the VM overlay stacked on top of it share one
+/// figure rather than each picking their own.
+const DISK_SIZE: &str = "10G";
+
+/// Name of the layer [`a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh`] bakes,
+/// which is both the filename under `images/02-prepared-base/` and the `prepared_base` its
+/// VM manifest chains onto — one name, so the two cannot disagree.
+const PREPARED_BASE_NAME: &str = "cloud-init-bootable";
+
+/// Boot budget for the VM created from the freshly baked layer.
+///
+/// A bare cloud image reaches a login prompt in ~17 s on an accelerated host
+/// (`vm_boot_control_acceptance.rs`); this guest additionally runs cloud-init again to apply
+/// its own login seed. 300 s is an order of magnitude over the observed figure, so a merely
+/// slow boot does not fail the suite while a guest that never comes up still does.
+const VM_BOOT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The UEFI firmware pair the bake boots through on this host, with its writable variables
 /// store placed in `work_dir`.
@@ -65,7 +86,7 @@ fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
     CloudInitUserData {
         hostname: Some("cloud-init-acceptance".to_string()),
         users: vec![CloudInitUser {
-            name: "tddy".to_string(),
+            name: PROVISIONED_USERNAME.to_string(),
             shell: Some("/bin/bash".to_string()),
             sudo: Some("ALL=(ALL) NOPASSWD:ALL".to_string()),
             ssh_authorized_keys: vec!["{{SSH_PUBLIC_KEY}}".to_string()],
@@ -84,12 +105,7 @@ fn a_minimal_cloud_init_user_data() -> CloudInitUserData {
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_overlay() {
-    let Some(base_image_src) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image_src = require_base_image();
 
     // Given a scratch directory, a place for the finished layer, and a minimal
     // provisioning spec
@@ -140,12 +156,7 @@ async fn builds_a_ready_to_use_provisioned_qcow2_by_baking_cloud_init_into_an_ov
             TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with --ignored"]
 #[serial(cloud_init_qemu_vm)]
 async fn the_overlay_records_the_image_it_was_baked_from_as_a_relative_backing_file() {
-    let Some(base_image_src) = configured_base_image() else {
-        eprintln!(
-            "{BASE_IMAGE_ENV} not set — skipping production test (see module docs to run it)"
-        );
-        return;
-    };
+    let base_image_src = require_base_image();
 
     // Given a completed cloud-init build
     let dir = tempdir().unwrap();
@@ -196,6 +207,108 @@ async fn the_overlay_records_the_image_it_was_baked_from_as_a_relative_backing_f
             .canonicalize()
             .expect("the base image must still be readable")
     );
+}
+
+#[tokio::test]
+#[ignore = "production test: bakes cloud-init into an overlay and then boots a VM off it, \
+            ~2-5 min; requires TDDY_CLOUDINIT_BASE_IMAGE (see module docs); run with \
+            --ignored"]
+#[serial(cloud_init_qemu_vm)]
+async fn a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh() {
+    let base_image_src = require_base_image();
+
+    // Given a library whose prepared base was baked from the supplied cloud image. The bake
+    // is the subject here, so it runs for real rather than being stood in for: nothing but a
+    // bake produces the layer the rest of this test boots.
+    let dir = tempdir().unwrap();
+    let library = VmLibrary::new(dir.path().join("library"));
+    library.init().expect("the library tree must be creatable");
+    let opts = CloudInitBuildOptions {
+        name: PREPARED_BASE_NAME.to_string(),
+        base_image_src,
+        overlay_output: library
+            .prepared_base_dir()
+            .join(format!("{PREPARED_BASE_NAME}.qcow2")),
+        output_dir: dir.path().join("bake"),
+        user_data: a_minimal_cloud_init_user_data(),
+        disk_size: DISK_SIZE.to_string(),
+        memory: "1024M".to_string(),
+        cpus: 1,
+        ssh_host_port: 2297,
+        timeout: Duration::from_secs(180),
+        iso_tool: IsoTool::Xorriso,
+        ssh_public_key: None,
+        arch: VmArch::host(),
+        accel: VmAccel::host_default(),
+        firmware: a_host_firmware(dir.path(), PREPARED_BASE_NAME),
+        nine_p_shares: vec![],
+    };
+    build_cloud_init_image(&opts, &|line| eprintln!("{line}"))
+        .await
+        .expect("cloud-init image build must succeed");
+
+    // When a VM created from that base is booted.
+    //
+    // The manifest is read back rather than reused: `create_vm` generates the per-VM keypair
+    // and login seed itself and records their paths in the manifest it persists, so the
+    // manifest that comes out of the library is the only one that knows which private key
+    // opens this guest.
+    let requested = a_vm_manifest("cloud-init-vm", PREPARED_BASE_NAME, 2296);
+    library
+        .create_vm(&requested)
+        .await
+        .expect("a VM must be creatable from the freshly baked prepared base");
+    let manifest = library
+        .read_manifest(&requested.name)
+        .expect("create_vm must have persisted a manifest naming the per-VM key");
+
+    let guest = BootedGuest::boot(&library, &manifest, vec![])
+        .await
+        .expect("a VM created from the baked prepared base must boot");
+
+    // Then sshd in the guest answers. Slirp accepts the forwarded connection from the moment
+    // QEMU starts, so reaching the port proves nothing; only a command the guest ran does.
+    guest
+        .wait_for_ssh_ready(VM_BOOT_TIMEOUT)
+        .await
+        .expect("sshd must start answering in a guest baked from this cloud-init layer");
+
+    // And it authenticates as the account the bake's cloud-init provisioned — which is what
+    // separates an image that merely boots from one that was actually provisioned
+    guest
+        .run_over_ssh("id -un")
+        .await
+        .expect("ssh must authenticate with the per-VM key and run the command")
+        .assert_stdout_line(PROVISIONED_USERNAME);
+
+    guest.shutdown().await.expect("guest must shut down");
+}
+
+/// The manifest of a throwaway VM chained onto `prepared_base`, logging in as the account
+/// the bake provisioned.
+///
+/// Sized like the boot-control suite's guests — 2 vCPUs and 2 GiB — because this one has to
+/// run cloud-init a second time to apply its own login seed before sshd will take the key.
+fn a_vm_manifest(name: &str, prepared_base: &str, ssh_host_port: u16) -> VmManifest {
+    VmManifest {
+        name: name.to_string(),
+        prepared_base: Some(prepared_base.to_string()),
+        image_path: None,
+        run: RunPolicy {
+            memory: "2048M".to_string(),
+            cpus: 2,
+            disk_size: DISK_SIZE.to_string(),
+            ssh_host_port,
+            port_forwards: vec![],
+            arch: VmArch::host(),
+            accel: VmAccel::host_default(),
+        },
+        login: LoginPolicy {
+            username: PROVISIONED_USERNAME.to_string(),
+            ssh_private_key: None,
+            ssh_public_key: None,
+        },
+    }
 }
 
 /// A library-shaped `images/02-prepared-base/` directory under `root`, so a layer is built

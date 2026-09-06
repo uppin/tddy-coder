@@ -253,6 +253,26 @@ its own failure message, none from that branch. New entries beyond the list abov
   would persist a full transcript alongside the interactive backend, making a CI failure readable
   from the uploaded artifact. The bake path already writes `<name>-boot.log`; this one does not.
 
+## Deferred from the `optional-livekit` common-room switch (#449, 2026-09-06)
+
+- **`server.rs::run_server` takes 12 positional arguments.** It already carries
+  `#[allow(clippy::too_many_arguments)]`; #449 added the twelfth (`livekit_enabled`). An options
+  struct is the right fix, but it moves `main.rs` and the desktop caller, and `tddy-desktop` is
+  outside the CI gate — so it wants its own PR, after the `optional-livekit` stack lands, where the
+  desktop build can actually be exercised.
+- **`packages/tddy-web/src/gen/daemon_config_pb.ts` was regenerated without `buf`.** No npm registry
+  was reachable in that worktree, so the descriptor was rebuilt with `protoc` plus a `json_name`
+  strip that reproduces `protoc-gen-es` byte-for-byte (verified against the committed file *before*
+  editing), and the two interface fields were written by hand. Re-run `bun run generate` once `buf`
+  is available and confirm the file is unchanged.
+- **`config.example.yaml`'s commented `livekit:` block is stale.** It uses `room:` / `identity:` /
+  `token:`, which matches neither `tddy_daemon::config::LiveKitConfig` nor
+  `tddy_coder::config::LiveKitConfig` as they stand. Pre-existing and unrelated to the switch — the
+  file is a tddy-coder configuration, so `livekit.enabled` correctly does not appear in it.
+- **`LiveKitStartupProbe` in `DesktopIpcHostAcceptance.cy.tsx`** grew an `enabled` field on its
+  inline `config` prop type. If a third spec needs the same shape, extract a named fixture rather
+  than widening the inline type again.
+
 ## Future Enhancements
 
 ### From 2026-09-05 sandboxed-codebase-mode
@@ -265,6 +285,53 @@ Source changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-ja
 - **Workflow recipes on a jailed checkout.** A recipe resolves `TDDY_REPO_DIR` on the agent's host, which in this mode is not where the checkout is reachable from. Decide whether `--recipe` is refused or re-pointed.
 - **A deep checkout path cannot key a per-repository build home.** `sandboxed` mode homes each repo at `<base>/<derive_repo_key(repo)>`, and `derive_repo_key` spells a path as one directory name (`/a/b` → `a--b`) with no length bound. A single path component is capped at `NAME_MAX` (255 bytes on macOS and Linux), so a checkout roughly 250+ characters deep fails while the jail comes up, with `create_dir_all` reporting "File name too long" against a path the operator never typed. Measured: a 249-byte key succeeds, 256 fails. Either refuse it by name at startup (the discipline the rest of this mode follows) or bound the key by hashing its tail — the latter is a migration, not a patch, because `derive_repo_key` is shared with the per-repo action store whose directories already exist on disk under the unbounded spelling. `packages/tddy-sandbox-app/src/sandboxed_session.rs` (`repo_build_home`), `packages/tddy-core/src/session_actions/paths.rs`.
 - **Linux `sandboxed` mode.** `run_linux` delegates to a running `tddy-daemon`; carrying a third codebase mode over `StartSessionRequest` and provisioning the cgroups equivalent of the `--workspace-tools` jail is a daemon-side change on a path documented as not verified end-to-end.
+### From the 2026-09-06 `#optional-livekit` stack evaluation (source: optional-livekit, PRs #437–#451)
+
+Findings from `/eval-changeset` over the integrated 9-PR stack (284 judged files, 26,577 changed
+lines). The stack itself was healthy — **1.02× inflation**, 51% essential, 0% opportunistic — so
+these are the design costs it *exposed*, not defects it introduced.
+
+**Redesign — worth doing**
+
+- **"Is LiveKit configured?" is decided in at least six independent places** — `daemon_settings.rs`,
+  `common_room_supervisor.rs`, `session_room.rs`, `config.rs`, the web `clientConfig`, and
+  `liveKitIsConfigured` in `packages/tddy-web/src/rpc/connections/localHost.ts`. **PR #449 exists
+  entirely to reconcile them**: 20 production files, 1,590 changed lines, to honour one switch.
+  Resolving availability **once** at daemon startup and serving it through the existing
+  `ClientConfig` would have made #449 ≈4 files / ≈300 lines, and #451 (a session start that waited on
+  LiveKit) most likely would not have existed at all — that wait is one of the same independent
+  re-derivations. ~6 call sites to move, one config field, migratable incrementally.
+  **Do this before the next "turn X off" switch**; the shape recurs and the modes can silently
+  disagree at rest.
+- **`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
+  convergence removed a duplicate path (`GhosttyTerminalLiveKit` 736 + `GhosttyTerminalGrpc` 631) but
+  produced one file above any comfortable review size. The cheapest extraction is the history/offset
+  engine — the `terminalHistoryLoader` + `TerminalStreamOffset` orchestration — into a hook, leaving a
+  presentational shell; no call sites move and no behaviour changes. Same family as the
+  `SessionMainPane` / `SessionRuntime` entry below, and worth doing in the same pass.
+
+**Considered and rejected** *(recorded so it is not re-proposed)*
+
+- A **capability-aware surface registry** to centralise `useHasCapability`. The call sites are
+  one-line guards at ~10 places; the indirection would cost more comprehension than it saves.
+
+**Planning habits for the next stack** *(no code)*
+
+- **Insert a node at its dependency-correct position, not at the tail.** Terminal convergence was
+  added mid-planning and appended as position 5 when its dependencies allowed position 4. It then
+  rewrote `SessionRuntime.tsx` wiring that the two PRs before it had just written — **239 lines
+  reviewed twice, 81% of all rework in the stack**. When `/add-to-pr-stack` is used mid-planning,
+  re-derive the topological position rather than appending.
+- **Restack immediately after a predecessor is greened.** #451 sat four commits behind #449 —
+  including #449's entire implementation — until the evaluation surfaced it, and conflicted on
+  `liveKitSource.ts` and `selectedDaemon.tsx` when finally rebased. A `/pr-stack-rebase` at each green
+  would have caught it while the diff was one commit old.
+
+**Also observed, not owed to this stack**
+
+- `useSelectedDaemon().room` being *ambient* is what made the migration cost 67 files / ~1,400
+  incidental lines. That is now fixed by the connection model — noted only because the same "reachable
+  from anywhere" shape elsewhere will cost the same on its next change.
 
 ### From 2026-09-05 Tauri desktop (single-process daemon)
 
@@ -1037,18 +1104,31 @@ adjacent duplications were left in place, both out of scope for that changeset:
 - **`tddy-vm-testkit` is a plain workspace lib**, so nothing structurally stops production code
   depending on it and picking up `SESSION_TOKEN_SECRET` / `GUEST_PASSWORD`. Consider
   `publish = false` plus a crate-level test-only marker.
-### Session rooms are not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
+### A split session's room is not re-opened when the daemon restarts (source: session-room changeset, 2026-08-14)
 
-`SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`, and a room is only opened by
-`start_workspace_session`. A daemon restart therefore leaves every surviving workspace session's
-checkout without its host: the room may still exist on the LiveKit server, but no `daemon-{instance_id}`
-is in it, so a split agent resumed against that session finds nothing to address and its
-`connect_livekit_client` wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`).
+`SessionRoomRegistry` is built empty in `ConnectionServiceImpl::new`. A co-located session recovers
+on its own — `ConnectSession` opens the room, which is the same path that opened it the first time —
+but a split session's room is opened only by its start
+(`SessionRoomRegistry::open_measured_by` on the split path) and its checkout is on another host, so
+`ConnectSession` there finds no local `repo_path` and opens nothing. A split agent resumed against a
+restarted daemon then finds no `daemon-{instance_id}` to address and its `connect_livekit_client`
+wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`).
 
-The fix is a startup sweep that re-opens a room for each session whose `.session.yaml` has a
-`repo_path` and a live worktree — the same shape as the existing startup reconciliation in
-`packages/tddy-daemon/src/startup.rs`. Marked in code at
-`packages/tddy-daemon/src/session_room.rs:259`.
+The fix is a startup sweep that re-opens a room for each split session whose `.session.yaml` names a
+codebase daemon — the same shape as the existing startup reconciliation in
+`packages/tddy-daemon/src/startup.rs`.
+
+### The LiveKit room-creation call has no timeout (source: lazy-session-room changeset, 2026-09-06)
+
+`packages/tddy-livekit/src/room_metadata.rs` has no timeout handling, and neither does
+`create_room` in `packages/tddy-daemon/src/session_room.rs`. A configured LiveKit that accepts a TCP
+connection and then never answers therefore makes the caller wait until its own RPC deadline expires
+rather than failing fast.
+
+This used to hang **session start**, which is the bug the lazy-room work fixed by taking the call off
+that path entirely. What is left is narrower and correctly scoped — the connection that asked to
+reach the session over LiveKit is the one that waits — but a bounded control-plane call would turn
+that wait into a legible error naming the server, and is worth having independently.
 
 ### A claude-cli split agent has no route to its own attachments (source: session-room changeset, 2026-08-14)
 

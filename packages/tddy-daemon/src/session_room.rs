@@ -56,6 +56,22 @@ pub fn session_room_name(codebase_session_id: &str) -> String {
     format!("session-{codebase_session_id}")
 }
 
+/// Whether a session of this type is *facilitated* by the daemon it was started on — that is,
+/// whether it runs an agent here and therefore has a session room of its own.
+///
+/// The PRD's Roles table as a predicate (`docs/ft/daemon/session-room.md` § Roles): the room
+/// belongs to the daemon running the session's agent. `claude-cli` and `cursor-cli` run one here.
+/// A `workspace` session runs none — it is the codebase half of a split session or a standalone
+/// checkout, and whatever agent it has is on another daemon. A `tool` (tddy-coder) session's
+/// terminal is a room `tddy-coder` joins for itself, which this daemon neither creates nor serves.
+///
+/// Deliberately **not** a statement about whether a session type "uses LiveKit". A `claude-cli`
+/// session also bridges its PTY into the lobby, and `ConnectSession` answers about a *terminal*
+/// room none of these types has. Three different rooms; this names one of them.
+pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
+    matches!(session_type.trim(), "claude-cli" | "cursor-cli")
+}
+
 /// Everything one poll of a checkout observed.
 ///
 /// `changed_paths` is carried here and published in room metadata but never in an event: an event
@@ -1226,25 +1242,6 @@ fn git_output(
 /// bounds the *join*, not how long the daemon may stay in the room.
 const SESSION_ROOM_TOKEN_TTL: Duration = Duration::from_secs(86_400);
 
-/// Opens the room of a session whose agent this daemon is about to spawn.
-///
-/// A trait object rather than the registry plus a generic `S: RpcService` parameter, because the
-/// agent-start path is a free function already carrying twenty-odd arguments: threading the service
-/// type through it would make every caller — and every one of its callers — name the daemon's
-/// concrete server type for a value none of them otherwise mention.
-///
-/// Returning `Ok(None)` means this daemon hosts no rooms at all (no LiveKit credentials), which is
-/// not an error: sessions start exactly as they did before rooms existed.
-#[async_trait::async_trait]
-pub trait SessionRoomHost: Send + Sync {
-    async fn open_for(
-        &self,
-        session_id: &str,
-        worktree_root: &Path,
-        session_dir: &Path,
-    ) -> Result<Option<OpenedSessionRoom>, Status>;
-}
-
 /// This daemon, as configured, in its capacity as a host of session rooms.
 ///
 /// One parameter rather than three because they are one fact, and because the registry is what
@@ -1322,6 +1319,22 @@ pub struct OpenedSessionRoom {
     pub server_identity: String,
 }
 
+/// What makes a session's terminal drivable over LiveKit, named here so [`SessionRoomRegistry`] can
+/// establish it in the same breath as the room without knowing what a PTY is.
+///
+/// The room and the terminal bridge are two participants serving one session, and they are wanted
+/// at the same moment: when something reaches that session *over LiveKit*. The desktop's own host
+/// is reached over IPC and needs neither, which is why neither is created when a session starts.
+#[async_trait::async_trait]
+pub trait SessionTerminalBridge: Send + Sync {
+    /// Put a participant serving `session_id`'s terminal into the room a remote client drives it
+    /// from, unless one is already there or this session has no terminal to bridge.
+    ///
+    /// A session with no terminal is not a failure — not every session type has one, and the room
+    /// is not the terminal's to refuse. A session that has one and could not be bridged is.
+    async fn bridge(&self, session_id: &str) -> Result<(), Status>;
+}
+
 /// The live rooms this daemon hosts, keyed by the session that owns each checkout.
 ///
 /// Owns the joined participant: a `LiveKitParticipant` that is dropped leaves the room, so a room
@@ -1333,6 +1346,18 @@ pub struct OpenedSessionRoom {
 #[derive(Default)]
 pub struct SessionRoomRegistry {
     rooms: Mutex<HashMap<String, SessionRoomTask>>,
+    /// One opening at a time per session, for [`SessionRoomRegistry::ensure_open`].
+    ///
+    /// A lock rather than a lookup, because "is this session's room open?" followed by "open it" is
+    /// two steps and the answer can change between them. Two clients connecting to the same session
+    /// at once would each find no room, each create one, and each join it as
+    /// `daemon-{instance_id}` — and LiveKit resolves a second participant under an identity that is
+    /// already present by disconnecting the first, so the room the winner registered would be
+    /// served by a connection the loser had already been dropped from.
+    ///
+    /// `tokio::sync::Mutex` rather than `std`: the section it guards creates a room and joins it,
+    /// both `await`s.
+    openings: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// Whether a session's WIP ref has been released, shared between the tick that publishes it and the
@@ -1416,9 +1441,12 @@ impl SessionRoomRegistry {
     /// returned as a success with the room quietly missing.
     ///
     /// The order is the point. The room exists, carries its metadata, and has this daemon in it
-    /// before `StartSession` returns — and the agent is only spawned after that response, so the
-    /// facilitating daemon being the first participant is a consequence of sequencing rather than a
-    /// race it hopes to win (PRD FR2).
+    /// before the call that opens it answers — and a participant learns where the room is from that
+    /// same answer, so the facilitating daemon being the first participant is a consequence of
+    /// sequencing rather than a race it hopes to win (PRD FR2). Which call that is depends on the
+    /// placement: a split start opens the room itself, because the agent it is about to spawn is
+    /// handed a token for it; every other session's room is opened by the connect that first
+    /// reaches for it ([`Self::ensure_open`]).
     pub async fn open<S: RpcService>(
         &self,
         hosting: &SessionRoomHosting<'_>,
@@ -1491,6 +1519,86 @@ impl SessionRoomRegistry {
             url: credentials.url,
             server_identity: identity,
         }))
+    }
+
+    /// [`Self::open`] unless this session's room is already open, and where it is either way.
+    ///
+    /// The lazy counterpart to `open`, and the one every caller outside a split start uses. A room
+    /// is opened when something first needs to reach the session *over LiveKit* — a client
+    /// connecting to it, an agent from another daemon attaching to it — rather than when the
+    /// session is created. Creating a session is local work over a git checkout, and making it wait
+    /// on a room made it cost whatever reaching LiveKit cost: nothing when the server answered, and
+    /// the caller's whole patience when the server was configured and unreachable.
+    ///
+    /// Idempotent and single-flight: concurrent callers for one session take turns, and all but the
+    /// first find the room already open and take that answer. See [`Self::openings`] for why
+    /// re-checking under a lock is not the same as checking twice.
+    ///
+    /// Failure here is still failure. A caller that asked to reach a session over LiveKit and
+    /// cannot get a room gets the error — what has been removed is the *session's* dependence on
+    /// one, not the room's dependence on a reachable server.
+    pub async fn ensure_open<S: RpcService>(
+        &self,
+        hosting: &SessionRoomHosting<'_>,
+        service: S,
+        terminal: &dyn SessionTerminalBridge,
+    ) -> Result<Option<OpenedSessionRoom>, Status> {
+        let opening = self.opening_lock(hosting.codebase_session_id);
+        let _opening_this_session = opening.lock().await;
+        let room = match self.already_open(hosting) {
+            Some(already) => {
+                log::debug!(
+                    "session_room: {} is already open; reusing it rather than creating a second",
+                    already.room
+                );
+                Some(already)
+            }
+            None => self.open(hosting, service).await?,
+        };
+        // The room says where the session is; the bridge is what makes its terminal usable once
+        // something is there. Both under this one lock, so a session cannot end up with a room a
+        // remote client can find and a terminal it cannot type at.
+        //
+        // Asked on every pass rather than only on the pass that created the room, because "already
+        // open" is a fact about the room alone: a connect whose bridge failed after its room
+        // succeeded leaves the next connect to finish the job. That is the same ensure this
+        // function is — the work happens when it is wanted — and not a retry: nothing here loops,
+        // waits or comes back on its own.
+        if room.is_some() {
+            terminal.bridge(hosting.codebase_session_id).await?;
+        }
+        Ok(room)
+    }
+
+    /// The lock that serialises openings of one session's room. Created on first use and dropped
+    /// with the room in [`Self::close`], so the map holds one entry per session that has ever been
+    /// connected to rather than one per session this daemon has ever seen.
+    fn opening_lock(&self, session_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        Arc::clone(
+            self.openings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(session_id.to_string())
+                .or_default(),
+        )
+    }
+
+    /// Where this session's room is, when this daemon is already hosting it.
+    ///
+    /// Derived rather than remembered: the name comes from the session id, the identity from this
+    /// daemon's instance id and the URL from its configuration, so a room reported here is
+    /// described exactly as the call that opened it described it. Storing the answer would be a
+    /// second copy of three values that cannot disagree.
+    fn already_open(&self, hosting: &SessionRoomHosting<'_>) -> Option<OpenedSessionRoom> {
+        if !self.hosts(hosting.codebase_session_id) {
+            return None;
+        }
+        let credentials = LiveKitCredentials::from_config(hosting.config)?;
+        Some(OpenedSessionRoom {
+            room: session_room_name(hosting.codebase_session_id),
+            url: credentials.url,
+            server_identity: daemon_rpc_identity(hosting.instance_id),
+        })
     }
 
     /// Hold the joined connection and start measuring the checkout, under the session's id.
@@ -1676,6 +1784,12 @@ impl SessionRoomRegistry {
 
     /// Stop hosting the room belonging to `codebase_session_id`, if this daemon hosts one.
     pub fn close(&self, codebase_session_id: &str) {
+        // Dropped with the room rather than kept: an entry per session this daemon ever connected
+        // to is a map that only grows for the life of the process.
+        self.openings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(codebase_session_id);
         let removed = self.lock_rooms().remove(codebase_session_id);
         let Some(room) = removed else {
             return;

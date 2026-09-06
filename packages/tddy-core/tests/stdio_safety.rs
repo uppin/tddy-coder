@@ -191,3 +191,103 @@ fn returns_an_error_when_the_log_file_path_is_unwritable() {
         "expected an error for an unwritable log path"
     );
 }
+
+#[test]
+fn overrides_a_stdout_destination_hidden_inside_a_fan_out() {
+    // Given a logger that fans out to a file and, among other destinations, stdout
+    let mut config = log_config_with_default_output(r#"[stdout, { file: "logs/debug.log" }]"#);
+
+    // When enforcing stdio-safe logging
+    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+
+    // Then only the stdout member moved to stderr; the file member is untouched
+    let output = &config
+        .loggers
+        .get("default")
+        .expect("default logger")
+        .output;
+    assert!(
+        matches!(
+            output,
+            tddy_core::LogOutput::Many(destinations)
+                if matches!(destinations.as_slice(), [
+                    tddy_core::LogOutput::Stderr,
+                    tddy_core::LogOutput::File(path),
+                ] if path == std::path::Path::new("logs/debug.log"))
+        ),
+        "expected [stderr, file], got {output:?}"
+    );
+}
+
+#[test]
+fn collapses_a_fan_out_whose_destinations_are_identical_after_the_override() {
+    // Given a logger that fans out to both stdout and stderr
+    let mut config = log_config_with_default_output("[stdout, stderr]");
+
+    // When enforcing stdio-safe logging
+    tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+
+    // Then it is a single stderr destination, so no line is written to stderr twice
+    let output = &config
+        .loggers
+        .get("default")
+        .expect("default logger")
+        .output;
+    assert!(
+        matches!(output, tddy_core::LogOutput::Stderr),
+        "expected Stderr, got {output:?}"
+    );
+}
+
+#[test]
+fn counts_a_fan_out_logger_once_however_it_was_overridden() {
+    // Given one fan-out logger with a stdout member and one already-safe logger
+    let mut config: LogConfig = serde_yaml::from_str(
+        r#"
+loggers:
+  default:
+    output: [stdout, { file: "logs/debug.log" }]
+  workflow_file:
+    output: { file: "logs/workflow.log" }
+default:
+  level: info
+  logger: default
+"#,
+    )
+    .expect("parse log config fixture");
+
+    // When enforcing stdio-safe logging
+    let overridden = tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+
+    // Then the fan-out logger counts once
+    assert_eq!(overridden, 1);
+}
+
+#[test]
+fn leaves_a_fan_out_without_stdout_unchanged() {
+    // Given a logger that fans out only to safe destinations
+    let mut config = log_config_with_default_output(r#"[stderr, { file: "logs/debug.log" }]"#);
+    let before = format!(
+        "{:?}",
+        config
+            .loggers
+            .get("default")
+            .expect("default logger")
+            .output
+    );
+
+    // When enforcing stdio-safe logging
+    let overridden = tddy_core::stdio_safety::enforce_stdio_safe_log_output(&mut config);
+
+    // Then nothing is touched and nothing is counted
+    let after = format!(
+        "{:?}",
+        config
+            .loggers
+            .get("default")
+            .expect("default logger")
+            .output
+    );
+    assert_eq!(after, before);
+    assert_eq!(overridden, 0);
+}

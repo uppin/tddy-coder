@@ -39,6 +39,14 @@ export const rpcPlaygroundPage = {
     byTestId(TEST_IDS.rpcRequestEditor, { timeout: 5000 }).should("not.exist");
   },
 
+  /** The participant/host picker, offered only on a connection that carries a roster. */
+  participantSelect: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.rpcPlaygroundParticipantSelect, { timeout: 5000, ...options }),
+
+  /** What replaces the picker on a connection that carries no LiveKit presence. */
+  participantSelectionUnavailable: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.rpcPlaygroundParticipantUnavailable, { timeout: 5000, ...options }),
+
   /** Pick the participant (host) the playground addresses. */
   chooseParticipant: (participantId: string) => {
     byTestId(TEST_IDS.rpcPlaygroundParticipantSelect, { timeout: 5000 }).select(participantId);

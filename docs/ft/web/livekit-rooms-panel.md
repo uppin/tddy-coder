@@ -216,6 +216,26 @@ that would silently answer a different question than the one asked.
 A stream error after a snapshot has arrived **keeps the last-known rooms on screen** alongside the
 error — a stale roster plus a visible error beats an empty panel.
 
+## Availability
+
+The panel asks the selected host's own daemon what the LiveKit server can see, so it exists only
+where that host is reached over a wire that carries presence. On a host whose connection does not,
+the panel is **absent** — not empty, not disabled. The `#/livekit` screen above it explains the
+absence once for the whole page, so the panel does not repeat it.
+
+While the common room is still being joined, or has failed to join, the panel **keeps its place**
+and says what it is waiting on (`Joining the common room…`, or that the room list is read over a
+common room that could not be joined). Dropping out and reappearing would shift the page under the
+operator on every visit to the screen.
+
+Whether the panel applies and whether its feed is opened are two different questions:
+`StreamLiveKitRooms` is subscribed **only** once the roster is genuinely available. A stream the
+daemon has to serve — `1 + room count` calls every 3 seconds — for a panel nobody can read is a cost
+paid for nothing, and a room still joining has no connection to stream over anyway.
+
+See [capability gating](../../../packages/tddy-web/docs/capability-gating.md) for the rule all the
+media and presence surfaces share.
+
 ## Acceptance criteria
 
 1. `#/livekit` renders a **Rooms** panel below the existing **Connected participants** panel, and
@@ -248,6 +268,10 @@ error — a stale roster plus a visible error beats an empty panel.
     snapshot keeps the last-known rooms visible alongside the error.
 12. `StreamLiveKitRooms` rejects an invalid session token.
 13. The daemon emits nothing on a poll tick that produced no delta.
+14. On a host whose connection carries no presence, the panel does not render and no
+    `StreamLiveKitRooms` subscription is opened.
+15. While the common room is still being joined, the panel keeps its place with a "joining" note and
+    opens no subscription; the feed starts when the roster becomes available.
 
 ## Related documentation
 
@@ -255,4 +279,7 @@ error — a stale roster plus a visible error beats an empty panel.
 - **[livekit-participant-owned-projects.md](./livekit-participant-owned-projects.md)** — the `owned_project_count` metadata key and the existing Metadata column
 - **[host-stats-footer.md § RPC surface](./host-stats-footer.md#rpc-surface)** — the streaming-readout pattern this RPC follows
 - **[`participant-metadata.md`](../../../packages/tddy-livekit/docs/participant-metadata.md)** — what participant metadata carries
-- **[app-shell.md](./app-shell.md)** — where the `#/livekit` screen is registered
+- **[app-shell.md](./app-shell.md)** — where the `#/livekit` screen is registered, and when its nav
+  entry is offered
+- **[capability gating](../../../packages/tddy-web/docs/capability-gating.md)** — the shared rule
+  behind the availability section above

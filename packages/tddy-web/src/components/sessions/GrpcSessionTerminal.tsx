@@ -5,7 +5,13 @@ import {
   SessionTerminalOutput,
   StreamReplayMode,
 } from "../../gen/connection_pb";
-import { GhosttyTerminalGrpc, type GrpcFrame, type GrpcStream, type HistoryFetcher } from "../GhosttyTerminalGrpc";
+import { GhosttyTerminalSession } from "../GhosttyTerminalSession";
+import type {
+  TerminalFeed,
+  TerminalFrame,
+  TerminalHistoryFetcher,
+  TerminalStream,
+} from "../../rpc/connections/terminal";
 import type { ConnectedSession } from "./useTerminalControl";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import { tddyDebug } from "../../lib/debugMask";
@@ -39,7 +45,7 @@ interface GrpcSessionTerminalProps {
   terminalId?: string;
   onDisconnect?: () => void;
   mobileShortcuts?: ToolShortcutDef[];
-  /** Called with this terminal's text-insert function (see `GhosttyTerminalGrpc.onRegisterInsertInput`),
+  /** Called with this terminal's text-insert function (see `GhosttyTerminalSession.onRegisterInsertInput`),
    *  so the runtime can expose it to the inspector's Files-tab click/tap route. */
   onRegisterInsertInput?: (insertInput: (text: string) => void) => void;
 }
@@ -54,7 +60,7 @@ export function GrpcSessionTerminal({
   mobileShortcuts,
   onRegisterInsertInput,
 }: GrpcSessionTerminalProps) {
-  const [stream, setStream] = useState<GrpcStream | null>(null);
+  const [stream, setStream] = useState<TerminalStream | null>(null);
   // containerRef must be on a div that is ALWAYS rendered (not gated on stream),
   // so getBoundingClientRect() returns real dimensions when the effect runs.
   const containerRef = useRef<HTMLDivElement>(null);
@@ -151,21 +157,21 @@ export function GrpcSessionTerminal({
       return;
     }
 
-    const outputListeners: Array<(frame: GrpcFrame) => void> = [];
+    const outputListeners: Array<(frame: TerminalFrame) => void> = [];
     let closed = false;
 
-    const grpcStream: GrpcStream = {
+    const terminalStream: TerminalStream = {
       send(data: Uint8Array) {
         sendInputRequestRef.current(data);
       },
-      onMessage(fn: (frame: GrpcFrame) => void) {
+      onMessage(fn: (frame: TerminalFrame) => void) {
         outputListeners.push(fn);
       },
       close() {
         closed = true;
       },
     };
-    setStream(grpcStream);
+    setStream(terminalStream);
 
     // Measure container dimensions so the daemon can resize the PTY before replaying buffered
     // output — eliminates the 220-col garbling on connect. Only sent on the first (TAIL) open;
@@ -228,7 +234,7 @@ export function GrpcSessionTerminal({
           // the lazy-history anchor from the initial replay frame and drives the forward fill of
           // the older-history terminal on demand.
           if (output.data.length > 0 || output.endOffset > 0n) {
-            const frame: GrpcFrame = {
+            const frame: TerminalFrame = {
               data: output.data,
               endOffset: output.endOffset,
               atOldest: output.atOldest,
@@ -271,7 +277,7 @@ export function GrpcSessionTerminal({
 
   // Always render the outer div so containerRef.current is available when the
   // effect above runs (before stream is set). Terminal renders once stream is ready.
-  const historyFetcher = useMemo<HistoryFetcher>(() => {
+  const historyFetcher = useMemo<TerminalHistoryFetcher>(() => {
     if (client === null) {
       // No client during a transient transport blip — no history fetch until it returns.
       return async () => null;
@@ -279,16 +285,31 @@ export function GrpcSessionTerminal({
     return createForwardHistoryFetcher(client, { sessionToken, sessionId, terminalId });
   }, [client, sessionToken, sessionId, terminalId]);
 
+  // What this pane hands the one terminal component. The daemon can always replay, so history is
+  // always offered — which is the answer `feedSupportsHistory` gives the terminal's scrollback.
+  //
+  // Its identity is the stream's, and the fetcher is reached through a ref: the terminal tears its
+  // listener down and closes the stream when the feed changes, so a feed rebuilt merely because a
+  // fresh client produced a fresh fetcher would close a stream that is still running.
+  const historyFetcherRef = useRef(historyFetcher);
+  historyFetcherRef.current = historyFetcher;
+  const feed = useMemo<TerminalFeed | null>(
+    () =>
+      stream
+        ? { stream, history: (from, until) => historyFetcherRef.current(from, until) }
+        : null,
+    [stream],
+  );
+
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative" }}>
-      {stream && (
-        <GhosttyTerminalGrpc
+      {feed && (
+        <GhosttyTerminalSession
+          feed={feed}
           sessionToken={sessionToken}
           sessionId={sessionId}
-          stream={stream}
           mobileShortcuts={mobileShortcuts}
           onRegisterInsertInput={onRegisterInsertInput}
-          historyFetcher={historyFetcher}
           onOffsetUpdate={(offset) => {
             currentOffsetRef.current = offset;
             hasSyncedRef.current = true;

@@ -80,7 +80,7 @@ deliberately, and each exclusion is coverage you still have to get locally:
 
 | Excluded | Why |
 |----------|-----|
-| VM-backed tests (`./vm-tests`) | `#[ignore]`d by design; need a QEMU guest and a base image that is never downloaded |
+| VM-backed tests (`./vm-tests`) | `#[ignore]`d by design; need a QEMU guest and a base image that is never downloaded. Two of them run in the separate VM workflow below |
 | cgroups sandbox tests | Need root and a writable cgroup root; the backend reports itself available on any Linux, then EPERMs at spawn |
 | One `tddy-sandbox-recipes` path test | Asserts a macOS-only path layout |
 | `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | Fails unprivileged with "tool ipc server exited before bind" even with the runner binary staged; survived two retries. Only this one test is skipped — the other two in the binary pass. Tracked in `docs/dev/TODO.md`; the intended fix is a VM-backed job, not a permanent exclusion |
@@ -94,30 +94,81 @@ test there is not.
 
 ## VM tests (separate workflow)
 
-`.github/workflows/vm-tests.yml` runs the QEMU-backed production tests. It is a
-separate workflow, not part of `ci.yml`, and **not a required check** — it is
-slower, needs hardware virtualisation, and is new enough to want its own blast
-radius.
+`.github/workflows/vm-tests.yml` runs the QEMU-backed production tests, and it
+is **not a required check**. Separate from `ci.yml` on purpose: these boot real
+guests, and a CI run should report its own result rather than stay in progress
+until a VM finishes.
 
-It runs on pull requests **and on pushes to `master`**. The master half is not
+Only the chain leg needs anything from CI, and only that leg waits for it — it
+polls for the `tddy-dist` artifact `Rust build` publishes for the same commit,
+failing if that build failed or never finished. The two cheap legs start
+immediately. The alternative is `workflow_run`, which would give a real
+dependency edge instead of a poll, but GitHub always takes a `workflow_run`
+workflow from the **default branch**: the file could not be changed and tested
+from a PR, and its runs do not appear in the PR's checks.
+
+They run on pull requests **and on pushes to `master`**. The master half is not
 redundant: `master` is the only ref that writes the cargo cache, so without it
 the `vm` cache is never populated and every PR compiles `tddy-vm` from scratch.
-It also means the branch itself has VM coverage rather than only its PRs.
 
-Scope is currently **one** of the eight suites in `./vm-tests`:
-`vm_boot_control_acceptance`. It proves the launcher, serial-console control,
-9p, SSH login and graceful shutdown against a real guest, and it is the only
-entry that needs no baked image chain — it boots the supplied cloud image
-directly. CI downloads Debian 12 genericcloud amd64 (331 MB, checksum-verified
-against the `SHA512SUMS` published beside it, then cached) because the testkit
-never downloads anything itself by design.
+Scope is three checks out of the ten suites in `./vm-tests`: two that a bare
+cloud image can reach, and one that bakes the full chain. Both are legs of one matrix job, so they share the KVM
+handling and the false-green guard:
 
-The runner is x86_64, and that matters in two ways. `VmArch::host()` reads
-`std::env::consts::ARCH`, so the guest image must be **amd64**, not the arm64
-one a developer on Apple silicon would use. And on x86_64 the `q35` machine
-boots through SeaBIOS, so `uefi_firmware_for` returns `None` and no `edk2` image
-has to be located — which is fortunate, since the nix QEMU package ships
-`edk2-aarch64-code.fd` but no x86_64 equivalent.
+| Check | Runs | Proves |
+|-------|------|--------|
+| `VM boot control` | all of `vm_boot_control_acceptance` (6 tests) | The launcher, serial-console control, 9p, SSH login with the per-VM key, graceful shutdown |
+| `Cloudinit VM boot` | one test of `cloud_init_acceptance`, `a_baked_prepared_base_boots_as_a_vm_that_answers_over_ssh` | That a bake produces a *usable* layer: cloud-init bakes a prepared base, a VM is created from it, boots, and answers `id -un` over SSH as the account the bake provisioned |
+| `Cloudinit + nix + tddy` | all of `tddy_image_chain_acceptance` (1 test) | Cloud-init layers all the way to a serving daemon: bake `tddy-nix-base`, bake the test host on it, install the binaries with the real `./install --systemd --headless`, then assert the supervisor is `active` as `root`, the daemon dropped to `tddy`, and the daemon **answers HTTP on its own web port** — a process in the table proves it started, only a response proves it serves |
+
+None of the three bakes an image chain by hand, and none needs a pre-baked one.
+
+### Where the deployed binaries come from
+
+`Rust build` stages them, from the debug build it already performs: the five
+binaries `recipes::deployed_binaries` names plus the four files `./install`
+reads out of a checkout, uploaded flat as `tddy-dist`. The chain leg downloads
+it, points `TDDY_PREBUILT_DIST_DIR` at it, and `BuiltBinaries::from_dist_dir`
+checks it is complete before a guest boots.
+
+**Debug binaries, deliberately.** `./release` is a bare `cargo build --release`
+with no features or flags and no `[profile.release]` section behind it;
+`./install` never inspects what it installs, and `TestHostVm::deploy` arranges
+the staged files into `target/release/` in the guest by placement rather than by
+profile. What the leg asserts — the unit, the privilege drop, the daemon serving
+— does not change with opt-level. A second full compile in release bought none
+of it. The gap this leaves is narrow and worth naming: nothing here proves the
+*shipped* artifact installs and serves, so a release-only failure (an
+optimisation-level miscompile, a bug masked by `debug_assertions`) would go
+unseen. The place for that is a release-artifact smoke test at publish time, not
+every PR.
+
+It deliberately does **not** use the testkit's builder guest either. That guest
+exists because a macOS host cannot emit Linux ELF — not a constraint on an
+x86_64 Linux runner, where the compile takes minutes rather than the hours the
+guest spent realising a dev shell over slirp first. The builder path keeps its
+coverage in `vm_cgroups_acceptance`, which is where a developer on Apple silicon
+needs it.
+
+### arm64
+
+`Rust build (arm64)` builds the workspace on `ubuntu-24.04-arm`. Native, not
+emulated: `rustc` there is `aarch64-unknown-linux-gnu`, and GitHub's arm64 Linux
+runners are free for public repositories.
+
+It builds and nothing more, because **an arm64 hosted runner has no `/dev/kvm`
+node at all** — measured, not assumed:
+
+```
+arch: aarch64   kernel: 6.17.0-1022-azure   cpus: 4   mem: 15Gi   disk: 145G (109G free)
+ls: cannot access '/dev/kvm': No such file or directory
+qemu-system-aarch64: failed to initialize kvm: No such file or directory
+```
+
+So no VM test can run there: QEMU would fall back to TCG and blow every boot
+budget by an order of magnitude. aarch64 guests remain a developer-machine
+concern. (Both runner classes report the same 145 G disk with ~110 G free, which
+is far more headroom than the VM legs need.)
 
 ### Two traps this workflow guards against
 
@@ -130,20 +181,31 @@ and then **fails fast** if a read-write open still does not succeed, so a runner
 without virtualisation reports that in seconds instead of timing out at 90
 minutes.
 
-**Every test passes when the image is missing.** Each one does
-`let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`
-(`vm_boot_control_acceptance.rs:81`), so an unset variable or a failed download
-yields a green check that booted nothing. The workflow asserts the path exists
-before running, and afterwards greps the log for both the skip message and
-`test result: ok. 6 passed`. A false green is worse than a red one.
+**A missing image used to pass.** Every one of these tests opened with
+`let Some(base_image) = configured_base_image() else { eprintln!(...); return; }`,
+so an unset variable or a failed download yielded a green check that booted
+nothing — and an unset variable is exactly what a typo or a failed download
+produces, which is when a green result misleads most. They now call
+`require_base_image()` (`tddy-vm-testkit/src/env_file.rs`), which panics naming
+the variable, so an unconfigured prerequisite is a red test.
+
+Reporting a *deliberate* absence stays where it belongs: `./vm-tests` checks the
+variable once, up front, and says so in one line rather than each test deciding
+for itself.
+
+The workflow still asserts the path exists before running, and afterwards greps
+for `test result: ok. <n> passed` — `n` being the leg's own `expected_passing`, 6
+or 1 — plus the old skip wording, kept as a regression guard against the pattern
+coming back. A false green is worse than a red one.
 
 ### What it would take to run the rest
 
 | Suite | Blocker |
 |-------|---------|
 | `tddy_host_vm_acceptance` (the bake) | Several hours even accelerated: installs a 9p kernel, installs Nix, and runs a cold `./release` of the whole workspace including `libwebrtc` inside a 2-vCPU guest. Per `docs/ft/vm/tddy-vm.md`, it has never been run end to end. Its output is a multi-GB qcow2 chain that does not fit the 10 GB Actions cache, so it would need external blob storage (ghcr.io via ORAS, or Releases) |
-| `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base, so they inherit the bake's problem |
-| `cloud_init_acceptance`, `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
+| `vm_cgroups_acceptance`, and the follow-on `tddy_host_vm_acceptance` tests | Consume a baked prepared-base. `vm_cgroups_acceptance` shares its chain with the `Cloudinit + nix + tddy` leg, so what blocks it now is only its extra per-test guest boots, not the bake |
+| `cloud_init_acceptance` (the two tests CI does not run) | Nothing structural — each bakes from the bare cloud image like the one that does run. They are left out because a second and third bake buys inspection of an artifact the `Cloudinit VM boot` check already boots |
+| `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
 
 ## Flaky tests
 
@@ -201,8 +263,9 @@ CI reports status but does not block merges until a ruleset says so. The
 - `Rust build`
 - `Web tests`
 
-Do **not** add `VM boot control` to that list yet — it is still being proven out,
-and a required check that flakes on QEMU would block every merge.
+Do **not** add `VM boot control` or `Cloudinit VM boot` to that list yet — they
+are still being proven out, and a required check that flakes on QEMU would block
+every merge.
 
 Creating it needs **repository admin**, so it lives here as a command rather
 than as a file the repo can apply itself:
@@ -314,7 +377,7 @@ blocked *for you*". Once the Actions app is a bypass actor, the answer for
 quietly become `#forcemerge`. So the workflow runs `gh pr checks --required`,
 which reports the checks themselves: exit 0 when every required one has passed,
 non-zero while any is pending or failing. It correctly reads requirements from
-the ruleset and excludes `VM boot control`.
+the ruleset and excludes the VM checks.
 
 The merge itself uses the repo's squash defaults (`COMMIT_OR_PR_TITLE` /
 `COMMIT_MESSAGES`), which is what produces the `... (#406)` subjects in

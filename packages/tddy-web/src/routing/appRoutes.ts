@@ -183,3 +183,21 @@ export type InspectorTabName = (typeof INSPECTOR_TAB_NAMES)[number];
 export function isInspectorTabName(value: string): value is InspectorTabName {
   return (INSPECTOR_TAB_NAMES as readonly string[]).includes(value);
 }
+
+/**
+ * The inspector tabs that exist only on a connection that can carry video tracks.
+ *
+ * The VNC and screen-sharing bridges publish their frames as a LiveKit video track into the
+ * session's own room (`vnc_service.rs` reads the session's `livekit_room`), so a session reached
+ * over a wire that carries no tracks has no picture to show and these two tabs are absent rather
+ * than dead. Declared here beside {@link INSPECTOR_TAB_NAMES} for the same reason that list is:
+ * an `inspector=` param is normalised from a pure module.
+ */
+export const MEDIA_INSPECTOR_TAB_NAMES = ["vnc", "screen-sharing"] as const;
+
+export type MediaInspectorTabName = (typeof MEDIA_INSPECTOR_TAB_NAMES)[number];
+
+/** Whether `value` names one of the tabs that needs the `media` capability. */
+export function isMediaInspectorTabName(value: string): value is MediaInspectorTabName {
+  return (MEDIA_INSPECTOR_TAB_NAMES as readonly string[]).includes(value);
+}

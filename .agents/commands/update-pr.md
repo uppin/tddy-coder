@@ -7,7 +7,7 @@ User wants to update an existing PR with the current changes.
 
 Before you look at the diff, work out whether this branch is part of a PR stack — its open PR has a
 `baseRefName` that is not `master`/`main`, or the session's `changeset.yaml` carries an
-`orchestrator_session_id`:
+its stack position:
 
 ```bash
 gh pr list --state open --head "$(git branch --show-current)" --json number,baseRefName,isDraft

@@ -11,8 +11,13 @@
 //!
 //! A `workspace` session runs no agent, so it has no facilitating daemon and gets no room.
 //!
-//! These need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`) and are `#[serial]`
-//! so they own it alone.
+//! The room is opened when something first *connects* to the session, not when the session is
+//! created: creating a session is local work over a git checkout, and making it wait on a LiveKit
+//! server made it cost whatever reaching that server cost.
+//!
+//! Most of these need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`) and are
+//! `#[serial]` so they own it alone. The ones under § Session creation is a local operation need no
+//! container at all — their whole subject is that nothing is dialled.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,11 +36,12 @@ use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    ExecuteToolRequest, ExecuteToolResponse, HostDocumentScope, ReadHostDocumentRequest,
-    ReadHostDocumentResponse, SessionAttachment, StagedAttachmentRef, StartSessionRequest,
-    StartSessionResponse,
+    session_attachment::Source as AttachmentSource, ConnectSessionRequest,
+    ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
+    HostDocumentScope, LiveKitRoomInfo, ReadHostDocumentRequest, ReadHostDocumentResponse,
+    SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
 };
+use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
 use tddy_testing_commons::wait::eventually_awaiting;
@@ -195,7 +201,8 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 fn livekit_yaml_block(ws_url: Option<&str>) -> String {
     match ws_url {
         Some(url) => format!(
-            "livekit:\n  url: {url}\n  api_key: {LK_API_KEY}\n  api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
+            "livekit:\n  enabled: true\n  url: {url}\n  api_key: {LK_API_KEY}\n  \
+             api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
         ),
         None => String::new(),
     }
@@ -257,9 +264,36 @@ fn a_caller_token_signed_with_the_deployment_secret() -> String {
     )
 }
 
+/// What the stub standing in for `claude` does once a session launches it.
+///
+/// A room belongs to a session that runs an agent, so every session here spawns one — without a
+/// stub each start would fail reaching for `claude` on PATH, for reasons that have nothing to do
+/// with rooms. What the stub then *does* is the variable: a session's terminal is what its LiveKit
+/// bridge is made of, so a session that has none is a case of its own.
+enum AnAgent {
+    /// Holds its PTY open the way a real agent waiting for a turn does, and echoes back whatever is
+    /// typed at it — which is what makes "the terminal is drivable" observable from a client.
+    HoldingItsPtyOpen,
+    /// Exits the moment it starts, leaving the session with no terminal to bridge.
+    ThatExitsAtOnce,
+}
+
+impl AnAgent {
+    fn written_to(&self, dir: &Path) -> PathBuf {
+        let script = a_stub_agent_script(dir, "stub-claude.sh").echoing_argv();
+        match self {
+            Self::HoldingItsPtyOpen => script.then_reading_stdin().build(),
+            Self::ThatExitsAtOnce => script.build(),
+        }
+    }
+}
+
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: ConnectionServiceImpl,
+    /// The PTY manager the service was built with, so a test can ask whether a session still has a
+    /// terminal at all.
+    agents: Arc<tddy_daemon::claude_cli_session::ClaudeCliSessionManager>,
     config: DaemonConfig,
     sessions_base: PathBuf,
     staging_base: PathBuf,
@@ -286,17 +320,20 @@ impl FacilitatingDaemon {
     }
 
     async fn build(ws_url: Option<String>, livekit: Option<LiveKitTestkit>) -> Self {
+        Self::build_running(ws_url, livekit, AnAgent::HoldingItsPtyOpen).await
+    }
+
+    async fn build_running(
+        ws_url: Option<String>,
+        livekit: Option<LiveKitTestkit>,
+        agent: AnAgent,
+    ) -> Self {
         let os_user = std::env::var("USER").expect("USER required");
         let repo_dir = tempfile::tempdir().unwrap();
         create_test_repo_with_origin(repo_dir.path());
 
-        // A room belongs to a session that runs an agent, so every session here spawns one. The stub
-        // reads stdin forever, which is the shape a PTY session needs; without it each start would
-        // fail reaching for `claude` on PATH, for reasons that have nothing to do with rooms.
         let stub_dir = tempfile::tempdir().unwrap();
-        let claude_stub = a_stub_agent_script(stub_dir.path(), "stub-claude.sh")
-            .then_reading_stdin()
-            .build();
+        let claude_stub = agent.written_to(stub_dir.path());
 
         let (config_dir, config_path) =
             write_daemon_yaml(ws_url.as_deref(), &os_user, &claude_stub);
@@ -310,6 +347,9 @@ impl FacilitatingDaemon {
             Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
 
         let staging = tempfile::tempdir().unwrap();
+        // Held by the test as well as by the service: the manager owns the sessions' PTYs, and
+        // "this session has no terminal to bridge" is a fact only it can be asked for.
+        let agents = Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new());
         let service = ConnectionServiceImpl::new(
             config.clone(),
             resolver,
@@ -318,12 +358,13 @@ impl FacilitatingDaemon {
             None,
             None,
             None,
-            Arc::new(tddy_daemon::claude_cli_session::ClaudeCliSessionManager::new()),
+            Arc::clone(&agents),
         )
         .with_staging_base_dir(staging.path().to_path_buf());
 
         Self {
             service,
+            agents,
             config,
             sessions_base: sessions.path().to_path_buf(),
             staging_base: staging.path().to_path_buf(),
@@ -639,33 +680,12 @@ fn rewrite_the_seeded_file(worktree: &Path, contents: &str) {
 
 // ---------------------------------------------------------------------------
 // AC1 — the facilitating daemon is first into the room
+//
+// Now proved at the connect that opens the room rather than at the start that no longer does:
+// `a_session_gets_its_room_when_something_first_connects_to_it`, below. The property is unchanged —
+// a participant learns where the room is from the same call that put the daemon in it — but the
+// moment it becomes observable moved with the open.
 // ---------------------------------------------------------------------------
-
-#[tokio::test]
-#[serial]
-async fn the_facilitating_daemon_is_the_only_participant_when_start_session_returns() {
-    // Given a daemon that runs agents
-    let daemon = FacilitatingDaemon::with_livekit().await;
-
-    // When it starts a session whose agent it runs
-    let started = daemon.start_agent_session().await;
-
-    // Then that session has a room, named after it — derived rather than read off the response,
-    // because `StartSessionResponse.livekit_room` names the session's *terminal* room, which the
-    // browser attaches to and which is a different room with different participants
-    let room = session_room_name(&started.session_id);
-
-    // ...and the facilitating daemon is already in it, alone. A probe joining now sees exactly who
-    // was there before it arrived, which is the only moment "first joiner" is observable: the room
-    // is opened before the agent process is spawned, so anything else in it would be a participant
-    // that beat the daemon to the session it facilitates.
-    let probe = AgentProbe::join(&daemon, &room, "probe-first-joiner").await;
-    assert_eq!(
-        probe.remote_identities(),
-        vec![rpc_identity(INSTANCE_ID)],
-        "the facilitating daemon must be the sole participant of a freshly opened session room"
-    );
-}
 
 // ---------------------------------------------------------------------------
 // AC12 — a session with no agent has no facilitating daemon, and no room
@@ -799,7 +819,7 @@ async fn a_split_agent_addresses_the_daemon_that_hosts_its_room() {
 async fn a_participant_reads_a_worktree_file_through_execute_tool_in_the_session_room() {
     // Given a worktree holding a committed file, and an agent that joined only the session room
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.start_agent_session().await;
+    let started = daemon.a_session_being_connected_to().await;
     let worktree = daemon.worktree_of(&started.session_id);
     commit_a_file(&worktree, "greeting.txt", "hello from the worktree");
 
@@ -841,7 +861,7 @@ async fn a_commit_reaches_both_agent_participants_from_a_single_publish() {
     // Given two agents in the session room — the coding agent, and the second agent this room exists
     // to make possible
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.start_agent_session().await;
+    let started = daemon.a_session_being_connected_to().await;
     let worktree = daemon.worktree_of(&started.session_id);
     let mut coder = AgentProbe::join(
         &daemon,
@@ -879,7 +899,7 @@ async fn writing_a_tracked_file_broadcasts_counts_without_paths_or_contents() {
     // Given an agent watching a worktree whose tracked file was committed before the room opened, so
     // the daemon's baseline already accounts for it and nothing is waiting to be announced
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.start_agent_session().await;
+    let started = daemon.a_session_being_connected_to().await;
     let worktree = daemon.worktree_of(&started.session_id);
     let mut agent = AgentProbe::join(
         &daemon,
@@ -921,7 +941,7 @@ async fn writing_a_tracked_file_broadcasts_counts_without_paths_or_contents() {
 async fn polls_that_find_no_tracked_change_leave_the_event_sequence_unbroken() {
     // Given an agent watching a worktree, with one change already announced
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.start_agent_session().await;
+    let started = daemon.a_session_being_connected_to().await;
     let worktree = daemon.worktree_of(&started.session_id);
     let mut agent = AgentProbe::join(
         &daemon,
@@ -962,7 +982,7 @@ async fn a_late_joiner_reads_the_current_worktree_summary_from_room_metadata() {
     // Given a worktree carrying an uncommitted edit with a commit landed on top of it, and an agent
     // already in the room to say when the daemon has taken both in
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.start_agent_session().await;
+    let started = daemon.a_session_being_connected_to().await;
     let worktree = daemon.worktree_of(&started.session_id);
     let mut early = AgentProbe::join(
         &daemon,
@@ -1008,7 +1028,7 @@ async fn a_participant_reads_an_attachment_through_read_host_document_in_the_ses
     // Given a worktree-backed session started with an attachment
     let daemon = FacilitatingDaemon::with_livekit().await;
     let started = daemon
-        .start_agent_session_with_attachment("spec.md", b"# the shared spec\n")
+        .a_session_being_connected_to_with_attachment("spec.md", b"# the shared spec\n")
         .await;
     let probe = AgentProbe::join(
         &daemon,
@@ -1037,7 +1057,7 @@ async fn room_metadata_lists_the_sessions_attachment_basenames() {
     // Given a worktree-backed session started with an attachment
     let daemon = FacilitatingDaemon::with_livekit().await;
     let started = daemon
-        .start_agent_session_with_attachment("design.txt", b"shapes and colours")
+        .a_session_being_connected_to_with_attachment("design.txt", b"shapes and colours")
         .await;
 
     // When an agent joins the room
@@ -1078,5 +1098,731 @@ async fn a_daemon_without_livekit_credentials_starts_a_session_and_creates_no_ro
     assert_eq!(
         started.livekit_room, "",
         "a daemon with no LiveKit credentials must not claim to have hosted a room"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Session creation is a local operation
+//
+// A session is created out of a git checkout and a session directory, both on this host. LiveKit
+// carries what the session says about itself afterwards, so *creating* one must not depend on
+// reaching a LiveKit server — configured or not, up or not. The room a session is facilitated in is
+// opened the first time something actually connects to the session over LiveKit, not before.
+//
+// These need no testkit container: their whole subject is that nothing is dialled.
+// ---------------------------------------------------------------------------
+
+/// A LiveKit address that accepts connections and answers nothing.
+///
+/// The operator's failure exactly: `livekit:` configured, the server unreachable, every request
+/// hanging until something upstream gives up. An address nothing listens on would be refused
+/// instantly and would prove far less — a start that survived a fast `ECONNREFUSED` can still block
+/// for minutes against a server that merely never replies.
+///
+/// The count of accepted connections *is* the assertion. Any contact at all shows up here, whether
+/// the daemon would have created a room, joined one, or bridged a PTY into the lobby.
+struct ALiveKitNobodyAnswers {
+    addr: std::net::SocketAddr,
+    accepted: Arc<std::sync::atomic::AtomicUsize>,
+    _accepting: tokio::task::JoinHandle<()>,
+}
+
+async fn a_livekit_nobody_answers() -> ALiveKitNobodyAnswers {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a stand-in LiveKit must be able to bind a loopback port");
+    let addr = listener
+        .local_addr()
+        .expect("a bound listener must know its address");
+    let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = Arc::clone(&accepted);
+    let accepting = tokio::spawn(async move {
+        // Every accepted stream is kept, never read from and never written to: dropping it would
+        // close the connection and let the caller fail fast, which is the one thing this server
+        // must not do.
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            held.push(stream);
+        }
+    });
+    ALiveKitNobodyAnswers {
+        addr,
+        accepted,
+        _accepting: accepting,
+    }
+}
+
+impl ALiveKitNobodyAnswers {
+    fn ws_url(&self) -> String {
+        format!("ws://{}", self.addr)
+    }
+
+    fn connections_accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl FacilitatingDaemon {
+    /// A daemon configured with LiveKit at [`ALiveKitNobodyAnswers`].
+    async fn with_livekit_that_never_answers(livekit: &ALiveKitNobodyAnswers) -> Self {
+        Self::build(Some(livekit.ws_url()), None).await
+    }
+
+    /// Start an agent session, failing rather than hanging if the start blocks on the network.
+    ///
+    /// 10s: a start cuts a git worktree and spawns a stub agent, so it is not instant — but it is
+    /// bounded by local work alone, and a start that waits on an unanswering socket exceeds this by
+    /// whatever that layer's own timeout is. The timeout is the assertion's teeth: without it a
+    /// regression here is a suite that hangs rather than a test that fails.
+    async fn starts_an_agent_session_within(&self, patience: Duration) -> StartSessionResponse {
+        tokio::time::timeout(patience, self.start_agent_session())
+            .await
+            .expect("StartSession must not block waiting on LiveKit")
+    }
+}
+
+#[tokio::test]
+async fn starting_a_session_dials_livekit_not_at_all() {
+    // Given a daemon whose LiveKit is configured, reachable on the wire, and answers nothing
+    let livekit = a_livekit_nobody_answers().await;
+    let daemon = FacilitatingDaemon::with_livekit_that_never_answers(&livekit).await;
+
+    // When it starts a session whose agent it runs
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // Then the checkout the session is made of is real...
+    assert!(
+        daemon.worktree_of(&started.session_id).exists(),
+        "a session's worktree must be cut whether or not LiveKit can be reached"
+    );
+
+    // ...and nothing was ever dialled. Asserted as the absence of a connection rather than as the
+    // presence of a session: a start that contacted an unreachable server and recovered from it
+    // would still have blocked for as long as that took, which is the defect itself.
+    assert_eq!(
+        livekit.connections_accepted(),
+        0,
+        "creating a session must not contact LiveKit"
+    );
+}
+
+/// A LiveKit address nothing is listening on.
+///
+/// A bound port, released before it is ever used: the operating system will not hand the same one
+/// out again while this test runs, so a dial to it is refused rather than answered by whatever
+/// happens to be there. `ECONNREFUSED` arrives immediately, which is what makes this the
+/// *unreachable-and-says-so* case rather than the hanging one [`ALiveKitNobodyAnswers`] covers.
+async fn a_livekit_address_nothing_listens_on() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binding a loopback port must succeed");
+    let addr = listener
+        .local_addr()
+        .expect("a bound listener must know its address");
+    drop(listener);
+    format!("ws://{addr}")
+}
+
+impl FacilitatingDaemon {
+    async fn with_livekit_nothing_listens_on() -> Self {
+        Self::build(Some(a_livekit_address_nothing_listens_on().await), None).await
+    }
+
+    /// A started session whose room is open — which is what having connected to it means.
+    ///
+    /// Every test about what happens *inside* a session's room needs one open, and starting a
+    /// session no longer opens it: connecting to the session does. Said once here rather than
+    /// repeated as a second setup line in each of them.
+    async fn a_session_being_connected_to(&self) -> StartSessionResponse {
+        let started = self.start_agent_session().await;
+        self.connect_to(&started.session_id)
+            .await
+            .expect("connecting to a started session must open its room");
+        started
+    }
+
+    /// [`Self::a_session_being_connected_to`] for the tests whose subject is what the room says
+    /// about a session's attachments.
+    async fn a_session_being_connected_to_with_attachment(
+        &self,
+        basename: &str,
+        contents: &[u8],
+    ) -> StartSessionResponse {
+        let started = self
+            .start_agent_session_with_attachment(basename, contents)
+            .await;
+        self.connect_to(&started.session_id)
+            .await
+            .expect("connecting to a started session must open its room");
+        started
+    }
+
+    /// Connect to a session, as a client reaching it over LiveKit does.
+    async fn connect_to(
+        &self,
+        session_id: &str,
+    ) -> Result<tddy_service::proto::connection::ConnectSessionResponse, tddy_rpc::Status> {
+        self.service
+            .connect_session(Request::new(ConnectSessionRequest {
+                session_token: TEST_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .map(|response| response.into_inner())
+    }
+
+    /// What the LiveKit **server** says about a room, or `None` when it has never heard of it.
+    ///
+    /// Read from the server's own room list rather than by joining: joining a room that does not
+    /// exist creates it, which would make the question change its own answer.
+    async fn room_on_the_server(&self, room: &str) -> Option<LiveKitRoomInfo> {
+        tddy_daemon::livekit_rooms_stream::room_roster_from_config(self.config.livekit.as_ref())
+            .list_rooms()
+            .await
+            .expect("the LiveKit server must answer its room list")
+            .into_iter()
+            .find(|listed| listed.name == room)
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn a_session_gets_its_room_when_something_first_connects_to_it() {
+    // Given a daemon that hosts session rooms, and a session it has started
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    let room = session_room_name(&started.session_id);
+
+    // ...which the LiveKit server has never been told about, because creating a session is local
+    // work and touches LiveKit nowhere
+    assert_eq!(
+        daemon.room_on_the_server(&room).await,
+        None,
+        "starting a session must not create its room"
+    );
+
+    // When a client connects to that session
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("connecting to a started session must succeed");
+
+    // Then the room exists and its facilitating daemon is in it, alone. Deferring the open moved
+    // *when* that happens without weakening it: a participant learns where the room is from the
+    // same call that put the daemon in it, so it still cannot arrive first (PRD FR2).
+    let probe = AgentProbe::join(&daemon, &room, "probe-first-joiner").await;
+    assert_eq!(
+        probe.remote_identities(),
+        vec![rpc_identity(INSTANCE_ID)],
+        "the facilitating daemon must be the sole participant of the room its connect opened"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn connecting_again_goes_on_using_the_room_the_first_connect_opened() {
+    // Given a session whose room a first connect opened, with a participant already in it
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("the first connect must succeed");
+    let mut probe = AgentProbe::join(
+        &daemon,
+        &session_room_name(&started.session_id),
+        "probe-second-connect",
+    )
+    .await;
+    let worktree = daemon.worktree_of(&started.session_id);
+    commit_a_file(&worktree, "first.txt", "one\n");
+    let before = probe.next_commit().await;
+
+    // When a second client connects to the same session
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("the second connect must succeed");
+
+    // Then it is the same room, still measuring the same checkout: the event sequence carries on
+    // from where it was rather than starting over, which a room replaced under this session's id
+    // could not do — a replacement aborts the poll loop that owns the counter and begins at zero.
+    //
+    // Greater-than rather than a literal: how many events land between two commits depends on where
+    // the poll interval falls, and a staged-but-not-yet-committed file is legitimately an event of
+    // its own. What is being asserted is that the counter continued at all.
+    commit_a_file(&worktree, "second.txt", "two\n");
+    let after = probe.next_commit().await;
+    assert!(
+        after.event.seq > before.event.seq,
+        "the room's event sequence must continue across a second connect; it went from {} to {}",
+        before.event.seq,
+        after.event.seq
+    );
+}
+
+#[tokio::test]
+async fn connecting_to_a_session_fails_when_livekit_cannot_be_reached() {
+    // Given a daemon whose LiveKit is configured at an address nothing answers on, and a session it
+    // started there regardless
+    let daemon = FacilitatingDaemon::with_livekit_nothing_listens_on().await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When a client connects to it
+    let refused = daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect_err("connecting must fail when the room it needs cannot be created");
+
+    // Then it is told so, naming the room it could not get. Creating a session stopped depending on
+    // LiveKit; *reaching* one over LiveKit did not, and a client that asked for a room and has none
+    // must hear about it rather than be handed coordinates nothing is serving.
+    assert!(
+        refused
+            .message
+            .contains(&session_room_name(&started.session_id)),
+        "the failure must name the room that could not be created, got: {}",
+        refused.message
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC7 — the terminal a remote client drives is LiveKit work too
+//
+// A session's PTY is bridged into the lobby so a client that is *not* on this host can drive it.
+// The desktop reaches its own host over IPC and never needs one, so the bridge is deferred for
+// exactly the reason the room is: it is LiveKit work, and LiveKit work belongs at the moment a
+// LiveKit consumer arrives. Both are established by the same connect, under the same lock, so a
+// session cannot end up with one and not the other.
+// ---------------------------------------------------------------------------
+
+/// The identity a session's PTY bridge serves the terminal on, in the lobby.
+///
+/// `daemon-{instance}-{session}`, spelled out here rather than derived, so this suite pins the
+/// coordinates `tddy-tools pty-relay --server-identity` and the Telegram attach hint hand out.
+fn terminal_bridge_identity(session_id: &str) -> String {
+    format!("daemon-{INSTANCE_ID}-{session_id}")
+}
+
+/// How long a client waits for the bridge participant it was told to expect. It is put in the room
+/// by the connect that returned before this call, so anything but "already there" is a failure —
+/// the wait covers the server's own propagation, not the daemon's work.
+const BRIDGE_ALREADY_THERE: Duration = Duration::from_secs(5);
+
+/// A keystroke sequence that appears nowhere in the stub's own output, so seeing it come back can
+/// only mean the bytes made the round trip through the session's PTY.
+const A_KEYSTROKE_SEQUENCE: &str = "tddy-drives-this-terminal";
+
+impl FacilitatingDaemon {
+    /// Who the LiveKit **server** says is in the lobby, sorted; empty when no lobby exists.
+    ///
+    /// Read from the server's room list rather than by joining it, for the same reason
+    /// [`Self::room_on_the_server`] is: joining a room that does not exist creates it, and the
+    /// question here is whether anything created one at all.
+    async fn lobby_participants(&self) -> Vec<String> {
+        let mut identities: Vec<String> = match self.room_on_the_server(COMMON_ROOM).await {
+            Some(lobby) => lobby
+                .participants
+                .into_iter()
+                .map(|participant| participant.identity)
+                .collect(),
+            None => Vec::new(),
+        };
+        identities.sort();
+        identities
+    }
+
+    /// The lobby's record of this session's bridge participant, as the server holds it.
+    async fn terminal_bridge_of(
+        &self,
+        session_id: &str,
+    ) -> Option<tddy_service::proto::connection::LiveKitParticipantInfo> {
+        self.room_on_the_server(COMMON_ROOM)
+            .await?
+            .participants
+            .into_iter()
+            .find(|participant| participant.identity == terminal_bridge_identity(session_id))
+    }
+
+    /// Type `keystrokes` at the session's terminal over LiveKit and read what comes back.
+    ///
+    /// The whole remote path in one call: join the lobby as a client, address the session's bridge
+    /// participant, open the terminal's bidi stream, send bytes and collect the output until they
+    /// are echoed. A session whose terminal is not drivable over LiveKit fails somewhere in here
+    /// rather than returning something that merely looks wrong.
+    async fn drives_the_terminal_over_livekit(&self, session_id: &str, keystrokes: &str) -> String {
+        let identity = terminal_bridge_identity(session_id);
+        let token = self
+            ._livekit
+            .as_ref()
+            .expect("driving a terminal needs the testkit")
+            .generate_token(COMMON_ROOM, "probe-remote-terminal")
+            .expect("LiveKit token for a remote terminal client");
+        let connected = tddy_livekit::client_connect::connect_client(
+            &self.ws_url,
+            &token,
+            &identity,
+            BRIDGE_ALREADY_THERE,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("a remote client must reach {identity} in {COMMON_ROOM}: {e}"));
+
+        let (mut keys, mut output) = connected
+            .client
+            .start_bidi_stream("terminal.TerminalService", "StreamTerminalIO")
+            .expect("the bridge must accept a terminal stream");
+        keys.send(
+            TerminalInput {
+                data: keystrokes.as_bytes().to_vec(),
+            }
+            .encode_to_vec(),
+            false,
+        )
+        .await
+        .expect("typing at the terminal must reach the bridge");
+
+        let mut seen = String::new();
+        tokio::time::timeout(CALL_TIMEOUT, async {
+            while let Some(frame) = output.recv().await {
+                let frame = frame.expect("the terminal stream must not error");
+                let decoded =
+                    TerminalOutput::decode(&frame[..]).expect("a terminal frame must decode");
+                seen.push_str(&String::from_utf8_lossy(&decoded.data));
+                if seen.contains(keystrokes) {
+                    return;
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!("the terminal must echo {keystrokes:?} within {CALL_TIMEOUT:?}; saw {seen:?}")
+        });
+        seen
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn starting_a_session_puts_no_terminal_bridge_in_the_lobby() {
+    // Given a daemon whose LiveKit is configured and answering
+    let daemon = FacilitatingDaemon::with_livekit().await;
+
+    // When it starts a session whose agent it runs
+    daemon.start_agent_session().await;
+
+    // Then nothing joined the lobby on that session's behalf — asserted through the server's own
+    // room list, so an empty answer means the lobby was never created rather than merely emptied.
+    // The regression this pins is the eager bridge: a network connect on the critical path of an
+    // operation made of a checkout and a process, both already local.
+    assert_eq!(
+        daemon.lobby_participants().await,
+        Vec::<String>::new(),
+        "creating a session must not put a participant in the lobby"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn the_first_connect_makes_the_sessions_terminal_drivable_over_livekit() {
+    // Given a started session whose terminal nothing has reached for yet
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+
+    // When a client connects to it
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("connecting to a started session must succeed");
+
+    // Then the session's terminal is served in the lobby...
+    assert_eq!(
+        daemon.lobby_participants().await,
+        vec![terminal_bridge_identity(&started.session_id)],
+        "the connect that opened the room must also have bridged the session's terminal"
+    );
+
+    // ...and a remote client really drives it: the bytes it types come back off the PTY.
+    // `contains` rather than equality, because what a terminal returns is the echo wrapped in
+    // whatever the agent's own output and the PTY's line discipline put around it.
+    let seen = daemon
+        .drives_the_terminal_over_livekit(&started.session_id, A_KEYSTROKE_SEQUENCE)
+        .await;
+    assert!(
+        seen.contains(A_KEYSTROKE_SEQUENCE),
+        "the terminal must echo what was typed at it over LiveKit, got: {seen:?}"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn the_terminal_bridge_publishes_the_block_the_session_was_started_with() {
+    // Given a session a client has connected to, so its terminal is in the lobby
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.a_session_being_connected_to().await;
+
+    // When the lobby is read the way another host's drawer reads it
+    let published = eventually_awaiting(
+        "the session's bridge to publish its own block",
+        ACTIVITY_TIMEOUT,
+        || async {
+            let participant = daemon
+                .terminal_bridge_of(&started.session_id)
+                .await
+                .ok_or_else(|| "the lobby has no bridge for this session".to_string())?;
+            match participant.metadata.is_empty() {
+                true => Err("the bridge has published no metadata yet".to_string()),
+                false => Ok(participant.metadata),
+            }
+        },
+    )
+    .await;
+
+    // Then it carries what the session was started with. `ListSessions` does not fan out, so this
+    // block is all another host has to synthesize a row from (D37) — deferring *when* the bridge
+    // joins must not cost it the fields the start knew and a later reader cannot recover.
+    let block: serde_json::Value =
+        serde_json::from_str(&published).expect("a participant block must be JSON");
+    assert_eq!(
+        block["session"]["session_id"],
+        serde_json::json!(started.session_id),
+        "the bridge must publish the session it is bridging; block was {block}"
+    );
+    assert_eq!(
+        block["session"]["model"],
+        serde_json::json!("claude-opus-5"),
+        "the bridge must publish the model the session was started with; block was {block}"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn connecting_twice_at_once_puts_one_terminal_bridge_in_the_lobby() {
+    // Given a started session nothing has connected to
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+
+    // When two clients connect at the same moment
+    let (first, second) = tokio::join!(
+        daemon.connect_to(&started.session_id),
+        daemon.connect_to(&started.session_id)
+    );
+    first.expect("the first of two simultaneous connects must succeed");
+    second.expect("the second of two simultaneous connects must succeed");
+
+    // Then one participant serves the terminal, not two racing under one identity — which LiveKit
+    // resolves by disconnecting the one that was already there.
+    assert_eq!(
+        daemon.lobby_participants().await,
+        vec![terminal_bridge_identity(&started.session_id)],
+        "two simultaneous first connects must leave exactly one terminal bridge"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn connecting_again_goes_on_using_the_terminal_bridge_the_first_connect_attached() {
+    // Given a session whose terminal a first connect bridged
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.a_session_being_connected_to().await;
+    let first = daemon
+        .terminal_bridge_of(&started.session_id)
+        .await
+        .expect("the first connect must have bridged the terminal");
+
+    // When a second client connects to the same session
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("the second connect must succeed");
+
+    // Then it is the same participant, still in the room since the first connect put it there. A
+    // replacement would announce itself as a fresh join — and would have evicted the one the first
+    // connect handed out coordinates for.
+    let again = daemon
+        .terminal_bridge_of(&started.session_id)
+        .await
+        .expect("the terminal must still be bridged after a second connect");
+    assert_eq!(
+        again.joined_at_ms, first.joined_at_ms,
+        "a second connect must reuse the bridge rather than join a second participant"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_session_whose_agent_left_no_terminal_still_gets_its_room() {
+    // Given a session whose agent has exited, so there is no PTY to bridge
+    let daemon = FacilitatingDaemon::with_livekit_and_an_agent_that_exits_at_once().await;
+    let started = daemon.start_agent_session().await;
+    daemon.await_no_terminal_for(&started.session_id).await;
+
+    // When a client connects to it
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("a session with no terminal must still get its room");
+
+    // Then the room is there — a bridge is what a session with a terminal gets, not a condition of
+    // being reachable at all...
+    assert!(
+        daemon
+            .room_on_the_server(&session_room_name(&started.session_id))
+            .await
+            .is_some(),
+        "the connect must open the session's room whether or not there is a terminal to bridge"
+    );
+
+    // ...and nothing was put in the lobby on behalf of a terminal that does not exist.
+    assert_eq!(
+        daemon.lobby_participants().await,
+        Vec::<String>::new(),
+        "a session with no terminal must leave the lobby empty"
+    );
+}
+
+impl FacilitatingDaemon {
+    async fn with_livekit_and_an_agent_that_exits_at_once() -> Self {
+        let livekit = LiveKitTestkit::start()
+            .await
+            .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
+        let ws_url = livekit.get_ws_url();
+        Self::build_running(Some(ws_url), Some(livekit), AnAgent::ThatExitsAtOnce).await
+    }
+
+    /// Waits until the session's agent has exited and the manager has dropped its terminal.
+    ///
+    /// The start returns as soon as the process is spawned, so "this session has no terminal" is a
+    /// state the test has to wait for rather than one it can assume.
+    async fn await_no_terminal_for(&self, session_id: &str) {
+        eventually_awaiting(
+            "the session's agent to exit, leaving no terminal",
+            ACTIVITY_TIMEOUT,
+            || async {
+                match self.agents.get(session_id).await {
+                    Some(_) => Err("the session still has a terminal".to_string()),
+                    None => Ok(()),
+                }
+            },
+        )
+        .await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AC7 — a session started while LiveKit was down, once LiveKit is back
+// ---------------------------------------------------------------------------
+
+/// A LiveKit address that refuses connections until the server behind it is switched on.
+///
+/// The operator's sequence needs one address that means two things over the life of one daemon:
+/// unreachable while the session is created, reachable when a client connects, with no restart in
+/// between. The daemon reads the address once, out of its config, so the switch has to be in front
+/// of the server rather than a second server somewhere else — a forwarder that is simply not
+/// listening yet.
+struct ALiveKitThatComesBack {
+    addr: std::net::SocketAddr,
+    upstream: std::net::SocketAddr,
+    _forwarding: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+impl ALiveKitThatComesBack {
+    /// Reserves an address in front of `testkit` and leaves nothing listening on it.
+    ///
+    /// The port is bound and released: the operating system does not hand the same one out again
+    /// while this test runs, so a dial to it is refused rather than answered by whatever happened to
+    /// take it.
+    async fn in_front_of(testkit: &LiveKitTestkit) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("binding a loopback port must succeed");
+        let addr = listener
+            .local_addr()
+            .expect("a bound listener must know its address");
+        drop(listener);
+        Self {
+            addr,
+            upstream: upstream_address_of(testkit),
+            _forwarding: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    fn ws_url(&self) -> String {
+        format!("ws://{}", self.addr)
+    }
+
+    /// Switch the server on: start forwarding everything that arrives to the real testkit.
+    async fn comes_back(&self) {
+        let listener = tokio::net::TcpListener::bind(self.addr)
+            .await
+            .expect("the reserved address must still be free when the server comes back");
+        let upstream = self.upstream;
+        let forwarding = tokio::spawn(async move {
+            while let Ok((mut client, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let Ok(mut server) = tokio::net::TcpStream::connect(upstream).await else {
+                        return;
+                    };
+                    let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+                });
+            }
+        });
+        *self._forwarding.lock().await = Some(forwarding);
+    }
+}
+
+/// Where the testkit actually listens, taken from the `ws://host:port` it reports.
+fn upstream_address_of(testkit: &LiveKitTestkit) -> std::net::SocketAddr {
+    let ws_url = testkit.get_ws_url();
+    let authority = ws_url
+        .strip_prefix("ws://")
+        .unwrap_or_else(|| panic!("the testkit must report a ws:// URL, got {ws_url}"));
+    authority
+        .trim_end_matches('/')
+        .parse()
+        .unwrap_or_else(|e| panic!("the testkit's address {authority} must parse: {e}"))
+}
+
+#[tokio::test]
+#[serial]
+async fn a_session_started_while_livekit_was_down_is_drivable_over_livekit_once_it_is_back() {
+    // Given a daemon configured for a LiveKit that is not up
+    let testkit = LiveKitTestkit::start()
+        .await
+        .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
+    let livekit = ALiveKitThatComesBack::in_front_of(&testkit).await;
+    let daemon = FacilitatingDaemon::build(Some(livekit.ws_url()), Some(testkit)).await;
+
+    // ...and a session it started anyway, because creating one is local work
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When LiveKit comes back and a client connects — the same daemon, no restart
+    livekit.comes_back().await;
+    daemon
+        .connect_to(&started.session_id)
+        .await
+        .expect("connecting must succeed once LiveKit answers again");
+
+    // Then the session is drivable over LiveKit: the room is there and so is its terminal. This is
+    // what the deferral buys — the session outlived the outage instead of being refused by it.
+    assert!(
+        daemon
+            .room_on_the_server(&session_room_name(&started.session_id))
+            .await
+            .is_some(),
+        "the session must get its room from the connect that followed the outage"
+    );
+    let seen = daemon
+        .drives_the_terminal_over_livekit(&started.session_id, A_KEYSTROKE_SEQUENCE)
+        .await;
+    assert!(
+        seen.contains(A_KEYSTROKE_SEQUENCE),
+        "a session started while LiveKit was down must be drivable once it is back, got: {seen:?}"
     );
 }

@@ -119,6 +119,10 @@ fn main() -> anyhow::Result<()> {
             .livekit
             .as_ref()
             .and_then(|l| l.common_room.clone());
+        // The operator's switch, so a page served by a daemon that joins no common room joins none
+        // either — the url and room above name a room it *could* join, not one it does.
+        let livekit_enabled =
+            tddy_daemon::config::LiveKitConfig::common_room_enabled(daemon.config.livekit.as_ref());
         // Browser DEBUG mask (debug-package namespaces) exposed at /api/config; see DaemonConfig::debug.
         let web_debug = daemon.config.debug.clone();
         // The startup snapshot the web bundle is served with. Config entries only: assistants are
@@ -166,6 +170,7 @@ fn main() -> anyhow::Result<()> {
             daemon.entries,
             livekit_url,
             common_room,
+            livekit_enabled,
             daemon_instance_id,
             allowed_agents,
             web_debug,

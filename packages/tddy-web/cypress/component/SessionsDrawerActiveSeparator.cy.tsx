@@ -64,6 +64,7 @@ function aSessionsDrawer(sessions: SessionEntry[], options: DrawerOptions = {}) 
             isOpen
             onClose={cy.stub().as("onClose")}
             onOpen={cy.stub().as("onOpen")}
+            crossHostSessionsVisible
             selectionMode={options.selectionMode ?? false}
             selectedForDelete={options.selectedForDelete}
             onToggleSelect={options.onToggleSelect}

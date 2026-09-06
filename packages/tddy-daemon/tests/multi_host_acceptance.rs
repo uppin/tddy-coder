@@ -80,6 +80,7 @@ allowed_tools:
   - path: {true_path}
     label: t
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {REMOTE_LK_API_KEY}
   api_secret: {REMOTE_LK_API_SECRET}

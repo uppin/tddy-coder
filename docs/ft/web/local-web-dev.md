@@ -51,6 +51,7 @@ Before starting, the script sends **`fuser -k -9`** on the daemon and Vite TCP p
 | `tddy:term:data` | Keystrokes / input sent **out** (`onData`) |
 | `tddy:term:resize` | `cols`×`rows` resize events |
 | `tddy:term:grpc` | gRPC terminal byte stream: recv length, ready/buffered state, hex preview, resize sequence |
+| `tddy:term:session` | The one session terminal's feed, whatever carries it: recv length, ready/buffered state, hex preview |
 | `tddy:term:life` | Terminal lifecycle (init, open, initial `cols`/`rows`) |
 | `tddy:term:mouse` | Mouse / SGR forwarding |
 

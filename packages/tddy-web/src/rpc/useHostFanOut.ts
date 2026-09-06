@@ -6,8 +6,9 @@
  * be started as, the agents it can attach, the model registry — has to ask every daemon itself, and
  * every one of those surfaces needs the same three properties:
  *
- *   • **one client per host**, each peer addressed at its `daemon-{instanceId}` RPC identity over the
- *     shared common-room connection — the identity a daemon actually serves RPC on;
+ *   • **one client per host**, each peer reached through the connection its host is registered
+ *     under (`rpc/connections`) — over the common room today, over whatever wire a host build
+ *     registers tomorrow;
  *   • **isolated reads**, so one unreachable host costs one error row and never the list;
  *   • **one row per identity**, because two hosts can name the same row — a def created on one host
  *     and known to another is one agent, and must be offered once.
@@ -23,9 +24,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConnectError, type Transport } from "@connectrpc/connect";
-import { daemonRpcIdentity } from "../lib/participantRole";
-import { useSelectedDaemon } from "./selectedDaemon";
-import { useLiveKitTransportFactory } from "./transportProvider";
+import { useHostConnector } from "./connections/registry";
+import { useDaemons } from "./selectedDaemon";
 
 /** A host that could not be asked, or refused to answer. Rendered as one row, never swallowed. */
 export interface HostReadFailure {
@@ -73,7 +73,7 @@ interface HostAnswer<T> {
   readonly error: string;
 }
 
-/** What a caller is told when the common room holds no connection to the host it addressed. */
+/** What a caller is told when no registered wire can reach the host it addressed. */
 export function noConnectionTo(daemonInstanceId: string): string {
   return `no connection to daemon ${daemonInstanceId}`;
 }
@@ -105,8 +105,8 @@ export function useHostFanOut<C, T>(
   homeInstanceId: string,
   reader: HostReader<C, T>,
 ): HostFanOut<T> {
-  const { room, daemons } = useSelectedDaemon();
-  const liveKitFactory = useLiveKitTransportFactory();
+  const daemons = useDaemons();
+  const connectHost = useHostConnector();
   const [answers, setAnswers] = useState<ReadonlyMap<string, HostAnswer<T>>>(new Map());
 
   const readerRef = useRef(reader);
@@ -162,21 +162,25 @@ export function useHostFanOut<C, T>(
     const reads = new AbortController();
     if (readsHomeClient) void readHost(homeInstanceId, homeClient, reads.signal);
     for (const instanceId of peerIds) {
-      // Every peer is addressed over the shared common-room connection; without a room there is no
-      // way to reach it, and saying so beats a list that quietly omits that host.
-      if (!room) {
+      // Every peer is addressed over whichever wire can reach it; with none that can, there is no
+      // way to ask, and saying so beats a list that quietly omits that host.
+      const connection = connectHost(instanceId);
+      if (!connection) {
         setAnswers((current) =>
           new Map(current).set(instanceId, { rows: [], error: noConnectionTo(instanceId) }),
         );
         continue;
       }
-      const transport = liveKitFactory(room, daemonRpcIdentity(instanceId));
-      void readHost(instanceId, readerRef.current.clientFor(transport), reads.signal);
+      void readHost(
+        instanceId,
+        readerRef.current.clientFor(connection.transport()),
+        reads.signal,
+      );
     }
     // Unmounting — or moving on to a different host list — cancels the reads in flight, so no answer
     // to a question nobody is asking any more is waited for or written.
     return () => reads.abort();
-  }, [homeClient, homeInstanceId, readsHomeClient, peerIds, room, liveKitFactory, readHost]);
+  }, [homeClient, homeInstanceId, readsHomeClient, peerIds, connectHost, readHost]);
 
   return useMemo(() => {
     const rows: T[] = [];

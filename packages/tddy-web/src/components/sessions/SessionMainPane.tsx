@@ -1,10 +1,11 @@
 import React from "react";
-import { ConnectError, type Client, type Transport } from "@connectrpc/connect";
+import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
-import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
+import type { SessionAttachmentHint } from "../../rpc/connections/session";
+import type { HostConnection } from "../../rpc/connections/types";
 import type { SessionMetadata } from "../../lib/sessionParticipantMetadata";
 import type { InspectorDrawerState } from "./SessionInspectorDrawer";
 import { SessionInspectorDrawer } from "./SessionInspectorDrawer";
@@ -31,11 +32,14 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
-type TokenClient = Client<typeof TokenService>;
 
 interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
   attachment: SessionAttachmentState;
+  /** How the attached session is reached — passed to the custom workflow views, whose chat panels
+   *  join the session's room as their own participant. `null` unless a room-backed session is
+   *  attached. */
+  attachmentHint?: SessionAttachmentHint | null;
   inspectorState: InspectorDrawerState;
   onToggleInspector: () => void;
   onInspectorClose: () => void;
@@ -47,13 +51,19 @@ interface SessionMainPaneProps {
   // Create session mode
   isCreating?: boolean;
   client?: ConnectionClient;
-  /** Client for fetching browser LiveKit tokens — required to render a terminal for `connected-livekit` sessions. */
-  tokenClient?: TokenClient;
+  /** The connection to the daemon that owns the selected session — a runtime attaches its spawned
+   *  child conversations over it, and the inspector's media tabs are gated on it. `null` until a
+   *  host is reachable.
+   *
+   *  Required, with no default, for the reason `SessionInspectorDrawer.hostConnection` (which this
+   *  feeds) and `InspectorTabs.mediaAvailable` are: the only possible default is `null`, `null`
+   *  hides the VNC and Screen Sharing tabs, and so a call site that forgot the prop would lose them
+   *  silently — the pane would look exactly like one whose host cannot carry a track. */
+  host: HostConnection | null;
   sessionToken?: string;
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
-  /** LiveKit room for the connected session (used by VNC / screen-sharing overlay and as the
-   *  common-room stand-in for session-scoped RPCs when the transport factory is overridden). */
+  /** LiveKit room for the connected session — used by the VNC / screen-sharing overlay. */
   room?: Room | null;
   /** Shortcut presets for the connected session — shown as the mobile shortcut overlay. */
   mobileShortcuts?: ToolShortcutDef[];
@@ -80,8 +90,6 @@ interface SessionMainPaneProps {
   sessions?: ReadonlyArray<SessionEntry>;
   /** The focused runtime's session id (visible); others are `display:none` but stay mounted. */
   focusedRuntimeId?: string | null;
-  /** Capture a session's connected LiveKit `Room` so session-scoped RPCs can route over it. */
-  onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Register a session's Agent-terminal text-insert (for the inspector Files-tab click/tap route). */
   onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Insert an uploaded file's host path into the focused session's terminal (Files tab → Insert /
@@ -94,11 +102,6 @@ interface SessionMainPaneProps {
   /** Lazy builder for a session-scoped `ConnectionService` client (session-participant routing) —
    *  used by the inspector's session-scoped RPCs (e.g. ExecuteTool). */
   buildSessionClient?: () => ConnectionClient | null;
-  /** LiveKit transport factory — passed through to each `SessionRuntime` for its explicit
-   *  steal-claim (`ClaimTerminalControl`) session-participant routing. */
-  liveKitFactory?: (room: Room, targetIdentity: string) => Transport;
-  /** True when `liveKitFactory` is a test double that ignores its `room` argument. */
-  liveKitFactoryIsOverridden?: boolean;
   /** The `session` metadata block each live participant publishes, keyed by session id — passed to
    *  the custom workflow view, where the PR-Stack screen joins planned nodes to cross-host child
    *  sessions with it (D37, D38). */
@@ -108,6 +111,7 @@ interface SessionMainPaneProps {
 export function SessionMainPane({
   selectedSession,
   attachment,
+  attachmentHint = null,
   inspectorState,
   onToggleInspector,
   onInspectorClose,
@@ -118,7 +122,7 @@ export function SessionMainPane({
   onTerminate,
   isCreating = false,
   client,
-  tokenClient,
+  host,
   sessionToken = "",
   onCancelCreate,
   onSessionCreated,
@@ -131,18 +135,14 @@ export function SessionMainPane({
   runtimes = [],
   sessions = [],
   focusedRuntimeId = null,
-  onSessionRoom,
   onSessionRegisterInsert,
   onInsertPathIntoTerminal,
   onSessionDisconnect,
   onSessionBytes,
   buildSessionClient,
-  liveKitFactory,
-  liveKitFactoryIsOverridden,
   sessionMetadataBySessionId,
 }: SessionMainPaneProps) {
-  const isConnected =
-    attachment.status === "connected-livekit" || attachment.status === "connected-grpc";
+  const isConnected = attachment.status === "connected";
 
   // The worktree Code pane is a split view available for every session type: it never replaces the
   // base view (terminal / chat / PR-Stack), it opens beside it. Its open/closed state lives in the
@@ -269,7 +269,7 @@ export function SessionMainPane({
     ? resolveWorkflowView(selectedSession, {
         client,
         sessionToken,
-        attachment,
+        attachmentHint,
         sessions: [...sessions],
         defaultBranch,
         defaultRemote,
@@ -319,15 +319,11 @@ export function SessionMainPane({
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
-          tokenClient={tokenClient}
           mobileShortcuts={mobileShortcuts}
-          onSessionRoom={onSessionRoom}
           onSessionRegisterInsert={onSessionRegisterInsert}
           onSessionDisconnect={onSessionDisconnect}
           onSessionBytes={onSessionBytes}
-          liveKitFactory={liveKitFactory}
-          liveKitFactoryIsOverridden={liveKitFactoryIsOverridden}
-          commonRoom={room}
+          host={host}
           sessions={sessions}
         />
       ))}
@@ -543,12 +539,24 @@ export function SessionMainPane({
                 onTerminate={onTerminate}
                 client={client}
                 sessionToken={sessionToken}
+                /* The media tabs are gated on the connection to the host that owns this session —
+                   `host`, the same connection the screen already resolved for every other
+                   cross-host read, so the tabs and the RPCs behind them cannot disagree about
+                   which daemon they are talking to.
+
+                   The *host* is the upstream fact, not the session: `capabilitiesForHint`
+                   (`rpc/connections/sessionAttachment.ts`) derives a session's capabilities from
+                   whether its attach hint names a room, and whether there is a room at all is
+                   decided by how the host is reached — a host reached without LiveKit can never
+                   hand out a room-backed session.
+
+                   Reading the session's own connection instead would also answer "no media" for a
+                   *dormant* session, which has no connection at all. That turns an unanswerable
+                   question into a refusal and hides tabs whose capability is in fact present,
+                   which is a behaviour change rather than gating. */
+                hostConnection={host}
                 room={room}
-                serverIdentity={
-                  attachment.status === "connected-livekit"
-                    ? attachment.livekitServerIdentity
-                    : undefined
-                }
+                serverIdentity={attachmentHint?.serverIdentity}
                 traffic={traffic}
                 buildSessionClient={buildSessionClient}
                 onInsertPathIntoTerminal={onInsertPathIntoTerminal}

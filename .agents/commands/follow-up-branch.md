@@ -12,7 +12,7 @@ This is the building block for extending a stack by hand. It **does not open a P
 **and** open a draft PR, use **`/add-to-pr-stack`**. For the full stacked-PR model (base tracking, the
 DAG, per-PR documents, landing rules) use the **`pr-stack` skill**
 (`.agents/skills/pr-stack/SKILL.md`) and
-[`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md).
+the `pr-stack` skill.
 
 ## Step 1: Resolve the reference to a base branch
 
@@ -32,27 +32,10 @@ Interpret `$ARGUMENTS`:
 - **Nothing given** → ask which branch or PR to base on. **Do not** silently base on the current
   branch or `master`.
 
-## Step 2: If a `pr-stack` orchestrator owns this stack, say so before branching
+## Step 2: Say whether the reference is part of a stack, before branching
 
-A branch can be part of a stack in two ways, and only one of them wants a raw `git switch -c`:
-
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG in its `Changeset.stack`. Nodes
-  are added with the orchestrator's **`pr_add_planned`** tool and materialised with **`pr_spawn_child`**
-  (or the web panel's *+ New planned PR* form and per-row **Start session** CTA), which creates the
-  child worktree and branch for you, off the nearest non-merged ancestor. Creating the branch by hand
-  here leaves it **outside the plan**, so `pr_stack_status`, the base-ref derivation, the Repoint
-  control and the merge ordering all work from a plan that does not describe reality. Repairing that
-  later means `pr_adopt` on the resulting PR.
-
-  If the reference belongs to a planned stack, **say so and offer the planned path first**. Proceed
-  with the raw branch only when the user confirms they want a branch outside the plan (a quick spike, a
-  scratch branch, work they intend to adopt later).
-
-  Note the `pr_*` tools belong to the **orchestrator agent** during its `orchestrate` goal; a child
-  session does not have them, and neither does an ordinary worktree.
-
-- **Ad-hoc chain** — nobody owns it; the base is just another open PR's head branch. Detect it the way
-  `/pr` does: `gh pr list --state open --json number,headRefName,baseRefName` plus
+A branch off an open PR's head is a stack member whether or not anybody says so. Detect it the way
+`/pr` does: `gh pr list --state open --json number,headRefName,baseRefName` plus
   `git merge-base --is-ancestor origin/<headRefName> HEAD`, treating any base that is not
   `master`/`main` as a stack parent. This is the case this command serves directly.
 
@@ -65,9 +48,8 @@ git switch -c <new-branch> origin/<base-branch>   # off the fetched ref, not sta
 ```
 
 - **New branch name**: use the name from `$ARGUMENTS` if given; otherwise propose one and confirm. Use
-  the stack's namespace — `feature/<stack-slug>/<node>` (`feature/auth/middleware`). In a planned stack
-  that convention is **required and validated**; elsewhere it is convention, and worth keeping so a
-  stack's branches group together.
+  the stack's namespace — `feature/<stack-slug>/<node>` (`feature/auth/middleware`), so a stack's
+  branches group together in a branch list and pair with the `(#<slug> K/N)` group in the titles.
 - If the base branch only exists locally (no remote), branch off the local ref instead and say so — the
   PR cannot be opened until the base is pushed.
 - If the working tree has tracked-file changes, stop and let the user commit them first — never
@@ -83,8 +65,9 @@ it. Remind the user of the base relationship for when they open the PR:
 > does that plus the title numbering. `/pr` detects a stack base on its own but confirm what it picked.
 > Once `<base-branch>` merges, `/repoint` moves this PR onto `origin/master`.
 
-Also state, in one line, whether this branch is **inside** a planned stack's plan or outside it — the
-one fact that is invisible from git afterwards.
+Also state, in one line, whether this branch is meant to become a PR **in the stack** — in which
+case it must be registered with `gh stack link` once its PR exists — or a scratch branch outside it.
+That is the one fact invisible from git afterwards.
 
 Do not open a PR here — that is `/add-to-pr-stack`, `/draft-pr`, or `/pr`. This command only creates
 and switches to the branch.
@@ -94,8 +77,8 @@ and switches to the branch.
 - Resolve the reference explicitly (branch / PR / ask) — never default to `master` or the current
   branch silently.
 - Base off the freshly fetched ref, ref-scoped, so the new branch starts from the reference's latest.
-- **Offer the planned path first** when a `pr-stack` orchestrator owns the reference; a hand-made
-  branch there is outside the plan and has to be adopted back.
+- **Say whether the branch is destined for the stack.** A branch off a stack member that never gets
+  registered is correctly based but outside the stack.
 - Never discard uncommitted work to switch branches.
 - Never open a PR, and never change any existing PR's draft/ready state.
 - Never use `--no-verify`.
@@ -107,5 +90,4 @@ and switches to the branch.
 stacked slices; this command only **adds on top**), `/split-branch`, `/pr`, `/pr-stack-rebase`,
 `/repoint`, `/merge`, `/squash-pr`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
-**Product docs**: [PR stacking](../../docs/ft/coder/pr-stacking.md) ·
-[PR-stack documents](../../docs/ft/coder/pr-stack-docs.md)
+**Product docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`)

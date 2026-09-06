@@ -26,17 +26,17 @@ Do NOT assume the base is `origin/master`. Detect it:
 
 1. **Default branch**: `git symbolic-ref --short refs/remotes/origin/HEAD` (fallback: `master`, then `main`). This is the base when the branch is standalone.
 2. **Already has an open PR?** `gh pr list --state open --head <current-branch> --json number,baseRefName`. If a PR exists for the current branch, you are **updating** it — keep its existing `baseRefName` and skip to step 3 (do not re-detect).
-3. **Planned stack** — this branch is a node of a stack an orchestrator session owns. Two signals, either is enough:
+3. **In a stack** — this branch is based on another open PR's branch. Two signals, either is enough:
    - per-PR documents are attached to this session: a `changeset.md` carrying `## Responsibility` / `## Boundaries` / `## Dependencies` / `## Draft PR contract`;
    - the branch is named `feature/<stack-slug>/<node>` and another branch under the same `feature/<stack-slug>/` namespace has an open PR.
 
    The base is then **the parent node's branch**, which the attached `changeset.md` names under `## Dependencies`. Do not guess it from ancestry — the stack is a DAG and a node may have several parents. See the `pr-stack` skill.
-4. **Ad-hoc chain** (the current branch stacks on another open PR, with no orchestrator):
+4. **Detecting it from the open PRs:**
    - `gh pr list --state open --json number,headRefName,baseRefName`
    - For each open PR's `headRefName` (excluding the current branch), test ancestry: `git merge-base --is-ancestor origin/<headRefName> HEAD`. Fetch first if the ref is stale (`git fetch origin <headRefName>`).
    - Branches that pass are **stack ancestors**. The **stack parent** is the closest one — the ancestor whose tip is itself an ancestor of HEAD with no other open-PR branch in between (smallest `git rev-list --count origin/<headRefName>..HEAD`).
 5. **Choose the base**:
-   - Planned stack → base = the parent node's branch (note its PR number — this PR stacks on it).
+   - In a stack → base = the predecessor's branch (note its PR number — this PR stacks on it).
    - Ad-hoc stack parent found → base = the stack parent's `headRefName` (note its PR number).
    - Else → base = the default branch from step 1.
 6. If multiple candidate stack parents, or the detected base is not `master`/`main`, **confirm with the user** before proceeding — basing a PR on the wrong branch misroutes the stack.
@@ -71,7 +71,7 @@ Do NOT assume the base is `origin/master`. Detect it:
   - A concise title (under 70 characters). **On a stack branch**, close the title with the stack group — `<type>(<scope>): <what this PR delivers> (#<stack-slug> K/N)` — and write the subject as the capability *shipped*, never as a phase (`red`, `stubs`, `WIP`). The title becomes the squash-merge commit on `master` and cannot be fixed afterwards; see the `pr-stack` skill.
   - A body with a summary of changes and a test plan
   - If updating an existing PR, skip `gh pr create` (the push already updated it); just present the existing PR URL.
-- **Planned stack**: once the PR exists, bind it to its node so the stack tracks it — the orchestrator session's `pr_adopt` tool, or `pr_spawn_child` if the node was started from the orchestrator in the first place. A PR nobody bound is invisible to `pr_stack_status`.
+- **In a stack**: once the PR exists, **re-register the stack** so it joins — `gh stack link --base master <prs…>`, bottom to top, additive. A PR nobody registered is correctly based but invisible as part of the stack.
 - Present the PR URL to the user. If the push output returned a URL to finish PR creation, you may open it in the browser (`open <URL>` on macOS).
 
 ## Output

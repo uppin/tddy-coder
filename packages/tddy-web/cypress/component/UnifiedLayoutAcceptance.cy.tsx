@@ -65,9 +65,14 @@ describe("Unified layout — navigation menu contents", () => {
   });
 
   it("navigates to the LiveKit route when the LiveKit entry is chosen", () => {
-    // Given — a navigation menu with a spied onNavigate
+    // Given — a navigation menu on a host reached over the common room, which is the only kind of
+    // host the LiveKit entry is offered for (see `PresenceCapabilityGatingAcceptance.cy.tsx`), and
+    // a spied onNavigate
     const onNavigate = cy.stub().as("onNavigate");
-    cy.mount(<DaemonNavMenu onNavigate={onNavigate} />);
+    mountWithRecordingLiveKitRpc(
+      withSelectedDaemon(<DaemonNavMenu onNavigate={onNavigate} />),
+      aConnectionServiceBackend(),
+    );
 
     // When — open the menu and choose LiveKit
     shell.openMenu();

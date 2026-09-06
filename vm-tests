@@ -44,6 +44,10 @@ VM_TESTS=(
   "tddy-vm tddy_host_vm_acceptance"
   "tddy-vm-build cloud_init_cli_acceptance"
   "tddy-vm-build build_image_cli_acceptance"
+  # Also needs TDDY_PREBUILT_DIST_DIR: a flat directory of release binaries
+  # (see docs/dev/guides/ci.md). It deploys what ./release built rather than
+  # building inside a guest, so it fails fast without one.
+  "tddy-e2e tddy_image_chain_acceptance"
   "tddy-e2e vm_cgroups_acceptance"
   "tddy-e2e vm_workspace_tool_sandbox_acceptance"
 )

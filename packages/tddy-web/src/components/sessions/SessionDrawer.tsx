@@ -39,6 +39,17 @@ interface SessionDrawerProps {
   selectedInstanceId?: string;
   /** Turn a daemon instance id into its display label. Defaults to the identity function. */
   hostLabelForInstance?: (instanceId: string) => string;
+  /**
+   * Whether the connection in scope can see sessions on hosts other than the selected one — the
+   * answer `SessionsDrawerScreen` gets from `useHasCapability(hostConnection, "presence")`.
+   *
+   * A cross-host row is a live LiveKit coder participant, so on a wire with no presence the union
+   * quietly narrows to what `ListSessions` reports for the selected host. Required, and required to
+   * be answered rather than defaulted, because the failure it guards against is silence: a list that
+   * has lost rows looks exactly like a list that never had them. When it is `false` the drawer shows
+   * the rows it does have and says which ones it cannot see (PRD AC 5).
+   */
+  crossHostSessionsVisible: boolean;
   /** Parsed `session` participant-metadata, keyed by session id (req 4). Defaults to empty. */
   sessionMetadataBySessionId?: ReadonlyMap<string, SessionMetadata>;
   /** Session ids ticked for bulk delete. When provided, each row renders a selection checkbox. */
@@ -236,6 +247,7 @@ export function SessionDrawer({
   onOpen,
   isMobile = false,
   selectedInstanceId = "",
+  crossHostSessionsVisible,
   hostLabelForInstance = (instanceId) => instanceId,
   sessionMetadataBySessionId = new Map(),
   selectedForDelete,
@@ -374,6 +386,16 @@ export function SessionDrawer({
           {sessions.length === 0 && (
             <div className="px-3 py-4 text-sm text-muted-foreground text-center">
               No sessions
+            </div>
+          )}
+          {/* Under the rows, not over them: the list is still the answer to "what is running", and
+              this is the footnote saying which part of the question it could not reach. */}
+          {!crossHostSessionsVisible && (
+            <div
+              data-testid="sessions-drawer-cross-host-unavailable"
+              className="border-t border-border px-3 py-2 text-xs text-muted-foreground"
+            >
+              Sessions on other hosts are not visible from this connection.
             </div>
           )}
         </div>

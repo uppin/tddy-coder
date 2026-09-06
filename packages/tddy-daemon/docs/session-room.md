@@ -29,9 +29,10 @@ lower layer knows about LiveKit.
 | **`WorktreeSource`** | One measurement, however obtained. Implemented by `LocalCheckout` and **`RemoteCheckout`**. |
 | **`RemoteSnapshotSource`** | One `GetWorktreeSnapshot` call. A trait so this module does not depend on `connection_service`; the daemon supplies the implementation. |
 | **`RemoteCheckout`** | A `WorktreeSource` that measures by asking the codebase daemon. |
-| **`SessionRoomHost`** | Opens the room of a session whose agent is about to be spawned. A trait object, so the agent-start path does not have to name the daemon's concrete RPC server type. |
+| **`session_type_is_facilitated_here`** | Whether a session of this type runs an agent on this daemon and therefore has a room here — the product doc's Roles table as a predicate. Deliberately not a statement about whether a session type "uses LiveKit": there are three rooms in play and this names one. |
+| **`SessionTerminalBridge`** | Puts a participant serving a session's terminal into the room a remote client drives it from. A trait so the registry can establish it in the same breath as the room without knowing what a PTY is. |
 | **`DaemonRoomHosting`** | This daemon as a host of rooms; `for_worktree` (local) and `for_remote_worktree` (split) build a `SessionRoomHosting`. |
-| **`SessionRoomRegistry`** | `open`, `open_measured_by`, `close`, `close_for_worktree`. Holds the live rooms, keyed by session. |
+| **`SessionRoomRegistry`** | `ensure_open`, `open`, `open_measured_by`, `hosts`, `close`, `close_for_worktree`. Holds the live rooms, keyed by session. |
 | **`SESSION_ACTIVITY_TOPIC`** | Re-export of `session.activity`, the topic each `AgentActivityRecord` is broadcast on. Distinct from `worktree.activity`, which still carries only *that* the checkout moved. |
 | **`write_wip_tree_within`** | Stage the whole checkout into a **scratch index** and `write-tree` it. Returns `""` on any failure, since a poll's only recourse is the next tick. |
 | **`tick_delta`** | Two snapshots plus a `seq` → the `ActivityDelta` between their WIP trees, or `None`. |
@@ -66,6 +67,28 @@ snapshot. An empty `head_commit` differs from the previous one, so reporting it 
   `WorktreeSnapshot::tracked_diff_differs` for why.
 
 ## The hosting task
+
+`ensure_open` is what almost everything calls: `open` unless the session's room is already open, and
+where it is either way. It exists because a room is created when something first needs to reach the
+session over LiveKit rather than when the session is created, so the callers are connects and
+attaches, arriving in any order and possibly at once. `open` and `open_measured_by` are called
+directly only by a split session's start, whose agent is handed a token for the room before anything
+could have connected.
+
+`ensure_open` holds a per-session `tokio::sync::Mutex` for the whole open, which is what makes it
+single-flight rather than merely idempotent. The registry offers no idempotency of its own: `hosts`
+followed by `open` is two steps, `register` replaces the entry and drops — therefore aborts — the
+previous room's tasks, and a second join under `daemon-{instance_id}` has LiveKit disconnect the
+participant already there, so two concurrent opens would leave the registered room served by a
+dropped connection. `already_open` derives the answer for the reusing caller from the session id, the
+instance id and the config rather than storing a second copy of three values that cannot disagree.
+The lock entry is removed by `close`, so the map holds one entry per session connected to rather than
+one per session ever seen.
+
+The terminal bridge is asked for under the same lock, on every pass rather than only the pass that
+created the room: "already open" is a fact about the room alone, so a connect whose bridge failed
+after its room succeeded leaves the next connect to finish the job. Nothing loops, waits or retries
+on its own — it is the same *ensure*, done when the work is next wanted.
 
 `open` (local) and `open_measured_by` (any source) take the first measurement *before* the room
 exists, so its opening metadata already describes the checkout, then create the room, join it as
@@ -150,7 +173,7 @@ clamp would turn `poll_interval_ms: 0` into a 1 ms loop spawning git subprocesse
 | Suite | Covers |
 |---|---|
 | `tests/worktree_activity.rs` | Naming, snapshotting a real checkout, every event rule, metadata shape, the log line. No LiveKit. |
-| `tests/session_room_acceptance.rs` | One daemon, real LiveKit: first-joiner, file access, broadcast fan-out, idle silence, late-joiner metadata, attachments, no-credentials, and that a `workspace` session gets no room. |
+| `tests/session_room_acceptance.rs` | One daemon, real LiveKit: that a start dials LiveKit not at all, that the first connect opens the room and bridges the terminal, that a second connect reuses both and two at once produce one of each, that a connect whose room cannot be created fails naming it, plus first-joiner, file access, broadcast fan-out, idle silence, late-joiner metadata, attachments, no-credentials, and that a `workspace` session gets no room. |
 | `tests/session_room_cross_host_acceptance.rs` | Two daemons, a real split session: a forwarded read is indistinguishable from a local one, and a commit on the codebase daemon is broadcast in the facilitating daemon's room. |
 | `tests/session_room_livekit_acceptance.rs` | One daemon, real LiveKit: the tick ring, the WIP ref's parentage and its release at close, a call served the patch its tick produced, and a record broadcast into the room stamped with its tick. |
 | `tests/session_activity_delta_acceptance.rs` | Real git repositories, ticks driven explicitly, no LiveKit: staging a WIP tree without touching the agent's index, delta scoping per call, the residual, and ring eviction. |

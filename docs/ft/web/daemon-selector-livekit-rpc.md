@@ -1,4 +1,4 @@
-# Daemon selector + LiveKit-only RPC routing
+# Daemon selector + host-connection RPC routing
 
 ## Purpose
 
@@ -10,23 +10,33 @@ with several daemons in the same LiveKit common room (e.g. a laptop and a workst
 that daemon's own URL.
 
 This feature adds a **daemon selector** to the top-right strip of these screens. The selectable
-daemons are the **daemon-role LiveKit participants in the common room** — the same source already
-used by the Projects screen's host picker (`daemonHostsFromParticipants`). Selecting a daemon
-switches **all daemon-level RPC** (projects, worktrees, VMs, tasks, session list/start) to that
-daemon, without a page reload.
+daemons come from the **host directory** — the merge of every registered directory source. The
+common room is one source (daemon-role participants, via `daemonHostsFromParticipants`); the daemon
+that served the page is another, so a build that joins no common room still has a host to offer.
+Selecting a daemon switches **all daemon-level RPC** (projects, worktrees, VMs, tasks, session
+list/start) to that daemon, without a page reload. See
+[`tddy-web` host directory](../../../packages/tddy-web/docs/host-directory.md).
 
-## Why LiveKit-only for daemon-level RPC
+## Why daemon-level RPC does not use HTTP
 
 HTTP `/rpc` is served same-origin by the daemon that served the web bundle. Pointing an HTTP
 ConnectRPC client at a *different* daemon's origin is cross-origin and blocked by CORS (the daemons
-do not — and should not — run a permissive CORS policy for their `/rpc` endpoint). LiveKit RPC
-(ConnectRPC over LiveKit data channels, `tddy-livekit-web`'s `LiveKitTransport`) has no such
-restriction: any daemon reachable in the common room can be addressed over the LiveKit data
-channel it already publishes/subscribes on. The daemon already serves the full daemon-level
-service set over both bindings from the same `rpc_entries` (see
-[`tddy-daemon` RPC dispatch](../../../packages/tddy-daemon/docs/connection-service.md)), so LiveKit
-RPC is a drop-in substitute — **except** for the initial bootstrap, which must stay HTTP to the
-serving daemon:
+do not — and should not — run a permissive CORS policy for their `/rpc` endpoint). So reaching a
+peer daemon needs a wire that is not the browser's origin model.
+
+A **host connection** is the name for that wire, and it is deliberately not spelled in any one
+transport's vocabulary. A call site asks for a connection to a host id; a registered
+`ConnectionProvider` supplies it. LiveKit is the provider today: ConnectRPC over LiveKit data
+channels (`tddy-livekit-web`'s `LiveKitTransport`) can address any daemon in the common room over
+the data channel it already publishes and subscribes on. A build that reaches a host some other way
+registers its own provider, and no screen learns which wire it got. The model, the registry and its
+hooks are described in
+[`tddy-web` host connections](../../../packages/tddy-web/docs/host-connections.md).
+
+The daemon serves the full daemon-level service set over both bindings from the same `rpc_entries`
+(see [`tddy-daemon` RPC dispatch](../../../packages/tddy-daemon/docs/connection-service.md)), so a
+peer connection is a drop-in substitute for the HTTP client — **except** for the initial bootstrap,
+which must stay HTTP to the serving daemon:
 
 - `GET /api/config` — how the web learns the LiveKit URL, common room name, and (new) the serving
   daemon's own instance id.
@@ -35,15 +45,32 @@ serving daemon:
   request over yet.
 
 Everything else — `ConnectionService`, `TaskService`, `ActionService`, `VmService`,
-`ScreenSharingService`, `AuthService` — switches to LiveKit RPC, addressed at the **selected**
-daemon.
+`ScreenSharingService`, `AuthService` — resolves through a host connection, addressed at the
+**selected** daemon.
+
+Who the hosts *are* is the **host directory**'s answer, not the common room's. An unconfigured
+common room contributes no hosts and reports `idle` rather than `error` — an operator who chose not
+to configure LiveKit is not shown a connection failure for it — and the daemon serving the page is
+contributed regardless, so the selector is never empty on a daemon-served page.
+
+Naming a host is not the same as reaching one: with no wire registered that can reach the serving
+daemon, selecting it resolves no connection and each screen renders its own "no connection" state.
+That is still what a **browser** served by a daemon outside its common room sees.
+
+The **desktop app** registers such a wire. Inside the Tauri shell the daemon runs in the same
+process, and `createIpcConnectionProvider` reaches it over the host application's IPC bridge —
+registered ahead of the LiveKit provider, so its own host resolves in-process even when a common room
+is configured and could also reach that machine. It carries `{"rpc"}` and nothing else, so the same
+daemon is media-capable when a browser reaches it over the common room and not when its own desktop
+app reaches it in-process — the asymmetry capabilities-on-the-connection exists to express. See
+[`tddy-web` local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md).
 
 ## Scope boundary: daemon-level vs. per-session RPC
 
 **Per-session** communication is unaffected by daemon selection and keeps targeting its own
 session's server identity in its own LiveKit room, exactly as today:
 
-- The terminal (`terminal.TerminalService`, `GhosttyTerminalLiveKit`) — targets
+- The terminal (`terminal.TerminalService`, `openRoomTerminalFeed`) — targets
   `daemon-{instanceId}-{sessionId}`.
 - The PR-Stack Chat Screen presenter stream (`usePresenterLiveKitRoom`) — targets the session's
   presenter identity.
@@ -53,12 +80,40 @@ Only **daemon-level** RPC — calls that are not scoped to one already-attached 
 with the selector.
 
 **Exception — cross-host session aggregation.** The sessions drawer deliberately does *not* scope
-`ListSessions` to the selected daemon. It fans the call out to **every** common-room daemon (a
-per-daemon `daemon-{instanceId}` client built from the shared room + transport factory) and merges
-the results, so a session with a live LiveKit participant on a non-selected host stays visible (see
+`ListSessions` to the selected daemon. It fans the call out to **every** advertised daemon (one
+client per host, resolved through that host's connection) and merges the results, so a session with
+a live participant on a non-selected host stays visible (see
 [session-drawer.md § Cross-Host Active Sessions](./session-drawer.md#cross-host-active-sessions)).
 Interaction with such a row routes attach/resume/delete/terminate to that session's **owning**
 daemon via `useDaemonClientFor` — without calling `selectDaemon`, so the selected host is unchanged.
+
+## What a host connection cannot substitute for
+
+Daemon-level RPC is wire-neutral, and the connection model is what makes it so. **Tracks and
+presence are not.** A video frame and a participant roster are things a wire either carries or does
+not, so the surfaces built on them are gated on the selected host's connection rather than
+abstracted: they render where that connection advertises the capability, and where it does not they
+are removed from navigation and name the reason.
+
+| Surface | Needs | Where it is documented |
+|---|---|---|
+| Session inspector's VNC and Screen Sharing tabs | video tracks | [vnc-sessions.md](vnc-sessions.md), [screen-sharing-sessions.md](screen-sharing-sessions.md) |
+| Participant roster and camera preview | presence (and tracks, for the camera column) | [app-shell.md § LiveKit screen](app-shell.md#livekit-screen) |
+| `#/livekit` and its nav entry, and the rooms panel | presence | [app-shell.md](app-shell.md), [livekit-rooms-panel.md](livekit-rooms-panel.md) |
+| RPC Playground's participant picker | presence | below |
+| Cross-host session rows in the sessions drawer | presence | [session-drawer.md § Cross-Host Active Sessions](session-drawer.md#cross-host-active-sessions) |
+
+**The RPC Playground's participant picker** is a presence surface, not an RPC one: its options *are*
+common-room participants. On a host reached over a wire that carries none, the picker and its label
+are replaced together by the reason there is nobody to address — a `<label for>` pointing at a
+control that is not there is a promise to a screen reader that nothing keeps. The rest of the
+playground, which addresses the selected host over its connection, is unaffected.
+
+A join that is still in flight, or one that failed, is **not** an absent capability: those surfaces
+stay, because a page that withdrew them for the second or two every LiveKit page spends connecting
+would contradict itself, and because a failed join's reason is what an operator opens those screens
+to read. The shared rule is
+[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
 
 ## The daemon identity subtlety
 
@@ -120,3 +175,7 @@ forwarding.
   participant discovery + role inference this selector is built on.
 - **[Web terminal / common room](web-terminal.md#shared-livekit-room-livekitcommon_room)** — the
   shared LiveKit room; per-session rooms are unaffected by this feature.
+- **[Capability gating](../../../packages/tddy-web/docs/capability-gating.md)** — the one predicate
+  and the availability rule behind every surface in the table above.
+- **[The local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md)** — the desktop
+  build's own provider, and why its host stays off the media server.

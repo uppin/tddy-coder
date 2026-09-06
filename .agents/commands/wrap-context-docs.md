@@ -149,13 +149,7 @@ These files do **not** get their own changelog entries; the changeset/PRD wrap a
 **Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first** — it owns the document
 ownership rules and the bottom-up wrap order summarised below.
 
-**Detect first.** A branch can be part of a stack in two ways, and the wrap must say which one applies:
-
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG and spawned this child session. The
-  session carries the orchestrator's per-PR documents as attachments (`artifacts/attachments/PRD.md`,
-  `artifacts/attachments/changeset.md`, plus `pr-stack-plan.md` and `exploration.md`), and the branch
-  follows `feature/<stack-slug>/<node>`. The `pr_*` tools belong to the orchestrator agent, not here.
-- **Ad-hoc chain** — a PR opened on top of another open PR's branch, with no orchestrator:
+**Detect first.** This branch is in a stack when its PR is based on another open PR's branch:
 
   ```bash
   gh pr list --state open --json number,headRefName,baseRefName
@@ -163,17 +157,17 @@ ownership rules and the bottom-up wrap order summarised below.
   ```
 
 Neither matches → ordinary branch, skip this section. A match → wrap **this PR's** documentation under
-the rules below. Model: [pr-stacking.md](../../docs/ft/coder/pr-stacking.md) and
-[pr-stack-docs.md](../../docs/ft/coder/pr-stack-docs.md).
+the rules below. Model: the `pr-stack` skill and
+the `pr-stack` skill § *Per-PR documents*.
 
 ### S1. Know which document you are wrapping, and who owns it
 
-Two different things are called "the changeset" on a stack branch. Only one of them is wrapped here:
+On a stack branch this tree contains **every predecessor's** working documents as well as this PR's,
+because a stacked branch inherits their commits. Only this PR's are wrapped:
 
 | Document | Where it lives | Wrapped by |
 |---|---|---|
-| Per-PR `PRD.md` / `changeset.md` (planned stack) | `{orchestrator_session_dir}/artifacts/prs/<node_id>/`, materialized into this session as `artifacts/attachments/` | **Nobody.** Session artifacts, not repo files — read-only inputs stating this node's `## Responsibility`, `## Boundaries`, `## Dependencies` and `## Draft PR contract`. Never copy one into `docs/dev/1-WIP/` to wrap it, and never delete it |
-| Shared stack plan `pr-stack-plan.md` (and `exploration.md`) | the orchestrator's `artifacts/`, attached read-only | **Nobody.** It is the stack-level document and belongs to the orchestrator; a child PR never wraps it |
+| A **predecessor's** changeset / PRD | `docs/dev/1-WIP/`, inherited through the branch's history | **That PR**, when it is set ready for review. Never wrap or delete one from here — it would show as a deletion in that PR's own diff |
 | This branch's changeset | `docs/dev/1-WIP/YYYY-MM-DD-*.md` | **this PR** — the wrap this command performs |
 | This branch's PRD | `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md` | **this PR** |
 | Permanent docs | `packages/*/docs/`, `docs/ft/<area>/` | reached **only** through a wrap |
@@ -186,8 +180,8 @@ Consequences worth stating plainly:
   first, then wrap it.
 - **Never edit `packages/*/docs/` directly** (CLAUDE.md) — the changeset workflow via `docs/dev/1-WIP/`
   is the only path in, on a stack branch as anywhere else.
-- The attached documents stay untouched by the wrap. They are the boundary contract this PR was built
-  against, and the orchestrator owns their lifecycle.
+- A predecessor's documents stay untouched by the wrap. They are the boundary contract this PR was
+  built against, and that PR owns their lifecycle.
 
 ### S2. Wrap only the documents THIS PR owns
 
@@ -210,8 +204,8 @@ Files this branch's own commits added are this PR's. Everything else in those di
   file in this PR's diff as a loss.
 - ❌ Never wrap a **dependent's** documents — they do not exist in this tree, and a deletion inside a
   shared file would surface as loss in the dependent's diff.
-- ✅ Wrap exactly the set whose scope matches this node's `## Responsibility` (planned stack) or this
-  branch's own commits (ad-hoc chain).
+- ✅ Wrap exactly the set whose scope matches this PR's `## Responsibility` — equivalently, this
+  branch's own commits.
 
 ### S3. Link dependents by PR number and URL, never by document path
 
@@ -249,7 +243,7 @@ command's part of it is narrow: report whether the wrap actually cleared **this 
 
 **Nothing hands off.** A wrap touches only the branch it runs on: no cross-branch push, no shared
 manifest, no "action required" notice. The stack-level document (`pr-stack-plan.md`) and the live
-topology (`pr_stack_status` on the orchestrator, `gh pr list`) need no committed copy.
+topology (`gh pr list`) needs no committed copy.
 
 ## Process
 
@@ -259,7 +253,7 @@ topology (`pr_stack_status` on the orchestrator, `gh pr list`) need no committed
    - Superpowers working docs: `docs/superpowers/specs/` and `docs/superpowers/plans/`
    - **Stack branch**: narrow this set to the documents **this PR** added — see
      [Stack Mode](#stack-mode--wrapping-one-pr-of-a-stack); inherited parent documents are excluded, and
-     the orchestrator's per-PR `PRD.md` / `changeset.md` attachments are never in this set
+     a predecessor's `docs/dev/1-WIP/` documents are never in this set
 2. For each changeset/PRD, check completion status
 3. Apply decision logic (complete vs incomplete)
 4. Execute the wrap: extract -> update docs -> create the changeset/changelog entry files -> delete source
@@ -284,7 +278,7 @@ topology (`pr_stack_status` on the orchestrator, `gh pr list`) need no committed
 | Document | Why |
 |----------|-----|
 | docs/dev/1-WIP/2026-01-20-parent-feature.md | inherited from parent PR #412 — that PR wraps it |
-| artifacts/attachments/changeset.md | orchestrator per-PR document, never wrapped |
+| a predecessor's `docs/dev/1-WIP/` changeset | that PR's document, never wrapped from here |
 
 ### Skipped (Incomplete)
 | Document | Missing |
@@ -302,7 +296,7 @@ Reason: complete the remaining work before wrapping.
 - **WRONG**: leaving the feature/dev docs unchanged
 - **WRONG** (stack): wrapping or deleting a **parent's** changeset/PRD, or deleting one to shrink this
   PR's diff — a stale inherited copy is `/pr-stack-rebase`'s to clear
-- **WRONG** (stack): treating the orchestrator's attached `artifacts/attachments/changeset.md` as the
+- **WRONG** (stack): treating a predecessor's inherited `docs/dev/1-WIP/` changeset as the
   document to wrap — it is a read-only session artifact, not a repo file
 - **WRONG** (stack): carrying a `docs/dev/1-WIP/` path for a dependent into permanent docs instead of its
   PR number and URL
@@ -313,4 +307,4 @@ Reason: complete the remaining work before wrapping.
 
 - **Rules**: [.cursor/rules/changeset-doc.mdc](../../.cursor/rules/changeset-doc.mdc), [.cursor/rules/prd-doc.mdc](../../.cursor/rules/prd-doc.mdc), [.cursor/rules/dev-doc.mdc](../../.cursor/rules/dev-doc.mdc), [.cursor/rules/feature-doc.mdc](../../.cursor/rules/feature-doc.mdc)
 - **Commands**: `/update-context-docs`, `/pr-wrap`
-- **Stack**: Commands `/pr-stack-rebase`, `/pr-wrap` (step 8: readiness gate, title, `gh pr ready`) · Docs [pr-stacking.md](../../docs/ft/coder/pr-stacking.md), [pr-stack-docs.md](../../docs/ft/coder/pr-stack-docs.md), [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)
+- **Stack**: Commands `/pr-stack-rebase`, `/pr-wrap` (step 8: readiness gate, title, `gh pr ready`) · Docs the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`), [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)

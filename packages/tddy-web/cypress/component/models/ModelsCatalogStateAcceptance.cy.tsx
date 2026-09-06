@@ -13,7 +13,7 @@
  */
 
 import React from "react";
-import { Room } from "livekit-client";
+import type { Room } from "livekit-client";
 import { create } from "@bufbuild/protobuf";
 import { type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
@@ -26,6 +26,7 @@ import { AuthProvider } from "../../../src/hooks/authProvider";
 import type { DaemonHost } from "../../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../../src/rpc/selectedDaemon";
 import { mountWithRpc } from "../../support/rpc/inMemory";
+import { aJoinedCommonRoom } from "../../support/rpc/withSelectedDaemon";
 import {
   aModelRegistryBackend,
   anLlmModel,
@@ -126,7 +127,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     // Given — connected, but no daemon has joined
     // When
     mountWithRoom(aModelRegistryBackend({ providers: [], models: [] }), {
-      room: new Room(),
+      room: aJoinedCommonRoom(),
       daemons: [],
     });
 
@@ -140,7 +141,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    mountWithRoom(aGatedRegistryBackend(gate), { room: new Room(), daemons: [FIXTURE_HOST] });
+    mountWithRoom(aGatedRegistryBackend(gate), { room: aJoinedCommonRoom(), daemons: [FIXTURE_HOST] });
 
     // Then — the wait is stated, not rendered as "this fleet has no models"
     page.emptyStateStatus().should("equal", "loading");
@@ -156,7 +157,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
     // Given — a daemon with a provider that offers nothing
     // When
     mountWithRoom(aModelRegistryBackend({ providers: [anOllamaProvider()], models: [] }), {
-      room: new Room(),
+      room: aJoinedCommonRoom(),
       daemons: [FIXTURE_HOST],
     });
 
@@ -169,7 +170,7 @@ describe("ModelsCatalogStateAcceptance — why the catalog is empty", () => {
   it("refuses to add a provider while no daemon is selected", () => {
     // Given — connected, but nothing to attach a provider to
     const backend = aModelRegistryBackend({ providers: [], models: [] });
-    mountWithRoom(backend, { room: new Room(), daemons: [] });
+    mountWithRoom(backend, { room: aJoinedCommonRoom(), daemons: [] });
 
     // When
     page.openAddProviderForm();

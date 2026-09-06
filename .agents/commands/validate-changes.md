@@ -28,20 +28,15 @@ delta, or any file-by-file analysis. A stacked `HEAD` contains its parents' comm
 against the wrong base reports their work as this PR's — and tempts an agent to "clean" the diff by
 deleting parent-owned files.
 
-A branch can be stacked in two ways, and both are in scope:
-
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG and spawned this session as a
-  child node. The per-PR documents (`PRD.md`, `changeset.md`) are **attached to this session**; the
-  `pr_*` tools belong to the orchestrator agent, not to you. See `docs/ft/coder/pr-stacking.md` and
-  `docs/ft/coder/pr-stack-docs.md`.
-- **Ad-hoc chain** — someone opened this PR on top of another open PR's branch, with no
-  orchestrator. Detected the way `.agents/commands/pr.md` already does it.
+This PR is in a stack when its base is another open PR's branch — detected the way
+`.agents/commands/pr.md` already does it. Its plan lives in this branch's own `docs/dev/1-WIP/`
+changeset.
 
 ```bash
 BRANCH=$(git branch --show-current)
 
-# 1. Planned stack: per-PR documents attached to this session
-grep -l "## Draft PR contract" artifacts/attachments/changeset.md 2>/dev/null
+# 1. This branch's own changeset, carrying the four stack headings
+grep -l "## Draft PR contract" docs/dev/1-WIP/*.md 2>/dev/null
 
 # 2. This branch's open PR is based on something other than trunk
 gh pr view --json baseRefName --jq .baseRefName 2>/dev/null
@@ -60,9 +55,8 @@ fi
 
 **Stack branch** if any of these hit:
 
-1. `artifacts/attachments/changeset.md` exists and carries `## Responsibility`, `## Boundaries`,
-   `## Dependencies` and `## Draft PR contract` — the four headings a child session spawned from a
-   `pr-stack` orchestrator receives.
+1. This branch's `docs/dev/1-WIP/` changeset carries `## Responsibility`, `## Boundaries`,
+   `## Dependencies` and `## Draft PR contract` — the four headings every PR in a stack has.
 2. This branch's open PR has a `baseRefName` that is not `master` / `main`.
 3. The branch matches `feature/<stack-slug>/<node>` and another branch under the same
    `feature/<stack-slug>/` namespace is open as a PR.
@@ -314,5 +308,5 @@ If issues are found, ask the user whether to proceed with fixes or just report.
 - **Rules**: `.cursor/rules/coding-practices.mdc`, `.cursor/rules/changeset-doc.mdc`,
   `.cursor/rules/feature-doc.mdc`, `.cursor/rules/dev-doc.mdc`
 - **Commands**: `/pr-stack-rebase` (step 0, stack branches), `/green` (its step 0 runs the same gate)
-- **Docs**: `docs/ft/coder/pr-stacking.md` (stack model, `pr_*` tools, PR boundary contract),
-  `docs/ft/coder/pr-stack-docs.md` (the per-PR `PRD.md` / `changeset.md` and their four headings)
+- **Docs**: the `pr-stack` skill (stack model, `pr_*` tools, PR boundary contract),
+  the `pr-stack` skill § *Per-PR documents* (the per-PR `PRD.md` / `changeset.md` and their four headings)

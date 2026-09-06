@@ -23,10 +23,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{
-    a_console_loginable_user_data, a_test_guest, configured_base_image, BASE_IMAGE_ENV,
-    GUEST_USERNAME,
-};
+use common::{a_console_loginable_user_data, a_test_guest, require_base_image, GUEST_USERNAME};
 use serial_test::serial;
 use tddy_vm::serial_shell::SerialShellState;
 use tddy_vm::tddy_host::ninep_capable_kernel_command;
@@ -78,10 +75,7 @@ async fn wait_for_port_to_close(port: u16, timeout: Duration) -> bool {
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn boots_an_aarch64_guest_and_reaches_a_login_prompt_over_the_serial_console() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a guest built from the developer-supplied cloud image
     let dir = tempdir().unwrap();
@@ -108,10 +102,7 @@ async fn boots_an_aarch64_guest_and_reaches_a_login_prompt_over_the_serial_conso
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn logs_in_over_the_serial_console_and_runs_a_command_returning_its_exit_code() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a booted guest the host has logged into over the serial console only
     let dir = tempdir().unwrap();
@@ -143,10 +134,7 @@ async fn logs_in_over_the_serial_console_and_runs_a_command_returning_its_exit_c
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn reports_the_failing_exit_code_of_a_command_run_over_the_serial_console() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a booted, logged-in guest
     let dir = tempdir().unwrap();
@@ -178,10 +166,7 @@ async fn reports_the_failing_exit_code_of_a_command_run_over_the_serial_console(
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn mounts_the_read_only_nine_p_share_and_reads_a_host_file_in_the_guest() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a host directory shared into the guest over virtio-9p
     let dir = tempdir().unwrap();
@@ -258,10 +243,7 @@ async fn mounts_the_read_only_nine_p_share_and_reads_a_host_file_in_the_guest() 
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn accepts_ssh_as_the_policy_user_with_the_generated_per_vm_key() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a guest whose cloud-init seed authorized a freshly generated per-VM keypair
     let dir = tempdir().unwrap();
@@ -302,10 +284,7 @@ async fn accepts_ssh_as_the_policy_user_with_the_generated_per_vm_key() {
             (see module docs); run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn shuts_a_running_vm_down_gracefully_via_the_qemu_monitor() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a booted guest sitting at its login prompt
     let dir = tempdir().unwrap();

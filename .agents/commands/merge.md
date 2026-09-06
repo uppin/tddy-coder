@@ -23,7 +23,7 @@ Determine the incoming branch, in this order:
 
 1. **An explicit argument** — the user named a branch. Use it.
 2. **This branch's open PR base** — `gh pr view --json baseRefName --jq .baseRefName`. This is authoritative: it is what GitHub computes the PR's diff against.
-3. **Planned stack** — the parent node's branch, named under `## Dependencies` in the per-PR `changeset.md` attached to this session. A node may have several parents; merge from each in turn, or use `/pr-stack-rebase`.
+3. **The predecessor's branch**, named under `## Dependencies` in this PR's `docs/dev/1-WIP/` changeset. Prefer `/pr-stack-rebase`, which resolves the base itself.
 4. **Default branch** — `git symbolic-ref --short refs/remotes/origin/HEAD` (fallback `master`). Only when 1–3 found nothing.
 
 `git fetch origin <incoming>` before comparing anything. State plainly which rule resolved the base, and stop and ask if 2 and 3 disagree.

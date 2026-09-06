@@ -1,7 +1,7 @@
 import React from "react";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import { SessionTrafficStrip } from "./SessionTrafficStrip";
-import { useSessionLiveKitRoom } from "./useSessionLiveKitRoom";
+import { liveKitRoomOf } from "../../rpc/connections/livekit/sessionConnection";
 import { useLiveKitPing } from "../../rpc/livekitPing";
 import { useTrafficMeterRegistry } from "../../rpc/transportProvider";
 import { useMeterSnapshot } from "./useMeterSnapshot";
@@ -19,8 +19,11 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ attachment, runtimes = [], runtimeRegistry = null }: StatusBarProps) {
-  const { room } = useSessionLiveKitRoom(attachment);
-  const pingMs = useLiveKitPing(room);
+  // Round-trip time is measured on the attached session's own connection, when that connection is
+  // one a room carries. A session served by its host has no room to measure and reads no ping — the
+  // strip's em-dash placeholder, which is what it already showed for such a session.
+  const connection = attachment.status === "connected" ? attachment.connection : null;
+  const pingMs = useLiveKitPing(liveKitRoomOf(connection));
   const meterRegistry = useTrafficMeterRegistry();
   // Control plane: the HTTP RPC meter. Data plane: every mounted session's terminal byte traffic,
   // aggregated across focused AND backgrounded runtimes (not just the focused session's room).

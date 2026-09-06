@@ -6,7 +6,15 @@
  * daemon-level RPC (`ConnectionService`, `TaskService`, `VmService`, …) must address
  * `daemon-{instanceId}`. `SelectedDaemonProvider` owns the one common-room connection shared by
  * every daemon-mode screen, the currently selected daemon, and `useDaemonClient` — the daemon-level
- * equivalent of `useHttpClient`/`useLiveKitClient` from `./transportProvider`.
+ * equivalent of `useHttpClient` from `./transportProvider`.
+ *
+ * *Which* daemons exist is no longer this module's answer. It composes the host directory's sources
+ * (`./hostDirectory`) — the common room, and the daemon that served the page — and reads the merged
+ * list off `useHostDirectory`, so a build with no common room still has a host to offer. The room
+ * itself is offered to the subtree as a *connection provider* (`./connections/liveKit`), so a screen
+ * asks for a host rather than for a room and a participant identity, and `useDaemonClient` is
+ * `useHostClient` under a daemon-shaped name. The room is **not** on this context any more: a screen
+ * that wants the participant roster asks `useHostPresence` for it, and can be refused.
  *
  * PRD: docs/ft/web/daemon-selector-livekit-rpc.md.
  */
@@ -25,13 +33,7 @@ import type { Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { Room } from "livekit-client";
 import { useAuth } from "../hooks/useAuth";
-import {
-  useCommonRoom,
-  useObservedCommonRoomStatus,
-  type CommonRoomStatus,
-} from "../hooks/useCommonRoom";
-import { useRoomParticipants } from "../hooks/useRoomParticipants";
-import { daemonHostsFromParticipants, daemonRpcIdentity, type DaemonHost } from "../lib/participantRole";
+import type { DaemonHost } from "../lib/participantRole";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import {
   readStoredSelectedDaemon,
@@ -45,7 +47,15 @@ import {
   setAppLocationParams,
   useAppLocation,
 } from "../routing/useAppLocation";
-import { useLiveKitClient } from "./transportProvider";
+import { LiveKitConnections } from "./connections/liveKit";
+import { useHostClient } from "./connections/registry";
+import type { ConnectionStatus } from "./connections/types";
+import { daemonHostOf } from "./hostDirectory/daemonHost";
+import { useLiveKitHostDirectorySource } from "./hostDirectory/liveKitSource";
+import { HostPresenceRoom } from "./hostDirectory/presenceRoom";
+import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
+import { HostDirectorySources, useHostDirectory } from "./hostDirectory/useHostDirectory";
+import type { HostDirectorySource } from "./hostDirectory/types";
 
 // ---------------------------------------------------------------------------
 // Persistence + resolution
@@ -64,25 +74,40 @@ export {
 // ---------------------------------------------------------------------------
 
 interface SelectedDaemonContextValue {
-  readonly room: Room | null;
   readonly daemons: DaemonHost[];
   readonly selectedInstanceId: string | null;
   readonly servingInstanceId?: string;
   readonly selectDaemon: (instanceId: string) => void;
   /**
-   * How the shared common-room connection is doing. `room` alone cannot answer that: it is `null`
-   * both while the join is in flight and after it failed, so a screen holding only the room cannot
-   * tell "still connecting" from "cannot connect" — the confusion that left the presence panel
-   * claiming it was connecting for as long as the tab stayed open.
+   * How the host directory is doing — whether this page can name the hosts it could talk to at all.
+   *
+   * An empty `daemons` alone cannot answer that: it means both "the directory is up and this fleet
+   * has no daemons" and "nothing has told us yet", and the confusion is what left the presence panel
+   * claiming it was connecting for as long as the tab stayed open. Optimistic across sources (see
+   * `hostDirectory/useHostDirectory`): one source that can name hosts is a usable directory, so an
+   * unreachable common room does not make a page that knows its own daemon look broken. To ask about
+   * one source in particular — as the LiveKit presence screen does — read
+   * `useHostDirectory().sources`.
    */
-  readonly roomStatus: CommonRoomStatus;
-  /** Why the common room is unusable, when {@link roomStatus} is `"error"`; `null` otherwise. */
-  readonly roomError: string | null;
+  readonly directoryStatus: ConnectionStatus;
+  /**
+   * Why the directory is unusable, when {@link directoryStatus} is `"error"`; `null` otherwise. A
+   * failure on one source while another still names hosts is that source's, and is read off
+   * `useHostDirectory().sources`.
+   */
+  readonly directoryError: string | null;
 }
 
 const SelectedDaemonContext = createContext<SelectedDaemonContextValue | null>(null);
 
 export interface SelectedDaemonProviderProps {
+  /**
+   * Whether the serving daemon joins the common room below (`/api/config`'s `livekit_enabled`).
+   * `false` is the operator's switch: the coordinates stay so it can be switched back on, so they
+   * can no longer stand in for the decision. `undefined` — a daemon too old to report it — joins as
+   * it always did.
+   */
+  livekitEnabled?: boolean;
   livekitUrl?: string;
   commonRoom?: string;
   /** The instance id of the daemon that served this web bundle (`/api/config`'s `daemon_instance_id`). */
@@ -93,9 +118,10 @@ export interface SelectedDaemonProviderProps {
    */
   room?: Room | null;
   /**
-   * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): when provided, used
-   * directly instead of deriving daemons from `useRoomParticipants` + `daemonHostsFromParticipants`.
-   * No production caller sets this.
+   * Test-injection seam (mirrors `RpcTransportProviderProps.liveKitFactory`): when provided, it is
+   * the common room's contribution to the directory, used instead of deriving one from
+   * `useRoomParticipants` + `daemonHostsFromParticipants`. The serving host is still contributed
+   * alongside it, exactly as in production. No production caller sets this.
    */
   daemons?: DaemonHost[];
   /**
@@ -110,27 +136,31 @@ export interface SelectedDaemonProviderProps {
 }
 
 /**
- * Resolve `{ room, daemons, roomStatus, roomError }` for the provider: the test-injection overrides
- * when given, otherwise the production path — join the common room as this user's presence
- * identity, then derive the daemon list from its participants.
+ * Assemble the directory's sources for the provider, and hand back the room they were assembled
+ * over.
  *
- * The published status has one rule, which covers the `room` override without special-casing it:
- * until there is a room object, it is the outcome of the join attempt (`useCommonRoom`); once
- * there is one, it is that room's own live connection state, so a drop after a successful join is
- * reported too. An injected room therefore speaks for itself — a room double standing in for a
- * joined room reports `ConnectionState.Connected` and is published as `"connected"`.
+ * The room comes back because two things above the directory still need the object — the connection
+ * provider that reaches hosts over it, and the presence context a roster-reading screen asks
+ * through. Neither is the directory's business, which is why nothing publishes it.
+ *
+ * Order is precedence, and the common room comes first deliberately: it carries a daemon's own
+ * advertisement, with the label it chose for itself, its `repos_base_path` and its
+ * `max_attachment_bytes`. The serving source knows an instance id and nothing else, so letting it
+ * win over the room's account of the same machine would silently drop the attachment cap the
+ * Start-Session form enforces. It contributes the serving daemon when the room did not — which is
+ * every case where there is no room, and the whole point of the exercise.
  */
-function useCommonRoomDaemons(
-  livekitUrl: string | undefined,
-  commonRoom: string | undefined,
-  roomOverride: Room | null | undefined,
-  daemonsOverride: DaemonHost[] | undefined,
-  roomFactory: (() => Room) | undefined,
-): {
+function useDirectorySources({
+  livekitEnabled,
+  livekitUrl,
+  commonRoom,
+  servingInstanceId,
+  room: roomOverride,
+  daemons: daemonsOverride,
+  roomFactory,
+}: Omit<SelectedDaemonProviderProps, "children">): {
+  sources: readonly HostDirectorySource[];
   room: Room | null;
-  daemons: DaemonHost[];
-  roomStatus: CommonRoomStatus;
-  roomError: string | null;
 } {
   // TODO: migrate to `useAuthContext()` once every `withSelectedDaemon`-based test provides an
   // `AuthProvider` ancestor. Left on the standalone `useAuth()` hook deliberately for now: this
@@ -145,25 +175,21 @@ function useCommonRoomDaemons(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],
   );
-  const {
-    room: producedRoom,
-    status: joinStatus,
-    error: joinError,
-  } = useCommonRoom(livekitUrl, commonRoom, isAuthenticated ? identity : undefined, roomFactory);
-  const room = roomOverride !== undefined ? roomOverride : producedRoom;
-
-  const participants = useRoomParticipants(daemonsOverride !== undefined ? null : room);
-  const derivedDaemons = useMemo(() => daemonHostsFromParticipants(participants), [participants]);
-  const daemons = daemonsOverride !== undefined ? daemonsOverride : derivedDaemons;
-
-  const observed = useObservedCommonRoomStatus(room);
-
-  return {
-    room,
-    daemons,
-    roomStatus: room ? observed.status : joinStatus,
-    roomError: room ? observed.error : joinError,
-  };
+  const { source: liveKitSource, room } = useLiveKitHostDirectorySource({
+    enabled: livekitEnabled,
+    livekitUrl,
+    commonRoom,
+    identity: isAuthenticated ? identity : undefined,
+    room: roomOverride,
+    hosts: daemonsOverride,
+    roomFactory,
+  });
+  const servingSource = useServingHostDirectorySource(servingInstanceId);
+  const sources = useMemo(
+    () => [liveKitSource, servingSource],
+    [liveKitSource, servingSource],
+  );
+  return { sources, room };
 }
 
 /**
@@ -235,10 +261,15 @@ function useSelectedDaemonState(
 }
 
 /**
- * Provide the shared common-room connection, the daemon list, and the currently selected daemon to
- * the component subtree. Mount once around the daemon-mode screen dispatch (see `index.tsx`).
+ * Provide the host directory, the currently selected daemon, and the wires that reach hosts to the
+ * component subtree. Mount once around the daemon-mode screen dispatch (see `index.tsx`).
+ *
+ * The three contexts nest in dependency order, all of them above the remount key: the directory's
+ * sources, the presence room they were assembled over, and the connection provider that reaches
+ * hosts over it.
  */
 export function SelectedDaemonProvider({
+  livekitEnabled,
   livekitUrl,
   commonRoom,
   servingInstanceId,
@@ -247,26 +278,63 @@ export function SelectedDaemonProvider({
   roomFactory,
   children,
 }: SelectedDaemonProviderProps) {
-  const { room, daemons, roomStatus, roomError } = useCommonRoomDaemons(
+  const { sources, room } = useDirectorySources({
+    livekitEnabled,
     livekitUrl,
     commonRoom,
-    roomOverride,
-    daemonsOverride,
+    servingInstanceId,
+    room: roomOverride,
+    daemons: daemonsOverride,
     roomFactory,
+  });
+
+  return (
+    <HostDirectorySources sources={sources}>
+      <HostPresenceRoom room={room}>
+        <LiveKitConnections room={room}>
+          <SelectedDaemonScope servingInstanceId={servingInstanceId}>{children}</SelectedDaemonScope>
+        </LiveKitConnections>
+      </HostPresenceRoom>
+    </HostDirectorySources>
   );
+}
+
+/**
+ * Read the merged directory and own the selection over it.
+ *
+ * A component of its own rather than part of {@link SelectedDaemonProvider} so that it reads the
+ * directory the same way every other consumer does — through `useHostDirectory` — instead of the
+ * provider quietly holding a merge nobody else can see.
+ */
+function SelectedDaemonScope({
+  servingInstanceId,
+  children,
+}: {
+  servingInstanceId: string | undefined;
+  children: ReactNode;
+}) {
+  const directory = useHostDirectory();
+  // The screens speak `DaemonHost`; the directory speaks `HostDescriptor`. See `hostDirectory/daemonHost`.
+  const daemons = useMemo(() => directory.hosts.map(daemonHostOf), [directory.hosts]);
   const { selectedInstanceId, selectDaemon } = useSelectedDaemonState(daemons, servingInstanceId);
 
   const value: SelectedDaemonContextValue = useMemo(
     () => ({
-      room,
       daemons,
       selectedInstanceId,
       servingInstanceId,
       selectDaemon,
-      roomStatus,
-      roomError,
+      directoryStatus: directory.status,
+      directoryError: directory.error,
     }),
-    [room, daemons, selectedInstanceId, servingInstanceId, selectDaemon, roomStatus, roomError],
+    [
+      daemons,
+      selectedInstanceId,
+      servingInstanceId,
+      selectDaemon,
+      directory.status,
+      directory.error,
+    ],
   );
 
   // Give the screen subtree a fresh lifecycle whenever the selected daemon changes: keying the
@@ -274,6 +342,10 @@ export function SelectedDaemonProvider({
   // state (selected session, open inspector, live terminal attachment, create/VM/task UI) and
   // re-runs its data fetches against the newly selected daemon — a full reload, not just a refetch.
   // The provider itself stays mounted above the key, so the shared common-room connection persists.
+  //
+  // `LiveKitConnections` — which offers that connection to the subtree as a wire hosts are resolved
+  // over — sits above the key for the same reason: a host change reloads the screens, it does not
+  // re-register the wire that reaches them.
   return (
     <SelectedDaemonContext.Provider value={value}>
       <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
@@ -286,13 +358,12 @@ export function SelectedDaemonProvider({
 // ---------------------------------------------------------------------------
 
 const NO_PROVIDER_DEFAULTS: SelectedDaemonContextValue = {
-  room: null,
   daemons: [],
   selectedInstanceId: null,
   servingInstanceId: undefined,
   selectDaemon: () => {},
-  roomStatus: "idle",
-  roomError: null,
+  directoryStatus: "idle",
+  directoryError: null,
 };
 
 /**
@@ -310,24 +381,27 @@ export function useDaemons(): DaemonHost[] {
 }
 
 /**
- * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon's
- * RPC-server identity (`daemon-{instanceId}`) over the shared common-room LiveKit connection.
- * Returns `null` until the room is connected and `instanceId` is set — callers must guard call
- * sites. Use this to address a daemon other than the currently selected one (e.g. adding a project
- * to a chosen host); {@link useDaemonClient} is the selected-daemon convenience over it.
+ * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon over
+ * whichever wire can reach it — the common room today, an in-process bridge in a host build that
+ * registers one. Returns `null` until a provider can reach `instanceId` and `instanceId` is set —
+ * callers must guard call sites. Use this to address a daemon other than the currently selected one
+ * (e.g. adding a project to a chosen host); {@link useDaemonClient} is the selected-daemon
+ * convenience over it.
+ *
+ * A thin name over {@link useHostClient}: a daemon *is* a host, and this hook is kept because the
+ * screens read in that vocabulary.
  */
 export function useDaemonClientFor<S extends DescService>(
   service: S,
   instanceId: string | null,
 ): Client<S> | null {
-  const { room } = useSelectedDaemon();
-  return useLiveKitClient(service, room, instanceId ? daemonRpcIdentity(instanceId) : null);
+  return useHostClient(service, instanceId);
 }
 
 /**
  * Build and memoize a ConnectRPC client for a daemon-level service, targeting the currently
- * selected daemon's RPC-server identity over the shared common-room LiveKit connection. Returns
- * `null` until a daemon is selected and the room is connected — callers must guard call sites.
+ * selected daemon. Returns `null` until a daemon is selected and a provider can reach it — callers
+ * must guard call sites.
  */
 export function useDaemonClient<S extends DescService>(service: S): Client<S> | null {
   const { selectedInstanceId } = useSelectedDaemon();

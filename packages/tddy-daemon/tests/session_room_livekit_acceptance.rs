@@ -315,7 +315,8 @@ fn a_daemon_yaml(ws_url: &str) -> String {
     format!(
         "daemon_instance_id: {INSTANCE_ID}\n\
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
-         livekit:\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  api_secret: {LK_API_SECRET}\n  \
+         livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
+         api_secret: {LK_API_SECRET}\n  \
          common_room: session-room-sync-lobby\n"
     )
 }

@@ -50,6 +50,9 @@ function mountDrawer(backend: InMemoryRpcBackend, onClose: Cypress.Agent<sinon.S
   const noop = () => undefined;
   mountWithRpc(
     <SessionInspectorDrawer
+      // No host connection in scope: this spec is not about the media tabs, and
+      // `hostConnection` is required so that saying so is a choice rather than an omission.
+      hostConnection={null}
       state="open"
       session={SESSION as unknown as SessionEntry}
       onClose={onClose}

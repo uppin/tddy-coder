@@ -323,6 +323,12 @@ async fn run_livekit_session(args: PtyRelayArgs) -> Result<()> {
 
     if !resp.livekit_server_identity.is_empty() {
         if let Some(livekit_url) = args.livekit_url.as_deref() {
+            // Ask the daemon to make the session reachable over LiveKit before joining the room to
+            // look for it. Starting a session is local work and touches LiveKit nowhere, so the
+            // participant this is about to wait for is put there by `ConnectSession` — which is the
+            // daemon's answer to "something is connecting to this session over LiveKit", and this is
+            // such a thing. Without it the wait below would expire against a room nobody joined.
+            connect_session_over_http(&args.daemon_url, &session_token, &resp.session_id).await?;
             log::info!(target: "tddy_tools::pty_relay", "connecting via LiveKit");
             return run_livekit_terminal(
                 &args,
@@ -543,6 +549,37 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
 
     log::info!(target: "tddy_tools::pty_relay", "authenticated as: {}", exchange_resp.user.map(|u| u.login).unwrap_or_default());
     Ok(exchange_resp.session_token)
+}
+
+/// Tell the daemon a client is connecting to `session_id`, which is what makes the session
+/// reachable over LiveKit: its room, and the participant serving its terminal.
+///
+/// The reply's own LiveKit fields are deliberately unread — a claude-cli session answers with empty
+/// coordinates, because the room it names is the *terminal* room and this session has none. What is
+/// wanted is the call's effect.
+#[cfg(feature = "livekit")]
+async fn connect_session_over_http(
+    daemon_url: &str,
+    session_token: &str,
+    session_id: &str,
+) -> Result<()> {
+    use prost::Message as _;
+    use tddy_service::proto::connection::ConnectSessionRequest;
+
+    connectrpc_post(
+        &reqwest::Client::new(),
+        daemon_url,
+        "connection.ConnectionService",
+        "ConnectSession",
+        ConnectSessionRequest {
+            session_token: session_token.to_string(),
+            session_id: session_id.to_string(),
+        }
+        .encode_to_vec(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("ConnectSession for {session_id}: {e}"))?;
+    Ok(())
 }
 
 async fn connectrpc_post(

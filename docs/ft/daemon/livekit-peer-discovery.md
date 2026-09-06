@@ -5,12 +5,13 @@
 
 ## Summary
 
-When **`livekit.common_room`** is set together with valid LiveKit URL, API key, and API secret, each **`tddy-daemon`** joins that shared room as a participant, publishes a small JSON advertisement on local participant metadata (`instance_id`, `label`), and observes other participants. **ListEligibleDaemons** returns exactly one row with **`is_local: true`** for the answering daemon plus one row per discovered peer (**`is_local: false`**), ordered with the local row first and stable ordering among peers. **StartSession** accepts a **`daemon_instance_id`** that matches the local instance (local spawn) or a currently listed peer (request forwarded over the LiveKit data-channel **tddy-rpc** bridge to that peer’s **ConnectionService**). Unknown or stale ids yield a clear gRPC error (**`FAILED_PRECONDITION`** or related); there is no silent fallback to the local host.
+When **`livekit.enabled`** is `true` and **`livekit.common_room`** is set together with valid LiveKit URL, API key, and API secret, each **`tddy-daemon`** joins that shared room as a participant, publishes a small JSON advertisement on local participant metadata (`instance_id`, `label`), and observes other participants. **ListEligibleDaemons** returns exactly one row with **`is_local: true`** for the answering daemon plus one row per discovered peer (**`is_local: false`**), ordered with the local row first and stable ordering among peers. **StartSession** accepts a **`daemon_instance_id`** that matches the local instance (local spawn) or a currently listed peer (request forwarded over the LiveKit data-channel **tddy-rpc** bridge to that peer’s **ConnectionService**). Unknown or stale ids yield a clear gRPC error (**`FAILED_PRECONDITION`** or related); there is no silent fallback to the local host.
 
 ## Configuration
 
 | YAML / setting | Role |
 |----------------|------|
+| `livekit.enabled` | Whether this daemon joins the common room at all. **Defaults to `false`**, so discovery is opt-in: a complete block with no `enabled: true` names a room the daemon stays out of. Switching it off preserves the credentials below, so it is not the same as deleting them. |
 | `livekit.url`, `livekit.api_key`, `livekit.api_secret` | LiveKit project access; required for discovery and forwarding. |
 | `livekit.common_room` | Non-empty room name shared by all daemons that should see each other. When unset or blank, the daemon lists only the local eligible row and does not join a discovery room. |
 | `daemon_instance_id` | Optional stable id for this process; default derives from the hostname. Must be distinct per physical daemon when multiple hosts share a room. |

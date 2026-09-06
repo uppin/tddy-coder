@@ -54,6 +54,12 @@ facilitating daemon already serves in that room. The one exception is the git tr
 which lives on the daemon's common room and is reached through the existing
 `tddy-remote-git-repo` shim.
 
+Getting into that room takes two calls to the daemon over HTTP first: `ListSessions` to resolve which
+host serves the session, and `ConnectSession` to open its room. A session's room is created by the
+first thing that connects to it over LiveKit rather than by the session's start
+([session-room.md](session-room.md)), and the syncer then waits for the facilitating daemon's
+`daemon-{instance_id}` participant to be there — so it asks rather than joining a room nobody hosts.
+
 ### Deltas come from the poll loop, not from tool inputs
 
 The session room's poll loop already measures the checkout every `session_room.poll_interval_ms`.

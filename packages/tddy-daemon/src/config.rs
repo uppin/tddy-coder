@@ -911,6 +911,19 @@ pub struct ListenConfig {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LiveKitConfig {
+    /// Whether this daemon joins its common room at all.
+    ///
+    /// Defaults to **`false`**, so the common room is opt-in: a block carrying url, key, secret and
+    /// room names a room the operator *could* join, not one this daemon does. Turning it off is
+    /// therefore a one-key edit rather than the deletion of a working block — every other field
+    /// survives, and turning it back on restores exactly what was there.
+    ///
+    /// It governs the **common room only**. `api_secret` still signs this daemon's session tokens
+    /// either way (see `auth.rs`), so a disabled daemon still authenticates its own gated RPCs —
+    /// including the one an operator re-enables it from. Per-session rooms, screen sharing and the
+    /// rooms panel read the same block for their own purposes and are not governed by it.
+    #[serde(default)]
+    pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -932,6 +945,7 @@ pub struct LiveKitConfig {
 impl Default for LiveKitConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             url: None,
             api_key: None,
             api_secret: None,
@@ -939,6 +953,19 @@ impl Default for LiveKitConfig {
             common_room: None,
             common_room_set_metadata_timeout_secs: default_common_room_set_metadata_timeout_secs(),
         }
+    }
+}
+
+impl LiveKitConfig {
+    /// Whether `livekit` names a common room this daemon may join.
+    ///
+    /// The **one** predicate every join path asks, so "is the common room on?" is decided in a
+    /// single place rather than re-derived per call site. It answers only the operator's switch —
+    /// whether the block is *complete* enough to join is [`CommonRoomTarget::from_livekit`]'s
+    /// question, and the two are deliberately separate: a disabled daemon and a misconfigured one
+    /// are different operator problems and must be reported differently.
+    pub fn common_room_enabled(livekit: Option<&Self>) -> bool {
+        livekit.is_some_and(|livekit| livekit.enabled)
     }
 }
 
@@ -2279,5 +2306,134 @@ users:
 
         // Then
         assert!(login.is_none());
+    }
+}
+
+#[cfg(test)]
+mod livekit_enabled_tests {
+    use super::*;
+
+    /// A daemon whose YAML carries `livekit_yaml` verbatim.
+    fn a_daemon_configured_with(livekit_yaml: &str) -> DaemonConfig {
+        serde_yaml::from_str(livekit_yaml).expect("the daemon fixture did not parse")
+    }
+
+    /// A complete LiveKit block — url, key, secret and room — with `enabled_line` spliced in.
+    fn a_complete_livekit_block_with(enabled_line: &str) -> String {
+        format!(
+            "livekit:\n{enabled_line}  url: ws://127.0.0.1:7880\n  api_key: devkey\n  \
+             api_secret: the-secret\n  common_room: tddy-lobby\n"
+        )
+    }
+
+    #[test]
+    fn reads_a_livekit_block_that_omits_enabled_as_disabled() {
+        // Given a complete LiveKit block written before the flag existed
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with(""));
+
+        // When the operator's switch is read
+        let livekit = config.livekit.expect("the fixture has a livekit block");
+
+        // Then it is off: the common room is opt-in, so a block that never said "join" does not
+        assert!(
+            !livekit.enabled,
+            "a livekit block with no `enabled` key was read as switched on"
+        );
+    }
+
+    #[test]
+    fn reads_a_livekit_block_that_says_enabled_true_as_enabled() {
+        // Given a complete LiveKit block the operator switched on
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with("  enabled: true\n"));
+
+        // When the operator's switch is read
+        let livekit = config.livekit.expect("the fixture has a livekit block");
+
+        // Then it is on
+        assert!(
+            livekit.enabled,
+            "`enabled: true` was not read as switched on"
+        );
+    }
+
+    #[test]
+    fn keeps_the_url_key_secret_and_room_when_livekit_is_switched_off() {
+        // Given a complete LiveKit block the operator switched off
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with("  enabled: false\n"));
+
+        // When the block is read
+        let livekit = config.livekit.expect("the fixture has a livekit block");
+
+        // Then everything needed to switch it back on is still there. "Off" is a flag, never the
+        // deletion of a working block — that is the whole point of the switch.
+        assert_eq!(
+            (
+                livekit.url.as_deref(),
+                livekit.api_key.as_deref(),
+                livekit.api_secret.as_deref(),
+                livekit.common_room.as_deref()
+            ),
+            (
+                Some("ws://127.0.0.1:7880"),
+                Some("devkey"),
+                Some("the-secret"),
+                Some("tddy-lobby")
+            )
+        );
+    }
+
+    #[test]
+    fn writes_the_enabled_flag_back_so_a_saved_config_says_what_it_was_told() {
+        // Given a LiveKit block switched on
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with("  enabled: true\n"));
+
+        // When it is serialised back to YAML, as an update to the daemon's own file does
+        let yaml = serde_yaml::to_string(&config).expect("the config did not serialise");
+
+        // Then the flag is in the file. `deny_unknown_fields` means the key and the field must
+        // travel together, so a flag that never reached the file would be silently lost.
+        assert!(
+            yaml.contains("enabled: true"),
+            "the enabled flag was not written back:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn calls_the_common_room_switched_on_when_the_operator_enabled_it() {
+        // Given a LiveKit block the operator switched on
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with("  enabled: true\n"));
+
+        // When the one predicate every join path asks is asked
+        let enabled = LiveKitConfig::common_room_enabled(config.livekit.as_ref());
+
+        // Then it says so
+        assert!(enabled, "an enabled livekit block was called switched off");
+    }
+
+    #[test]
+    fn calls_the_common_room_switched_off_when_the_operator_disabled_it() {
+        // Given a complete LiveKit block the operator switched off
+        let config = a_daemon_configured_with(&a_complete_livekit_block_with("  enabled: false\n"));
+
+        // When the one predicate every join path asks is asked
+        let enabled = LiveKitConfig::common_room_enabled(config.livekit.as_ref());
+
+        // Then it says so, even though every credential is present
+        assert!(
+            !enabled,
+            "a complete but disabled livekit block was called switched on"
+        );
+    }
+
+    #[test]
+    fn calls_the_common_room_switched_off_when_there_is_no_livekit_block_at_all() {
+        // Given a daemon that was never configured for LiveKit
+        let config = a_daemon_configured_with("listen:\n  web_port: 8899\n");
+
+        // When the one predicate every join path asks is asked
+        let enabled = LiveKitConfig::common_room_enabled(config.livekit.as_ref());
+
+        // Then it says off — an absent block behaves exactly as it always has
+        assert!(!enabled, "an absent livekit block was called switched on");
     }
 }

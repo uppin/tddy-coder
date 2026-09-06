@@ -33,12 +33,29 @@ pub enum SuppliedImageFormat {
     Other(String),
 }
 
-/// Detect the format of `src` by asking `qemu-img info`.
+/// The virtual size `image` presents to a guest, in bytes.
 ///
-/// Unlike [`crate::library`]'s backing-file check, which reads the qcow2 header itself because
-/// the question there is what the bytes say, this asks the tool that will later have to open
-/// the file: the useful answer is the format `qemu-img` will act on, probing included.
-pub fn supplied_image_format(src: &Path) -> Result<SuppliedImageFormat, VmError> {
+/// The figure a *derived* image has to match or exceed. A qcow2 overlay may be created with
+/// any size at all, including one smaller than the image it chains onto — `qemu-img` accepts
+/// it without complaint, and the result is a guest whose partition table refers to sectors
+/// the disk no longer has. Since a bake grows the root partition to fill whatever disk it
+/// was given, that is not a corner case: it is what an overlay smaller than its parent
+/// always produces, and it surfaces as `ALERT! PARTUUID=… does not exist` in an initramfs
+/// shell rather than as an error from the tool that caused it.
+pub fn virtual_size_bytes(image: &Path) -> Result<u64, VmError> {
+    let info = qemu_img_info(image)?;
+    info.get("virtual-size")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            VmError::BuildFailed(format!(
+                "qemu-img info for {} reported no virtual-size",
+                image.display()
+            ))
+        })
+}
+
+/// `qemu-img info --output=json`, parsed.
+fn qemu_img_info(src: &Path) -> Result<serde_json::Value, VmError> {
     let output = std::process::Command::new("qemu-img")
         .args(["info", "--output=json"])
         .arg(src)
@@ -56,13 +73,21 @@ pub fn supplied_image_format(src: &Path) -> Result<SuppliedImageFormat, VmError>
             String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
-
-    let info: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+    serde_json::from_slice(&output.stdout).map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to parse qemu-img info for {}: {e}",
             src.display()
         ))
-    })?;
+    })
+}
+
+/// Detect the format of `src` by asking `qemu-img info`.
+///
+/// Unlike [`crate::library`]'s backing-file check, which reads the qcow2 header itself because
+/// the question there is what the bytes say, this asks the tool that will later have to open
+/// the file: the useful answer is the format `qemu-img` will act on, probing included.
+pub fn supplied_image_format(src: &Path) -> Result<SuppliedImageFormat, VmError> {
+    let info = qemu_img_info(src)?;
     let format = info
         .get("format")
         .and_then(serde_json::Value::as_str)

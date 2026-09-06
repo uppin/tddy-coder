@@ -40,8 +40,9 @@ pub mod layout;
 pub mod recipes;
 pub mod test_host_vm;
 
-pub use builder_vm::{BuilderVm, BuiltBinaries};
-pub use env_file::{configured_base_image, BASE_IMAGE_ENV};
+pub use bake::boot_probe_of_prepared_base;
+pub use builder_vm::{ensure_nix_base, BuilderVm, BuiltBinaries};
+pub use env_file::{configured_base_image, require_base_image, require_env_path, BASE_IMAGE_ENV};
 pub use guest::{BootedGuest, GuestCommandOutput};
 pub use layout::{
     linux_platform_dir, TestkitLayout, BUILDER_IMAGE_NAME, NIX_BASE_IMAGE_NAME,

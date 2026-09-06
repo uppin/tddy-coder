@@ -26,10 +26,7 @@ mod common;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::{
-    a_tddy_host_manifest, configured_base_image, configured_prepared_base, BASE_IMAGE_ENV,
-    PREPARED_BASE_ENV,
-};
+use common::{a_tddy_host_manifest, require_base_image, require_prepared_base};
 use serial_test::serial;
 use tddy_vm::library::VmLibrary;
 use tddy_vm::tddy_host::{
@@ -82,10 +79,7 @@ fn a_livekit_common_room() -> LiveKitCommonRoom {
             a guest — takes hours; requires TDDY_CLOUDINIT_BASE_IMAGE; run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn bakes_a_prepared_base_whose_guest_runs_the_tddy_daemon_under_systemd() {
-    let Some(base_image) = configured_base_image() else {
-        eprintln!("{BASE_IMAGE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let base_image = require_base_image();
 
     // Given a library and this repository's own working copy as the build source
     let dir = tempdir().unwrap();
@@ -146,10 +140,7 @@ async fn bakes_a_prepared_base_whose_guest_runs_the_tddy_daemon_under_systemd() 
             TDDY_TDDY_HOST_PREPARED_BASE; run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn runs_the_tddy_daemon_under_systemd_in_a_vm_created_from_the_prepared_base() {
-    let Some(prepared_base) = configured_prepared_base() else {
-        eprintln!("{PREPARED_BASE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let prepared_base = require_prepared_base();
 
     // Given a VM created from an already-baked tddy host prepared base
     let library = the_library_holding(&prepared_base);
@@ -184,10 +175,7 @@ async fn runs_the_tddy_daemon_under_systemd_in_a_vm_created_from_the_prepared_ba
             TDDY_TDDY_HOST_PREPARED_BASE; run with --ignored"]
 #[serial(tddy_vm_real_boot)]
 async fn serves_the_guest_daemon_connect_port_over_the_forwarded_host_port() {
-    let Some(prepared_base) = configured_prepared_base() else {
-        eprintln!("{PREPARED_BASE_ENV} not set — skipping production test (see module docs)");
-        return;
-    };
+    let prepared_base = require_prepared_base();
 
     // Given a booted VM created from the tddy host prepared base
     let library = the_library_holding(&prepared_base);

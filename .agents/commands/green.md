@@ -27,15 +27,12 @@ rebase, dependency and boundary rules that step 0 below only enforces.
 
 Detect **before** reviewing tests or writing code, and bind every check to **this branch**. Another PR's document does not make this branch stacked.
 
-A branch can be stacked in two ways, and both are in scope here:
-
-- **Planned stack** — a `pr-stack` orchestrator session owns the DAG and spawned this session as a child node. The per-PR documents (`PRD.md`, `changeset.md`) are **attached to this session**; the `pr_*` tools belong to the orchestrator agent, not to you. See `docs/ft/coder/pr-stacking.md` and `docs/ft/coder/pr-stack-docs.md`.
-- **Ad-hoc chain** — someone opened this PR on top of another open PR's branch, with no orchestrator. Detected the way `.agents/commands/pr.md` already does it.
+This PR is in a stack when its base is another open PR's branch — detected the way `.agents/commands/pr.md` already does it. Its plan lives in this branch's own `docs/dev/1-WIP/` changeset.
 
 ```bash
 BRANCH=$(git branch --show-current)
 
-# 1. Planned stack: per-PR documents attached to this session
+# 1. This PR's own changeset, carrying the four stack headings
 grep -l "## Draft PR contract" artifacts/attachments/changeset.md 2>/dev/null
 
 # 2. This branch's open PR is based on something other than trunk
@@ -55,7 +52,7 @@ fi
 
 **Stack branch** if any of these hit:
 
-1. `artifacts/attachments/changeset.md` exists and carries `## Responsibility`, `## Boundaries`, `## Dependencies` and `## Draft PR contract` — the four headings a child session spawned from a `pr-stack` orchestrator receives.
+1. This branch's `docs/dev/1-WIP/` changeset carries `## Responsibility`, `## Boundaries`, `## Dependencies` and `## Draft PR contract` — the four headings every PR in a stack has.
 2. This branch's open PR has a `baseRefName` that is not `master` / `main`.
 3. The branch matches `feature/<stack-slug>/<node>` and another branch under the same `feature/<stack-slug>/` namespace is open as a PR.
 
@@ -67,7 +64,7 @@ An empty `git branch --show-current` (detached HEAD) is **not** a match — do n
 
 Run **`/pr-stack-rebase`** (this branch only) before any implementation. If the branch is already on the latest base tip and `origin/<base>..HEAD` holds this PR's commits only, that command verifies and returns — that still counts as having run it.
 
-Do **not** start implementing on a stale base. Do **not** kick off a whole-stack cascade from a per-PR worktree: syncing every node from here will fail on, or clobber, branches other worktrees have pinned. Whole-stack operations belong to the orchestrator session (`pr_resolve_conflicts`, `pr_repoint`), not to a child.
+Do **not** start implementing on a stale base. Do **not** kick off a whole-stack cascade from a per-PR worktree: syncing every layer from here will fail on, or clobber, branches other worktrees have pinned. Whole-stack operations run from a clean worktree that owns nothing — see `/pr-stack-rebase` cascade mode.
 
 **0b. Dependency gate — MUST stop if unmet**
 
@@ -86,7 +83,7 @@ After the rebase, check that everything this PR consumes from a parent is actual
 - why this PR needs them — which tests, which `## Dependencies` row;
 - that you will **not** implement a parent-owned symbol from here.
 
-**A missing dependency here means the parent has not merged or pushed yet — not that it deliberately left you a stub.** A parent is not permitted to ship a stubs-only PR: `docs/ft/coder/pr-stacking.md` § "PR boundary contract: every node is self-contained" requires the API change, the code implementing it and its tests to land in **one** node, and forbids splitting by layer. So the fix is almost always to wait for that parent's push and re-run `/pr-stack-rebase` — not to fill in its body. The `## Draft PR contract` is the sanctioned middle ground: a real signature to code against, with the owner still finishing the behaviour behind it.
+**A missing dependency here means the parent has not merged or pushed yet — not that it deliberately left you a stub.** A parent is not permitted to ship a stubs-only PR: the `pr-stack` skill requires the API change, the code implementing it and its tests to land in **one** node, and forbids splitting by layer. So the fix is almost always to wait for that parent's push and re-run `/pr-stack-rebase` — not to fill in its body. The `## Draft PR contract` is the sanctioned middle ground: a real signature to code against, with the owner still finishing the behaviour behind it.
 
 Let the user choose — wait for the parent's push, code against the published draft signature with a test double at the seam, rescope the blocked tests, or something else they decide. Do not pick for them and do not silently continue.
 
@@ -162,7 +159,7 @@ cargo build            # the branch still builds
 
 Other tests in this PR may still be red for parts not yet implemented; never the ones covering what you just pushed. **Never push half-finished implementation to "share progress"** — code that works for one case is worse for a dependent than nothing, because it surfaces as *their* bug. Not finished and green? Hold it and push when it is.
 
-When a milestone unblocks a dependent, **say so** — that worktree needs to run `/pr-stack-rebase` to pick it up. Its own documents are the orchestrator's to update, not yours to edit from here.
+When a milestone unblocks a dependent, **say so** — that worktree needs to run `/pr-stack-rebase` to pick it up. Its own documents belong to whoever works it, not to you to edit from here.
 
 If the push is rejected because the base moved, run **`/pr-stack-rebase`** (this branch only) and push again. Do not cascade a sync across the whole stack from here. Never `--force`; if a force-push is genuinely needed after a rebase, ask the user first and use `--force-with-lease`.
 
@@ -375,7 +372,7 @@ Complete workflow successful when:
 **Rules**: `.cursor/rules/tdd.mdc`, `.cursor/rules/testing-practices.mdc`
 **Subagents**: `tdd-implementer` (for implementation), `refactor` (next phase)
 **Commands**: `/red` (previous phase), `/pr-stack-rebase` (step 0a, stack branches), `/validate-changes` (next, on a stack branch)
-**Docs**: `docs/ft/coder/pr-stacking.md` (stack model, PR boundary contract), `docs/ft/coder/pr-stack-docs.md` (the per-PR `PRD.md` / `changeset.md`)
+**Docs**: the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) — the stack model, the PR boundary contract, and the per-PR documents
 
 ## Workflow Summary
 

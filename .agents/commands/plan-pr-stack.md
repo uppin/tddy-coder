@@ -16,7 +16,7 @@ rules. This command assumes those definitions and never contradicts them.
 > a workflow recipe (`pr-stack`, legacy aliases `plan-pr-stack` / `orchestrate-pr-stack`) that plans
 > and drives a stack from inside a coding session, with its own state and its own tooling. That is a
 > **separate implementation**, shipped to whatever repository a user runs tddy on, and documented in
-> [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md). This command is how *this*
+> the `pr-stack` skill. This command is how *this*
 > repository's contributors plan a stack by hand. Neither describes the other.
 
 ### The two waves
@@ -723,4 +723,4 @@ this command plans from requirements), `/follow-up-branch`, `/green`, `/validate
 **References**: `.agents/skills/planning/references/planning-phase.md`,
 `.agents/skills/planning/references/initial-discovery.md`,
 `.agents/skills/fluent-tests/references/generic-guidelines.md`
-**Feature docs**: [`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md)
+**Feature docs**: the `pr-stack` skill

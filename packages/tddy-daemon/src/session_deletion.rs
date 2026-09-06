@@ -217,8 +217,11 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
 /// ([`crate::session_room`]). What it does guarantee is that the loop stops, rather than warning
 /// about a missing directory at the poll rate for the life of the daemon.
 ///
-/// A session that never hosted a room (any type but `workspace`, or a daemon with no LiveKit
-/// credentials) has nothing registered under its id and this does nothing.
+/// A session that is not hosting a room has nothing registered under its id and this does nothing —
+/// which is the ordinary case, not the exception: a room is opened when something first connects to
+/// the session over LiveKit ([`crate::session_room::SessionRoomRegistry::ensure_open`]), so a
+/// session nobody connected to, and every session on a daemon with no LiveKit credentials, has
+/// none.
 pub fn close_session_room(rooms: &crate::session_room::SessionRoomRegistry, session_id: &str) {
     rooms.close(session_id.trim());
 }

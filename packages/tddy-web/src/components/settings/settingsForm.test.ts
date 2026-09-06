@@ -28,6 +28,7 @@ function aConfiguredDaemonResponse() {
         apiKey: "devkey",
         commonRoom: "tddy-lobby",
         apiSecretSet: true,
+        enabled: true,
       },
       listen: { webPort: 8899, webHost: "127.0.0.1" },
     },
@@ -45,6 +46,7 @@ function theLoadedForm(
     livekitApiSecret: "",
     livekitCommonRoom: "tddy-lobby",
     livekitApiSecretSet: true,
+    livekitEnabled: true,
     webPort: "8899",
     webHost: "127.0.0.1",
     ...overrides,
@@ -129,6 +131,69 @@ describe("daemon settings form", () => {
     expect(settings.livekit?.apiKey).toEqual("devkey");
     expect(settings.livekit?.commonRoom).toEqual("tddy-other");
     expect(settings.listen?.webHost).toEqual("127.0.0.1");
+  });
+
+  it("shows LiveKit as switched on when the daemon joins its common room", () => {
+    // Given a daemon joining its common room
+    const response = aConfiguredDaemonResponse();
+
+    // When the form is loaded from it
+    const form = toFormState(response);
+
+    // Then the toggle has a state to render
+    expect(form.livekitEnabled).toEqual(true);
+  });
+
+  it("shows LiveKit as switched off for a daemon with no LiveKit block", () => {
+    // Given a daemon configured without LiveKit
+    const response = create(GetConfigResponseSchema, {
+      configPath: "/etc/tddy/daemon.yaml",
+      settings: { listen: { webPort: 8899 } },
+    });
+
+    // When the form is loaded from it
+    const form = toFormState(response);
+
+    // Then the toggle reads off rather than defaulting to on for a daemon that has no room to join
+    expect(form.livekitEnabled).toEqual(false);
+  });
+
+  it("carries a switched-on LiveKit in the update", () => {
+    // Given a form where LiveKit is on. This is the direction that discriminates: `enabled` is a
+    // proto3 bool, so a message nobody set it on already reads `false`, and only `true` proves the
+    // form's value reached the wire.
+    const form = theLoadedForm({ livekitEnabled: true });
+
+    // When the update is built
+    const settings = toUpdateSettings(form);
+
+    // Then the daemon is told to join
+    expect(settings.livekit?.enabled).toEqual(true);
+  });
+
+  it("carries a switched-off LiveKit in the update", () => {
+    // Given a form where the operator moved the toggle to off
+    const form = theLoadedForm({ livekitEnabled: false });
+
+    // When the update is built
+    const settings = toUpdateSettings(form);
+
+    // Then the daemon is told. Nothing else in the message changed, so the flag is the only thing
+    // that can carry the operator's decision.
+    expect(settings.livekit?.enabled).toEqual(false);
+  });
+
+  it("keeps the url, key and room in an update that switches LiveKit off", () => {
+    // Given the same form
+    const form = theLoadedForm({ livekitEnabled: false });
+
+    // When the update is built
+    const settings = toUpdateSettings(form);
+
+    // Then the credentials go back untouched — switching off must never cost them
+    expect(settings.livekit?.url).toEqual(CONFIGURED_URL);
+    expect(settings.livekit?.apiKey).toEqual("devkey");
+    expect(settings.livekit?.commonRoom).toEqual("tddy-lobby");
   });
 
   it("sends the web port as a number", () => {
