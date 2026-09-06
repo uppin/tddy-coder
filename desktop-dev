@@ -34,6 +34,21 @@ export VITE_URL="${VITE_URL:-http://localhost:${VITE_PORT}}"
 
 cd "$PROJECT_ROOT"
 
+# The toolchain — bun, cargo, tauri — comes from the nix dev shell, and every other root script
+# wraps itself in it (./test and ./verify via `nix develop -c bash -c`, ./release via exec). This one
+# did not, so a plain `./desktop-dev` from an ordinary shell died on `bun: command not found` at the
+# first Vite line, which is not what its own usage block promises. Re-exec through the same GC-rooted
+# profile the siblings use, unless the toolchain is already on PATH — so running it from inside
+# `./dev` costs nothing, and a `nix`-less machine still gets bun's own error rather than nix's.
+#
+# The sentinel makes the re-exec once-only: if the shell comes up still missing bun, fail with that
+# error instead of spawning nix forever.
+if [[ -z "${TDDY_DESKTOP_DEV_RESHELLED:-}" ]] \
+  && { ! command -v bun >/dev/null 2>&1 || ! command -v cargo >/dev/null 2>&1; }; then
+  export TDDY_DESKTOP_DEV_RESHELLED=1
+  exec nix develop --profile ./.nix-profile -c "$SCRIPT_DIR/desktop-dev" "$@"
+fi
+
 # Load .env if present (does not override already-set env vars) — same as ./web-dev.
 if [[ -f .env ]]; then
   while IFS='=' read -r key value; do
