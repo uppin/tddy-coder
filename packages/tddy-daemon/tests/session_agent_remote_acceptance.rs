@@ -539,6 +539,7 @@ allowed_tools:
 cursor_cli:
   binary_path: {cursor_binary}
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}

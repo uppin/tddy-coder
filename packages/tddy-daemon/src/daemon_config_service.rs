@@ -213,7 +213,11 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             daemon_instance_id: Some(crate::livekit_peer_discovery::local_instance_id_for_config(
                 &config,
             )),
-            livekit_enabled: None,
+            // The operator's switch, so the page joins nothing this daemon is not in: the url and
+            // room above name a room it *could* join, not one it does.
+            livekit_enabled: Some(crate::config::LiveKitConfig::common_room_enabled(
+                config.livekit.as_ref(),
+            )),
         }))
     }
 }

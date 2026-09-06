@@ -78,6 +78,7 @@ allowed_tools:
   - path: {true_path}
     label: t
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}

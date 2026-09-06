@@ -88,7 +88,7 @@ use tddy_service::proto::connection::{
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, LiveKitConfig};
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 
 /// After `RoomEvent::Connected`, yield before the first `set_metadata` attempt.
@@ -644,6 +644,12 @@ pub(crate) fn livekit_common_room_connect_strings(
         .livekit
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("LiveKit not configured"))?;
+    // The operator's switch, asked before any field is: a daemon told not to join and a daemon
+    // that cannot are different operator problems, and must read differently.
+    anyhow::ensure!(
+        LiveKitConfig::common_room_enabled(Some(livekit)),
+        "the common room is disabled (livekit.enabled is false)"
+    );
     let room_name = livekit
         .common_room
         .as_deref()

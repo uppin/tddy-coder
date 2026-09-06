@@ -55,6 +55,9 @@ coder_config_path: dev.config.yaml
 debug: "tddy:term:*,tddy:presenter:*,tddy:rpc:*"
 
 livekit:
+  # The common room is opt-in: without this, a complete block names a room this daemon
+  # could join rather than one it does.
+  enabled: true
   url: ws://127.0.0.1:7880
   api_key: devkey
   api_secret: secret

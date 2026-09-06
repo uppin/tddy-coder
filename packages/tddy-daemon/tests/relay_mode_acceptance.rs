@@ -62,6 +62,7 @@ relay:
 listen:
   web_port: 0
 livekit:
+  enabled: true
   url: "ws://localhost:7880"
   api_key: "devkey"
   api_secret: "devsecret"

@@ -35,7 +35,7 @@ pub fn redacted_settings(config: &DaemonConfig) -> DaemonSettings {
             api_secret: None,
             common_room: livekit.common_room.clone(),
             api_secret_set: livekit.api_secret.is_some(),
-            enabled: false,
+            enabled: livekit.enabled,
         }),
         listen: Some(ListenSettings {
             web_port: config.listen.web_port.map(u32::from),
@@ -80,6 +80,9 @@ fn merged_livekit(
     settings: &LiveKitSettings,
 ) -> Result<LiveKitConfig, Status> {
     let mut livekit = stored.cloned().unwrap_or_default();
+    // Rendered fields are assigned, never inherited: the operator's switch is on the screen the
+    // update came from, so leaving it to `stored` would make the toggle unsaveable.
+    livekit.enabled = settings.enabled;
     livekit.url = Some(livekit_url(settings.url.as_deref())?);
     livekit.public_url = settings.public_url.clone();
     livekit.api_key = settings.api_key.clone();
@@ -115,13 +118,15 @@ fn web_port(port: u32) -> Result<u16, Status> {
     })
 }
 
-/// Whether the common-room connection has to be rebuilt: it is defined by the server it is made to
-/// and the room it joins, so a change to either invalidates the live one.
+/// Whether the common-room connection has to be rebuilt: it is defined by the operator's switch,
+/// the server it is made to and the room it joins, so a change to any of the three invalidates the
+/// live one. The switch belongs in that identity as much as the room does — without it, saving the
+/// toggle off would leave the daemon in the room it was just told to leave.
 fn common_room_changed(before: &Option<LiveKitConfig>, after: &Option<LiveKitConfig>) -> bool {
     let identity = |livekit: &Option<LiveKitConfig>| {
         livekit
             .as_ref()
-            .map(|lk| (lk.url.clone(), lk.common_room.clone()))
+            .map(|lk| (lk.enabled, lk.url.clone(), lk.common_room.clone()))
     };
     identity(before) != identity(after)
 }

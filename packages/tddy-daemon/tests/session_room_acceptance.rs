@@ -195,7 +195,8 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 fn livekit_yaml_block(ws_url: Option<&str>) -> String {
     match ws_url {
         Some(url) => format!(
-            "livekit:\n  url: {url}\n  api_key: {LK_API_KEY}\n  api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
+            "livekit:\n  enabled: true\n  url: {url}\n  api_key: {LK_API_KEY}\n  \
+             api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
         ),
         None => String::new(),
     }

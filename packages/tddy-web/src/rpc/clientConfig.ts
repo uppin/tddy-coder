@@ -52,6 +52,7 @@ interface ClientConfigJson {
 
 function fromJson(json: ClientConfigJson): ClientConfig {
   return {
+    livekitEnabled: json.livekit_enabled,
     livekitUrl: json.livekit_url,
     livekitRoom: json.livekit_room,
     commonRoom: json.common_room,
@@ -87,6 +88,7 @@ export async function loadClientConfig(
   // carries no secrets — so an unfilled token is not a failure here.
   const response = await createClient(DaemonConfigService, transport).getClientConfig({});
   return {
+    livekitEnabled: response.livekitEnabled,
     livekitUrl: response.livekitUrl,
     livekitRoom: response.livekitRoom,
     commonRoom: response.commonRoom,

@@ -24,6 +24,9 @@ pub async fn run_server(
     rpc_entries: Vec<tddy_rpc::ServiceEntry>,
     livekit_url: Option<String>,
     common_room: Option<String>,
+    // Whether this daemon joins the common room above (`livekit.enabled`). The page is told, so a
+    // daemon that stays out of it serves a page that does too.
+    livekit_enabled: bool,
     daemon_instance_id: String,
     allowed_agents: Vec<ClientAllowedAgent>,
     debug: Option<String>,
@@ -51,7 +54,7 @@ pub async fn run_server(
         allowed_agents,
         debug,
         daemon_instance_id: Some(daemon_instance_id),
-        livekit_enabled: None,
+        livekit_enabled: Some(livekit_enabled),
     };
 
     let shutdown_copy = lifecycle_telegram.clone();

@@ -34,11 +34,12 @@ use crate::daemon_config_service::CommonRoomSupervisor;
 /// the next connection back for ever.
 const PARTICIPANT_LEAVE_GRACE: Duration = Duration::from_secs(2);
 
-/// A LiveKit block proven to name a room this daemon can join: server URL, API key, API secret and
-/// room name all present and non-blank.
+/// A LiveKit block proven to name a room this daemon can join: the operator's switch on, and
+/// server URL, API key, API secret and room name all present and non-blank.
 ///
-/// A partially configured block is not a room, so it never becomes one of these — which is what
-/// makes "connect to whatever the operator saved" a total function rather than a runtime surprise.
+/// Neither a switched-off block nor a partially configured one is a room, so neither ever becomes
+/// one of these — which is what makes "connect to whatever the operator saved" a total function
+/// rather than a runtime surprise.
 #[derive(Clone, Debug)]
 pub struct CommonRoomTarget {
     livekit: LiveKitConfig,
@@ -49,8 +50,12 @@ pub struct CommonRoomTarget {
 }
 
 impl CommonRoomTarget {
-    /// The room `livekit` names, or `None` when it names no joinable one.
+    /// The room `livekit` names, or `None` when it names no joinable one — because the operator
+    /// switched the common room off, or because the block is incomplete.
     pub fn from_livekit(livekit: Option<&LiveKitConfig>) -> Option<Self> {
+        if !LiveKitConfig::common_room_enabled(livekit) {
+            return None;
+        }
         let livekit = livekit?;
         let non_blank = |value: Option<&String>| {
             value
@@ -141,13 +146,23 @@ impl SupervisedCommonRoom {
 impl CommonRoomSupervisor for SupervisedCommonRoom {
     fn reconfigure(&self, livekit: Option<LiveKitConfig>) {
         let target = CommonRoomTarget::from_livekit(livekit.as_ref());
+        // A daemon told not to join and a daemon that cannot are different operator problems, so
+        // they read differently: the first is a decision, the second something to go and fix.
         if target.is_none() && livekit.is_some() {
-            log::warn!(
-                target: "tddy_daemon::common_room",
-                "the updated livekit block names no joinable common room (url, api_key, api_secret \
-                 and common_room are all required) — this daemon will leave the room it is in and \
-                 stay disconnected"
-            );
+            if LiveKitConfig::common_room_enabled(livekit.as_ref()) {
+                log::warn!(
+                    target: "tddy_daemon::common_room",
+                    "the updated livekit block names no joinable common room (url, api_key, \
+                     api_secret and common_room are all required) — this daemon will leave the \
+                     room it is in and stay disconnected"
+                );
+            } else {
+                log::info!(
+                    target: "tddy_daemon::common_room",
+                    "the common room is disabled (livekit.enabled is false) — this daemon will \
+                     leave the room it is in and stay out of it until it is switched back on"
+                );
+            }
         }
         // The supervising task owns the teardown and the join; an RPC handler answering an operator
         // must not block on a LiveKit round-trip to do it.

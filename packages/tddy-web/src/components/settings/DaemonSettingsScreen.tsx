@@ -46,8 +46,12 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
     };
   }, [client, sessionToken]);
 
-  const edit = (field: keyof DaemonSettingsFormState, value: string) =>
-    setForm((current) => (current ? { ...current, [field]: value } : current));
+  // Typed per field rather than as `string`, so the LiveKit switch is edited through the same one
+  // helper every text field is — a checkbox writing a boolean is not a different kind of edit.
+  const edit = <Field extends keyof DaemonSettingsFormState>(
+    field: Field,
+    value: DaemonSettingsFormState[Field],
+  ) => setForm((current) => (current ? { ...current, [field]: value } : current));
 
   const save = async () => {
     if (!form) return;
@@ -83,6 +87,17 @@ export function DaemonSettingsScreen({ client, sessionToken }: DaemonSettingsScr
         <>
           <div className="flex max-w-md flex-col gap-3 rounded-md border border-border p-4">
             <div className="font-medium">LiveKit</div>
+            {/* The operator's switch. Off keeps every field below it, so turning the common room
+                back on is this one checkbox rather than four credentials retyped. */}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                data-testid="daemon-settings-livekit-enabled"
+                checked={form.livekitEnabled}
+                onChange={(e) => edit("livekitEnabled", e.target.checked)}
+              />
+              <span>Join the common room</span>
+            </label>
             <label>
               <span className={labelClass}>URL</span>
               <input

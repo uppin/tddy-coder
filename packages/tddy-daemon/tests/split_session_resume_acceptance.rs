@@ -165,6 +165,7 @@ allowed_tools:
 claude_cli:
   binary_path: {claude_binary}
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: devkey
   api_secret: {LK_API_SECRET}
