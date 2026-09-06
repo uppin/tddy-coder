@@ -71,6 +71,7 @@ fn write_daemon_yaml(ws_url: &str, instance_id: Option<&str>) -> (tempfile::Temp
   - github_user: "testuser"
     os_user: "testuser"
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}
@@ -111,6 +112,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
         vec![],
         None,
         None,
+        false,                       // relay mode joins no common room
         "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
         vec![],
         None, // web_debug mask

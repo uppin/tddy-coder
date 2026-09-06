@@ -167,6 +167,8 @@ function ResolutionProbe({
 
 /** The presence identity a signed-in operator has. Its presence is what makes the spec below bite. */
 const A_SIGNED_IN_IDENTITY = "web-someone";
+const A_LIVEKIT_URL = "ws://127.0.0.1:7880";
+const A_COMMON_ROOM = "tddy-lobby";
 
 /**
  * The common room actually brought up — or not — from `config`, through the production hook.
@@ -179,7 +181,7 @@ function LiveKitStartupProbe({
   config,
   roomFactory,
 }: {
-  config: { livekitUrl?: string; commonRoom?: string };
+  config: { livekitUrl?: string; commonRoom?: string; enabled?: boolean };
   roomFactory: () => Room;
 }) {
   const { source } = useLiveKitHostDirectorySource({
@@ -265,6 +267,71 @@ describe("a desktop app with no LiveKit configuration", () => {
     cy.mount(<ResolutionProbe providers={providers} hostId={A_PEER} />);
 
     byTestId("provider").should("have.text", "unreachable");
+  });
+});
+
+describe("a desktop app whose daemon has LiveKit switched off", () => {
+  it("starts no LiveKit connection even though it holds the coordinates for one", () => {
+    // Given a signed-in operator and a daemon that reports a url and a common room — and says it
+    // is switched off. This is the case an absent configuration cannot stand in for: every
+    // coordinate the page needs to join is present, so only the flag can stop it.
+    const rooms = aRoomFactoryTripwire();
+    const tokens = aTokenMintTripwire();
+
+    mountWithRpc(
+      <LiveKitStartupProbe
+        config={{ livekitUrl: A_LIVEKIT_URL, commonRoom: A_COMMON_ROOM, enabled: false }}
+        roomFactory={rooms.construct}
+      />,
+      tokens.backend,
+    );
+
+    // Then nothing was started: no token minted, no `Room` constructed. The status is asserted
+    // first so the hook has settled before the tripwires are read — `should` on a counter that is
+    // already zero would pass on the first tick, before a join could have happened.
+    byTestId("livekit-status").should("have.text", "idle");
+    cy.wrap(null).then(() => {
+      expect(tokens.minted(), "LiveKit tokens minted").to.equal(0);
+      expect(rooms.constructed(), "Room objects constructed").to.equal(0);
+    });
+  });
+
+  it("calls a switched-off common room idle, never an error", () => {
+    // Given the same page
+    const rooms = aRoomFactoryTripwire();
+    const tokens = aTokenMintTripwire();
+
+    mountWithRpc(
+      <LiveKitStartupProbe
+        config={{ livekitUrl: A_LIVEKIT_URL, commonRoom: A_COMMON_ROOM, enabled: false }}
+        roomFactory={rooms.construct}
+      />,
+      tokens.backend,
+    );
+
+    // Then the source reports `idle`. An operator who deliberately switched LiveKit off must not be
+    // shown a connection failure for it on every screen — the same rule an unconfigured deployment
+    // already gets, reached by a different route.
+    byTestId("livekit-status").should("have.text", "idle");
+  });
+
+  it("joins the common room once the daemon is switched back on", () => {
+    // Given a page whose daemon reports LiveKit switched on, with the same coordinates
+    const rooms = aRoomFactoryTripwire();
+    const tokens = aTokenMintTripwire();
+
+    mountWithRpc(
+      <LiveKitStartupProbe
+        config={{ livekitUrl: A_LIVEKIT_URL, commonRoom: A_COMMON_ROOM, enabled: true }}
+        roomFactory={rooms.construct}
+      />,
+      tokens.backend,
+    );
+
+    // Then it does join — the flag is an off switch, not a second way to be unconfigured
+    cy.wrap(null).should(() => {
+      expect(rooms.constructed(), "Room objects constructed").to.equal(1);
+    });
   });
 });
 

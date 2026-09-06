@@ -101,6 +101,13 @@ interface SelectedDaemonContextValue {
 const SelectedDaemonContext = createContext<SelectedDaemonContextValue | null>(null);
 
 export interface SelectedDaemonProviderProps {
+  /**
+   * Whether the serving daemon joins the common room below (`/api/config`'s `livekit_enabled`).
+   * `false` is the operator's switch: the coordinates stay so it can be switched back on, so they
+   * can no longer stand in for the decision. `undefined` — a daemon too old to report it — joins as
+   * it always did.
+   */
+  livekitEnabled?: boolean;
   livekitUrl?: string;
   commonRoom?: string;
   /** The instance id of the daemon that served this web bundle (`/api/config`'s `daemon_instance_id`). */
@@ -144,6 +151,7 @@ export interface SelectedDaemonProviderProps {
  * every case where there is no room, and the whole point of the exercise.
  */
 function useDirectorySources({
+  livekitEnabled,
   livekitUrl,
   commonRoom,
   servingInstanceId,
@@ -168,6 +176,7 @@ function useDirectorySources({
     [user],
   );
   const { source: liveKitSource, room } = useLiveKitHostDirectorySource({
+    enabled: livekitEnabled,
     livekitUrl,
     commonRoom,
     identity: isAuthenticated ? identity : undefined,
@@ -260,6 +269,7 @@ function useSelectedDaemonState(
  * hosts over it.
  */
 export function SelectedDaemonProvider({
+  livekitEnabled,
   livekitUrl,
   commonRoom,
   servingInstanceId,
@@ -269,6 +279,7 @@ export function SelectedDaemonProvider({
   children,
 }: SelectedDaemonProviderProps) {
   const { sources, room } = useDirectorySources({
+    livekitEnabled,
     livekitUrl,
     commonRoom,
     servingInstanceId,

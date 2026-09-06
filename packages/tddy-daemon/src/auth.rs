@@ -15,9 +15,13 @@ use tddy_service::proto::auth::{
     LiveKitTokenService as LiveKitTokenServiceTrait, MintLiveKitTokenRequest,
     MintLiveKitTokenResponse,
 };
+use tddy_service::proto::token::{
+    GenerateTokenRequest, GenerateTokenResponse, RefreshTokenRequest, RefreshTokenResponse,
+    TokenService as TokenServiceTrait,
+};
 use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
 
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, LiveKitConfig};
 use crate::connection_service::SessionUserResolver;
 
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
@@ -211,11 +215,96 @@ pub fn build_token_service_entry(
         crate::token_provider::LiveKitTokenProvider(token_generator),
         authenticate,
     );
+    let service = CommonRoomSwitch {
+        mint: service,
+        // The same gate the mint behind it applies, so the switch speaks only to callers that
+        // would otherwise be admitted — see `CommonRoomSwitch`.
+        authenticate: session_token_authenticator(user_resolver, "token.TokenService"),
+        switched_off_common_room: switched_off_common_room(livekit),
+    };
     Some(ServiceEntry {
         name: "token.TokenService",
         service: Arc::new(tddy_service::TokenServiceServer::new(service))
             as Arc<dyn tddy_rpc::RpcService>,
     })
+}
+
+/// The common room this daemon has been told **not** to join, if any — `None` while the operator's
+/// switch is on, or while the block names no room at all.
+fn switched_off_common_room(livekit: &LiveKitConfig) -> Option<String> {
+    if LiveKitConfig::common_room_enabled(Some(livekit)) {
+        return None;
+    }
+    livekit
+        .common_room
+        .as_deref()
+        .map(str::trim)
+        .filter(|room| !room.is_empty())
+        .map(str::to_string)
+}
+
+/// The web mint with the operator's switch in front of it: it refuses the common room while that
+/// room is switched off, and mints everything else exactly as before.
+///
+/// `token.TokenService` mints per *request*, so the room is the caller's to name. Refusing the
+/// whole service would take session rooms and screen sharing down with the common room — they read
+/// the same LiveKit block for their own purposes and the switch does not govern them. Refusing the
+/// one named room is the whole of what "the common room is off" means here: no client is handed an
+/// invitation into a room this daemon is not in.
+///
+/// **The switch answers only callers who are already somebody.** It applies the same session-token
+/// gate the mint behind it applies, and applies it *first*, so an anonymous caller is told it is
+/// unauthenticated rather than being told which of this daemon's rooms are switched off. That
+/// ordering is the reason the gate is repeated here rather than left to the inner mint: a decorator
+/// that answered before authentication would turn every refusal into a disclosure. The inner mint
+/// still runs its own gate — this one is in front of it, never instead of it.
+struct CommonRoomSwitch<M: TokenServiceTrait> {
+    mint: M,
+    authenticate: tddy_service::SessionTokenAuthenticator,
+    switched_off_common_room: Option<String>,
+}
+
+impl<M: TokenServiceTrait> CommonRoomSwitch<M> {
+    /// The switch's own gate, in the order that matters: who is asking, then which room.
+    fn refuse_the_switched_off_room(&self, session_token: &str, room: &str) -> Result<(), Status> {
+        if !(self.authenticate)(session_token) {
+            return Err(Status::unauthenticated(
+                "session token is missing, expired, or not an access token; \
+                 no livekit token minted",
+            ));
+        }
+        let switched_off = self.switched_off_common_room.as_deref();
+        if switched_off.is_some_and(|off| off == room.trim()) {
+            return Err(Status::failed_precondition(format!(
+                "the common room \"{room}\" is disabled on this daemon (livekit.enabled is \
+                 false), so no token into it is minted"
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<M: TokenServiceTrait> tddy_service::proto::token::TokenService for CommonRoomSwitch<M> {
+    async fn generate_token(
+        &self,
+        request: Request<GenerateTokenRequest>,
+    ) -> Result<Response<GenerateTokenResponse>, Status> {
+        let asked = request.get_ref();
+        self.refuse_the_switched_off_room(&asked.session_token, &asked.room)?;
+        self.mint.generate_token(request).await
+    }
+
+    async fn refresh_token(
+        &self,
+        request: Request<RefreshTokenRequest>,
+    ) -> Result<Response<RefreshTokenResponse>, Status> {
+        // A refresh mints a brand-new JWT, so it passes the same switch as the first one rather
+        // than letting a token minted while the room was on outlive its being switched off.
+        let asked = request.get_ref();
+        self.refuse_the_switched_off_room(&asked.session_token, &asked.room)?;
+        self.mint.refresh_token(request).await
+    }
 }
 
 /// TTL of a minted LiveKit room JWT. One git operation, however large, is long done inside an
@@ -270,6 +359,14 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
         })?;
 
         let livekit = self.config.livekit.as_ref();
+        // The operator's switch, asked before the fields are: this daemon holds every credential
+        // and has been told not to join, which is a different answer from "not configured".
+        if !LiveKitConfig::common_room_enabled(livekit) {
+            return Err(Status::failed_precondition(
+                "this daemon's common room is disabled (livekit.enabled is false), so it mints no \
+                 token into a room it is not in",
+            ));
+        }
         let configured = |value: Option<&String>| {
             value
                 .map(|s| s.trim())
@@ -585,7 +682,16 @@ mod tests {
     /// A daemon whose LiveKit is fully configured and whose common room is `tddy-lobby`.
     fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
         a_daemon(&format!(
-            "livekit:\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
+            "livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
+             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+        ))
+    }
+
+    /// The same deployment with the operator's switch off. Every credential is still there — which
+    /// is exactly what makes it a different daemon from an unconfigured one.
+    fn a_daemon_with_its_common_room_switched_off() -> (DaemonConfig, tempfile::TempDir) {
+        a_daemon(&format!(
+            "livekit:\n  enabled: false\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
              api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
         ))
     }
@@ -703,8 +809,9 @@ mod tests {
     async fn hands_back_the_public_livekit_url_when_one_is_configured() {
         // Given a daemon whose own LiveKit address is in-cluster and unreachable from a client
         let (config, _dir) = a_daemon(&format!(
-            "livekit:\n  url: \"ws://127.0.0.1:7880\"\n  public_url: \"wss://livekit.example:443\"\n  \
-             api_key: \"devkey\"\n  api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+            "livekit:\n  enabled: true\n  url: \"ws://127.0.0.1:7880\"\n  \
+             public_url: \"wss://livekit.example:443\"\n  api_key: \"devkey\"\n  \
+             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
         ));
 
         // When
@@ -919,8 +1026,9 @@ mod tests {
         // Given a daemon with LiveKit credentials but no GitHub auth, so nothing on it can
         // authenticate a caller
         let (config, _dir) = a_daemon(&format!(
-            "livekit:\n  url: \"ws://livekit.internal:7880\"\n  api_key: \"devkey\"\n  \
-             api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{COMMON_ROOM}\"\n"
+            "livekit:\n  enabled: true\n  url: \"ws://livekit.internal:7880\"\n  \
+             api_key: \"devkey\"\n  api_secret: \"{FLEET_SECRET}\"\n  \
+             common_room: \"{COMMON_ROOM}\"\n"
         ));
         let entry = build_token_service_entry(&config, None)
             .expect("livekit credentials alone should still register the mint");
@@ -979,5 +1087,114 @@ mod tests {
         // one list feeds Connect-HTTP, the local socket and the common room alike
         let names: Vec<&str> = entries.iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["auth.AuthService", "auth.LiveKitTokenService"]);
+    }
+
+    // -------------------------------------------------------------------------
+    // The operator's switch, and the lockout it must never cause.
+    //
+    // `livekit.api_secret` signs this daemon's *session tokens* as well as its room JWTs. Reading
+    // "switched off" as "the block is absent" would leave the daemon with no signer, so every
+    // token-gated RPC would refuse — including `DaemonConfigService`, the one an operator turns
+    // LiveKit back on from. The switch governs the common room and nothing else.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn keeps_authenticating_gated_rpcs_when_the_common_room_is_switched_off() {
+        // Given a daemon whose common room the operator switched off, still holding the fleet secret
+        let (config, _dir) = a_daemon_with_its_common_room_switched_off();
+        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
+            .expect("auth should build")
+            .user_resolver
+            .expect("auth should produce a resolver");
+        // and an operator's access token signed with that secret
+        let token = SessionTokenSigner::new(FLEET_SECRET.as_bytes())
+            .mint_access(&a_github_user("operator"));
+
+        // When a gated RPC resolves the caller
+        let login = (resolver)(&token);
+
+        // Then the operator is still authenticated. If this ever returns `None`, switching LiveKit
+        // off locks the operator out of the settings screen that would switch it back on.
+        assert_eq!(
+            login.as_deref(),
+            Some("operator"),
+            "switching the common room off disarmed session-token authentication"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_to_mint_a_common_room_token_when_the_common_room_is_switched_off() {
+        // Given a daemon whose common room the operator switched off
+        let (config, _dir) = a_daemon_with_its_common_room_switched_off();
+
+        // When an authenticated operator asks for a room token
+        let refusal = mint_with(&a_mint(&config), &an_access_token_for("operator"))
+            .await
+            .expect_err("a daemon told not to join its common room must mint no way in");
+
+        // Then it is refused. A minted token is an invitation into a room this daemon is not in —
+        // and the client that got one would hold a live LiveKit connection the operator switched off.
+        assert_eq!(refusal.code, tddy_rpc::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn tells_an_anonymous_caller_of_the_web_mint_nothing_about_which_rooms_are_switched_off()
+    {
+        // Given a daemon whose common room is switched off, and a caller presenting no token
+        let (config, _dir) = a_daemon_with_its_common_room_switched_off();
+        let request = GenerateTokenRequest {
+            session_token: String::new(),
+            ..a_generate_request("")
+        };
+
+        // When it asks for a token naming that common room
+        let refusal = generate_through(a_registered_mint(&config), request)
+            .await
+            .expect_err("an anonymous caller must be admitted nowhere");
+
+        // Then it is told it is nobody — not which of this daemon's rooms are switched off. The
+        // switch answers only callers who would otherwise be admitted, so a refusal never doubles
+        // as an inventory of the deployment.
+        assert_eq!(refusal.code, tddy_rpc::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn refuses_a_common_room_token_from_the_web_mint_when_the_room_is_switched_off() {
+        // Given the same daemon, and the mint the web UI uses
+        let (config, _dir) = a_daemon_with_its_common_room_switched_off();
+
+        // When the web UI asks for a token naming that common room
+        let refusal = generate_through(
+            a_registered_mint(&config),
+            a_generate_request(&an_access_token_for("operator")),
+        )
+        .await
+        .expect_err("the web mint must not admit a caller to a switched-off common room");
+
+        // Then it is refused too — `MintLiveKitToken` is not the only way in, so gating one of the
+        // two would leave the other serving the room the daemon is not in
+        assert_eq!(refusal.code, tddy_rpc::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn still_mints_a_session_room_token_when_the_common_room_is_switched_off() {
+        // Given the same daemon, and a request for a *session* room rather than the common one
+        let (config, _dir) = a_daemon_with_its_common_room_switched_off();
+        let request = GenerateTokenRequest {
+            room: "session-abc123".to_string(),
+            ..a_generate_request(&an_access_token_for("operator"))
+        };
+
+        // When the web UI asks for it
+        let minted = generate_through(a_registered_mint(&config), request)
+            .await
+            .expect("a session room is not governed by the common-room switch");
+
+        // Then it is minted. The switch turns off the common room, not LiveKit itself: per-session
+        // rooms and screen sharing read the same block for their own purposes and keep working.
+        assert!(
+            !minted.token.is_empty(),
+            "a session room token must still be issued"
+        );
     }
 }

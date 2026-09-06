@@ -1209,6 +1209,8 @@ fn build_client_config(args: &Args) -> crate::web_server::ClientConfig {
         debug: None,
         // The standalone tddy-coder web server is not a tddy-daemon common-room participant.
         daemon_instance_id: None,
+        // …and has no common-room switch to report the state of.
+        livekit_enabled: None,
     }
 }
 

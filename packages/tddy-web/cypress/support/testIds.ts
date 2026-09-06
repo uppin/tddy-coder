@@ -732,6 +732,8 @@ export const TEST_IDS = {
   daemonSettingsLivekitApiKey: "daemon-settings-livekit-api-key",
   /** Says whether the daemon holds a LiveKit API secret; never shows the secret itself. */
   daemonSettingsLivekitSecretState: "daemon-settings-livekit-secret-state",
+  /** The operator's LiveKit switch: off preserves every other field in the block. */
+  daemonSettingsLivekitEnabled: "daemon-settings-livekit-enabled",
   daemonSettingsSave: "daemon-settings-save",
   /** The fields an update persisted but could not apply to the running daemon. */
   daemonSettingsRestartRequired: "daemon-settings-restart-required",

@@ -317,6 +317,7 @@ fn renders_the_exact_daemon_config_document_the_guest_daemon_deserializes() {
          web_bundle_path: /usr/local/share/tddy/web\n\
          daemon_instance_id: tddy-host\n\
          livekit:\n\
+         \x20 enabled: true\n\
          \x20 url: wss://livekit.example.com\n\
          \x20 api_key: devkey\n\
          \x20 api_secret: devsecret\n\

@@ -561,7 +561,8 @@ fn a_daemon_yaml(ws_url: &str, agent_binary: &Path) -> String {
          github:\n  stub: true\n\
          claude_cli:\n  binary_path: {}\n\
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
-         livekit:\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  api_secret: {FLEET_SECRET}\n  \
+         livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
+         api_secret: {FLEET_SECRET}\n  \
          common_room: {COMMON_ROOM}\n",
         serving_os_user(),
         agent_binary.display(),

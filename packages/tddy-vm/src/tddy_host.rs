@@ -282,6 +282,7 @@ pub fn daemon_config_yaml(spec: &TddyHostSpec) -> String {
         web_bundle_path: GUEST_WEB_BUNDLE_DIR,
         daemon_instance_id: &spec.hostname,
         livekit: spec.livekit.as_ref().map(|lk| GuestLiveKit {
+            enabled: true,
             url: &lk.url,
             api_key: &lk.api_key,
             api_secret: &lk.api_secret,
@@ -327,6 +328,11 @@ struct GuestListen<'a> {
 
 #[derive(Debug, Serialize)]
 struct GuestLiveKit<'a> {
+    /// A spec that carries a LiveKit block is one whose guest is meant to be on the common room,
+    /// so the block says so. `livekit.enabled` defaults to **off** in the daemon, so a rendered
+    /// block that omitted it would bake a guest that holds every credential and joins nothing —
+    /// and the only symptom would be a peer that never appears, hours into a bake.
+    enabled: bool,
     url: &'a str,
     api_key: &'a str,
     api_secret: &'a str,

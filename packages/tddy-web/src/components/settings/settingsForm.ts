@@ -24,6 +24,11 @@ export interface DaemonSettingsFormState {
   livekitCommonRoom: string;
   /** True when the daemon holds a secret. Display only — never the secret itself. */
   livekitApiSecretSet: boolean;
+  /**
+   * Whether the daemon joins its common room. The operator's switch: off preserves every other
+   * field, so turning LiveKit back on is one toggle rather than four credentials retyped.
+   */
+  livekitEnabled: boolean;
   webPort: string;
   webHost: string;
 }
@@ -42,6 +47,9 @@ export function toFormState(response: GetConfigResponse): DaemonSettingsFormStat
     livekitApiSecret: "",
     livekitCommonRoom: livekit?.commonRoom ?? "",
     livekitApiSecretSet: livekit?.apiSecretSet ?? false,
+    // A daemon with no `livekit:` block joins no common room, so the toggle reads off rather than
+    // defaulting to on for a room that does not exist.
+    livekitEnabled: livekit?.enabled ?? false,
     webPort: listen?.webPort === undefined ? "" : String(listen.webPort),
     webHost: listen?.webHost ?? "",
   };
@@ -58,6 +66,9 @@ export function toUpdateSettings(form: DaemonSettingsFormState): DaemonSettings 
       // clear the daemon's credentials, so the field is left out of the message entirely.
       apiSecret: form.livekitApiSecret === "" ? undefined : form.livekitApiSecret,
       commonRoom: form.livekitCommonRoom,
+      // The operator's switch, always sent: the daemon assigns what the update carries, so a flag
+      // left out of the message would read as "switch it off" rather than "leave it alone".
+      enabled: form.livekitEnabled,
       // `api_secret_set` is read-only: the daemon ignores it on update.
     },
     listen: {

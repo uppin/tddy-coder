@@ -39,6 +39,7 @@ allowed_tools:
   - path: /bin/true
     label: t
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {LIVEKIT_API_KEY}
   api_secret: {LIVEKIT_API_SECRET}

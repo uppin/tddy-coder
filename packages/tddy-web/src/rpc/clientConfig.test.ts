@@ -30,6 +30,19 @@ function aDaemonServingItsClientConfig(): InMemoryRpcBackend {
   );
 }
 
+/** A daemon holding a complete LiveKit block whose common room the operator switched off. */
+function aDaemonWithItsCommonRoomSwitchedOff(): InMemoryRpcBackend {
+  return anInMemoryRpcBackend().onUnary(DaemonConfigService.method.getClientConfig, () =>
+    create(GetClientConfigResponseSchema, {
+      livekitUrl: "ws://127.0.0.1:7880",
+      commonRoom: "tddy-lobby",
+      daemonMode: true,
+      daemonInstanceId: "udoo",
+      livekitEnabled: false,
+    }),
+  );
+}
+
 /** The URLs a page fetched over HTTP while the test ran. */
 interface HttpEndpoint {
   fetched: () => string[];
@@ -47,6 +60,22 @@ function anHttpDaemonServingItsClientConfig(): HttpEndpoint {
       daemon_instance_id: "udoo",
       allowed_agents: [{ id: "claude", label: "Claude" }],
       debug: "tddy:rpc:*",
+    });
+  });
+  return { fetched: () => fetched };
+}
+
+/** The same daemon, answering over the HTTP endpoint its web server has always served. */
+function anHttpDaemonWithItsCommonRoomSwitchedOff(): HttpEndpoint {
+  const fetched: string[] = [];
+  spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL) => {
+    fetched.push(String(url));
+    return Response.json({
+      livekit_url: "ws://127.0.0.1:7880",
+      common_room: "tddy-lobby",
+      daemon_mode: true,
+      daemon_instance_id: "udoo",
+      livekit_enabled: false,
     });
   });
   return { fetched: () => fetched };
@@ -143,5 +172,38 @@ describe("the startup configuration the daemon hands its web bundle", () => {
     expect(
       daemon.callsTo(DaemonConfigService.method.getClientConfig).map((c) => c.sessionToken),
     ).toEqual(["fresh-token"]);
+  });
+
+  it("tells the page the common room is switched off when it is asked over RPC", async () => {
+    // Given — a page whose daemon holds LiveKit credentials it was told not to use
+    const daemon = aDaemonWithItsCommonRoomSwitchedOff();
+    const host = aTauriHostedPage(DaemonConfigService, daemon.transport());
+
+    // When — the bundle reads its startup configuration
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then — it knows. A url and a room name are still there, so without the flag the page would
+    // build a `Room` and mint a token for a room the daemon deliberately is not in.
+    expect(config?.livekitEnabled).toEqual(false);
+  });
+
+  it("tells the page the common room is switched off when it is served over HTTP", async () => {
+    // Given — the same daemon, reached the way a browser dashboard reaches it
+    const daemon = anHttpDaemonWithItsCommonRoomSwitchedOff();
+    const host = aBrowserPageServedFrom("https://daemon.example");
+
+    // When — the bundle reads its startup configuration
+    const config = await loadClientConfig(
+      createDefaultDaemonTransport(undefined, undefined, host),
+      host,
+    );
+
+    // Then — it knows over this route too. The two payloads are mapped by hand in separate
+    // branches, so a flag added to one and forgotten in the other is the expected failure.
+    expect(config?.livekitEnabled).toEqual(false);
+    expect(daemon.fetched()).toEqual(["/api/config"]);
   });
 });

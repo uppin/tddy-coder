@@ -37,6 +37,7 @@ allowed_tools:
     label: t
 daemon_instance_id: {DAEMON_IDENTITY}
 livekit:
+  enabled: true
   url: {ws_url}
   api_key: {LIVEKIT_API_KEY}
   api_secret: {LIVEKIT_API_SECRET}

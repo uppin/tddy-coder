@@ -22,10 +22,23 @@ export function aDaemonConfiguration() {
         apiKey: "devkey",
         commonRoom: "tddy-lobby",
         apiSecretSet: true,
+        enabled: true,
       },
       listen: { webPort: 8899, webHost: "127.0.0.1" },
     },
     configPath: "/etc/tddy/daemon.yaml",
+  };
+}
+
+/** The same daemon with the operator's LiveKit switch off — every credential still in place. */
+export function aDaemonWithLiveKitSwitchedOff() {
+  const configuration = aDaemonConfiguration();
+  return {
+    ...configuration,
+    settings: {
+      ...configuration.settings,
+      livekit: { ...configuration.settings.livekit, enabled: false },
+    },
   };
 }
 
@@ -42,6 +55,13 @@ export function aDaemonConfigBackend() {
   return aDaemonServing().onUnary(DaemonConfigService.method.updateConfig, () => ({
     restartRequired: [],
   }));
+}
+
+/** A daemon whose LiveKit is switched off and which applies every update immediately. */
+export function aDaemonConfigBackendWithLiveKitSwitchedOff() {
+  return anInMemoryRpcBackend()
+    .onUnary(DaemonConfigService.method.getConfig, () => aDaemonWithLiveKitSwitchedOff())
+    .onUnary(DaemonConfigService.method.updateConfig, () => ({ restartRequired: [] }));
 }
 
 /** A daemon that persists an update but cannot apply `fields` while running. */
@@ -73,12 +93,28 @@ export function aDaemonSettingsScreen(backend: Backend) {
       byTestId(TEST_IDS.daemonSettingsLivekitUrl).clear().type(url);
       return driver;
     },
+    switchLiveKitOff() {
+      byTestId(TEST_IDS.daemonSettingsLivekitEnabled).uncheck();
+      return driver;
+    },
+    switchLiveKitOn() {
+      byTestId(TEST_IDS.daemonSettingsLivekitEnabled).check();
+      return driver;
+    },
     save() {
       byTestId(TEST_IDS.daemonSettingsSave).click();
       return driver;
     },
     expectLiveKitUrl(url: string) {
       byTestId(TEST_IDS.daemonSettingsLivekitUrl).should("have.value", url);
+      return driver;
+    },
+    expectLiveKitSwitchedOn() {
+      byTestId(TEST_IDS.daemonSettingsLivekitEnabled).should("be.checked");
+      return driver;
+    },
+    expectLiveKitSwitchedOff() {
+      byTestId(TEST_IDS.daemonSettingsLivekitEnabled).should("not.be.checked");
       return driver;
     },
     expectLiveKitApiKey(apiKey: string) {

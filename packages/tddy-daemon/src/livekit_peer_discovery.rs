@@ -88,7 +88,7 @@ use tddy_service::proto::connection::{
     UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
 };
 
-use crate::config::DaemonConfig;
+use crate::config::{DaemonConfig, LiveKitConfig};
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 
 /// After `RoomEvent::Connected`, yield before the first `set_metadata` attempt.
@@ -644,6 +644,12 @@ pub(crate) fn livekit_common_room_connect_strings(
         .livekit
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("LiveKit not configured"))?;
+    // The operator's switch, asked before any field is: a daemon told not to join and a daemon
+    // that cannot are different operator problems, and must read differently.
+    anyhow::ensure!(
+        LiveKitConfig::common_room_enabled(Some(livekit)),
+        "the common room is disabled (livekit.enabled is false)"
+    );
     let room_name = livekit
         .common_room
         .as_deref()
@@ -1886,5 +1892,63 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].project_id, "proj-on-laptop");
         assert_eq!(rows[0].daemon_instance_id, "laptop");
+    }
+
+    // -----------------------------------------------------------------------
+    // The operator's switch. Peer discovery *is* the advertisement: no connect strings means no
+    // room joined, no metadata published, and nothing for a peer to find.
+    // -----------------------------------------------------------------------
+
+    /// A daemon whose LiveKit block is complete, with the operator's switch set to `enabled`.
+    fn a_daemon_whose_common_room_is(enabled: bool) -> DaemonConfig {
+        serde_yaml::from_str(&format!(
+            "livekit:\n  enabled: {enabled}\n  url: ws://livekit.internal:7880\n  \
+             api_key: devkey\n  api_secret: the-secret\n  common_room: tddy-lobby\n"
+        ))
+        .expect("the daemon fixture did not parse")
+    }
+
+    #[test]
+    fn hands_out_the_connect_strings_when_the_common_room_is_switched_on() {
+        // Given a daemon whose common room the operator switched on
+        let config = a_daemon_whose_common_room_is(true);
+
+        // When discovery asks what to connect to
+        let (room, url, api_key, api_secret) = livekit_common_room_connect_strings(&config)
+            .expect("a switched-on daemon must have connect strings");
+
+        // Then it is told
+        assert_eq!(
+            (
+                room.as_str(),
+                url.as_str(),
+                api_key.as_str(),
+                api_secret.as_str()
+            ),
+            (
+                "tddy-lobby",
+                "ws://livekit.internal:7880",
+                "devkey",
+                "the-secret"
+            )
+        );
+    }
+
+    #[test]
+    fn refuses_the_connect_strings_when_the_common_room_is_switched_off() {
+        // Given the same daemon with the switch off
+        let config = a_daemon_whose_common_room_is(false);
+
+        // When discovery asks what to connect to
+        let refusal = livekit_common_room_connect_strings(&config)
+            .expect_err("a switched-off daemon must have nothing to connect with");
+
+        // Then it is refused, so the registry loop assembles no discovery and publishes no
+        // advertisement — a disabled daemon is not merely quiet, it is absent from the roster
+        assert!(
+            refusal.to_string().contains("disabled"),
+            "the refusal must say the common room is disabled, not that the block is incomplete; \
+             they are different operator problems. Was: {refusal}"
+        );
     }
 }

@@ -253,6 +253,26 @@ its own failure message, none from that branch. New entries beyond the list abov
   would persist a full transcript alongside the interactive backend, making a CI failure readable
   from the uploaded artifact. The bake path already writes `<name>-boot.log`; this one does not.
 
+## Deferred from the `optional-livekit` common-room switch (#449, 2026-09-06)
+
+- **`server.rs::run_server` takes 12 positional arguments.** It already carries
+  `#[allow(clippy::too_many_arguments)]`; #449 added the twelfth (`livekit_enabled`). An options
+  struct is the right fix, but it moves `main.rs` and the desktop caller, and `tddy-desktop` is
+  outside the CI gate — so it wants its own PR, after the `optional-livekit` stack lands, where the
+  desktop build can actually be exercised.
+- **`packages/tddy-web/src/gen/daemon_config_pb.ts` was regenerated without `buf`.** No npm registry
+  was reachable in that worktree, so the descriptor was rebuilt with `protoc` plus a `json_name`
+  strip that reproduces `protoc-gen-es` byte-for-byte (verified against the committed file *before*
+  editing), and the two interface fields were written by hand. Re-run `bun run generate` once `buf`
+  is available and confirm the file is unchanged.
+- **`config.example.yaml`'s commented `livekit:` block is stale.** It uses `room:` / `identity:` /
+  `token:`, which matches neither `tddy_daemon::config::LiveKitConfig` nor
+  `tddy_coder::config::LiveKitConfig` as they stand. Pre-existing and unrelated to the switch — the
+  file is a tddy-coder configuration, so `livekit.enabled` correctly does not appear in it.
+- **`LiveKitStartupProbe` in `DesktopIpcHostAcceptance.cy.tsx`** grew an `enabled` field on its
+  inline `config` prop type. If a third spec needs the same shape, extract a named fixture rather
+  than widening the inline type again.
+
 ## Future Enhancements
 
 ### From 2026-09-05 Tauri desktop (single-process daemon)

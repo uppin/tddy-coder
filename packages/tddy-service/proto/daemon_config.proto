@@ -58,6 +58,10 @@ message GetClientConfigResponse {
   repeated ClientAllowedAgent allowed_agents = 5;
   optional string debug = 6;
   optional string daemon_instance_id = 7;
+  // Whether the serving daemon joins its common room. False means the operator switched LiveKit
+  // off, so the page constructs no `Room` and mints no token — the same quiet outcome an
+  // unconfigured deployment already has, reached deliberately rather than by omission.
+  optional bool livekit_enabled = 8;
 }
 
 message ClientAllowedAgent {
@@ -84,6 +88,9 @@ message LiveKitSettings {
   optional string common_room = 5;
   // Read-only: true when the stored configuration holds an API secret. Ignored on update.
   bool api_secret_set = 6;
+  // Whether this daemon joins its common room. Everything else in the block is preserved when it
+  // is false, so turning LiveKit back on is one toggle rather than re-entering four fields.
+  bool enabled = 7;
 }
 
 message ListenSettings {

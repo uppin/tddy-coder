@@ -397,6 +397,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
   const transport = useHttpTransport();
   const [appConfig, setAppConfig] = useState<{
     daemonMode: boolean | null;
+    livekitEnabled?: boolean;
     livekitUrl?: string;
     commonRoom?: string;
     daemonInstanceId?: string;
@@ -409,6 +410,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
         applyDebugMaskFromConfig(config?.debug);
         setAppConfig({
           daemonMode: config?.daemonMode ?? false,
+          livekitEnabled: config?.livekitEnabled,
           livekitUrl: config?.livekitUrl,
           commonRoom: config?.commonRoom,
           daemonInstanceId: config?.daemonInstanceId,
@@ -468,6 +470,7 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
              reach that machine. In a browser `localHost` is `null` and it registers nothing. */
           <LocalHostConnections registration={localHost}>
             <SelectedDaemonProvider
+              livekitEnabled={appConfig.livekitEnabled}
               livekitUrl={appConfig.livekitUrl}
               commonRoom={appConfig.commonRoom}
               servingInstanceId={appConfig.daemonInstanceId}

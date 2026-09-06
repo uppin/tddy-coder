@@ -240,7 +240,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
         format!(
             "users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
              github:\n  stub: true\n\
-             livekit:\n  url: \"{ws_url}\"\n  api_key: \"devkey\"\n  \
+             livekit:\n  enabled: true\n  url: \"{ws_url}\"\n  api_key: \"devkey\"\n  \
              api_secret: \"{FLEET_SECRET}\"\n  common_room: \"{room}\"\n",
             serving_os_user()
         ),
