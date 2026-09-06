@@ -215,6 +215,9 @@ export interface ConnectionServiceScenario {
   /** When set, `StreamHostStats` emits a second event carrying these per-core percentages after the
    *  first — lets a test assert the footer applies fresh readings streamed by the server. */
   hostCpuPerCoreUpdate?: number[];
+  /** When true, `StreamHostStats` opens and then emits nothing — a host that is subscribed but has
+   *  not reported yet, which is what a caller must render as pending rather than as zeroes. */
+  hostStatsSilent?: boolean;
   /** Rows returned by `ListWorktreesForProject` (Session Worktree tab). Default: none. */
   worktrees?: Array<{
     path: string;
@@ -568,6 +571,11 @@ export function aConnectionServiceBackend(
       // like the daemon dropping the feed.
       streamHostStats: async function* () {
         hostStatsStreamOpens += 1;
+        // A silent feed stays open without ever reporting — the state a caller must render as
+        // pending rather than as zeroes.
+        if (scenario.hostStatsSilent) {
+          await new Promise<never>(() => undefined);
+        }
         const disk = create(HostDiskStatsSchema, {
           availableBytes: scenario.hostDisk?.availableBytes ?? 0n,
           totalBytes: scenario.hostDisk?.totalBytes ?? 0n,
