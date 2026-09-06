@@ -41,7 +41,7 @@ use tddy_daemon::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl,
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, StartSessionRequest,
+    ConnectSessionRequest, ConnectionService as ConnectionServiceTrait, StartSessionRequest,
 };
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
@@ -240,6 +240,11 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     .await;
 
     let session_id = a_started_session(&connections, suffix).await;
+    // A session's room is opened by the first connection to it, not by its creation — and warming
+    // that room below needs it open. In production the syncer's own attach is that first
+    // connection; here the room has to be warm *before* the syncer arrives, so the connect is made
+    // on its own.
+    a_client_connects_to(&connections, &session_id).await;
     let session_dir = unified_session_dir_path(&data_dir, &session_id);
     let worktree = worktree_of(&session_dir);
 
@@ -631,6 +636,17 @@ async fn a_started_session(connections: &ConnectionServiceImpl, suffix: &str) ->
         .expect("an agent session must start")
         .into_inner();
     started.session_id
+}
+
+/// Connect to the session, which is what opens the room its worktree is measured in.
+async fn a_client_connects_to(connections: &ConnectionServiceImpl, session_id: &str) {
+    connections
+        .connect_session(tddy_rpc::Request::new(ConnectSessionRequest {
+            session_token: an_access_token_for(GITHUB_USER),
+            session_id: session_id.to_string(),
+        }))
+        .await
+        .expect("connecting to a started session must open its room");
 }
 
 /// The checkout the daemon cut for a session, as the session's own metadata records it.

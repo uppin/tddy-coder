@@ -1610,6 +1610,11 @@ async fn moves_the_clone_to_the_commit_the_session_made() {
 
 /// A clone corrupted by hand is restored, and the divergence is reported rather than absorbed
 /// silently — a mirror that repairs itself without saying so hides a real fault.
+///
+/// FIXME(flaky): observed failing when this suite runs alongside other LiveKit-backed suites on one
+/// machine, and passing every time the suite runs on its own. The waits here are wall-clock, so a
+/// contended host is the likeliest cause rather than anything about what is being asserted — but
+/// that is a hypothesis, not a finding. Left marked so CI can say which it is.
 #[tokio::test]
 #[serial]
 async fn restores_a_clone_that_diverged_and_says_so() {
