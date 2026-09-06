@@ -40,6 +40,11 @@ jobs:
       # first, so every `./dev` invocation below compiles through sccache against
       # the Actions cache. See docs/dev/guides/build-cache.md.
       TDDY_BUILD_CACHE: github-actions
+      # A failed cache write is not an error sccache surfaces anywhere except as a
+      # counter in its stats, so a cache that stores nothing looks exactly like a
+      # cold one. Keep its own log and print it beside the stats.
+      SCCACHE_LOG: warn
+      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
     steps:
       - uses: actions/checkout@v7
 
@@ -94,7 +99,10 @@ jobs:
       # up as a number in the log rather than as a slow build nobody attributes.
       - name: sccache stats
         if: always()
-        run: ./dev sccache --show-stats
+        run: |
+          ./dev sccache --show-stats
+          echo '--- sccache log ---'
+          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
 
   rust-test:
     name: Rust tests
@@ -105,6 +113,8 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_LOG: warn # see rust-lint
+      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
     steps:
       - uses: actions/checkout@v7
 
@@ -169,7 +179,10 @@ jobs:
 
       - name: sccache stats
         if: always()
-        run: ./dev sccache --show-stats
+        run: |
+          ./dev sccache --show-stats
+          echo '--- sccache log ---'
+          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
@@ -198,6 +211,8 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_LOG: warn # see rust-lint
+      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
     steps:
       - uses: actions/checkout@v7
 
@@ -248,7 +263,10 @@ jobs:
 
       - name: sccache stats
         if: always()
-        run: ./dev sccache --show-stats
+        run: |
+          ./dev sccache --show-stats
+          echo '--- sccache log ---'
+          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
 
       # Binaries that tests exec by path, not all of target/debug — the whole
       # directory is many GB. Each belongs to a package other than the one whose
@@ -346,6 +364,8 @@ jobs:
     timeout-minutes: 150
     env:
       TDDY_BUILD_CACHE: github-actions # see rust-lint
+      SCCACHE_LOG: warn # see rust-lint
+      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
     steps:
       - uses: actions/checkout@v7
 
@@ -392,7 +412,10 @@ jobs:
 
       - name: sccache stats
         if: always()
-        run: ./dev sccache --show-stats
+        run: |
+          ./dev sccache --show-stats
+          echo '--- sccache log ---'
+          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
 
   web:
     name: Web tests
