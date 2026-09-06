@@ -134,7 +134,7 @@ so the diff cannot talk you into a rationalisation. Sources, in order of authori
 
 1. **Each PR's own documents**, committed on its own branch under `docs/dev/1-WIP/`:
    `YYYY-MM-DD-<slug>.md` (the changeset — `## Responsibility`, `## Boundaries`, `## Dependencies`,
-   `## Draft PR contract`) and `YYYY-MM-DD-<slug>-prd.md`. The four headings **are** the per-PR intent
+   `## Draft PR contract`, `## Green wave`) and `YYYY-MM-DD-<slug>-prd.md`. The five headings **are** the per-PR intent
    statement, and § 5 needs them. There is deliberately **no shared stack manifest** in this repo —
    do not look for one, and do not create one; the whole-stack view is assembled by reading each PR's
    own document, which is what the table below does.
@@ -288,7 +288,7 @@ it should have been.
 **Also check the boundary contract itself** while the per-PR data is in hand: a PR whose diff is only
 types or only stubs, a PR that implements a surface its `## Dependencies` says belongs to a
 predecessor, a PR that cannot be reviewed without reading its successor, or a PR missing any of the
-four required headings. Each is a planning finding independent of the rework count — as is a chain
+five required headings. Each is a planning finding independent of the rework count — as is a chain
 that was never registered with `gh stack link`, which leaves reviewers no stack view at all.
 
 For a **single PR** the increment figures do not apply — say so rather than omitting the section —

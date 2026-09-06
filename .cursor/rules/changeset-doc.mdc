@@ -105,7 +105,7 @@ Why these technical changes are needed.
 
 #### 6. Prerequisites (when the TODO scan finds something)
 
-**Optional — include only when `docs/dev/TODO.md` holds entries this change runs into.** An empty
+**Optional — include only when `docs/dev/todo/` holds items this change runs into.** An empty
 heading is noise; omit it entirely when the scan came back clear.
 
 Produced by planning Step 2b (`.agents/skills/planning/references/planning-phase.md`). Each entry
@@ -114,9 +114,9 @@ gets a verdict, so a reviewer can see it was considered rather than missed:
 ```markdown
 ## Prerequisites
 
-Open items in [`docs/dev/TODO.md`](../TODO.md) this change runs into.
+Open items in [`docs/dev/todo/`](../todo/) this change runs into.
 
-### ⛔ BLOCKING — {entry heading, quoted from TODO.md}
+### ⛔ BLOCKING — {item title, quoted from its file in docs/dev/todo/}
 
 Why every route around it is wrong, not merely inconvenient. What must land first, and where.
 A blocking entry ALSO earns a line in `## Scope` — it is work, not a note.

@@ -177,7 +177,7 @@ author does not make the code correct. Verdicts:
 | **Agree** | The comment identifies a real defect, risk, or clear improvement in scope for this PR | 👍 now; fix in Step 5 |
 | **Disagree** | The comment is factually wrong, or the change would make things worse / violates a repo boundary | Draft a reply with the reasoning; 👎 + post after user approval |
 | **Question** | The comment asks for information, not a change | Reply with the answer; no reaction, no fix |
-| **Out of scope** | Valid, but belongs to another PR/stack node or a follow-up | Reply saying where it belongs (name the node, or offer to log it in `docs/dev/TODO.md`); no 👍 — that would promise a fix here |
+| **Out of scope** | Valid, but belongs to another PR/stack node or a follow-up | Reply saying where it belongs (name the node, or offer to log it as a new file in `docs/dev/todo/`); no 👍 — that would promise a fix here |
 
 **"Belongs to another node" is a real boundary in a stack, not a dodge.** A planned node's
 `## Dependencies` heading lists what a predecessor owns and this PR must **not** implement — that

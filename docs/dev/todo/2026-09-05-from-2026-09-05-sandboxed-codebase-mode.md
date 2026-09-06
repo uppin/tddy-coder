@@ -1,0 +1,12 @@
+# 2026-09-05 — From 2026-09-05 sandboxed-codebase-mode
+
+**Category:** Future enhancement
+
+Source changeset: `docs/dev/changesets/2026-09-05-sandboxed-codebase-mode-the-jail-holds-the-code.md`. Feature
+[sandboxed-codebase-mode.md](../../ft/coder/sandboxed-codebase-mode.md).
+
+- **Two implementations of the in-jail tool exchange.** `tddy_daemon::workspace_tool_sandbox::exchange_in_jail_tool_call` drives `in_jail_tool_request`/`in_jail_tool_response` on its own raw `SessionChannel`, and `sandboxed-codebase-mode` adds a second one on the host relay (`InJailToolDispatcher`) because that relay must also own the CONNECT tunnels for jailed builds. Consolidate the daemon onto the relay's dispatcher once both have landed.
+- **`--agent-kind cursor` cannot use `sandboxed` mode.** The confinement claim rests on `--disallowedTools` withdrawing Claude's native tool surface; Cursor's `agent` has no equivalent, so an inverted placement there would confine nothing.
+- **Workflow recipes on a jailed checkout.** A recipe resolves `TDDY_REPO_DIR` on the agent's host, which in this mode is not where the checkout is reachable from. Decide whether `--recipe` is refused or re-pointed.
+- **A deep checkout path cannot key a per-repository build home.** `sandboxed` mode homes each repo at `<base>/<derive_repo_key(repo)>`, and `derive_repo_key` spells a path as one directory name (`/a/b` → `a--b`) with no length bound. A single path component is capped at `NAME_MAX` (255 bytes on macOS and Linux), so a checkout roughly 250+ characters deep fails while the jail comes up, with `create_dir_all` reporting "File name too long" against a path the operator never typed. Measured: a 249-byte key succeeds, 256 fails. Either refuse it by name at startup (the discipline the rest of this mode follows) or bound the key by hashing its tail — the latter is a migration, not a patch, because `derive_repo_key` is shared with the per-repo action store whose directories already exist on disk under the unbounded spelling. `packages/tddy-sandbox-app/src/sandboxed_session.rs` (`repo_build_home`), `packages/tddy-core/src/session_actions/paths.rs`.
+- **Linux `sandboxed` mode.** `run_linux` delegates to a running `tddy-daemon`; carrying a third codebase mode over `StartSessionRequest` and provisioning the cgroups equivalent of the `--workspace-tools` jail is a daemon-side change on a path documented as not verified end-to-end.

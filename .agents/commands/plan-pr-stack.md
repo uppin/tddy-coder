@@ -103,6 +103,11 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
    it takes a position in the line **before** the first node that needs it. A prerequisite node is a
    legitimate node: a vertical slice (the fix, its tests, its docs), independently mergeable. It is
    *not* the forbidden stubs-only shape, because it delivers behaviour.
+7. **Green waves** — from the real edges recorded in step 2, group the nodes into waves: wave 1 is
+   every node needing no *predecessor behaviour*, wave 2 every node whose only unmet need is wave 1,
+   and so on. This is a different grouping from the branch line and usually far wider: a node sixth
+   in the line can still be wave 1. Present the waves with the sequence, so the user sees what the
+   flattening cost and what it did not.
 
 **Hold the boundary contract while decomposing.** These pairs are one node, never two:
 
@@ -121,8 +126,8 @@ ones; **do not invent a third**. Anything that seems to need one goes in the nod
 the user to decide.
 
 Present the proposed **sequence** (n₁…nₙ with one-line scope + owned surface each), the real
-dependency edges behind it, and anywhere the order was forced by flattening rather than by a real
-dependency. **Wait for user approval of the decomposition before creating anything.** If the user
+dependency edges behind it, the **green waves** those edges imply, and anywhere the order was forced
+by flattening rather than by a real dependency. **Wait for user approval of the decomposition before creating anything.** If the user
 named a trunk other than the detected one, set `TRUNK` to it.
 
 ### Step 2: Analyze Existing Code
@@ -145,7 +150,7 @@ Then run `.agents/skills/planning/references/planning-phase.md` **Step 2** (code
 Record which packages each node touches.
 
 **Step 2b matters more for a stack than for a single PR**, because a stack has somewhere to put the
-answer. Scan `docs/dev/TODO.md` for entries in the path of this work, classify each — blocking /
+answer. Scan `docs/dev/todo/` for items in the path of this work, classify each — blocking /
 during / answered / unrelated — then decide its **shape**:
 
 | Size of the fix | Shape |
@@ -243,7 +248,7 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   heading on nodes the scan cleared; an empty section is noise. Keep any node list inside it
   **accurate** — "nodes 1, 3 and 6 touch this file" is a claim a reviewer will check, so verify it
   against the diffs rather than writing it from memory.
-- **Every changeset MUST carry the four headings** the stack model requires, in every node's
+- **Every changeset MUST carry the five headings** the stack model requires, in every node's
   document:
 
   ```
@@ -251,9 +256,11 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   ## Boundaries            what it explicitly does not do
   ## Dependencies          per parent node: what that PR delivers that this one consumes
   ## Draft PR contract     what lands first (API + failing tests) to unblock dependents
+  ## Green wave            whether this node can be greened now, and alongside which others
   ```
 
-  A root node still carries all four; its `## Dependencies` says it has none.
+  A root node still carries all five; its `## Dependencies` says it has none, and its
+  `## Green wave` is almost always wave 1.
 - **`## Dependencies` is the duplicate-development guard.** Whoever runs `/green` on this node has
   never seen the plan's reasoning and has no other way to learn that a parent is already adding the
   trait they are about to add. State it **per parent node**, in a table:
@@ -274,6 +281,28 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
 - **`## Draft PR contract`** states what wave 2 will publish for this node: the owned API surface plus
   the failing tests that specify it. Write it as *the first push of this PR*, never as this PR's
   deliverable.
+- **`## Green wave`** answers three questions a would-be implementer asks before touching anything:
+  can this node be greened now, which nodes can be greened *alongside* it, and which node is waiting
+  on it. Write the first pass here from the planned decomposition, and **revisit it in wave 2** once
+  the tests exist — the tests are what actually decide it:
+
+  ```markdown
+  ## Green wave
+
+  **Wave:** 1 of 3
+  **Greenable independently:** yes — every test mounts this node's own component or injects a double
+  **Concurrent with:** #454, #455, #456, #457, #459
+  **Blocks:** #458 (its add-key test needs this node's agent client to actually perform the add)
+
+  Real dependency edges, as opposed to the branch line:
+
+      n1 → n2, n4, n5, n7      n2 → n3      n5 → n6      n7 → n8
+  ```
+
+  The discriminator is narrow, and it is **not** the branch order: a node is greenable now when its
+  tests need only its own surface plus its predecessors' *published* surface, and not when a test
+  exercises a predecessor's **behaviour**. Always give the reason — "no" is actionable only when it
+  names the behaviour that must exist first.
 - **Forward-only doc linking, own files only.** A parent's PRD/changeset MAY link forward to its
   children's (`## Successor PRs`, naming the child **branches**). A child's MUST NOT link back — the
   parent is wrapped and removed from `1-WIP` first, so a backward link would dangle immediately. Do
@@ -319,6 +348,11 @@ gh pr create --draft \
   > title, or pass the title explicitly at merge time.
 - Pass the body from a file so newlines and backticks survive. The body may say the PR is at its
   planning stage; the **title** may not.
+- **The body carries the stack graph and this node's wave**, so an implementer sees them without
+  opening the changeset: the node's position (`K/N`), its base, the real dependency edges, whether it
+  is greenable now, the PRs it can be greened alongside, and the PR it blocks. A reader who has to
+  open five documents to learn whether they can start is a reader who starts anyway and finds out the
+  hard way.
 - Verify this PR:
   ```bash
   gh pr view --json number,url,isDraft,baseRefName,changedFiles \
@@ -601,8 +635,12 @@ Present a complete summary:
   discovery companion, owned surface, failing acceptance + unit/integration test titles and paths, and
   confirmation the build passes on the published surface while tests fail for this node's own missing
   implementation.
-- Which nodes can be `/green`-ed in parallel, and which have a sequencing fact recorded in
-  `## Dependencies`.
+- **The green waves** — wave 1 (everything greenable now, concurrently), then each later wave with
+  the behaviour it is waiting on. Say plainly that this grouping is *not* the branch order and is
+  usually much wider. Name the per-node sequencing facts recorded in `## Dependencies`.
+- **What concurrency costs**: every `/green` adds commits, so a wave of N concurrent greens is N
+  cascades of `/pr-stack-rebase`, and each concurrent node needs its own worktree (several GB here).
+  Offer the smaller-batch trade rather than leaving it to be discovered.
 - **Where the order was forced** — any pair that is only sequential because `gh stack` needs a line,
   so a reviewer knows those two could have gone in parallel.
 - Anything you could not prove locally (server-side checks, org policy), stated as a risk.
@@ -664,9 +702,10 @@ nothing does for you once a parent lands. `/merge` and `/repoint` are the by-han
 ## Out-of-Scope Ideas
 
 During planning and code analysis, if you identify enhancements outside the current stack's scope, add
-them to `docs/dev/TODO.md` under **Future Enhancements**, with the source set to the stack slug.
+**a new file** to `docs/dev/todo/` — `YYYY-MM-DD-<slug>.md`, `**Category:** Future enhancement`,
+`**Source:**` the stack slug. Never append to an existing file.
 
-`docs/dev/TODO.md` is read as well as written: Step 2b scans it for entries this stack runs into and
+`docs/dev/todo/` is read as well as written: Step 2b scans it for items this stack runs into and
 Step 4b records them per node. The two directions are complementary — what this stack defers is what
 somebody's Step 2b finds next, so write entries stating **why** the work was deferred, not only what
 remains. That reason is what tells the next planner whether it blocks them.
@@ -680,7 +719,7 @@ remains. That reason is what tells the next planner whether it blocks them.
   in the report what that cost — siblings become predecessor and successor, and an independent root
   loses its independence.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
-- **Cross-check `docs/dev/TODO.md` (Step 2b) before decomposing.** Record every relevant entry in the
+- **Cross-check `docs/dev/todo/` (Step 2b) before decomposing.** Record every relevant item in the
   affected node's `## Prerequisites` with a verdict; give a blocking one a `## Scope` line; give a
   large one its own node or its own PR. Never absorb a large refactor into a feature node.
 - **The boundary contract governs the decomposition.** Every node is a vertical slice — schema, code,
@@ -735,7 +774,7 @@ remains. That reason is what tells the next planner whether it blocks them.
 /plan-pr-stack
   record ORIGINAL_BRANCH (stop if detached) and TRUNK
   interview → decompose into a LINEAR sequence of vertical slices → whole-work discovery
-  → cross-check docs/dev/TODO.md → size each fix: in-node, prerequisite PR, or its own node
+  → cross-check docs/dev/todo/ → size each fix: in-node, prerequisite PR, or its own node
   → settle order, slug, owned surfaces, per-node draft-PR contracts
   → WAVE 1 (per node, in this worktree, in dependency order)
         git checkout -b feature/<slug>/<node>   (off its parent; root off origin/$TRUNK)

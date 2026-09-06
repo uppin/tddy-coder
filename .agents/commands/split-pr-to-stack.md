@@ -516,8 +516,8 @@ A (`<A>`) → B1 (`<B>`, PR #<n1>) → B2 (`<B2>`, PR #<n2>) → C (`<C>`, PR #<
 - descendant backups…
 
 ### Docs
-- B1's `docs/dev/1-WIP/` pair narrowed to the bottom slice, four headings present: ✅
-- B2's `docs/dev/1-WIP/` pair written under its own slug, four headings present: ✅
+- B1's `docs/dev/1-WIP/` pair narrowed to the bottom slice, five headings present: ✅
+- B2's `docs/dev/1-WIP/` pair written under its own slug, five headings present: ✅
 - Children's `## Dependencies` now name B2: ✅
 - Each new changeset filed in `docs/dev/changesets/` with a distinct slug: ✅ / none existed
 
@@ -555,7 +555,9 @@ back onto B.
   `--open`. Do not claim the stack was updated when only the bases were.
 - **Never close a PR to reshape a stack.** It loses the review history, and a closed PR cannot be
   re-based via the API.
-- **Both slices need all four changeset headings** in `docs/dev/1-WIP/`.
+- **Both slices need all five changeset headings** in `docs/dev/1-WIP/`. Splitting a node changes
+  the graph, so **both slices' `## Green wave` must be re-derived** — B2 is not automatically in B1's
+  wave, and anything that was concurrent with B may not be concurrent with both halves.
 - Keep B's existing PR as B1; create B2; retarget **all** direct children of B onto B2; rebase the
   rest of the tree onto their existing parents' new tips.
 - **Never delete a branch** an open PR still bases on — it closes that PR.

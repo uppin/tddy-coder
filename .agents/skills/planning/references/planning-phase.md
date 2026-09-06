@@ -49,7 +49,8 @@ changeset.
 
 ## Step 2b: Cross-check the TODO backlog
 
-**MANDATORY** — `docs/dev/TODO.md` is a record of known defects, deferred work and flagged debt.
+**MANDATORY** — [`docs/dev/todo/`](../../../docs/dev/todo/) is a record of known defects, deferred
+work and flagged debt, **one file per item**.
 Some of it will be sitting directly in the path of what you are about to plan, and discovering that
 during `/green` is late: by then the choice is between working around it, silently making it worse,
 or stopping.
@@ -58,10 +59,13 @@ Scan it **after** Step 2's code analysis, when you know which files and modules 
 
 ```bash
 # Items naming the areas this change touches — adapt the terms to your feature
-grep -niE '^###.*(host|proto|codegen|secret|stream|<your-module>)' docs/dev/TODO.md
+grep -rl -iE '(host|proto|codegen|secret|stream|<your-module>)' docs/dev/todo/
 
-# The whole-file skim is worth it too: entries are grouped by source changeset, not by area
-grep -n '^#\{2,3\} ' docs/dev/TODO.md
+# The listing is the index; the date prefix sorts it
+ls docs/dev/todo/ | sort -r | head -30
+
+# Still-open items only
+grep -rL 'Status:\*\* Resolved' docs/dev/todo/
 ```
 
 Read the **body** of every candidate, not just its heading. Entries state why they were deferred, and
@@ -137,7 +141,7 @@ Include all required sections:
 - **Initial Discovery** — first content section after the header; link to
   `./{changeset-slug}-initial-discovery.md` (see `initial-discovery.md`). The discovery file
   must already exist from Step 2.
-- **Prerequisites** — `docs/dev/TODO.md` items this change runs into, with a verdict each (Step 2b).
+- **Prerequisites** — `docs/dev/todo/` items this change runs into, with a verdict each (Step 2b).
   Omit the section entirely when the scan found nothing relevant; an empty heading is noise
 - Affected packages (ALL packages with links to READMEs and docs)
 - Related feature documentation (link to PRD from Step 4)
@@ -170,7 +174,7 @@ Include all required sections:
 ## TODO
 
 - [x] Record initial discovery (`YYYY-MM-DD-feature-name-initial-discovery.md`)
-- [x] Cross-check `docs/dev/TODO.md` for items this change touches (Step 2b)
+- [x] Cross-check `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
 - [ ] Create failing acceptance tests

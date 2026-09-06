@@ -164,7 +164,7 @@ squashed commit; this PR closes as merged; the base PR's diff grows to cover bot
    `<base-branch>` (the branch this PR folded into), not master.
 4. Update the base PR's title/body to reflect the combined scope, and merge this PR's per-PR
    documents into the base PR's (the PRD and changeset pair in `docs/dev/1-WIP/`). Respect the
-   forward-only linking rule — the base is the predecessor. The four required headings survive the
+   forward-only linking rule — the base is the predecessor. The five required headings survive the
    fold: the combined `## Responsibility` and `## Boundaries` must describe the union, and anything
    the folded PR listed under `## Dependencies` that the base now implements has to come **out** of
    that list, or the base PR is documenting itself as depending on itself.

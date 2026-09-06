@@ -7,7 +7,7 @@ description: >-
   is therefore LINEAR — `gh stack` has no representation for a branching one. Defines the stack
   model, the PR boundary contract (every node is independently reviewable and independently
   mergeable — splitting by layer is forbidden, a stubs-only PR is not a valid node), the per-PR
-  documents in `docs/dev/1-WIP/` with their four headings `## Responsibility`, `## Boundaries`,
+  documents in `docs/dev/1-WIP/` with their five headings `## Responsibility`, `## Boundaries`,
   `## Dependencies` (do not implement a predecessor's surface here) and `## Draft PR contract`, base
   tracking, forward-only doc linking, the golden rules for bottom-up landing (a deleted base branch
   CLOSES its dependent PR), the worktree rules (plan in the current worktree, one branch checked out
@@ -351,19 +351,63 @@ docs/dev/1-WIP/
 Give every PR of a stack a **distinct slug** — several land on the same date, and each adds its own
 files. Never edit a sibling's documents.
 
-### The four required headings
+### The five required headings
 
-`<slug>.md` carries all four, in every PR's document:
+`<slug>.md` carries all five, in every PR's document:
 
 ```
 ## Responsibility        what this PR owns
 ## Boundaries            what it explicitly does not do
 ## Dependencies          per predecessor: what that PR delivers that this one consumes
 ## Draft PR contract     what lands first (API + failing tests) to unblock successors
+## Green wave            whether this node can be greened now, and alongside which others
 ```
 
-A bottom PR still carries all four; its `## Dependencies` says it has none. A document missing any
+A bottom PR still carries all five; its `## Dependencies` says it has none. A document missing any
 of them is the duplicate-development hazard the documents exist to close.
+
+### `## Green wave` — the stack is a line, the dependency graph is not
+
+`gh stack` models a **line**, so the branch order is a topological sort of the real edges — but it is
+not the graph. Reading merge order off the line and concluding that implementation must also be
+serial is the default mistake, and it costs the stack most of its parallelism.
+
+What actually gates a concurrent `/green` is narrower:
+
+> A node is **greenable now** when its own tests need only its own surface plus its predecessors'
+> **published surface**. It is **not** when one of its tests exercises a predecessor's **behaviour** —
+> a real integration rather than an injected double.
+
+That distinction is decided when the tests are written, not when the stack is planned, which is why
+this heading is filled in during wave 2 and revisited if the tests change. A node whose acceptance
+tests mount its *own* component and inject doubles for everything else is greenable immediately, even
+sitting sixth in the line. A node whose test asserts "the key is now held by the agent" needs the
+node that talks to the agent to be green first.
+
+```markdown
+## Green wave
+
+**Wave:** 1 of 3
+**Greenable independently:** yes — every test mounts this node's own component or injects a double
+**Concurrent with:** #454, #455, #456, #457, #459
+**Blocks:** #458 (its add-key test needs this node's agent client to actually perform the add)
+
+Real dependency edges, as opposed to the branch line:
+
+    n1 → n2, n4, n5, n7      n2 → n3      n5 → n6      n7 → n8
+```
+
+State the **reason** in `Greenable independently`, not just the verdict — "no" is only actionable
+when it names the behaviour that must exist first.
+
+Two consequences worth writing down in the node that has them:
+
+- **Every `/green` adds commits**, so finishing one node leaves every descendant stale. A wave of six
+  concurrent greens is six cascades of `/pr-stack-rebase`. Recording the wave lets whoever runs the
+  stack trade throughput against rebase churn deliberately — two batches of three instead of one of
+  six — rather than discovering the cost.
+- **A branch can only be checked out once**, so concurrency means one worktree per node, and in this
+  repo a populated worktree is several GB. Six at once is a real disk decision.
 
 ### There is no shared stack manifest — and there must not be
 

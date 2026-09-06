@@ -56,7 +56,8 @@ fi
 **Stack branch** if any of these hit:
 
 1. This branch's `docs/dev/1-WIP/` changeset carries `## Responsibility`, `## Boundaries`,
-   `## Dependencies` and `## Draft PR contract` — the four headings every PR in a stack has.
+   `## Dependencies`, `## Draft PR contract` and `## Green wave` — the five headings every PR in a
+   stack has.
 2. This branch's open PR has a `baseRefName` that is not `master` / `main`.
 3. The branch matches `feature/<stack-slug>/<node>` and another branch under the same
    `feature/<stack-slug>/` namespace is open as a PR.
@@ -309,4 +310,4 @@ If issues are found, ask the user whether to proceed with fixes or just report.
   `.cursor/rules/feature-doc.mdc`, `.cursor/rules/dev-doc.mdc`
 - **Commands**: `/pr-stack-rebase` (step 0, stack branches), `/green` (its step 0 runs the same gate)
 - **Docs**: the `pr-stack` skill (stack model, `pr_*` tools, PR boundary contract),
-  the `pr-stack` skill § *Per-PR documents* (the per-PR `PRD.md` / `changeset.md` and their four headings)
+  the `pr-stack` skill § *Per-PR documents* (the per-PR `PRD.md` / `changeset.md` and their five headings)
