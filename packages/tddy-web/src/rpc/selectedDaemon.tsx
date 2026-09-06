@@ -6,7 +6,11 @@
  * daemon-level RPC (`ConnectionService`, `TaskService`, `VmService`, …) must address
  * `daemon-{instanceId}`. `SelectedDaemonProvider` owns the one common-room connection shared by
  * every daemon-mode screen, the currently selected daemon, and `useDaemonClient` — the daemon-level
- * equivalent of `useHttpClient`/`useLiveKitClient` from `./transportProvider`.
+ * equivalent of `useHttpClient` from `./transportProvider`.
+ *
+ * The room itself is offered to the subtree as a *connection provider* (`./connections/liveKit`), so
+ * a screen asks for a host rather than for a room and a participant identity, and `useDaemonClient`
+ * is `useHostClient` under a daemon-shaped name.
  *
  * PRD: docs/ft/web/daemon-selector-livekit-rpc.md.
  */
@@ -31,7 +35,7 @@ import {
   type CommonRoomStatus,
 } from "../hooks/useCommonRoom";
 import { useRoomParticipants } from "../hooks/useRoomParticipants";
-import { daemonHostsFromParticipants, daemonRpcIdentity, type DaemonHost } from "../lib/participantRole";
+import { daemonHostsFromParticipants, type DaemonHost } from "../lib/participantRole";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
 import {
   readStoredSelectedDaemon,
@@ -45,7 +49,8 @@ import {
   setAppLocationParams,
   useAppLocation,
 } from "../routing/useAppLocation";
-import { useLiveKitClient } from "./transportProvider";
+import { LiveKitConnections } from "./connections/liveKit";
+import { useHostClient } from "./connections/registry";
 
 // ---------------------------------------------------------------------------
 // Persistence + resolution
@@ -274,9 +279,15 @@ export function SelectedDaemonProvider({
   // state (selected session, open inspector, live terminal attachment, create/VM/task UI) and
   // re-runs its data fetches against the newly selected daemon — a full reload, not just a refetch.
   // The provider itself stays mounted above the key, so the shared common-room connection persists.
+  //
+  // `LiveKitConnections` — which offers that connection to the subtree as a wire hosts are resolved
+  // over — sits above the key for the same reason: a host change reloads the screens, it does not
+  // re-register the wire that reaches them.
   return (
     <SelectedDaemonContext.Provider value={value}>
-      <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
+      <LiveKitConnections room={room}>
+        <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
+      </LiveKitConnections>
     </SelectedDaemonContext.Provider>
   );
 }
@@ -310,24 +321,27 @@ export function useDaemons(): DaemonHost[] {
 }
 
 /**
- * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon's
- * RPC-server identity (`daemon-{instanceId}`) over the shared common-room LiveKit connection.
- * Returns `null` until the room is connected and `instanceId` is set — callers must guard call
- * sites. Use this to address a daemon other than the currently selected one (e.g. adding a project
- * to a chosen host); {@link useDaemonClient} is the selected-daemon convenience over it.
+ * Build and memoize a ConnectRPC client for a daemon-level service, targeting a specific daemon over
+ * whichever wire can reach it — the common room today, an in-process bridge in a host build that
+ * registers one. Returns `null` until a provider can reach `instanceId` and `instanceId` is set —
+ * callers must guard call sites. Use this to address a daemon other than the currently selected one
+ * (e.g. adding a project to a chosen host); {@link useDaemonClient} is the selected-daemon
+ * convenience over it.
+ *
+ * A thin name over {@link useHostClient}: a daemon *is* a host, and this hook is kept because the
+ * screens read in that vocabulary.
  */
 export function useDaemonClientFor<S extends DescService>(
   service: S,
   instanceId: string | null,
 ): Client<S> | null {
-  const { room } = useSelectedDaemon();
-  return useLiveKitClient(service, room, instanceId ? daemonRpcIdentity(instanceId) : null);
+  return useHostClient(service, instanceId);
 }
 
 /**
  * Build and memoize a ConnectRPC client for a daemon-level service, targeting the currently
- * selected daemon's RPC-server identity over the shared common-room LiveKit connection. Returns
- * `null` until a daemon is selected and the room is connected — callers must guard call sites.
+ * selected daemon. Returns `null` until a daemon is selected and a provider can reach it — callers
+ * must guard call sites.
  */
 export function useDaemonClient<S extends DescService>(service: S): Client<S> | null {
   const { selectedInstanceId } = useSelectedDaemon();

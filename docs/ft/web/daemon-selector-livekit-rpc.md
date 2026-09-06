@@ -1,4 +1,4 @@
-# Daemon selector + LiveKit-only RPC routing
+# Daemon selector + host-connection RPC routing
 
 ## Purpose
 
@@ -15,18 +15,26 @@ used by the Projects screen's host picker (`daemonHostsFromParticipants`). Selec
 switches **all daemon-level RPC** (projects, worktrees, VMs, tasks, session list/start) to that
 daemon, without a page reload.
 
-## Why LiveKit-only for daemon-level RPC
+## Why daemon-level RPC does not use HTTP
 
 HTTP `/rpc` is served same-origin by the daemon that served the web bundle. Pointing an HTTP
 ConnectRPC client at a *different* daemon's origin is cross-origin and blocked by CORS (the daemons
-do not — and should not — run a permissive CORS policy for their `/rpc` endpoint). LiveKit RPC
-(ConnectRPC over LiveKit data channels, `tddy-livekit-web`'s `LiveKitTransport`) has no such
-restriction: any daemon reachable in the common room can be addressed over the LiveKit data
-channel it already publishes/subscribes on. The daemon already serves the full daemon-level
-service set over both bindings from the same `rpc_entries` (see
-[`tddy-daemon` RPC dispatch](../../../packages/tddy-daemon/docs/connection-service.md)), so LiveKit
-RPC is a drop-in substitute — **except** for the initial bootstrap, which must stay HTTP to the
-serving daemon:
+do not — and should not — run a permissive CORS policy for their `/rpc` endpoint). So reaching a
+peer daemon needs a wire that is not the browser's origin model.
+
+A **host connection** is the name for that wire, and it is deliberately not spelled in any one
+transport's vocabulary. A call site asks for a connection to a host id; a registered
+`ConnectionProvider` supplies it. LiveKit is the provider today: ConnectRPC over LiveKit data
+channels (`tddy-livekit-web`'s `LiveKitTransport`) can address any daemon in the common room over
+the data channel it already publishes and subscribes on. A build that reaches a host some other way
+registers its own provider, and no screen learns which wire it got. The model, the registry and its
+hooks are described in
+[`tddy-web` host connections](../../../packages/tddy-web/docs/host-connections.md).
+
+The daemon serves the full daemon-level service set over both bindings from the same `rpc_entries`
+(see [`tddy-daemon` RPC dispatch](../../../packages/tddy-daemon/docs/connection-service.md)), so a
+peer connection is a drop-in substitute for the HTTP client — **except** for the initial bootstrap,
+which must stay HTTP to the serving daemon:
 
 - `GET /api/config` — how the web learns the LiveKit URL, common room name, and (new) the serving
   daemon's own instance id.
@@ -35,8 +43,13 @@ serving daemon:
   request over yet.
 
 Everything else — `ConnectionService`, `TaskService`, `ActionService`, `VmService`,
-`ScreenSharingService`, `AuthService` — switches to LiveKit RPC, addressed at the **selected**
-daemon.
+`ScreenSharingService`, `AuthService` — resolves through a host connection, addressed at the
+**selected** daemon.
+
+Who the hosts *are* is still read from common-room participants, so a build with no room resolves no
+hosts even though the connection model itself no longer requires one. Separating the directory from
+the connection is the next step in the `optional-livekit` stack
+([#438](https://github.com/uppin/tddy-coder/pull/438)).
 
 ## Scope boundary: daemon-level vs. per-session RPC
 
@@ -53,9 +66,9 @@ Only **daemon-level** RPC — calls that are not scoped to one already-attached 
 with the selector.
 
 **Exception — cross-host session aggregation.** The sessions drawer deliberately does *not* scope
-`ListSessions` to the selected daemon. It fans the call out to **every** common-room daemon (a
-per-daemon `daemon-{instanceId}` client built from the shared room + transport factory) and merges
-the results, so a session with a live LiveKit participant on a non-selected host stays visible (see
+`ListSessions` to the selected daemon. It fans the call out to **every** advertised daemon (one
+client per host, resolved through that host's connection) and merges the results, so a session with
+a live participant on a non-selected host stays visible (see
 [session-drawer.md § Cross-Host Active Sessions](./session-drawer.md#cross-host-active-sessions)).
 Interaction with such a row routes attach/resume/delete/terminate to that session's **owning**
 daemon via `useDaemonClientFor` — without calling `selectDaemon`, so the selected host is unchanged.

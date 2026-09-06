@@ -6,6 +6,7 @@ import { RpcTransportProvider, useHttpClient, useHttpTransport } from "./rpc/tra
 import { loadClientConfig } from "./rpc/clientConfig";
 import { AuthProvider, useAuthContext } from "./hooks/authProvider";
 import { SelectedDaemonProvider } from "./rpc/selectedDaemon";
+import { ConnectionProviders } from "./rpc/connections/registry";
 import type { DaemonHost } from "./lib/participantRole";
 import { GhosttyTerminalLiveKit } from "./components/GhosttyTerminalLiveKit";
 import { ConnectionTerminalChrome } from "./components/connection/ConnectionTerminalChrome";
@@ -462,10 +463,16 @@ applyDebugMaskFromUrl();
 const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
+    // One registry for the page's whole lifetime. It is empty here: the wires register themselves
+    // as they come up — the common room from `SelectedDaemonProvider`, and in a host build whatever
+    // that build knows how to reach its own daemon over. A page where none of them does resolves
+    // every host to `null`, which is the "not connected" state each screen already renders.
     <RpcTransportProvider>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      <ConnectionProviders>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ConnectionProviders>
     </RpcTransportProvider>,
   );
 }

@@ -43,6 +43,19 @@ export function aFakeCommonRoom(participantIdentities: string[]): Room {
 }
 
 /**
+ * A `Room` double standing in for a common room this page has **joined**.
+ *
+ * `new Room()` is not that, and the difference is visible to anything reading the published room
+ * status: a freshly constructed SDK room reports `ConnectionState.Disconnected`, which
+ * `useCommonRoom` maps to `"connecting"`. A fixture built on one is therefore saying "still
+ * joining" — the state a real page is in while its token is being minted — not "joined". Tests that
+ * mean "connected, and here is the fleet" want this instead.
+ */
+export function aJoinedCommonRoom(participantIdentities: string[] = []): Room {
+  return aFakeCommonRoom(participantIdentities);
+}
+
+/**
  * Like `aFakeCommonRoom`, but each participant carries its own `metadata` string (e.g. a JSON
  * document with a `session` block). Used by acceptance tests that assert presence-driven
  * session metadata rendering in the sessions drawer.

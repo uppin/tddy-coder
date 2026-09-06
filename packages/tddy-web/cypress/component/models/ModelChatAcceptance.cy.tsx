@@ -168,9 +168,12 @@ describe("ModelChatAcceptance — chatting with a model over ACP", () => {
     page.openChat(QWEN);
     page.sendChatPrompt("How many parameters do you have?");
 
-    // Then — the operator is told the prompt did not go anywhere. Reporting success and echoing
-    // their own words back is the one answer that is never true
-    page.chatError().should("have.text", "Message not sent — the presenter is not connected.");
+    // Then — the operator is told the prompt did not go anywhere, and told which host is missing:
+    // this chat has no "presenter", it has the daemon they picked off the Models screen. Reporting
+    // success and echoing their own words back is the one answer that is never true
+    page
+      .chatError()
+      .should("have.text", `Message not sent — daemon ${FIXTURE_DAEMON} is not connected.`);
     page.chatTranscript().should("not.contain.text", "How many parameters do you have?");
     cy.wrap(recorder).should((r) => {
       expect(r.sent).to.have.length(0);

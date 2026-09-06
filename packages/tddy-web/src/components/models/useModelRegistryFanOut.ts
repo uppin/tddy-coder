@@ -25,7 +25,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
+import { Code, ConnectError, type Client } from "@connectrpc/connect";
 import {
   ModelRegistryService,
   type AssignableTool,
@@ -35,9 +35,8 @@ import {
   type ProviderKind,
 } from "../../gen/models_pb";
 import { useAuthContext } from "../../hooks/authProvider";
-import { daemonRpcIdentity } from "../../lib/participantRole";
+import { useHostConnector } from "../../rpc/connections/registry";
 import { useSelectedDaemon } from "../../rpc/selectedDaemon";
-import { useLiveKitTransportFactory } from "../../rpc/transportProvider";
 // The same wording every fleet-wide read reports an unreachable host with.
 import { noConnectionTo } from "../../rpc/useHostFanOut";
 import {
@@ -197,15 +196,15 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
 /**
  * Read — and act on — the model registry of every daemon in the common room.
  *
- * Returns `null`-safe results throughout: until the common room is connected there is no client for
- * any daemon, so every read and every action reports that instead of being issued against a
+ * Returns `null`-safe results throughout: until a wire that can reach a daemon is registered there
+ * is no client for it, so every read and every action reports that instead of being issued against a
  * connection that does not exist (`useDaemonClientFor`'s contract) — and instead of leaving the
  * screen with an empty catalog that reads as "this fleet has no models".
  */
 export function useModelRegistryFanOut(): ModelRegistryFanOut {
   const { sessionToken } = useAuthContext();
-  const { room, daemons } = useSelectedDaemon();
-  const liveKitFactory = useLiveKitTransportFactory();
+  const { daemons, roomStatus } = useSelectedDaemon();
+  const connectHost = useHostConnector();
   const token = sessionToken ?? "";
 
   const [statesByDaemon, setStatesByDaemon] = useState<ReadonlyMap<string, DaemonState>>(new Map());
@@ -216,15 +215,14 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   const [assistantErrors, setAssistantErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const [modelErrors, setModelErrors] = useState<ReadonlyMap<string, string>>(new Map());
 
-  // Address each daemon's own RPC server over the shared common-room connection. Built per call
-  // rather than through `useDaemonClientFor` because the daemon list is dynamic — one hook per
-  // daemon would change the hook count between renders.
+  // Resolve each daemon through the connection registry rather than through `useDaemonClientFor`,
+  // because the daemon list is dynamic — one hook per daemon would change the hook count between
+  // renders. A host no registered wire can reach has no client, which is what every read below
+  // reports as `noConnectionTo`.
   const clientFor = useCallback(
     (instanceId: string): RegistryClient | null =>
-      room && instanceId
-        ? createClient(ModelRegistryService, liveKitFactory(room, daemonRpcIdentity(instanceId)))
-        : null,
-    [room, liveKitFactory],
+      connectHost(instanceId)?.clientFor(ModelRegistryService) ?? null,
+    [connectHost],
   );
 
   /**
@@ -345,14 +343,31 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
     return mergeRegistryEntries(snapshots);
   }, [daemonIds, statesByDaemon]);
 
+  // The common room is this fleet's host directory, and only a *joined* room is one: while the token
+  // is being minted `useCommonRoom` already reports `connecting` with no room and therefore no
+  // roster, so a directory that "can name hosts" then would be claiming a fleet it cannot enumerate.
+  // Treating `connecting` as a directory made every page load render "no daemons in the common room"
+  // — an empty fleet, positively asserted — for the whole of the mint, where the honest answer is
+  // that this screen is not connected to the common room yet.
+  const hasDirectory = roomStatus === "connected";
   const status = useMemo(
     () =>
       registryReadStatus({
-        connected: room !== null,
+        // "Connected" is the claim that this fleet can be addressed at all, and it is the directory
+        // that answers it. An empty fleet is only "no daemons" when the directory is up — otherwise
+        // there are no daemons *known*, which is a disconnection and says so.
+        //
+        // Host reachability deliberately does *not* enter here. Asking `daemonIds.every(reachable)`
+        // would let one host nobody can reach collapse the whole fleet to "not connected" and throw
+        // away the rows already read from the healthy ones — the exact failure `useHostFanOut` is
+        // built to avoid ("one unreachable host costs one error row and never the list"). An
+        // unreachable host is already carried, per host, by the `noConnectionTo` error row that the
+        // fan-out records for it, which is where a partial outage belongs.
+        connected: hasDirectory,
         daemonCount: daemonIds.length,
         answeredCount: daemonIds.filter((instanceId) => statesByDaemon.has(instanceId)).length,
       }),
-    [room, daemonIds, statesByDaemon],
+    [hasDirectory, daemonIds, statesByDaemon],
   );
 
   const toolsFor = useCallback(

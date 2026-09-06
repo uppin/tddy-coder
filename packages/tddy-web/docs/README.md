@@ -2,6 +2,8 @@
 
 - **Changeset history**: [changesets/](changesets/)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
+- **Cross-daemon fan-out**: [host-fan-out.md](host-fan-out.md)
+- **Host connections (transport-neutral daemon RPC)**: [host-connections.md](host-connections.md)
 - **Inactive session activities (main-pane base view)**: [inactive-session-activities.md](inactive-session-activities.md)
 - **Agent conversation tabs (attach a roster agent, talk to it)**: [session-agent-conversation.md](session-agent-conversation.md)
 - **Insecure-origin constraints (plain-http LAN serving)**: [insecure-origin-constraints.md](insecure-origin-constraints.md)
