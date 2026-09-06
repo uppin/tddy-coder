@@ -12,8 +12,7 @@ import { formatBytes } from "./formatTraffic";
  * Accepts a `bigint` (the proto `uint64`) or a plain `number`.
  */
 export function formatDiskFree(availableBytes: number | bigint): string {
-  const bytes = typeof availableBytes === "bigint" ? Number(availableBytes) : availableBytes;
-  return `${formatBytes(bytes)} free`;
+  return formatBytesFree(availableBytes);
 }
 
 /**
@@ -34,9 +33,8 @@ export function clampCorePercent(raw: number): number {
  * renderings of the same quantity.
  */
 export function formatBytesFree(availableBytes: number | bigint): string {
-  // TODO(host-resources): implement
-  void availableBytes;
-  throw new Error("host-resources: formatBytesFree not implemented");
+  const bytes = typeof availableBytes === "bigint" ? Number(availableBytes) : availableBytes;
+  return `${formatBytes(bytes)} free`;
 }
 
 /**
@@ -46,7 +44,6 @@ export function formatBytesFree(availableBytes: number | bigint): string {
  * indistinguishable from an idle one.
  */
 export function formatLoadAverage(load: { oneMinute: number } | null): string | null {
-  // TODO(host-resources): implement
-  void load;
-  throw new Error("host-resources: formatLoadAverage not implemented");
+  if (load === null) return null;
+  return load.oneMinute.toFixed(2);
 }

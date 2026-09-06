@@ -6,7 +6,9 @@
  * idea.
  */
 
+import React from "react";
 import type { HostMemoryStats } from "../../rpc/useHostStats";
+import { formatBytesFree } from "./hostStatsFormat";
 
 export interface MemoryIndicatorProps {
   /** Latest memory reading, or `null` when the host has not reported one. */
@@ -14,7 +16,9 @@ export interface MemoryIndicatorProps {
 }
 
 export function MemoryIndicator({ memory }: MemoryIndicatorProps) {
-  // TODO(host-resources): implement
-  void memory;
-  return <span data-testid="memory-indicator" />;
+  return (
+    <span data-testid="memory-indicator" className="text-xs text-muted-foreground">
+      {memory === null ? "—" : formatBytesFree(memory.availableBytes)}
+    </span>
+  );
 }

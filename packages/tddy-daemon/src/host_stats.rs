@@ -166,18 +166,53 @@ impl HostStats for SysinfoHostStats {
     }
 
     fn memory(&self) -> MemoryUsage {
-        // TODO(host-resources): implement
-        unimplemented!("host-resources: memory")
+        let mut system = self.system.lock().expect("host stats CPU mutex poisoned");
+        // Unlike CPU, memory is a point-in-time reading rather than a delta, but `System` still
+        // caches the last refresh, so it has to be re-read on every call to be live.
+        system.refresh_memory();
+        MemoryUsage {
+            available_bytes: system.available_memory(),
+            total_bytes: system.total_memory(),
+        }
     }
 
     fn logical_cores(&self) -> u32 {
-        // TODO(host-resources): implement
-        unimplemented!("host-resources: logical_cores")
+        let system = self.system.lock().expect("host stats CPU mutex poisoned");
+        // The constructor primes the CPU sampler, so the core list is populated before the first
+        // call. Counting it keeps this consistent with `cpu_per_core_percent`'s length.
+        system.cpus().len() as u32
     }
 
     fn load_average(&self) -> Option<LoadAverage> {
-        // TODO(host-resources): implement
-        unimplemented!("host-resources: load_average")
+        // A load average is a platform fact, not a runtime one: `sysinfo` only implements it for
+        // the targets below and returns an all-zero `LoadAvg` everywhere else. Reporting those
+        // zeros would render as "idle" instead of "cannot tell", so the unsupported targets say
+        // `None` and never reach the wire as a reading.
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        ))]
+        {
+            let average = sysinfo::System::load_average();
+            Some(LoadAverage {
+                one_minute: average.one,
+                five_minutes: average.five,
+                fifteen_minutes: average.fifteen,
+            })
+        }
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        )))]
+        {
+            None
+        }
     }
 }
 

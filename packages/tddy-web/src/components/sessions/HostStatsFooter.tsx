@@ -11,6 +11,8 @@ import React from "react";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import { StatusBar } from "./StatusBar";
 import { DiskSpaceIndicator } from "./DiskSpaceIndicator";
+import { MemoryIndicator } from "./MemoryIndicator";
+import { LoadAverageIndicator } from "./LoadAverageIndicator";
 import { CpuCoresIndicator } from "./CpuCoresIndicator";
 import { UploadProgressIndicator } from "./UploadProgressIndicator";
 import { useHostStats } from "../../rpc/useHostStats";
@@ -27,7 +29,7 @@ export interface HostStatsFooterProps {
 }
 
 export function HostStatsFooter({ attachment, runtimes = [], runtimeRegistry = null }: HostStatsFooterProps) {
-  const { perCorePercent, disk } = useHostStats();
+  const { perCorePercent, disk, memory, load } = useHostStats();
 
   return (
     <div
@@ -36,6 +38,8 @@ export function HostStatsFooter({ attachment, runtimes = [], runtimeRegistry = n
     >
       <StatusBar attachment={attachment} runtimes={runtimes} runtimeRegistry={runtimeRegistry} />
       <DiskSpaceIndicator availableBytes={disk ? disk.availableBytes : null} />
+      <MemoryIndicator memory={memory} />
+      <LoadAverageIndicator load={load} />
       <CpuCoresIndicator perCorePercent={perCorePercent} />
       <UploadProgressIndicator />
     </div>

@@ -90,7 +90,10 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
   const client = hostId === undefined ? selectedClient : hostClient;
   const { sessionToken } = useAuthContext();
   const [perCorePercent, setPerCorePercent] = useState<number[]>([]);
+  const [logicalCores, setLogicalCores] = useState<number | null>(null);
   const [disk, setDisk] = useState<HostDiskStats | null>(null);
+  const [memory, setMemory] = useState<HostMemoryStats | null>(null);
+  const [load, setLoad] = useState<HostLoadStats | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -105,6 +108,7 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
       (signal) => client.streamHostStats({ sessionToken: sessionToken ?? "" }, { signal }),
       (event) => {
         setPerCorePercent(event.cpu?.perCorePercent ?? []);
+        setLogicalCores(event.cpu ? event.cpu.logicalCores : null);
         if (event.disk) {
           setDisk({
             availableBytes: event.disk.availableBytes,
@@ -114,11 +118,30 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
         } else {
           setDisk(null);
         }
+        if (event.memory) {
+          setMemory({
+            availableBytes: event.memory.availableBytes,
+            totalBytes: event.memory.totalBytes,
+          });
+        } else {
+          setMemory(null);
+        }
+        // An absent block is the host saying it has no load average; it becomes "no reading", not
+        // a zero.
+        if (event.load) {
+          setLoad({
+            oneMinute: event.load.oneMinute,
+            fiveMinutes: event.load.fiveMinutes,
+            fifteenMinutes: event.load.fifteenMinutes,
+          });
+        } else {
+          setLoad(null);
+        }
       },
     );
 
     return () => subscription.unsubscribe();
   }, [client, sessionToken]);
 
-  return { perCorePercent, disk };
+  return { perCorePercent, logicalCores, disk, memory, load };
 }
