@@ -17,28 +17,35 @@
 import { describe, it, expect } from "bun:test";
 import { subscribeHostStats, type HostStatsEventLike } from "./hostStatsSubscription";
 
-/** A stream that hands over `events`, then stays open the way the daemon's feed does. */
+/**
+ * A stream that hands over `events`, then stays open the way the daemon's feed does.
+ *
+ * Hand-rolled rather than an `async function*` on purpose. An async generator parked on an `await`
+ * queues a `return()` behind the pending `next()` and never processes it, so its `finally` could
+ * not run and no implementation could pass these tests. A plain iterator answers `return()` the
+ * moment the consumer calls it — which is the contract under test.
+ */
 function aStreamOf(...events: HostStatsEventLike[]) {
   let closed = false;
-  let delivered = 0;
+  let handedOver = 0;
   const stream = {
-    async *[Symbol.asyncIterator]() {
-      try {
-        for (const event of events) {
-          delivered += 1;
-          yield event;
-        }
-        await new Promise<never>(() => undefined);
-      } finally {
-        closed = true;
-      }
+    [Symbol.asyncIterator]() {
+      return {
+        next: async () => {
+          if (handedOver < events.length) {
+            return { value: events[handedOver++], done: false as const };
+          }
+          // Open, with nothing more to say — the daemon between readings.
+          return new Promise<never>(() => undefined);
+        },
+        return: async () => {
+          closed = true;
+          return { value: undefined, done: true as const };
+        },
+      };
     },
   };
-  return {
-    stream,
-    wasClosed: () => closed,
-    deliveredCount: () => delivered,
-  };
+  return { stream, wasClosed: () => closed };
 }
 
 /** A stream that opens and never emits — a host subscribed but not yet reporting. */
@@ -49,14 +56,21 @@ function aSilentStream() {
 /** A stream that fails after handing over `events`. */
 function aStreamThatFailsAfter(...events: HostStatsEventLike[]) {
   let closed = false;
+  let handedOver = 0;
   const stream = {
-    async *[Symbol.asyncIterator]() {
-      try {
-        for (const event of events) yield event;
-        throw new Error("daemon dropped the feed");
-      } finally {
-        closed = true;
-      }
+    [Symbol.asyncIterator]() {
+      return {
+        next: async () => {
+          if (handedOver < events.length) {
+            return { value: events[handedOver++], done: false as const };
+          }
+          throw new Error("daemon dropped the feed");
+        },
+        return: async () => {
+          closed = true;
+          return { value: undefined, done: true as const };
+        },
+      };
     },
   };
   return { stream, wasClosed: () => closed };

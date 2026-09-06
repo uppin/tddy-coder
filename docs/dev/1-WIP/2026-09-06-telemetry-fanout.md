@@ -125,11 +125,11 @@ is unary-shaped and cannot express a subscription.
 - [~] Per-host stream tally in the backend helper — **dropped, by the testing plan above.** The
       properties under test are counts, not attributions; the existing global `hostStatsStreamCount()`
       proves them, and the discriminator a per-host tally needs would have cost a proto change.
-- [~] Telemetry cell rendering live values for an online host — renders, but the test asserts only
-      that the elements exist, against a zero-byte disk fixture. Values are not pinned.
+- [x] Telemetry cell rendering live values for an online host — asserts `42.1 GB` and the exact
+      per-core percentages.
 - [x] Offline / connecting / errored states, no fabricated values
-- [ ] Teardown on unmount verified — **not actually verified.** See the Validation findings below:
-      the backend's counter counts opens only, so the test asserting it cannot fail on a teardown bug.
+- [x] Teardown on unmount verified — by `hostStatsSubscription.test.ts`, which asserts the iterator
+      is closed, including one that never emitted. The backend counter could not have shown this.
 - [x] `./dev bun run cypress:component` green for the touched specs
 
 ## Testing plan
@@ -248,16 +248,41 @@ a pure function that is unit-tested, and a thin hook that wraps it.
 **Backend helper change** — additive only (+8 lines): a `hostStatsSilent` knob. No per-host tally, no
 proto change; the existing global `hostStatsStreamCount()` still carries the count assertions.
 
+### Green phase — the extracted seams
+
+| Suite | Result |
+|---|---|
+| `src/rpc/hostStatsSubscription.test.ts` | 🟢 6/6 |
+| `src/components/hosts/hostTelemetryState.test.ts` | 🟢 4/4 |
+| `cypress/component/HostsScreenTelemetryAcceptance.cy.tsx` | 🟢 9/9 |
+| `cypress/component/HostStatsFooterAcceptance.cy.tsx` | 🟢 6/6 — no regression |
+| `bun run --filter tddy-web test:unit` | 🟢 1113/1113 |
+
+- `subscribeHostStats` iterates the stream **manually** rather than with `for await`, so
+  `unsubscribe()` can call `iterator.return()` directly. A `for await` cannot: parked awaiting a
+  frame that may never arrive, it can never reach a `break` — which is why a silent host was never
+  let go of. The flag is re-checked on the far side of the await, so a frame already in flight when
+  the caller let go is dropped rather than delivered to a component that stopped listening.
+- `telemetryFeedFor` is pure and returns `string | null`, never `undefined`. That spelling means
+  "follow the daemon selector", and it is the one answer that would put one machine's CPU under
+  another machine's name.
+- `useHostStats` keeps its signature and tri-state exactly; only its effect body moved.
+
+**One extra change, outside the plan.** `packages/tddy-web/package.json`'s `test:unit` enumerates
+directories, and `src/components/hosts` was not among them — `hostTelemetryState.test.ts` is the
+first test file to live there, so it would have passed locally and never run in CI. Added the
+directory (one word). A test that does not run is worse than no test, since it reads as coverage.
+
 ## Refactoring needed
 
 ### From /red
 
-- [ ] Extract the stream loop out of `useHostStats` into `subscribeHostStats` so teardown is
+- [x] Extract the stream loop out of `useHostStats` into `subscribeHostStats` so teardown is
       testable; the hook becomes the thin wrapper.
-- [ ] Extract the feed decision into `telemetryFeedFor`, so `HostRowTelemetry` states which host it
+- [x] Extract the feed decision into `telemetryFeedFor`, so `HostRowTelemetry` states which host it
       reads rather than deriving it inline.
-- [ ] Give the offline branch its own `-telemetry-offline` marker.
-- [ ] `useHostStats` unsubscribe is cooperative (`cancelled` + `break`), so a host that never reports
+- [x] Give the offline branch its own `-telemetry-offline` marker.
+- [x] `useHostStats` unsubscribe is cooperative (`cancelled` + `break`), so a host that never reports
       is never let go of. `subscribeHostStats` must close the iterator outright.
 
 ## Validation results

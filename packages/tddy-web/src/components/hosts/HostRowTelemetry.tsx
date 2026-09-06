@@ -35,6 +35,7 @@ import { useHostStats } from "../../rpc/useHostStats";
 import { CpuCoresIndicator } from "../sessions/CpuCoresIndicator";
 import { DiskSpaceIndicator } from "../sessions/DiskSpaceIndicator";
 import { clampCorePercent } from "../sessions/hostStatsFormat";
+import { telemetryFeedFor } from "./hostTelemetryState";
 
 export interface HostRowTelemetryProps {
   /** The host to read. */
@@ -64,7 +65,9 @@ export function HostRowTelemetry({ instanceId, online }: HostRowTelemetryProps) 
   // Hooks cannot be conditional, so "do not subscribe" is said by naming no host: an offline row, or
   // one the directory does not name, resolves no connection and `useHostStats(null)` opens nothing.
   const connection = useHostConnection(online && inDirectory ? instanceId : null);
-  const { perCorePercent, disk } = useHostStats(connection ? instanceId : null);
+  // Reachability is two answers together: the directory names the host, and a wire resolved for it.
+  const routable = connection !== null;
+  const { perCorePercent, disk } = useHostStats(telemetryFeedFor({ instanceId, online, routable }));
 
   // Until the first event lands there is no reading — not a reading of zero. The daemon emits its
   // snapshot on subscribe, so this is the brief window between opening the stream and its first
@@ -72,8 +75,15 @@ export function HostRowTelemetry({ instanceId, online }: HostRowTelemetryProps) 
   const hasReading = perCorePercent.length > 0 || disk !== null;
 
   const content = !online ? (
-    <span title="Offline — no live reading">—</span>
-  ) : !connection ? (
+    // Addressable in its own right: `DiskSpaceIndicator` draws the same em dash for a live host
+    // with no disk figure, so without this marker the two states are indistinguishable.
+    <span
+      data-testid={`hosts-row-${instanceId}-telemetry-offline`}
+      title="Offline — no live reading"
+    >
+      —
+    </span>
+  ) : !routable ? (
     <span
       data-testid={`hosts-row-${instanceId}-telemetry-unavailable`}
       title="No connection reaches this host"

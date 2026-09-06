@@ -26,6 +26,7 @@
 
 import { useEffect, useState } from "react";
 import { ConnectionService } from "../gen/connection_pb";
+import { subscribeHostStats } from "./hostStatsSubscription";
 import { useHostClient } from "./connections/registry";
 import { useDaemonClient } from "./selectedDaemon";
 import { useAuthContext } from "../hooks/authProvider";
@@ -46,9 +47,9 @@ export interface UseHostStatsResult {
 
 /**
  * Subscribe once to `ConnectionService.StreamHostStats` — for `hostId` when given, otherwise for the
- * selected daemon — and expose the latest CPU and disk snapshots. The subscription/cleanup shape
- * mirrors `useSessionActivity`: a `cancelled` flag plus a cleanup that stops iterating, swallowing
- * the unmount AbortError.
+ * selected daemon — and expose the latest CPU and disk snapshots. The reading itself is
+ * `subscribeHostStats`: unmounting closes the stream even when the host has never reported, which a
+ * `for await` parked on its first frame could not do.
  *
  * @param hostId a specific host to read; `null` to subscribe to nothing; **omitted** to follow the
  *        daemon selector. `null` and `undefined` are deliberately not the same: collapsing them
@@ -68,35 +69,24 @@ export function useHostStats(hostId?: string | null): UseHostStatsResult {
 
   useEffect(() => {
     if (!client) return;
-    let cancelled = false;
 
-    (async () => {
-      try {
-        for await (const event of client.streamHostStats({ sessionToken: sessionToken ?? "" })) {
-          if (cancelled) break;
-          setPerCorePercent(event.cpu?.perCorePercent ?? []);
-          if (event.disk) {
-            setDisk({
-              availableBytes: event.disk.availableBytes,
-              totalBytes: event.disk.totalBytes,
-              projectDir: event.disk.projectDir,
-            });
-          } else {
-            setDisk(null);
-          }
+    const subscription = subscribeHostStats(
+      () => client.streamHostStats({ sessionToken: sessionToken ?? "" }),
+      (event) => {
+        setPerCorePercent(event.cpu?.perCorePercent ?? []);
+        if (event.disk) {
+          setDisk({
+            availableBytes: event.disk.availableBytes,
+            totalBytes: event.disk.totalBytes,
+            projectDir: event.disk.projectDir,
+          });
+        } else {
+          setDisk(null);
         }
-      } catch (err) {
-        // A stream aborted on unmount surfaces as an AbortError; ignore it. Any other error while
-        // still mounted leaves the last-known readouts in place (no fallback fabrication).
-        if (!cancelled) {
-          console.debug("[useHostStats] streamHostStats error", err);
-        }
-      }
-    })();
+      },
+    );
 
-    return () => {
-      cancelled = true;
-    };
+    return () => subscription.unsubscribe();
   }, [client, sessionToken]);
 
   return { perCorePercent, disk };
