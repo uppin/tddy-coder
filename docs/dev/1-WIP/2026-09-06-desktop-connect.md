@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 8/8 — the top node
 **Branch:** `feature/hosts-screen/desktop-connect` → base `feature/hosts-screen/desktop-probe`
+**PR:** [#460](https://github.com/uppin/tddy-coder/pull/460)
 
 ## Initial Discovery
 
@@ -46,6 +47,36 @@ Affected: [`screen-sharing-sessions.md`](../../ft/web/screen-sharing-sessions.md
 - Does **not** change node 7's probe, node 6's prompt channel, node 5's agent client, node 4's probes,
   node 3's telemetry, node 2's fan-out, or node 1's registry.
 - Does **not** discover non-default ports or offer multi-monitor selection.
+
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) this PR runs into.
+
+### ⚠ DURING — the daemon's secret stores still truncate in place
+
+`docs/dev/TODO.md` § *The daemon's secret stores still truncate in place* (source:
+atomic-session-file-writes, 2026-08-16). `screen_sharing_vault.rs` — the file this node's
+session-scoped counterpart uses — is **one of the three named**, left out of
+`tddy_core::atomic_file` because `write_atomic` copies permission bits only from an existing target
+and would create a swap file at the process umask on first write.
+
+Two consequences for this node:
+
+1. `FileHostDesktopTargetStore` is new persistence. It must not become a fourth hand-rolled writer.
+   Targets are **not** credentials — label, host, port, protocol, username — so plain
+   `write_atomic` is correct here, and the module should say so rather than copy the vault's pattern
+   by reflex.
+2. This node deliberately does **not** persist a desktop password (it follows
+   `#hosts-screen 6/8`'s prompt-encrypt-drop posture), which is what keeps it out of the blocking
+   case that node's private key is in. That is a reason the inconsistency with the session vault is
+   defensible, not merely a preference.
+
+### ⚠ DURING — `connection_service.rs` is 19,600 lines
+
+`docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines*. This node adds its handlers to
+`screen_sharing_service.rs` rather than to `connection_service.rs`, so it does **not** add to that
+file — nor do nodes 2, 5 and 7. The four that do are **nodes 1, 3, 4 and 6**. Recorded here so the
+stack's total contribution to that file is visible from any of its nodes.
 
 ## Dependencies
 
@@ -216,17 +247,35 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo clippy -p tddy-daemon --all-targets -- -D warnings` — clean.
+- `host_desktop_targets.rs` — 5/5 red. `HostDesktopConnectAcceptance.cy.tsx` — 5/5 red.
+
+### ⚠ Three of these tests passed *vacuously* on the first run — and were rewritten
+
+The gating criteria are naturally phrased as absences ("no connect action when the connection carries
+no media"), and `should("not.exist")` **passes trivially against unimplemented UI**: nothing renders
+the action in *any* condition, so all three were green while proving nothing. They would have stayed
+green through an implementation that got the gating exactly backwards.
+
+Each is now a **contrast** test: mount the positive case and assert the action exists, then mount the
+negative case and assert it is withdrawn. A component that never renders the action fails the first
+half; one that always renders it fails the second. Only correct gating satisfies both.
+
+Same failure mode as a stubbed `pending_prompt_pump_count()` returning `0` in `#hosts-screen 6/8` —
+an assertion that holds for the wrong reason is worse than no assertion, because it reports the
+property as verified forever.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-desktop-connect-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

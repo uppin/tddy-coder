@@ -21,10 +21,13 @@ use crate::screen_sharing_vault::{
 };
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
-    AddTargetRequest, AddTargetResponse, ListTargetsRequest, ListTargetsResponse, Protocol,
-    RemoveTargetRequest, RemoveTargetResponse, ScreenSharingService,
-    ScreenSharingTarget as ProtoScreenSharingTarget, StartStreamRequest, StartStreamResponse,
-    StopStreamRequest, StopStreamResponse, UnlockVaultRequest, UnlockVaultResponse,
+    AddHostTargetRequest, AddHostTargetResponse, AddTargetRequest, AddTargetResponse,
+    ListHostTargetsRequest, ListHostTargetsResponse, ListTargetsRequest, ListTargetsResponse,
+    Protocol, RemoveHostTargetRequest, RemoveHostTargetResponse, RemoveTargetRequest,
+    RemoveTargetResponse, ScreenSharingService, ScreenSharingTarget as ProtoScreenSharingTarget,
+    StartHostStreamRequest, StartStreamRequest, StartStreamResponse, StopHostStreamRequest,
+    StopHostStreamResponse as HostStopStreamResponse, StopStreamRequest, StopStreamResponse,
+    UnlockVaultRequest, UnlockVaultResponse,
 };
 
 const DEFAULT_STREAM_WIDTH: u32 = 1920;
@@ -306,6 +309,59 @@ fn vault_target_to_proto(t: &ScreenSharingTarget) -> ProtoScreenSharingTarget {
 
 #[async_trait]
 impl ScreenSharingService for ScreenSharingServiceImpl {
+    // --- Host-scoped targets (#hosts-screen 8/8) ---
+    //
+    // A desktop belongs to a machine, not to a coding session. These mirror the session-scoped
+    // calls above, addressed by `daemon_instance_id`, and reuse the same bridge spawn path — host
+    // scope is an addressing and storage change, not a second implementation.
+
+    async fn list_host_targets(
+        &self,
+        request: Request<ListHostTargetsRequest>,
+    ) -> Result<Response<ListHostTargetsResponse>, Status> {
+        let _req = request.into_inner();
+        // TODO(desktop-connect): implement
+        unimplemented!("desktop-connect: list_host_targets")
+    }
+
+    async fn add_host_target(
+        &self,
+        request: Request<AddHostTargetRequest>,
+    ) -> Result<Response<AddHostTargetResponse>, Status> {
+        let _req = request.into_inner();
+        // TODO(desktop-connect): implement
+        unimplemented!("desktop-connect: add_host_target")
+    }
+
+    async fn remove_host_target(
+        &self,
+        request: Request<RemoveHostTargetRequest>,
+    ) -> Result<Response<RemoveHostTargetResponse>, Status> {
+        let _req = request.into_inner();
+        // TODO(desktop-connect): implement
+        unimplemented!("desktop-connect: remove_host_target")
+    }
+
+    /// Starts a bridge for a host-scoped target, returning the same coordinates the session-scoped
+    /// call does — the browser overlay already consumes exactly those fields.
+    async fn start_host_stream(
+        &self,
+        request: Request<StartHostStreamRequest>,
+    ) -> Result<Response<StartStreamResponse>, Status> {
+        let _req = request.into_inner();
+        // TODO(desktop-connect): implement
+        unimplemented!("desktop-connect: start_host_stream")
+    }
+
+    async fn stop_host_stream(
+        &self,
+        request: Request<StopHostStreamRequest>,
+    ) -> Result<Response<HostStopStreamResponse>, Status> {
+        let _req = request.into_inner();
+        // TODO(desktop-connect): implement
+        unimplemented!("desktop-connect: stop_host_stream")
+    }
+
     async fn list_targets(
         &self,
         request: Request<ListTargetsRequest>,

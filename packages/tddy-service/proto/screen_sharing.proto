@@ -12,6 +12,21 @@ service ScreenSharingService {
   rpc UnlockVault  (UnlockVaultRequest)  returns (UnlockVaultResponse);
   rpc StartStream  (StartStreamRequest)  returns (StartStreamResponse);
   rpc StopStream   (StopStreamRequest)   returns (StopStreamResponse);
+
+  // --- Host-scoped targets (#hosts-screen 8/8) ---
+  //
+  // A desktop belongs to a MACHINE, not to a coding session. Every RPC above carries a session_id
+  // and its vault lives under the session directory, so there is no way to say "this host's
+  // desktop" today. These mirror the session-scoped calls, addressed by daemon_instance_id.
+  //
+  // The bridge, the LiveKit republishing and the browser overlay are all REUSED unchanged — this is
+  // a scoping change, not a second implementation. There is no browser-side VNC/RDP client and there
+  // must never be one.
+  rpc ListHostTargets(ListHostTargetsRequest) returns (ListHostTargetsResponse);
+  rpc AddHostTarget(AddHostTargetRequest) returns (AddHostTargetResponse);
+  rpc RemoveHostTarget(RemoveHostTargetRequest) returns (RemoveHostTargetResponse);
+  rpc StartHostStream(StartHostStreamRequest) returns (StartStreamResponse);
+  rpc StopHostStream(StopHostStreamRequest) returns (StopHostStreamResponse);
 }
 
 // --- Protocol ---
@@ -119,5 +134,58 @@ message StopStreamRequest {
 }
 
 message StopStreamResponse {
+  bool ok = 1;
+}
+
+// --- Host-scoped target model (#hosts-screen 8/8) ---
+
+message ListHostTargetsRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+}
+message ListHostTargetsResponse {
+  repeated ScreenSharingTarget targets = 1;
+}
+
+message AddHostTargetRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string label = 3;
+  string host = 4;
+  uint32 port = 5;
+  Protocol protocol = 6;
+  string username = 7;
+}
+message AddHostTargetResponse {
+  string target_id = 1;
+}
+
+message RemoveHostTargetRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string target_id = 3;
+}
+message RemoveHostTargetResponse {
+  bool ok = 1;
+}
+
+// Starts a bridge for a HOST-scoped target. Returns the same StartStreamResponse the session-scoped
+// call does, because the browser overlay consumes exactly those fields already.
+message StartHostStreamRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string target_id = 3;
+  // A desktop password, encrypted under this host's public key via the #hosts-screen 6/8 prompt
+  // channel. Empty when the target needs none. NEVER carries a plaintext credential, and nothing
+  // persists it — the session-scoped vault's storing model is deliberately NOT followed here.
+  bytes encrypted_password = 4;
+}
+
+message StopHostStreamRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string target_id = 3;
+}
+message StopHostStreamResponse {
   bool ok = 1;
 }

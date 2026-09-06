@@ -233,3 +233,10 @@ export const hostRemoteDesktopPage = {
   protocol: (instanceId: string, protocol: "vnc" | "rdp") =>
     byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-${protocol}`),
 };
+
+/** Host desktop connect selectors — added by `#hosts-screen 8/8`. */
+export const hostDesktopPage = {
+  connect: (instanceId: string) =>
+    cy.get(`[data-testid="hosts-row-${instanceId}-connect-desktop"]`),
+  overlay: (instanceId: string) => cy.get(`[data-testid="host-desktop-overlay-${instanceId}"]`),
+};
