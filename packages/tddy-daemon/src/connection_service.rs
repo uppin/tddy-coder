@@ -1284,7 +1284,7 @@ impl SeedCodebase {
 
 /// This daemon in its capacity as the claimant of the clones a session's seeded agents read.
 ///
-/// A trait for the same reason [`crate::session_room::SessionRoomHost`] is one: the co-located
+/// A trait for the same reason [`StackParentHost`] is one: the co-located
 /// cursor-cli spawn is a free function, and claiming a clone is the whole of `ConnectionService`'s
 /// peer-facing surface — naming that type there would drag it through every caller of a function
 /// that otherwise mentions nothing of the kind.
@@ -1950,16 +1950,9 @@ impl ConnectionServiceImpl {
         self
     }
 
-    /// This daemon as the host of the rooms of the sessions it runs agents for.
-    ///
-    /// Handed to the agent-start path so the room is open *before* the agent process exists, which
-    /// is what makes "the facilitating daemon is the first participant" a consequence of ordering
-    /// rather than a race (PRD FR2).
-    fn session_room_host(&self) -> DaemonSessionRoomHost {
-        DaemonSessionRoomHost {
-            config: self.config.clone(),
-            instance_id: local_instance_id_for_config(&self.config),
-            rooms: Arc::clone(&self.session_rooms),
+    /// This daemon as the claimant of the clones a session's peer-owned agents read.
+    fn seed_clone_claimant(&self) -> DaemonSeedCloneClaimant {
+        DaemonSeedCloneClaimant {
             service: self.clone(),
         }
     }
@@ -2603,7 +2596,6 @@ impl ConnectionServiceImpl {
             {
                 let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
                 Some(Arc::new(StackChildSpawnHandler {
-                    room_host: Arc::new(self.session_room_host()),
                     stack_parent_host: Arc::new(self.clone()),
                     service: self.clone(),
                     config: self.config.clone(),
@@ -2662,7 +2654,6 @@ impl ConnectionServiceImpl {
             semantic_index,
             create_remote_branch,
             &self.task_registry,
-            &self.session_room_host(),
         )
         .await
     }
@@ -2684,7 +2675,6 @@ impl ConnectionServiceImpl {
             return None;
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
-            room_host: Arc::new(self.session_room_host()),
             stack_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
@@ -2732,7 +2722,6 @@ impl ConnectionServiceImpl {
         let sessions_base = self.tddy_data_dir.clone();
         let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
         let handler = Arc::new(GrillMeConversationSpawnHandler {
-            room_host: Arc::new(self.session_room_host()),
             stack_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
@@ -3075,16 +3064,12 @@ pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
     crate::config::resolve_claude_binary_path(config)
 }
 
-/// The daemon's own [`crate::session_room::SessionRoomHost`].
+/// The daemon in its capacity as the claimant of the clones a session's peer-owned agents read.
 ///
-/// Holds a clone of the service it will serve inside the room — the same `ConnectionService` it
-/// answers on in the common room, so a participant reaches every file-access method without a
-/// second connection anywhere (PRD FR3). That makes a reference cycle with the registry, which is
-/// deliberate and broken by `close`: see `SessionRoomRegistry`.
-struct DaemonSessionRoomHost {
-    config: DaemonConfig,
-    instance_id: String,
-    rooms: Arc<crate::session_room::SessionRoomRegistry>,
+/// A shallow clone of the service (every mutable field is behind an `Arc`) rather than the service
+/// itself, so the free spawn functions can be handed the one collaborator they need without naming
+/// the concrete daemon type in their signatures.
+struct DaemonSeedCloneClaimant {
     service: ConnectionServiceImpl,
 }
 
@@ -3131,7 +3116,7 @@ impl crate::session_room::RemoteSnapshotSource for ConnectionServiceImpl {
 }
 
 #[async_trait::async_trait]
-impl SeededAgentClones for DaemonSessionRoomHost {
+impl SeededAgentClones for DaemonSeedCloneClaimant {
     async fn claim_for_seed(
         &self,
         session_id: &str,
@@ -3143,73 +3128,6 @@ impl SeededAgentClones for DaemonSessionRoomHost {
             .claim_co_located_seed_clones(session_id, codebase, session_token, records)
             .await
     }
-}
-
-#[async_trait::async_trait]
-impl crate::session_room::SessionRoomHost for DaemonSessionRoomHost {
-    async fn open_for(
-        &self,
-        session_id: &str,
-        worktree_root: &Path,
-        session_dir: &Path,
-    ) -> Result<Option<crate::session_room::OpenedSessionRoom>, Status> {
-        self.rooms
-            .open(
-                &crate::session_room::DaemonRoomHosting {
-                    config: &self.config,
-                    instance_id: &self.instance_id,
-                    rooms: &self.rooms,
-                }
-                .for_worktree(session_id, worktree_root, session_dir),
-                tddy_service::ConnectionServiceServer::new(self.service.clone()),
-            )
-            .await
-    }
-}
-
-/// Open the session room of a session whose agent this daemon is about to spawn, and say which way
-/// it went.
-///
-/// Every spawn path that starts an agent against a checkout this daemon holds goes through here —
-/// claude-cli and cursor-cli, sandboxed or not. The room belongs to the daemon **running the
-/// agent** (`docs/ft/daemon/session-room.md` § Roles), and on all four of those paths that daemon
-/// is this one: it resolved the worktree, it holds the session directory, and it is about to fork
-/// the agent. A `workspace` session is the one session type deliberately left out — it has no
-/// agent, so no facilitating daemon and no room; see `crate::workspace_session`.
-///
-/// Before the agent exists, not after: the room's first-participant property is a consequence of
-/// this `await` completing while the only thing that could join is still unspawned (PRD FR2). A
-/// failure here fails the start — the agent's tool transport is minted for this room, so a session
-/// started without it is a session whose agent has nowhere to ask for its files. A daemon with no
-/// `livekit:` credentials at all is not a failure but a `None`: the room is an addition to a
-/// session, never a prerequisite for one, and such a daemon starts sessions exactly as it did
-/// before rooms existed.
-///
-/// Deliberately not returned in `StartSessionResponse.livekit_room`: that field names the
-/// session's *terminal* room, which the browser attaches to, and the two are different rooms with
-/// different participants. A caller that wants this one derives it from the session id through
-/// `session_room_name`, which is how the agent's own wiring gets it too.
-pub(crate) async fn open_session_room_before_spawning_agent(
-    room_host: &dyn crate::session_room::SessionRoomHost,
-    session_type: &str,
-    session_id: &str,
-    worktree_path: &Path,
-    session_dir: &Path,
-) -> Result<(), Status> {
-    match room_host
-        .open_for(session_id, worktree_path, session_dir)
-        .await?
-    {
-        Some(room) => log::info!(
-            "{session_type} session {session_id} facilitated in {} as {}",
-            room.room,
-            room.server_identity
-        ),
-        None => log::debug!(
-            "{session_type} session {session_id} runs without a session room (LiveKit not configured)"
-        ),
-    }
-    Ok(())
 }
 
 /// The exec-catalog names of the tools a def's own loop may call — the spelling the wire, the
@@ -3498,7 +3416,6 @@ async fn spawn_claude_cli_session_inner(
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
     task_registry: &TaskRegistry,
-    room_host: &dyn crate::session_room::SessionRoomHost,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -3731,15 +3648,6 @@ async fn spawn_claude_cli_session_inner(
         env_extra.push((key, value));
     }
 
-    open_session_room_before_spawning_agent(
-        room_host,
-        "claude-cli",
-        session_id,
-        &worktree_path,
-        &session_dir,
-    )
-    .await?;
-
     let handle = manager
         .start_with_options(
             &session_id_owned,
@@ -3797,29 +3705,22 @@ async fn spawn_claude_cli_session_inner(
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
 
-    // Optionally expose the PTY via a per-session LiveKit participant so that LiveKit
-    // clients (web UI, pty-relay --livekit-url) can use the same bidi-stream path as
-    // tool sessions. Falls back gracefully: if LiveKit is not configured the session is
-    // still usable via the gRPC connectrpc endpoints.
-    let (lk_room, lk_url, lk_server_identity) = if let Some(lk) =
-        spawner::livekit_creds_from_config(config)
-    {
-        let room_name = spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
-        let server_identity = spawner::livekit_server_identity_for_session(
-            lk.daemon_instance_id.as_deref(),
+    // What this session tells the fleet about itself, recorded now and published when its terminal
+    // is first bridged into LiveKit. The stack association is the load-bearing part: a PR-Stack view
+    // on another host has no other way to learn that this session is the planned node's child
+    // (D37), and it is knowledge this call has and a later reader does not — no session directory
+    // records which planned node was materialized — so it is kept rather than re-derived.
+    //
+    // Recording it is local work over values already in hand. Putting a participant in the room is
+    // not: it is a network round-trip to a server this daemon does not control, and a session is
+    // made of a checkout and a process, both of which already exist by now. That join belongs to
+    // the moment a LiveKit consumer arrives, which is the same moment the session's room is opened
+    // — see `SessionRoomRegistry::ensure_open`. The desktop reaches its own host over IPC and
+    // drives this terminal without a bridge at all.
+    claude_cli_manager
+        .expose_terminal_to_livekit(
             session_id,
-        );
-        match crate::cli_session_manager::spawn_livekit_bridge(
-            Arc::clone(&handle),
-            &lk.url,
-            &room_name,
-            &lk.api_key,
-            &lk.api_secret,
-            &server_identity,
-            // What this session tells the fleet about itself. The stack association is the load-
-            // bearing part: a PR-Stack view on another host has no other way to learn that this
-            // session is the planned node's child (D37).
-            Some(claude_cli_participant_metadata(&StartingClaudeCliSession {
+            claude_cli_participant_metadata(&StartingClaudeCliSession {
                 session_id,
                 model,
                 recipe: managed_recipe
@@ -3829,31 +3730,23 @@ async fn spawn_claude_cli_session_inner(
                 worktree_path: &worktree_path,
                 branch: &spawned_branch,
                 stack_parent: &stack_parent,
-            })),
+            }),
         )
-        .await
-        {
-            Ok(()) => {
-                log::info!(
-                    target: "tddy_daemon::connection_service",
-                    "claude-cli session {}: LiveKit bridge started (identity={})",
-                    session_id,
-                    server_identity
-                );
-                (room_name, lk.url.clone(), server_identity)
-            }
-            Err(e) => {
-                log::warn!(
-                    target: "tddy_daemon::connection_service",
-                    "claude-cli session {}: LiveKit bridge failed ({}); gRPC path still works",
-                    session_id,
-                    e
-                );
-                (String::new(), String::new(), String::new())
-            }
-        }
-    } else {
-        (String::new(), String::new(), String::new())
+        .await;
+
+    // Where that terminal will be served once it is bridged. Derived from the session id and the
+    // deployment config rather than read off a connection, so it is the same answer whether a
+    // consumer has arrived yet or not — and deriving it contacts nothing.
+    let (lk_room, lk_url, lk_server_identity) = match spawner::livekit_creds_from_config(config) {
+        Some(lk) => (
+            spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id),
+            lk.url.clone(),
+            spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            ),
+        ),
+        None => (String::new(), String::new(), String::new()),
     };
 
     log::info!(
@@ -4303,12 +4196,97 @@ impl ConnectionServiceImpl {
     //
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
 
-    /// Open the session's room, if it is not open already, so an owning daemon has something to be
+    /// Open the session's room over a checkout this daemon holds, unless it is open already.
+    ///
+    /// The one place a room is opened outside a split start, and the reason session *creation* no
+    /// longer opens one: a room is what a session is reached through, so it is created when
+    /// something first reaches for it. Every caller here is such a reach — a client connecting to
+    /// the session, an owning daemon being admitted to it — and each of them is already waiting on
+    /// a LiveKit round trip by asking.
+    ///
+    /// `Ok(None)` means this daemon has no LiveKit credentials at all and hosts no rooms; each
+    /// caller decides what that means for it.
+    async fn ensure_session_room(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        worktree_root: &Path,
+    ) -> Result<Option<crate::session_room::OpenedSessionRoom>, Status> {
+        let local_instance_id = local_instance_id_for_config(&self.config);
+        let hosting = crate::session_room::DaemonRoomHosting {
+            config: &self.config,
+            instance_id: &local_instance_id,
+            rooms: &self.session_rooms,
+        }
+        .for_worktree(session_id, worktree_root, session_dir);
+        self.session_rooms
+            .ensure_open(
+                &hosting,
+                tddy_service::ConnectionServiceServer::new(self.clone()),
+                self,
+            )
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::session_room::SessionTerminalBridge for ConnectionServiceImpl {
+    /// Bridge the session's PTY into the room a remote client drives it from.
+    ///
+    /// The same coordinates `StartSession` reported and the Telegram attach hint hands out — the
+    /// lobby, under `daemon-{instance}-{session}` — because deferring *when* the participant joins
+    /// must not move *where* it is. Both are pure functions of the deployment config and the
+    /// session id, so deriving them contacts nothing.
+    ///
+    /// A daemon with no LiveKit credentials bridges nothing, exactly as it hosts no rooms. A
+    /// failure with credentials in hand is reported: the room this was called alongside has just
+    /// been created, so LiveKit answered a moment ago, and a caller told its session is reachable
+    /// over LiveKit when its terminal is not would find that out by typing into nothing.
+    async fn bridge(&self, session_id: &str) -> Result<(), Status> {
+        let Some(lk) = spawner::livekit_creds_from_config(&self.config) else {
+            return Ok(());
+        };
+        let at = crate::cli_session_manager::LiveKitTerminalAddress {
+            url: lk.url.clone(),
+            room: spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id),
+            api_key: lk.api_key.clone(),
+            api_secret: lk.api_secret.clone(),
+            identity: spawner::livekit_server_identity_for_session(
+                lk.daemon_instance_id.as_deref(),
+                session_id,
+            ),
+        };
+        match self
+            .claude_cli_manager
+            .ensure_livekit_terminal(session_id, &at)
+            .await
+        {
+            Ok(true) => log::info!(
+                target: "tddy_daemon::connection_service",
+                "session {session_id}: terminal served in {} as {}",
+                at.room,
+                at.identity
+            ),
+            Ok(false) => log::debug!(
+                target: "tddy_daemon::connection_service",
+                "session {session_id} exposes no terminal over LiveKit; its room carries no bridge"
+            ),
+            Err(e) => {
+                return Err(Status::internal(format!(
+                    "session '{session_id}' has its room, but its terminal could not be served in \
+                     {} as {}: {e}",
+                    at.room, at.identity
+                )))
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ConnectionServiceImpl {
+    /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
     /// admitted to.
     ///
-    /// A session started through the ordinary spawn path already has its room — it is opened before
-    /// the agent process exists. This covers the session that does not: a resumed session whose
-    /// daemon restarted, and any session whose first remote agent arrives after the room was closed.
     /// A peer told to join a room nobody opened waits out its deadline against a participant that
     /// never arrives, so this is done *before* the peer is asked for anything.
     async fn ensure_session_room_for_agents(
@@ -4316,10 +4294,13 @@ impl ConnectionServiceImpl {
         session_id: &str,
         codebase: &SeedCodebase,
     ) -> Result<(), Status> {
+        // Asked before the checkout is, because the two questions are independent and only one of
+        // them is a precondition. A session already hosting its room needs nothing from this call,
+        // including a local checkout — under split placement it has none, and demanding one here
+        // would refuse an attach to a room that is open and serving.
         if self.session_rooms.hosts(session_id) {
             return Ok(());
         }
-        let session_dir = codebase.session_dir.as_path();
         let worktree_root = codebase.worktree_root.clone().ok_or_else(|| {
             Status::failed_precondition(format!(
                 "session '{session_id}' has no checkout on this daemon, so its room cannot be \
@@ -4327,19 +4308,8 @@ impl ConnectionServiceImpl {
                  to mirror"
             ))
         })?;
-        let local_instance_id = local_instance_id_for_config(&self.config);
-        let hosting = crate::session_room::DaemonRoomHosting {
-            config: &self.config,
-            instance_id: &local_instance_id,
-            rooms: &self.session_rooms,
-        }
-        .for_worktree(session_id, &worktree_root, session_dir);
         match self
-            .session_rooms
-            .open(
-                &hosting,
-                tddy_service::ConnectionServiceServer::new(self.clone()),
-            )
+            .ensure_session_room(session_id, codebase.session_dir.as_path(), &worktree_root)
             .await?
         {
             Some(room) => {
@@ -6418,18 +6388,6 @@ impl ConnectionServiceImpl {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
-        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
-        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
-        // reach, not who hosts its room.
-        open_session_room_before_spawning_agent(
-            &self.session_room_host(),
-            "claude-cli",
-            session_id,
-            &worktree_path,
-            &session_dir,
-        )
-        .await?;
-
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
@@ -6893,18 +6851,6 @@ impl ConnectionServiceImpl {
         env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
-
-        // The jail is this daemon's child and the checkout is this daemon's, so a sandboxed session
-        // is facilitated here exactly as an unsandboxed one is — the jail changes what the agent can
-        // reach, not who hosts its room.
-        open_session_room_before_spawning_agent(
-            &self.session_room_host(),
-            "cursor-cli",
-            session_id,
-            &worktree_path,
-            &session_dir,
-        )
-        .await?;
 
         let mut handle = crate::sandbox_session::spawn_sandbox_runner(
             crate::sandbox_session::SandboxRunnerSpawn {
@@ -7916,17 +7862,14 @@ fn prepare_managed_workflow_inner(
 /// [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses. Bound only to a `pr-stack`
 /// orchestrator's toolcall listener, so it can only spawn children for that orchestrator's stack.
 struct StackChildSpawnHandler {
-    /// Opens the session room of each child agent this handler spawns — the children are
-    /// agent sessions of this same daemon, so it facilitates their rooms too.
-    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
-    /// Resolves each child's base off the orchestrator's stack. Held for the same reason
-    /// `room_host` is: the orchestrator this handler spawns children of is a session of *this*
-    /// daemon, so the resolution never leaves the host — but it takes the one path every spawn
-    /// takes, rather than a second one that would drift from it.
+    /// Resolves each child's base off the orchestrator's stack. A collaborator rather than
+    /// something built here because the orchestrator this handler spawns children of is a session
+    /// of *this* daemon, so the resolution never leaves the host — but it takes the one path every
+    /// spawn takes, rather than a second one that would drift from it.
     stack_parent_host: Arc<dyn StackParentHost>,
 
     /// The daemon whose attachment path materializes the child's documents. A shallow clone (every
-    /// mutable field is behind an `Arc`), exactly as [`DaemonSessionRoomHost`] holds one: the
+    /// mutable field is behind an `Arc`), exactly as [`DaemonSeedCloneClaimant`] holds one: the
     /// documents go through [`ConnectionServiceImpl::prepare_session_attachments`], the same
     /// materializer `StartSession` uses, so a child cannot differ by how it was started.
     service: ConnectionServiceImpl,
@@ -8050,7 +7993,6 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // never push a remote branch here.
             false,
             &self.claude_cli_manager.task_registry(),
-            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -8232,7 +8174,6 @@ mod stack_child_spawn_tests {
         /// [`ConnectionServiceImpl::start_claude_cli_session`] wires it for a pr-stack session.
         fn child_spawn_handler(&self) -> StackChildSpawnHandler {
             StackChildSpawnHandler {
-                room_host: Arc::new(self.service.session_room_host()),
                 // Same clone production passes: the orchestrator is a session of this daemon, so
                 // resolving a child's base never leaves the host.
                 stack_parent_host: Arc::new(self.service.clone()),
@@ -8534,9 +8475,6 @@ fn conversation_branch_slug(prompt: &str) -> String {
 /// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
 /// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
 struct GrillMeConversationSpawnHandler {
-    /// Opens the session room of each child agent this handler spawns — the children are
-    /// agent sessions of this same daemon, so it facilitates their rooms too.
-    room_host: Arc<dyn crate::session_room::SessionRoomHost>,
     /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
     /// daemon. Held for the same reason [`StackChildSpawnHandler::stack_parent_host`] is.
     stack_parent_host: Arc<dyn StackParentHost>,
@@ -8622,7 +8560,6 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             &self.claude_cli_manager.task_registry(),
-            self.room_host.as_ref(),
         )
         .await
         .map_err(|status| status.message().to_string())?;
@@ -10671,7 +10608,7 @@ impl ConnectionServiceImpl {
             // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
             // than persisting a roster entry that resolves to nothing on the next resume.
             let mut started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
-            let host = self.session_room_host();
+            let clones = self.seed_clone_claimant();
             return crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
                 &self.config,
                 &self.tddy_data_dir,
@@ -10704,8 +10641,7 @@ impl ConnectionServiceImpl {
                 req.semantic_index,
                 req.create_remote_branch,
                 &self.task_registry,
-                &host,
-                &host,
+                &clones,
             )
             .await;
         }
@@ -12615,11 +12551,39 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
 
-        // claude-cli, cursor-cli, and workspace sessions do not use LiveKit — return empty fields immediately.
-        if metadata.session_type.as_deref() == Some("claude-cli")
-            || metadata.session_type.as_deref() == Some("cursor-cli")
-            || metadata.session_type.as_deref() == Some("workspace")
-        {
+        let session_type = metadata.session_type.as_deref().unwrap_or_default();
+
+        // Connecting to a session is what opens its room. Session creation does not touch LiveKit
+        // at all, so this is the moment the daemon has to be in the room a participant is about to
+        // look for — including a `tddy-session-sync` mirror, which joins directly and waits for
+        // `daemon-{instance_id}` to already be there.
+        //
+        // Only for a session this daemon facilitates over a checkout it holds. A session whose
+        // agent runs elsewhere has its room over there, and opening one here would put it on a
+        // daemon that serves nobody.
+        if crate::session_room::session_type_is_facilitated_here(session_type) {
+            match metadata.repo_path.as_deref() {
+                Some(worktree_root) => {
+                    self.ensure_session_room(
+                        &req.session_id,
+                        &session_dir,
+                        Path::new(worktree_root),
+                    )
+                    .await?;
+                }
+                None => log::debug!(
+                    "ConnectSession: session {} records no checkout on this daemon, so its room is \
+                     not this daemon's to open",
+                    req.session_id
+                ),
+            }
+        }
+
+        // The *terminal* room, which is a different room with different participants. A claude-cli,
+        // cursor-cli or workspace session has none: its PTY is served over gRPC and bridged into
+        // the lobby, never into a room of its own, so these three answer with empty coordinates —
+        // as they did before the session room above existed.
+        if matches!(session_type, "claude-cli" | "cursor-cli" | "workspace") {
             return Ok(Response::new(ConnectSessionResponse {
                 livekit_room: String::new(),
                 livekit_url: String::new(),

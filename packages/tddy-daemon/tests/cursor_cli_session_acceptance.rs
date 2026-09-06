@@ -1,6 +1,6 @@
 //! Acceptance tests: Cursor Agent CLI session type (PRD: docs/ft/daemon/cursor-cli-session.md).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tddy_core::session_metadata::{read_session_metadata, SessionMetadata};
@@ -12,7 +12,6 @@ use tddy_daemon::connection_service::{
     StackNodeLink, StackParentHost,
 };
 use tddy_daemon::cursor_cli_spawn::spawn_cursor_cli_session_inner;
-use tddy_daemon::session_room::{OpenedSessionRoom, SessionRoomHost};
 use tddy_rpc::{Code, Request, Response, Status};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSessionsRequest, StartSessionRequest,
@@ -608,54 +607,24 @@ async fn cursor_cli_peer_spawn_rejects_a_repo_path_that_is_not_a_directory() {
 }
 
 // ---------------------------------------------------------------------------
-// Session room (PRD: docs/ft/daemon/session-room.md).
+// Seeded clones (PRD: docs/ft/daemon/session-agent-roster.md § Clones).
 //
-// A cursor-cli session runs its agent on this daemon, against a checkout this
-// daemon made — so this daemon is its facilitating daemon and hosts its room,
-// exactly as it does for a claude-cli session. The room is opened before the
-// agent process exists, which is what makes the daemon its first participant.
+// A cursor-cli spawn no longer opens the session's LiveKit room: creating a session is local work,
+// and the room is opened when something first connects to the session over LiveKit
+// (`session_room_acceptance.rs` § Session creation is a local operation). What the spawn still
+// takes is the daemon that claims clones for peer-owned agents, which these starts name none of.
 // ---------------------------------------------------------------------------
 
-/// One `open_for` call, as the spawn path made it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AnOpenedRoom {
-    session_id: String,
-    worktree_root: PathBuf,
-    session_dir: PathBuf,
-}
-
-/// A [`SessionRoomHost`] that records what it was asked to host, standing in for the daemon's own —
-/// which needs a LiveKit server to answer at all.
+/// A daemon with no peer-owned agents to claim clones for.
 #[derive(Default)]
-struct RecordingRoomHost {
-    opened: Mutex<Vec<AnOpenedRoom>>,
-    /// When set, the reason this host cannot open a room: a configured daemon that fails to reach
-    /// its LiveKit server answers this way.
-    refusal: Option<String>,
-}
+struct ADaemonClaimingNoClones;
 
-/// A daemon that hosts session rooms and records the ones it opens.
-fn a_room_host() -> RecordingRoomHost {
-    RecordingRoomHost::default()
-}
-
-impl RecordingRoomHost {
-    /// A daemon configured to host rooms that cannot reach LiveKit to open one.
-    fn that_cannot_open_a_room(mut self) -> Self {
-        self.refusal = Some("livekit is unreachable".to_string());
-        self
-    }
-
-    fn rooms_opened(&self) -> Vec<AnOpenedRoom> {
-        self.opened
-            .lock()
-            .expect("room log is not poisoned")
-            .clone()
-    }
+fn a_daemon_claiming_no_clones() -> ADaemonClaimingNoClones {
+    ADaemonClaimingNoClones
 }
 
 #[async_trait::async_trait]
-impl SeededAgentClones for RecordingRoomHost {
+impl SeededAgentClones for ADaemonClaimingNoClones {
     /// These starts name no agent, so there is no peer to claim a checkout from.
     async fn claim_for_seed(
         &self,
@@ -665,33 +634,6 @@ impl SeededAgentClones for RecordingRoomHost {
         _records: &mut [tddy_core::SessionAgentRecord],
     ) -> Result<SeededCloneGuard, Status> {
         Ok(SeededCloneGuard::nothing_claimed())
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionRoomHost for RecordingRoomHost {
-    async fn open_for(
-        &self,
-        session_id: &str,
-        worktree_root: &Path,
-        session_dir: &Path,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
-        if let Some(reason) = &self.refusal {
-            return Err(Status::internal(reason.clone()));
-        }
-        self.opened
-            .lock()
-            .expect("room log is not poisoned")
-            .push(AnOpenedRoom {
-                session_id: session_id.to_string(),
-                worktree_root: worktree_root.to_path_buf(),
-                session_dir: session_dir.to_path_buf(),
-            });
-        Ok(Some(OpenedSessionRoom {
-            room: format!("session-{session_id}"),
-            url: "ws://livekit.test".to_string(),
-            server_identity: "daemon-test-instance".to_string(),
-        }))
     }
 }
 
@@ -726,9 +668,9 @@ impl ACursorCliDaemon {
     async fn start_cursor_cli_session(
         &self,
         session_id: &str,
-        room_host: &RecordingRoomHost,
+        clones: &ADaemonClaimingNoClones,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_cursor_cli_session_under(session_id, room_host, SpawnStackParent::NoParent)
+        self.start_cursor_cli_session_under(session_id, clones, SpawnStackParent::NoParent)
             .await
     }
 
@@ -737,7 +679,7 @@ impl ACursorCliDaemon {
     async fn start_cursor_cli_session_under(
         &self,
         session_id: &str,
-        room_host: &RecordingRoomHost,
+        clones: &ADaemonClaimingNoClones,
         stack_parent: SpawnStackParent<'_>,
     ) -> Result<Response<StartSessionResponse>, Status> {
         spawn_cursor_cli_session_inner(
@@ -763,8 +705,7 @@ impl ACursorCliDaemon {
             false,
             false,
             &self.agents.task_registry(),
-            room_host,
-            room_host,
+            clones,
         )
         .await
     }
@@ -792,63 +733,27 @@ impl ACursorCliDaemon {
     }
 }
 
-const ROOM_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000a1";
+/// A session id in the shape the daemon mints, for the start that needs no other setup.
+const A_LOCAL_SESSION_ID: &str = "019f9fdb-cf83-70d2-aef5-0000000000a1";
 
 #[tokio::test]
-async fn cursor_cli_start_hosts_the_room_of_the_session_it_starts() {
-    // Given
+async fn a_cursor_cli_session_is_started_out_of_local_work_alone() {
+    // Given a daemon that can start cursor-cli sessions
     let daemon = a_cursor_cli_daemon();
-    let rooms = a_room_host();
+    let clones = a_daemon_claiming_no_clones();
 
-    // When
+    // When it starts one
     daemon
-        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
+        .start_cursor_cli_session(A_LOCAL_SESSION_ID, &clones)
         .await
         .expect("cursor-cli StartSession must succeed");
 
-    // Then
-    assert_eq!(
-        rooms.rooms_opened(),
-        vec![AnOpenedRoom {
-            session_id: ROOM_SESSION_ID.to_string(),
-            worktree_root: daemon.worktree_of(ROOM_SESSION_ID),
-            session_dir: daemon.session_dir(ROOM_SESSION_ID),
-        }],
-        "a cursor-cli session must be facilitated in a room of its own, over its own checkout"
-    );
-}
-
-#[tokio::test]
-async fn cursor_cli_start_fails_when_the_session_room_cannot_be_opened() {
-    // Given
-    let daemon = a_cursor_cli_daemon();
-    let rooms = a_room_host().that_cannot_open_a_room();
-
-    // When
-    let err = daemon
-        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
-        .await
-        .expect_err("a session whose room cannot be opened must not start");
-
-    // Then
-    assert_eq!(err.message, "livekit is unreachable");
-}
-
-#[tokio::test]
-async fn cursor_cli_agent_is_not_spawned_when_the_session_room_cannot_be_opened() {
-    // Given
-    let daemon = a_cursor_cli_daemon();
-    let rooms = a_room_host().that_cannot_open_a_room();
-
-    // When
-    let _ = daemon
-        .start_cursor_cli_session(ROOM_SESSION_ID, &rooms)
-        .await;
-
-    // Then — the room is opened first, so a refused room leaves no agent behind
+    // Then the session is a real checkout of its own. Nothing about LiveKit took part in getting
+    // here — the spawn path is handed no room host at all, and the room this session is facilitated
+    // in is opened when something first connects to it over LiveKit.
     assert!(
-        daemon.agents.get(ROOM_SESSION_ID).await.is_none(),
-        "the cursor agent must not be spawned before its session room is open"
+        daemon.worktree_of(A_LOCAL_SESSION_ID).is_dir(),
+        "a started cursor-cli session must own a checkout on disk"
     );
 }
 
@@ -941,14 +846,14 @@ const ORCHESTRATOR_SESSION_ID: &str = "019f9dd5-716d-7071-96ac-464ff7b98c2a";
 async fn a_cursor_cli_child_records_its_branch_on_the_planned_node_it_materializes() {
     // Given — a cursor-cli spawn of a planned PR, exactly as the PR-Stack row starts one
     let daemon = a_cursor_cli_daemon();
-    let rooms = a_room_host();
+    let clones = a_daemon_claiming_no_clones();
     let orchestrators_daemon = ARecordingStackParentOwner::default();
 
     // When
     daemon
         .start_cursor_cli_session_under(
             STACK_CHILD_SESSION_ID,
-            &rooms,
+            &clones,
             SpawnStackParent::OwnedBy {
                 session_id: ORCHESTRATOR_SESSION_ID,
                 daemon_instance_id: "host-a",

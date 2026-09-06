@@ -148,13 +148,10 @@ pub async fn spawn_cursor_cli_session_inner(
     // When true (new_branch_from_base only), push the new branch to origin at session start.
     create_remote_branch: bool,
     task_registry: &tddy_task::TaskRegistry,
-    // This daemon in its capacity as a host of session rooms. A parameter rather than something
-    // built here for the same reason the claude-cli spawn takes one: this is a free function, and
-    // the room's RPC surface is the whole `ConnectionService` — naming that type here would drag it
-    // through every caller of a function that otherwise mentions nothing of the kind.
-    room_host: &dyn crate::session_room::SessionRoomHost,
     // This daemon in its capacity as the claimant of the clones the roster's peer-owned agents
-    // read. A parameter for the same reason `room_host` is one, and the same object in practice.
+    // read. A parameter rather than something built here because this is a free function, and
+    // naming the concrete daemon type would drag it through every caller of a function that
+    // otherwise mentions nothing of the kind.
     agent_clones: &dyn crate::connection_service::SeededAgentClones,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
@@ -380,18 +377,6 @@ pub async fn spawn_cursor_cli_session_inner(
                 "failed to create the Cursor chat for session {session_id}: {e}"
             ))
         })?;
-
-    // This daemon runs the cursor agent and holds its checkout, so it is this session's
-    // facilitating daemon and hosts its room — `create-chat` above minted a chat, not a process
-    // that could join one, so the room is still opened with nothing else able to be in it.
-    crate::connection_service::open_session_room_before_spawning_agent(
-        room_host,
-        "cursor-cli",
-        session_id,
-        &worktree_path,
-        &session_dir,
-    )
-    .await?;
 
     let handle = cli_manager
         .start_cursor(

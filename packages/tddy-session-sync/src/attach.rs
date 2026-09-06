@@ -28,7 +28,10 @@ use tddy_livekit::broadcast::BroadcastMessage;
 use tddy_livekit::client_connect::{connect_client, ConnectError, ConnectedClient};
 use tddy_livekit::{BroadcastChannel, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
 use tddy_service::proto::auth::{RefreshSessionRequest, RefreshSessionResponse};
-use tddy_service::proto::connection::{ListSessionsRequest, ListSessionsResponse, SessionEntry};
+use tddy_service::proto::connection::{
+    ConnectSessionRequest, ConnectSessionResponse, ListSessionsRequest, ListSessionsResponse,
+    SessionEntry,
+};
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
 use tokio::sync::mpsc;
@@ -252,6 +255,14 @@ pub async fn attach(credentials: &Credentials) -> Result<AttachedSession, Attach
     let listed = http.list_sessions(&session_token).await?;
     let address = resolve_session(&listed, &credentials.session_id)?;
 
+    // Ask the daemon to open the session's room before joining it. The room is opened by the first
+    // connection to the session rather than by its creation, so a mirror that joined without asking
+    // would be joining a room LiveKit auto-creates on its behalf — one with no `daemon-{id}` in it,
+    // which is exactly the `DaemonAbsent` wait below. `ConnectSession` is the daemon's answer to
+    // "something is connecting to this session", and a mirror is such a thing.
+    http.connect_session(&session_token, &address.session_id)
+        .await?;
+
     let room_name = session_room_name(&address.session_id);
     let identity = syncer_identity(&address.session_id, &join_nonce());
     let token = TokenGenerator::new(
@@ -419,6 +430,29 @@ impl DaemonHttp {
             )
             .await?;
         Ok(response.sessions)
+    }
+
+    /// Tell the daemon a client is connecting to this session, which is what opens its room.
+    ///
+    /// The response's LiveKit fields name the session's *terminal* room and are deliberately
+    /// unused: a mirror joins `session-{id}`, which it derives itself. What is wanted is the call's
+    /// effect — the facilitating daemon in the room before anything looks for it there.
+    async fn connect_session(
+        &self,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<(), DaemonHttpError> {
+        let _: ConnectSessionResponse = self
+            .unary(
+                "connection.ConnectionService",
+                "ConnectSession",
+                ConnectSessionRequest {
+                    session_token: session_token.to_string(),
+                    session_id: session_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     async fn unary<Req: prost::Message, Res: prost::Message + Default>(

@@ -171,6 +171,33 @@ type ControlRegistry = Arc<RwLock<HashMap<String, ControlLeaseInfo>>>;
 type ManagedWorkflowRegistry =
     Arc<RwLock<HashMap<String, crate::session_toolcall::ManagedWorkflow>>>;
 
+/// Per-session LiveKit exposure of the terminal: `session_id → BridgedTerminal`.
+type LiveKitTerminalRegistry = Arc<RwLock<HashMap<String, BridgedTerminal>>>;
+
+/// A session's terminal as LiveKit clients see it: what it publishes about itself, and the
+/// participant serving it once one has been put in the room.
+struct BridgedTerminal {
+    /// The `session` block this session publishes about itself. Spawn-time knowledge — nothing on
+    /// disk records which planned stack node a child materialized — so it is kept from the start
+    /// rather than re-derived when the bridge is finally wanted.
+    metadata: tddy_core::session_participant_metadata::SessionParticipantMetadata,
+    /// The participant bridging the PTY, once a LiveKit consumer has arrived. Its task ends when
+    /// the room or the PTY does, so a finished handle is a bridge that is no longer there.
+    participant: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Where a session's terminal is served to LiveKit clients.
+///
+/// Every field is a pure function of the deployment config and the session id, so the caller
+/// derives them rather than the manager reading configuration it otherwise knows nothing about.
+pub struct LiveKitTerminalAddress {
+    pub url: String,
+    pub room: String,
+    pub api_key: String,
+    pub api_secret: String,
+    pub identity: String,
+}
+
 /// Manages PTY session tools via the shared [`TaskRegistry`] and per-session control leases.
 pub struct CliSessionManager {
     task_registry: TaskRegistry,
@@ -184,6 +211,14 @@ pub struct CliSessionManager {
     /// Managed-workflow wiring per session — its toolcall listener + controller must outlive the
     /// spawned process, so the manager owns it and drops it when the main terminal exits.
     managed_workflows: ManagedWorkflowRegistry,
+    /// What each session publishes about itself when its terminal is bridged into LiveKit, and the
+    /// participant doing it once one has been put there.
+    ///
+    /// An entry is written when a session that is *meant* to be drivable from another host starts;
+    /// the participant is added when a LiveKit consumer first arrives. A session with no entry is
+    /// one that is not exposed over LiveKit at all — which is why the entry, and not the presence
+    /// of a PTY, is what decides whether anything is bridged.
+    livekit_terminals: LiveKitTerminalRegistry,
 }
 
 /// Backward-compatible alias for [`CliSessionManager`].
@@ -211,6 +246,7 @@ impl CliSessionManager {
             control: Arc::new(RwLock::new(HashMap::new())),
             control_tx,
             managed_workflows: Arc::new(RwLock::new(HashMap::new())),
+            livekit_terminals: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -226,6 +262,82 @@ impl CliSessionManager {
             .write()
             .await
             .insert(session_id.to_string(), managed);
+    }
+
+    /// Record what `session_id` publishes about itself when its terminal is bridged into LiveKit.
+    ///
+    /// Local and instant, which is the point: a session start says what the session *is*, and
+    /// joining a room on its behalf is deferred to the first LiveKit consumer
+    /// ([`Self::ensure_livekit_terminal`]). A session start that reached a LiveKit server cost
+    /// whatever reaching it cost — nothing when the server answered, the caller's whole patience
+    /// when it was configured and down.
+    ///
+    /// Calling this is what makes a session drivable from another host at all. A session type that
+    /// is served over the daemon's own connection and never over LiveKit — `cursor-cli`,
+    /// `workspace` — records nothing here and is bridged nowhere.
+    pub async fn expose_terminal_to_livekit(
+        &self,
+        session_id: &str,
+        metadata: tddy_core::session_participant_metadata::SessionParticipantMetadata,
+    ) {
+        self.livekit_terminals.write().await.insert(
+            session_id.to_string(),
+            BridgedTerminal {
+                metadata,
+                participant: None,
+            },
+        );
+    }
+
+    /// Put a participant serving `session_id`'s terminal into `at`, unless one is already there or
+    /// there is nothing to bridge.
+    ///
+    /// Returns whether the session's terminal is drivable over LiveKit once this call is done.
+    /// `false` is not a failure: it means there was nothing to expose — a session type that is
+    /// never reached over LiveKit, or one whose agent has exited and left no PTY behind.
+    ///
+    /// The write lock is held across the join deliberately, and that is what makes this
+    /// single-flight. Two clients connecting to one session at the same moment would otherwise each
+    /// find no participant and each connect one under the same identity — and LiveKit resolves a
+    /// duplicate identity by disconnecting the participant that was already there, so the second
+    /// would evict the first the moment it arrived.
+    pub async fn ensure_livekit_terminal(
+        &self,
+        session_id: &str,
+        at: &LiveKitTerminalAddress,
+    ) -> anyhow::Result<bool> {
+        let mut exposed = self.livekit_terminals.write().await;
+        let Some(terminal) = exposed.get(session_id) else {
+            return Ok(false);
+        };
+        if terminal
+            .participant
+            .as_ref()
+            .is_some_and(|serving| !serving.is_finished())
+        {
+            return Ok(true);
+        }
+        let metadata = terminal.metadata.clone();
+        // A session whose agent has exited keeps its block until the cleanup task removes it, so
+        // the PTY is asked for rather than assumed: a bridge built on a handle that is gone would
+        // serve a terminal nothing writes to.
+        let Some(handle) = self.get(session_id).await else {
+            return Ok(false);
+        };
+        let participant = spawn_livekit_bridge(
+            handle,
+            &at.url,
+            &at.room,
+            &at.api_key,
+            &at.api_secret,
+            &at.identity,
+            Some(metadata),
+        )
+        .await?;
+        if let Some(terminal) = exposed.get_mut(session_id) {
+            terminal.participant = Some(participant);
+        }
+        Ok(true)
     }
 
     /// Shared task registry — PTY tools and fast tools use the same instance.
@@ -598,6 +710,7 @@ impl CliSessionManager {
     fn spawn_terminal_cleanup(&self, session_id: String, terminal_id: String, task_id: TaskId) {
         let terminals = Arc::clone(&self.terminals);
         let managed_workflows = Arc::clone(&self.managed_workflows);
+        let livekit_terminals = Arc::clone(&self.livekit_terminals);
         let task_registry = self.task_registry.clone();
         tokio::spawn(async move {
             let task = match task_registry.get(&task_id).await {
@@ -626,9 +739,12 @@ impl CliSessionManager {
                 }
             }
             // The main claude terminal exiting ends the session — drop its managed workflow so the
-            // per-session toolcall listener socket is cleaned up.
+            // per-session toolcall listener socket is cleaned up, and forget how it was exposed to
+            // LiveKit: there is no terminal left to bridge, and an entry nobody removes would keep
+            // a dead session's block waiting for a consumer that could only find an empty PTY.
             if terminal_id == MAIN_TERMINAL_ID {
                 managed_workflows.write().await.remove(&session_id);
+                livekit_terminals.write().await.remove(&session_id);
             }
         });
     }
@@ -1172,8 +1288,8 @@ const SESSION_METADATA_REPUBLISH_INTERVAL: std::time::Duration = std::time::Dura
 /// tap the way `tddy-coder` has one — logged in `docs/dev/TODO.md` § Future Enhancements, not closed
 /// here.
 ///
-/// Returns the identity string used (`daemon-<instance_id>-<session_id>` or
-/// `daemon-<session_id>`), which the caller should return in `StartSessionResponse`.
+/// Returns the task running the participant, so a caller that tracks its session's bridge can tell
+/// a live one from one whose room or PTY has since ended.
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_livekit_bridge(
     handle: Arc<PtyHandle>,
@@ -1183,7 +1299,7 @@ pub async fn spawn_livekit_bridge(
     api_secret: &str,
     server_identity: &str,
     session_metadata: Option<tddy_core::session_participant_metadata::SessionParticipantMetadata>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let token = TokenGenerator::new(
         api_key.to_string(),
         api_secret.to_string(),
@@ -1208,7 +1324,7 @@ pub async fn spawn_livekit_bridge(
     let metadata_json = session_metadata
         .as_ref()
         .map(tddy_core::session_participant_metadata::session_metadata_json);
-    tokio::spawn(async move {
+    let serving = tokio::spawn(async move {
         // The watcher publishes on *change*, so the channel starts empty and the block is sent
         // after the receiver exists: a value put into a channel before anyone subscribed is the
         // subscriber's already-seen initial value and would never reach the room.
@@ -1251,7 +1367,7 @@ pub async fn spawn_livekit_bridge(
         );
     });
 
-    Ok(())
+    Ok(serving)
 }
 
 #[cfg(test)]

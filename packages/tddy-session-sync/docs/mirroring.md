@@ -16,10 +16,20 @@ a room, or a clock. Only `sync::run` and the `Mirror` methods touch the world.
 | Module | Role |
 |--------|------|
 | `credentials` | Flags with per-parameter environment fallback, and the repo-root `.env` beneath both. An already-set variable always wins — the rule `./web-dev` and `tddy_vm_testkit::env_file` implement. |
-| `attach` | Resolve the session over HTTP, mint a room token, join `session-{id}`, subscribe to both topics. |
+| `attach` | Resolve the session over HTTP, ask the daemon to open its room, mint a room token, join `session-{id}`, subscribe to both topics. |
 | `sync` | The loop: what each broadcast provokes, and the git that keeps the mirror equal. |
 | `mirror` | The managed destination: marker, ownership refusal, sequence de-duplication, apply. |
 | `apply` | What a delta is (`Delta`), and what offering one can conclude (`ApplyOutcome`, `ReconcileReason`). |
+
+## Opening the room is asked for, not assumed
+
+A session's room is created by the first thing that connects to it over LiveKit, not by the session's
+own start ([session-room.md](../../../docs/ft/daemon/session-room.md)), and a mirror is such a thing.
+So `attach` calls **`ConnectSession`** before joining. Its reply is deliberately unread — those
+fields name the session's *terminal* room, while a mirror joins `session-{id}`, which it derives
+itself — and what is wanted is the call's effect: `daemon-{instance_id}` in the room before anything
+looks for it there. Joining without asking would join a room LiveKit auto-creates on the mirror's
+behalf, with no daemon in it, which is indistinguishable from the `DaemonAbsent` wait timing out.
 
 ## What the room supplies
 
