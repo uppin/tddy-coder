@@ -11,13 +11,14 @@
 //! - **Expiry.** An unanswered prompt must not pin an operation forever.
 //! - **Single use.** Answering twice must not add a key twice, and must not turn the endpoint into a
 //!   passphrase-guessing oracle that silently accepts repeated attempts against one prompt.
-//! - **No plaintext at rest.** The registry holds the *ciphertext* only until the waiting operation
-//!   takes it; it never stores a decrypted answer, and never logs either form.
+//! - **No plaintext at rest.** The registry passes the *ciphertext* straight to the operation
+//!   waiting on the prompt and keeps no copy of it; it never stores a decrypted answer, and never
+//!   logs either form.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 
 /// How long a prompt stays answerable.
 pub const PROMPT_TTL: Duration = Duration::from_secs(120);
@@ -28,6 +29,12 @@ pub const PROMPT_TTL: Duration = Duration::from_secs(120);
 /// magnitude — it exists so that a browser mid-reconnect cannot make the *issuing* side block or
 /// fail, not because a burst is expected.
 const PROMPT_FEED_CAPACITY: usize = 32;
+
+/// The **ciphertext** answering one prompt, delivered once to the operation waiting on it.
+///
+/// A channel rather than a value the caller polls for: an operation waiting on somebody typing must
+/// not wake on a timer to find out they have, and a poll interval is latency added to every answer.
+pub type AnswerHandoff = oneshot::Receiver<Vec<u8>>;
 
 /// What the host is asking for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +87,20 @@ pub trait HostPromptRegistry: Send + Sync {
         now_unix_ms: i64,
     ) -> Result<(), AnswerRejection>;
 
+    /// Claim the handoff carrying `prompt_id`'s answer, for the one operation waiting on it.
+    ///
+    /// The handoff is created with the prompt rather than here, so an answer that arrives between
+    /// [`Self::issue`] and this call is still delivered — issuing puts the prompt on the feed, so a
+    /// browser can answer before the operation that raised it has claimed anything.
+    ///
+    /// Expiry is not signalled through it. The waiter already holds the prompt's
+    /// `expires_at_unix_ms` and bounds itself by it; a reaped prompt drops its sender, which ends
+    /// the wait the same way.
+    ///
+    /// `None` when no such prompt is outstanding, or when its handoff has already been claimed — a
+    /// prompt has one waiting operation, the same way it has one answer.
+    fn awaited_answer(&self, prompt_id: &str) -> Option<AnswerHandoff>;
+
     /// A feed of prompts as they are issued, for `StreamHostPrompts` to forward.
     ///
     /// A feed rather than a poll: a prompt is worth nothing to the operator who raised it if it
@@ -95,14 +116,19 @@ pub struct InMemoryHostPromptRegistry {
     issued: broadcast::Sender<PendingPrompt>,
 }
 
-/// A prompt and the answer it has been given, if any.
+/// A prompt and the two halves of the channel its answer travels down.
 ///
-/// The ciphertext is what makes the prompt answered: single use is the absence of an answer, not a
-/// separate flag that could disagree with one. It stays here only until the operation waiting on
-/// this prompt takes it — the plaintext never enters this type at all.
+/// Holding the sender is what makes a prompt unanswered: single use is the presence of the half
+/// that can still deliver an answer, not a flag beside a stored one that could disagree with it.
+/// The ciphertext passes through — it is handed to the waiting operation and never kept here — and
+/// the plaintext never enters this type at all.
 struct PromptRecord {
     prompt: PendingPrompt,
-    encrypted_answer: Option<Vec<u8>>,
+    /// Taken by the first answer. `None` means this prompt has been answered.
+    unanswered: Option<oneshot::Sender<Vec<u8>>>,
+    /// Parked until the operation that raised this prompt claims it, so an answer arriving before
+    /// the claim waits in the channel rather than being dropped.
+    handoff: Option<oneshot::Receiver<Vec<u8>>>,
 }
 
 impl InMemoryHostPromptRegistry {
@@ -142,11 +168,13 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
             // the registry is guaranteed to be woken — nothing sweeps it on a timer. Without this a
             // long-lived daemon accumulates one entry per prompt ever raised.
             prompts.retain(|_, record| now_unix_ms < record.prompt.expires_at_unix_ms);
+            let (unanswered, handoff) = oneshot::channel();
             prompts.insert(
                 prompt.prompt_id.clone(),
                 PromptRecord {
                     prompt: prompt.clone(),
-                    encrypted_answer: None,
+                    unanswered: Some(unanswered),
+                    handoff: Some(handoff),
                 },
             );
         }
@@ -160,7 +188,7 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
         self.lock()
             .values()
             .filter(|record| {
-                record.encrypted_answer.is_none() && now_unix_ms < record.prompt.expires_at_unix_ms
+                record.unanswered.is_some() && now_unix_ms < record.prompt.expires_at_unix_ms
             })
             .map(|record| record.prompt.clone())
             .collect()
@@ -178,14 +206,27 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
             .ok_or(AnswerRejection::UnknownPrompt)?;
         // Checked before expiry, so a replayed answer is reported as the replay it is rather than
         // as a timeout — the two call for different responses from whoever sent it.
-        if record.encrypted_answer.is_some() {
+        if record.unanswered.is_none() {
             return Err(AnswerRejection::AlreadyAnswered);
         }
         if now_unix_ms >= record.prompt.expires_at_unix_ms {
             return Err(AnswerRejection::Expired);
         }
-        record.encrypted_answer = Some(encrypted_answer);
+        let waiting = record
+            .unanswered
+            .take()
+            .expect("the sender was present a line ago and this map is locked");
+        // Nobody waiting is an ordinary outcome — an answer to a prompt whose operation has already
+        // given up. The prompt still counts as answered, so it cannot be answered again, and the
+        // ciphertext goes nowhere: it is dropped with the channel rather than kept here.
+        let _ = waiting.send(encrypted_answer);
         Ok(())
+    }
+
+    fn awaited_answer(&self, prompt_id: &str) -> Option<AnswerHandoff> {
+        self.lock()
+            .get_mut(prompt_id)
+            .and_then(|record| record.handoff.take())
     }
 
     fn subscribe(&self) -> broadcast::Receiver<PendingPrompt> {
