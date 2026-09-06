@@ -306,3 +306,81 @@ fn default_log_config_respects_log_level_override() {
     // Then
     assert_eq!(config.default.level, log::LevelFilter::Trace);
 }
+
+fn log_config_with_default_output(output_yaml: &str) -> LogConfig {
+    let yaml = format!(
+        r#"
+loggers:
+  default:
+    output: {output_yaml}
+    format: "{{timestamp}} [{{level}}] [{{target}}] {{message}}"
+default:
+  level: debug
+  logger: default
+rotation:
+  max_rotated: 0
+"#
+    );
+    serde_yaml::from_str(&yaml).expect("parse log config")
+}
+
+#[test]
+#[serial]
+fn output_fan_out_to_stderr_and_a_file_writes_the_line_to_the_file() {
+    // Given a logger configured the way dev.desktop.yaml configures its default logger:
+    // visible in the terminal and recorded on disk at the same time.
+    // (Only the file half is asserted here — capturing the process's own stderr would need a
+    // process-wide fd redirect that would swallow the test harness's panic output.)
+    let log_dir = tempfile::tempdir().expect("tempdir");
+    let log_file = log_dir.path().join("daemon.log");
+    let config = log_config_with_default_output(&format!(
+        r#"[stderr, {{ file: "{}" }}]"#,
+        log_file.display()
+    ));
+
+    // When
+    init_tddy_logger(config);
+    log::debug!(target: "fan_out_target", "fanned out to stderr and a file");
+
+    // Then
+    let content = std::fs::read_to_string(&log_file).expect("read fan-out log file");
+    assert!(
+        content.contains("[fan_out_target] fanned out to stderr and a file"),
+        "got: {}",
+        content
+    );
+}
+
+#[test]
+#[serial]
+fn output_fan_out_writes_the_same_line_to_both_of_its_destinations() {
+    // Given a logger that fans out to the in-memory buffer and a file — two destinations whose
+    // contents a test can both read back, so "the same line reaches every destination" is proven
+    // rather than assumed.
+    let log_dir = tempfile::tempdir().expect("tempdir");
+    let log_file = log_dir.path().join("daemon.log");
+    let config = log_config_with_default_output(&format!(
+        r#"[buffer, {{ file: "{}" }}]"#,
+        log_file.display()
+    ));
+    let _ = tddy_core::take_buffered_logs();
+
+    // When
+    init_tddy_logger(config);
+    log::debug!(target: "fan_out_target", "fanned out to a buffer and a file");
+
+    // Then
+    let buffered = tddy_core::take_buffered_logs();
+    let file_lines: Vec<String> = std::fs::read_to_string(&log_file)
+        .expect("read fan-out log file")
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(buffered.len(), 1, "buffered: {:?}", buffered);
+    assert_eq!(file_lines, buffered);
+    assert!(
+        buffered[0].contains("[fan_out_target] fanned out to a buffer and a file"),
+        "got: {:?}",
+        buffered
+    );
+}

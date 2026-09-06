@@ -4,17 +4,38 @@
 use crate::log_backend::{LogConfig, LogOutput};
 
 /// Force any `LogOutput::Stdout` logger destination in `config` to `LogOutput::Stderr`, since
-/// `--stdio` dedicates fd 1 to RPC framing. Leaves every other output (`Stderr`, `File`, `Buffer`,
-/// `Mute`) untouched. Returns the number of loggers changed.
+/// `--stdio` dedicates fd 1 to RPC framing. That includes a `Stdout` nested in a `LogOutput::Many`
+/// fan-out, which would corrupt the protocol just as surely as a lone one. Leaves every other
+/// output (`Stderr`, `File`, `Buffer`, `Mute`) untouched. Returns the number of loggers changed.
 pub fn enforce_stdio_safe_log_output(config: &mut LogConfig) -> usize {
     let mut overridden = 0;
     for logger in config.loggers.values_mut() {
-        if matches!(logger.output, LogOutput::Stdout) {
-            logger.output = LogOutput::Stderr;
+        if let Some(safe) = stdio_safe_output(&logger.output) {
+            logger.output = safe;
             overridden += 1;
         }
     }
     overridden
+}
+
+/// The stdio-safe form of `output`, or `None` when it is already safe. A fan-out is rebuilt
+/// through [`LogOutput::fan_out`] so that overriding, say, `[stdout, stderr]` leaves one stderr
+/// destination rather than two writing every line twice.
+fn stdio_safe_output(output: &LogOutput) -> Option<LogOutput> {
+    match output {
+        LogOutput::Stdout => Some(LogOutput::Stderr),
+        LogOutput::Many(destinations) => {
+            if !destinations.iter().any(|d| stdio_safe_output(d).is_some()) {
+                return None;
+            }
+            let safe: Vec<LogOutput> = destinations
+                .iter()
+                .map(|d| stdio_safe_output(d).unwrap_or_else(|| d.clone()))
+                .collect();
+            LogOutput::fan_out(safe)
+        }
+        LogOutput::Stderr | LogOutput::File(_) | LogOutput::Buffer | LogOutput::Mute => None,
+    }
 }
 
 /// Redirect `target_fd` to `path`: creates (or truncates) the file, then makes `target_fd` an
