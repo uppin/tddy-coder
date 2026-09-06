@@ -80,3 +80,10 @@ export const hostTelemetryPage = {
     hostTelemetryPage.disk(instanceId).should("not.exist");
   },
 };
+
+/** Tooling section selectors — added by `#hosts-screen 4/8`. */
+export const hostToolingPage = {
+  section: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-tooling"]`),
+  gitIdentity: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-git"]`),
+  githubCli: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-gh"]`),
+};

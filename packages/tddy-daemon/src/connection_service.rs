@@ -29,15 +29,16 @@ use tddy_service::proto::connection::{
     ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
-    DetachSessionAgentRequest, EligibleDaemonEntry, KnownHostEntry, ListAgentModelsRequest,
-    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
-    ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
-    ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
-    ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
-    ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
+    DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
+    KnownHostEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListKnownHostsRequest, ListKnownHostsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionAgentsRequest, ListSessionUploadsRequest, ListSessionUploadsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse,
+    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
     OpenAgentConversationRequest, OpenAgentConversationResponse, ProjectEntry as ProtoProjectEntry,
@@ -69,6 +70,7 @@ use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_
 use crate::config::DaemonConfig;
 use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
+use crate::host_tooling::{HostToolingProbe, SubprocessHostToolingProbe};
 use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
 };
@@ -1112,6 +1114,8 @@ pub struct ConnectionServiceImpl {
     /// Durable record of every host seen, behind `ListKnownHosts` on the Hosts screen. Distinct from
     /// `eligible_daemon_source`, which reports only who is reachable right now.
     host_registry: Arc<dyn HostRegistry>,
+    /// Probes what this host has installed and configured, behind `GetHostTooling`.
+    host_tooling: Arc<dyn HostToolingProbe>,
     /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
     /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
@@ -1775,6 +1779,7 @@ impl ConnectionServiceImpl {
         let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
+        let host_tooling: Arc<dyn HostToolingProbe> = Arc::new(SubprocessHostToolingProbe);
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -1806,6 +1811,7 @@ impl ConnectionServiceImpl {
             spawn_client,
             eligible_daemon_source,
             host_registry,
+            host_tooling,
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
@@ -2022,6 +2028,13 @@ impl ConnectionServiceImpl {
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
         self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Substitute the host tooling probe (builder pattern) — lets tests state what a host has
+    /// installed instead of depending on whatever is installed on the machine running the suite.
+    pub fn with_host_tooling(mut self, host_tooling: Arc<dyn HostToolingProbe>) -> Self {
+        self.host_tooling = host_tooling;
         self
     }
 
@@ -13114,6 +13127,28 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .collect();
 
         Ok(Response::new(ListKnownHostsResponse { hosts }))
+    }
+
+    /// What a host has installed and configured.
+    ///
+    /// Addressed by `daemon_instance_id`; the existing peer routing relays it so the probes run on
+    /// that host, as that host's OS user. Both facts are per-user — `git config` reads
+    /// `$HOME/.gitconfig`, `gh auth status` reads `$HOME/.config/gh/hosts.yml` — so running them as
+    /// the daemon's own user would answer for the wrong account.
+    async fn get_host_tooling(
+        &self,
+        request: Request<GetHostToolingRequest>,
+    ) -> Result<Response<GetHostToolingResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // TODO(host-identity): implement
+        unimplemented!("host-identity: get_host_tooling")
     }
 
     async fn list_session_workflow_files(

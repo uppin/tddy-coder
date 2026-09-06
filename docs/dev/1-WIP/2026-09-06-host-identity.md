@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 4/8
 **Branch:** `feature/hosts-screen/host-identity` → base `feature/hosts-screen/host-resources`
+**PR:** [#456](https://github.com/uppin/tddy-coder/pull/456)
 
 ## Initial Discovery
 
@@ -45,6 +46,25 @@ Affected: [`projects-screen-multi-host.md`](../../ft/web/projects-screen-multi-h
 - Does **not** probe the ssh-agent (node 5) or VNC/RDP (node 7), though it owns the RPC shape they extend.
 - Does **not** reuse `ConnectionCapability`, which means what the wire carries.
 - Does **not** modify telemetry, the registry, the route or the nav entry.
+
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) this PR runs into.
+
+### ⚠ DURING — `connection_service.rs` is 19,600 lines
+
+`docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines* (source:
+subagent-conversation-inference, 2026-08-29), flagged rather than acted on.
+
+This node adds to that file. Across the `#hosts-screen` stack, **nodes 1, 3, 4 and 6** modify it —
+nodes 2, 5, 7 and 8 do not — so the stack makes a known problem measurably worse in four places.
+
+The TODO is explicit that a split "needs to be its own PR", because `ConnectionServiceImpl`'s ~60
+private fields would have to become `pub(crate)` and several hundred in-file tests would repoint. So
+this is **recorded, not fixed here**.
+
+Worth leaving for whoever does that split: the host registry, tooling probe and prompt handlers this
+stack adds form a coherent host-facing group, which is not among the seams the TODO currently lists.
 
 ## Dependencies
 
@@ -223,17 +243,28 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo build -p tddy-service` / `-p tddy-daemon --tests` — pass; TypeScript regenerated.
+- `host_tooling.rs` — **6 tests, 6 red**, all at the two `unimplemented!()` classifiers.
+- **`classify_gh_auth_status` is a pure function of `(exit_code, output)`**, split out from the
+  subprocess call. The classification is the part that is easy to get wrong and expensive to get
+  wrong, and this makes it provable without spawning anything or depending on whatever `gh` happens
+  to be installed on the machine running the suite.
+- The Cypress spec asserts the six states are **distinguishable**, not merely present: the
+  "failed to report" case asserts it does *not* also read as "Not configured". A per-state test in
+  isolation would pass even if the component collapsed two states into one rendering — which is
+  exactly the bug that sends an operator to configure git on a host where git is not installed.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-host-identity-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

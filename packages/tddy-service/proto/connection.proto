@@ -75,6 +75,11 @@ service ConnectionService {
   // durable registry: a host that goes away keeps its entry and its last-seen stamp. `online` is
   // computed per call by intersecting the registry with the live roster, never stored.
   rpc ListKnownHosts(ListKnownHostsRequest) returns (ListKnownHostsResponse);
+  // Hosts screen — what a host has installed and configured, as opposed to how busy it is.
+  // Addressed by `daemon_instance_id`, so the existing peer routing relays it to that host and the
+  // probes run there, as that host's OS user. Every block distinguishes "absent" from "we could not
+  // find out": an empty string would be a fabricated answer an operator acts on.
+  rpc GetHostTooling(GetHostToolingRequest) returns (GetHostToolingResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
@@ -1087,6 +1092,53 @@ message KnownHostEntry {
 }
 message ListKnownHostsResponse {
   repeated KnownHostEntry hosts = 1;
+}
+
+message GetHostToolingRequest {
+  string session_token = 1;
+  // The host to probe. Empty means the daemon serving the call.
+  string daemon_instance_id = 2;
+}
+
+// Whether a probe could run at all, before asking what it found.
+enum ProbeOutcome {
+  PROBE_OUTCOME_UNSPECIFIED = 0;
+  // The probe ran and its findings are populated below.
+  PROBE_OUTCOME_OK = 1;
+  // The probe could not run or its output was not understood. NOT the same as a negative finding —
+  // reporting an authenticated host as logged out is worse than admitting we do not know.
+  PROBE_OUTCOME_FAILED = 2;
+  // This platform cannot run the probe at all (the daemon's spawn-as-user path is Unix-only).
+  PROBE_OUTCOME_UNSUPPORTED = 3;
+}
+
+// The git identity commits made on this host would carry.
+message HostGitIdentity {
+  ProbeOutcome outcome = 1;
+  // True when the host has a user.name/user.email configured at all. False with OK means the probe
+  // ran and found none — which is a real answer, and different from a blank string.
+  bool configured = 2;
+  string user_name = 3;
+  string user_email = 4;
+  // Why the probe failed, when outcome is FAILED. For an operator, not for parsing.
+  string failure_reason = 5;
+}
+
+// The state of the GitHub CLI on this host.
+message HostGithubCli {
+  ProbeOutcome outcome = 1;
+  bool installed = 2;
+  bool authenticated = 3;
+  // The login `gh` is authenticated as. This is the HOST's gh login — not the tddy web session's
+  // user, and not a GITHUB_TOKEN in some environment. Three different identities that can disagree.
+  string login = 4;
+  string failure_reason = 5;
+}
+
+message GetHostToolingResponse {
+  string daemon_instance_id = 1;
+  HostGitIdentity git = 2;
+  HostGithubCli github_cli = 3;
 }
 
 message ListSessionWorkflowFilesRequest {
