@@ -116,7 +116,7 @@ weak evidence and should be read as such.>
 
 <PRs that violate `pr-stack`'s contract independently of rework: a types-only or stubs-only PR, a PR
 implementing a surface its `## Dependencies` assigns to a predecessor, a PR not reviewable without
-its successor, a document missing one of the four required headings, or a chain never registered with
+its successor, a document missing one of the five required headings, or a chain never registered with
 `gh stack link`. Or: "every PR was independently reviewable and independently mergeable.">
 
 ## 5. Essential vs incidental

@@ -271,7 +271,7 @@ what is actually there — and every verdict gets its **signal on the comment it
 | **Actionable — this PR** | the fix is inside this PR's owned surface (`## Responsibility`) | 👍 now | fix in Wave 2, in this PR |
 | **Actionable — PR Y** | the fix belongs to a symbol another node owns (it is in this node's `## Dependencies`) | 👍 now (on the comment, wherever it sits) | record against PR Y; **never fix it elsewhere** |
 | **Not a defect** | validated and the claim does not hold | 👎 + evidence reply — **drafted, user-gated** | post after plan approval; never silently ignore |
-| **Follow-up** | real, but outside the stack's scope | reply saying so — no 👍 (that would promise a fix here) | record it; raise after landing (`docs/dev/TODO.md`, or a new changeset in `docs/dev/1-WIP/`) |
+| **Follow-up** | real, but outside the stack's scope | reply saying so — no 👍 (that would promise a fix here) | record it; raise after landing (a new file in `docs/dev/todo/`, or a changeset in `docs/dev/1-WIP/`) |
 
 Post the 👍 and already-fixed 🚀/replies as the verdicts land — that is the "seen it" signal
 reviewers watch for. The 👎 replies argue with a teammate in public under the user's GitHub
@@ -721,7 +721,7 @@ From the merge plan, also report:
   `/repoint` / manual `--onto`);
 - **any thread left open**, and why it was not acted on;
 - **the follow-ups** the stack did not cover, so they can be raised as their own work
-  (`docs/dev/TODO.md`, or a changeset in `docs/dev/1-WIP/` indexed in `docs/dev/changesets/`);
+  (a new file in `docs/dev/todo/`, or a changeset in `docs/dev/1-WIP/` indexed in `docs/dev/changesets/`);
 - **any coverage the CI gate excludes** that this stack touched, and whether you ran it locally;
 - the plan's path (`tmp/merge-pr-stack-<slug>.md`), noting it is gitignored scratch and will not appear
   in any diff.

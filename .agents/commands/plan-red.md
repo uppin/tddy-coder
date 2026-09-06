@@ -13,7 +13,17 @@ Combines planning and test-first development into a single flow: gather requirem
 
 ### Planning Phase (Steps 1–5)
 
-Follow the planning phase from `.agents/skills/planning/references/planning-phase.md` — Steps 1 through 5 (interview → code analysis → product area → PRD → changeset).
+Follow the planning phase from `.agents/skills/planning/references/planning-phase.md` — Steps 1 through 5 (interview → code analysis → **TODO cross-check** → product area → PRD → changeset).
+
+**Step 2b is not optional.** After the code analysis, scan `docs/dev/todo/` for items sitting in
+this change's path and classify each — blocking / during / answered / unrelated. Anything blocking or
+constraining goes in the changeset's `## Prerequisites`, and a **blocking** item also earns a line in
+`## Scope`, because it is work rather than a note. Discovering it during `/green` is late: the choice
+by then is to work around it, silently make it worse, or stop.
+
+If the fix is small and lives in this change's own files, do it here. If it is small but in shared
+code, it is a prerequisite PR that lands first. If it is large, it gets its own PR — never absorb a
+large refactor into a feature change, which buries a reviewable diff under a mechanical one.
 
 Check off the first two TODO items in the changeset (`Create/update PRD documentation` and `Create changeset`).
 
@@ -63,11 +73,18 @@ Present complete summary:
 
 ## Out-of-Scope Ideas
 
-During planning and code analysis, if you identify enhancements or improvements that are relevant but outside the current changeset scope, add them to `docs/dev/TODO.md` under **Future Enhancements** with source set to the current changeset name.
+During planning and code analysis, if you identify enhancements or improvements that are relevant but outside the current changeset scope, **add a new file** to `docs/dev/todo/` — `YYYY-MM-DD-<slug>.md`, `**Category:** Future enhancement`, `**Source:**` the current changeset name. Never append to an existing file; that is the shared append-point this layout removes.
+
+`docs/dev/todo/` is read as well as written: Step 2b scans it for items this change runs into.
+The two directions are complementary — what you defer today is what somebody's Step 2b finds
+tomorrow, so write entries that state **why** the work was deferred, not only what is left. That
+reason is what tells the next planner whether it blocks them.
 
 ## Rules
 
 - Each step is discrete and actionable
+- Cross-check `docs/dev/todo/` before writing the changeset; record every relevant item in
+  `## Prerequisites` with a verdict, including the ones you decide not to fix
 - Never skip user review after acceptance tests
 - Never assume user approval without explicit confirmation
 - Take extra time on testing strategy — don't rush

@@ -52,7 +52,7 @@ fi
 
 **Stack branch** if any of these hit:
 
-1. This branch's `docs/dev/1-WIP/` changeset carries `## Responsibility`, `## Boundaries`, `## Dependencies` and `## Draft PR contract` — the four headings every PR in a stack has.
+1. This branch's `docs/dev/1-WIP/` changeset carries `## Responsibility`, `## Boundaries`, `## Dependencies`, `## Draft PR contract` and `## Green wave` — the five headings every PR in a stack has.
 2. This branch's open PR has a `baseRefName` that is not `master` / `main`.
 3. The branch matches `feature/<stack-slug>/<node>` and another branch under the same `feature/<stack-slug>/` namespace is open as a PR.
 

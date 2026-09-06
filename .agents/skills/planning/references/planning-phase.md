@@ -47,6 +47,56 @@ Document findings as **State A** (current state) — this becomes the baseline f
 State A in the changeset is distilled from the discovery file; do not dump grep traces into the
 changeset.
 
+## Step 2b: Cross-check the TODO backlog
+
+**MANDATORY** — [`docs/dev/todo/`](../../../docs/dev/todo/) is a record of known defects, deferred
+work and flagged debt, **one file per item**.
+Some of it will be sitting directly in the path of what you are about to plan, and discovering that
+during `/green` is late: by then the choice is between working around it, silently making it worse,
+or stopping.
+
+Scan it **after** Step 2's code analysis, when you know which files and modules the change touches.
+
+```bash
+# Items naming the areas this change touches — adapt the terms to your feature
+grep -rl -iE '(host|proto|codegen|secret|stream|<your-module>)' docs/dev/todo/
+
+# The listing is the index; the date prefix sorts it
+ls docs/dev/todo/ | sort -r | head -30
+
+# Still-open items only
+grep -rL 'Status:\*\* Resolved' docs/dev/todo/
+```
+
+Read the **body** of every candidate, not just its heading. Entries state why they were deferred, and
+that reason is usually what tells you whether it blocks you.
+
+### Classify each hit
+
+| Verdict | Meaning | Where it goes |
+|---|---|---|
+| ⛔ **Blocking** | The change cannot be implemented *correctly* without it | `## Prerequisites`, and an item in `## Scope` — it is work, not a note |
+| ⚠ **During** | The change touches it, makes it worse, or must avoid re-introducing it | `## Prerequisites`, as a constraint on how the work is done |
+| ℹ **Answered** | Planning or discovery resolved an open question the entry asks | `## Prerequisites`, stating the answer — and update the entry itself when wrapping |
+| — **Unrelated** | Same area, different concern | Nothing. Do not pad the document |
+
+**"Blocking" means correctness, not convenience.** An entry is blocking when every route around it is
+wrong — for example a store that must write a new secret at rest, where the existing helper would
+create it world-readable *and* the hand-rolled alternative adds to the very debt the entry records.
+An entry you merely find annoying is not blocking.
+
+### Right-size the fix
+
+- **Small and inside this change's own files** — just do it, and say so in `## Prerequisites`.
+- **Small but in shared code** — a prerequisite that lands first, in its own PR off the trunk. Name
+  it in `## Prerequisites` so nobody starts the dependent work before it exists.
+- **Large** — its own PR, or its own node in a stack. Do **not** absorb a large refactor into a
+  feature PR: it buries a reviewable change under a mechanical one, which is exactly the trade the
+  `connection_service.rs` entry records as the reason nobody has done it.
+
+Record the verdict even when it is "recorded, not fixed here" — the value is that the next person
+sees the entry was considered rather than missed.
+
 ## Step 3: Identify Product Area
 
 Determine which product area the feature belongs to (the subdirectories of `docs/ft/`):
@@ -91,6 +141,8 @@ Include all required sections:
 - **Initial Discovery** — first content section after the header; link to
   `./{changeset-slug}-initial-discovery.md` (see `initial-discovery.md`). The discovery file
   must already exist from Step 2.
+- **Prerequisites** — `docs/dev/todo/` items this change runs into, with a verdict each (Step 2b).
+  Omit the section entirely when the scan found nothing relevant; an empty heading is noise
 - Affected packages (ALL packages with links to READMEs and docs)
 - Related feature documentation (link to PRD from Step 4)
 - Summary and background
@@ -122,6 +174,7 @@ Include all required sections:
 ## TODO
 
 - [x] Record initial discovery (`YYYY-MM-DD-feature-name-initial-discovery.md`)
+- [x] Cross-check `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
 - [ ] Create failing acceptance tests

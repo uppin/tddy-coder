@@ -1,0 +1,7 @@
+# 2026-07-03 — tddy-sandbox-app / tddy-sandbox-runner
+
+**Category:** Future enhancement
+**Source:** claude-sandbox-launcher changeset, 2026-07-03
+
+- **Integration/acceptance test for `./claude-sandbox` full launch with an inline Ollama def** — the launcher was verified by a manual full-launch smoke test (config loads → `codebase_mode=managed` → inline `fastcontext` activated, end-to-end through a real macOS Seatbelt jail), but the interactive terminal-attach path was not exercised in CI and no automated regression test drives a full sandboxed launch with an inline Ollama `fastcontext` def. The launcher script, `tddy-sandbox-app --config`, the egress shim's plain-HTTP forward proxy, persisted `tddy-tools.mcp.log` + `latest` symlink, and the `--disallowedTools` + server-side replaced-tool enforcement are all landed; what's missing is a CI-runnable test that asserts the whole stack comes up and a subagent turn completes against a stubbed Ollama. Knowledge transferred to `docs/ft/coder/managed-codebase-subagents.md` § Standalone launcher; source changeset `docs/dev/1-WIP/claude-sandbox-launcher.md` removed after wrap.
+- **Split the Standalone launcher section into its own `docs/ft/coder/claude-sandbox-launcher.md`** — the launcher/config/egress/observability/enforcement knowledge currently lives as a section of `managed-codebase-subagents.md`. If it outgrows that file, lift it into a dedicated feature doc.
