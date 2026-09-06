@@ -11,7 +11,7 @@
 | Document | Relationship |
 |---|---|
 | [`docs/ft/web/host-stats-footer.md`](../host-stats-footer.md) | Defines the telemetry contract this node extends; its footer gains the new readings too |
-| [`PRD-2026-09-06-telemetry-fanout.md`](./PRD-2026-09-06-telemetry-fanout.md) | Supplies the per-host fan-out that carries the new fields to every row |
+| [`docs/ft/web/hosts-screen-telemetry.md`](../hosts-screen-telemetry.md) | Supplies the per-host fan-out that carries the new fields to every row (`#hosts-screen` 2/8) |
 
 ## Summary
 
