@@ -15,13 +15,30 @@
 //! intersects. See [`crate::connection_service`]'s `list_known_hosts`.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
+use tddy_core::atomic_file::write_atomic_labelled;
 
+use crate::config::DaemonConfig;
+use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
 
 /// Basename of the registry file inside the storage directory.
 const REGISTRY_FILE: &str = "known-hosts.json";
+
+/// Subdirectory of the daemon data directory the registry lives in.
+const REGISTRY_DIR: &str = "hosts";
+
+/// Where a daemon rooted at `tddy_data_dir` keeps its host registry.
+///
+/// One function rather than the join spelled out at each call site: the daemon builds the registry
+/// twice — once for the RPC surface, once for the discovery path — and two directories would mean
+/// discovery recording sightings the Hosts screen never reads.
+#[must_use]
+pub fn host_registry_dir(tddy_data_dir: impl AsRef<Path>) -> PathBuf {
+    tddy_data_dir.as_ref().join(REGISTRY_DIR)
+}
 
 /// What is remembered about a host between sightings.
 ///
@@ -112,12 +129,28 @@ pub trait HostRegistry: Send + Sync {
 
 /// A [`HostRegistry`] persisted as one JSON file under a storage directory.
 ///
-/// Persistence is deliberately not implemented here yet: see the changeset's testing plan for the
-/// shape it must take (atomic staging-file publish, owner-only permissions, a process-wide write
-/// lock around the read-modify-write, and a corrupt file reading as empty — the
-/// [`crate::github_token_store::FileGitHubTokenStore`] posture).
+/// The file is published through [`tddy_core::atomic_file`] rather than the hand-rolled
+/// staging-file-plus-rename in [`crate::github_token_store::FileGitHubTokenStore`]. That store, and
+/// the two others like it, are excluded from `atomic_file` because `write_atomic` only carries
+/// permission bits over from an *existing* target, so a credential file would be created at the
+/// process umask on its very first write. **A host list is not a credential** — knowing which
+/// machines this daemon has seen grants nothing — so the reason for the exclusion does not apply
+/// here, and reproducing the pattern would add a fourth hand-rolled writer to the set
+/// `docs/dev/TODO.md` exists to shrink.
+///
+/// A read tolerates a missing or unparseable file by starting empty; the screen then shows the live
+/// roster only, which is the pre-registry behaviour. A **write** failure is returned, because a
+/// registry that silently fails to persist is indistinguishable from a working one until the
+/// restart that loses everything.
 pub struct FileHostRegistry {
     registry_path: PathBuf,
+    /// Serialises the read-modify-write in [`Self::record_sighting`] / [`Self::record_departure`].
+    ///
+    /// Each write republishes the whole file, so two sightings racing without this would not
+    /// interleave bytes — `rename` is atomic — but the loser would still publish a document built
+    /// from a snapshot taken before the winner's, dropping that host entirely. The daemon holds one
+    /// registry, so one lock here serialises every writer in the process.
+    write_lock: Mutex<()>,
 }
 
 impl FileHostRegistry {
@@ -125,6 +158,7 @@ impl FileHostRegistry {
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
         Self {
             registry_path: storage_dir.as_ref().join(REGISTRY_FILE),
+            write_lock: Mutex::new(()),
         }
     }
 
@@ -133,13 +167,76 @@ impl FileHostRegistry {
     pub fn registry_path(&self) -> &Path {
         &self.registry_path
     }
+
+    /// Hold the write lock, recovering from poisoning instead of propagating it.
+    ///
+    /// The lock guards a file, not the `()` behind it, and the file is only ever replaced whole —
+    /// so a thread that panicked mid-write left nothing torn for the next one to inherit.
+    fn write_guard(&self) -> MutexGuard<'_, ()> {
+        self.write_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Every recorded host, or none when the file is absent or unreadable.
+    fn read_all(&self) -> Vec<KnownHost> {
+        // No file is the ordinary state of a daemon that has not seen anyone yet, so it is not
+        // worth a log line; a file that will not parse is.
+        let Ok(bytes) = std::fs::read(&self.registry_path) else {
+            return Vec::new();
+        };
+        serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+            log::warn!(
+                "host registry {} could not be parsed ({e}); continuing with an empty registry",
+                self.registry_path.display()
+            );
+            Vec::new()
+        })
+    }
+
+    /// Publish `hosts` as the whole registry.
+    fn write_all(&self, hosts: &[KnownHost]) -> Result<(), String> {
+        let json = serde_json::to_vec_pretty(hosts)
+            .map_err(|e| format!("serializing the host registry: {e}"))?;
+        write_atomic_labelled(&self.registry_path, json)
+    }
 }
 
 impl HostRegistry for FileHostRegistry {
     fn record_sighting(&self, sighting: &HostSighting, now_unix_ms: i64) -> Result<(), String> {
-        // TODO(host-registry): implement
-        let _ = (sighting, now_unix_ms);
-        unimplemented!("host-registry: record_sighting")
+        let _guard = self.write_guard();
+        let mut hosts = self.read_all();
+        match hosts
+            .iter_mut()
+            .find(|host| host.instance_id == sighting.instance_id.0)
+        {
+            Some(known) => {
+                known.last_seen_unix_ms = now_unix_ms;
+                // Refreshed only when the sighting actually carries the column. A roster-derived
+                // sighting knows the id and the label and nothing else
+                // (`HostSighting::from_eligible`), so an empty value there means "not observed",
+                // not "now empty" — writing it over a repos path recorded from a richer sighting
+                // would blank a column the screen has already shown.
+                if !sighting.label.is_empty() {
+                    known.label = sighting.label.clone();
+                }
+                if !sighting.repos_base_path.is_empty() {
+                    known.repos_base_path = sighting.repos_base_path.clone();
+                }
+                if sighting.max_attachment_bytes != 0 {
+                    known.max_attachment_bytes = sighting.max_attachment_bytes;
+                }
+            }
+            None => hosts.push(KnownHost {
+                instance_id: sighting.instance_id.0.clone(),
+                label: sighting.label.clone(),
+                first_seen_unix_ms: now_unix_ms,
+                last_seen_unix_ms: now_unix_ms,
+                repos_base_path: sighting.repos_base_path.clone(),
+                max_attachment_bytes: sighting.max_attachment_bytes,
+            }),
+        }
+        self.write_all(&hosts)
     }
 
     fn record_departure(
@@ -147,9 +244,18 @@ impl HostRegistry for FileHostRegistry {
         instance_id: &DaemonInstanceId,
         now_unix_ms: i64,
     ) -> Result<(), String> {
-        // TODO(host-registry): implement
-        let _ = (instance_id, now_unix_ms);
-        unimplemented!("host-registry: record_departure")
+        let _guard = self.write_guard();
+        let mut hosts = self.read_all();
+        let Some(known) = hosts
+            .iter_mut()
+            .find(|host| host.instance_id == instance_id.0)
+        else {
+            // A departure we never saw arrive. Creating an entry for it would record a sighting
+            // that never happened, so there is nothing to persist and nothing to report.
+            return Ok(());
+        };
+        known.last_seen_unix_ms = now_unix_ms;
+        self.write_all(&hosts)
     }
 
     fn known_hosts(
@@ -158,9 +264,60 @@ impl HostRegistry for FileHostRegistry {
         local_instance_id: &str,
         now_unix_ms: i64,
     ) -> Vec<KnownHostView> {
-        // TODO(host-registry): implement
-        let _ = (live_roster, local_instance_id, now_unix_ms);
-        unimplemented!("host-registry: known_hosts")
+        let mut views: Vec<KnownHostView> = self
+            .read_all()
+            .into_iter()
+            .map(|host| KnownHostView {
+                online: live_roster
+                    .iter()
+                    .any(|live| live.instance_id.0 == host.instance_id),
+                is_local: host.instance_id == local_instance_id,
+                host,
+            })
+            .collect();
+
+        // The roster is a sighting in its own right: a machine answering right now is known about,
+        // whatever the file says, and hiding it would be the one failure this screen exists to
+        // prevent. The entry is not written back — a read stays a read, and the discovery path is
+        // what turns a roster into a durable record.
+        for live in live_roster {
+            if views
+                .iter()
+                .any(|view| view.host.instance_id == live.instance_id.0)
+            {
+                continue;
+            }
+            views.push(KnownHostView {
+                host: KnownHost {
+                    instance_id: live.instance_id.0.clone(),
+                    label: live.label.clone(),
+                    first_seen_unix_ms: now_unix_ms,
+                    last_seen_unix_ms: now_unix_ms,
+                    repos_base_path: String::new(),
+                    max_attachment_bytes: 0,
+                },
+                online: true,
+                is_local: live.instance_id.0 == local_instance_id,
+            });
+        }
+        views
+    }
+}
+
+/// This daemon's sighting of itself.
+///
+/// [`crate::livekit_peer_discovery::CommonRoomPeerRegistry`] deliberately excludes the local row —
+/// it answers "who *else* is in the room" — so without this the one host an operator is certainly
+/// looking at would be the only one never recorded. Unlike a roster sighting, this one can fill the
+/// host facts in, because they are read from this daemon's own configuration.
+#[must_use]
+pub fn local_host_sighting(config: &DaemonConfig) -> HostSighting {
+    let instance_id = local_instance_id_for_config(config);
+    HostSighting {
+        label: format!("{instance_id} (this daemon)"),
+        instance_id: DaemonInstanceId(instance_id),
+        repos_base_path: config.repos_base_path_or_default().to_string(),
+        max_attachment_bytes: config.max_attachment_bytes,
     }
 }
 

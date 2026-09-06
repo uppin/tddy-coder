@@ -131,14 +131,14 @@ persists that record, and renders it at `#/hosts` with an online/offline state a
 
 ## Scope
 
-- [ ] `host_registry` module in `tddy-daemon`, with persistence
-- [ ] Recording hook in the peer-discovery path
-- [ ] `ListKnownHosts` proto + regeneration (Rust + TypeScript)
-- [ ] `ListKnownHosts` handler
-- [ ] `#/hosts` route, dispatch branch, nav entry
-- [ ] `HostsAppPage` + `HostsScreen` with row rendering and sort
-- [ ] Rust unit + integration tests
-- [ ] Cypress component acceptance tests
+- [x] `host_registry` module in `tddy-daemon`, with persistence
+- [x] Recording hook in the peer-discovery path
+- [x] `ListKnownHosts` proto + regeneration (Rust + TypeScript)
+- [x] `ListKnownHosts` handler
+- [x] `#/hosts` route, dispatch branch, nav entry
+- [x] `HostsAppPage` + `HostsScreen` with row rendering and sort
+- [x] Rust unit + integration tests
+- [x] Cypress component acceptance tests
 
 ## Technical changes
 
@@ -190,13 +190,13 @@ persists that record, and renders it at `#/hosts` with an online/offline state a
 
 ## Implementation milestones
 
-- [ ] `HostRegistry` + file persistence, unit-tested standalone
-- [ ] Discovery hook recording appearances and last-seen
-- [ ] Proto + both regenerations, workspace builds
-- [ ] `ListKnownHosts` handler with auth and the `online` intersection
-- [ ] Route + nav entry reachable
-- [ ] `HostsScreen` rows, sort, and last-seen formatting
-- [ ] All tests green; `cargo clippy -- -D warnings` clean
+- [x] `HostRegistry` + file persistence, unit-tested standalone
+- [x] Discovery hook recording appearances and last-seen
+- [x] Proto + both regenerations, workspace builds
+- [x] `ListKnownHosts` handler with auth and the `online` intersection
+- [x] Route + nav entry reachable
+- [x] `HostsScreen` rows, sort, and last-seen formatting
+- [x] All tests green; `cargo clippy -- -D warnings` clean
 
 ## Testing plan
 
@@ -262,7 +262,13 @@ Mount: `mountWithRpc(withSelectedDaemon(<HostsAppPage />), backend)`.
 
 ## Technical debt & production readiness
 
-_(populated during development)_
+- `connection_service.rs` grew by ~50 lines (handler + field + builder override), making the
+  19,600-line TODO recorded under **Prerequisites** measurably worse. Recorded, not fixed — the TODO
+  is explicit that the split needs its own PR.
+- `known_hosts` performs a linear scan of the roster per entry. Fine at the scale this screen exists
+  for (a handful of machines); if a deployment ever has hundreds, it becomes a map lookup.
+- No production-readiness markers left on this node's surface: no `TODO`/`FIXME`, no mock or
+  environment-detecting code paths, no debug output.
 
 ## Refactoring needed
 
@@ -284,6 +290,60 @@ _(populated by each validation phase)_
     regression guard.
   - `HostsScreenAcceptance.cy.tsx` — 5/5 red ("expected to find `hosts-row-…`, never found it").
 
+### Green phase
+
+- `cargo build` (workspace) — pass.
+- `cargo fmt --all --check` — clean.
+- `cargo clippy -p tddy-daemon -p tddy-service --all-targets -- -D warnings` — clean.
+- `cargo test -p tddy-daemon --lib` — **677 passed, 0 failed** on two consecutive full runs.
+- `cypress:component --spec cypress/component/HostsScreenAcceptance.cy.tsx` — **5 passed, 0 failed**.
+- All 16 tests from the red phase are green: 7 `host_registry`, 4 `known_hosts_handler_unit_tests`,
+  5 Cypress specs.
+
+**One intermittent failure observed and not reproduced.** A single full-suite run failed
+`connection_service::stack_child_spawn_tests::a_child_started_from_the_dialog_is_told_to_read_its_changeset`.
+It passes in isolation and on both subsequent full runs. Nothing in this node touches session
+spawning, so it reads as pre-existing order/timing flakiness rather than a regression here — recorded
+so the next person to see it has a prior sighting rather than a mystery. A bare `cargo test` also
+fails `sandbox_session::tests::dial_and_bridge_drives_run_host_relay_over_a_stdio_sandbox_client`
+until `tddy-sandbox-runner` is built, which is why `./test` builds it first.
+
+**Two test-infrastructure defects were fixed** — both made a published spec unsatisfiable rather than
+merely failing, so neither could be answered by implementation. No assertion was weakened and no spec
+text changed:
+
+1. `hostsScreenPage.rows()` matched `[data-testid^="hosts-row-"]`, which by construction also
+   collects each row's own `-liveness` and `-last-seen` children that the same page object mandates.
+   No markup satisfying the first two specs could satisfy the sort spec. Now guarded with `:not()`,
+   the pattern already used by `sessionAgentConversationPage.ts:74` and `sessionTerminalTabsPage.ts:87`.
+2. `NOW_MS` was a frozen `1_788_696_000_000` (2026-09-06T12:00:00Z) compared against the wall clock:
+   the spec mounts `HostsAppPage`, which renders against `Date.now()`, so the fixture's instant never
+   reached the formatter. It read "4 hours ago" the same afternoon and would drift daily. Now anchored
+   to `Date.now()`, which is the clock the screen actually uses.
+
+**Judgment calls made during implementation**, each commented at its site:
+
+- `record_sighting` refreshes `label` / `repos_base_path` / `max_attachment_bytes` **only when the
+  sighting carries them**. `HostSighting::from_eligible` knows only id and label, so an empty value
+  there means "not observed", not "now empty"; an unconditional refresh would blank a repos path the
+  screen had already shown.
+- `known_hosts` unions the live roster into its view but **does not write it back**. It returns
+  `Vec`, not `Result`, so a write there could only be swallowed or panic. Durable recording stays the
+  discovery path's job.
+- The `list_known_hosts` handler guarantees the **serving daemon always appears**, flagged
+  `is_local`, filling the row from what the daemon knows about itself first-hand. A first boot has
+  written nothing before the first RPC, and an unwritable registry never will; the machine the
+  operator is talking to is the one host that can never legitimately be missing.
+- `CommonRoomPeerRegistry::clear()` deliberately records **no** departures — it observes our own
+  disconnection, not the peers leaving, and stamping every host's `last_seen` there would record a
+  sighting-end that did not happen.
+- The web row renders a `(local)` marker next to the label. Every daemon self-labels
+  `"<id> (this daemon)"` in its own advertisement, so in a multi-host list the label alone cannot say
+  which one is serving the page. Deliberately given no `data-testid`, to avoid a fourth element under
+  the `hosts-row-` prefix.
+- `HostsAppPage`'s fetch effect carries a cancellation guard: it legitimately re-fires when the
+  selected host changes, so a reply from the daemon just navigated away from must not render.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-host-registry-initial-discovery.md`)
@@ -293,8 +353,8 @@ _(populated by each validation phase)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

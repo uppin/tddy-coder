@@ -89,6 +89,7 @@ use tddy_service::proto::connection::{
 };
 
 use crate::config::{DaemonConfig, LiveKitConfig};
+use crate::host_registry::{now_unix_ms, HostRegistry, HostSighting};
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 
 /// After `RoomEvent::Connected`, yield before the first `set_metadata` attempt.
@@ -263,14 +264,38 @@ pub fn classify_start_session_peer_route(
 }
 
 /// Registry of remote daemons observed in the shared common room (excludes the local row).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct CommonRoomPeerRegistry {
     remotes: std::sync::RwLock<HashMap<String, EligibleDaemonInfo>>,
+    /// Where each snapshot's arrivals and departures are recorded durably.
+    ///
+    /// Optional because this registry is also the roster on its own: the discovery tests and any
+    /// caller that only cares about live membership build one without persistence.
+    host_registry: Option<Arc<dyn HostRegistry>>,
+}
+
+impl std::fmt::Debug for CommonRoomPeerRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommonRoomPeerRegistry")
+            .field(
+                "remotes",
+                &self.remotes.read().map(|g| g.len()).unwrap_or(0),
+            )
+            .field("persists", &self.host_registry.is_some())
+            .finish()
+    }
 }
 
 impl CommonRoomPeerRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Record every snapshot transition into `host_registry` as well as the live map.
+    #[must_use]
+    pub fn with_host_registry(mut self, host_registry: Arc<dyn HostRegistry>) -> Self {
+        self.host_registry = Some(host_registry);
+        self
     }
 
     /// Replace remote entries from a full room snapshot (authoritative for membership).
@@ -288,14 +313,55 @@ impl CommonRoomPeerRegistry {
             }
         }
         let n = next.len();
-        {
+        let sightings: Vec<HostSighting> = next.values().map(HostSighting::from_eligible).collect();
+        // Taking the old map out as the new one goes in is what makes a departure observable at
+        // all: the snapshot is authoritative about who is present and says nothing about who left,
+        // so the difference against what was here a moment ago is the only evidence there is.
+        let previous = {
             let mut g = self.remotes.write().expect("registry lock");
-            *g = next;
-        }
+            std::mem::replace(&mut *g, next)
+        };
+        self.record_snapshot(&sightings, previous.into_keys());
         log::info!(
             "CommonRoomPeerRegistry: synced {} remote daemon(s) from LiveKit room snapshot",
             n
         );
+    }
+
+    /// Persist this snapshot: every peer visible now was seen, and every id in `previous_ids` that
+    /// is no longer visible has departed.
+    ///
+    /// A failed write is logged and dropped. Discovery's job is routing, and a persistence failure
+    /// costs a stale row on a screen — whereas propagating it would let a full disk take the peer
+    /// roster, and every RPC routed through it, down with it.
+    fn record_snapshot(
+        &self,
+        sightings: &[HostSighting],
+        previous_ids: impl Iterator<Item = String>,
+    ) {
+        let Some(host_registry) = self.host_registry.as_ref() else {
+            return;
+        };
+        let now = now_unix_ms();
+        for sighting in sightings {
+            if let Err(e) = host_registry.record_sighting(sighting, now) {
+                log::warn!(
+                    "host registry: could not record sighting of {}: {e}",
+                    sighting.instance_id.0
+                );
+            }
+        }
+        for gone in previous_ids
+            .filter(|id| !sightings.iter().any(|seen| &seen.instance_id.0 == id))
+            .map(DaemonInstanceId)
+        {
+            if let Err(e) = host_registry.record_departure(&gone, now) {
+                log::warn!(
+                    "host registry: could not record departure of {}: {e}",
+                    gone.0
+                );
+            }
+        }
     }
 
     pub fn snapshot_remotes(&self) -> Vec<EligibleDaemonInfo> {

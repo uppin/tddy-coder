@@ -19,8 +19,14 @@ import { hostsScreenPage } from "../support/pages/hostsScreenPage";
 const ONLINE_HOST = "workstation-1";
 const OFFLINE_HOST = "server-2";
 
-/** 2026-09-06T12:00:00Z, so relative phrasing in assertions is stable. */
-const NOW_MS = 1_788_696_000_000;
+/**
+ * The reference time the fixtures are anchored to.
+ *
+ * It has to be the real clock: the screen renders relative phrases against `Date.now()`, and these
+ * tests mount `HostsAppPage`, which owns that call. A frozen instant here would be compared against
+ * wall-clock time and the phrasing would drift with the calendar.
+ */
+const NOW_MS = Date.now();
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 function aKnownHost(overrides: Partial<KnownHostEntry>): KnownHostEntry {

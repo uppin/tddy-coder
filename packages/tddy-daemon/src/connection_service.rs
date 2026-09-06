@@ -29,7 +29,7 @@ use tddy_service::proto::connection::{
     ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
-    DetachSessionAgentRequest, EligibleDaemonEntry, ListAgentModelsRequest,
+    DetachSessionAgentRequest, EligibleDaemonEntry, KnownHostEntry, ListAgentModelsRequest,
     ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
     ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
@@ -1767,8 +1767,9 @@ impl ConnectionServiceImpl {
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let host_registry: Arc<dyn HostRegistry> =
-            Arc::new(FileHostRegistry::new(tddy_data_dir.join("hosts")));
+        let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
+            crate::host_registry::host_registry_dir(&tddy_data_dir),
+        ));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -13067,8 +13068,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
-        // TODO(host-registry): implement
-        unimplemented!("host-registry: list_known_hosts")
+        let local_id = local_instance_id_for_config(&self.config);
+        let live_roster = self.eligible_daemon_source.list_eligible_daemons();
+        let now_unix_ms = crate::host_registry::now_unix_ms();
+        let mut hosts: Vec<KnownHostEntry> = self
+            .host_registry
+            .known_hosts(&live_roster, &local_id, now_unix_ms)
+            .into_iter()
+            .map(|view| KnownHostEntry {
+                instance_id: view.host.instance_id,
+                label: view.host.label,
+                online: view.online,
+                first_seen_unix_ms: view.host.first_seen_unix_ms,
+                last_seen_unix_ms: view.host.last_seen_unix_ms,
+                repos_base_path: view.host.repos_base_path,
+                max_attachment_bytes: view.host.max_attachment_bytes,
+                is_local: view.is_local,
+            })
+            .collect();
+
+        // Invariant: the daemon serving this call is the one host that can never legitimately be
+        // missing from the answer — it is, demonstrably, right here answering. Whatever the registry
+        // has or has not recorded about itself (a first boot writes nothing before the first RPC,
+        // and an unwritable registry never will), an operator must be able to see the machine they
+        // are talking to. So the row is filled from what this daemon knows about itself first-hand.
+        if !hosts.iter().any(|host| host.instance_id == local_id) {
+            let label = live_roster
+                .iter()
+                .find(|daemon| daemon.instance_id.0 == local_id)
+                .map(|daemon| daemon.label.clone())
+                .unwrap_or_else(|| format!("{local_id} (this daemon)"));
+            hosts.push(KnownHostEntry {
+                instance_id: local_id,
+                label,
+                online: true,
+                first_seen_unix_ms: now_unix_ms,
+                last_seen_unix_ms: now_unix_ms,
+                repos_base_path: self.config.repos_base_path_or_default().to_string(),
+                max_attachment_bytes: self.config.max_attachment_bytes,
+                is_local: true,
+            });
+        }
+
+        Ok(Response::new(ListKnownHostsResponse { hosts }))
     }
 
     async fn list_session_workflow_files(
