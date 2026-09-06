@@ -20,7 +20,10 @@
 //! Reporting an authenticated host as logged out is the worse error: it sends an operator to fix
 //! something that is not broken.
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use crate::remote_desktop_probe::{DesktopProtocol, DesktopReachability, RemoteDesktopProbe};
 
 /// How long a single probe may take before it is abandoned.
 ///
@@ -177,8 +180,37 @@ pub fn parse_git_identity(name_output: &str, email_output: &str) -> GitIdentity 
     }
 }
 
-/// The live probe: runs `git` and `gh` as the host's OS user.
-pub struct SubprocessHostToolingProbe;
+/// The protocols the desktop block reports on, each checked on its own default port.
+///
+/// Both are reported for every host, including the ones nothing answered for. "No desktop on
+/// :5900" is a finding, and a block that listed only the protocols that answered could not be told
+/// apart from one where nobody looked.
+const PROBED_PROTOCOLS: [DesktopProtocol; 2] = [DesktopProtocol::Vnc, DesktopProtocol::Rdp];
+
+/// The live probe: runs `git` and `gh` as the host's OS user, and checks this host's desktops.
+///
+/// The desktop half is held as a trait object rather than called directly, for the reason the RPC
+/// layer holds [`HostToolingProbe`] as one: what a connect finds depends on what happens to be
+/// listening on the machine running the suite, and a test may not depend on that.
+pub struct SubprocessHostToolingProbe {
+    remote_desktop: Arc<dyn RemoteDesktopProbe>,
+}
+
+impl Default for SubprocessHostToolingProbe {
+    fn default() -> Self {
+        Self {
+            remote_desktop: Arc::new(crate::remote_desktop_probe::TcpRemoteDesktopProbe),
+        }
+    }
+}
+
+impl SubprocessHostToolingProbe {
+    /// Fill the desktop block from `remote_desktop` instead of connecting for real.
+    #[must_use]
+    pub fn probing_desktops_with(remote_desktop: Arc<dyn RemoteDesktopProbe>) -> Self {
+        Self { remote_desktop }
+    }
+}
 
 impl HostToolingProbe for SubprocessHostToolingProbe {
     #[cfg(unix)]
@@ -199,6 +231,11 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         // carries its own, shorter bound, and running it last would add that bound to whatever `gh`
         // took.
         let ssh_agent = start_agent_probe(os_user);
+        // Started with the others for the same reason again: each connect carries its own
+        // `CONNECT_TIMEOUT`, and a block collected by connecting to one port and then the next
+        // would put both of those bounds after whatever `gh` took — on a screen that probes every
+        // host it lists, on every poll.
+        let remote_desktop = start_desktop_probes(&self.remote_desktop);
         let name = git_program
             .as_deref()
             .map(|git| start_probe(os_user, git, &["config", "--global", "--get", "user.name"]));
@@ -214,6 +251,10 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         // judged on whatever is left of the shared deadline — so collecting it after `gh`, which can
         // reach the network, would fail it for time `gh` had spent.
         let ssh_agent = agent_status_of(ssh_agent, deadline);
+        // Collected here for the same reason, and not as the last field of the literal: two bounded
+        // TCP connects judged on whatever `git` and `gh` left of the deadline would report a host as
+        // unprobeable for time they spent, which is the one thing this block must never claim.
+        let remote_desktop = desktop_readings_of(remote_desktop, deadline);
 
         let tooling = HostTooling {
             git: match (name, email) {
@@ -238,11 +279,13 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 None => classify_gh_auth_status(None, ""),
             },
             ssh_agent,
+            remote_desktop,
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
         warn_if_failed("gh", os_user, &tooling.github_cli.outcome);
         warn_if_failed("ssh-agent", os_user, &tooling.ssh_agent.outcome);
+        warn_if_a_desktop_probe_failed(&tooling.remote_desktop);
         tooling
     }
 
@@ -251,7 +294,14 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
     /// internal error an operator would try to fix.
     #[cfg(not(unix))]
     fn probe(&self, _os_user: &str) -> HostTooling {
-        HostTooling {
+        // The desktop block is the one thing here that is *not* unsupported off Unix, so it is
+        // probed rather than declared away. Nothing it does needs `start_output_as_user`: it is a
+        // TCP connect to this machine's own loopback plus an existence check on a path, and both
+        // answer on every platform. Reporting `Unsupported` for a probe that would have answered
+        // would be as much of a fabricated fact as reporting a finding it never made.
+        let remote_desktop = start_desktop_probes(&self.remote_desktop);
+        let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+        let tooling = HostTooling {
             git: GitIdentity {
                 outcome: ProbeOutcome::Unsupported,
                 name_and_email: None,
@@ -263,6 +313,104 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 login: None,
             },
             ssh_agent: crate::ssh_agent::AgentStatus::unsupported(),
+            remote_desktop: desktop_readings_of(remote_desktop, deadline),
+        };
+
+        warn_if_a_desktop_probe_failed(&tooling.remote_desktop);
+        tooling
+    }
+}
+
+/// Start one connect per protocol, without waiting for any of them.
+///
+/// Each reading is produced on a thread of its own, like every other probe in this module and for
+/// the same reason: a connect that gets no answer costs
+/// [`crate::remote_desktop_probe::CONNECT_TIMEOUT`], and a host serving neither protocol would cost
+/// two of those in a row if they were checked one after the other.
+fn start_desktop_probes(
+    probe: &Arc<dyn RemoteDesktopProbe>,
+) -> Vec<(
+    DesktopProtocol,
+    std::sync::mpsc::Receiver<DesktopReachability>,
+)> {
+    PROBED_PROTOCOLS
+        .iter()
+        .map(|&protocol| {
+            let probe = Arc::clone(probe);
+            let (tx, reading) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(probe.probe(protocol, protocol.default_port()));
+            });
+            (protocol, reading)
+        })
+        .collect()
+}
+
+/// Wait for each connect until `deadline`, then give up on it.
+///
+/// A connect bounds itself well inside [`PROBE_TIMEOUT`], so reaching this deadline means the
+/// reading never came back at all — a failed probe, and never the "nothing is serving here"
+/// finding an operator would go and act on.
+fn desktop_readings_of(
+    started: Vec<(
+        DesktopProtocol,
+        std::sync::mpsc::Receiver<DesktopReachability>,
+    )>,
+    deadline: std::time::Instant,
+) -> Vec<DesktopReachability> {
+    started
+        .into_iter()
+        .map(|(protocol, reading)| {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match reading.recv_timeout(remaining) {
+                Ok(reading) => reading,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => desktop_probe_failed(
+                    protocol,
+                    format!(
+                        "the {protocol:?} desktop probe did not finish within {}s",
+                        PROBE_TIMEOUT.as_secs()
+                    ),
+                ),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => desktop_probe_failed(
+                    protocol,
+                    format!("the {protocol:?} desktop probe ended without reporting"),
+                ),
+            }
+        })
+        .collect()
+}
+
+/// A reading for a protocol nothing reported on.
+///
+/// The two flags carry the same neutral values `TcpRemoteDesktopProbe` gives a connect it could not
+/// complete, and [`ProbeOutcome::Failed`] beside them is what says they are not findings. A reader
+/// keying off `desktop_reachable` alone would report "no desktop" for a host nobody reached, which
+/// is the whole reason the outcome travels with them.
+fn desktop_probe_failed(protocol: DesktopProtocol, reason: String) -> DesktopReachability {
+    DesktopReachability {
+        outcome: ProbeOutcome::Failed(reason),
+        protocol,
+        can_bridge: false,
+        desktop_reachable: false,
+        port: protocol.default_port(),
+    }
+}
+
+/// Record a desktop probe that could not answer.
+///
+/// The same argument `warn_if_failed` makes for the three blocks beside this one: a `Failed`
+/// outcome's cause lives on this side of the wire, and without a line in the daemon log its only
+/// trace is a cell on a screen nobody may be looking at. No OS user is named, because a desktop is
+/// served by the host rather than by one of its accounts.
+fn warn_if_a_desktop_probe_failed(readings: &[DesktopReachability]) {
+    for reading in readings {
+        if let ProbeOutcome::Failed(reason) = &reading.outcome {
+            log::warn!(
+                target: "tddy_daemon::host_tooling",
+                "the {:?} desktop probe on port {} reported nothing: {reason}",
+                reading.protocol,
+                reading.port
+            );
         }
     }
 }
@@ -633,6 +781,160 @@ mod tests {
     #[cfg(unix)]
     fn a_process_still_exists(pid: u32) -> bool {
         unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    /// A desktop probe that answers from a script instead of connecting to anything.
+    ///
+    /// Deterministic by construction: a real connect answers about whatever happens to be listening
+    /// on the machine running the suite, and a real bridge check about whatever happens to be
+    /// installed beside the test binary. Neither is something a test may assert on.
+    #[cfg(unix)]
+    struct ScriptedDesktopProbe {
+        readings: Vec<DesktopReachability>,
+    }
+
+    #[cfg(unix)]
+    impl RemoteDesktopProbe for ScriptedDesktopProbe {
+        fn probe(&self, protocol: DesktopProtocol, port: u16) -> DesktopReachability {
+            self.readings
+                .iter()
+                .find(|reading| reading.protocol == protocol)
+                .cloned()
+                .unwrap_or_else(|| panic!("nothing scripted for {protocol:?} on port {port}"))
+        }
+    }
+
+    /// A probe that answers `readings` for the protocols it is asked about.
+    #[cfg(unix)]
+    fn a_desktop_probe_reporting(
+        readings: Vec<DesktopReachability>,
+    ) -> Arc<dyn RemoteDesktopProbe> {
+        Arc::new(ScriptedDesktopProbe { readings })
+    }
+
+    /// A host serving a desktop this daemon has no bridge binary for.
+    #[cfg(unix)]
+    fn serving_with_no_bridge(protocol: DesktopProtocol) -> DesktopReachability {
+        DesktopReachability {
+            outcome: ProbeOutcome::Ok,
+            protocol,
+            can_bridge: false,
+            desktop_reachable: true,
+            port: protocol.default_port(),
+        }
+    }
+
+    /// A host this daemon could bridge, with nothing serving a desktop on it.
+    #[cfg(unix)]
+    fn bridgeable_with_no_desktop(protocol: DesktopProtocol) -> DesktopReachability {
+        DesktopReachability {
+            outcome: ProbeOutcome::Ok,
+            protocol,
+            can_bridge: true,
+            desktop_reachable: false,
+            port: protocol.default_port(),
+        }
+    }
+
+    /// The reading the block carries for `protocol`.
+    #[cfg(unix)]
+    fn the_reading_for(tooling: &HostTooling, protocol: DesktopProtocol) -> DesktopReachability {
+        tooling
+            .remote_desktop
+            .iter()
+            .find(|reading| reading.protocol == protocol)
+            .cloned()
+            .unwrap_or_else(|| panic!("the block reports nothing for {protocol:?}"))
+    }
+
+    /// Assert that a block was answered by a probe that actually ran here.
+    ///
+    /// [`ProbeOutcome::Unsupported`] is the one answer a Unix host can never honestly give for these
+    /// three: it means the platform cannot run the probe at all, and this one can. It is what the
+    /// `#[cfg(not(unix))]` arm reports, which is exactly the arm the desktop block also had to be
+    /// added to — so it is the shape a careless edit leaves behind.
+    #[cfg(unix)]
+    fn assert_was_probed_on_this_host(subject: &str, outcome: &ProbeOutcome) {
+        assert_ne!(
+            *outcome,
+            ProbeOutcome::Unsupported,
+            "the {subject} probe runs on this platform, so it must never report it as unsupported"
+        );
+    }
+
+    /// AC-4 and AC-7, the pair this whole node exists for. "tddy cannot bridge here" and "nothing is
+    /// serving a desktop here" have unrelated fixes — install the bridge, versus start a server — so
+    /// the block reports them as two facts. A host with each one and not the other is what proves
+    /// they never collapsed into one.
+    #[cfg(unix)]
+    #[test]
+    fn host_tooling_reports_bridge_availability_separately_from_reachability() {
+        // Given — VNC: a desktop is up, and this daemon has no bridge for it.
+        //         RDP: the bridge is there, and nothing is serving.
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_desktop_probe_reporting(vec![
+                serving_with_no_bridge(DesktopProtocol::Vnc),
+                bridgeable_with_no_desktop(DesktopProtocol::Rdp),
+            ]));
+
+        // When
+        let tooling = probe.probe(&the_current_os_user());
+
+        // Then — each protocol reports both facts, and the two disagree in opposite directions
+        let vnc = the_reading_for(&tooling, DesktopProtocol::Vnc);
+        assert_eq!(vnc.outcome, ProbeOutcome::Ok);
+        assert!(vnc.desktop_reachable, "a desktop is serving over VNC");
+        assert!(
+            !vnc.can_bridge,
+            "and this daemon still cannot bridge it — the fix is to install the bridge, not to \
+             start a server"
+        );
+        assert_eq!(vnc.port, DesktopProtocol::Vnc.default_port());
+
+        let rdp = the_reading_for(&tooling, DesktopProtocol::Rdp);
+        assert_eq!(rdp.outcome, ProbeOutcome::Ok);
+        assert!(rdp.can_bridge, "this daemon has the RDP bridge");
+        assert!(
+            !rdp.desktop_reachable,
+            "and nothing is serving over RDP — the fix is to start a server, not to install a \
+             bridge"
+        );
+        assert_eq!(rdp.port, DesktopProtocol::Rdp.default_port());
+    }
+
+    /// The desktop block arrives **beside** nodes 4's and 5's, not instead of them.
+    ///
+    /// Adding it meant editing both arms of `probe`, including the one that answers
+    /// `Unsupported` for everything because the platform cannot spawn as another user. What each of
+    /// the three blocks *finds* depends on the machine running the suite, so what this pins is the
+    /// part that does not: on a Unix host all three are probes that can run, and every one of them
+    /// still reports an answer only a probe that ran can give.
+    #[cfg(unix)]
+    #[test]
+    fn host_tooling_still_reports_git_gh_and_the_ssh_agent_alongside_the_desktop_block() {
+        // Given
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_desktop_probe_reporting(vec![
+                serving_with_no_bridge(DesktopProtocol::Vnc),
+                bridgeable_with_no_desktop(DesktopProtocol::Rdp),
+            ]));
+
+        // When
+        let tooling = probe.probe(&the_current_os_user());
+
+        // Then — the desktop block reports one reading per probed protocol ...
+        assert_eq!(
+            tooling
+                .remote_desktop
+                .iter()
+                .map(|reading| reading.protocol)
+                .collect::<Vec<_>>(),
+            vec![DesktopProtocol::Vnc, DesktopProtocol::Rdp],
+        );
+        // ... and the three blocks beside it were still answered by probes that ran here
+        assert_was_probed_on_this_host("git identity", &tooling.git.outcome);
+        assert_was_probed_on_this_host("gh", &tooling.github_cli.outcome);
+        assert_was_probed_on_this_host("ssh-agent", &tooling.ssh_agent.outcome);
     }
 
     /// A configured host reports both halves of the identity its commits would carry.

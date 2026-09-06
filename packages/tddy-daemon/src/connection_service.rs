@@ -32,9 +32,9 @@ use tddy_service::proto::connection::{
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
-    HostGitIdentity, HostGithubCli, HostKeyCandidate, HostPromptEvent, HostSshAgent,
-    KnownHostEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
-    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    HostGitIdentity, HostGithubCli, HostKeyCandidate, HostPromptEvent, HostRemoteDesktop,
+    HostSshAgent, KnownHostEntry, ListAgentModelsRequest, ListAgentModelsResponse,
+    ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
     ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse, ListKnownHostsRequest,
     ListKnownHostsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
     ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
@@ -1186,6 +1186,27 @@ fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> HostGithubCl
     }
 }
 
+/// Put one probed remote-desktop reading on the wire.
+///
+/// `can_bridge` and `desktop_reachable` are carried as two fields because they are two facts: "this
+/// daemon has no bridge binary" and "nothing is serving a desktop here" have unrelated fixes, and a
+/// single flag could not send an operator to the right one. `port` travels with them so an
+/// unreachable reading is not read as authoritative for a host serving somewhere non-default.
+fn host_remote_desktop_message(
+    reading: &crate::remote_desktop_probe::DesktopReachability,
+) -> HostRemoteDesktop {
+    HostRemoteDesktop {
+        outcome: proto_probe_outcome(&reading.outcome) as i32,
+        // `screen_sharing.proto`'s `Protocol` values, which `DesktopProtocol`'s discriminants
+        // mirror rather than restate — two enums meaning the same thing drift apart.
+        protocol: reading.protocol as i32,
+        can_bridge: reading.can_bridge,
+        desktop_reachable: reading.desktop_reachable,
+        port: u32::from(reading.port),
+        failure_reason: probe_failure_reason(&reading.outcome),
+    }
+}
+
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.
 pub(crate) fn now_unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -2047,7 +2068,8 @@ impl ConnectionServiceImpl {
         let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
-        let host_tooling: Arc<dyn HostToolingProbe> = Arc::new(SubprocessHostToolingProbe);
+        let host_tooling: Arc<dyn HostToolingProbe> =
+            Arc::new(SubprocessHostToolingProbe::default());
         let host_prompts: Arc<dyn HostPromptRegistry> =
             Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
         // Alongside the host registry, and generated on first use rather than here: a host whose
@@ -13514,6 +13536,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             git: Some(git_identity_message(&tooling.git)),
             github_cli: Some(github_cli_message(&tooling.github_cli)),
             ssh_agent: Some(ssh_agent_message(&tooling.ssh_agent)),
+            remote_desktop: tooling
+                .remote_desktop
+                .iter()
+                .map(host_remote_desktop_message)
+                .collect(),
         }))
     }
 
@@ -23148,6 +23175,9 @@ mod host_tooling_handler_unit_tests {
             // These tests are about the git and `gh` halves; no agent is reached, which is the
             // neutral value for the block `#hosts-screen 5/8` added to this struct.
             ssh_agent: crate::ssh_agent::AgentStatus::unreachable(),
+            // Likewise for the block `#hosts-screen 7/8` added beside it: no protocol was probed,
+            // so this host claims nothing either way about a desktop.
+            remote_desktop: Vec::new(),
         }
     }
 
@@ -23428,6 +23458,9 @@ mod ssh_agent_block_handler_tests {
                 login: Some("ada".to_string()),
             },
             ssh_agent: AgentStatus::unreachable(),
+            // These tests are about the agent block; no protocol was probed, which is the neutral
+            // value for the block `#hosts-screen 7/8` added beside it.
+            remote_desktop: Vec::new(),
         }
     }
 

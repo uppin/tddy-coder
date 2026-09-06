@@ -15,8 +15,14 @@
  * one it is showing.
  */
 
-import type { HostGitIdentity, HostGithubCli, HostSshAgent } from "../../gen/connection_pb";
+import type {
+  HostGitIdentity,
+  HostGithubCli,
+  HostRemoteDesktop,
+  HostSshAgent,
+} from "../../gen/connection_pb";
 import { ProbeOutcome } from "../../gen/connection_pb";
+import { HostRowRemoteDesktop } from "./HostRowRemoteDesktop";
 import { HostRowSshAgent } from "./HostRowSshAgent";
 
 export interface HostRowToolingProps {
@@ -26,6 +32,9 @@ export interface HostRowToolingProps {
   /** Added by `#hosts-screen 5/8`, and optional for the same reason the two above accept
    * `undefined`: a row renders before any probe has answered for that host. */
   sshAgent?: HostSshAgent | undefined;
+  /** Added by `#hosts-screen 7/8`: one reading per probed protocol. Optional for the same reason —
+   * a row renders before any probe has answered. */
+  remoteDesktop?: readonly HostRemoteDesktop[] | undefined;
 }
 
 /** What one cell says, and what hovering it explains. */
@@ -123,7 +132,13 @@ function githubCliCell(githubCli: HostGithubCli | undefined): ToolingCell {
   };
 }
 
-export function HostRowTooling({ instanceId, git, githubCli, sshAgent }: HostRowToolingProps) {
+export function HostRowTooling({
+  instanceId,
+  git,
+  githubCli,
+  sshAgent,
+  remoteDesktop,
+}: HostRowToolingProps) {
   const gitState = gitCell(git);
   const ghState = githubCliCell(githubCli);
 
@@ -145,6 +160,9 @@ export function HostRowTooling({ instanceId, git, githubCli, sshAgent }: HostRow
         {ghState.text}
       </span>
       <HostRowSshAgent instanceId={instanceId} sshAgent={sshAgent} />
+      {/* No readings is no claim: a host nothing has answered for yet renders an empty section
+          rather than a protocol row asserting something about a probe that has not run. */}
+      <HostRowRemoteDesktop instanceId={instanceId} readings={remoteDesktop ?? []} />
     </span>
   );
 }
