@@ -59,6 +59,36 @@ pub trait HostStats: Send + Sync {
     fn cpu_per_core_percent(&self) -> Vec<f32>;
     /// Free/total capacity of the filesystem holding the daemon's default project directory.
     fn disk_for_project_dir(&self) -> DiskUsage;
+
+    /// Total and available physical memory. Refreshed on the same (fast) tick as CPU, because it
+    /// moves on the same timescale — an operator watching a build eat memory needs it live.
+    fn memory(&self) -> MemoryUsage;
+
+    /// Logical core count, reported explicitly so a reader is not left inferring it from a
+    /// `cpu_per_core_percent` that is empty before the first sample has been taken.
+    fn logical_cores(&self) -> u32;
+
+    /// 1/5/15-minute load averages, or `None` where the platform does not provide them.
+    ///
+    /// `None` is a real answer and must survive all the way to the wire. `sysinfo` reports zeros on
+    /// platforms without a load average, and rendering `0.00` would tell an operator the machine is
+    /// idle — the opposite of "we cannot tell". See CLAUDE.md on fallbacks.
+    fn load_average(&self) -> Option<LoadAverage>;
+}
+
+/// Physical memory, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryUsage {
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+}
+
+/// 1/5/15-minute load averages.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoadAverage {
+    pub one_minute: f64,
+    pub five_minutes: f64,
+    pub fifteen_minutes: f64,
 }
 
 /// Live host stats backed by the `sysinfo` crate.
@@ -134,6 +164,21 @@ impl HostStats for SysinfoHostStats {
             },
         }
     }
+
+    fn memory(&self) -> MemoryUsage {
+        // TODO(host-resources): implement
+        unimplemented!("host-resources: memory")
+    }
+
+    fn logical_cores(&self) -> u32 {
+        // TODO(host-resources): implement
+        unimplemented!("host-resources: logical_cores")
+    }
+
+    fn load_average(&self) -> Option<LoadAverage> {
+        // TODO(host-resources): implement
+        unimplemented!("host-resources: load_average")
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +244,61 @@ mod tests {
 
         // Then no mount matches
         assert!(selected.is_none());
+    }
+}
+
+#[cfg(test)]
+mod resource_reading_tests {
+    use super::*;
+
+    fn a_live_provider() -> SysinfoHostStats {
+        SysinfoHostStats::new(std::env::temp_dir())
+    }
+
+    /// Memory is the reading an operator actually needs when a session dies: CPU being busy is
+    /// normal, running out of memory is not.
+    #[test]
+    fn reports_total_and_available_memory_for_the_host() {
+        let memory = a_live_provider().memory();
+
+        assert!(
+            memory.total_bytes > 0,
+            "a host must report some total memory"
+        );
+        assert!(
+            memory.available_bytes <= memory.total_bytes,
+            "available memory ({}) cannot exceed total ({})",
+            memory.available_bytes,
+            memory.total_bytes
+        );
+    }
+
+    /// Reported explicitly rather than inferred from `cpu_per_core_percent`, which is empty until
+    /// the first sample has been taken.
+    #[test]
+    fn reports_the_logical_core_count() {
+        assert!(
+            a_live_provider().logical_cores() > 0,
+            "a host must report at least one logical core"
+        );
+    }
+
+    /// The honesty case. `sysinfo` reports zeros where no load average exists, and a `0.00` in the
+    /// UI reads as "idle" — the opposite of "cannot tell". Whatever this platform does, the two must
+    /// stay distinguishable: either a genuine reading, or `None`.
+    #[test]
+    fn reports_no_load_average_on_a_platform_that_does_not_provide_one() {
+        let load = a_live_provider().load_average();
+
+        // `None` is equally valid — and the whole point of the Option. What must not happen is a
+        // reported average that is really the all-zero sentinel `sysinfo` returns where the platform
+        // has none.
+        if let Some(avg) = load {
+            assert!(
+                avg.one_minute != 0.0 || avg.five_minutes != 0.0 || avg.fifteen_minutes != 0.0,
+                "an all-zero load average is the unsupported-platform sentinel and must be reported \
+                 as None rather than as a reading"
+            );
+        }
     }
 }

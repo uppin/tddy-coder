@@ -25,3 +25,28 @@ export function clampCorePercent(raw: number): number {
   if (raw > 100) return 100;
   return raw;
 }
+
+/**
+ * A byte count as a short "free" phrase, for any host resource.
+ *
+ * Shares `formatDiskFree`'s signature (`number | bigint`) so a `uint64` from the wire needs no
+ * `Number()` conversion at the call site, and so memory and disk cannot drift into two different
+ * renderings of the same quantity.
+ */
+export function formatBytesFree(availableBytes: number | bigint): string {
+  // TODO(host-resources): implement
+  void availableBytes;
+  throw new Error("host-resources: formatBytesFree not implemented");
+}
+
+/**
+ * A load average as it should read in a row, or `null` when the host reports none.
+ *
+ * Returning `null` rather than `"0.00"` is the whole point: a host with no load average must not be
+ * indistinguishable from an idle one.
+ */
+export function formatLoadAverage(load: { oneMinute: number } | null): string | null {
+  // TODO(host-resources): implement
+  void load;
+  throw new Error("host-resources: formatLoadAverage not implemented");
+}

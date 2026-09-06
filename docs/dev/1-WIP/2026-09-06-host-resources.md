@@ -5,6 +5,7 @@
 **Type:** Modification to an existing feature
 **Stack:** `#hosts-screen` 3/8
 **Branch:** `feature/hosts-screen/host-resources` → base `feature/hosts-screen/telemetry-fanout`
+**PR:** [#455](https://github.com/uppin/tddy-coder/pull/455)
 
 ## Initial Discovery
 
@@ -44,6 +45,25 @@ Affected: [`host-stats-footer.md`](../../ft/web/host-stats-footer.md)
 - Does **not** touch the fan-out mechanics, the subscription policy or the per-host tally — node 2's.
 - Does **not** touch the registry, `ListKnownHosts`, the route or the nav entry — node 1's.
 - Does **not** probe any software installed on a host — nodes 4–8.
+
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) this PR runs into.
+
+### ⚠ DURING — `connection_service.rs` is 19,600 lines
+
+`docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines* (source:
+subagent-conversation-inference, 2026-08-29), flagged rather than acted on.
+
+This node adds to that file. Across the `#hosts-screen` stack, **nodes 1, 3, 4 and 6** modify it —
+nodes 2, 5, 7 and 8 do not — so the stack makes a known problem measurably worse in four places.
+
+The TODO is explicit that a split "needs to be its own PR", because `ConnectionServiceImpl`'s ~60
+private fields would have to become `pub(crate)` and several hundred in-file tests would repoint. So
+this is **recorded, not fixed here**.
+
+Worth leaving for whoever does that split: the host registry, tooling probe and prompt handlers this
+stack adds form a coherent host-facing group, which is not among the seams the TODO currently lists.
 
 ## Dependencies
 
@@ -210,17 +230,28 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo build -p tddy-service` — pass; `bun run --filter tddy-web generate` — pass.
+- **The trait break landed exactly as predicted.** Adding three methods to `HostStats` failed the
+  build at every implementor, including two `FakeHostStats` construction sites in the test module.
+  That is the reason the plan accepted a breaking trait change rather than defaulted methods: the
+  compiler enumerates the sites, so no double can silently keep reporting a stale shape.
+- `SequencedHostStats` gained its own `memory_reads` counter, so
+  `refreshes_memory_on_the_fast_cadence` proves a *fresh* read rather than a repeated snapshot. Had
+  memory reused the CPU counter the assertion would have passed while demonstrating nothing.
+- Added `still_refreshes_disk_on_the_slow_cadence` as a regression guard: moving memory onto the fast
+  tick is precisely the change that could drag the expensive disk walk along with it.
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-host-resources-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

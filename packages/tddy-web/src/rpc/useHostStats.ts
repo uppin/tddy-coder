@@ -38,11 +38,36 @@ export interface HostDiskStats {
   projectDir: string;
 }
 
+/** Total and available physical memory for a host. */
+export interface HostMemoryStats {
+  availableBytes: bigint;
+  totalBytes: bigint;
+}
+
+/** 1/5/15-minute load averages, on hosts that report them. */
+export interface HostLoadStats {
+  oneMinute: number;
+  fiveMinutes: number;
+  fifteenMinutes: number;
+}
+
 export interface UseHostStatsResult {
   /** Per-core CPU utilization percentages (core 0 first). Empty until the first event arrives. */
   perCorePercent: number[];
+  /** Logical core count as the host reports it, or `null` before the first event. */
+  logicalCores: number | null;
   /** Latest disk figures, or `null` until the first event arrives (or while no daemon is selected). */
   disk: HostDiskStats | null;
+  /** Latest memory figures, or `null` before the first event. */
+  memory: HostMemoryStats | null;
+  /**
+   * Latest load averages, or `null`.
+   *
+   * `null` covers two different things on purpose — no event yet, and a host whose platform has no
+   * load average — and in both cases the only honest rendering is "no reading". What it must never
+   * become is `0`, which reads as an idle machine.
+   */
+  load: HostLoadStats | null;
 }
 
 /**
