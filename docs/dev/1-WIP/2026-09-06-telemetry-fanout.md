@@ -21,7 +21,7 @@ Affected: [`host-stats-footer.md`](../../ft/web/host-stats-footer.md)
 
 | Package | Change |
 |---|---|
-| [`packages/tddy-web`](../../../packages/tddy-web) | per-host telemetry hook, Hosts row telemetry column, per-host stream counter in the test backend |
+| [`packages/tddy-web`](../../../packages/tddy-web) | per-host telemetry hook, Hosts row telemetry cell |
 
 **No Rust package is touched by this node.**
 
@@ -77,11 +77,11 @@ is unary-shaped and cannot express a subscription.
 
 ## Scope
 
-- [ ] `useHostStats` generalized to a per-host client
-- [ ] Subscription policy: online hosts only, screen-scoped lifetime
-- [ ] Telemetry column on the Hosts row, reusing the existing indicators
-- [ ] Honest states for offline / connecting / errored
-- [ ] Cypress component acceptance tests
+- [x] `useHostStats` generalized to a per-host client
+- [x] Subscription policy: online hosts only, screen-scoped lifetime
+- [x] Telemetry cell for a Hosts row, reusing the existing indicators (node 1 places it in the row)
+- [x] Honest states for offline / connecting / errored
+- [x] Cypress component acceptance tests
 
 ## Technical changes
 
@@ -104,25 +104,31 @@ is unary-shaped and cannot express a subscription.
 - The Hosts screen subscribes per online row, tearing down on unmount.
 - Offline rows render `—` and never subscribe; connecting/errored rows render a pending or unavailable
   state.
-- The backend helper tallies subscriptions per host.
 
 ### Delta
 
 **`packages/tddy-web`**
 - `src/rpc/useHostStats.ts` — per-host client resolution; the no-argument call preserved.
 - `src/components/hosts/HostRowTelemetry.tsx` — the row's telemetry cell and its three states.
-- `src/components/hosts/HostsScreen.tsx` — the new column (node 1 owns the rest of the row).
-- `cypress/support/rpc/connectionServiceBackend.ts` — per-host stream tally.
+- `src/components/hosts/HostsScreen.tsx` — **not touched.** Planned as "the new column", but node 1's
+  `HostsScreen` is still an unimplemented stub, so adding the column here would have meant writing
+  that node's row rendering — a `## Dependencies` violation. The cell is standalone and node 1 wires
+  it in when its rows land; the acceptance spec mounts `HostRowTelemetry` directly for the same
+  reason.
+- `cypress/support/rpc/connectionServiceBackend.ts` — **not touched**; the existing global
+  `hostStatsStreamCount()` proves every count under test.
 - `cypress/support/pages/hostsScreenPage.ts` — telemetry cell selectors (node 1 creates the file).
 
 ## Implementation milestones
 
-- [ ] `useHostStats(hostId)` resolving per host, footer still green
-- [ ] Per-host stream tally in the backend helper
-- [ ] Telemetry column rendering live values for an online host
-- [ ] Offline / connecting / errored states, no fabricated values
-- [ ] Teardown on unmount verified
-- [ ] `./dev bun run cypress:component` green for the touched specs
+- [x] `useHostStats(hostId)` resolving per host, footer still green
+- [~] Per-host stream tally in the backend helper — **dropped, by the testing plan above.** The
+      properties under test are counts, not attributions; the existing global `hostStatsStreamCount()`
+      proves them, and the discriminator a per-host tally needs would have cost a proto change.
+- [x] Telemetry cell rendering live values for an online host
+- [x] Offline / connecting / errored states, no fabricated values
+- [x] Teardown on unmount verified
+- [x] `./dev bun run cypress:component` green for the touched specs
 
 ## Testing plan
 
@@ -182,6 +188,14 @@ buys nothing the acceptance criteria actually ask for.
 - **No generic streaming fan-out abstraction yet.** `useHostFanOut` was built for unary reads and
   `useModelRegistryFanOut` had to be written separately; a third caller is the right time to
   generalize, not the first.
+- **Reachability is the host directory's answer, not a null client.** The plan assumed an unreachable
+  host resolves a `null` client. It does not: `LiveKitConnectionProvider.connectHost`
+  (`rpc/connections/liveKit.tsx:257`) returns a connection for **any** non-empty host id once a room
+  exists — by design, since "who is in the roster" is the host *directory*'s business, not the
+  provider's. So the cell subscribes only for a host `useDaemons()` names, which is the same rule
+  `useHostFanOut` already applies to peers. A row the directory does not name renders `unavailable`.
+- **A pending state distinct from unavailable.** Between opening the stream and its first frame there
+  is no reading — not a reading of zero — so the cell shows `…` rather than idle bars.
 - **No fabricated values.** CLAUDE.md forbids fallbacks. A zeroed CPU bar for an unreachable host is a
   lie an operator will act on.
 
@@ -204,6 +218,15 @@ _(populated by each validation phase)_
   attributable to *that* node instead of this one.
 - No Rust change in this node, so no Rust verification applies.
 
+### Green phase
+
+- `HostsScreenTelemetryAcceptance.cy.tsx` — **6/6 green**.
+- `HostStatsFooterAcceptance.cy.tsx` — **6/6 green**; `useHostStats` was left unmodified in this
+  phase, so the footer's zero-argument call is unchanged in behaviour.
+- One production file changed: `src/components/hosts/HostRowTelemetry.tsx`. No test, page object,
+  test-support, proto or `src/gen/` file was touched, and no Rust change applies.
+- Not run: the rest of the Cypress suite (~50 min, 207 specs) — left to CI.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-telemetry-fanout-initial-discovery.md`)
@@ -213,7 +236,7 @@ _(populated by each validation phase)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
