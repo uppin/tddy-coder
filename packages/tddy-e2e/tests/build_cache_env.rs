@@ -24,7 +24,8 @@ fn all_backends_selecting(kind: &str) -> String {
              max_size: 20G\n\
          \n  \
            redis:\n    \
-             url: redis://127.0.0.1:6379\n    \
+             endpoint: rediss://cache.internal:16380\n    \
+             password: hunter2\n    \
              key_prefix: tddy\n"
     )
 }
@@ -114,7 +115,8 @@ fn selecting_one_backend_ignores_the_others_coordinates() {
     let resolved = resolve(&home, &all_backends_selecting("local"));
 
     // Then the redis coordinates sit there unused — switching back is a one-line edit
-    resolved.expect_no_export("SCCACHE_REDIS");
+    resolved.expect_no_export("SCCACHE_REDIS_ENDPOINT");
+    resolved.expect_no_export("SCCACHE_REDIS_PASSWORD");
     resolved.expect_no_export("SCCACHE_REDIS_KEY_PREFIX");
 }
 
@@ -127,7 +129,8 @@ fn redis_backend_exports_its_endpoint_and_prefix() {
     let resolved = resolve(&home, &all_backends_selecting("redis"));
 
     // Then
-    resolved.expect_export("SCCACHE_REDIS", "redis://127.0.0.1:6379");
+    resolved.expect_export("SCCACHE_REDIS_ENDPOINT", "rediss://cache.internal:16380");
+    resolved.expect_export("SCCACHE_REDIS_PASSWORD", "hunter2");
     resolved.expect_export("SCCACHE_REDIS_KEY_PREFIX", "tddy");
     resolved.expect_no_export("SCCACHE_DIR");
     assert!(resolved.enables_sccache());
@@ -135,25 +138,22 @@ fn redis_backend_exports_its_endpoint_and_prefix() {
 
 #[test]
 fn redis_notice_does_not_echo_the_password() {
-    // Given a redis URL carrying credentials
+    // Given a redis backend with credentials
     let home = TempDir::new().unwrap();
-    let yaml =
-        "sccache:\n  type: redis\n  redis:\n    url: redis://admin:hunter2@cache.internal:6379/1\n";
 
     // When
-    let resolved = resolve(&home, yaml);
+    let resolved = resolve(&home, &all_backends_selecting("redis"));
 
-    // Then the endpoint reaches sccache but the secret never reaches a build log
-    resolved.expect_export(
-        "SCCACHE_REDIS",
-        "redis://admin:hunter2@cache.internal:6379/1",
-    );
+    // Then the password reaches sccache but never a build log. It is exported apart from the
+    // endpoint for exactly this reason: sccache's older single-URL form prints the URL it was
+    // given — password and all — in `sccache --show-stats`.
+    resolved.expect_export("SCCACHE_REDIS_PASSWORD", "hunter2");
     assert!(
         !resolved.notices.contains("hunter2"),
         "the notice leaked the password: {:?}",
         resolved.notices
     );
-    resolved.expect_notice_containing("redis://cache.internal:6379/1");
+    resolved.expect_notice_containing("rediss://cache.internal:16380");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn redis_without_an_endpoint_is_refused() {
 
     // Then the run stops rather than compiling uncached under a config that claims a cache
     assert!(!resolved.succeeded);
-    resolved.expect_notice_containing("redis.url");
+    resolved.expect_notice_containing("redis.endpoint");
 }
 
 #[test]
@@ -330,23 +330,31 @@ fn dev_and_direnv_both_resolve_through_the_shared_script() {
 }
 
 #[test]
-fn ci_names_the_backend_for_every_rust_job() {
+fn ci_caches_through_redis_and_keeps_the_password_a_secret() {
     // Given the CI workflow
     let ci = fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).unwrap();
 
     // When
-    let selectors = ci.matches("TDDY_BUILD_CACHE: github-actions").count();
-    let credentials = ci.matches("Expose the Actions cache to sccache").count();
+    let selectors = ci.matches("TDDY_BUILD_CACHE: redis").count();
 
-    // Then every Rust job — lint, test, build, build-arm64 — is preconfigured, and each has the
-    // credential step without which the resolver refuses to run
+    // Then all four Rust jobs — lint, test, build, build-arm64 — cache. Redis rather than the
+    // Actions cache: sccache writes one entry per compilation unit, and this repo's Actions
+    // cache is already at GitHub's hard 10 GB ceiling, where those entries evict
+    // `Swatinem/rust-cache`'s multi-GB `target/` archives. See docs/dev/guides/build-cache.md.
     assert_eq!(
         selectors, 4,
-        "expected all four Rust jobs to name the backend"
+        "expected all four Rust jobs to name the redis backend"
     );
-    assert_eq!(
-        credentials, 4,
-        "expected all four Rust jobs to expose the cache service"
+
+    // And the credential is only ever a secret reference. A literal here would be committed,
+    // and would also defeat the runner's log masking.
+    assert!(
+        ci.contains("SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}"),
+        "the redis password must come from a repo secret, never a literal"
+    );
+    assert!(
+        !ci.contains("SCCACHE_REDIS_ENDPOINT: rediss://:"),
+        "the endpoint must not carry inline credentials — sccache prints the endpoint in its stats"
     );
 }
 
@@ -375,4 +383,48 @@ fn no_job_level_env_reaches_for_the_runner_context() {
             path.display()
         );
     }
+}
+
+#[test]
+fn redis_backend_takes_its_coordinates_from_the_environment() {
+    // Given a runner: the backend named by env, the password arriving from a secret, and no
+    // per-host file anywhere
+    let home = TempDir::new().unwrap();
+
+    // When
+    let resolved = resolve_in(home.path())
+        .with_env("TDDY_BUILD_CACHE", "redis")
+        .with_env("SCCACHE_REDIS_ENDPOINT", "rediss://cache.internal:16380")
+        .with_env("SCCACHE_REDIS_PASSWORD", "from-a-secret")
+        .with_env("SCCACHE_REDIS_KEY_PREFIX", "tddy-ci")
+        .run();
+
+    // Then
+    resolved.expect_export("SCCACHE_REDIS_ENDPOINT", "rediss://cache.internal:16380");
+    resolved.expect_export("SCCACHE_REDIS_PASSWORD", "from-a-secret");
+    resolved.expect_export("SCCACHE_REDIS_KEY_PREFIX", "tddy-ci");
+    assert!(resolved.enables_sccache());
+    assert!(
+        !resolved.notices.contains("from-a-secret"),
+        "the notice leaked the secret: {:?}",
+        resolved.notices
+    );
+}
+
+#[test]
+fn a_config_endpoint_beats_one_from_the_environment() {
+    // Given both a per-host file and an inherited environment
+    let home = TempDir::new().unwrap();
+
+    // When
+    let resolved = resolve_in(home.path())
+        .with_config(&all_backends_selecting("redis"))
+        .with_env("SCCACHE_REDIS_ENDPOINT", "rediss://wrong.example:16380")
+        .with_env("SCCACHE_REDIS_PASSWORD", "wrong")
+        .run();
+
+    // Then the file wins — the environment is the fallback for a host that has no file, not an
+    // override of one that does
+    resolved.expect_export("SCCACHE_REDIS_ENDPOINT", "rediss://cache.internal:16380");
+    resolved.expect_export("SCCACHE_REDIS_PASSWORD", "hunter2");
 }

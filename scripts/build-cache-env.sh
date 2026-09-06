@@ -20,7 +20,9 @@
 # Backends and the coordinates each needs:
 #
 #   local           dir (default ~/.cache/sccache), max_size (default 10G)
-#   redis           url (required), key_prefix
+#   redis           endpoint (required), password, username, db, key_prefix —
+#                   each also readable from SCCACHE_REDIS_* in the environment,
+#                   which is how a runner passes a secret in
 #   github-actions  url + token (default to the runner's ACTIONS_RESULTS_URL /
 #                   ACTIONS_RUNTIME_TOKEN), version
 #   off             explicitly no cache, and no notice about it
@@ -149,16 +151,30 @@ case "$KIND" in
     ;;
 
   redis)
-    URL="$(cfg redis.url)"
-    [ -n "$URL" ] || fail "sccache.type is 'redis' but no 'redis.url' in $SOURCE — see $DOC"
-    emit SCCACHE_REDIS "$URL"
-    PREFIX="$(cfg redis.key_prefix)"
-    if [ -n "$PREFIX" ]; then
-      emit SCCACHE_REDIS_KEY_PREFIX "$PREFIX"
-    fi
-    # Redacted: the URL carries the password when the server needs one.
-    _rest="${URL#*://}"
-    note "sccache → redis ${URL%%://*}://${_rest#*@}"
+    # Endpoint and password are separate on purpose. sccache's older single-URL
+    # form (SCCACHE_REDIS) is deprecated, and it prints the URL — password and
+    # all — in `sccache --show-stats`, which on a runner means the password in a
+    # build log. Split, the credential never appears in sccache's own output.
+    #
+    # A runner has no per-host file, so each coordinate also comes from the
+    # environment; that is how a secret gets in.
+    ENDPOINT="$(cfg redis.endpoint)"
+    [ -n "$ENDPOINT" ] || ENDPOINT="${SCCACHE_REDIS_ENDPOINT:-}"
+    [ -n "$ENDPOINT" ] || fail "sccache.type is 'redis' but neither 'redis.endpoint' nor SCCACHE_REDIS_ENDPOINT is set — see $DOC"
+    emit SCCACHE_REDIS_ENDPOINT "$ENDPOINT"
+
+    for _key in password username db key_prefix; do
+      _value="$(cfg "redis.$_key")"
+      if [ -z "$_value" ]; then
+        # Uppercase the suffix without bash 4's ${x^^} — macOS ships bash 3.2.
+        _env="SCCACHE_REDIS_$(printf '%s' "$_key" | tr '[:lower:]' '[:upper:]')"
+        _value="$(eval "printf '%s' \"\${$_env:-}\"")"
+      fi
+      [ -n "$_value" ] || continue
+      emit "SCCACHE_REDIS_$(printf '%s' "$_key" | tr '[:lower:]' '[:upper:]')" "$_value"
+    done
+
+    note "sccache → redis $ENDPOINT"
     ;;
 
   github-actions|gha)

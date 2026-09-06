@@ -136,7 +136,9 @@ impl ResolverRun {
             .env_remove("ACTIONS_RESULTS_URL")
             .env_remove("ACTIONS_RUNTIME_TOKEN")
             .env_remove("SCCACHE_DIR")
-            .env_remove("SCCACHE_REDIS")
+            .env_remove("SCCACHE_REDIS_ENDPOINT")
+            .env_remove("SCCACHE_REDIS_PASSWORD")
+            .env_remove("SCCACHE_REDIS_KEY_PREFIX")
             .env_remove("RUSTC_WRAPPER");
         for (name, value) in &self.env {
             command.env(name, value);

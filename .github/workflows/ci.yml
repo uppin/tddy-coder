@@ -35,16 +35,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      # CI never reads ~/.tddy/build-cache.yaml — there is no per-host file on a
-      # runner. Naming the backend here is what `scripts/build-cache-env.sh` reads
-      # first, so every `./dev` invocation below compiles through sccache against
-      # the Actions cache. See docs/dev/guides/build-cache.md.
-      TDDY_BUILD_CACHE: github-actions
-      # A failed cache write is not an error sccache surfaces anywhere except as a
-      # counter in its stats, so a cache that stores nothing looks exactly like a
-      # cold one. Keep its own log and print it beside the stats.
-      SCCACHE_LOG: warn
-      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+      # CI has no ~/.tddy/build-cache.yaml — there is no per-host file on a runner —
+      # so the backend and its coordinates arrive here. Redis rather than the
+      # Actions cache: sccache stores one entry per compilation unit, and this
+      # repo's Actions cache is already at GitHub's hard 10 GB ceiling, where
+      # those entries evict `Swatinem/rust-cache`'s multi-GB target/ archives.
+      # Redis keeps the build cache off that budget entirely.
+      # See docs/dev/guides/build-cache.md.
+      TDDY_BUILD_CACHE: redis
+      # The endpoint is not a secret; the password is. They are separate because
+      # sccache's older single-URL form prints the URL it was given — password
+      # and all — in `sccache --show-stats`.
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -53,28 +57,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
-
-      # sccache talks to the same Actions cache service `actions/cache` uses, and
-      # its credentials reach a step only through a JS action — `ACTIONS_RESULTS_URL`
-      # and `ACTIONS_RUNTIME_TOKEN` are not in a `run:` step's environment. This
-      # re-exports them so `./dev` can hand them to sccache.
-      - name: Expose the Actions cache to sccache
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            // Namespaces the cache per architecture: the two Linux runners share
-            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
-            // here rather than in the job's `env:`, which has no `runner` context
-            // — referencing one there is rejected as an invalid workflow file.
-            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
-            // Selects the v2 cache protocol. Without it sccache's backend builds
-            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
-            // and since GitHub decommissioned v1 every read and write 404s —
-            // silently, as a write-error counter and a permanently empty cache.
-            // Hardcoded rather than passed through: v1 no longer exists.
-            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -103,12 +85,11 @@ jobs:
 
       # Hit rate for this job, so a cache that has quietly stopped working shows
       # up as a number in the log rather than as a slow build nobody attributes.
+      # Safe to print: with the endpoint and password split, sccache reports the
+      # endpoint alone and never the credential.
       - name: sccache stats
         if: always()
-        run: |
-          ./dev sccache --show-stats
-          echo '--- sccache log ---'
-          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
+        run: ./dev sccache --show-stats
 
   rust-test:
     name: Rust tests
@@ -118,9 +99,10 @@ jobs:
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
     env:
-      TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_LOG: warn # see rust-lint
-      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -129,24 +111,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
-
-      - name: Expose the Actions cache to sccache # see rust-lint
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            // Namespaces the cache per architecture: the two Linux runners share
-            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
-            // here rather than in the job's `env:`, which has no `runner` context
-            // — referencing one there is rejected as an invalid workflow file.
-            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
-            // Selects the v2 cache protocol. Without it sccache's backend builds
-            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
-            // and since GitHub decommissioned v1 every read and write 404s —
-            // silently, as a write-error counter and a permanently empty cache.
-            // Hardcoded rather than passed through: v1 no longer exists.
-            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -189,12 +153,9 @@ jobs:
         continue-on-error: true
         run: ./dev cargo nextest run --workspace --profile ci --locked
 
-      - name: sccache stats
+      - name: sccache stats # see rust-lint
         if: always()
-        run: |
-          ./dev sccache --show-stats
-          echo '--- sccache log ---'
-          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
+        run: ./dev sccache --show-stats
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
@@ -222,9 +183,10 @@ jobs:
     # runners — the only way to share a built binary is to publish it.
     timeout-minutes: 150
     env:
-      TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_LOG: warn # see rust-lint
-      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -233,24 +195,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
-
-      - name: Expose the Actions cache to sccache # see rust-lint
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            // Namespaces the cache per architecture: the two Linux runners share
-            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
-            // here rather than in the job's `env:`, which has no `runner` context
-            // — referencing one there is rejected as an invalid workflow file.
-            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
-            // Selects the v2 cache protocol. Without it sccache's backend builds
-            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
-            // and since GitHub decommissioned v1 every read and write 404s —
-            // silently, as a write-error counter and a permanently empty cache.
-            // Hardcoded rather than passed through: v1 no longer exists.
-            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -279,12 +223,9 @@ jobs:
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
 
-      - name: sccache stats
+      - name: sccache stats # see rust-lint
         if: always()
-        run: |
-          ./dev sccache --show-stats
-          echo '--- sccache log ---'
-          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
+        run: ./dev sccache --show-stats
 
       # Binaries that tests exec by path, not all of target/debug — the whole
       # directory is many GB. Each belongs to a package other than the one whose
@@ -381,9 +322,10 @@ jobs:
     # hours (measured, see docs/dev/guides/ci.md).
     timeout-minutes: 150
     env:
-      TDDY_BUILD_CACHE: github-actions # see rust-lint
-      SCCACHE_LOG: warn # see rust-lint
-      SCCACHE_ERROR_LOG: /tmp/sccache-error.log
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -392,24 +334,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
                       /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
           df -h /
-
-      - name: Expose the Actions cache to sccache # see rust-lint
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_RESULTS_URL', process.env.ACTIONS_RESULTS_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-            // Namespaces the cache per architecture: the two Linux runners share
-            // `runner.os`, and an arm64 object is useless to the x86_64 job. Set
-            // here rather than in the job's `env:`, which has no `runner` context
-            // — referencing one there is rejected as an invalid workflow file.
-            core.exportVariable('SCCACHE_GHA_VERSION', process.env.RUNNER_ARCH || '');
-            // Selects the v2 cache protocol. Without it sccache's backend builds
-            // v1 paths (`_apis/artifactcache/...`) and aims them at the v2 host,
-            // and since GitHub decommissioned v1 every read and write 404s —
-            // silently, as a write-error counter and a permanently empty cache.
-            // Hardcoded rather than passed through: v1 no longer exists.
-            core.exportVariable('ACTIONS_CACHE_SERVICE_V2', 'true');
 
       - uses: cachix/install-nix-action@v31
         with:
@@ -434,12 +358,9 @@ jobs:
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
 
-      - name: sccache stats
+      - name: sccache stats # see rust-lint
         if: always()
-        run: |
-          ./dev sccache --show-stats
-          echo '--- sccache log ---'
-          cat /tmp/sccache-error.log 2>/dev/null || echo '(no sccache log)'
+        run: ./dev sccache --show-stats
 
   web:
     name: Web tests

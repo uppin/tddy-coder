@@ -21,5 +21,6 @@ sccache:
     max_size: 20G
 
   # redis:
-  #   url: redis://127.0.0.1:6379
-  #   key_prefix: tddy
+  #   endpoint: rediss://cache.example:16380   # rediss = TLS; use it over a public network
+  #   password: ...                            # kept apart from the endpoint so that
+  #   key_prefix: tddy                         # `sccache --show-stats` never prints it
