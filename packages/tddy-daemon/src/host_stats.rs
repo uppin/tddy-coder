@@ -99,8 +99,9 @@ pub struct LoadAverage {
 pub struct SysinfoHostStats {
     /// The daemon's default project directory; its filesystem is the one the footer reports on.
     project_dir: PathBuf,
-    /// CPU sampling state. `sysinfo` computes per-core usage as the delta between two refreshes, so
-    /// this must persist across calls.
+    /// Sampling state shared by every reading taken from `sysinfo`. It must persist across calls
+    /// because per-core CPU usage is computed as the delta between two refreshes; memory and the
+    /// core list are read from the same long-lived `System`.
     system: Mutex<sysinfo::System>,
 }
 
@@ -119,7 +120,10 @@ impl SysinfoHostStats {
 
 impl HostStats for SysinfoHostStats {
     fn cpu_per_core_percent(&self) -> Vec<f32> {
-        let mut system = self.system.lock().expect("host stats CPU mutex poisoned");
+        let mut system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
         system.refresh_cpu_usage();
         system.cpus().iter().map(|cpu| cpu.cpu_usage()).collect()
     }
@@ -166,7 +170,10 @@ impl HostStats for SysinfoHostStats {
     }
 
     fn memory(&self) -> MemoryUsage {
-        let mut system = self.system.lock().expect("host stats CPU mutex poisoned");
+        let mut system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
         // Unlike CPU, memory is a point-in-time reading rather than a delta, but `System` still
         // caches the last refresh, so it has to be re-read on every call to be live.
         system.refresh_memory();
@@ -177,7 +184,10 @@ impl HostStats for SysinfoHostStats {
     }
 
     fn logical_cores(&self) -> u32 {
-        let system = self.system.lock().expect("host stats CPU mutex poisoned");
+        let system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
         // The constructor primes the CPU sampler, so the core list is populated before the first
         // call. Counting it keeps this consistent with `cpu_per_core_percent`'s length.
         system.cpus().len() as u32

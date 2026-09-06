@@ -1,8 +1,9 @@
 # Host stats streaming (`src/rpc/useHostStats.ts`, `src/rpc/hostStatsSubscription.ts`)
 
-`ConnectionService.StreamHostStats` is a server-stream carrying a host's per-core CPU and the
-free/total capacity of its project directory. The daemon owns the cadence: one snapshot on subscribe,
-then CPU every 5 s and disk every 60 s, each event carrying both.
+`ConnectionService.StreamHostStats` is a server-stream carrying a host's per-core CPU, its logical
+core count, total/available memory, its load average where the platform has one, and the free/total
+capacity of its project directory. The daemon owns the cadence: one snapshot on subscribe, then CPU,
+memory and load every 5 s and disk every 60 s, each event carrying the latest of all four.
 
 Two surfaces consume it — the Host Stats Footer, which follows the daemon selector, and the Hosts
 screen, which shows a reading per row. One hook serves both.
@@ -14,6 +15,14 @@ screen, which shows a reading per row. One hook serves both.
 | `useHostStats()` | the selected daemon, via `useDaemonClient` |
 | `useHostStats(id)` | that host, via `useHostClient(ConnectionService, id)` |
 | `useHostStats(null)` | nothing |
+
+The result carries `perCorePercent`, `logicalCores`, `disk`, `memory` and `load`. Every one of them
+is `null` (or empty) until a frame supplies it, and a block absent from an event sets its reading
+back to `null` rather than to a zero.
+
+`load` is `null` in two different situations on purpose — no frame yet, and a host whose platform has
+no load average — because the only honest rendering of either is "no reading". What it must never
+become is `0`, which reads as an idle machine.
 
 `null` and `undefined` are **not** interchangeable, and the distinction is load-bearing. `undefined`
 means "follow the selector"; `null` means "this caller gets no feed". Collapsing them
@@ -73,13 +82,24 @@ by the same rule.
 | offline | an offline marker; nothing subscribed |
 | online, nothing routes to it | an unavailable marker |
 | online, subscribed, no frame yet | a pending marker |
-| online, subscribed, reading in hand | CPU bars and free disk |
+| online, subscribed, reading in hand | CPU bars, free disk and free memory |
 
 The last two are decided **per metric**: a reading carrying disk but no CPU leaves the CPU slot
 pending rather than drawing `CpuCoresIndicator` with an empty array, which is indistinguishable from
 every core at 0 %. Offline and unavailable are separately addressable so neither can be confused with
 the em dash `DiskSpaceIndicator` renders for a null reading.
 
-The cell reuses `CpuCoresIndicator` and `DiskSpaceIndicator` unchanged, and carries the row's
+The cell reuses `CpuCoresIndicator`, `DiskSpaceIndicator` and `MemoryIndicator` unchanged, and carries the row's
 per-core percentages as `data-core-{n}` attributes — the indicator's own bar ids are per-core and
 would collide across rows.
+
+## Formatting
+
+`hostStatsFormat.ts` holds one byte-formatting body, `formatBytesFree`, and `formatDiskFree`
+delegates to it. Memory and disk are the same quantity asked about two ways, so a second near-identical
+formatter is how the two readouts drift into different phrasings.
+
+`formatLoadAverage` returns `null` for a null reading rather than a string, which pushes the
+"no reading" decision to the component and makes `"0.00"` unreachable for a host that reports nothing.
+`MemoryIndicator` and `LoadAverageIndicator` each render an em dash in that case, the same way
+`DiskSpaceIndicator` does.

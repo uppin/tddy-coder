@@ -1,7 +1,7 @@
 # Per-host telemetry on the Hosts screen
 
-Every row of the Hosts screen carries a live reading of that host's per-core CPU and free disk,
-streamed rather than polled.
+Every row of the Hosts screen carries a live reading of that host's per-core CPU, free disk and
+free memory, streamed rather than polled.
 
 ## Motivation
 
@@ -14,7 +14,7 @@ footer, which is the opposite of what a fleet list is for. A row that shows its 
 
 | Row state | Telemetry cell |
 |---|---|
-| Online, connected, reporting | per-core CPU bars and free disk, updating as readings arrive |
+| Online, connected, reporting | per-core CPU bars, free disk and free memory, updating as readings arrive |
 | Online, connected, not yet reported | a pending marker |
 | Online, but no wire reaches it | an unavailable marker |
 | Offline | an offline marker, and no subscription is attempted |
@@ -44,7 +44,8 @@ selected host. See [`host-stats-footer.md`](./host-stats-footer.md).
 
 ## Acceptance criteria
 
-- [x] An online host's row shows its per-core CPU bars and free disk, sourced from a live stream.
+- [x] An online host's row shows its per-core CPU bars, free disk and free memory, sourced from a
+      live stream.
 - [x] The row updates as fresh readings arrive, without a reload.
 - [x] Exactly one subscription is opened per online host — not one per render.
 - [x] An offline host's row shows no reading and opens no subscription.

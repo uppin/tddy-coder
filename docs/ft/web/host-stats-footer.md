@@ -2,9 +2,9 @@
 
 The **Host Stats Footer** is a persistent, screen-level bottom strip on the sessions
 drawer screen. It consolidates connection-level and host-level telemetry into one place:
-the live **byte-traffic** readout (relocated here from the top header) plus two new
-host-level indicators — **available disk space** and **per-core CPU usage** — reported for
-the currently selected daemon.
+the live **byte-traffic** readout (relocated here from the top header) plus host-level
+indicators — **available disk space**, **per-core CPU usage**, **available memory** and the
+host's **load average** — reported for the currently selected daemon.
 
 > **Relocation note:** the byte-traffic strip previously lived in the screen's top header
 > row (see [session-drawer.md § Session Traffic Strip](./session-drawer.md#session-traffic-strip)).
@@ -14,7 +14,8 @@ the currently selected daemon.
 ## Motivation
 
 Operators watching a daemon want an at-a-glance sense of the host's headroom: is the disk
-that holds their projects filling up, and how busy are the machine's cores? Today the web
+that holds their projects filling up, how busy are the machine's cores, and is it running out
+of memory — the more common reason a session dies than a busy CPU? Today the web
 shows only per-connection byte traffic, and it sits in the top header where the eye does
 not naturally rest. A single bottom footer — the same strip that already hosts the mobile
 keyboard button — is a more natural home for ambient telemetry and leaves room to add
@@ -41,6 +42,8 @@ The footer shows, left to right:
 | Traffic | Ping | Round-trip time to the focused session's LiveKit gateway in ms, or `—` |
 | Disk | Available disk | Free space on the filesystem holding the daemon's default project directory (e.g. `42.1 GB free`) |
 | CPU | Per-core usage | One mini bar per logical core; bar height encodes that core's utilization percentage |
+| Memory | Available memory | Free physical memory on the host (e.g. `4.0 GB free`) |
+| Load | Load average | The host's 1-minute load average (e.g. `load 1.50`), or `—` on a platform that reports none |
 
 The traffic sub-readout is the relocated `SessionTrafficStrip`. Its **control plane** is the
 app-global HTTP `/rpc` meter; its **data plane** is the per-session terminal byte tap aggregated

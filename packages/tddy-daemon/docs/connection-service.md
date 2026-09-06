@@ -629,28 +629,50 @@ Because `get_terminal` **rebuilds a `PtyHandle` per RPC**, the offset accumulato
 `subscribe_acked_offset`), not on the handle — so an ACK from the input path reaches an already-open
 output stream. The tddy-coder session participant serves the same contract for its bash terminals.
 
-## Host stats (Host Stats Footer)
+## Host stats
 
-Two unary RPCs feed the web's bottom **Host Stats Footer** (see
-[docs/ft/web/host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md)) with host-level
-telemetry for the daemon the client is addressing:
+One server-streaming RPC feeds the web's **Host Stats Footer**
+([docs/ft/web/host-stats-footer.md](../../../../docs/ft/web/host-stats-footer.md)) and the per-row
+telemetry on the Hosts screen
+([docs/ft/web/hosts-screen-telemetry.md](../../../../docs/ft/web/hosts-screen-telemetry.md)) with
+host-level readings for the daemon the client is addressing:
 
-- `GetHostCpuStats()` → `per_core_percent: []float` — utilization (0..100) of each logical core,
-  core 0 first. The web polls it every 5 s.
-- `GetHostDiskStats()` → `{available_bytes, total_bytes, project_dir}` for the filesystem holding
-  the daemon's default project directory. The web polls it every 60 s.
+- `StreamHostStats(session_token)` → `stream HostStatsEvent`, carrying `cpu`, `disk`, `memory` and,
+  where the platform provides one, `load`.
 
-Both authenticate `session_token` via the same GitHub → OS user path as the other endpoints, and are
+It authenticates `session_token` via the same GitHub → OS user path as the other endpoints, and is
 addressed to the daemon participant directly (no `daemon_instance_id` payload — the LiveKit transport
 already targets `daemon-{instanceId}`).
 
+**Two cadences, one event.** The handler emits a full snapshot on subscribe, then runs two timers:
+a fast tick (5 s) refreshing CPU, memory and load, and a slow tick (60 s) refreshing disk. Every
+event carries the latest of all four, so a consumer never folds partial events together. Memory and
+load ride the fast tick because they move on CPU's timescale; disk stays on the slow one because
+enumerating mounts is the expensive read.
+
+**A missing load average is reported as missing.** `sysinfo` implements `load_average()` only for
+macOS, iOS, Linux, Android and FreeBSD, and returns an all-zero `LoadAvg` on every other target.
+Forwarding those zeros would make an unsupported platform indistinguishable from an idle machine, so
+`SysinfoHostStats::load_average` resolves the platform at compile time and returns `None` elsewhere;
+the `load` block is then absent from the event rather than zeroed. Consumers render "no reading".
+
 Backed by **`host_stats.rs`**: the `HostStats` trait — injected via
 `ConnectionServiceImpl::with_host_stats` so tests substitute a deterministic fake — with a
-`sysinfo`-backed `SysinfoHostStats`. CPU sampling holds a long-lived `sysinfo::System` (constructed
-once with the service) so successive ~5 s-apart refreshes report real per-core deltas; the first
-sample reads ~0. Disk resolution enumerates mounts and picks the filesystem whose mount point is the
-longest **path-component** prefix of the project directory (`select_mount_for_path`), falling back to
-the largest mount by capacity if none is a prefix. The default project directory resolves to
+`sysinfo`-backed `SysinfoHostStats`. It reports:
+
+| Method | Reading |
+|---|---|
+| `cpu_per_core_percent()` | utilization (0..100) of each logical core, core 0 first |
+| `logical_cores()` | the core count, reported explicitly so a reader never infers it from a `per_core_percent` that is empty before the first sample |
+| `memory()` | total and available physical memory, in bytes |
+| `load_average()` | 1/5/15-minute averages, or `None` where the platform has none |
+| `disk_for_project_dir()` | free/total capacity of the filesystem holding the default project directory |
+
+A single long-lived `sysinfo::System` (constructed once with the service) backs CPU, memory and the
+core list, so successive ~5 s-apart refreshes report real per-core deltas; the first sample reads ~0.
+Disk resolution enumerates mounts and picks the filesystem whose mount point is the longest
+**path-component** prefix of the project directory (`select_mount_for_path`), falling back to the
+largest mount by capacity if none is a prefix. The default project directory resolves to
 `$HOME/<repos_base_path_or_default>` (`DaemonConfig` has no explicit project-dir override today).
 
 ## LiveKit rooms (Rooms panel)
