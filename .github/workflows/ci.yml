@@ -34,6 +34,21 @@ jobs:
     name: Rust lint
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      # CI has no ~/.tddy/build-cache.yaml — there is no per-host file on a runner —
+      # so the backend and its coordinates arrive here. Redis rather than the
+      # Actions cache: sccache stores one entry per compilation unit, and this
+      # repo's Actions cache is already at GitHub's hard 10 GB ceiling, where
+      # those entries evict `Swatinem/rust-cache`'s multi-GB target/ archives.
+      # Redis keeps the build cache off that budget entirely.
+      # See docs/dev/guides/build-cache.md.
+      TDDY_BUILD_CACHE: redis
+      # The endpoint is not a secret; the password is. They are separate because
+      # sccache's older single-URL form prints the URL it was given — password
+      # and all — in `sccache --show-stats`.
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -68,6 +83,14 @@ jobs:
       - name: cargo clippy
         run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # Hit rate for this job, so a cache that has quietly stopped working shows
+      # up as a number in the log rather than as a slow build nobody attributes.
+      # Safe to print: with the endpoint and password split, sccache reports the
+      # endpoint alone and never the credential.
+      - name: sccache stats
+        if: always()
+        run: ./dev sccache --show-stats
+
   rust-test:
     name: Rust tests
     runs-on: ubuntu-latest
@@ -75,6 +98,11 @@ jobs:
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -125,6 +153,10 @@ jobs:
         continue-on-error: true
         run: ./dev cargo nextest run --workspace --profile ci --locked
 
+      - name: sccache stats # see rust-lint
+        if: always()
+        run: ./dev sccache --show-stats
+
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
@@ -150,6 +182,11 @@ jobs:
     # workspace binaries rather than linking them, and jobs get separate
     # runners — the only way to share a built binary is to publish it.
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -185,6 +222,10 @@ jobs:
 
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
+
+      - name: sccache stats # see rust-lint
+        if: always()
+        run: ./dev sccache --show-stats
 
       # Binaries that tests exec by path, not all of target/debug — the whole
       # directory is many GB. Each belongs to a package other than the one whose
@@ -280,6 +321,11 @@ jobs:
     # runner has no /dev/kvm node at all, so a guest would fall back to TCG and take
     # hours (measured, see docs/dev/guides/ci.md).
     timeout-minutes: 150
+    env:
+      TDDY_BUILD_CACHE: redis # see rust-lint
+      SCCACHE_REDIS_ENDPOINT: rediss://raitininkai.ddnsgeek.com:16380
+      SCCACHE_REDIS_PASSWORD: ${{ secrets.SCCACHE_REDIS_PASSWORD }}
+      SCCACHE_REDIS_KEY_PREFIX: tddy-ci
     steps:
       - uses: actions/checkout@v7
 
@@ -311,6 +357,10 @@ jobs:
 
       - name: cargo build
         run: ./dev cargo build --workspace --bins --examples --locked
+
+      - name: sccache stats # see rust-lint
+        if: always()
+        run: ./dev sccache --show-stats
 
   web:
     name: Web tests

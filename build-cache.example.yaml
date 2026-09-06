@@ -1,0 +1,26 @@
+# Per-host build cache (sccache).
+# Usage: mkdir -p ~/.tddy && cp build-cache.example.yaml ~/.tddy/build-cache.yaml
+#
+# Read by `scripts/build-cache-env.sh`, which `./dev` and `.envrc` eval. Lives
+# outside the repo on purpose: it is a property of this machine, it is never
+# committed, and every worktree of this repo shares one answer.
+#
+# Without this file sccache is simply off. See docs/dev/guides/build-cache.md.
+
+sccache:
+  # Which backend to use. Only that backend's block below is read, so the others
+  # can stay configured — switching is a one-line edit here.
+  #   local           a directory on this machine
+  #   redis           shared between machines
+  #   github-actions  only meaningful on a runner; CI sets this by env instead
+  #   off             explicitly no cache
+  type: local
+
+  local:
+    dir: ~/.cache/sccache
+    max_size: 20G
+
+  # redis:
+  #   endpoint: rediss://cache.example:16380   # rediss = TLS; use it over a public network
+  #   password: ...                            # kept apart from the endpoint so that
+  #   key_prefix: tddy                         # `sccache --show-stats` never prints it

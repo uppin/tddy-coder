@@ -71,6 +71,10 @@
             # Test runner used by CI (.github/workflows/ci.yml) and available
             # locally so a CI failure can be reproduced with the same command.
             pkgs.cargo-nextest
+            # Compiler cache. `scripts/build-cache-env.sh` decides per host
+            # whether to point RUSTC_WRAPPER at it and where its cache lives;
+            # the binary is always here so that decision is the only variable.
+            pkgs.sccache
             pkgs.buf
             pkgs.protobuf
             # `cargo tauri dev` / `cargo tauri build` for packages/tddy-desktop.

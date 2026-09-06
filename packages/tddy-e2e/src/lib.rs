@@ -23,6 +23,7 @@ use tddy_workflow_recipes::{resolve_workflow_recipe_from_cli_name, TddRecipe};
 
 use crate::test_util::temp_dir_with_git_repo;
 
+pub mod build_cache_contract;
 pub mod install_contract;
 pub use tddy_tui_testkit::input_encoding as rpc_frontend;
 pub mod test_util;

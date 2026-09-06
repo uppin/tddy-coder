@@ -4,6 +4,21 @@
 #
 # If nix fails with "getting attributes of path /nix/store/...-nodejs-...: No such file or directory",
 # the GC-rooted profile is stale: rm -rf .nix-profile && ./dev <command>  (rebuilds the shell).
+
+# Per-host build cache. Resolved out here, before `nix develop`, so the wrapper
+# settings are part of the ambient environment the shell inherits — and so every
+# command run through this script shares one answer, whether that is `cargo
+# build` or `./test`. A bad ~/.tddy/build-cache.yaml stops the run rather than
+# quietly compiling uncached; a missing one is fine and simply leaves sccache off.
+# See docs/dev/guides/build-cache.md.
+_tddy_dev_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$_tddy_dev_root/scripts/build-cache-env.sh" ]; then
+  _tddy_build_cache_env="$("$_tddy_dev_root/scripts/build-cache-env.sh")" || exit 1
+  eval "$_tddy_build_cache_env"
+  unset _tddy_build_cache_env
+fi
+unset _tddy_dev_root
+
 if [ $# -eq 0 ]; then
   exec nix develop --profile ./.nix-profile
 else
