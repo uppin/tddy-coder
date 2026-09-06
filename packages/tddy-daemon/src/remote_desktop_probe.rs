@@ -16,8 +16,12 @@
 //! A missing binary surfaces only as a spawn error in `screen_sharing_service`, i.e. after the user
 //! has already asked for a stream. Checking up front turns that into a fact on the row.
 
+use std::io::ErrorKind;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::path::Path;
 use std::time::Duration;
 
+use crate::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use crate::host_tooling::ProbeOutcome;
 
 /// Default VNC port (display :0). Port discovery is out of scope — the probe reports which port it
@@ -75,19 +79,95 @@ pub trait RemoteDesktopProbe: Send + Sync {
 /// **Connect and close — no bytes are ever written.** A monitoring screen polling half-open protocol
 /// handshakes against people's desktops on a timer is antisocial, and the connect already answers
 /// the question being asked.
-pub fn is_accepting_connections(_host: &str, _port: u16) -> Result<bool, String> {
-    // TODO(desktop-probe): implement
-    unimplemented!("desktop-probe: is_accepting_connections")
+pub fn is_accepting_connections(host: &str, port: u16) -> Result<bool, String> {
+    let address = (host, port)
+        .to_socket_addrs()
+        .map_err(|e| format!("could not resolve {host}:{port}: {e}"))?
+        .next()
+        .ok_or_else(|| format!("{host}:{port} resolved to no address"))?;
+
+    match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
+        // The whole interaction: the connection is established and immediately dropped. Nothing is
+        // written, so no protocol handshake is ever begun against someone's desktop.
+        Ok(_connected_and_closed) => Ok(true),
+        // A refusal is an answer: we reached the host and nothing is listening there.
+        Err(e) if e.kind() == ErrorKind::ConnectionRefused => Ok(false),
+        // Everything else — a timeout, an unreachable network, a permission denial — means the
+        // probe could not get an answer. Reporting that as "no desktop" would be a finding we never
+        // made.
+        Err(e) => Err(format!("could not check {host}:{port}: {e}")),
+    }
 }
+
+/// The host a daemon probes: its own loopback. Each daemon reports for the machine it runs on, so a
+/// desktop served on another host's loopback is that daemon's reading to take, not this one's.
+const PROBE_HOST: &str = "127.0.0.1";
 
 /// The live probe: an existence check on the resolved bridge binary plus a TCP connect.
 pub struct TcpRemoteDesktopProbe;
 
 impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
-    fn probe(&self, _protocol: DesktopProtocol, _port: u16) -> DesktopReachability {
-        // TODO(desktop-probe): implement
-        unimplemented!("desktop-probe: probe")
+    fn probe(&self, protocol: DesktopProtocol, port: u16) -> DesktopReachability {
+        // Independent of the connect below, and answered even when the connect gets nowhere: a host
+        // that cannot bridge cannot bridge whether or not a desktop is up.
+        let can_bridge = bridge_binary_is_present(protocol);
+
+        match is_accepting_connections(PROBE_HOST, port) {
+            Ok(desktop_reachable) => DesktopReachability {
+                outcome: ProbeOutcome::Ok,
+                protocol,
+                can_bridge,
+                desktop_reachable,
+                port,
+            },
+            Err(reason) => DesktopReachability {
+                outcome: ProbeOutcome::Failed(reason),
+                protocol,
+                can_bridge,
+                // Not a finding. `Failed` is what says so — a reader keying off this flag alone
+                // would report "no desktop" for a host we never reached.
+                desktop_reachable: false,
+                port,
+            },
+        }
     }
+}
+
+/// Whether the bridge binary for `protocol` is actually there, at the path
+/// [`crate::config`] would spawn it from.
+///
+/// TODO(desktop-probe): this reads the *default* configuration, so an operator's explicit
+/// `screen_sharing.vnc_binary_path` / `rdp_binary_path` is not consulted. Threading the daemon's
+/// live config in needs the probe to carry it, which its callers do not yet do.
+fn bridge_binary_is_present(protocol: DesktopProtocol) -> bool {
+    let config = DaemonConfig::default();
+    let resolved = match protocol {
+        DesktopProtocol::Vnc => resolve_vnc_binary_path(&config),
+        DesktopProtocol::Rdp => resolve_rdp_binary_path(&config),
+    };
+    binary_is_present(Path::new(&resolved))
+}
+
+/// Whether a resolved binary path names something that exists.
+///
+/// A resolution with a directory in it is checked directly. A **bare name** — the resolvers' last
+/// resort, which they hand to the OS to look up on `PATH` — is searched on `PATH` too: testing it
+/// with `exists()` would answer about the daemon's working directory, which is not where the OS
+/// would find it.
+fn binary_is_present(resolved: &Path) -> bool {
+    let has_directory = resolved
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty());
+    if has_directory {
+        return resolved.is_file();
+    }
+
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path_var)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .any(|dir| dir.join(resolved).is_file())
 }
 
 #[cfg(test)]

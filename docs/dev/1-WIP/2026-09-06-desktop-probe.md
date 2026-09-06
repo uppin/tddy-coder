@@ -76,11 +76,11 @@ a stream.
 
 ## Scope
 
-- [ ] Bridge-binary existence check for both protocols
-- [ ] Bounded, non-intrusive TCP reachability probe
-- [ ] Remote-desktop block on node 4's response + both regenerations
-- [ ] Row section presenting the two facts separately
-- [ ] Rust unit/integration tests + Cypress component tests
+- [x] Bridge-binary existence check for both protocols
+- [x] Bounded, non-intrusive TCP reachability probe
+- [x] Remote-desktop block on node 4's response + both regenerations
+- [x] Row section presenting the two facts separately
+- [x] Rust unit tests + Cypress component tests — integration tests deferred, see Green phase
 
 ## Technical changes
 
@@ -124,11 +124,11 @@ a stream.
 
 ## Implementation milestones
 
-- [ ] Bridge existence check for both protocols
-- [ ] TCP probe with timeout, proven non-intrusive
-- [ ] Block on the wire + both regenerations
-- [ ] Row section presenting both facts distinctly
-- [ ] `./test -p tddy-daemon` and touched Cypress specs green
+- [x] Bridge existence check for both protocols
+- [x] TCP probe with timeout, proven non-intrusive
+- [x] Block on the wire + both regenerations
+- [x] Row section presenting both facts distinctly
+- [x] `./test -p tddy-daemon` and touched Cypress specs green
 
 ## Testing plan
 
@@ -213,6 +213,57 @@ _(populated by each validation phase)_
 - `remote_desktop_probe.rs` — 5 tests, **4 red** at the `unimplemented!()` sites.
   `names_the_default_port_for_each_protocol` passes: the constants are real, published surface.
 
+### Green phase
+
+Implemented, both suites green. Verification **scoped to `tddy-daemon` and the one touched Cypress
+spec** — a full-workspace run on this branch is red for nodes 1, 4, 5 and 6's deliberate
+`unimplemented!()` sites, which are not this PR's.
+
+| Gate | Result |
+|---|---|
+| `./test -p tddy-daemon -- remote_desktop_probe` | **5 passed, 0 failed** (`.verify-result.txt:6-12`) |
+| `cypress:component --spec HostsScreenRemoteDesktopAcceptance.cy.tsx` | **4 passed, 0 failed** |
+| `cargo clippy -p tddy-daemon --all-targets -- -D warnings` | clean, exit 0 |
+| `cargo build` / `cargo fmt` | clean |
+
+Two files changed — `remote_desktop_probe.rs` and `HostRowRemoteDesktop.tsx`. **No test file was
+edited**, and the `#[cfg(test)]` block is byte-for-byte unchanged.
+
+**A refusal is a finding; anything else is a failure.** `is_accepting_connections` maps
+`ErrorKind::ConnectionRefused` to `Ok(false)` and every other error — timeout included — to
+`Err(reason)`, which `probe` turns into `ProbeOutcome::Failed` with `desktop_reachable: false`. That
+is the fourth state above, enforced rather than described.
+
+**Bare-name resolution is searched on `PATH`, not `exists()`-ed.** The resolvers' last resort is a
+bare `"tddy-vnc"`, which the OS looks up on `PATH`. Testing that with `exists()` would answer about
+the daemon's working directory and report "cannot bridge" for a bridge that is genuinely installed —
+the same conflation this node exists to prevent. Resolution *order* is untouched, per `## Boundaries`.
+
+### Deferred — blocked on node 4, not oversight
+
+Two rows of the plan are **not** delivered here, because delivering them means implementing a symbol
+`## Dependencies` assigns to `host-identity` (#hosts-screen 4/8):
+
+| Planned | Why deferred |
+|---|---|
+| `src/host_tooling.rs` — populate the block | `SubprocessHostToolingProbe::probe` is still node 4's `unimplemented!()`. There is no probe body to populate the block *in*. |
+| Integration tests `host_tooling_reports_bridge_availability_separately_from_reachability`, `host_tooling_still_reports_git_gh_and_the_ssh_agent_alongside_the_desktop_block` | Both would only pass by implementing node 4's probe. Writing a test whose green depends on a parent's unwritten body is the duplicate-development failure `## Dependencies` exists to prevent. |
+| `src/connection_service.rs` — injectable probe seam | `get_host_tooling` is node 4's `unimplemented!()`; the seam has nothing to inject into yet. The `RemoteDesktopProbe` trait — the draft-contract item — **is** delivered. |
+
+Consequence: `HostRowRemoteDesktop` is currently reachable only from its spec, because
+`HostRowTooling` (node 4's file) is the component that would mount it. The wire shape and both
+regenerations are landed, so node 8 can branch off a real ref regardless.
+
+**These land after node 4 greens**, via `/pr-stack-rebase` on this branch — not from here.
+
+### Known limitation — recorded, not hidden
+
+`TODO(desktop-probe)` at `remote_desktop_probe.rs:139`: `bridge_binary_is_present` reads
+`DaemonConfig::default()`, so an operator's explicit `screen_sharing.vnc_binary_path` /
+`rdp_binary_path` is not consulted. `TcpRemoteDesktopProbe` must stay a unit struct while the test
+calls it by value, and threading the live config needs a caller that does not exist until the seam
+above is wired. Correct for the default resolution path; incomplete for an explicitly configured one.
+
 ### The rudeness guard is asserted, not assumed
 
 `writes_no_bytes_to_the_remote_before_closing` has the fake listener **record what it received**, and
@@ -243,7 +294,7 @@ beside every finding: **"we checked and the answer is no" is not "we could not c
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
