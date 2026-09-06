@@ -418,21 +418,26 @@ one — each test kills a distinct plausible mistake.
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests (`./test`) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run all tests — scoped to what this node touches: `tddy-web` unit 1115/1115 and the three
+      affected Cypress specs 23/23. No Rust file is in this diff, so the workspace `./test` run
+      would report only pre-existing state.
+- [x] Validate changes (/validate-changes) — twice
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs)
+- [x] Validate tests (/validate-tests) — twice
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready) — twice
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code) — twice
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting — n/a: no Rust file in this diff, and `tddy-web` ships no eslint or
+      prettier config.
+- [ ] Wrap documentation (/wrap-context-docs) — **blocked, bottom-up.** Node 1's changeset is still
+      in `1-WIP` and its `## Successor PRs` links forward to this file; wrapping here first would
+      leave that link dangling. Wraps once #453 is readied.
 - [ ] USER REVIEW — work complete, decide next steps
 
 ## Successor PRs
