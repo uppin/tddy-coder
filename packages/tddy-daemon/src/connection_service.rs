@@ -31,8 +31,9 @@ use tddy_service::proto::connection::{
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, ListAgentModelsRequest,
     ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
-    ListEligibleDaemonsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
     ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
     ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
@@ -66,6 +67,7 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
+use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
@@ -1106,6 +1108,9 @@ pub struct ConnectionServiceImpl {
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
+    /// Durable record of every host seen, behind `ListKnownHosts` on the Hosts screen. Distinct from
+    /// `eligible_daemon_source`, which reports only who is reachable right now.
+    host_registry: Arc<dyn HostRegistry>,
     /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
     /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
@@ -1762,6 +1767,8 @@ impl ConnectionServiceImpl {
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let host_registry: Arc<dyn HostRegistry> =
+            Arc::new(FileHostRegistry::new(tddy_data_dir.join("hosts")));
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -1792,6 +1799,7 @@ impl ConnectionServiceImpl {
             user_resolver,
             spawn_client,
             eligible_daemon_source,
+            host_registry,
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
@@ -2008,6 +2016,13 @@ impl ConnectionServiceImpl {
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
         self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Substitute the known-host registry (builder pattern) — lets tests inject a deterministic,
+    /// in-memory registry in place of the file-backed one, and drive `online` from a stub roster.
+    pub fn with_host_registry(mut self, host_registry: Arc<dyn HostRegistry>) -> Self {
+        self.host_registry = host_registry;
         self
     }
 
@@ -13034,6 +13049,28 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListEligibleDaemonsResponse { daemons }))
     }
 
+    /// Every host this daemon has a record of, live or not.
+    ///
+    /// `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it
+    /// leaves the room. This answers "what machines does tddy know about", which is what an operator
+    /// staring at an unreachable host needs. Liveness is resolved here, per call, by intersecting
+    /// the durable registry with the live roster — never read from disk.
+    async fn list_known_hosts(
+        &self,
+        request: Request<ListKnownHostsRequest>,
+    ) -> Result<Response<ListKnownHostsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let _os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // TODO(host-registry): implement
+        unimplemented!("host-registry: list_known_hosts")
+    }
+
     async fn list_session_workflow_files(
         &self,
         request: Request<ListSessionWorkflowFilesRequest>,
@@ -21895,6 +21932,184 @@ mod workspace_sandbox_roster_dispatch_unit_tests {
             std::fs::read_to_string(workspace.worktree.join("agent-wrote.txt"))
                 .expect("an unsandboxed agent writes straight to the worktree"),
             "from the agent"
+        );
+    }
+}
+
+#[cfg(test)]
+mod known_hosts_handler_unit_tests {
+    use super::*;
+    use crate::host_registry::{HostRegistry, HostSighting, KnownHost, KnownHostView};
+    use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
+    use tddy_service::proto::connection::{KnownHostEntry, ListKnownHostsRequest};
+
+    const LOCAL_HOST: &str = "workstation-1";
+    const DEPARTED_HOST: &str = "server-2";
+
+    /// A registry double holding a fixed set of remembered hosts.
+    ///
+    /// It deliberately still performs the *intersection* with the live roster itself, because that
+    /// join is the behaviour under test at this layer: the handler must hand the roster in and
+    /// report what comes back, rather than deciding liveness on its own.
+    struct FakeHostRegistry {
+        remembered: Vec<KnownHost>,
+    }
+
+    impl HostRegistry for FakeHostRegistry {
+        fn record_sighting(
+            &self,
+            _sighting: &HostSighting,
+            _now_unix_ms: i64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn record_departure(
+            &self,
+            _instance_id: &DaemonInstanceId,
+            _now_unix_ms: i64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn known_hosts(
+            &self,
+            live_roster: &[EligibleDaemonInfo],
+            local_instance_id: &str,
+            _now_unix_ms: i64,
+        ) -> Vec<KnownHostView> {
+            self.remembered
+                .iter()
+                .map(|host| KnownHostView {
+                    online: live_roster
+                        .iter()
+                        .any(|live| live.instance_id.0 == host.instance_id),
+                    is_local: host.instance_id == local_instance_id,
+                    host: host.clone(),
+                })
+                .collect()
+        }
+    }
+
+    fn a_remembered_host(instance_id: &str) -> KnownHost {
+        KnownHost {
+            instance_id: instance_id.to_string(),
+            label: format!("{instance_id} (this daemon)"),
+            first_seen_unix_ms: 1_000,
+            last_seen_unix_ms: 2_000,
+            repos_base_path: "repos".to_string(),
+            max_attachment_bytes: 0,
+        }
+    }
+
+    fn make_unit_config() -> crate::config::DaemonConfig {
+        let yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    fn service_remembering(hosts: Vec<KnownHost>) -> ConnectionServiceImpl {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().to_path_buf();
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| {
+            if token == "valid" {
+                Some("u".to_string())
+            } else {
+                None
+            }
+        });
+        ConnectionServiceImpl::new(
+            make_unit_config(),
+            sessions_base_resolver,
+            temp.path().to_path_buf(),
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        )
+        .with_host_registry(Arc::new(FakeHostRegistry { remembered: hosts }))
+    }
+
+    async fn known_hosts_of(service: &ConnectionServiceImpl) -> Vec<KnownHostEntry> {
+        service
+            .list_known_hosts(Request::new(ListKnownHostsRequest {
+                session_token: "valid".to_string(),
+            }))
+            .await
+            .expect("list_known_hosts should succeed for a valid session")
+            .into_inner()
+            .hosts
+    }
+
+    fn entry_named<'a>(hosts: &'a [KnownHostEntry], instance_id: &str) -> &'a KnownHostEntry {
+        hosts
+            .iter()
+            .find(|h| h.instance_id == instance_id)
+            .unwrap_or_else(|| panic!("expected {instance_id} in the response"))
+    }
+
+    #[tokio::test]
+    async fn list_known_hosts_rejects_an_invalid_token() {
+        let service = service_remembering(vec![]);
+
+        let result = service
+            .list_known_hosts(Request::new(ListKnownHostsRequest {
+                session_token: "nope".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err(), "an invalid session must be rejected");
+        assert_eq!(result.unwrap_err().code, tddy_rpc::Code::Unauthenticated);
+    }
+
+    /// The live roster decides `online`, and the handler must consult it — a host it remembers but
+    /// cannot currently reach has to read as offline, not as merely absent.
+    #[tokio::test]
+    async fn list_known_hosts_marks_a_recorded_host_absent_from_the_roster_as_offline() {
+        let service = service_remembering(vec![a_remembered_host(DEPARTED_HOST)]);
+
+        let hosts = known_hosts_of(&service).await;
+
+        let departed = entry_named(&hosts, DEPARTED_HOST);
+        assert!(!departed.online, "a host outside the roster is offline");
+        assert_eq!(
+            departed.last_seen_unix_ms, 2_000,
+            "its last-seen stamp is reported so the row can say when it was last reachable"
+        );
+    }
+
+    /// The stub roster lists this daemon, so a remembered entry for it must come back online.
+    #[tokio::test]
+    async fn list_known_hosts_marks_a_host_in_the_live_roster_as_online() {
+        let local_id = crate::multi_host::local_daemon_instance_id().0;
+        let service = service_remembering(vec![a_remembered_host(&local_id)]);
+
+        let hosts = known_hosts_of(&service).await;
+
+        assert!(
+            entry_named(&hosts, &local_id).online,
+            "a host in the live roster is online"
+        );
+    }
+
+    /// An operator must be able to see the daemon they are talking to, marked as such.
+    #[tokio::test]
+    async fn list_known_hosts_always_includes_the_local_daemon() {
+        let local_id = crate::multi_host::local_daemon_instance_id().0;
+        let service = service_remembering(vec![a_remembered_host(LOCAL_HOST)]);
+
+        let hosts = known_hosts_of(&service).await;
+
+        assert!(
+            hosts
+                .iter()
+                .any(|h| h.instance_id == local_id && h.is_local),
+            "the serving daemon must appear, flagged is_local; got {:?}",
+            hosts.iter().map(|h| &h.instance_id).collect::<Vec<_>>()
         );
     }
 }

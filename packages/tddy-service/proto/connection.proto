@@ -69,6 +69,12 @@ service ConnectionService {
   rpc SignalSession(SignalSessionRequest) returns (SignalSessionResponse);
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
   rpc ListEligibleDaemons(ListEligibleDaemonsRequest) returns (ListEligibleDaemonsResponse);
+  // Hosts screen (see docs/ft/web/1-WIP/PRD-2026-09-06-host-registry.md) — every host this daemon
+  // has ever seen, whether or not it is reachable right now. Unlike ListEligibleDaemons, which
+  // reports the *live* common-room roster and forgets a host the moment it leaves, this reads a
+  // durable registry: a host that goes away keeps its entry and its last-seen stamp. `online` is
+  // computed per call by intersecting the registry with the live roster, never stored.
+  rpc ListKnownHosts(ListKnownHostsRequest) returns (ListKnownHostsResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
@@ -1058,6 +1064,29 @@ message EligibleDaemonEntry {
 }
 message ListEligibleDaemonsResponse {
   repeated EligibleDaemonEntry daemons = 1;
+}
+
+message ListKnownHostsRequest {
+  string session_token = 1;
+}
+// One host the daemon has seen. Everything except `online` is read from the durable registry;
+// `online` is computed at call time against the live roster.
+message KnownHostEntry {
+  string instance_id = 1;
+  string label = 2;
+  // True when this host is in the live eligible-daemon roster at the moment of the call.
+  bool online = 3;
+  // When this host was first recorded. Never re-stamped.
+  int64 first_seen_unix_ms = 4;
+  // When this host was last seen in the roster. For an online host this is the current sighting.
+  int64 last_seen_unix_ms = 5;
+  string repos_base_path = 6;
+  uint64 max_attachment_bytes = 7;
+  // True when this entry is the daemon serving the call.
+  bool is_local = 8;
+}
+message ListKnownHostsResponse {
+  repeated KnownHostEntry hosts = 1;
 }
 
 message ListSessionWorkflowFilesRequest {

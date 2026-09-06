@@ -5,6 +5,7 @@
 **Type:** New feature
 **Stack:** `#hosts-screen` 1/8 (root node)
 **Branch:** `feature/hosts-screen/host-registry` → base `master`
+**PR:** [#453](https://github.com/uppin/tddy-coder/pull/453)
 
 ## Initial Discovery
 
@@ -46,6 +47,60 @@ Affected: [`app-shell.md`](../../ft/web/app-shell.md), [`url-state-routing.md`](
 - Does **not** widen `ConnectionCapability`. That type means what the *wire* carries; the host-facts
   sense introduced by later nodes is named separately.
 - Does **not** delete a host, ever — there is no removal RPC in this node.
+
+## Prerequisites
+
+Open items in [`docs/dev/TODO.md`](../TODO.md) this PR runs into.
+
+### ⚠ DURING — the daemon's secret stores still truncate in place
+
+`docs/dev/TODO.md` § *The daemon's secret stores still truncate in place* (source:
+atomic-session-file-writes, 2026-08-16).
+
+This changeset's State B says `FileHostRegistry` follows the `FileGitHubTokenStore` posture — but
+that file is one of **three** the TODO names as deliberately excluded from `tddy_core::atomic_file`,
+because `write_atomic` copies permission bits only from an existing target and would create a swap
+file at the process umask on first write.
+
+The registry is **not** a secret store — a host list is not a credential — so this does not block
+this node the way it blocks `#hosts-screen 6/8`'s private key. What it does mean is that copying the
+hand-rolled staging-file-plus-rename pattern would add a fourth hand-rolled writer to the set the
+TODO exists to shrink.
+
+**Preferred resolution during `/green`:** if `write_atomic_with_mode(path, contents, mode)` has
+landed by then (node 6 needs it), build on `tddy_core::atomic_file` instead of hand-rolling. If it
+has not, use plain `write_atomic` — correct here precisely *because* the registry holds no secret —
+and say so in the module docs rather than silently reproducing the pattern.
+
+### ⚠ DURING — `connection_service.rs` is 19,600 lines
+
+`docs/dev/TODO.md` § *`connection_service.rs` is 19,600 lines* (source:
+subagent-conversation-inference, 2026-08-29), flagged rather than acted on.
+
+This node adds a handler, a field and a builder override to that file. Across the stack, **nodes 1,
+3, 4 and 6** modify it — nodes 2, 5, 7 and 8 do not — so the stack makes a known problem measurably
+worse in four places. The TODO is explicit that a split "needs to be its own PR", so this is
+**recorded, not fixed here**. Worth noting for whoever does it: the host registry, tooling probe and
+prompt handlers this stack adds form a coherent host-facing group, which is not among the seams the
+TODO currently lists.
+
+### ℹ ANSWERED — `daemon_config_pb.ts` was regenerated without `buf`
+
+`docs/dev/TODO.md` § *Deferred from the `optional-livekit` common-room switch* asks: *"Re-run
+`bun run generate` once `buf` is available and confirm the file is unchanged."*
+
+**It is not unchanged.** Running it in this worktree (with the local-registry install making `buf`
+available) produces two differences from the committed file:
+
+1. the committed base64 descriptor carries `==` padding that `protoc-gen-es` omits;
+2. a `session_token` doc comment present in the proto is missing from the hand-written version.
+
+Separately, `packages/tddy-web/src/gen/sandbox_pb.ts` is stale for an unrelated reason:
+`in_jail_tool_request` / `in_jail_tool_response` were added to `sandbox.proto` and never regenerated.
+
+Both drifts are **reverted on every node of this stack** so no `#hosts-screen` diff carries an
+unrelated regeneration. They remain on `master`, and the next person to run `generate` will hit them.
+Fixing them is a separate, tiny PR — not this stack's to make.
 
 ## Dependencies
 
@@ -215,17 +270,29 @@ _(populated by each validation phase)_
 
 ## Validation results
 
-_(populated by each validation command)_
+### Red phase (draft-PR contract)
+
+- `cargo build -p tddy-service` — pass (proto regenerated).
+- `bun run --filter tddy-web generate` — pass (TypeScript regenerated).
+- `cargo clippy -p tddy-daemon -- -D warnings` — **clean on the published surface**.
+- `cargo build -p tddy-daemon --tests` — pass.
+- **16 tests, 15 red, 1 green.** Every red failure is this node's own missing implementation.
+  - `host_registry.rs` — 7/7 red (`not implemented: host-registry: …`).
+  - `connection_service.rs` — 3/4 red at the `unimplemented!`; `list_known_hosts_rejects_an_invalid_token`
+    **passes**, because the session check is part of the published surface (every handler in the file
+    has one — omitting it to force a red would ship a handler with no auth). It stands as a
+    regression guard.
+  - `HostsScreenAcceptance.cy.tsx` — 5/5 red ("expected to find `hosts-row-…`, never found it").
 
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-host-registry-initial-discovery.md`)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
