@@ -62,7 +62,7 @@ That wire arrives later in the `optional-livekit` stack.
 **Per-session** communication is unaffected by daemon selection and keeps targeting its own
 session's server identity in its own LiveKit room, exactly as today:
 
-- The terminal (`terminal.TerminalService`, `GhosttyTerminalLiveKit`) — targets
+- The terminal (`terminal.TerminalService`, `openRoomTerminalFeed`) — targets
   `daemon-{instanceId}-{sessionId}`.
 - The PR-Stack Chat Screen presenter stream (`usePresenterLiveKitRoom`) — targets the session's
   presenter identity.

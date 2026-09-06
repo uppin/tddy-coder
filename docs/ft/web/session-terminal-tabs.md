@@ -36,9 +36,11 @@ The tab bar renders at the top of the focused session's runtime area (above the 
 styled like the existing inspector tab strip (`InspectorTabs`).
 
 - **Agent tab** (`data-testid="sessions-terminal-tab-agent"`): always present, first, selected by
-  default, **no close control**. Renders the session's coding-agent terminal, chosen from the
-  session connection's capabilities — `GrpcSessionTerminal` with `terminal_id="main"` for a
-  host-served session, the VirtualTui `SessionLiveKitTerminal` for a media-capable one.
+  default, **no close control**. Renders the session's coding-agent terminal — one
+  `GhosttyTerminalSession` either way. What is chosen from the session connection's capabilities is
+  the **feed** behind it: `GrpcSessionTerminal`'s own `ConnectionService` stream with
+  `terminal_id="main"` for a host-served session, the connection's room feed for a media-capable
+  one. See [terminal-session.md](../../../packages/tddy-web/docs/terminal-session.md).
 - **Bash tabs** (`data-testid="sessions-terminal-tab-<terminalId>"`): one per shell terminal, each
   with a close control (`data-testid="sessions-terminal-tab-close-<terminalId>"`). Closing a bash
   tab calls `StopTerminalSession(terminal_id)`, removes the tab, and — if it was active — returns

@@ -128,6 +128,25 @@ are gated on the **host** connection instead: what the hint names is decided by 
 reached, so the host is the upstream fact — and it is the only one a dormant session has.
 See [capability gating](capability-gating.md).
 
+## Opening a terminal
+
+`openTerminal(options)` returns the [terminal feed](terminal-session.md) for this session — a byte
+stream, and a history fetcher where the transport can serve one. The connection builds it, because
+the connection is the thing that knows how this session is reached; the component that renders it
+never learns which wire it is on, and asks `feedSupportsHistory(feed)` rather than which transport
+carries it.
+
+`TerminalOptions` carries what the connection cannot know: which terminal, the operator's
+`sessionToken` (the auth gate fills that field on unary calls only, and both terminal RPCs are
+server-streaming), the initial grid, and a `controlToken` **getter** read at send time, because the
+control lease moves between screens and a snapshot goes stale silently.
+
+The two implementations differ in where history comes from. A host-served session asks the daemon
+that already carries its stream. A room-carried session's room serves the PTY and nothing else, so
+its bytes come from the session participant and its **history from the host daemon**, which is where
+the capture ring lives — which is what gives a room-carried session scrollback without moving any
+output off the room.
+
 ## Lifetime and ownership
 
 A session connection holds real resources — a joined room and a self-rescheduling timer — so who owns
@@ -211,25 +230,13 @@ failed.
 
 ## Current limits
 
-- **The terminal still performs its own join.** `SessionLiveKitTerminal` mints its own
-  `browser-<session>-<ts>-<random>` identity and takes its own token through
-  `useLiveKitTerminalToken`, so a room-backed session holds a second participant and a second
-  handshake. The identity is held as state adjusted on a changed room rather than written into a ref
-  during render: a render that mutates a ref has already happened by the time React decides whether
-  to keep it, so a discarded or replayed render would leave the identity and the room it was minted
-  for disagreeing — and that mismatch surfaces as a token issued for the wrong room. The random
-  suffix is what keeps a re-attach from colliding with a participant still leaving. Folding this join
-  into the session connection is [#441](https://github.com/uppin/tddy-coder/pull/441)
-  (`optional-livekit` node 5), which takes `leastConnectedOf` and the terminal's
-  `onConnectionStatusChange` with it.
 - **`useConnectionStatus` samples rather than subscribes.** Both wires have something that could push
   a status change — LiveKit's room `ConnectionStateChanged`, and the IPC bridge's own signal — but
   neither is reachable through the wire-neutral interface.
   [#442](https://github.com/uppin/tddy-coder/pull/442) (node 6) introduces the transport that makes a
   subscription expressible.
-- **A session connection gates exactly one media decision.** `capabilities.has("media")` chooses the
-  terminal component, and nothing else about a session reads it: VNC, screen sharing, participant
-  video and the participant roster are gated on the **host** connection, because a dormant session
-  has no session connection to ask. See [capability gating](capability-gating.md).
-- **Both terminal components still exist.** `GhosttyTerminalLiveKit` and `GhosttyTerminalGrpc` are
-  chosen between, not merged; the merge is node 5's.
+- **A session connection gates exactly one media decision.** `capabilities.has("media")` decides
+  whether a session's terminal is opened on its connection, and nothing else about a session reads
+  it: VNC, screen sharing, participant video and the participant roster are gated on the **host**
+  connection, because a dormant session has no session connection to ask. See
+  [capability gating](capability-gating.md).

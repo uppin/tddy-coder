@@ -22,6 +22,15 @@
 > (null client) no longer evicts the runtime — the terminal stays mounted and resumes with
 > `FROM_OFFSET` when a non-null client returns.
 >
+> **Scrollback is offered on every wire.** The terminal asks its feed
+> (`feedSupportsHistory`), not the transport, so a session carried over its own LiveKit room
+> scrolls back exactly as a host-served one does. Its room serves the PTY and nothing else, so its
+> history is fetched from the **host daemon** that holds the capture ring. Because
+> `terminal.TerminalOutput` carries no offsets, that fill runs **unanchored**: it pages to the
+> capture tip and ends on the first chunk reporting `atEnd`, rather than filling toward an anchor
+> taken from an initial replay frame. See
+> [the session terminal](../../../packages/tddy-web/docs/terminal-session.md).
+>
 > **Status history:** the earlier "terminal-native-scrolling" amendment raised the live terminal
 > to `scrollback > 0`; that was reverted (it reintroduced duplicate-pane accumulation and
 > surfaced a blank-page-after-reconnect bug). The live terminal stays at `scrollback: 0`; the
@@ -114,7 +123,7 @@ user sees a single seamless terminal surface rather than a split pane.
   `getScrollbar()` returning `{ total, offset, len }` (the single source of truth for viewport
   position, same coordinate space as `scrollToLine`): `total = getScrollbackLength() + rows`,
   `offset = max(0, getScrollbackLength() - getViewportY())`, `len = rows`.
-- `GhosttyTerminalGrpc` (the shared component) **owns the scroll-up history flow**: it renders
+- `GhosttyTerminalSession` (the one terminal component) **owns the scroll-up history flow**: it renders
   **two overlaid ghostty-web terminals** sharing one rect — a live terminal (`scrollback: 0`,
   the active screen, always pinned to the live tip) and an older-history "page" terminal
   (`scrollback > 0`, read-only). It captures the absolute `endOffset` anchor from the initial
@@ -159,7 +168,7 @@ user sees a single seamless terminal surface rather than a split pane.
   (which may stop propagation).
 - `GrpcSessionTerminal` builds the `historyFetcher` from its `Client<ConnectionService>` +
   session ids and passes it (plus the full `SessionTerminalOutput` frames carrying the offset
-  metadata) down to `GhosttyTerminalGrpc`. The `onRegisterLoadOlderHistory` prop is **removed**.
+  metadata) into the `TerminalFeed` the component reads. There is no `onRegisterLoadOlderHistory` prop.
 - **Reconnect resume by offset (`StreamReplayMode`):** `StreamTerminalOutputRequest` (and the bidi
   `StreamSessionTerminalIO` open frame) gain a `mode` (`StreamReplayMode`) + `from_offset`.
   `TAIL` (default, first connect) sends the mode prologue + current last-frame tail chunk, resizes
@@ -176,10 +185,6 @@ user sees a single seamless terminal surface rather than a split pane.
 
 ### Out of scope
 
-- The LiveKit-backed `GhosttyTerminalLiveKit` path — the LiveKit transport does not yet carry
-  the offset metadata. LiveKit lazy history is a separate follow-up. (The shared
-  `GhosttyTerminal` `scrollback`/handle changes benefit both transports; only the gRPC arm wires
-  the fetcher.)
 - Persisting scroll position across session reconnects.
 - A unified single-terminal surface (concatenating older + live into one scrollback) — would
   require either a prepend API or resetting the live terminal. The overlay double-buffer is the
@@ -276,7 +281,7 @@ Consumed from the unification changeset (forward-chunk shape):
   forward-fill. (The native scroll-to-bottom policy is a no-op on the live terminal because
   `scrollback: 0` means the viewport can never be scrolled up away from the tip.)
 
-### `GhosttyTerminalGrpc`
+### `GhosttyTerminalSession`
 
 - New prop: `historyFetcher?: (fromOffset: bigint, untilOffset: bigint) =>
   Promise<HistoryChunk | null>` — built by `GrpcSessionTerminal` from
@@ -324,16 +329,18 @@ Consumed from the unification changeset (forward-chunk shape):
 ### `GrpcSessionTerminal`
 
 - Builds `historyFetcher = createForwardHistoryFetcher(client, { sessionToken, sessionId,
-  terminalId })` (memoized) and passes it to `GhosttyTerminalGrpc`.
+  terminalId })` (memoized) and offers it as the feed's `history`.
 - Forwards the full `SessionTerminalOutput` frame (data + offsets) through the `GrpcStream`
   instead of just `output.data`.
 - Removes the `onRegisterLoadOlderHistory` prop and the `historyLoaderRef` ownership (now lives
-  in `GhosttyTerminalGrpc`). ACK handling (`ackedInputOffset`) stays in `GrpcSessionTerminal`.
+  in `GhosttyTerminalSession`). ACK handling (`ackedInputOffset`) stays in `GrpcSessionTerminal`, which
+  is why that call site still builds its own stream rather than opening one on the connection: a
+  `TerminalFrame` has nowhere to carry a daemon's input acknowledgement.
 
 ## Acceptance criteria
 
-1. **Affordance appears when older history exists.** Mount `GhosttyTerminalGrpc` with a
-   `historyFetcher` and a stream whose first frame carries `endOffset > 0` and `atOldest = false`:
+1. **Affordance appears when older history exists.** Mount `GhosttyTerminalSession` with a feed whose
+   `history` is set and whose first frame carries `endOffset > 0` and `atOldest = false`:
    the `load-earlier-history` affordance becomes visible and the live pane is foreground.
 2. **Affordance absent when no older history.** First frame with `atOldest = true` (or
    `endOffset = 0`): no `load-earlier-history` affordance.
@@ -406,7 +413,7 @@ Consumed from the unification changeset (forward-chunk shape):
   not the viewport, matching ghostty's `isMouseReporting` gate. (The native scroll-to-bottom
   policy is a no-op on the live terminal because `scrollback: 0` means the viewport can never be
   scrolled up away from the tip.)
-- **`historyFetcher` callback over `Client` injection** — keeps `GhosttyTerminalGrpc` decoupled
+- **A history-fetcher callback over `Client` injection** — keeps `GhosttyTerminalSession` decoupled
   from `ConnectionService` and unit-testable with a plain function double.
 - **Capture-phase wheel listeners** — ghostty-web's own wheel handler may stop propagation; a
   bubble-phase React `onWheel` would never see the event. The capture-phase listeners fire first
@@ -416,8 +423,8 @@ Consumed from the unification changeset (forward-chunk shape):
 
 ## Future scope
 
-- LiveKit transport: carry offset metadata on the LiveKit terminal frames so
-  `GhosttyTerminalLiveKit` can use the same flow.
+- Carry offset metadata on a room-carried session's terminal frames, so its fill can be anchored and
+  resume from a byte the way the daemon path does. Scrollback itself already works there, unanchored.
 - Persisted scroll position across reconnects.
 - A unified single-terminal surface if a future ghostty-web release adds a prepend/insert-at-top
   API that does not require a live-terminal reset, or a daemon-side PageList emulator that holds

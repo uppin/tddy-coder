@@ -21,11 +21,11 @@
  */
 
 import { aGhosttyTerminal } from "../support/drivers/ghosttyTerminalDriver";
-import { aGhosttyTerminalLiveKit } from "../support/drivers/ghosttyTerminalLiveKitDriver";
+import { aGhosttyTerminalSession } from "../support/drivers/ghosttyTerminalSessionDriver";
 
-// GhosttyTerminal's `onData` is the PTY input channel: GhosttyTerminalLiveKit
-// wires `onData` straight into `enqueueTerminalInput`, which is drained to the
-// remote terminal. Asserting on `onData` therefore asserts "sent to the PTY".
+// GhosttyTerminal's `onData` is the PTY input channel: `GhosttyTerminalSession`
+// wires `onData` straight into its feed's `send`, which is drained to the remote
+// terminal. Asserting on `onData` therefore asserts "sent to the PTY".
 const REVERSE_TAB_SEQUENCE = "\x1b[Z"; // Shift+Tab → CSI Z
 const ALT_M_META_SEQUENCE = "\x1bm"; // Alt+M → ESC + "m" (xterm meta encoding)
 
@@ -42,7 +42,7 @@ describe("Desktop browser terminal shortcuts", () => {
 
   it("shows the sticky shortcut overlay on the desktop browser when the session has shortcuts", () => {
     // Given — a desktop session (mobile keyboard not shown) that exposes shortcuts
-    aGhosttyTerminalLiveKit({
+    aGhosttyTerminalSession({
       showMobileKeyboard: false,
       mobileShortcuts: CLAUDE_CLI_SHORTCUTS,
     })

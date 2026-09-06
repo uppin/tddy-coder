@@ -8,7 +8,6 @@ import {
   type SessionEntry,
   type ProjectEntry,
 } from "../../gen/connection_pb";
-import { TokenService } from "../../gen/token_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
@@ -94,11 +93,6 @@ export function SessionsDrawerScreen({
   // over a wire with no roster yields `null`, and each of those already handles its absence.
   const room = useHostPresence(selectedInstanceId);
   const daemons = useDaemons();
-  // TokenService issues this session's own browser LiveKit-join token — it must stay HTTP to the
-  // serving daemon (you cannot fetch a LiveKit-join token *over* LiveKit), per the PRD's bootstrap
-  // exception. Do not migrate this to useDaemonClient.
-  const tokenClient = useHttpClient(TokenService);
-
   // Address any daemon's ConnectionService directly. Used to connect to a cross-host row's owning
   // daemon at click time, when the owner is known but the selected session (and thus `activeClient`)
   // hasn't updated yet — a host named that late cannot have a hook of its own, so it is resolved
@@ -235,7 +229,7 @@ export function SessionsDrawerScreen({
   // fall back to the daemon-sourced `SessionEntry` fields (req 5 dual source). Created once and kept
   // in a ref so the `SessionRuntimeRegistry` instance (and its cached `runtimes` snapshot) is stable
   // across renders — must be instantiated before any callback that touches it (buildSessionClient,
-  // onSessionRoom, onSessionDisconnect).
+  // onSessionDisconnect).
   const runtimeRegistryRef = useRef<SessionRuntimeRegistry | null>(null);
   runtimeRegistryRef.current ??= new SessionRuntimeRegistry();
   const runtimeRegistry = runtimeRegistryRef.current;
@@ -269,15 +263,6 @@ export function SessionsDrawerScreen({
         ? (runtimeRegistry.get(connectedSessionId)?.connection?.clientFor(ConnectionService) ?? null)
         : null,
     [connectedSessionId, runtimeRegistry],
-  );
-
-  // Capture a session's connected LiveKit `Room` (fired by the terminal after `room.connect`) —
-  // see `SessionRuntimeState.room` for why nothing reads it any more.
-  const onSessionRoom = useCallback(
-    (sessionId: string, sessionRoom: Room) => {
-      runtimeRegistry.setRoom(sessionId, sessionRoom);
-    },
-    [runtimeRegistry],
   );
 
   // Register a session's Agent-terminal text-insert (fired once its terminal mounts), so the
@@ -848,7 +833,6 @@ export function SessionsDrawerScreen({
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
               host={activeHost}
-              tokenClient={tokenClient}
               sessionToken={sessionToken}
               onCancelCreate={handleCancelCreate}
               onSessionCreated={handleSessionCreated}
@@ -861,7 +845,6 @@ export function SessionsDrawerScreen({
               runtimes={runtimes}
               sessions={sortedSessions}
               focusedRuntimeId={runtimeRegistry.focusedSessionId}
-              onSessionRoom={onSessionRoom}
               onSessionRegisterInsert={onSessionRegisterInsert}
               onInsertPathIntoTerminal={handleInsertPathIntoTerminal}
               onSessionDisconnect={onSessionDisconnect}

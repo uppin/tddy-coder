@@ -18,6 +18,7 @@
 import React from "react";
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
+import type { TerminalFeed } from "../../src/rpc/connections/terminal";
 import type { SessionConnection } from "../../src/rpc/connections/session";
 import type { ConnectionCapability, ConnectionStatus } from "../../src/rpc/connections/types";
 import {
@@ -66,6 +67,9 @@ function aConnectionThatIs(status: ConnectionStatus) {
     },
     transport: (): Transport => {
       throw new Error("this connection is a status stand-in and issues no calls");
+    },
+    openTerminal: (): TerminalFeed => {
+      throw new Error("this connection is a status stand-in and serves no terminal");
     },
     close: () => {},
   };

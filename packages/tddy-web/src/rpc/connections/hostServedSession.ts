@@ -15,8 +15,11 @@
 
 import type { Client, Transport } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
+import { ConnectionService } from "../../gen/connection_pb";
 import { capabilitiesForHint } from "./sessionAttachment";
 import type { SessionAttachmentHint, SessionConnection } from "./session";
+import type { TerminalFeed, TerminalOptions } from "./terminal";
+import { openDaemonTerminalFeed, TerminalResumePoint } from "./terminalFeed";
 import type { ConnectionStatus, HostConnection } from "./types";
 
 /**
@@ -44,6 +47,17 @@ export function openHostServedSession(
     }
   };
 
+  // One resume point per terminal, for the life of this connection: a session has several terminals
+  // and each is at its own offset, so re-opening one must not resume it from another's.
+  const resumePoints = new Map<string, TerminalResumePoint>();
+  const resumePointFor = (terminalId: string): TerminalResumePoint => {
+    const existing = resumePoints.get(terminalId);
+    if (existing) return existing;
+    const fresh = new TerminalResumePoint();
+    resumePoints.set(terminalId, fresh);
+    return fresh;
+  };
+
   return {
     hostId: host.hostId,
     sessionId: hint.sessionId,
@@ -64,6 +78,19 @@ export function openHostServedSession(
     },
     close(): void {
       live = false;
+    },
+    /**
+     * The terminal over this host's own `ConnectionService` — the wire this session's RPC already
+     * travels, and the one holding its capture ring, so scrollback comes with it.
+     */
+    openTerminal(options: TerminalOptions): TerminalFeed {
+      refuseIfClosed();
+      return openDaemonTerminalFeed({
+        client: host.clientFor(ConnectionService),
+        sessionId: hint.sessionId,
+        resume: resumePointFor(options.terminalId ?? ""),
+        options,
+      });
     },
   };
 }

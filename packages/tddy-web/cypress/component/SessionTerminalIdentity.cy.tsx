@@ -1,36 +1,41 @@
 /**
- * Behaviour spec: the participant identity a session's terminal joins its room under.
+ * Behaviour spec: the participant identity a session's terminal is reached under.
  *
- * `SessionLiveKitTerminal` still performs a **second**, independent join of the session's room —
- * separate from the one the session's RPC travels over — so it mints an identity of its own and has
- * a browser token issued for it. Two things about that identity are load-bearing, and both fail
- * silently when they are wrong, because LiveKit's answer to a duplicate identity is to drop one of
- * the two participants rather than to complain.
+ * The terminal used to perform a **second**, independent join of the session's room — separate from
+ * the one the session's RPC travelled over — minting an identity of its own and having a browser
+ * token issued for it. It no longer does: it reads its bytes off the session's connection, and that
+ * connection's join is the only one. The identity went with it, and so did this spec.
  *
- * It must hold across re-renders — a regenerated identity is a fresh join under a new participant,
- * with the old one still on the roster — and it must not be reproducible, because two joins that
- * overlap (a remount before the previous participant is reaped, two tabs on one session) would
- * otherwise mint the same string.
+ * Two things about that identity are load-bearing, and both fail silently when they are wrong,
+ * because LiveKit's answer to a duplicate identity is to drop one of the two participants rather
+ * than to complain. It must hold for the life of the attachment — a regenerated identity is a fresh
+ * join under a new participant, with the old one still on the roster — and it must not be
+ * reproducible, because two joins that overlap (a remount before the previous participant is
+ * reaped, two tabs on one session) would otherwise mint the same string.
  *
- * The token mint here never answers, so `GhosttyTerminalLiveKit` is never reached: what the terminal
- * *asks for* is the whole of the behaviour under test.
- *
- * TODO(optional-livekit node 5): folds into the session connection's own join, and this identity
- * goes with it.
+ * The mint here never answers, so nothing connects and no media server is involved: what the
+ * connection *asks for* is the whole of the behaviour under test.
  *
  * Technical: `packages/tddy-web/docs/session-connections.md`.
  */
 
 import React from "react";
-import type { Client } from "@connectrpc/connect";
+import type { Client, Transport } from "@connectrpc/connect";
+import type { DescService } from "@bufbuild/protobuf";
+import { ConnectionState, type Room } from "livekit-client";
 import type { TokenService } from "../../src/gen/token_pb";
-import { SessionLiveKitTerminal } from "../../src/components/sessions/SessionLiveKitTerminal";
+import {
+  openLiveKitSession,
+  type LiveKitSessionSupport,
+} from "../../src/rpc/connections/livekit/sessionConnection";
+import type { SessionConnection } from "../../src/rpc/connections/session";
 import { byTestId } from "../support/testIds";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
+const A_HOST = "dev";
 const A_SESSION = "session-0001";
 const A_ROOM = "daemon-session-0001";
 const ANOTHER_ROOM = "daemon-session-0001-resumed";
@@ -43,8 +48,8 @@ const MINTS_EL = "token-mints";
 /**
  * A mint that records what it was asked for and never answers.
  *
- * Never answering is deliberate: the terminal renders nothing until a token arrives, so the real
- * LiveKit terminal is never mounted and nothing here depends on a media server.
+ * Never answering is deliberate: the join waits on the token, so no room is ever connected and
+ * nothing here depends on a media server.
  */
 function aRecordingTokenMint() {
   const requests: { room: string; identity: string }[] = [];
@@ -58,14 +63,61 @@ function aRecordingTokenMint() {
   return { client, requests };
 }
 
+/** A room that is never connected — the join never gets past the mint. */
+function anUnjoinedRoom(): Room {
+  return {
+    state: ConnectionState.Disconnected,
+    remoteParticipants: new Map(),
+    on: () => {},
+    off: () => {},
+    connect: async () => {},
+    disconnect: () => {},
+  } as unknown as Room;
+}
+
+function supportedBy(tokens: Client<typeof TokenService>): LiveKitSessionSupport {
+  return {
+    tokens,
+    // Neither is reached: nothing in these specs issues a call or opens a terminal, and a stub that
+    // answered one would be claiming a wire that is not there.
+    transportFor: () => {
+      throw new Error("this session's routing is not under test");
+    },
+    hostClientFor: <S extends DescService>(): Client<S> => {
+      throw new Error("this session's host is not under test");
+    },
+    newRoom: anUnjoinedRoom,
+  } as LiveKitSessionSupport;
+}
+
+/** Open `room`'s session the way an attachment does — once, and held for its lifetime. */
+function useAttachedSession(
+  tokens: Client<typeof TokenService>,
+  room: string,
+): SessionConnection {
+  const [held, setHeld] = React.useState(() => ({
+    room,
+    connection: openLiveKitSession(A_HOST, { sessionId: A_SESSION, room, url: NOWHERE }, supportedBy(tokens)),
+  }));
+  if (held.room !== room) {
+    held.connection.close();
+    setHeld({
+      room,
+      connection: openLiveKitSession(A_HOST, { sessionId: A_SESSION, room, url: NOWHERE }, supportedBy(tokens)),
+    });
+  }
+  return held.connection;
+}
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
-/** One terminal, whose room the test can change and whose parent the test can re-render. */
-function TerminalHarness({ tokenClient }: { tokenClient: Client<typeof TokenService> }) {
+/** One attached session, whose room the test can change and whose pane the test can re-render. */
+function SessionHarness({ tokens }: { tokens: Client<typeof TokenService> }) {
   const [room, setRoom] = React.useState(A_ROOM);
   const [renders, setRenders] = React.useState(1);
+  const connection = useAttachedSession(tokens, room);
 
   return (
     <div>
@@ -76,36 +128,18 @@ function TerminalHarness({ tokenClient }: { tokenClient: Client<typeof TokenServ
         change room
       </button>
       <div data-testid="renders">{renders}</div>
-      <SessionLiveKitTerminal
-        livekitUrl={NOWHERE}
-        livekitRoom={room}
-        livekitServerIdentity={`daemon-${A_SESSION}`}
-        tokenClient={tokenClient}
-        sessionToken="an-operator-access-token"
-        sessionId={A_SESSION}
-      />
+      <div data-testid="session">{connection.sessionId}</div>
     </div>
   );
 }
 
-/** Two terminals watching the same session's room at once — two tabs, or a racing remount. */
-function TwoTerminalsHarness({ tokenClient }: { tokenClient: Client<typeof TokenService> }) {
-  const terminal = (key: string) => (
-    <SessionLiveKitTerminal
-      key={key}
-      livekitUrl={NOWHERE}
-      livekitRoom={A_ROOM}
-      livekitServerIdentity={`daemon-${A_SESSION}`}
-      tokenClient={tokenClient}
-      sessionToken="an-operator-access-token"
-      sessionId={A_SESSION}
-    />
-  );
+/** Two attachments to the same session's room at once — two tabs, or a racing remount. */
+function TwoSessionsHarness({ tokens }: { tokens: Client<typeof TokenService> }) {
+  const first = useAttachedSession(tokens, A_ROOM);
+  const second = useAttachedSession(tokens, A_ROOM);
   return (
-    <div>
-      {terminal("first")}
-      {terminal("second")}
-      <div data-testid={MINTS_EL}>mounted</div>
+    <div data-testid={MINTS_EL}>
+      {first.sessionId}/{second.sessionId}
     </div>
   );
 }
@@ -116,12 +150,12 @@ function TwoTerminalsHarness({ tokenClient }: { tokenClient: Client<typeof Token
 
 describe("a session terminal's own participant identity", () => {
   it("holds across re-renders, so the join is not repeated under a new participant", () => {
-    // Given a mounted terminal that has asked for its token
+    // Given an attached session that has asked for its token
     const mint = aRecordingTokenMint();
-    cy.mount(<TerminalHarness tokenClient={mint.client} />);
+    cy.mount(<SessionHarness tokens={mint.client} />);
     cy.wrap(null).should(() => expect(mint.requests).to.have.length(1));
 
-    // When its parent re-renders twice — every keystroke in the drawer does this
+    // When the pane re-renders twice — every keystroke in the drawer does this
     byTestId(RE_RENDER_BTN).click();
     byTestId(RE_RENDER_BTN).click();
     byTestId("renders").should("have.text", "3");
@@ -132,9 +166,9 @@ describe("a session terminal's own participant identity", () => {
   });
 
   it("is minted afresh for a different room", () => {
-    // Given a terminal watching one room
+    // Given a session attached over one room
     const mint = aRecordingTokenMint();
-    cy.mount(<TerminalHarness tokenClient={mint.client} />);
+    cy.mount(<SessionHarness tokens={mint.client} />);
     cy.wrap(null).should(() => expect(mint.requests).to.have.length(1));
 
     // When the session is re-attached into a different room
@@ -148,11 +182,11 @@ describe("a session terminal's own participant identity", () => {
     });
   });
 
-  it("differs between two terminals watching the same room", () => {
-    // Given two terminals on one session's room, mounted together
+  it("differs between two attachments watching the same room", () => {
+    // Given two attachments to one session's room, mounted together
     const mint = aRecordingTokenMint();
 
-    cy.mount(<TwoTerminalsHarness tokenClient={mint.client} />);
+    cy.mount(<TwoSessionsHarness tokens={mint.client} />);
 
     // Then they join as two participants. Minting from the clock alone puts both in the same
     // millisecond, and a room that sees an identity twice silently drops one of the two

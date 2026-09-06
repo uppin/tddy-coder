@@ -3,7 +3,6 @@ import { ConnectError, type Client } from "@connectrpc/connect";
 import type { Room } from "livekit-client";
 import type { ConnectionService, SessionEntry, ProjectEntry } from "../../gen/connection_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
-import type { TokenService } from "../../gen/token_pb";
 import type { SessionAttachmentState } from "./useSessionAttachment";
 import type { SessionAttachmentHint } from "../../rpc/connections/session";
 import type { HostConnection } from "../../rpc/connections/types";
@@ -33,7 +32,6 @@ import type { ToolShortcutDef } from "../../lib/toolShortcuts";
 import type { ByteDelta, SessionRuntimeState } from "./sessionRuntimeRegistry";
 
 type ConnectionClient = Client<typeof ConnectionService>;
-type TokenClient = Client<typeof TokenService>;
 
 interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
@@ -62,9 +60,6 @@ interface SessionMainPaneProps {
    *  hides the VNC and Screen Sharing tabs, and so a call site that forgot the prop would lose them
    *  silently — the pane would look exactly like one whose host cannot carry a track. */
   host: HostConnection | null;
-  /** Client for fetching browser LiveKit tokens — required to render a terminal for a session
-   *  carried over its own LiveKit room. */
-  tokenClient?: TokenClient;
   sessionToken?: string;
   onCancelCreate?: () => void;
   onSessionCreated?: (sessionId: string) => void;
@@ -95,8 +90,6 @@ interface SessionMainPaneProps {
   sessions?: ReadonlyArray<SessionEntry>;
   /** The focused runtime's session id (visible); others are `display:none` but stay mounted. */
   focusedRuntimeId?: string | null;
-  /** Capture a session's connected LiveKit `Room` so session-scoped RPCs can route over it. */
-  onSessionRoom?: (sessionId: string, room: Room) => void;
   /** Register a session's Agent-terminal text-insert (for the inspector Files-tab click/tap route). */
   onSessionRegisterInsert?: (sessionId: string, insertInput: (text: string) => void) => void;
   /** Insert an uploaded file's host path into the focused session's terminal (Files tab → Insert /
@@ -130,7 +123,6 @@ export function SessionMainPane({
   isCreating = false,
   client,
   host,
-  tokenClient,
   sessionToken = "",
   onCancelCreate,
   onSessionCreated,
@@ -143,7 +135,6 @@ export function SessionMainPane({
   runtimes = [],
   sessions = [],
   focusedRuntimeId = null,
-  onSessionRoom,
   onSessionRegisterInsert,
   onInsertPathIntoTerminal,
   onSessionDisconnect,
@@ -328,9 +319,7 @@ export function SessionMainPane({
           focused={!dormant && r.sessionId === focusedRuntimeId}
           sessionToken={sessionToken}
           client={client}
-          tokenClient={tokenClient}
           mobileShortcuts={mobileShortcuts}
-          onSessionRoom={onSessionRoom}
           onSessionRegisterInsert={onSessionRegisterInsert}
           onSessionDisconnect={onSessionDisconnect}
           onSessionBytes={onSessionBytes}

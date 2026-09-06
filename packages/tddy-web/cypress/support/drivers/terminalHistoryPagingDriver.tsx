@@ -1,5 +1,5 @@
 /**
- * Fluent component driver for GhosttyTerminalGrpc overlay double-buffer scroll-up history.
+ * Fluent component driver for the terminal's overlay double-buffer scroll-up history.
  *
  * Wraps mount → push frames → activate affordance → assert on the live/page buffers, fetcher
  * calls, foreground pane, loading indicator, and swap actions, so test bodies stay free of raw
@@ -10,7 +10,8 @@
 
 import React from "react";
 import { mount } from "cypress/react";
-import { GhosttyTerminalGrpc, type GrpcStream } from "../../../src/components/GhosttyTerminalGrpc";
+import { GhosttyTerminalSession } from "../../../src/components/GhosttyTerminalSession";
+import type { TerminalStream } from "../../../src/rpc/connections/terminal";
 import type { HistoryChunk } from "../../../src/lib/terminalHistoryLoader";
 import { UploadProgressProvider } from "../../../src/rpc/uploadProgress";
 import { byTestId, TEST_IDS } from "../testIds";
@@ -19,7 +20,7 @@ import { byTestId, TEST_IDS } from "../testIds";
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 // ---------------------------------------------------------------------------
-// Frame shape carried by GrpcStream.onMessage (the full SessionTerminalOutput frame)
+// Frame shape carried by TerminalStream.onMessage (the full SessionTerminalOutput frame)
 // ---------------------------------------------------------------------------
 
 export interface GrpcFrame {
@@ -119,12 +120,12 @@ function aFetcherDouble(): FetcherDouble {
 // Driver
 // ---------------------------------------------------------------------------
 
-export function aGhosttyTerminalGrpcLazyHistory() {
+export function aTerminalWithHistoryPaging() {
   const outputListeners: Array<(frame: GrpcFrame) => void> = [];
   const sentChunks: Uint8Array[] = [];
   const fetcher = aFetcherDouble();
 
-  const stream: GrpcStream = {
+  const stream: TerminalStream = {
     send(data: Uint8Array) {
       sentChunks.push(data);
     },
@@ -139,7 +140,7 @@ export function aGhosttyTerminalGrpcLazyHistory() {
 
   const waitForListener = () =>
     cy.wrap(null, { timeout: 10000 }).should(() => {
-      expect(outputListeners.length, "GrpcStream onMessage listener registered").to.be.greaterThan(0);
+      expect(outputListeners.length, "TerminalStream onMessage listener registered").to.be.greaterThan(0);
     });
 
   return {
@@ -147,11 +148,10 @@ export function aGhosttyTerminalGrpcLazyHistory() {
       mount(
         <div style={{ height: 400, width: 800, position: "relative" }}>
           <UploadProgressProvider>
-            <GhosttyTerminalGrpc
+            <GhosttyTerminalSession
+              feed={{ stream, history: fetcher.fetch }}
               sessionToken="lazy-history-token"
               sessionId="lazy-history-session"
-              stream={stream}
-              historyFetcher={fetcher.fetch}
             />
           </UploadProgressProvider>
         </div>,

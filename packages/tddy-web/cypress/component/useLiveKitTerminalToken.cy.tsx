@@ -6,7 +6,7 @@
  * does inline.
  *
  * Changeset: unify tddy-coder recipe-session terminals onto the same LiveKit
- * terminal component already used for Claude CLI (`GhosttyTerminalLiveKit`).
+ * terminal component already used for Claude CLI.
  *
  * This module does not exist yet — every test below fails at bundle time
  * (module not found) until `useLiveKitTerminalToken.ts` is added under

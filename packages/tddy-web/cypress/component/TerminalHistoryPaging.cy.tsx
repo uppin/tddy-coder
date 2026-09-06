@@ -1,5 +1,5 @@
 /**
- * Acceptance tests: GhosttyTerminalGrpc overlay double-buffer scroll-up history.
+ * Acceptance tests: the terminal's overlay double-buffer scroll-up history.
  *
  * PRD: docs/ft/web/terminal-replay-lazy-scroll.md (amended — terminal-native-scrolling)
  *
@@ -18,9 +18,9 @@
  */
 
 import {
-  aGhosttyTerminalGrpcLazyHistory,
+  aTerminalWithHistoryPaging,
   aReplayFrame,
-} from "../support/drivers/ghosttyTerminalGrpcLazyHistoryDriver";
+} from "../support/drivers/terminalHistoryPagingDriver";
 import type { HistoryChunk } from "../../src/lib/terminalHistoryLoader";
 
 // ---------------------------------------------------------------------------
@@ -65,11 +65,11 @@ const OLDER_CHUNK_DEEP: HistoryChunk = {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () => {
+describe("Terminal history paging — overlay double-buffer", () => {
   it("shows the load-earlier-history affordance when the initial frame carries endOffset and atOldest is false", () => {
     // Given / When — the terminal mounts and the initial replay frame arrives
     // Then — the affordance is visible (older history is available) and the live pane is foreground
-    aGhosttyTerminalGrpcLazyHistory()
+    aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -83,7 +83,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
     // When — the terminal mounts and the at-oldest replay frame arrives
     // Then — no affordance (there is no older history to load)
-    aGhosttyTerminalGrpcLazyHistory()
+    aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(atOldestFrame)
@@ -92,7 +92,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("shows the loading indicator and fetches forward from offset 0 when the affordance is activated", () => {
     // Given
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -109,7 +109,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("appends older bytes to the background page terminal and chains the next forward chunk", () => {
     // Given
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -133,7 +133,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("swaps the page terminal to the foreground once a chunk reports atEnd (reached the anchor)", () => {
     // Given
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -160,7 +160,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("keeps live bytes flowing to the live terminal during the forward fill (no reset, no interruption)", () => {
     // Given
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -183,7 +183,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("triggers the forward fill on a scroll-up-at-top gesture on the live pane", () => {
     // Given
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -200,7 +200,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("swaps back to the live pane on the Back-to-live affordance, then re-views history instantly", () => {
     // Given — the fill has completed and the page pane is foreground
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -230,7 +230,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("swaps back to live on a scroll-down-at-bottom gesture on the page pane", () => {
     // Given — the fill has completed and the page pane is foreground
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -250,7 +250,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("swaps to the page pane instantly on a scroll-up gesture once history is already filled", () => {
     // Given — the fill has completed and the user has returned to the live pane
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -274,7 +274,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     // Given — the page terminal has been forward-filled with a 30-line older-history chunk
     // (scrollback > rows), so scrollLines has real history to scroll through. The page pane is
     // foreground and pinned to the bottom (viewportY 0) at the seam.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -307,7 +307,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("live terminal has no native scrollback — overflow output does not accumulate, and a scroll-up gesture triggers the page forward-fill immediately", () => {
     // Given — the live terminal carries scrollback 0 (always pinned to the live tip).
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -341,7 +341,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     // evicting the original anchor. The page forward-fill must be bounded by the CURRENT tip, not
     // the stale anchor — otherwise `replay_from(0, 1000)` is an evicted-empty range and the page
     // would swap to blank.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME) // anchor captured at 1000
@@ -377,7 +377,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("a forward fill that resolves with no retained bytes (empty range) stays on the live pane — no blank page", () => {
     // Given — the live terminal opened at anchor 1000 with older history available.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -397,7 +397,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("a forward fill whose fetch errors (e.g. getTerminalHistory not_found) stays on the live pane — no blank page", () => {
     // Given — the live terminal opened at anchor 1000 with older history available.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -421,7 +421,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
   it("live terminal stays at scrollback 0 across primary and alternate screen (DEC 1049) — no native scrollback to duplicate", () => {
     // Given — the live terminal carries scrollback 0 (always pinned to the live tip); push enough
     // output that a native-scrollback terminal would have accumulated history.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -447,7 +447,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
   it("page terminal exposes the native Scrollbar {total, offset, len} as the single source of truth and scrollToLine sets the absolute offset", () => {
     // Given — the page terminal has been forward-filled with a 30-line older-history chunk
     // (scrollback > rows), so the native Scrollbar has real history to report.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME)
@@ -478,7 +478,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
   it("mouse tracking on (DEC 1006) routes the wheel to the TUI, not the viewport (no forward-fill, viewport stays pinned)", () => {
     // Given — the live terminal has scrollback 0 (always pinned to the live tip); enable mouse
     // tracking (DEC 1006) so the wheel is reported to the TUI instead of triggering forward-fill.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -507,7 +507,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     // TUI has enabled mouse tracking (DEC 1006). ghostty-web's handleWheel unconditionally emits
     // Up/Down arrows in the alternate screen — but when the TUI opted into mouse tracking, the wheel
     // must be reported as an SGR mouse event (button 64 = wheel up), never as an arrow key.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -527,7 +527,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
 
   it("mouse tracking on + alternate screen routes wheel-down to the TUI as an SGR mouse event, not a Down-arrow key", () => {
     // Given — alternate screen (DEC 1049) + mouse tracking on (DEC 1006), same as Claude CLI.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
@@ -549,7 +549,7 @@ describe("GhosttyTerminalGrpcLazyHistory — overlay double-buffer paging", () =
     // Given — the live terminal is in the alternate screen (DEC 1049) but the TUI has NOT enabled
     // mouse tracking (e.g. `less`/`man`). Native terminals emulate Up/Down arrows for the wheel in
     // this mode so the pager scrolls — our forward-fill must NOT hijack that gesture.
-    const terminal = aGhosttyTerminalGrpcLazyHistory()
+    const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);

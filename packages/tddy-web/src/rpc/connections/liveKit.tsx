@@ -185,6 +185,9 @@ class LiveKitHostConnection implements HostConnection {
       newRoom: resources.newRoom,
       refreshPolicy: resources.refreshPolicy,
       transportFor: (room, targetIdentity) => this.currentFactory()(room, targetIdentity),
+      // The session's own room serves its PTY and nothing else, so its terminal history has to be
+      // asked of the host that holds the capture ring — this connection.
+      hostClientFor: <S extends DescService>(service: S) => this.clientFor(service),
     });
   }
 }

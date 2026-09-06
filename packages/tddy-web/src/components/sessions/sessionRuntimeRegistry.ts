@@ -20,7 +20,6 @@
  * Feature: `docs/ft/web/session-drawer.md#fast-session-change` (req 2, 3)
  */
 
-import type { Room } from "livekit-client";
 import type { SessionAttachmentHint, SessionConnection } from "../../rpc/connections/session";
 
 export interface SessionRuntimeState {
@@ -31,15 +30,9 @@ export interface SessionRuntimeState {
    *  terminal component the runtime layer renders is derived from the capabilities, never from a
    *  status string. */
   connection?: SessionConnection;
-  /** How the daemon said to reach this session. The terminal still joins the session's room for
-   *  itself (`SessionLiveKitTerminal`), so it reads the room and url from here. */
+  /** How the daemon said to reach this session — read by the screens whose chat panels join the
+   *  session's room as a participant of their own. */
   hint?: SessionAttachmentHint;
-  /** The session's connected LiveKit `Room`, captured via the terminal's `onRoom` callback.
-   *  TODO(optional-livekit node 5): nothing reads this any more — session RPC routes through
-   *  {@link connection} rather than through a room captured from the terminal. It is kept only
-   *  because the terminal that reports it is the one node 5 folds into the connection; drop the
-   *  field, `setRoom` and the `onSessionRoom` plumbing with that merge. */
-  room?: Room | null;
   /** Cumulative bytes received over the session's LiveKit transport. */
   bytesIn: number;
   /** Cumulative bytes sent over the session's LiveKit transport. */
@@ -131,15 +124,6 @@ export class SessionRuntimeRegistry {
   ): void {
     const held = previous?.connection;
     if (held && held !== replacement) held.close();
-  }
-
-  /** Store the session's connected LiveKit `Room` (captured from the terminal). No-op when the
-   *  session has no runtime. */
-  setRoom(sessionId: string, room: Room): void {
-    const state = this.runtimeBySessionId.get(sessionId);
-    if (!state) return;
-    this.runtimeBySessionId.set(sessionId, { ...state, room });
-    // `room` is not part of the `runtimes` snapshot used by the UI; no notify needed.
   }
 
   /** Register the session's terminal text-insert function (captured from the mounted terminal), so
