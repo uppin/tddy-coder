@@ -125,9 +125,11 @@ is unary-shaped and cannot express a subscription.
 - [~] Per-host stream tally in the backend helper — **dropped, by the testing plan above.** The
       properties under test are counts, not attributions; the existing global `hostStatsStreamCount()`
       proves them, and the discriminator a per-host tally needs would have cost a proto change.
-- [x] Telemetry cell rendering live values for an online host
+- [~] Telemetry cell rendering live values for an online host — renders, but the test asserts only
+      that the elements exist, against a zero-byte disk fixture. Values are not pinned.
 - [x] Offline / connecting / errored states, no fabricated values
-- [x] Teardown on unmount verified
+- [ ] Teardown on unmount verified — **not actually verified.** See the Validation findings below:
+      the backend's counter counts opens only, so the test asserting it cannot fail on a teardown bug.
 - [x] `./dev bun run cypress:component` green for the touched specs
 
 ## Testing plan
@@ -226,6 +228,46 @@ _(populated by each validation phase)_
 - One production file changed: `src/components/hosts/HostRowTelemetry.tsx`. No test, page object,
   test-support, proto or `src/gen/` file was touched, and no Rust change applies.
 - Not run: the rest of the Cypress suite (~50 min, 207 specs) — left to CI.
+
+### /pr-wrap validation
+
+**Fixed in this pass** (all re-verified, 12/12 specs green):
+
+- `useHostStats.ts` — the module doc claimed a host with no reachable connection resolves to a `null`
+  client. It does not: a registered common room answers for **any** host id, so a non-null client is
+  not evidence of reachability. This is the false premise that misled the green phase.
+- `useHostStats.ts` — the `@param` said `null` follows the daemon selector; it subscribes to nothing.
+  Collapsing the tri-state (`hostId ?? undefined`) would report the selected daemon's CPU under an
+  unreachable host's name, so the doc is now explicit about why the two are not the same.
+- `HostRowTelemetry.tsx` — a reading carrying disk but no CPU rendered `CpuCoresIndicator` with an
+  empty array: a blank bar strip that reads as *all cores idle*, contradicting this file's own
+  no-fabrication docblock. The CPU slot is now decided per metric and stays pending instead.
+- `HostRowTelemetry.tsx` — the state table under-counted (three listed, four rendered) and ran in the
+  opposite order to the branches it documents.
+
+**Open — blocks readiness, needs a decision:**
+
+1. **`## Responsibility` is not delivered in full.** "The telemetry column on each Hosts row" is not
+   in the branch: `HostRowTelemetry` is imported only by its own spec and is mounted nowhere in
+   `src/`. Node 1 (#453) is still at its draft-contract commit, so `HostsScreen` renders no rows to
+   put a column on. This PR's `## Dependencies` explicitly allows "adds a column inside the existing
+   `HostsScreen` row", so the wiring is this node's job, deferred by sequencing.
+2. **AC-6 is not pinned.** `hostStatsStreamCount()` counts opens and is never decremented
+   (`connectionServiceBackend.ts:337,570,637`), so `tears_down_every_subscription_when_the_screen_unmounts`
+   passes whether teardown works or not. It also cannot work against this backend: the generator parks
+   on `await new Promise<never>(...)`, so `cancelled = true` never breaks the `for await`. Needs a live
+   gauge (increment on open, decrement in the generator's `finally`).
+3. **Per-host attribution is not pinned** — the PR's central claim. Every host shares one transport
+   and the only evidence is a global count, so an implementation reading the **selected daemon** for
+   every row (`useHostStats(online && inDirectory ? undefined : null)`) passes all six tests. Fixable
+   without a proto change: yield a different `perCorePercent` per subscription and assert the two rows
+   differ.
+4. **AC-1 is weakly pinned.** Both assertions are `.should("exist")`; no test sets `hostDisk`, so the
+   backend defaults to `0n` and the cell renders "0 B free" — blessed as "shows free disk". The
+   sibling `HostStatsFooterAcceptance.cy.tsx` does this properly with a real figure.
+5. **AC-5 is half-pinned.** `not.contain.text("0%")` is tautological — nothing renders that string
+   (`CpuCoresIndicator` emits `style="height: 0%"`, not text). The pending state has no test and no
+   page-object selector, and no backend knob makes the stream error.
 
 ## TODO
 

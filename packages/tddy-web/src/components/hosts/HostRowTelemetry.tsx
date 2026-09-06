@@ -4,13 +4,19 @@
  * One `StreamHostStats` subscription per **online** host, opened only while this cell is mounted.
  * An offline host has no connection to subscribe through, so nothing is opened and the cell says so.
  *
- * The three states are deliberately distinct, and never collapse into a number:
+ * The four states are deliberately distinct, and never collapse into a number:
  *
- * | Row state                     | Cell |
- * |-------------------------------|------|
- * | online, connected             | live CPU bars + free disk |
- * | online, connecting or errored | a pending / unavailable marker |
- * | offline                       | `—`, and no subscription attempted |
+ * Listed in the order the branches below test them:
+ *
+ * | Row state                          | Cell |
+ * |------------------------------------|------|
+ * | offline                             | `—`, and no subscription attempted |
+ * | online, but nothing routes to it    | an unavailable marker |
+ * | online, subscribed, no frame yet    | a pending marker — not empty bars, which would read as idle |
+ * | online, subscribed, reading in hand | live CPU bars + free disk |
+ *
+ * The last two are decided per metric, not for the cell as a whole: a reading that carries disk but
+ * no CPU leaves the CPU slot pending rather than drawing an empty strip.
  *
  * A zeroed CPU bar for a host that is not reporting would be a fabricated reading an operator acts
  * on, so it is never rendered — see CLAUDE.md on fallbacks.
@@ -80,9 +86,17 @@ export function HostRowTelemetry({ instanceId, online }: HostRowTelemetryProps) 
     </span>
   ) : (
     <>
-      <span data-testid={`hosts-row-${instanceId}-cpu`} {...coreAttributes(perCorePercent)}>
-        <CpuCoresIndicator perCorePercent={perCorePercent} />
-      </span>
+      {/* An empty bar strip is indistinguishable from every core at 0%, so a reading that carries
+          disk but no CPU shows the CPU slot as still pending rather than drawing nothing. */}
+      {perCorePercent.length > 0 ? (
+        <span data-testid={`hosts-row-${instanceId}-cpu`} {...coreAttributes(perCorePercent)}>
+          <CpuCoresIndicator perCorePercent={perCorePercent} />
+        </span>
+      ) : (
+        <span data-testid={`hosts-row-${instanceId}-cpu-pending`} title="Waiting for a CPU reading">
+          …
+        </span>
+      )}
       <span data-testid={`hosts-row-${instanceId}-disk`}>
         <DiskSpaceIndicator availableBytes={disk ? disk.availableBytes : null} />
       </span>
