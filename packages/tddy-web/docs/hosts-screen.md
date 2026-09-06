@@ -18,7 +18,7 @@ host is listed with its last-seen time rather than omitted.
 |---|---|
 | Route | `HOSTS_ROUTE = "/hosts"` and `isHostsPath` in `src/routing/appRoutes.ts` — an exact match, no sub-paths |
 | Dispatch | one branch in the `src/index.tsx` route chain |
-| Nav | `shell-menu-hosts` in `DaemonNavMenu`, between **Projects** and **Models & Agents** |
+| Nav | `shell-menu-hosts` in `DaemonNavMenu`, between **Models & Agents** and **VMs** — beside the other machine-level screen, and clear of the Projects→Models adjacency the menu order pins |
 
 ## Components
 
