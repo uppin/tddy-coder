@@ -18,8 +18,21 @@
 import React from "react";
 import { Room } from "livekit-client";
 import { create } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { GenerateTokenResponseSchema, TokenService } from "../../src/gen/token_pb";
+import {
+  DaemonConfigService,
+  GetClientConfigResponseSchema,
+} from "../../src/gen/daemon_config_pb";
+import { App } from "../../src/index";
+import { AuthProvider } from "../../src/hooks/authProvider";
+import { RpcTransportProvider } from "../../src/rpc/transportProvider";
+import type { TauriHostWindow } from "../../src/rpc/daemonTransportFlavour";
+import {
+  ACCESS_TOKEN_KEY,
+  aDurableSessionBackend,
+  CURRENT_ACCESS_TOKEN,
+} from "../support/rpc/durableSessionBackend";
 import { useLiveKitHostDirectorySource } from "../../src/rpc/hostDirectory/liveKitSource";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {
@@ -534,5 +547,172 @@ describe("a desktop app with LiveKit configured and working", () => {
     byTestId("hosts").should("have.text", `${A_PEER},${THIS_HOST}`);
     byTestId("local-wire").should("have.text", "ipc");
     byTestId("peer-wire").should("have.text", "livekit");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The application as it is actually composed
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything above this line registers the wires by hand and asks the registry what it resolved.
+ * That proves the routing rule, and it is exactly the shape of coverage that cannot fail when the
+ * *app* never reaches the rule — nothing above mounts `App`, so nothing above notices if
+ * `localHostRegistrationFor` is never called with what it needs, or if `LocalHostConnections`
+ * never renders.
+ *
+ * An operator hit precisely that gap: a desktop build with LiveKit configured and unreachable
+ * created a session and got no terminal, because `connectHost(selectedInstanceId)` answered `null`
+ * and `SessionsDrawerScreen` returned silently. So this section drives the real composition —
+ * `RpcTransportProvider` → `ConnectionProviders` → `AuthProvider` → `App` — in the desktop flavour,
+ * and asks the app's own registry the one question the operator's app got wrong.
+ */
+
+/**
+ * The media server the operator configured and could not reach. Its value is never dialled here
+ * (see {@link aDaemonWhoseCommonRoomCannotBeJoined}); it is stated because "LiveKit is configured"
+ * is half of the scenario, and a placeholder would leave a reader guessing what was configured.
+ */
+const AN_UNREACHABLE_LIVEKIT_URL = "ws://192.168.1.10:7880";
+const A_CONFIGURED_COMMON_ROOM = "tddy-fleet";
+
+/**
+ * The daemon that served this page, answering the two calls a desktop boot makes before any screen
+ * renders: the session status `AuthProvider` resolves, and the client configuration `App` reads
+ * over RPC because a page loaded from the asset protocol has no `/api/config` to fetch.
+ *
+ * `daemonMode: true` and a `daemonInstanceId` are what a real daemon serves, and together they are
+ * what puts the app on the daemon-mode path with a host to name.
+ */
+function aDaemonServing(livekit: { livekitUrl?: string; commonRoom?: string }): InMemoryRpcBackend {
+  return aDurableSessionBackend().onUnary(DaemonConfigService.method.getClientConfig, () =>
+    create(GetClientConfigResponseSchema, {
+      daemonMode: true,
+      daemonInstanceId: THIS_HOST,
+      livekitUrl: livekit.livekitUrl,
+      commonRoom: livekit.commonRoom,
+    }),
+  );
+}
+
+/** A daemon that never heard of LiveKit — the `tddy-desktop` default. */
+function aDaemonWithNoLiveKit(): InMemoryRpcBackend {
+  return aDaemonServing({});
+}
+
+/**
+ * A daemon that names a common room the page cannot join.
+ *
+ * The join runs its whole production path — `useCommonRoom` is entered with a URL, a room name and
+ * the signed-in operator's presence identity — and ends without a room, which is the state the
+ * operator's app was in for as long as it was open. It ends there because the token mint the join
+ * begins with is left unimplemented and so rejects: a failure the page reaches offline and in one
+ * turn, where the operator's own (a socket to an address nothing answers on) would put a real
+ * connect attempt and its retry loop inside a component test. What both produce is the only thing
+ * downstream can see — LiveKit configured, no room, so the LiveKit provider claims no host at all.
+ */
+function aDaemonWhoseCommonRoomCannotBeJoined(): InMemoryRpcBackend {
+  return aDaemonServing({
+    livekitUrl: AN_UNREACHABLE_LIVEKIT_URL,
+    commonRoom: A_CONFIGURED_COMMON_ROOM,
+  });
+}
+
+/** This page was loaded by the Tauri host application, which injects its IPC internals into every one. */
+function loadThePageInsideTheDesktopShell(): void {
+  (window as TauriHostWindow).__TAURI_INTERNALS__ = {};
+}
+
+/** Undo it, so a spec file that runs after this one is in a browser again. */
+function leaveTheDesktopShell(): void {
+  delete (window as TauriHostWindow).__TAURI_INTERNALS__;
+}
+
+/** The operator is signed in: this is the access token `aDurableSessionBackend` accepts. */
+function signInTheOperator(): void {
+  window.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN);
+}
+
+/**
+ * Boot the app the way `index.tsx` boots it, into `registry`.
+ *
+ * The probe is a sibling of `App` rather than a child because `App` takes no children — and it does
+ * not have to be one: `LocalHostConnections` reaches the registry through `useConnectionProviders`
+ * and re-provides that same instance, so what the app registers into is what is passed in here.
+ * Nothing is injected past `RpcTransportProvider`: the transport is the seam a desktop page already
+ * has (its daemon connection), and everything between it and the wire — the config read, the
+ * flavour question, the registration — is the app's own.
+ */
+function bootTheDesktopApp(backend: InMemoryRpcBackend, registry: ConnectionProviderRegistry): void {
+  cy.mount(
+    <RpcTransportProvider httpTransport={backend.transport()}>
+      <ConnectionProviders registry={registry}>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+        <WireProbe hostId={THIS_HOST} testId="local-wire" />
+      </ConnectionProviders>
+    </RpcTransportProvider>,
+  );
+}
+
+describe("the desktop application, booted as it is in production", () => {
+  // Synchronously, not through `cy.clearLocalStorage()`: a queued clear would run *after* the
+  // sign-in below and undo it, leaving the app on its login screen for a reason no assertion names.
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    window.location.hash = "";
+    loadThePageInsideTheDesktopShell();
+    signInTheOperator();
+  });
+
+  afterEach(leaveTheDesktopShell);
+
+  it("reaches its own host over IPC when no common room is configured", () => {
+    // Given the desktop's own daemon, and nothing else
+    bootTheDesktopApp(aDaemonWithNoLiveKit(), new ConnectionProviderRegistry());
+
+    // Then the host the daemon named is reachable, over the wire this node added. Every screen
+    // resolves its daemon client through exactly this call; `unreachable` here is a desktop with
+    // no terminal, no session list and no way to start one.
+    byTestId("local-wire").should("have.text", "ipc");
+  });
+
+  it("reaches its own host over IPC while the configured common room is failing to join", () => {
+    // Given the operator's own configuration: a common room named, and unjoinable
+    const daemon = aDaemonWhoseCommonRoomCannotBeJoined();
+
+    bootTheDesktopApp(daemon, new ConnectionProviderRegistry());
+
+    // Then the machine the operator is sitting at is reached in-process, exactly as with no common
+    // room at all. This is the case that matters: the LiveKit provider has no room and so claims
+    // nothing, which leaves the local host reachable only if the IPC wire really did register.
+    byTestId("local-wire").should("have.text", "ipc");
+
+    // And the scenario really was the operator's, not a quietly unconfigured one: the join was
+    // attempted, which only happens with a URL, a room name and a signed-in identity — and it is
+    // this mint, unimplemented, that fails it.
+    cy.wrap(null).then(() => {
+      expect(
+        daemon.callsTo(TokenService.method.generateToken).length,
+        "common-room token mints attempted",
+      ).to.equal(1);
+    });
+  });
+
+  it("offers its own wire ahead of the common room's", () => {
+    // Given the app assembling both wires itself — nobody registers anything here
+    const registry = new ConnectionProviderRegistry();
+
+    bootTheDesktopApp(aDaemonWhoseCommonRoomCannotBeJoined(), registry);
+
+    // Then the order the routing rule depends on is the order `index.tsx` produces. Precedence is
+    // registration order, and registration order is where the components sit — so a mount that
+    // registers the two by hand cannot make this claim: it states the order itself, and would stay
+    // green with `LocalHostConnections` moved below `SelectedDaemonProvider`, where its provider
+    // would land behind the common room's and lose the machine the operator is sitting at to it.
+    byTestId("local-wire").should("have.text", "ipc");
+    cy.wrap(null).then(() => expect([...registry.providerIds()]).to.deep.equal(["ipc", "livekit"]));
   });
 });
