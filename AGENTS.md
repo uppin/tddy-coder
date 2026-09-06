@@ -168,6 +168,7 @@ When a feature includes a demo (e.g. `demo-plan.md`), the demo must run **via a 
 - [Technology stack](docs/dev/guides/tech-stack.md) — core technologies, integration patterns
 - [Changelog and changeset hygiene](docs/dev/guides/changelog-merge-hygiene.md) — one file per entry in `changelog/`, `changesets/`; no index
 - [Build cache](docs/dev/guides/build-cache.md) — per-host sccache backends, the CI wiring, why `CARGO_INCREMENTAL=0`
+  - [KB: what was tried and what broke](docs/kb/build-cache.md) — measurements, the failure modes that look like a cold cache, the 10 GB Actions budget, untried options
 - [Continuous integration](docs/dev/guides/ci.md) — what each PR check runs, how to query results, what the gate deliberately skips
 
 ## Documentation Hierarchy

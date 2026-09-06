@@ -199,4 +199,8 @@ If it does not, the cache was not the problem.
 `./dev sccache --stop-server` restarts the server, which is the fix when sccache
 itself is wedged rather than the objects it holds.
 
+Field notes on how this was arrived at — the dead ends, the failure modes that
+look like an ordinary cold cache, the Actions cache budget, and the options not
+yet tried — are in [docs/kb/build-cache.md](../../kb/build-cache.md).
+
 [sccache]: https://github.com/mozilla/sccache
