@@ -84,11 +84,20 @@ Implementation lands in the same PR. **Not a merge candidate on the contract alo
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — failing unit/integration tests
-- [ ] Implement production code (`/green`)
+- [x] Implement production code (`/green`)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 
 ## Refactoring Needed
+
+### From `/green`
+
+- [ ] `server.rs::run_server` now takes 12 positional args (it already carried
+      `#[allow(clippy::too_many_arguments)]`). A params struct is the obvious refactor.
+- [ ] `config.example.yaml`'s commented LiveKit block is still the old tddy-coder shape
+      (`room:`/`identity:`/`token:`), and `docs/ft/daemon/daemon-settings.md`,
+      `docs/ft/daemon/livekit-peer-discovery.md` and `packages/tddy-web/docs/host-directory.md`
+      still state the pre-flag rule. Docs step.
 
 ### From `/red`
 
@@ -115,6 +124,10 @@ Implementation lands in the same PR. **Not a merge candidate on the contract alo
 - **The default flip.** `enabled: false` by default disconnects every existing deployment on upgrade.
   Intended and operator-approved, but it is a breaking change and the changelog must lead with it.
 - **`deny_unknown_fields`.** A daemon older than the field rejects a config the newer UI wrote.
+- **The default flip reaches anything that renders a `livekit:` block.** `dev.daemon.yaml`,
+  `dev.desktop.yaml` and `tddy-vm`'s `GuestLiveKit` now say `enabled: true` explicitly. `tddy-vm`
+  was the dangerous one: `./vm-tests` is outside the CI gate, so a VM baked holding every
+  credential and joining nothing would only have surfaced hours into a bake.
 
 ## Commands
 
