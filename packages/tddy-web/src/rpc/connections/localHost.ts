@@ -96,9 +96,17 @@ export function localHostRegistrationFor(
   win: TauriHostWindow,
   daemonInstanceId: string | undefined,
 ): LocalHostRegistration | null {
-  if (daemonTransportFlavour(win) !== "webview-ipc") return null;
+  const flavour = daemonTransportFlavour(win);
+  if (flavour !== "webview-ipc") {
+    dIpc("no local host: transport flavour is %s, so this page is not inside the host application", flavour);
+    return null;
+  }
   const hostId = daemonInstanceId?.trim() ?? "";
-  if (!hostId) return null;
+  if (!hostId) {
+    dIpc("no local host: the served client config named no daemon instance id (got %o)", daemonInstanceId);
+    return null;
+  }
+  dIpc("local host is %s, reached over the host application's IPC bridge", hostId);
   return { daemonInstanceId: hostId };
 }
 
@@ -444,7 +452,12 @@ export function createIpcConnectionProvider(
     connectHost(asked: string): HostConnection | null {
       // A registration naming no instance claims nothing: a provider that answered to `""` would
       // shadow every other wire for a host id nobody has.
-      if (!hostId || asked !== hostId) return null;
+      if (!hostId || asked !== hostId) {
+        // The single most useful line when the desktop unexpectedly reaches nothing: it separates
+        // "no provider registered" from "registered, but the selector is naming a different host".
+        dIpc("declining %o — this provider claims %o only", asked, hostId);
+        return null;
+      }
       connection ??= new IpcHostConnection(hostId, resolved);
       return connection;
     },

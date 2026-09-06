@@ -15,11 +15,15 @@
  */
 
 import { useRef, type ReactNode } from "react";
+import { tddyDebug } from "../../lib/debugMask";
 import { useAuthTokenGate, useHttpTransport, useTrafficMeterRegistry } from "../transportProvider";
 import { createDefaultWebviewIpcTransport } from "../daemonTransport";
 import { createIpcConnectionProvider, type LocalHostRegistration } from "./localHost";
 import { ConnectionProviders, useConnectionProviders } from "./registry";
 import type { ConnectionProvider } from "./types";
+
+/** Shares `localHost.ts`'s namespace: one mask turns the whole local-host story on. */
+const dRegistration = tddyDebug("tddy:rpc:local-host");
 
 export interface LocalHostConnectionsProps {
   /**
@@ -79,7 +83,12 @@ export function LocalHostConnections({ registration, children }: LocalHostConnec
   // Unconditionally, on every render, exactly as `LiveKitConnections` does: `register` is idempotent
   // for the instance it already holds, and performing it from a `useMemo` would make the
   // registration depend on whether React kept the render.
-  if (registration && registered.current) registry.register(registered.current.provider);
+  if (registration && registered.current) {
+    registry.register(registered.current.provider);
+    // Registration order is the whole mechanism by which the desktop stays off the media server, so
+    // the ids in order are what a diagnosis needs — not merely that this one registered.
+    dRegistration("registered the local host wire; providers now %o", registry.providerIds());
+  }
 
   return <ConnectionProviders registry={registry}>{children}</ConnectionProviders>;
 }
