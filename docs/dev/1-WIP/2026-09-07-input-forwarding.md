@@ -85,7 +85,7 @@ supplies a mount point that already exists on its branch.
 - [ ] The keep-vs-forward key policy
 - [ ] Stream opened on mount, closed on unmount
 - [ ] Input-unavailable state that leaves the picture working
-- [ ] Cypress component tests for both scopes
+- [x] Cypress component tests for both scopes — written, failing (see **Red phase** below)
 
 ## Decisions — settled before the red phase
 
@@ -126,13 +126,57 @@ node fixes that docblock. Deleting the surface outright is worth proposing, as i
 produced seven tests that passed while proving nothing; the recurring cause was asserting a
 mechanism rather than an outcome. Every test here asserts what the fake bridge received.
 
+## Red phase — the failing tests, and what each one would catch
+
+Written 2026-09-07. **No production behaviour was added**; the only production file created is the
+seam below, whose two exports throw.
+
+| File | Tests | Covers |
+|---|---|---|
+| [`packages/tddy-web/src/components/sessions/screenSharingInput.test.ts`](../../../packages/tddy-web/src/components/sessions/screenSharingInput.test.ts) | 15 | AC-IF-2, AC-IF-3 as pure functions |
+| [`packages/tddy-web/cypress/component/ScreenSharingInputForwardingAcceptance.cy.tsx`](../../../packages/tddy-web/cypress/component/ScreenSharingInputForwardingAcceptance.cy.tsx) | 11 | AC-IF-1, 2, 3, 6, 7, 8, 9 |
+| [`packages/tddy-web/cypress/component/ScreenSharingInputScopesAcceptance.cy.tsx`](../../../packages/tddy-web/cypress/component/ScreenSharingInputScopesAcceptance.cy.tsx) | 2 | AC-IF-4 (host), AC-IF-5 (session) |
+
+Supporting test infrastructure:
+
+- `cypress/support/rpc/screenSharingInputBridge.ts` — the fake bridge. It **serves**
+  `ScreenSharingInputService` and records every `ScreenSharingInputEvent` that arrives on the
+  stream, plus how many streams were opened and how many have ended. Every assertion in both specs
+  is about what it received; none is about a handler having run.
+- `cypress/support/pages/screenSharingOverlayPage.ts` — the overlay's gestures, expressed as an
+  offset *inside the rendered picture* so a spec never hands the component the coordinate it is
+  supposed to compute.
+
+Seam added so the tests compile: `src/components/sessions/screenSharingInput.ts`, exporting
+`framebufferPointFor` and `keysymFor`, both of which throw `… is not implemented`.
+
+⚠ Every one of these 28 tests was confirmed **reachable**: a throwaway implementation of the seam
+plus input capture in `ScreenSharingOverlay` turned all 28 green and left the 48 tests of
+`HostDesktopConnectAcceptance`, `HostsScreenRemoteDesktopAcceptance`, `HostAddKeyAcceptance`,
+`HostsScreenAddKeyAcceptance` and `SessionScreenSharingTargetRowsAcceptance` green as well. That
+implementation was then reverted; the probe existed only to rule out a test that cannot pass.
+
+## Refactoring needed
+
+### From @red (TDD Red Phase)
+
+- `cypress/support/rpc/screenSharingInputBridge.ts` is a second recording double alongside
+  `recordingLiveKitRpc.tsx`; the two record different things (stream payloads versus target
+  identities) and the scopes spec uses both. Worth one look during green for whether the testkit
+  should record streaming messages the way it already records unary ones — `InMemoryRpcBackend`'s
+  interceptor explicitly skips them ("Streaming messages are not captured in v1").
+- `ScreenSharingOverlay.tsx`'s own docblock already claims it "Captures pointer and keyboard events"
+  and that Escape dismisses it. Green makes the first true and the second false; both lines have to
+  change with the code, as does `VncOverlay.tsx`'s (see the technical-debt note above).
+- The overlay currently ignores its `width`/`height` props entirely. Green is the first consumer.
+
 ## TODO
 
 - [x] Create PRD documentation
 - [x] Create changeset (this document)
 - [ ] Record initial discovery
-- [ ] Settle the open questions above
-- [ ] TDD Red — failing acceptance tests
+- [x] Settle the open questions above
+- [x] TDD Red — failing acceptance tests
 - [ ] TDD Green — implement
 - [ ] Validate, refactor, wrap
 
