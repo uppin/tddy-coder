@@ -26,27 +26,22 @@ export interface HostPassphraseDialogProps {
   fingerprint: string;
   /** The host's published SPKI DER public key, which the answer is encrypted under. */
   spkiDer: Uint8Array;
-  /** True when this fingerprint differs from the one pinned for this host. */
-  keyChanged: boolean;
   /**
-   * What the continuity check concluded about this host's key.
+   * What the continuity check concluded about this host's key — the one thing the dialog is told
+   * about the pin, and both what it blocks on and what it says.
    *
-   * `keyChanged` above is the flow's block/allow switch; this is what the dialog *says* about the
-   * check itself, and `unverified` is the arm that must not go unsaid. It means no continuity
-   * conclusion was available at all — no key was presented, or storage refused to be read — so this
-   * sighting is not evidence of anything, in either direction. Rendering it as an ordinary first
-   * sighting would let an active substitution look routine, which is precisely what the pin exists
-   * to prevent.
+   * A separate `keyChanged` boolean stood beside this verdict while the verdict had no reader. Two
+   * props encoding the same fact can disagree, and the arm that would have gone unsaid is exactly
+   * the one worth saying: `unverified` means no conclusion was available at all — no key was
+   * presented, or storage refused to be read — so the sighting is evidence of nothing, in either
+   * direction. Rendering it as an ordinary first sighting would let an active substitution look
+   * routine, which is precisely what the pin exists to prevent.
    *
-   * `unverified` warns but, unlike `changed`, does **not** block: a host that cannot be pin-checked
-   * has not been caught doing anything, and refusing here would make the feature unusable in any
-   * browser that will not store a pin. Intended copy, under `data-testid`
-   * `host-key-unverified-notice`: *"Could not check whether this host's key has changed since last
-   * time. Verify the fingerprint above with the host before sending anything."*
-   *
-   * TODO: unimplemented — accepted so callers can state the verdict, not yet rendered.
+   * `changed` blocks the answer. `unverified` warns and does **not**: a host that cannot be
+   * pin-checked has not been caught doing anything, and refusing here would make the feature
+   * unusable in any browser that will not store a pin.
    */
-  keyContinuity?: KeyPinVerdict;
+  keyContinuity: KeyPinVerdict;
   /** Receives the RSA-OAEP ciphertext — the passphrase itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   onCancel: () => void;
@@ -57,10 +52,12 @@ export function HostPassphraseDialog({
   subject,
   fingerprint,
   spkiDer,
-  keyChanged,
+  keyContinuity,
   onSubmit,
   onCancel,
 }: HostPassphraseDialogProps): React.ReactElement {
+  const keyChanged = keyContinuity.kind === "changed";
+  const keyUnverified = keyContinuity.kind === "unverified";
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -115,6 +112,15 @@ export function HostPassphraseDialog({
             className="text-xs text-destructive border border-destructive rounded px-2 py-1"
           >
             This host&apos;s key has changed since you last answered a prompt from it. Verify the
+            fingerprint above with the host before sending anything.
+          </p>
+        )}
+        {keyUnverified && (
+          <p
+            data-testid="host-key-unverified-notice"
+            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
+          >
+            Could not check whether this host&apos;s key has changed since last time. Verify the
             fingerprint above with the host before sending anything.
           </p>
         )}

@@ -16,7 +16,11 @@
  * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
  */
 
-import type { HostPromptEventLike } from "./hostPromptsSubscription";
+import { useEffect, useState } from "react";
+import { ConnectionService } from "../gen/connection_pb";
+import { subscribeHostPrompts, type HostPromptEventLike } from "./hostPromptsSubscription";
+import { useHostClient } from "./connections/registry";
+import { useAuthContext } from "../hooks/authProvider";
 
 export type { HostPromptEventLike };
 
@@ -27,8 +31,39 @@ export type { HostPromptEventLike };
  * @returns the outstanding prompt, or `null` when the host is not asking anything.
  */
 export function useHostPrompts(hostId: string | null): HostPromptEventLike | null {
-  // TODO: unimplemented — the subscription, the token wiring and the current-prompt state are still
-  // to be written.
-  void hostId;
-  throw new Error("useHostPrompts is not implemented");
+  const client = useHostClient(ConnectionService, hostId);
+  const { sessionToken } = useAuthContext();
+  const [prompt, setPrompt] = useState<HostPromptEventLike | null>(null);
+
+  useEffect(() => {
+    if (!client || hostId === null) {
+      // Nothing routes here, so there is nothing outstanding either. A prompt left standing from an
+      // earlier feed would offer to answer a question no host is waiting on any more.
+      setPrompt(null);
+      return;
+    }
+
+    // A question belongs to the feed that raised it: a host that went away and came back is not
+    // still waiting on what it asked before.
+    setPrompt(null);
+
+    const subscription = subscribeHostPrompts(
+      (signal) =>
+        client.streamHostPrompts(
+          { sessionToken: sessionToken ?? "", daemonInstanceId: hostId },
+          { signal },
+        ),
+      (event) => setPrompt(event),
+      (error) => {
+        // Not the caller's to render: this hook reports what a host is asking, and a feed that died
+        // is asking nothing. Said out loud all the same, because a dead feed and an idle one look
+        // identical from here.
+        console.debug("[useHostPrompts] host prompt stream ended", hostId, error);
+      },
+    );
+
+    return () => subscription.unsubscribe();
+  }, [client, hostId, sessionToken]);
+
+  return prompt;
 }

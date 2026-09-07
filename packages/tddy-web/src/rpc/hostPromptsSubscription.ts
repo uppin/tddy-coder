@@ -53,9 +53,71 @@ export function subscribeHostPrompts(
   onPrompt: (prompt: HostPromptEventLike) => void,
   onFeedFailure: (error: unknown) => void = () => undefined,
 ): HostPromptsSubscription {
-  // TODO: unimplemented — the loop, its cancellation and its failure reporting are still to be written.
-  void open;
-  void onPrompt;
-  void onFeedFailure;
-  throw new Error("subscribeHostPrompts is not implemented");
+  let unsubscribed = false;
+  let stream: AsyncIterator<HostPromptEventLike> | null = null;
+  // The signal is what actually ends the call. A Connect client hands back an iterable whose
+  // iterator has `next` and nothing else — the library strips `return` and `throw` on purpose — so
+  // releasing the iterator cannot cancel anything, and a parked `next()` would never settle.
+  const aborter = new AbortController();
+
+  /** Release the stream. A second call has nothing left to release. */
+  const close = () => {
+    const released = stream;
+    stream = null;
+    // A stream that objects to being closed is gone either way; there is nothing to recover.
+    void released?.return?.().catch(() => undefined);
+  };
+
+  const reportFeedFailure = (error: unknown) => {
+    // A stream aborted on `unsubscribe` rejects with an AbortError, which is this loop's own doing
+    // and says nothing about the feed. Anything else ended a feed somebody was still reading, and
+    // an idle prompt feed looks exactly like a dead one unless it is said out loud.
+    if (unsubscribed) return;
+    onFeedFailure(error);
+  };
+
+  void (async () => {
+    try {
+      stream = open(aborter.signal)[Symbol.asyncIterator]();
+    } catch (error) {
+      reportFeedFailure(error);
+      return;
+    }
+    const activeStream = stream;
+    try {
+      while (!unsubscribed) {
+        let frame: IteratorResult<HostPromptEventLike>;
+        try {
+          frame = await activeStream.next();
+        } catch (error) {
+          reportFeedFailure(error);
+          return;
+        }
+        // The caller may have let go while that frame was in flight; `unsubscribe` has already
+        // ended the call, and a prompt handed over now would raise a dialog for a screen that is
+        // gone — a secret asked for by nobody.
+        if (unsubscribed || frame.done) return;
+        onPrompt(frame.value);
+      }
+    } finally {
+      close();
+    }
+  })();
+
+  return {
+    unsubscribe: () => {
+      if (unsubscribed) return;
+      // Set before the abort, so the rejection the abort causes is recognised as this loop's own
+      // and is not reported as a feed that died.
+      unsubscribed = true;
+      // Ending the call is what releases it. Aborting also rejects a parked `next()`, so the loop
+      // unwinds instead of holding the stream and the caller's handler for the life of the page —
+      // which is what a feed that is silent almost all of the time would otherwise do, once per
+      // host on screen.
+      aborter.abort();
+      // Still release the iterator: one that does expose `return` deserves the courtesy, and the
+      // in-memory fakes a component test mounts are exactly that shape.
+      close();
+    },
+  };
 }

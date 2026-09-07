@@ -65,6 +65,9 @@ async function anRsaOaepPublicKey(): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
 }
 
+/** What was pinned for this host before the key the dialog is showing turned up. */
+const A_PINNED_FINGERPRINT = "SHA256:9WK1EJ1YHXbCP9V0Y13uwbHFuqWFcAe1eFf0kSPn5Ok";
+
 function mountDialog(
   opts: {
     keyChanged?: boolean;
@@ -73,6 +76,14 @@ function mountDialog(
     onSubmit?: (encrypted: Uint8Array) => void;
   } = {},
 ) {
+  // The dialog takes the verdict and nothing else. `keyChanged` is how the tests above say "this is
+  // not the key that was pinned", which is `changed` and no other arm; a test that says neither is
+  // not about the check, and gets the sighting that carries no caveat.
+  const keyContinuity: KeyPinVerdict =
+    opts.continuity ??
+    (opts.keyChanged
+      ? { kind: "changed", pinnedFingerprint: A_PINNED_FINGERPRINT }
+      : { kind: "unchanged" });
   mountWithRpc(
     withSelectedDaemon(
       <HostPassphraseDialog
@@ -80,8 +91,7 @@ function mountDialog(
         subject="id_ed25519"
         fingerprint={FINGERPRINT}
         spkiDer={hostPublicKey}
-        keyChanged={opts.keyChanged ?? false}
-        keyContinuity={opts.continuity}
+        keyContinuity={keyContinuity}
         onSubmit={opts.onSubmit ?? (() => {})}
         onCancel={() => {}}
       />,

@@ -6,7 +6,7 @@
  * | State | What an operator does about it |
  * |---|---|
  * | agent holding keys | nothing — this host can reach its remotes |
- * | agent, no keys | add a key (`#hosts-screen 6/8`) |
+ * | agent, no keys | add a key (`HostAddKeyAction`, rendered beside this summary) |
  * | no agent reachable | start an agent, or the daemon cannot see its socket |
  * | probe failed | look at the daemon log; we do not know |
  *
@@ -17,6 +17,7 @@
 
 import type { HostSshAgent, SshAgentKey } from "../../gen/connection_pb";
 import { ProbeOutcome } from "../../gen/connection_pb";
+import { HostAddKeyAction } from "./HostAddKeyAction";
 
 export interface HostRowSshAgentProps {
   instanceId: string;
@@ -126,6 +127,10 @@ export function HostRowSshAgent({ instanceId, sshAgent }: HostRowSshAgentProps) 
       ) : (
         <span title={summary.title}>{summary.text}</span>
       )}
+      {/* Reporting and acting are different jobs, so the action is its own component and decides
+          for itself whether this host has an agent worth adding a key to — the summary above says
+          nothing about what an operator may do here. */}
+      <HostAddKeyAction instanceId={instanceId} sshAgent={sshAgent} />
     </span>
   );
 }
