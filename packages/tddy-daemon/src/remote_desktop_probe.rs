@@ -104,13 +104,41 @@ pub fn is_accepting_connections(host: &str, port: u16) -> Result<bool, String> {
 const PROBE_HOST: &str = "127.0.0.1";
 
 /// The live probe: an existence check on the resolved bridge binary plus a TCP connect.
-pub struct TcpRemoteDesktopProbe;
+///
+/// It carries the daemon's configuration because the existence check is worth no more than the path
+/// it checks: an operator who sets `screen_sharing.vnc_binary_path` must have *that* path tested.
+/// Checking a default resolution instead would report "cannot bridge" for a bridge that is
+/// genuinely installed — the fabricated fact this module exists to prevent.
+#[derive(Default)]
+pub struct TcpRemoteDesktopProbe {
+    config: DaemonConfig,
+}
+
+impl TcpRemoteDesktopProbe {
+    /// Probe the bridge binaries `config` would actually spawn.
+    #[must_use]
+    pub fn for_config(config: &DaemonConfig) -> Self {
+        Self {
+            config: config.clone(),
+        }
+    }
+
+    /// Whether the bridge binary for `protocol` is actually there, at the path
+    /// [`crate::config`] would spawn it from — an explicitly configured one included.
+    fn bridge_binary_is_present(&self, protocol: DesktopProtocol) -> bool {
+        let resolved = match protocol {
+            DesktopProtocol::Vnc => resolve_vnc_binary_path(&self.config),
+            DesktopProtocol::Rdp => resolve_rdp_binary_path(&self.config),
+        };
+        binary_is_present(Path::new(&resolved))
+    }
+}
 
 impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
     fn probe(&self, protocol: DesktopProtocol, port: u16) -> DesktopReachability {
         // Independent of the connect below, and answered even when the connect gets nowhere: a host
         // that cannot bridge cannot bridge whether or not a desktop is up.
-        let can_bridge = bridge_binary_is_present(protocol);
+        let can_bridge = self.bridge_binary_is_present(protocol);
 
         match is_accepting_connections(PROBE_HOST, port) {
             Ok(desktop_reachable) => DesktopReachability {
@@ -131,21 +159,6 @@ impl RemoteDesktopProbe for TcpRemoteDesktopProbe {
             },
         }
     }
-}
-
-/// Whether the bridge binary for `protocol` is actually there, at the path
-/// [`crate::config`] would spawn it from.
-///
-/// TODO(desktop-probe): this reads the *default* configuration, so an operator's explicit
-/// `screen_sharing.vnc_binary_path` / `rdp_binary_path` is not consulted. Threading the daemon's
-/// live config in needs the probe to carry it, which its callers do not yet do.
-fn bridge_binary_is_present(protocol: DesktopProtocol) -> bool {
-    let config = DaemonConfig::default();
-    let resolved = match protocol {
-        DesktopProtocol::Vnc => resolve_vnc_binary_path(&config),
-        DesktopProtocol::Rdp => resolve_rdp_binary_path(&config),
-    };
-    binary_is_present(Path::new(&resolved))
 }
 
 /// Whether a resolved binary path names something that exists.
@@ -190,6 +203,28 @@ mod tests {
         let (listener, port) = a_listener();
         drop(listener);
         port
+    }
+
+    /// A bridge binary that really is on disk, in a directory that dies with the test — so the
+    /// reading is about the configured path and never about what the machine happens to have
+    /// installed. The directory is returned because dropping it deletes the file.
+    fn an_installed_bridge_binary() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let binary = dir.path().join("tddy-vnc");
+        std::fs::write(&binary, b"#!/bin/sh\n").expect("write the bridge binary");
+        (dir, binary)
+    }
+
+    /// A daemon configuration naming `binary` as the VNC bridge, the way an operator's
+    /// `screen_sharing:` block does.
+    fn a_config_with_vnc_binary_at(binary: &Path) -> DaemonConfig {
+        DaemonConfig {
+            screen_sharing: Some(crate::config::ScreenSharingConfig {
+                vnc_binary_path: binary.to_string_lossy().to_string(),
+                rdp_binary_path: String::new(),
+            }),
+            ..DaemonConfig::default()
+        }
     }
 
     #[test]
@@ -249,7 +284,7 @@ mod tests {
     fn reports_that_the_host_cannot_bridge_when_the_binary_is_missing() {
         let (_listener, port) = a_listener();
 
-        let reading = TcpRemoteDesktopProbe.probe(DesktopProtocol::Vnc, port);
+        let reading = TcpRemoteDesktopProbe::default().probe(DesktopProtocol::Vnc, port);
 
         assert_eq!(reading.outcome, ProbeOutcome::Ok);
         assert_eq!(reading.port, port, "the checked port is reported back");
@@ -261,6 +296,26 @@ mod tests {
             !reading.can_bridge,
             "no tddy-vnc binary is beside the test binary, so this host cannot bridge — a separate \
              fact from the desktop being reachable"
+        );
+    }
+
+    /// The other half of the fact above: an operator who points `screen_sharing.vnc_binary_path` at
+    /// a bridge that is really there must be told the host *can* bridge. Answering from a default
+    /// resolution would report "cannot bridge" for an installed bridge — the same fabricated fact,
+    /// pointing the other way.
+    #[test]
+    fn reports_that_the_host_can_bridge_when_the_configured_binary_exists() {
+        let (_listener, port) = a_listener();
+        let (_bridge_dir, installed_bridge) = an_installed_bridge_binary();
+
+        let reading =
+            TcpRemoteDesktopProbe::for_config(&a_config_with_vnc_binary_at(&installed_bridge))
+                .probe(DesktopProtocol::Vnc, port);
+
+        assert_eq!(reading.outcome, ProbeOutcome::Ok);
+        assert!(
+            reading.can_bridge,
+            "the explicitly configured bridge binary exists, so this host can bridge"
         );
     }
 

@@ -197,14 +197,25 @@ pub struct SubprocessHostToolingProbe {
 }
 
 impl Default for SubprocessHostToolingProbe {
+    /// The default configuration's bridge paths — what a daemon with no `screen_sharing:` block
+    /// resolves. A daemon that has its configuration in hand uses [`Self::for_config`] instead.
     fn default() -> Self {
-        Self {
-            remote_desktop: Arc::new(crate::remote_desktop_probe::TcpRemoteDesktopProbe),
-        }
+        Self::for_config(&crate::config::DaemonConfig::default())
     }
 }
 
 impl SubprocessHostToolingProbe {
+    /// Probe this host's desktops against the bridge binaries `config` would actually spawn, so an
+    /// operator's explicit `screen_sharing` paths are the ones checked for existence.
+    #[must_use]
+    pub fn for_config(config: &crate::config::DaemonConfig) -> Self {
+        Self {
+            remote_desktop: Arc::new(
+                crate::remote_desktop_probe::TcpRemoteDesktopProbe::for_config(config),
+            ),
+        }
+    }
+
     /// Fill the desktop block from `remote_desktop` instead of connecting for real.
     #[must_use]
     pub fn probing_desktops_with(remote_desktop: Arc<dyn RemoteDesktopProbe>) -> Self {

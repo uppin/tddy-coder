@@ -2068,8 +2068,11 @@ impl ConnectionServiceImpl {
         let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
+        // Given this daemon's own configuration, not a default one: the desktop block's
+        // bridge-availability flag is an existence check on the path `screen_sharing` resolves to,
+        // and an operator who set that path explicitly must have it checked.
         let host_tooling: Arc<dyn HostToolingProbe> =
-            Arc::new(SubprocessHostToolingProbe::default());
+            Arc::new(SubprocessHostToolingProbe::for_config(&config));
         let host_prompts: Arc<dyn HostPromptRegistry> =
             Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
         // Alongside the host registry, and generated on first use rather than here: a host whose
