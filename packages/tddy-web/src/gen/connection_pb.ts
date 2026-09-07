@@ -2728,11 +2728,18 @@ export type AddHostKeyRequest = Message<"connection.AddHostKeyRequest"> & {
   daemonInstanceId: string;
 
   /**
-   * The key to add, as the operator sees it — the path of a private key on that host. It is also
-   * the `subject` of the prompt this call raises, so what the dialog names is what gets unlocked.
+   * The key to add, as the operator sees it — the ABSOLUTE path of a private key on that host. It is
+   * also the `subject` of the prompt this call raises, so what the dialog names is what gets
+   * unlocked.
    *
    * Read as the OS user the calling session maps to, and only from inside that user's home
    * directory: this is free text from a browser, and a daemon can reach files its caller cannot.
+   *
+   * MUST be absolute. The confinement that reads it is lexical — no canonicalize, no stat, nothing
+   * that could answer "does this exist?" — so nothing expands `~` or resolves a relative path, here
+   * or anywhere else in this flow. A `~/.ssh/id_ed25519` is refused, and the refusal names no path,
+   * so the caller is the only side that can explain it. ListHostKeyCandidates returns absolute
+   * paths for the same reason: one path syntax across the picker and the field.
    *
    * @generated from field: string subject = 3;
    */

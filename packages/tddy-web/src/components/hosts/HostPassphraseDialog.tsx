@@ -46,9 +46,9 @@ export interface HostPassphraseDialogProps {
    * direction. Rendering it as an ordinary first sighting would let an active substitution look
    * routine, which is precisely what the pin exists to prevent.
    *
-   * `changed`, `mismatched` and `underivable` block the answer. `unverified` warns and does **not**:
-   * a host that cannot be pin-checked has not been caught doing anything, and refusing here would
-   * make the feature unusable in any browser that will not store a pin.
+   * `changed`, `mismatched`, `underivable` and `unchecked` block the answer. `unverified` warns and
+   * does **not**: a host that cannot be pin-checked has not been caught doing anything, and refusing
+   * here would make the feature unusable in any browser that will not store a pin.
    */
   keyContinuity: KeyPinVerdict;
   /** Receives the RSA-OAEP ciphertext — the passphrase itself never leaves this component. */
@@ -79,15 +79,19 @@ export function HostPassphraseDialog({
   const keyUnverified = keyContinuity.kind === "unverified";
   const keyMismatched = keyContinuity.kind === "mismatched";
   const keyUnderivable = keyContinuity.kind === "underivable";
+  // The key arrived and its digest is not back. Nothing is said about it and nothing may be sent to
+  // it: a fingerprint shown now would be the *previous* key's, which is the one substitution the pin
+  // exists to catch, and it would be wearing that key's approval.
+  const keyUnchecked = keyContinuity.kind === "unchecked";
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [changeVerified, setChangeVerified] = useState(false);
 
   // Empty is refused because an empty answer only wastes the host's single-use prompt; `encrypting`
-  // is refused because one prompt accepts exactly one answer. The three key states are refused for
-  // three different reasons, spelled out beside their notices below.
-  const keyBlocks = keyChanged || keyMismatched || keyUnderivable;
+  // is refused because one prompt accepts exactly one answer. Each blocking key state is refused for
+  // a reason of its own, spelled out beside its notice below.
+  const keyBlocks = keyChanged || keyMismatched || keyUnderivable || keyUnchecked;
   const blocked = keyBlocks || encrypting || passphrase.length === 0;
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -186,6 +190,14 @@ export function HostPassphraseDialog({
           >
             This host&apos;s key cannot be checked or encrypted to from this page:{" "}
             {keyContinuity.reason}. Nothing has been sent.
+          </p>
+        )}
+        {keyUnchecked && (
+          <p
+            data-testid="host-key-unchecked-notice"
+            className="text-xs text-muted-foreground border border-border rounded px-2 py-1"
+          >
+            Checking the key this host is presenting. Nothing can be sent until it is checked.
           </p>
         )}
         {keyUnverified && (

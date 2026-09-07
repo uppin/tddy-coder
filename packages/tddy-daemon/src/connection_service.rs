@@ -32,12 +32,12 @@ use tddy_service::proto::connection::{
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
     DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
-    HostGitIdentity, HostGithubCli, HostPromptEvent, HostSshAgent, KnownHostEntry,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListHostKeyCandidatesRequest,
-    ListHostKeyCandidatesResponse, ListKnownHostsRequest, ListKnownHostsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    HostGitIdentity, HostGithubCli, HostKeyCandidate, HostPromptEvent, HostSshAgent,
+    KnownHostEntry, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
+    ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
+    ListHostKeyCandidatesRequest, ListHostKeyCandidatesResponse, ListKnownHostsRequest,
+    ListKnownHostsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
+    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
     ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
     ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
@@ -13739,8 +13739,49 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         &self,
         request: Request<ListHostKeyCandidatesRequest>,
     ) -> Result<Response<ListHostKeyCandidatesResponse>, Status> {
-        let _ = request;
-        unimplemented!("listing the private keys an operator could add")
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Routed first, for the reason the add is: these paths are files on one machine, and a
+        // listing answered locally shows the browser this daemon's keys as though they were the
+        // addressed host's — after which the path it picks names nothing over there.
+        if let Some(answered) = self
+            .rpc_served_by_peer("ListHostKeyCandidates", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        // The same mapping `add_host_key` resolves the read through, so what an operator is offered
+        // and what they may then add are the keys of one OS user — their own.
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
+            .to_string();
+
+        // Off the runtime worker: the listing runs a child process per user-privileged step, the
+        // way every other per-user read in this daemon does.
+        let files = Arc::clone(&self.host_user_files);
+        let candidates = tokio::task::spawn_blocking(move || {
+            crate::host_private_key::list_key_candidates(files.as_ref(), &os_user)
+        })
+        .await
+        .map_err(|_| Status::internal("listing the keys on this host did not complete"))?;
+
+        log::debug!("ListHostKeyCandidates: {} offered", candidates.len());
+        Ok(Response::new(ListHostKeyCandidatesResponse {
+            candidates: candidates
+                .into_iter()
+                .map(|candidate| HostKeyCandidate {
+                    path: candidate.path.display().to_string(),
+                    key_type: candidate.key_type,
+                    fingerprint: candidate.fingerprint,
+                })
+                .collect(),
+        }))
     }
 
     async fn list_session_workflow_files(

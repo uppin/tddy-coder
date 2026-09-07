@@ -140,8 +140,9 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Key continuity: pin on first sight, block on change — 13 tests; unusable storage now reports `unverified`
 - [x] Daemon decrypt → private key decrypt → agent add → drop plaintext
 - [x] Passphrase dialog, add-key action and the prompt subscription — the flow is reachable from a Hosts row
-- [~] The **key selector**: `ListHostKeyCandidates` lists the private keys a session's own OS user could load, described from their public halves — red phase written, not yet implemented
-- [~] The key field speaks **absolute paths**, in the picker and in the free-text field alike — `confined_to_home` accepts nothing else and nothing expands `~` (the placeholder has been inviting a refusal since it shipped)
+- [x] The **key selector**: `ListHostKeyCandidates` lists the private keys a session's own OS user could load, described from their public halves — a candidate is a key whose `.pub` sits beside it, so no private key is ever opened to build the list
+- [x] The key field speaks **absolute paths**, in the picker and in the free-text field alike — `confined_to_home` accepts nothing else and nothing expands `~`, so a `~` path is refused here rather than sent to a refusal that names no path
+- [x] A checked host key is held **with the prompt it arrived on**, so the fingerprint on screen always belongs to the key that would encrypt; a key whose check is outstanding is `unchecked`, which says nothing and sends nothing
 - [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
 - [x] Confirm whether the git hardening needs any change at all
 

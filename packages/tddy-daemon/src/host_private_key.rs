@@ -26,7 +26,8 @@
 //!
 //! Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
 
-use ssh_key::PrivateKey;
+use ssh_key::{PrivateKey, PublicKey};
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 /// What an operator is told when the key they named did not read. **The only such message**: see
@@ -183,6 +184,9 @@ pub fn read_private_key(
 /// is still addable — it is typed rather than picked.
 const SSH_DIR: &str = ".ssh";
 
+/// What `ssh-keygen` appends to a key's file name to name its public half.
+const PUB_SUFFIX: &str = ".pub";
+
 /// One private key an operator could pick from a list, described entirely from its public half.
 ///
 /// Carries no key material and cannot: every field here comes out of `<path>.pub`.
@@ -219,8 +223,98 @@ pub struct KeyCandidate {
 /// `~/.ssh` are indistinguishable to the caller: an authenticated session must not be able to use
 /// this as a probe for what is on the host.
 pub fn list_key_candidates(files: &dyn HostUserFiles, os_user: &str) -> Vec<KeyCandidate> {
-    let _ = (files, os_user, SSH_DIR);
-    unimplemented!("listing a user's candidate private keys")
+    let Ok(home) = files.home_dir(os_user).inspect_err(|reason| {
+        // Logged rather than surfaced, exactly as `read_private_key` logs it: an operator whose
+        // account has no home on this host is offered nothing, and is told nothing either.
+        log::warn!(
+            target: "tddy_daemon::host_private_key",
+            "cannot resolve a home directory to list keys in: {reason}"
+        );
+    }) else {
+        return Vec::new();
+    };
+    let ssh_dir = home.join(SSH_DIR);
+    let listed = match files.list_files_as_user(os_user, &ssh_dir) {
+        Ok(listed) => listed,
+        Err(reason) => {
+            // The whole reason this function returns a `Vec` and not a `Result`: a directory that
+            // is not there and one this host cannot get into leave by the same door.
+            log::debug!(
+                target: "tddy_daemon::host_private_key",
+                "listing {} as {os_user} failed: {reason}",
+                ssh_dir.display()
+            );
+            return Vec::new();
+        }
+    };
+    // Membership and order out of one structure: "is `<path>.pub` in this directory?" is the whole
+    // filter, and a sorted set answers it in the order an operator then reads the list in.
+    let in_the_directory: BTreeSet<PathBuf> = listed.into_iter().collect();
+    in_the_directory
+        .iter()
+        // A `.pub` describes a candidate; it is not one. Skipped before anything is read, so the
+        // public half of a key is opened once rather than twice.
+        .filter(|path| !is_public_half(path))
+        // The half that cannot bend: a path this offers is then sent back as
+        // `AddHostKeyRequest.subject`, so it is offered only if the add's own confinement accepts
+        // it. Enforced rather than assumed — the two checks are the same function.
+        .filter(|path| confined_to_home(&home, &path.display().to_string()).is_ok())
+        .filter(|path| in_the_directory.contains(&public_half_of(path)))
+        .filter_map(|path| described_by_its_public_half(files, os_user, path))
+        .collect()
+}
+
+/// One candidate, read entirely out of `<path>.pub`.
+///
+/// The private file at `path` is never opened: its name is all a listing takes from it, and the two
+/// fields an operator reads come from the public bytes beside it. A `.pub` that does not parse as
+/// an OpenSSH public key describes nothing, so the key beside it is not offered.
+fn described_by_its_public_half(
+    files: &dyn HostUserFiles,
+    os_user: &str,
+    path: &Path,
+) -> Option<KeyCandidate> {
+    let public_half = public_half_of(path);
+    let openssh = files
+        .read_as_user(os_user, &public_half)
+        .inspect_err(|reason| {
+            log::debug!(
+                target: "tddy_daemon::host_private_key",
+                "reading {} as {os_user} failed: {reason}",
+                public_half.display()
+            );
+        })
+        .ok()?;
+    // An OpenSSH public key is a single line of ASCII, so a lossy decode cannot alter one, and a
+    // file that is not one fails the parse below.
+    let public = PublicKey::from_openssh(&String::from_utf8_lossy(&openssh))
+        .inspect_err(|reason| {
+            log::debug!(
+                target: "tddy_daemon::host_private_key",
+                "{} is not an OpenSSH public key: {reason}",
+                public_half.display()
+            );
+        })
+        .ok()?;
+    Some(KeyCandidate {
+        path: path.to_path_buf(),
+        key_type: public.algorithm().as_str().to_string(),
+        fingerprint: public.fingerprint(ssh_key::HashAlg::Sha256).to_string(),
+    })
+}
+
+/// `<path>.pub`, the way `ssh-keygen` names a public half: appended to the whole file name rather
+/// than replacing an extension, so `id_rsa` pairs with `id_rsa.pub`.
+fn public_half_of(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(PUB_SUFFIX);
+    path.with_file_name(name)
+}
+
+/// Whether `path` is itself the public half of some key.
+fn is_public_half(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(PUB_SUFFIX))
 }
 
 /// `subject` as a path inside `home`, or [`KEY_OUTSIDE_HOME`].

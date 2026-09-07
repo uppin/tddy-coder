@@ -49,6 +49,16 @@ export type KeyPinVerdict =
   /** No continuity conclusion is available — no key was presented, or storage is unusable. */
   | { kind: "unverified" }
   /**
+   * The key in hand has not been checked *yet* — its digest is still being derived.
+   *
+   * Never returned by {@link verifyHostKey}, which resolves to a conclusion: this is what a caller
+   * holding a key whose check is outstanding says about it, and the reason the arm exists is that
+   * the alternatives are all lies. `unverified` claims a check was attempted and reached nothing,
+   * and does not block; `unchanged` claims continuity nobody has established. A key whose digest is
+   * not back is a key nothing may be encrypted to, because "which key is this?" has no answer yet.
+   */
+  | { kind: "unchecked" }
+  /**
    * The key could not be fingerprinted here at all — this origin exposes no `crypto.subtle`.
    *
    * Distinct from `unverified`, which is about storage: nothing on this page can hash a key or
