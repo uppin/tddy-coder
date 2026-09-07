@@ -28,6 +28,7 @@ import {
   anRsaOaepKeypair,
   anRsaOaepPublicKey,
   fingerprintOf,
+  hostKeyPins,
   type AHostPromptKeypair,
 } from "../support/hostKeys";
 import {
@@ -406,5 +407,215 @@ describe("The answer AnswerHostPrompt carries", () => {
       const [answer] = backend.callsTo(ConnectionService.method.answerHostPrompt);
       return hostKeypair.decrypt(answer.encryptedAnswer);
     }).should("equal", PASSPHRASE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The key the dialog is holding, and the key it is describing
+// ---------------------------------------------------------------------------
+
+/**
+ * A hold on fingerprint derivation, so a spec can stand *inside* the window between a key arriving
+ * and its digest coming back.
+ *
+ * That window is where the correlation between "the key that encrypts" and "the fingerprint that is
+ * displayed and pinned" can come apart, and it is not otherwise observable: derivation resolves in a
+ * microtask, so by the time any retried assertion runs, the state has settled. A peer in the routing
+ * path does not have that problem — it can raise frames faster than SHA-256 resolves, for as long as
+ * it likes — so the hold is how a test occupies the position an attacker occupies for free.
+ *
+ * Patched onto `crypto.subtle` itself rather than onto the module that calls it, because the claim
+ * being tested is about what is on screen while a *real* derivation is outstanding.
+ */
+interface ADigestHold {
+  /** Let every derivation held so far complete. */
+  readonly release: () => void;
+  /** How many derivations are waiting. */
+  readonly held: () => number;
+  /** Put the browser's own `digest` back. */
+  readonly restore: () => void;
+}
+
+function holdDerivationsAfter(letThrough: number): ADigestHold {
+  const subtle = crypto.subtle;
+  const real = subtle.digest.bind(subtle);
+  const waiting: Array<() => void> = [];
+  let seen = 0;
+  const patched = (algorithm: AlgorithmIdentifier, data: BufferSource): Promise<ArrayBuffer> => {
+    seen += 1;
+    if (seen <= letThrough) return real(algorithm, data);
+    return new Promise<void>((resolve) => waiting.push(resolve)).then(() =>
+      real(algorithm, data),
+    );
+  };
+  Object.defineProperty(subtle, "digest", {
+    value: patched,
+    configurable: true,
+    writable: true,
+  });
+  return {
+    release: () => {
+      while (waiting.length > 0) (waiting.shift() as () => void)();
+    },
+    held: () => waiting.length,
+    restore: () => {
+      Reflect.deleteProperty(subtle, "digest");
+    },
+  };
+}
+
+/**
+ * The key a prompt carries and the verdict shown beside it have to be **the same key's**.
+ *
+ * `HostAddKeyAction` hands the dialog `spkiDer` from the prompt and `fingerprint`/`keyContinuity`
+ * from a separate piece of state, with nothing tying the two together. A second prompt frame
+ * replaces the key immediately; the verdict for it arrives a digest later. In between, the dialog
+ * shows the *previous* key's fingerprint and its reassuring `unchanged` verdict while holding bytes
+ * that will encrypt the passphrase for a different key — which is precisely the substitution the pin
+ * exists to catch, wearing the pin's own approval.
+ *
+ * Nothing else in this suite raises a second prompt while a dialog is open.
+ */
+describe("A second prompt arriving while the dialog is open", () => {
+  /** The key the operator has already trusted for this host, and the one that replaces it. */
+  let trustedKey: Uint8Array;
+  let trustedFingerprint: string;
+  let substitutedKey: Uint8Array;
+  let substitutedFingerprint: string;
+  let hold: ADigestHold | null = null;
+
+  before(() => {
+    cy.wrap(anRsaOaepPublicKey())
+      .then((spkiDer) => {
+        trustedKey = spkiDer as unknown as Uint8Array;
+        return fingerprintOf(trustedKey);
+      })
+      .then((fingerprint) => {
+        trustedFingerprint = fingerprint as unknown as string;
+        return anRsaOaepPublicKey();
+      })
+      .then((spkiDer) => {
+        substitutedKey = spkiDer as unknown as Uint8Array;
+        return fingerprintOf(substitutedKey);
+      })
+      .then((fingerprint) => {
+        substitutedFingerprint = fingerprint as unknown as string;
+      });
+  });
+
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
+  afterEach(() => {
+    hold?.restore();
+    hold = null;
+  });
+
+  it("never shows the previous keys fingerprint beside the key that would encrypt", () => {
+    // Given a host whose key this browser has already pinned, and an add blocked on its prompt
+    const feed = aHostPromptFeed();
+    const backend = aBackendAwaitingAnAnswer(feed);
+    mountAction(backend);
+    cy.then(() => hostKeyPins.pin(HOST, trustedFingerprint));
+    addKey.addKey(HOST, KEY_PATH);
+    cy.wrap(feed).should((f: HostPromptFeed) => expect(f.subscriptionCount()).to.equal(1));
+    cy.then(() => {
+      feed.raise({
+        promptId: "prompt-1",
+        daemonInstanceId: HOST,
+        subject: KEY_PATH,
+        hostPublicKey: trustedKey,
+        hostPublicKeyFingerprint: trustedFingerprint,
+      });
+    });
+    // The pinned key, checked and unremarkable — the state an operator would answer without a
+    // second thought, and therefore the state worth substituting under.
+    dialog.root().should("contain.text", trustedFingerprint);
+    dialog.changedWarning().should("not.exist");
+
+    // When a second frame replaces the key while the dialog is open, and its digest is not back yet
+    cy.then(() => {
+      hold = holdDerivationsAfter(0);
+      feed.raise({
+        promptId: "prompt-2",
+        daemonInstanceId: HOST,
+        subject: KEY_PATH,
+        hostPublicKey: substitutedKey,
+        hostPublicKeyFingerprint: substitutedFingerprint,
+      });
+    });
+
+    // Then the dialog says nothing about the key it used to be holding. Showing the old
+    // fingerprint here is showing an operator a value they may have verified out of band, bound to
+    // bytes that are not the ones it describes.
+    dialog.root().should("not.contain.text", trustedFingerprint);
+    // And no answer can be sent while the key in hand is unaccounted for — a submit that is merely
+    // absent satisfies this too, which is why it is stated as "nothing enabled" rather than as the
+    // presence of any particular control.
+    cy.get('[data-testid="host-passphrase-submit"]:not([disabled])').should("not.exist");
+
+    // And once the check for the new key does come back, it is the substitution it actually is
+    cy.then(() => hold?.release());
+    dialog.changedWarning().should("exist");
+    dialog.submit().should("be.disabled");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The path the field invites an operator to type
+// ---------------------------------------------------------------------------
+
+/**
+ * **The UI must not invite a path the host is bound to refuse.**
+ *
+ * `confined_to_home` (`packages/tddy-daemon/src/host_private_key.rs`) requires an absolute path,
+ * and nothing anywhere expands `~` — not the browser, which does not know the host's home, and not
+ * the daemon, whose confinement is deliberately lexical and touches the filesystem not at all. So
+ * the example this field has been showing since it shipped, `~/.ssh/id_ed25519`, is refused with
+ * `KEY_OUTSIDE_HOME`.
+ *
+ * **The resolution pinned here is absolute paths only**, in the field and in the picker alike:
+ *
+ * - `ListHostKeyCandidates` returns absolute paths, so the common case is picking, not typing, and
+ *   one path syntax across both surfaces is the only way a picked path and a typed one can be
+ *   compared by eye.
+ * - Expanding `~` would have to happen in the daemon, and the confinement's whole value is that it
+ *   is a function of the caller's own input — no `canonicalize`, no `stat`, nothing that could
+ *   answer "does this exist?". A second path syntax to reason about is a poor trade for saving five
+ *   characters.
+ * - The refusal cannot explain itself. `KEY_OUTSIDE_HOME` names no path, on purpose, so an operator
+ *   who types the placeholder learns only that their key "must be a path inside your own home" —
+ *   about a path that *was* inside their home. The browser holds the one piece of context that
+ *   makes that refusal legible, so it is the browser that must not send the request.
+ */
+describe("The key path the add-key field invites", () => {
+  it("shows an example the host will accept rather than a tilde path it refuses", () => {
+    // Given the add-key control on a host with an agent
+    mountAction(aBackendReporting(AddHostKeyOutcome.KEY_UNREADABLE, ""));
+
+    // When the operator reads the example in the field
+    // Then it is an absolute path — the only kind `confined_to_home` accepts
+    addKey.keyField(HOST).invoke("attr", "placeholder").should("match", /^\//);
+    addKey.keyField(HOST).invoke("attr", "placeholder").should("not.contain", "~");
+  });
+
+  it("does not send a tilde path for the host to refuse without explanation", () => {
+    // Given a host that would report a key it cannot read, saying nothing about why
+    const backend = aBackendReporting(AddHostKeyOutcome.KEY_UNREADABLE, "");
+    mountAction(backend);
+
+    // When the operator types a path relative to their home and asks for the add
+    addKey.addKey(HOST, "~/.ssh/id_ed25519");
+
+    // Then nothing was sent, and the operator is told what is wrong with the path they typed —
+    // which is knowledge only this side has: the daemon's refusal is deliberately silent about it
+    cy.wrap(backend).should((b: InMemoryRpcBackend) => {
+      expect(
+        b.callsTo(ConnectionService.method.addHostKey),
+        "a path the host cannot accept was sent anyway",
+      ).to.have.length(0);
+    });
+    hostAddKeyOutcome.saying(HOST, /absolute/i);
   });
 });

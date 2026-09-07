@@ -34,9 +34,10 @@ use tddy_service::proto::connection::{
     DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
     HostGitIdentity, HostGithubCli, HostPromptEvent, HostSshAgent, KnownHostEntry,
     ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListKnownHostsRequest,
-    ListKnownHostsResponse, ListProjectBranchesRequest, ListProjectBranchesResponse,
-    ListProjectsRequest, ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
+    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListHostKeyCandidatesRequest,
+    ListHostKeyCandidatesResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
+    ListProjectsResponse, ListSessionAgentsRequest, ListSessionUploadsRequest,
     ListSessionUploadsResponse, ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse,
     ListSessionsRequest, ListSessionsResponse, ListStagedAttachmentsRequest,
     ListStagedAttachmentsResponse, ListSubagentsRequest, ListSubagentsResponse,
@@ -13722,6 +13723,26 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(added))
     }
 
+    /// The private keys this host's operator could load into their agent.
+    ///
+    /// What makes the key field on the Hosts row a picker instead of a typed path. Every path it
+    /// offers is a path [`add_host_key`](Self::add_host_key) will accept: the same OS user, the
+    /// same home, the same confinement — a listing whose choices the add then refused would be
+    /// worse than no listing.
+    ///
+    /// Routed like the add for the same reason: the keys are files on one machine.
+    ///
+    /// Says nothing about what is on disk beyond the keys themselves — see
+    /// [`crate::host_private_key::list_key_candidates`] for why an absent `~/.ssh`, an unreadable
+    /// one and an empty one are one answer.
+    async fn list_host_key_candidates(
+        &self,
+        request: Request<ListHostKeyCandidatesRequest>,
+    ) -> Result<Response<ListHostKeyCandidatesResponse>, Status> {
+        let _ = request;
+        unimplemented!("listing the private keys an operator could add")
+    }
+
     async fn list_session_workflow_files(
         &self,
         request: Request<ListSessionWorkflowFilesRequest>,
@@ -23518,7 +23539,7 @@ mod host_add_key_handler_tests {
     use ssh_key::PrivateKey;
     use std::sync::{Mutex, Once};
     use std::time::Duration;
-    use tddy_service::proto::connection::AddHostKeyOutcome;
+    use tddy_service::proto::connection::{AddHostKeyOutcome, HostKeyCandidate};
 
     /// Distinctive, and used nowhere else in the workspace, so
     /// [`the_passphrase_never_appears_in_captured_logs`] cannot be fooled by another test's output
@@ -23612,6 +23633,9 @@ users:
         key_path: PathBuf,
         /// The fingerprint the agent must end up holding.
         key_fingerprint: String,
+        /// The key of the OS user [`OTHER_TOKEN`]'s operator is mapped to, in their own home — what
+        /// makes "whose keys am I offered?" a question this host can answer wrongly.
+        other_key_path: PathBuf,
         /// Owns the key file and the daemon's data directory for the life of the test.
         _storage: tempfile::TempDir,
     }
@@ -23645,6 +23669,21 @@ users:
     }
 
     fn a_host_with_an_encrypted_key(passphrase: &str) -> HostWithAnEncryptedKey {
+        a_host_where(passphrase, |files| files)
+    }
+
+    /// The same host, with its one un-stageable seam adjusted: `adjust` receives the OS-file reader
+    /// the fixture would have used and returns the one this host gets.
+    ///
+    /// Parameterised for exactly one reason — impersonating an OS user, and failing to, is the step
+    /// a test process cannot perform for real without depending on who it happens to be running
+    /// as. Everything else about this host is the real thing.
+    fn a_host_where(
+        passphrase: &str,
+        adjust: impl FnOnce(
+            crate::host_private_key::UserFilesUnder,
+        ) -> crate::host_private_key::UserFilesUnder,
+    ) -> HostWithAnEncryptedKey {
         let storage = tempfile::tempdir().expect("a temp directory for this host");
         // A home directory for the mapped OS user, with the key inside it: an operator's private
         // key is a file in their own home, and a fixture that put it anywhere else would be
@@ -23653,6 +23692,12 @@ users:
         std::fs::create_dir_all(home.join(".ssh")).expect("this operator has a ~/.ssh");
         let key_path = home.join(".ssh").join("id_ed25519");
         let key_fingerprint = an_encrypted_private_key_at(&key_path, passphrase);
+        // The second operator's own key, in their own home. Two operators with a key each is the
+        // only arrangement in which offering the wrong one is visible.
+        let other_home = storage.path().join("home").join("otherdev");
+        std::fs::create_dir_all(other_home.join(".ssh")).expect("they have a ~/.ssh too");
+        let other_key_path = other_home.join(".ssh").join("id_ed25519");
+        an_encrypted_private_key_at(&other_key_path, passphrase);
 
         let prompts = Arc::new(InMemoryHostPromptRegistry::new());
         let keypair = Arc::new(FileHostKeypair::new(storage.path()));
@@ -23663,8 +23708,9 @@ users:
             .with_ssh_agent_key_adder(Arc::clone(&agent) as Arc<dyn SshAgentKeyAdder>)
             // Impersonating an OS user is not something a test can do; the home directory it
             // reports is the real confinement's own input.
-            .with_host_user_files(Arc::new(crate::host_private_key::UserFilesUnder::home(
-                &home,
+            .with_host_user_files(Arc::new(adjust(
+                crate::host_private_key::UserFilesUnder::home(&home)
+                    .and_the_home_of("otherdev", &other_home),
             )));
         // Generated up front so no test's timing window has to cover an RSA keygen: the prompt feed
         // reads the published key per event, and the first read is the one that makes the key.
@@ -23680,6 +23726,7 @@ users:
             home,
             key_path,
             key_fingerprint,
+            other_key_path,
             _storage: storage,
         }
     }
@@ -23845,6 +23892,17 @@ users:
             .to_openssh(ssh_key::LineEnding::LF)
             .expect("in the format ssh-keygen writes");
         std::fs::write(path, openssh.as_bytes()).expect("the key file is written");
+        // The public half beside it, because that is what `ssh-keygen` leaves on disk and what a
+        // listing describes a candidate from. A fixture without it would make every key on this
+        // host invisible to the picker while still addable by path — a state no real host is in.
+        let public_line = key
+            .public_key()
+            .to_openssh()
+            .expect("in the one-line format ssh-keygen writes a .pub in");
+        let mut pub_name = path.file_name().expect("a key file name").to_os_string();
+        pub_name.push(".pub");
+        std::fs::write(path.with_file_name(pub_name), format!("{public_line}\n"))
+            .expect("the public half is written beside it");
         fingerprint
     }
 
@@ -24463,6 +24521,205 @@ users:
         assert_eq!(
             refused.err().map(|status| status.code),
             Some(tddy_rpc::Code::InvalidArgument)
+        );
+    }
+
+    // -- what the operator can pick from --------------------------------------------------------
+
+    /// How long a listing gets. It reads one directory and a handful of small files, and unlike an
+    /// add it waits on no operator, so a listing that takes seconds is a listing that is wrong.
+    const LISTING_WINDOW: Duration = Duration::from_secs(2);
+
+    impl HostWithAnEncryptedKey {
+        /// The keys an operator holding `token` is offered on this host.
+        async fn keys_offered_to(&self, token: &str) -> Vec<HostKeyCandidate> {
+            self.keys_offered(ListHostKeyCandidatesRequest {
+                session_token: token.to_string(),
+                daemon_instance_id: String::new(),
+            })
+            .await
+            .expect("a listing for a valid session")
+        }
+
+        async fn keys_offered(
+            &self,
+            request: ListHostKeyCandidatesRequest,
+        ) -> Result<Vec<HostKeyCandidate>, Status> {
+            tokio::time::timeout(
+                LISTING_WINDOW,
+                self.service.list_host_key_candidates(Request::new(request)),
+            )
+            .await
+            .expect("a listing reads one directory and must not hang")
+            .map(|listed| listed.into_inner().candidates)
+        }
+    }
+
+    fn paths_of(candidates: &[HostKeyCandidate]) -> Vec<String> {
+        candidates
+            .iter()
+            .map(|candidate| candidate.path.clone())
+            .collect()
+    }
+
+    /// The ordinary case: the operator's own key, described from its public half, ready to be
+    /// picked. Also the guard that keeps the refusals below from passing for an endpoint that
+    /// offers nothing to anyone.
+    #[tokio::test]
+    async fn offers_the_operator_the_key_in_their_own_home() {
+        // Given a host where this operator has a key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When they ask what they could add
+        let offered = host.keys_offered_to(TEST_TOKEN).await;
+
+        // Then
+        assert_eq!(
+            paths_of(&offered),
+            vec![host.key_path.display().to_string()]
+        );
+        assert_eq!(
+            offered
+                .first()
+                .map(|candidate| candidate.fingerprint.clone()),
+            Some(host.key_fingerprint.clone()),
+            "the key was offered under a fingerprint that is not its own"
+        );
+    }
+
+    /// **Whose keys are these?** The listing is resolved through the same GitHub-to-OS-user mapping
+    /// the add is, so a session is offered its own operator's keys and no one else's. Resolved
+    /// wrongly, this endpoint enumerates another operator's `~/.ssh` for anyone with a session.
+    #[tokio::test]
+    async fn offers_each_operator_only_the_keys_of_their_own_os_user() {
+        // Given a host where two operators each have a key of their own
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When each of them asks what they could add
+        let theirs = host.keys_offered_to(TEST_TOKEN).await;
+        let the_others = host.keys_offered_to(OTHER_TOKEN).await;
+
+        // Then
+        assert_eq!(paths_of(&theirs), vec![host.key_path.display().to_string()]);
+        assert_eq!(
+            paths_of(&the_others),
+            vec![host.other_key_path.display().to_string()],
+            "an operator was not offered the keys of their own OS user"
+        );
+    }
+
+    /// **The two halves must agree.** A picked key goes straight back as `AddHostKeyRequest.subject`
+    /// and is read under a confinement this endpoint does not share by construction — only by
+    /// being built out of the same parts. A path this offers that the add refuses is a choice that
+    /// does not work.
+    #[tokio::test]
+    async fn offers_a_key_that_an_add_of_the_very_same_path_then_loads() {
+        // Given a host where this operator has a key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When they pick the key they are offered and add it
+        let offered = host.keys_offered_to(TEST_TOKEN).await;
+        let picked = offered.first().expect("a key to pick").path.clone();
+        let added = host.add_key_at(Path::new(&picked), PASSPHRASE).await;
+
+        // Then
+        added.assert_added_the_key(&host.key_fingerprint);
+    }
+
+    /// A listing is not a public directory of a host's keys. Unauthenticated, it enumerates one.
+    #[tokio::test]
+    async fn rejects_a_listing_for_an_invalid_session_token() {
+        // Given a host where this operator has a key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When a listing arrives with a token this host never issued
+        let refused = host
+            .keys_offered(ListHostKeyCandidatesRequest {
+                session_token: "not-a-session".to_string(),
+                daemon_instance_id: String::new(),
+            })
+            .await;
+
+        // Then
+        assert_eq!(
+            refused.err().map(|status| status.code),
+            Some(tddy_rpc::Code::Unauthenticated)
+        );
+    }
+
+    /// The same reason [`refuses_an_add_addressed_to_a_host_this_daemon_does_not_know`] gives. A
+    /// key is a file on one machine: answered locally, the browser is shown this daemon's keys as
+    /// though they were the other host's, and the path it then picks does not exist over there.
+    #[tokio::test]
+    async fn refuses_a_listing_addressed_to_a_host_this_daemon_does_not_know() {
+        // Given a host where this operator has a key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the listing is addressed to a different host
+        let refused = host
+            .keys_offered(ListHostKeyCandidatesRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
+            })
+            .await;
+
+        // Then
+        assert_eq!(
+            refused.err().map(|status| status.code),
+            Some(tddy_rpc::Code::InvalidArgument)
+        );
+    }
+
+    /// The other half of honouring the field: a host named by its own id answers for itself rather
+    /// than trying to forward the call to a peer.
+    #[tokio::test]
+    async fn serves_a_listing_addressed_to_this_daemon_by_its_own_instance_id() {
+        // Given a host where this operator has a key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the listing names this host by its own id
+        let offered = host
+            .keys_offered(ListHostKeyCandidatesRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: local_instance_id_for_config(&host.service.config),
+            })
+            .await
+            .expect("a listing addressed to this host by name");
+
+        // Then
+        assert_eq!(
+            paths_of(&offered),
+            vec![host.key_path.display().to_string()]
+        );
+    }
+
+    /// The listing's own version of the file oracle. An operator with no `~/.ssh` and one whose
+    /// `~/.ssh` this host cannot read must be indistinguishable from one who simply has no keys —
+    /// otherwise a session probes the host's filesystem one directory at a time.
+    #[tokio::test]
+    async fn offers_nothing_and_fails_nothing_when_the_ssh_directory_is_unreadable() {
+        // Given a host where this operator's ~/.ssh cannot be read
+        let host = a_host_where(PASSPHRASE, |files| {
+            let denied = crate::host_private_key::HostUserFiles::home_dir(&files, "testdev")
+                .expect("this fixture's reader knows where testdev lives")
+                .join(".ssh");
+            files.and_a_directory_it_cannot_read(denied)
+        });
+
+        // When they ask what they could add
+        let offered = host
+            .keys_offered(ListHostKeyCandidatesRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: String::new(),
+            })
+            .await
+            .expect("an unreadable ~/.ssh must read as an empty list, not as a failure");
+
+        // Then
+        assert_eq!(
+            paths_of(&offered),
+            Vec::<String>::new(),
+            "an unreadable ~/.ssh was reported as something other than an empty list"
         );
     }
 }

@@ -104,8 +104,10 @@ blast radius is much smaller than first assumed.
 
 ### User
 
-- A host row gains an "add key" action, a key selector, and a passphrase dialog naming the host and its
-  key fingerprint.
+- A host row gains an "add key" action, a key selector fed by `ListHostKeyCandidates`, and a
+  passphrase dialog naming the host and its key fingerprint. The selector offers absolute paths, and
+  the free-text field beside it — the only way to reach a key with no `.pub` — speaks the same
+  syntax.
 
 ## Acceptance criteria
 
@@ -122,10 +124,20 @@ blast radius is much smaller than first assumed.
 - [ ] **AC-9** A **changed** host key blocks the flow with an explicit warning rather than proceeding.
 - [ ] **AC-10** When the subscriber goes away, the daemon's prompt-stream task is torn down — no leak.
 - [ ] **AC-11** `AnswerHostPrompt` rejects an invalid `session_token` and an unknown prompt id.
+- [ ] **AC-12** An operator **picks** a key from the ones that host reports for their own OS user,
+      rather than recalling a path — and every path offered is one `AddHostKey` accepts. The listing
+      is built from public halves only: no private key is opened to describe a candidate, and a
+      user's absent, empty and unreadable `~/.ssh` are one answer.
+- [ ] **AC-13** The key field never invites a path the host is bound to refuse. `confined_to_home`
+      takes absolute paths and nothing expands `~`, so both surfaces speak absolute paths and a
+      relative one is refused here, where the reason can still be stated.
+- [ ] **AC-14** The fingerprint the dialog displays and pins always belongs to the key that will
+      encrypt the answer — including when a second prompt replaces the key while the dialog is open.
 
 ## Out of scope for this node
 
-Removing a key from an agent. Generating a key. Persisting a passphrase in any form (explicitly
+Removing a key from an agent. Generating a key. Expanding `~` on the host — see AC-13 for why that
+resolution was rejected rather than deferred. Persisting a passphrase in any form (explicitly
 rejected). Changing the git remote hardening unless the red phase proves it necessary. VNC/RDP
 (nodes 7–8).
 

@@ -137,6 +137,25 @@ export const hostAddKeyPage = {
   addedConfirmation: (instanceId: string) =>
     byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-added`),
 
+  /**
+   * The keys the host said its operator could load — `ListHostKeyCandidates`, on screen.
+   *
+   * A picker rather than a second text field: the paths are the host's, not the browser's, and an
+   * operator who has to retype one is being asked to remember something the host just said.
+   */
+  keyChoices: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-choices`),
+
+  /**
+   * Pick one of the offered keys, by its path on the host.
+   *
+   * The path is the identity: it is what goes back as `AddHostKeyRequest.subject`, and it is the
+   * one field of a candidate that is guaranteed to be unique among them.
+   */
+  pickKey: (instanceId: string, path: string) => {
+    hostAddKeyPage.keyChoices(instanceId).select(path);
+  },
+
   /** Name a key and ask the host to load it — the whole operator gesture, in one step. */
   addKey: (instanceId: string, subject: string) => {
     hostAddKeyPage.keyField(instanceId).type(subject);

@@ -140,7 +140,8 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Key continuity: pin on first sight, block on change — 13 tests; unusable storage now reports `unverified`
 - [x] Daemon decrypt → private key decrypt → agent add → drop plaintext
 - [x] Passphrase dialog, add-key action and the prompt subscription — the flow is reachable from a Hosts row
-- [ ] ⚠ The **key selector** is a free-text path field, not a selector: `AddHostKeyRequest.subject` is a path and no RPC lists a host's candidate key files, so there is nothing to select from. Offering real choices needs a listing RPC — recorded as a scope decision, not implemented
+- [~] The **key selector**: `ListHostKeyCandidates` lists the private keys a session's own OS user could load, described from their public halves — red phase written, not yet implemented
+- [~] The key field speaks **absolute paths**, in the picker and in the free-text field alike — `confined_to_home` accepts nothing else and nothing expands `~` (the placeholder has been inviting a refusal since it shipped)
 - [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
 - [x] Confirm whether the git hardening needs any change at all
 
@@ -283,6 +284,50 @@ otherwise unverified, and a stray `debug!` is exactly how such a secret escapes.
 | `distinguishes_a_wrong_passphrase_from_an_absent_agent_and_from_an_expired_prompt` | AC-4 — the enum's whole point |
 | `says_continuity_could_not_be_checked_without_blocking_the_answer` | AC-9 — the `unverified` verdict |
 | `distinguishes_an_unverifiable_host_key_from_a_changed_one_and_from_a_first_sighting` | AC-9 |
+| `never_shows_the_previous_keys_fingerprint_beside_the_key_that_would_encrypt` | AC-14 — the correlation the committed fix left open |
+| `shows_an_example_the_host_will_accept_rather_than_a_tilde_path_it_refuses` | AC-13 |
+| `does_not_send_a_tilde_path_for_the_host_to_refuse_without_explanation` | AC-13 |
+
+**`packages/tddy-daemon/src/host_private_key.rs`** (unit — the key listing)
+
+| Test | Validates |
+|---|---|
+| `offers_a_key_whose_public_half_sits_beside_it` | AC-12 — the rule that does all the filtering |
+| `describes_each_key_by_the_type_and_fingerprint_in_its_public_half` | AC-12 |
+| `lists_the_keys_with_the_privileges_of_the_user_they_belong_to` | AC-12 — listed as the owner, not as the daemon |
+| `never_opens_a_private_key_to_build_the_list` | AC-12 — a list of keys is not a use of them |
+| `reads_only_the_users_own_ssh_directory` | AC-12 — no walk of the operator's home |
+| `does_not_offer_another_users_key` | AC-12 — the confinement, on a multi-user host |
+| `does_not_offer_a_keypair_kept_outside_the_ssh_directory` | AC-12 |
+| `does_not_offer_ssh_configuration_or_a_public_half_on_its_own` | AC-12 — `known_hosts`, `authorized_keys`, `config`, a lone `.pub` |
+| `does_not_offer_a_directory_that_is_named_like_a_key` | AC-12 — a candidate is a file |
+| `does_not_offer_a_private_key_with_no_public_half_beside_it` | AC-12 — the filtering rule's cost, and why the typed field stays |
+| `offers_the_keys_in_a_stable_order` | AC-12 |
+| `offers_nothing_for_an_absent_ssh_directory_and_nothing_for_an_unreadable_one` | AC-12 — the directory oracle |
+| `offers_only_paths_that_an_add_of_the_same_key_accepts` | AC-12 — the two halves must agree |
+
+**`packages/tddy-daemon/src/connection_service.rs`** (integration — the key listing)
+
+| Test | Validates |
+|---|---|
+| `offers_the_operator_the_key_in_their_own_home` | AC-12 |
+| `offers_each_operator_only_the_keys_of_their_own_os_user` | AC-12 — whose keys are these? |
+| `offers_a_key_that_an_add_of_the_very_same_path_then_loads` | AC-12 — list → pick → add, end to end |
+| `rejects_a_listing_for_an_invalid_session_token` | AC-12 |
+| `refuses_a_listing_addressed_to_a_host_this_daemon_does_not_know` | AC-12 — routing honoured |
+| `serves_a_listing_addressed_to_this_daemon_by_its_own_instance_id` | AC-12 |
+| `offers_nothing_and_fails_nothing_when_the_ssh_directory_is_unreadable` | AC-12 |
+
+**`packages/tddy-web/cypress/component/HostAddKeySelector.cy.tsx`**
+
+| Test | Validates |
+|---|---|
+| `offers_the_keys_the_host_reported_so_nothing_has_to_be_typed_from_memory` | AC-12 |
+| `tells_the_keys_apart_by_type_and_fingerprint_not_by_path_alone` | AC-12 |
+| `asks_the_host_in_the_row_and_only_when_there_is_an_agent_to_add_to` | AC-12 — routing, and no call for a row that cannot take a key |
+| `adds_the_key_that_was_picked_at_the_path_the_host_gave_for_it` | AC-12 |
+| `still_takes_a_typed_path_for_a_key_no_listing_can_see` | AC-12 — a guard, already green |
+| `treats_a_host_that_will_not_list_its_keys_as_one_with_no_keys_to_offer` | AC-12 — a guard, already green |
 
 **`packages/tddy-web/src/rpc/hostPromptsSubscription.test.ts`** (unit)
 
@@ -554,10 +599,27 @@ _(populated by each validation phase)_
 - **`HostPromptFeed` and `SessionNotificationFeed` are the same fixture twice** — an always-open
   generator, a queue, a `wake` promise and a subscription counter, differing only in the event they
   carry. A shared `anAlwaysOpenServerStream<T>()` helper in `cypress/support/rpc/` would carry both.
-- **The add-key key field is a free-text path, not a selector.** The changeset says "key selector",
-  but `AddHostKeyRequest.subject` is a path on the host and no RPC lists candidate key files, so
-  there is nothing to select *from*. Offering real choices needs a listing RPC — a decision, not a
-  refactor, and it belongs to whoever wants it.
+- **The add-key key field is a free-text path, not a selector.** ✅ Taken up: `ListHostKeyCandidates`
+  is specified and red-phase tested (see the acceptance tables). The free-text field stays, because a
+  key with no `.pub` beside it is invisible to the listing and must still be loadable.
+
+### From @red (key listing and selector)
+
+- **`UserFilesUnder` is growing a recorder per question.** It now records users read as, users listed
+  as, paths read and directories listed — four parallel `Mutex<Vec<_>>` fields with identical
+  locking and identical `expect` text. One `Mutex<Vec<Interaction>>` with an enum would carry all
+  four and make "what did this call touch, in order?" a single assertion. Left additive so the
+  existing read tests were not rewritten in the pass that added the listing.
+- **The fixture seam is parameterised for exactly one thing.** `a_host_where(passphrase, adjust)`
+  exists so one test can stage an unreadable `~/.ssh`. If a second such staging arrives, the closure
+  should become a small builder rather than a second positional parameter.
+- **`AddHostKeyRequest.subject` does not say the path must be absolute** — the proto comment describes
+  a path on the host and stops there, while `confined_to_home` rejects anything relative. Correcting
+  the comment belongs to green, alongside the placeholder it contradicts.
+- **`with_pub_suffix` is now written twice** — once in `host_private_key.rs`'s tests and once inline
+  in `connection_service.rs`'s `an_encrypted_private_key_at`. `ssh-keygen`'s naming rule (append,
+  never replace an extension) is one fact and should live in one place once the production code needs
+  it too.
 
 ## Validation results
 
@@ -566,6 +628,37 @@ _(populated by each validation phase)_
 - `cargo clippy -p tddy-daemon --all-targets -- -D warnings` — clean.
 - `host_prompts.rs` 4/4 red · `host_keypair.rs` 3/3 red · `stream_host_prompts_rpc.rs` 2/3 red
   (`rejects_an_invalid_token` passes — the auth guard is genuinely part of the published surface).
+
+### Red phase — the key listing and selector
+
+- `cargo clippy -p tddy-daemon --profile test --lib -- -D warnings` — clean. **Deliberately not
+  `--all-targets`**: that links every `tddy-daemon` acceptance-test binary separately and filled the
+  build disk before running a single test.
+- `cargo test -p tddy-daemon --lib host_private_key` — **13 red**, 6 pre-existing green.
+- `cargo test -p tddy-daemon --lib host_add_key_handler_tests` — **7 red**, 18 pre-existing green.
+- `HostAddKeySelector.cy.tsx` — **4 red**, 2 green (both green ones are guards on behaviour that
+  already holds: a typed path still works, and a host that refuses the listing is not an error).
+- `HostAddKeyAcceptance.cy.tsx` — **3 red** (the new ones), 11 pre-existing green.
+
+### ⚠ Two committed security fixes were incomplete — both now pinned red
+
+- **The key check was not carried atomically with the prompt it describes.** `HostAddKeyAction`
+  passes `spkiDer` from `outstandingPrompt` and `fingerprint`/`keyContinuity` from a separate
+  `keyCheck` state, with nothing correlating them; the verify effect does not clear `keyCheck` before
+  re-running. A second prompt frame replaces the key immediately and its verdict arrives a digest
+  later, so in between the dialog shows the *previous* key's fingerprint and its reassuring
+  `unchanged` verdict over bytes that will encrypt for a different key — the substitution the pin
+  exists to catch, wearing the pin's approval. A peer in the routing path widens that window at will
+  by emitting frames faster than SHA-256 resolves. Pinned by
+  `never_shows_the_previous_keys_fingerprint_beside_the_key_that_would_encrypt`, which holds
+  `crypto.subtle.digest` open to stand inside the window.
+- **The placeholder invited a path the daemon refuses.** `placeholder="~/.ssh/id_ed25519"` against a
+  `confined_to_home` that requires `is_absolute()` with no `~` expansion anywhere. **Resolution:
+  absolute paths only** — the listing returns absolute paths so picking is the common case, one
+  syntax lets a picked and a typed path be compared by eye, and expanding `~` would have to happen in
+  the daemon, whose confinement is valuable precisely because it is a pure function of the caller's
+  input. The refusal also cannot explain itself (`KEY_OUTSIDE_HOME` names no path, on purpose), so
+  the browser — which holds the only context that makes it legible — must not send the request.
 
 ### ✅ The git hardening does NOT need inverting — confirmed
 

@@ -48,7 +48,8 @@ use tddy_service::proto::connection::{
     GetWorktreeSnapshotResponse, HostPromptEvent, HostStatsEvent, LinkStackNodeRequest,
     LinkStackNodeResponse, ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest,
     ListAgentsResponse, ListEligibleDaemonsRequest, ListEligibleDaemonsResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
+    ListExecToolsRequest, ListExecToolsResponse, ListHostKeyCandidatesRequest,
+    ListHostKeyCandidatesResponse, ListKnownHostsRequest, ListKnownHostsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
     ListProjectsResponse, ListSessionAgentsRequest, ListSessionToolCallsRequest,
     ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
@@ -582,6 +583,19 @@ where
         request: tonic::Request<AddHostKeyRequest>,
     ) -> Result<tonic::Response<AddHostKeyResponse>, tonic::Status> {
         let resp = RpcConnectionService::add_host_key(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn list_host_key_candidates(
+        &self,
+        request: tonic::Request<ListHostKeyCandidatesRequest>,
+    ) -> Result<tonic::Response<ListHostKeyCandidatesResponse>, tonic::Status> {
+        let resp = RpcConnectionService::list_host_key_candidates(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )

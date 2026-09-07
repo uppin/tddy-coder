@@ -106,6 +106,23 @@ service ConnectionService {
   // ciphertext on AnswerHostPrompt, and the response says whether the key was added, never what was
   // tried.
   rpc AddHostKey(AddHostKeyRequest) returns (AddHostKeyResponse);
+  // Hosts screen — the private keys this host's OS user could load into their ssh-agent, so an
+  // operator picks one instead of typing a path.
+  //
+  // Addressed by `daemon_instance_id` and honoured the way AddHostKey honours it: the keys are
+  // files on one machine, and a listing served by whichever daemon took the call would offer paths
+  // that do not exist on the host the operator is looking at.
+  //
+  // Enumerated as the OS user the calling session maps to, and only inside that user's own
+  // ~/.ssh — the same confinement AddHostKey.subject is read under, so every path offered here is
+  // a path that add will accept. A candidate is a private key whose PUBLIC half sits beside it:
+  // that is where the type and fingerprint come from, so listing never opens a private key at all.
+  //
+  // Says nothing about whether a directory is there. A user with no ~/.ssh and one whose ~/.ssh
+  // cannot be read both get an empty list, for the reason AddHostKeyResponse.failure_reason must
+  // not distinguish absent from malformed: an authenticated caller must not be able to use this as
+  // a probe for what exists on the host.
+  rpc ListHostKeyCandidates(ListHostKeyCandidatesRequest) returns (ListHostKeyCandidatesResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
@@ -1291,6 +1308,35 @@ message AddHostKeyResponse {
   // MUST NOT distinguish a key that is absent from one that is malformed either: told apart, the
   // two answer "is there a file at this path?" for anywhere the caller can name.
   string failure_reason = 4;
+}
+
+message ListHostKeyCandidatesRequest {
+  string session_token = 1;
+  // The host whose keys are listed. Empty means the daemon serving the call. Honoured as
+  // AddHostKeyRequest.daemon_instance_id is: the paths are files on one machine.
+  string daemon_instance_id = 2;
+}
+
+// One private key an operator could pick, described entirely from its PUBLIC half.
+//
+// Carries no key material, and by construction cannot: the fields below are derived from
+// `<path>.pub`, and the private file at `path` is never opened to build this message.
+message HostKeyCandidate {
+  // The absolute path of the PRIVATE key on that host — what goes in AddHostKeyRequest.subject.
+  string path = 1;
+  // e.g. "ssh-ed25519", read from the public half. Two keys of different types are told apart by
+  // this alone, without the operator having to recognise a digest.
+  string key_type = 2;
+  // SHA256 fingerprint in the form `ssh-add -l` prints, including the "SHA256:" prefix, over the
+  // public half. The same string the ssh_agent block reports, so an operator can see at a glance
+  // which of these keys the agent is already holding.
+  string fingerprint = 3;
+}
+
+message ListHostKeyCandidatesResponse {
+  // Ordered by path, so the list an operator reads is stable across calls. Empty when this user has
+  // no keys, no ~/.ssh, or a ~/.ssh this host could not read — deliberately indistinguishable.
+  repeated HostKeyCandidate candidates = 1;
 }
 
 message ListSessionWorkflowFilesRequest {
