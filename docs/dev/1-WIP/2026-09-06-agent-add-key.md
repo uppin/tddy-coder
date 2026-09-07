@@ -139,7 +139,8 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Browser `SubtleCrypto` `RSA-OAEP` encryption
 - [x] Key continuity: pin on first sight, block on change — 13 tests; unusable storage now reports `unverified`
 - [x] Daemon decrypt → private key decrypt → agent add → drop plaintext
-- [~] ⚠ Passphrase dialog **done**; add-key action, key selector and the prompt subscription have **failing tests, no implementation**
+- [x] Passphrase dialog, add-key action and the prompt subscription — the flow is reachable from a Hosts row
+- [ ] ⚠ The **key selector** is a free-text path field, not a selector: `AddHostKeyRequest.subject` is a path and no RPC lists a host's candidate key files, so there is nothing to select from. Offering real choices needs a listing RPC — recorded as a scope decision, not implemented
 - [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
 - [x] Confirm whether the git hardening needs any change at all
 
@@ -385,75 +386,138 @@ on every later sighting, so an active substitution was indistinguishable from an
 permanently. An empty fingerprint takes the same route rather than burning the one first-use trust
 slot.
 
-### ⚠ Still open — the flow is not reachable from the browser
+### Third wave — the flow reached the browser, and validation found four blockers
 
-The daemon can serve the whole round trip, but nothing in the UI starts it:
+`AddHostKey` became reachable from the Hosts row (`HostAddKeyAction`, `useHostPrompts` and its
+`hostPromptsSubscription` loop). Then `/pr-wrap`'s validation passes found four security defects,
+each of which is now fixed with a test that failed against the previous behaviour first.
 
-1. **`useHostPrompts.ts`** — the subscription hook the Delta specifies. Does not exist.
-2. **The add-key action and key selector** on the Hosts row. Do not exist.
-3. **`reports_a_failure_without_adding_a_key_when_the_passphrase_is_wrong`** — the Cypress AC-4 test
-   named in the acceptance table. Not written.
-4. **`unverified` is displayed nowhere.** `checkHostKey` has no caller outside its own test, so the
-   verdict exists but no operator ever sees it.
+#### 1. ⛔ Key continuity was decorative — the pin was never bound to the encrypting key
 
-Under the boundary contract an unimplemented owned symbol is a blocker rather than a follow-up, so
-this node is **not ready to be marked ready for review**.
+`checkHostKey` pinned and compared `HostPromptEvent.host_public_key_fingerprint`, the **advertised
+string**, while the answer was encrypted under `host_public_key`, the SPKI DER. Nothing derived the
+one from the other. Both fields ride the channel this feature exists to distrust, and the
+fingerprint is not secret — so an active peer could replay the genuine fingerprint beside **its own**
+key, get `unchanged`, show the operator the value they had verified out of band, and receive the
+passphrase. Encryption was intact; the thing that was supposed to bound an active substitution was
+not.
 
-#### Failing tests now define all four — implementation still outstanding
+`lib/hostKeyFingerprint.ts` now derives `SHA256:<base64-no-pad>` over the received SPKI DER,
+matching the daemon's `spki_fingerprint`, and `verifyHostKey` pins, compares and displays **that**.
+An advertised fingerprint that disagrees with the derived one is a hard block with no accept path —
+that is a substitution attempt, not a rotation. An **empty** advertised field blocks too:
+"stripped in flight" and "an older daemon" are indistinguishable from the browser.
 
-| Gate | Result |
-|---|---|
-| `bun test src/rpc/hostPromptsSubscription.test.ts` | **6 failing** — `subscribeHostPrompts is not implemented` |
-| Cypress `HostAddKeyAcceptance.cy.tsx` | 9 tests: **5 passing** (unchanged), **4 failing** |
-| Cypress `HostsScreenAddKeyAcceptance.cy.tsx` | **6 failing** — `HostAddKeyAction is not implemented` |
-| `bun test src/rpc src/lib` | 521 passing, 6 failing (only the new file) |
+#### 2. ⛔ `crypto.subtle` was called unguarded, and tddy-web is served over plain http
 
-**The subscription follows `hostStatsSubscription`, not `useSessionNotifications`.** The changeset's
-Delta named `useHostPrompts.ts` alone, following the `useHostStats` template. That template is
-actually a **pair**, and the split is load-bearing rather than stylistic:
-`hostStatsSubscription.test.ts`'s own header records why — `createRouterTransport` propagates
-neither an abort nor a consumer's `break` to the server handler, so **no Cypress backend can observe
-a subscription closing**. Since the teardown assertion is the one this node cannot skip, the loop was
-written as `src/rpc/hostPromptsSubscription.ts` (a plain function, unit-tested against a hand-rolled
-Connect-shaped iterable) with `src/rpc/useHostPrompts.ts` as the thin hook the Delta names. A
-`for await` hook alone — the `useSessionNotifications` shape — would have left AC-10's browser half
-permanently unassertable.
+`packages/tddy-web/docs/insecure-origin-constraints.md` is explicit that the daemon serves this
+bundle over `http://` on a LAN address, which is **not a secure context**, and it records the
+`crypto.randomUUID` incident where exactly this broke a whole feature on real devices while passing
+every local test. `crypto.subtle` is withheld on such an origin, so every submit threw a `TypeError`
+and the add-key flow was **dead on the normal deployment**. Cypress runs on `localhost`, a secure
+context, so nothing local could notice.
 
-**The prompt feed's silence is why this leak is worse than the stats one.** `StreamHostPrompts` is
-silent almost all of the time by design; a `for await` parked on a first frame that never comes has
-no reachable `break`, so *every* quiet host leaks a subscription. `subscribeHostPrompts` therefore
-reports feed failures through an **explicit callback** rather than `console.debug` as the stats loop
-does: an idle prompt feed and a dead one look identical, and a callback is the only way to state, as
-a test, that an abort of our own making is *not* reported — paired with
-`reports_a_feed_the_daemon_drops_while_the_caller_is_still_subscribed`, without which that swallow
-would be satisfied by a loop that reported nothing at all.
+`lib/subtleCrypto.ts` is now the one audited entry point and **refuses loudly**, naming the insecure
+origin. There is deliberately **no fallback**: the only thing behind `subtle` here is a passphrase
+being encrypted, and a plaintext fallback would hand it to every peer in the room. The refusal
+surfaces as the `underivable` verdict, so the dialog blocks with a reason instead of failing at
+submit.
 
-**`unverified` is now rendered, and does not block.** `HostPassphraseDialog` gained a
-`keyContinuity?: KeyPinVerdict` prop alongside the existing `keyChanged` — additive, so the five
-green tests are untouched. The wording chosen is *"Could not check whether this host's key has
-changed since last time. Verify the fingerprint above with the host before sending anything."*
-under `data-testid="host-key-unverified-notice"`. It **warns without disabling submission**: a host
-that cannot be pin-checked has not been caught doing anything, and blocking would make the feature
-unusable in any browser that refuses to store a pin — the opposite decision to `changed`, which does
-block. That asymmetry is deliberate and is pinned by
-`distinguishes_an_unverifiable_host_key_from_a_changed_one_and_from_a_first_sighting`.
+⚠ **This bounds the feature, not just the code.** Add-key works only on a secure origin. Making it
+work over LAN needs TLS, which the daemon has nowhere today (`config.rs` has no TLS at all) — a
+deployment decision outside this node.
 
-**The outcome fixtures carry an empty `failure_reason` on purpose.** A component echoing that free
-text verbatim would pass a distinguishability test that supplied one while still reporting "it
-failed" three times over. With nothing to echo, the only thing that can tell `WRONG_PASSPHRASE`,
-`NO_AGENT` and `PROMPT_EXPIRED` apart is the enum — which is the reason the response carries one.
+#### 3. ⛔ The private key was read as the daemon, from an unvalidated client path
 
-**`HostAddKeyAction` is deliberately not yet wired into `HostRowSshAgent`.** The stub throws, so
-mounting it inside the row would take node 5's four green ssh-agent tests down with it. The action's
-own spec mounts it directly, exactly as `HostsScreenSshAgentAcceptance` mounts `HostRowSshAgent`;
-wiring it into the row's section is green's first step, and node 5's four-state summary logic stays
-untouched either way.
+`std::fs::read_to_string(subject)` ran with the daemon's own credentials on a free-text path, so a
+session mapped to one user could name another's key; and two distinguishable refusals
+("could not be read" / "is not an OpenSSH private key") were returned verbatim, giving any
+authenticated session a file-existence oracle over the host.
 
-**One negative-only test was caught passing vacuously and rewritten.** "Offers nothing when no agent
-is reachable" is satisfied by a row that renders no control on *any* host — which is precisely this
-node's starting state, and it did pass against the stub. It is now
-`offers_the_add_only_where_there_is_an_agent_to_add_to`, mounting both states in one test, the same
-shape `HostsScreenSshAgentAcceptance`'s "distinguishes an empty agent from an absent one" uses.
+`host_private_key.rs` confines the path to the mapped user's home and reads it **as that user**
+through `spawner::run_capture_as_user` — a child process, not `seteuid`, because the daemon is
+multi-threaded. Absent, unreadable and malformed now share one refusal.
+
+Confinement is **lexical, deliberately without `canonicalize`**: canonicalizing would have to stat a
+caller-chosen path, re-introducing the very existence oracle this closes. The real boundary is the
+privilege drop — a symlink in one user's home pointing at another's key resolves *as* the first
+user, who cannot read it. `KEY_OUTSIDE_HOME` stays a distinct message because it is a pure function
+of the caller's own input and their own account, so it discloses nothing, and it is the one refusal
+an operator can act on.
+
+#### 4. ⛔ A prompt was not bound to the session that raised it
+
+`pending()` filtered only on unanswered-and-unexpired, so the pump replayed **every** outstanding
+prompt to **any** authenticated subscriber, and `answer()` accepted any id from any session. A
+second operator was shown the first's dialog — including the key path — and could burn the
+single-use prompt with garbage, denying the real add for the full TTL.
+
+Prompts now carry `issued_for` and both the feed and the answer filter on it. The identity is the
+resolved **GitHub user**, not the OS user: two GitHub users mapped to one OS user would otherwise
+still see and burn each other's prompts, which is precisely what `config.users[]` can express. A
+mismatched answer gets the same `UnknownPrompt` rejection an id that was never issued gets, and
+returns **before** the oneshot sender is taken, so the prompt keeps its one answer.
+
+#### Also fixed
+
+- **The response was an adaptive RSA-OAEP decryption oracle** — "cannot decrypt" and "did not
+  unlock" were distinguishable, giving a clean bit per query against the host's long-lived key. They
+  are now byte-identical, sharing one constant so they cannot drift; the real cause goes to the log
+  only. (`rsa` is pinned at `=0.9.10`, which is under RUSTSEC-2023-0071 with no fixed release;
+  `decrypt_blinded` covers the timing channel, and collapsing the response covers the explicit one.)
+- **The proto promised routing that no handler implemented.** `daemon_instance_id` is now honoured
+  on all three RPCs, mirroring `get_host_tooling`. A key silently loaded into the wrong host's agent
+  is a worse version of the failure that handler's own comment warns about.
+- **`acceptChangedHostKey` was dead**, so a legitimate key rotation locked the operator out
+  permanently, contradicting the PRD. The dialog now has a deliberate two-step accept — a checkbox
+  confirming out-of-band verification, gating the accept button.
+- **`AnswerHostPromptResponse` was discarded**, so the three rejections the daemon distinguishes
+  reached nobody. Now surfaced on the row.
+- **Cancel did not cancel** — the RPC stayed parked for the full 120s TTL with the row disabled and
+  nothing explaining why. It now aborts the call client-side; the daemon has no withdraw path, so
+  the prompt simply expires unanswered.
+- `write_atomic_with_mode` uses `create_new(true)`, making the owner-only mode structural rather
+  than probabilistic, and `fingerprint_of` → `spki_fingerprint` to remove the collision with node
+  5's same-named function over different bytes.
+
+#### Test hardening
+
+Every item below was **mutation-verified** — the production code was broken on purpose to confirm
+the new assertion catches it:
+
+- The pump-teardown test asserted only `count == 0`, which an implementation that never counts also
+  satisfies. It now asserts `== 1` while subscribed first.
+- AC-2 asserted the ciphertext "does not contain the passphrase" and a loose length — satisfied by
+  base64, a hash, or random bytes. It now **decrypts** the recorded `AnswerHostPrompt` payload with
+  the test keypair's private half and asserts it equals the passphrase exactly, at 256 bytes.
+- Nothing pinned that the row renders the action; deleting the line failed no test.
+- The handler's classification of a ciphertext encrypted **for another host** was unasserted — the
+  previous test proved only that two responses were identical, which both reporting `UNSPECIFIED`
+  would satisfy.
+- The log recorder never cleared `RECORDED`, so after that test every other test in the binary
+  pushed into a leaked buffer behind one global mutex. It is now an RAII guard that also fails
+  loudly if a second recording displaces it, and the fail-closed marker check is preserved.
+- **RSA keygen cost was a real flake source, and the obvious fix was wrong.**
+  `[profile.test.package.rsa] opt-level = 3` measured as a **no-op** (20.13s → 20.53s). The prime
+  search lives in `num-bigint-dig`; overriding that gives 20.13s → **1.08s**, and the add-key
+  handler tests 81.86s → **13.63s**, turning a ~3.3s keygen inside a 10s timeout into ~0.76s.
+
+#### ⚠ One caveat worth weighing before enabling a flag
+
+`classify_peer_route` compares against the **routing** instance id while `list_known_hosts`
+publishes the **durable** one. They are equal under the default
+`daemon_instance_id_append_startup_timestamp: false`. With that flag on, a browser sending the
+durable id now gets `invalid_argument` where it was previously — wrongly — served locally. This is a
+pre-existing property of this field shared with `get_host_tooling` and ~20 other RPCs; fixing it
+means changing `classify_peer_route`, which is outside this node.
+
+#### ⚠ A documentation-route deviation, recorded deliberately
+
+`packages/tddy-web/docs/insecure-origin-constraints.md` was edited **directly** to add
+`crypto.subtle` and a Web Crypto section. CLAUDE.md says never to modify `packages/*/docs/`
+directly — the changeset workflow owns that. The content is correct and is where wrapping would have
+placed it, so it was kept rather than reverted and re-derived, and it is noted here so the
+changeset↔docs relationship stays honest.
 
 ### Two outcome gaps recorded rather than fixed
 
@@ -552,21 +616,21 @@ it in the dialog — remains reasonable. Recorded to be argued with.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [~] TDD Green — daemon core + browser encryption green; the unlock/add path and the row action still need a `/red` pass
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete (three waves)
 - [ ] Run all tests (`./test`) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs)
 - [ ] USER REVIEW — work complete, decide next steps
 
