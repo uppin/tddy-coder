@@ -926,12 +926,27 @@ pub async fn build(
                 crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
             })
         };
+        // Host scope, alongside the host registry rather than under any session: a desktop belongs
+        // to a machine, and deleting a session must not delete the host's target. The keypair is
+        // the one `#hosts-screen 6/8` publishes and reads from the same directory — one key per
+        // host, so a password the browser encrypted for a prompt is readable here too.
+        let ss_host_targets: Arc<dyn crate::host_desktop_targets::HostDesktopTargetStore> =
+            Arc::new(
+                crate::host_desktop_targets::FileHostDesktopTargetStore::new(
+                    crate::host_registry::host_registry_dir(&tddy_data_dir),
+                ),
+            );
+        let ss_host_keypair: Arc<dyn crate::host_keypair::HostKeypair> =
+            Arc::new(crate::host_keypair::FileHostKeypair::new(
+                crate::host_registry::host_registry_dir(&tddy_data_dir),
+            ));
         let ss_svc = crate::screen_sharing_service::ScreenSharingServiceImpl::new(
             ss_user_resolver,
             ss_sessions_base,
             Arc::clone(&ss_key_cache),
         )
-        .with_config(Arc::clone(&config_arc));
+        .with_config(Arc::clone(&config_arc))
+        .with_host_scope(ss_host_targets, ss_host_keypair);
         let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "screen_sharing.ScreenSharingService",

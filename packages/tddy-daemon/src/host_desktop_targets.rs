@@ -18,10 +18,19 @@
 //! — so the Hosts screen has one secret-handling model rather than two. That is a deliberate
 //! inconsistency with the session path, and an arguable one; see the PRD.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use log::error;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// A desktop attached to a host.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Field names are the persisted JSON keys — renaming one drops that column for every already
+/// attached desktop, so treat them as a format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostDesktopTarget {
     pub target_id: String,
     pub label: String,
@@ -53,36 +62,128 @@ pub trait HostDesktopTargetStore: Send + Sync {
     fn remove(&self, daemon_instance_id: &str, target_id: &str) -> Result<(), String>;
 }
 
+/// What the store keeps on disk.
+///
+/// A named wrapper rather than a bare map so a later field (a format version, say) can be added
+/// without every already-written file becoming unreadable.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct TargetsFile {
+    /// Daemon instance id → the desktops attached to that host. Ordered so the file a reviewer or
+    /// an operator opens is stable between writes rather than reshuffled by hash order.
+    #[serde(default)]
+    hosts: BTreeMap<String, Vec<HostDesktopTarget>>,
+}
+
 /// A [`HostDesktopTargetStore`] persisted under one directory, alongside — never inside — the
 /// per-session screen-sharing vault.
 pub struct FileHostDesktopTargetStore {
-    #[allow(dead_code)] // read once persistence lands (#hosts-screen 8/8 green)
     targets_path: PathBuf,
+    /// Held across each read-modify-write. Two RPCs attaching a desktop at the same moment both
+    /// read, both write, and the second silently drops the first's target without it.
+    rewrite: Mutex<()>,
 }
 
 impl FileHostDesktopTargetStore {
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
         Self {
             targets_path: storage_dir.as_ref().join("host-desktop-targets.json"),
+            rewrite: Mutex::new(()),
         }
+    }
+
+    /// The file's contents, or an empty set when nothing has been attached yet.
+    ///
+    /// A file that exists but does not parse is an **error**, never an empty set: the callers that
+    /// go on to write would otherwise replace a damaged file with a file holding one target, and
+    /// every other host's desktops would be gone with no way back.
+    fn read_file(&self) -> Result<TargetsFile, String> {
+        match std::fs::read(&self.targets_path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+                format!(
+                    "{} is not readable as host desktop targets: {e}",
+                    self.targets_path.display()
+                )
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(TargetsFile::default()),
+            Err(e) => Err(format!("reading {}: {e}", self.targets_path.display())),
+        }
+    }
+
+    /// Replace the file with `contents`.
+    ///
+    /// Plain [`tddy_core::atomic_file::write_atomic`], deliberately: a target is a label, a host, a
+    /// port, a protocol and a username — an address, not a credential. The session-scoped vault's
+    /// encrypted-file pattern exists because it stores a password; this store never sees one (a
+    /// host desktop password is prompted, decrypted, used and dropped), so copying that pattern
+    /// would buy nothing and add a key to manage. What is needed is the atomic half: a half-written
+    /// file here reads as "this host has no desktops" and silently loses every attachment.
+    fn write_file(&self, contents: &TargetsFile) -> Result<(), String> {
+        let json = serde_json::to_vec_pretty(contents)
+            .map_err(|e| format!("encoding host desktop targets: {e}"))?;
+        tddy_core::atomic_file::write_atomic_labelled(&self.targets_path, json)
+    }
+
+    fn locked(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.rewrite.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl HostDesktopTargetStore for FileHostDesktopTargetStore {
-    fn list(&self, _daemon_instance_id: &str) -> Vec<HostDesktopTarget> {
-        // TODO(desktop-connect): implement
-        unimplemented!("desktop-connect: list")
+    fn list(&self, daemon_instance_id: &str) -> Vec<HostDesktopTarget> {
+        match self.read_file() {
+            Ok(file) => file
+                .hosts
+                .get(daemon_instance_id)
+                .cloned()
+                .unwrap_or_default(),
+            // The signature leaves nowhere to report this, so it goes to the log loudly rather
+            // than reaching an operator as a host that quietly lost its desktops. Nothing here
+            // rewrites the file, so the damaged one is still there to recover from.
+            Err(e) => {
+                error!("cannot list host desktop targets: {e}");
+                Vec::new()
+            }
+        }
     }
 
-    fn add(&self, _daemon_instance_id: &str, _target: HostDesktopTarget) -> Result<String, String> {
-        // TODO(desktop-connect): implement
-        unimplemented!("desktop-connect: add")
+    /// The id is assigned here, not accepted from the caller: it addresses a running bridge, and a
+    /// caller-chosen one could collide with a target already attached to the same host.
+    fn add(&self, daemon_instance_id: &str, target: HostDesktopTarget) -> Result<String, String> {
+        let _rewriting = self.locked();
+        let mut file = self.read_file()?;
+        let target_id = Uuid::new_v4().to_string();
+        file.hosts
+            .entry(daemon_instance_id.to_string())
+            .or_default()
+            .push(HostDesktopTarget {
+                target_id: target_id.clone(),
+                ..target
+            });
+        self.write_file(&file)?;
+        Ok(target_id)
     }
 
-    fn remove(&self, _daemon_instance_id: &str, _target_id: &str) -> Result<(), String> {
-        // TODO(desktop-connect): implement
-        unimplemented!("desktop-connect: remove")
+    fn remove(&self, daemon_instance_id: &str, target_id: &str) -> Result<(), String> {
+        let _rewriting = self.locked();
+        let mut file = self.read_file()?;
+        let attached = file
+            .hosts
+            .get_mut(daemon_instance_id)
+            .ok_or_else(|| not_attached(daemon_instance_id, target_id))?;
+        let before = attached.len();
+        attached.retain(|t| t.target_id != target_id);
+        if attached.len() == before {
+            return Err(not_attached(daemon_instance_id, target_id));
+        }
+        if attached.is_empty() {
+            file.hosts.remove(daemon_instance_id);
+        }
+        self.write_file(&file)
     }
+}
+
+fn not_attached(daemon_instance_id: &str, target_id: &str) -> String {
+    format!("host {daemon_instance_id} has no desktop target {target_id}")
 }
 
 #[cfg(test)]
