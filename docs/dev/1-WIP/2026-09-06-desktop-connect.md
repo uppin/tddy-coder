@@ -107,13 +107,14 @@ a machine, not to a coding session.
 
 ## Scope
 
-- [ ] Host-scoped target model + storage
-- [ ] Host-scoped start/stop RPCs + both regenerations
-- [ ] Bridge start/stop at host scope, reusing the existing spawn path
-- [ ] Connect action, gated on reachability **and** `media`
-- [ ] Overlay mounted at host scope with input forwarding
-- [ ] Desktop password via node 6's encrypted prompt, not persisted
-- [ ] Rust unit/integration tests + Cypress component tests
+- [x] Host-scoped target model + storage
+- [x] Host-scoped start/stop RPCs + both regenerations
+- [x] Bridge start/stop at host scope, reusing the existing spawn path
+- [x] Connect action, gated on reachability **and** `media`
+- [x] Overlay mounted at host scope — ⚠ **without input forwarding**, see below
+- [~] Desktop password via node 6's encrypted prompt, not persisted — daemon side done,
+      **browser side not implemented** (no spec covers it), see below
+- [x] Rust unit/integration tests + Cypress component tests
 
 ## Technical changes
 
@@ -155,13 +156,14 @@ a machine, not to a coding session.
 
 ## Implementation milestones
 
-- [ ] Target model + store, unit-tested
-- [ ] Host-scoped start returning overlay-ready values
-- [ ] Overlay mounted, a real track rendering
-- [ ] Input forwarding verified
-- [ ] Stop releasing the bridge process
-- [ ] Capability gating removing the action without media
-- [ ] Password prompt through node 6's channel, nothing persisted
+- [x] Target model + store, unit-tested
+- [x] Host-scoped start returning overlay-ready values
+- [x] Overlay mounted, a real track rendering
+- [ ] Input forwarding verified — ⚠ **blocked, see "Input forwarding does not exist to reuse"**
+- [x] Stop releasing the bridge process
+- [x] Capability gating removing the action without media
+- [~] Password prompt through node 6's channel, nothing persisted — daemon decrypts and drops;
+      the browser does not yet prompt
 
 ## Testing plan
 
@@ -267,6 +269,83 @@ Same failure mode as a stubbed `pending_prompt_pump_count()` returning `0` in `#
 an assertion that holds for the wrong reason is worse than no assertion, because it reports the
 property as verified forever.
 
+### Green phase
+
+Implemented on a rebase onto `desktop-probe`'s current tip (node 7 had been greened and
+force-pushed; this branch had been carrying pre-rewrite copies of nodes 1-7's commits).
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy -p tddy-daemon --all-targets -- -D warnings` | clean |
+| `cargo test -p tddy-daemon --lib` | **754 passed, 0 failed** |
+| `cargo test -p tddy-daemon --test screen_sharing_service_acceptance` | **6 passed** (AC-9, the reused session path) |
+| `HostDesktopConnectAcceptance.cy.tsx` | **5 passed** |
+| `HostsScreenRemoteDesktopAcceptance.cy.tsx` (node 7 regression) | **4 passed** |
+
+The four integration tests named in *Acceptance tests* above **did not exist** — the red phase
+wrote none for `screen_sharing_service.rs`, which had no test module at all, and left all five
+host-scoped RPCs as `unimplemented!()`. They were written during green, under the names planned
+here, and each was **mutation-checked** rather than trusted on a first-run green — the same
+vacuous-pass failure this document already records for three Cypress tests. One of them
+(`starting_a_session_desktop_still_works_unchanged`) passed its first mutation because it restated
+the production function; it now asserts the literal session key shape.
+
+`AC-10` is guarded against the same vacuity: the daemon passes *no* argv at all, so "the password
+is not in argv" is trivially true. The test first asserts the password **is** in the JSON the
+bridge read from stdin, so a password that never travelled fails before the argv assertion.
+
+### ⚠ The media-gating spec asserted a condition it never constructed
+
+`offers connect over a media carrying connection but not over one without media` built its negative
+half by changing the **daemon directory list**. That has nothing to do with the connection registry:
+`withSelectedDaemon` always injects a `Room`, and `LiveKitConnectionProvider.connectHost`
+(`liveKit.tsx:258`) claims every host once a room exists, with all three capabilities. Both halves
+therefore mounted an identical media-capable connection, and the test passed against a component
+that never rendered the action at all — the third instance of this failure mode in this node.
+
+Both halves now mount over a **stated** wire (`aHostConnection(HOST)` + `room={null}`), the pattern
+`cypress/support/rpc/hostConnections.ts` documents for precisely this and that
+`PresenceCapabilityGatingAcceptance.cy.tsx` already uses. The contrast is now within one mount shape
+differing only in capabilities, so neither a never-render nor an always-render component passes.
+
+### ⚠ Input forwarding does not exist to reuse — AC-3 is blocked on a scope decision
+
+`## Responsibility` says this node mounts the existing overlay "with input forwarding", and
+`## Boundaries` says it does **not** change `ScreenSharingOverlay` or `vncInput.ts` because it
+"reuses them". Both cannot hold:
+
+- `ScreenSharingOverlay.tsx`'s only key/mouse handlers are **Escape-to-close** and
+  **click-outside-to-close** (lines 65-85). It forwards nothing to the remote desktop.
+- `vncInput.ts` is referenced by **nothing in production** — only by its own `vncInput.test.ts`.
+  It is orphaned from a `VncOverlay` that no longer exists.
+
+So AC-3 is new plumbing in a file this node's boundaries forbid it to touch, not a reuse. Left
+unimplemented and marked, rather than silently widening the boundary or quietly dropping the AC.
+Marked `TODO(#hosts-screen 8/8)` at `HostDesktopOverlay.tsx:132`.
+
+### ⚠ AC-7's browser half is unimplemented — its planned spec was never written
+
+*Acceptance tests* names `prompts_for_a_desktop_password_without_persisting_it`; that spec is absent
+from `HostDesktopConnectAcceptance.cy.tsx`. The **daemon** half is complete and tested —
+`StartHostStream` decrypts `encrypted_password` with node 6's `HostKeypair::decrypt`, uses it, drops
+it, persists nothing. The **browser** half — prompting over node 6's channel and encrypting the
+answer — is not implemented, and no test covers it. Marked `TODO(#hosts-screen 8/8)` at
+`HostDesktopOverlay.tsx:101`.
+
+### Open decisions a reviewer should weigh
+
+- **Room:** a host desktop publishes into the daemon's configured `livekit.common_room` — a session
+  has a room in its metadata, a host has none, and the common room is the one a browser already
+  holds a token for on this screen. A daemon with none configured gets `FAILED_PRECONDITION`.
+  Deliberately not gated on `livekit.enabled`, which governs whether *this daemon* joins.
+- **Bridge identity** is `screenshare-host-{instance_id}-{target_id}`; the host id must be present
+  because every host's bridge lands in the same common room. Track name is unchanged.
+- **`add_host_target` stores the protocol as sent**, mirroring the session path's
+  `unwrap_or(Unspecified)` posture rather than rejecting an unknown value; the spawn path logs and
+  skips an unusable target. Pattern-consistency was chosen over an untested validation branch.
+
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-desktop-connect-initial-discovery.md`)
@@ -276,7 +355,7 @@ property as verified forever.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
