@@ -1,8 +1,9 @@
 # Host tooling on the Hosts screen
 
 Every row of the Hosts screen reports what that host has installed and configured: the **git
-identity** its commits would carry, the state of the **GitHub CLI** on it, and the **ssh-agent** it
-has, with the keys that agent is holding.
+identity** its commits would carry, the state of the **GitHub CLI** on it, the **ssh-agent** it has
+with the keys that agent is holding, and whether a **remote desktop** on it can be reached — and
+bridged.
 
 ## Motivation
 
@@ -14,12 +15,17 @@ its agent holds no key its remotes accept, the operator finds out from the resul
 the fleet list. A clone or push that fails for want of a usable key reports a generic git error and
 nothing about why.
 
+The remote desktop is the same story told by a different failure. tddy bridges VNC and RDP per
+session, but the session flow asks nothing about availability first: a host with no desktop serving,
+or a daemon with no bridge binary to spawn, is discovered only when the stream fails to start — after
+the operator has already asked for one.
+
 This is the first *capability probe* in tddy. The telemetry on the same row says how busy a machine
 is; this says whether work on it will succeed.
 
 ## What a row shows
 
-Three sections, each labelled with the tool it speaks for.
+Four sections, each labelled with the tool it speaks for.
 
 | Cell | State | Reading |
 |---|---|---|
@@ -33,14 +39,25 @@ Three sections, each labelled with the tool it speaks for.
 | ssh-agent | agent, no keys | "No keys loaded" — an agent is running and holds nothing |
 | ssh-agent | no agent | "No agent" — nothing answered for that host's OS user |
 | ssh-agent | could not check | the probe failed, with the reason on hover |
+| remote desktop | bridge present | "Bridge ready" — this host's daemon has the bridge binary for that protocol |
+| remote desktop | no bridge | "No bridge" — nothing to spawn, whatever is or is not serving |
+| remote desktop | desktop serving | "Desktop on :5900" — something accepted a connection on the port named |
+| remote desktop | nothing serving | "No desktop on :5900" — the probe reached the host and nothing was listening |
+| remote desktop | could not check | "Could not check :5900", with the reason on hover |
+
+The remote-desktop section lists **both protocols, always** — VNC on `:5900` and RDP on `:3389` —
+including the ones nothing answered for. "No desktop on :5900" is a finding, and a row that listed
+only the protocols that answered could not be told apart from one where nobody looked.
 
 A host that has not answered yet renders a waiting marker, and a platform that cannot run the probes
-at all says so. Neither borrows the shape of a finding.
+at all says so. Neither borrows the shape of a finding. The desktop section is the exception to the
+second half: it is a TCP connect to the host's own loopback plus a check that a file exists, so it
+answers on every platform and is never reported as unsupported.
 
 ## Absence is reported, never blanked
 
 Every one of these states sends an operator somewhere different, so none of them collapses into an
-empty string or into another. Three distinctions carry the whole design:
+empty string or into another. Four distinctions carry the whole design:
 
 - **"Could not check" is not "not configured".** One is a host to go and fix; the other is a probe
   to go and fix. A failed probe rendered as a negative finding sends an operator to set an identity
@@ -51,6 +68,10 @@ empty string or into another. Three distinctions carry the whole design:
   answered can report an empty list; every other emptiness is "No agent" or "Could not check". An
   empty agent wants a key added, an absent one wants an agent started, and a failed probe wants
   looking at on the daemon side.
+- **"No desktop" is never said about a port nobody reached.** A refused connection is an answer —
+  we got to the host and nothing was listening. A timeout, an unreachable network or a denied
+  connect is not: it reads "Could not check", with the port and the reason. A row that keyed off
+  reachability alone would report "No desktop" for a host it never touched.
 
 A half-configured host — a `user.name` with no `user.email`, or the reverse — reports "not
 configured". Git refuses to commit without both, so such a host has no identity its commits would
@@ -87,6 +108,27 @@ A certificate is listed under its own type (`ssh-ed25519-cert-v01@openssh.com`) 
 of the key it certifies — which is what `ssh-add -l` shows for one, so the row and the operator's own
 terminal agree.
 
+## Two availabilities, and the row keeps them apart
+
+"This host has a desktop available" is two claims, and only one of them is about the desktop:
+
+| Fact | What it means | What a "no" asks for |
+|---|---|---|
+| **Bridge capability** | this host's daemon can spawn a VNC/RDP bridge at all | install the bridge binary on that host |
+| **Desktop reachability** | something is serving a desktop on the checked port | start a desktop server, or look at the port |
+
+They are independent — a host can serve a desktop that tddy has no bridge for, and a host with both
+bridges installed can be serving nothing — so the row shows both, side by side, and never one
+merged verdict. Merged, "unavailable" sends an operator to the wrong machine's worth of work.
+
+**The port that was checked is always named.** Only the default ports are probed, and a host is free
+to serve on another display; "No desktop" without a port reads as authoritative about the host
+rather than about `:5900`. Discovering non-default ports is not part of this.
+
+**The probe is a bare TCP connect, closed immediately — never a protocol handshake.** The screen
+would otherwise be pointing half-open RFB handshakes at people's desktops on a timer, and the
+connect already answers the question being asked.
+
 ## What a supervised host can report
 
 On a host installed with `./install --systemd`, the daemon runs as an unprivileged service account.
@@ -105,7 +147,7 @@ the socket the read side resolved. It needs a privileged path to it, which is a 
 ## Reporting, and the one action
 
 The probes themselves change nothing. There is no "configure git" and no "log in" action, and no
-general "run this on host X" primitive exists — the daemon runs three fixed probes and nothing else.
+general "run this on host X" primitive exists — the daemon runs a fixed set of probes and nothing else.
 
 The ssh-agent section carries the screen's **only** write action: **loading a key into that host's
 agent**, offered on a row whose agent answered, and only there. A host whose agent did not answer
@@ -115,6 +157,9 @@ persisted, logged or written to disk. That flow is its own feature —
 [hosts-screen-add-key.md](./hosts-screen-add-key.md) — and nothing else on the row writes anything.
 
 Removing a key from an agent, and generating one, are not offered.
+
+The desktop section starts no stream and opens no viewer either: it reports what is reachable, and
+opening it is [PR #460](https://github.com/uppin/tddy-coder/pull/460).
 
 ## Relationship to the rest of the screen
 
@@ -144,18 +189,30 @@ than subscribed to, and only for hosts that are online.
 - [x] A key's comment is presented as a comment, never as a file path.
 - [x] The agent is resolved for the host's **own** OS user, matching the git and `gh` probes.
 - [x] The row renders each fingerprint whole, never truncated into ambiguity.
+- [x] A host serving VNC on the checked port reports VNC reachable.
+- [x] A host serving RDP on the checked port reports RDP reachable.
+- [x] A host serving neither reports both unreachable, naming the ports checked.
+- [x] A host whose bridge binary is missing reports that it cannot bridge — distinctly from a
+      desktop being unreachable.
+- [x] A probe that could not reach a port reads as a probe failure, distinct from "no desktop".
+- [x] The probe never performs a protocol handshake — a bare TCP connect, closed immediately.
+- [x] The row shows bridge capability and desktop reachability separately and never conflates them.
 
 ## Not yet reachable in the running app
 
-⚠ **No screen mounts these cells.** `HostRowTooling` — and with it the ssh-agent section — is not
-rendered by `HostsScreen` or any other component in `packages/tddy-web/src`; nothing there issues
-`GetHostTooling` either. Its only call sites are the Cypress component specs, which mount it
-directly.
+⚠ **No screen mounts these cells.** `HostRowTooling` — and with it the ssh-agent and remote-desktop
+sections — is not rendered by `HostsScreen` or any other component in `packages/tddy-web/src`;
+nothing there issues `GetHostTooling` either. Its only call sites are the Cypress component specs,
+which mount it directly.
 
 So everything above is implemented, tested and reachable over the wire, and **an operator cannot see
 any of it yet**. Mounting the section on the Hosts row belongs to the node that owns that row. Until
 then this page describes a contract rather than a screen someone can open, and the assembled path
 — row → RPC → probe → cells — has never run.
+
+The remote-desktop section is mounted by `HostRowTooling` behind an optional prop, the way the
+ssh-agent section is, so it comes along the moment that row is mounted and needs no separate wiring
+of its own. It fetches nothing itself.
 
 ## Technical reference
 
@@ -164,3 +221,5 @@ then this page describes a contract rather than a screen someone can open, and t
 - Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md)
 - Feature: [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into the agent this
   section reports on
+- Related: [`screen-sharing-sessions.md`](./screen-sharing-sessions.md) — the per-session VNC/RDP
+  bridging whose binaries the desktop section checks for

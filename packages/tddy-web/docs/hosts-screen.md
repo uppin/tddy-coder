@@ -44,9 +44,10 @@ screen has no "known since" column and an unrendered field is surface every late
 to keep mapping for nothing.
 
 **`HostRowTooling`** renders a host's tooling facts — the git identity its commits would carry, the
-state of the GitHub CLI there, and the ssh-agent it has. It takes `{instanceId, git, githubCli,
-sshAgent}` and nothing else: the blocks arrive as props rather than being fetched, so the section is
-a pure rendering of one `GetHostTooling` answer and mounts wherever the row places it.
+state of the GitHub CLI there, the ssh-agent it has, and whether a remote desktop on it is reachable.
+It takes `{instanceId, git, githubCli, sshAgent, remoteDesktop}` and nothing else: the blocks arrive
+as props rather than being fetched, so the section is a pure rendering of one `GetHostTooling` answer
+and mounts wherever the row places it.
 
 Its state machine is written **guard-first**: `unanswered()` runs before either block's own states
 are consulted, and only `ProbeOutcome.OK` passes through to a finding. That direction is the point.
@@ -75,12 +76,37 @@ matches nothing in an operator's own `ssh-add -l`. The comment is rendered in it
 suggesting it locates anything: the agent does not know which file a key came from, and a comment is
 free text.
 
+**`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, readings}` — one reading per
+probed protocol, and an absent block renders as an empty list rather than a fabricated one. Each
+reading becomes one `hosts-row-<id>-<vnc|rdp>` span holding **two facts side by side**: the bridge
+half (`Bridge ready` / `No bridge`) and the desktop half (`Desktop on :5900` / `No desktop on :5900`
+/ `Could not check :5900`). They are never merged, because a host can serve a desktop tddy has no
+bridge for and a host with the bridge installed can be serving nothing — and the two "no"s ask for
+work on different things.
+
+The desktop half repeats the same outcome-first guard the other sections use: anything other than
+`ProbeOutcome.OK` reads "Could not check", with `failureReason` on the `title`. Keying off
+`desktopReachable` alone would render "No desktop" for a host the daemon never reached, which is the
+one thing this section exists not to say. The bridge half is rendered in every outcome, because it
+is an existence check answered independently of the connect and a refused connect tells us nothing
+new about it — where a reading never came back at all, the daemon sends the neutral `canBridge:
+false` that renders as "No bridge".
+
+`PROTOCOL_NAMES` maps `screen_sharing.proto`'s `Protocol` values (`1` → VNC, `2` → RDP), the same
+values the daemon puts on the wire rather than a second enumeration of them. A reading for any other
+value renders **nothing**: `protocol` is an open proto3 value, a newer daemon can probe a protocol
+this bundle cannot name, and there is no label to put on it — inventing one, or rendering a nameless
+row of facts, would be worse than omitting it.
+
+The port is part of every desktop string rather than a separate cell. Only default ports are probed,
+so "No desktop" on its own would read as authoritative about a host that simply serves elsewhere.
+
 ⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
 issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
 are covered, and the assembled path — row → RPC → probe → cells — has never run. Mounting it belongs
-to the node that owns the row. Everything `HostRowSshAgent` mounts inherits that limit, including the
-add-key action below: it is wired, covered and reachable over the wire, and an operator cannot yet
-open a screen that shows it.
+to the node that owns the row. Everything `HostRowTooling` mounts inherits that limit —
+`HostRowSshAgent`, `HostRowRemoteDesktop`, and the add-key action below: each is wired, covered and
+reachable over the wire, and an operator cannot yet open a screen that shows it.
 
 ## Adding a key to a host's agent
 
@@ -244,7 +270,7 @@ One `<tr>` per host, in a `hosts-table`, columns left to right:
 
 An empty list renders `hosts-empty` ("No hosts recorded yet.") instead of the table.
 
-**Tooling cells.** `HostRowTooling` renders three sections under `hosts-row-<id>-tooling`, each
+**Tooling cells.** `HostRowTooling` renders four sections under `hosts-row-<id>-tooling`, each
 labelled with the tool it speaks for:
 
 | Cell | Test id | Reading |
@@ -252,9 +278,17 @@ labelled with the tool it speaks for:
 | git | `hosts-row-<id>-git` | `Name <email>` · `Not configured` · `Could not check` · `Not supported here` · `…` |
 | gh | `hosts-row-<id>-gh` | the login · `Not authenticated` · `Not installed` · `Could not check` · `Not supported here` · `…` |
 | ssh-agent | `hosts-row-<id>-ssh-agent` | one `hosts-row-<id>-ssh-key-<fingerprint>` per held key · `No keys loaded` · `No agent` · `Could not check` · `Not supported here` · `…` |
+| remote desktop | `hosts-row-<id>-remote-desktop` | one `hosts-row-<id>-vnc` and one `hosts-row-<id>-rdp`, each `Bridge ready`/`No bridge` · `Desktop on :<port>`/`No desktop on :<port>`/`Could not check :<port>` |
 
 "Could not check" and "Not configured" are deliberately different strings, because they send an
-operator to two different places and only one of them is a host to go and fix.
+operator to two different places and only one of them is a host to go and fix. The desktop section
+draws the same line twice over: `No bridge` against `No desktop`, and both against
+`Could not check`.
+
+The per-protocol test ids sit **beside** the section's own rather than under it
+(`hosts-row-<id>-vnc`, not `hosts-row-<id>-remote-desktop-vnc`), which keeps a protocol assertion a
+direct lookup instead of a nested one — and the section id stays available for asserting that the
+block is there at all.
 
 The `gh` label is static and present in **every** state, and that is what the `title` attribute
 exists for: it names the login as *this host's*, distinguishing it from the tddy session user in
@@ -303,6 +337,20 @@ comment rather than a path, an outcome this bundle cannot name, and a host that 
 
 `hostSshAgentPage` on the same page object owns the ssh-agent section's selectors, including the
 prefix match over `hosts-row-<id>-ssh-key-` that collects the held keys.
+
+`cypress/component/HostsScreenRemoteDesktopAcceptance.cy.tsx` mounts `HostRowRemoteDesktop` directly
+and covers four behaviours: both protocols reported for one host, a host that cannot bridge told
+apart from one with nothing serving, the checked port named when reporting unreachable, and a failed
+probe told apart from a negative finding.
+
+Two of those tests assert a **denial** as well as a presence — `No desktop` must not also read
+`No bridge`, and `Could not check` must not read `No desktop`. A spec asserting only that its own
+string is present passes for a component that collapses the two facts into one verdict, which is the
+exact bug the section exists to prevent. `aReading` builds a fully-populated reading and takes
+overrides, so each test states only the field it is about.
+
+`hostRemoteDesktopPage` on the page object exposes `section(id)` and `protocol(id, "vnc" | "rdp")`,
+so a test names a protocol rather than a test id.
 
 `hostToolingPage` on that same page object owns the tooling section's DOM contract, and
 `expectGhLoginLabelledAsHosts` is why it has to. The cell renders a static `gh` label in every

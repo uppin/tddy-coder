@@ -125,6 +125,16 @@ desktop with input and no picture is not a feature.
 See [capability gating](../../../packages/tddy-web/docs/capability-gating.md) for the rule all the
 media and presence surfaces share.
 
+## Host-level reachability is reported elsewhere
+
+Everything above is scoped to a **session**: a target belongs to one, its credentials live in that
+session's directory, and a stream is started from that session's inspector. Whether a *host* has a
+desktop to reach in the first place is a separate question, answered on the Hosts screen — per host
+and per protocol, on the default ports, and as two distinct facts: whether that host's daemon can
+spawn a bridge at all, and whether anything is serving a desktop there. That reporting starts no
+stream and touches no target or vault. See
+[`hosts-screen-tooling.md`](./hosts-screen-tooling.md).
+
 ## Out of scope (MVP)
 
 - Audio forwarding

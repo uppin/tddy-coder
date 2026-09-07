@@ -2,10 +2,10 @@
 
 What a host has installed and configured, as opposed to how busy it is.
 
-`host_stats.rs` reports load. `host_tooling.rs` reports the three facts that decide whether work on
-a host will actually succeed: the git identity its commits would carry, whether the GitHub CLI there
-is authenticated, and whether an ssh-agent is holding a key its remotes would accept. It backs the
-web's Hosts rows
+`host_stats.rs` reports load. `host_tooling.rs` reports the facts that decide whether work on a host
+will actually succeed: the git identity its commits would carry, whether the GitHub CLI there is
+authenticated, whether an ssh-agent is holding a key its remotes would accept, and whether a desktop
+on it can be reached — and bridged. It backs the web's Hosts rows
 ([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)) through the
 `GetHostTooling` RPC ([connection-service.md](./connection-service.md)).
 
@@ -28,8 +28,9 @@ is the anti-pattern [the testing guide](../../../docs/dev/guides/testing.md) nam
 branch inside the probe is not an alternative — CLAUDE.md forbids code paths that only work under
 test, so the substitution point is a trait and nothing else.
 
-`HostTooling` is `{ git: GitIdentity, github_cli: GithubCliStatus, ssh_agent: AgentStatus }`, and
-each part carries a `ProbeOutcome` **before** its findings:
+`HostTooling` is
+`{ git: GitIdentity, github_cli: GithubCliStatus, ssh_agent: AgentStatus, remote_desktop: Vec<DesktopReachability> }`,
+and each part carries a `ProbeOutcome` **before** its findings:
 
 | `ProbeOutcome` | Meaning |
 |---|---|
@@ -98,8 +99,8 @@ up. None of those is evidence of absence.
 
 ## Running as the host's OS user
 
-All three facts are per-user: `git config --global` reads `$HOME/.gitconfig`, `gh auth status`
-reads `$HOME/.config/gh/hosts.yml`, and an agent socket belongs to one login. A probe run as the
+Three of the four facts are per-user: `git config --global` reads `$HOME/.gitconfig`, `gh auth
+status` reads `$HOME/.config/gh/hosts.yml`, and an agent socket belongs to one login. A probe run as the
 daemon's own user answers for a different account, so the two commands go through
 `spawner::start_output_as_user`, which resolves the user with `getpwnam_r`, sets
 `HOME` and `PATH`, chdirs into that home, and drops privilege in `pre_exec`
@@ -110,6 +111,11 @@ user or reading the wrong `$HOME` — precisely the answer these callers exist t
 The agent is scoped to the same user by a different route: nothing is spawned for it, so there is
 no privilege to drop. The socket is located from the user's **uid** instead — see
 [The ssh-agent](#the-ssh-agent) below.
+
+The desktop readings are the one part of the answer that is scoped to **no** user: a desktop is
+served by the host, not by one of its accounts, and the bridge binary belongs to the daemon rather
+than to whoever is logged in. Nothing there spawns anything, so `os_user` never reaches it — see
+[Remote desktop](#remote-desktop) below.
 
 `--global` is load-bearing on the git reads. Without it, git also reads the **repo-local** config
 for the process's cwd — and the probe's cwd is the target user's home, which is itself a work tree
@@ -124,15 +130,19 @@ probe exists to report. Any other code is a failure, and so is a signal.
 ## One deadline, and a child that is actually ended
 
 `PROBE_TIMEOUT` is 5 s for the whole probe, not per command. All three commands (`user.name`,
-`user.email`, `gh auth status`) and the agent conversation beside them are **started** before any is
-collected, so the Hosts screen waits for the slowest rather than the sum, and a `gh` that reaches the
-network cannot decide how long the git answer takes.
+`user.email`, `gh auth status`), the agent conversation and the desktop connects beside them are all
+**started** before any is collected, so the Hosts screen waits for the slowest rather than the sum,
+and a `gh` that reaches the network cannot decide how long the git answer takes.
 
 The agent is started **first and collected first**. It carries its own, shorter bound, and a struct
 literal evaluates its fields in order — so collecting it after `gh`, which can reach the network,
 would fail it for time `gh` had spent. Reaching `PROBE_TIMEOUT` on it therefore means it had the
 whole deadline and never came back, which is `AgentStatus::failed` and never the empty key list an
 operator would read as "this host has no keys loaded".
+
+The desktop readings are collected next, and for the same reason: both self-bounding probes are
+gathered into locals **before** the `HostTooling` literal is built, rather than sitting in it as
+fields. See [Field order is the deadline](#field-order-is-the-deadline).
 
 The shape that makes the deadline enforceable:
 
@@ -345,6 +355,152 @@ Carried here because none of them is visible from a passing test run:
   That is what `ssh-add -l` shows, and it is stated here because the two halves of one row coming
   from two different blobs is otherwise a surprise.
 
+## Remote desktop
+
+`remote_desktop_probe.rs` answers the fourth question, and it is really two questions that only look
+like one:
+
+| Fact | Question it answers | How |
+|---|---|---|
+| `can_bridge` | can tddy stream a desktop from this host **at all**? | the resolved bridge binary exists |
+| `desktop_reachable` | is anything **serving** a desktop here? | a bounded TCP connect |
+
+They are independent, and both are answered on every reading — a host that cannot bridge cannot
+bridge whether or not a desktop is up. Collapsing them into one "available" flag would send an
+operator to the wrong fix: "install the bridge" and "start a VNC server" are unrelated problems with
+nothing in common but the row they would share.
+
+`DesktopReachability` is `{ outcome, protocol, can_bridge, desktop_reachable, port }`, and
+`PROBED_PROTOCOLS` is both of them — `Vnc` on **5900**, `Rdp` on **3389**. Both are reported for
+every host, including the ones nothing answered for, because "no desktop on :5900" is a finding and a
+block listing only the protocols that answered could not be told apart from one where nobody looked.
+
+**The checked port always travels with the answer.** Port discovery is out of scope, so an
+unreachable reading is only ever a statement about the port named beside it; without that port,
+"unavailable" reads as authoritative for a host that simply serves on a display other than `:0`.
+
+### A connect, and not one byte more
+
+`is_accepting_connections(host, port)` opens a `TcpStream` with `connect_timeout` and drops it. That
+is the whole interaction: **nothing is written**, so no protocol handshake is ever begun. A
+monitoring screen polling half-open RFB handshakes against people's desktops on a timer is
+antisocial, and the connect already answers the question being asked. The rudeness guard is a test
+rather than this paragraph — see [Testing](#testing).
+
+`CONNECT_TIMEOUT` is **750 ms**, deliberately far inside `PROBE_TIMEOUT`. The Hosts screen probes
+every host it lists, for both protocols, on every poll, and an address that black-holes packets must
+not be able to hold the tooling RPC open.
+
+The address is always this daemon's own loopback (`PROBE_HOST`, `127.0.0.1`). Each daemon reports for
+the machine it runs on, so a desktop served on another host's loopback is that daemon's reading to
+take rather than this one's — which is what makes `GetHostTooling`'s existing peer routing the only
+fan-out this block needs.
+
+### A refusal is a finding; anything else is a failure
+
+The classification is one `match`, and it is the point of the module:
+
+- `Ok(_)` — something accepted the connection. `desktop_reachable: true`.
+- `Err` with `ErrorKind::ConnectionRefused` — we reached the host and nothing is listening there.
+  That is an **answer**: `Ok(false)`, and the reading is `ProbeOutcome::Ok` with
+  `desktop_reachable: false`.
+- **every other `Err`** — a timeout, an unreachable network, a permission denial — means the probe
+  got no answer at all. It becomes `ProbeOutcome::Failed(reason)`, with `desktop_reachable: false`
+  because a flag has to say something and `false` is the neutral value.
+
+So one protocol on one host has four distinguishable states, and the outcome is the only thing that
+separates "nothing is serving" from "we could not check":
+
+| State | `outcome` | `can_bridge` | `desktop_reachable` |
+|---|---|---|---|
+| bridge present, desktop serving | `Ok` | `true` | `true` |
+| bridge present, nothing serving | `Ok` | `true` | `false` |
+| desktop serving, no bridge here | `Ok` | `false` | `true` |
+| we could not check | `Failed(reason)` | as found | `false` |
+
+**"We checked and the answer is no" is not "we could not check."** A reader keying off
+`desktop_reachable` alone would report "No desktop" for a host it never reached, which is the same
+class of fabricated fact as reporting an authenticated `gh` as logged out. That is why the outcome
+travels with every reading rather than being inferred from the flags, and it is the same rule
+`classify_gh_auth_status` follows one section above.
+
+### The bridge check is the cheaper win
+
+`resolve_vnc_binary_path` / `resolve_rdp_binary_path` (`crate::config`) resolve a path by *guessing*
+— explicit config, then a sibling of `current_exe()`, then a bare name on `PATH` — with **no
+existence check anywhere**. A missing binary surfaces only as a spawn error in
+`screen_sharing_service`, i.e. after an operator has already asked for a stream. Checking it up front
+turns that error into a fact on the row, and it costs a `stat`.
+
+`binary_is_present` splits on whether the resolution has a directory in it:
+
+- a path **with** a directory is `is_file()`-ed directly;
+- a **bare name** — the resolvers' last resort, which they hand to the OS to look up on `PATH` — is
+  searched along `PATH` too.
+
+The second half is the whole reason the function exists. `Path::new("tddy-vnc").exists()` answers
+about the **daemon's working directory**, which is not where the OS would find it — and under
+`./install --systemd` there is no `WorkingDirectory=` at all, so that question is about `/`. It would
+report "cannot bridge" for a bridge that is genuinely installed: the same conflation this module
+exists to prevent, pointing the other way.
+
+Resolution **order** is untouched. This module only asks whether what the resolvers return is there.
+
+### It checks the path this daemon would really spawn
+
+`TcpRemoteDesktopProbe` carries a `DaemonConfig`, and `bridge_binary_is_present` is a method on it,
+because an existence check is worth no more than the path it checks. An operator who sets
+`screen_sharing.vnc_binary_path` must have **that** path tested; answering from
+`DaemonConfig::default()` would report a configured, installed bridge as absent.
+
+The configuration therefore reaches it by construction, not by lookup:
+`SubprocessHostToolingProbe::for_config(&config)` builds the probe from the daemon's own
+configuration, and `connection_service.rs` hands it the live `config` it already has in scope — the
+same value `LocalOnlyEligibleDaemonSource::for_config` is built from a few lines earlier. `Default` still
+resolves against `DaemonConfig::default()`, which is exactly what a daemon with no `screen_sharing:`
+block spawns.
+
+### Field order is the deadline
+
+`start_desktop_probes` starts one connect per protocol on a thread of its own and waits for none of
+them; `desktop_readings_of` then waits on each channel until the shared deadline. A reading that
+never arrives becomes `desktop_probe_failed` — `Failed`, naming the protocol and the port, and never
+the "nothing is serving here" finding an operator would act on. Since a connect bounds itself at
+`CONNECT_TIMEOUT`, reaching `PROBE_TIMEOUT` here means the reading did not come back at all.
+
+The readings are then collected into a local **before** the `HostTooling` literal is built, beside
+`ssh_agent` and for the identical reason: **a struct literal evaluates its fields in order.** With
+`remote_desktop` sitting last in the literal, two bounded connects would be judged on whatever `git`
+and `gh` had left of the shared deadline — and `gh` can reach the network. The block would then
+report a host as unprobeable for time another probe spent, which is the one thing it must never
+claim.
+
+### On the wire
+
+`HostRemoteDesktop` (`connection.proto`) carries `{ outcome, protocol, can_bridge,
+desktop_reachable, port, failure_reason }`, and `GetHostToolingResponse.remote_desktop` is
+`repeated` — one entry per probed protocol, beside the git, `gh` and ssh-agent blocks rather than on
+an RPC of its own.
+
+`protocol` is an `int32` holding **`screen_sharing.proto`'s `Protocol` values** (`1` = VNC, `2` =
+RDP), which `DesktopProtocol`'s discriminants mirror rather than restate. A second enum meaning the
+same thing is how two enums drift apart, and this one would have to agree with the service that
+actually spawns the bridges.
+
+`host_remote_desktop_message` is the one conversion, and it keeps `can_bridge` and
+`desktop_reachable` as two fields for the reason they are two facts.
+
+### What this block does not do
+
+It reports. It starts no stream, spawns no bridge, opens no viewer, and creates no host-scoped target
+or vault — `ScreenSharingService`, its per-session targets and its vault are untouched, and its
+resolution order along with them. Opening a host's desktop from the Hosts screen is
+[PR #460](https://github.com/uppin/tddy-coder/pull/460).
+
+**Known cost.** Probing on every screen refresh is a TCP connect per host per protocol. If a fleet
+makes that noticeable, the fix is a short-TTL cache in front of the block; it is recorded rather than
+pre-optimised.
+
 ## Failures are logged
 
 `Failed` is the one outcome whose cause lives on the daemon's side of the wire — a missing tool, a
@@ -352,11 +508,29 @@ refused spawn, a timeout. `warn_if_failed` writes one `log::warn!` per failed pa
 ssh-agent — naming the OS user and the reason, because without it the only trace of a broken probe is a cell on a screen
 nobody may be looking at.
 
+`warn_if_a_desktop_probe_failed` does the same for the desktop block, once per failed reading and
+naming the protocol and the port instead of an OS user, because a desktop is not one account's. It
+is a separate function rather than a fourth call to `warn_if_failed` because that one takes the OS
+user it names, and passing it a user the reading was never scoped to would put a name in the log
+that means nothing.
+
 ## Non-Unix
 
-`start_output_as_user` is Unix-only, and so is a Unix-domain agent socket, so `probe` on every
-other target returns `ProbeOutcome::Unsupported` for all three parts. That is a property of the platform, not of the host's
+`start_output_as_user` is Unix-only, and so is a Unix-domain agent socket, so `probe` on every other
+target returns `ProbeOutcome::Unsupported` for git, `gh` and the agent. That is a property of the platform, not of the host's
 tooling, and it says so rather than surfacing an internal error an operator would try to fix.
+
+**The desktop block is the exception, and the `#[cfg(not(unix))]` arm probes it for real.** Nothing
+it does needs `start_output_as_user`: it is a TCP connect to this machine's own loopback plus an
+existence check on a path, and both answer on every platform. `Unsupported` for a probe that would
+have answered is as much a fabricated fact as a finding nobody made, so that arm starts the same
+`start_desktop_probes` and collects it through the same `desktop_readings_of` against the same
+`PROBE_TIMEOUT`, and calls `warn_if_a_desktop_probe_failed` afterwards like the Unix one. The code
+says so where a reader would otherwise assume symmetry with the three fields above it.
+
+That asymmetry is what `assert_was_probed_on_this_host` guards from the other side: the Unix tests
+assert git, `gh` and the agent are **not** `Unsupported` on a Unix host, since that is the one answer
+a Unix host can never honestly give for them.
 
 ## Testing
 
@@ -364,8 +538,10 @@ tooling, and it says so rather than surfacing an internal error an operator woul
 |---|---|---|
 | Unit | `host_tooling.rs` `#[cfg(test)]` | classification per outcome, and the timeout's kill-and-reap |
 | Unit | `ssh_agent.rs` `#[cfg(test)]` | the protocol exchange, the four outcomes, fingerprint derivation |
+| Unit | `remote_desktop_probe.rs` `#[cfg(test)]` | a real socket's behaviour: reachable, refused, no bytes written, and the bridge check against a configured path |
+| Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
 | Integration | `connection_service.rs` `#[cfg(test)]` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
-| Component | `packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx` | the states rendering distinguishably |
+| Component | `packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |
 
 Shelling out to the real `git` / `gh` was rejected: CI has an arbitrary `gh` state, and a suite that
 asserts against it is environment-dependent by construction. Talking to the developer's own
@@ -387,6 +563,32 @@ The fingerprint fixtures — a published ed25519 blob and an OpenSSH certificate
 against **`ssh-keygen -lf`'s own output**, not against this code's, so the assertions prove agreement
 with OpenSSH rather than self-consistency.
 
+**The desktop probe's harness is a real socket too.** `a_listener` binds `127.0.0.1:0` and
+`a_closed_port` binds one and drops it, so the reachable and the refused case are the kernel's own
+answers on an ephemeral loopback port — hermetic, needing no network, and unable to collide with a
+service the developer happens to be running. That matters because [the CI gate](../../../docs/dev/guides/ci.md)
+deliberately excludes the VM-backed and desktop suites, so anything here that reached a real desktop
+would be flaky where it ran at all.
+
+`writes_no_bytes_to_the_remote_before_closing` is the one test that could not be replaced by a
+mock: the listener **records what it received** and the assertion is that zero bytes arrived.
+"We do not handshake" is otherwise a comment rather than a fact.
+
+`reports_that_the_host_can_bridge_when_the_configured_binary_exists` writes a file into a `tempfile`
+directory and names it in a `DaemonConfig`, so the reading is about the configured path and never
+about what the machine running the suite has installed — the same rule the git and `gh` fakes follow.
+Its mirror, `reports_that_the_host_cannot_bridge_when_the_binary_is_missing`, asserts a **reachable**
+desktop with **no** bridge in the same reading, which is the pair of facts a single flag could not
+carry.
+
+`host_tooling.rs`'s two integration tests inject a scripted `RemoteDesktopProbe` through
+`SubprocessHostToolingProbe::probing_desktops_with`, because what a connect finds depends on what is
+listening on the machine running the suite and a test may not depend on that. The seam is on
+`SubprocessHostToolingProbe` and not a second builder override on the service:
+`with_host_tooling` already substitutes the whole `HostTooling`, `remote_desktop` included, so a
+parallel `with_remote_desktop_probe` would have had no caller — and dead surface is worse than a
+missing one.
+
 `ProbeOutcome::Failed` carries its reason as a `String` for an operator to read, not for a caller to
 parse. Nothing branches on the text.
 
@@ -402,3 +604,5 @@ parse. Nothing branches on the text.
   injectable-trait shape
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
 - Web: [packages/tddy-web/docs/hosts-screen.md](../../tddy-web/docs/hosts-screen.md)
+- Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
+  — the per-session bridging whose binaries the desktop block checks for
