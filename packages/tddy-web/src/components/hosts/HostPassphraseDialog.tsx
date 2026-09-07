@@ -5,9 +5,11 @@
  * before making a call. Here the host raised the question on `StreamHostPrompts` and is blocked
  * until an answer comes back.
  *
- * The dialog always names the host and shows its public-key fingerprint, so an operator can verify
- * out of band before handing over a secret. A **changed** key blocks submission entirely rather than
- * warning and proceeding.
+ * The dialog always names the host and shows its public-key fingerprint — the one derived from the
+ * key that will do the encrypting, which is what its caller passes — so an operator can verify out
+ * of band before handing over a secret. A **changed** key blocks submission entirely rather than
+ * warning and proceeding, and is released only by an operator who says, in two deliberate steps,
+ * that they checked the new key with the host itself.
  *
  * The encryption happens *here*, not in the caller: the plaintext then exists only inside this
  * component's state, and every path out of the dialog carries ciphertext. A caller handed the
@@ -22,8 +24,15 @@ export interface HostPassphraseDialogProps {
   hostId: string;
   /** What is being unlocked — e.g. the key file name. Never a secret. */
   subject: string;
-  /** The host's public-key fingerprint, shown for out-of-band verification. */
-  fingerprint: string;
+  /**
+   * The host's public-key fingerprint, shown for out-of-band verification.
+   *
+   * Derived by the caller from {@link HostPassphraseDialogProps.spkiDer}, never the string a prompt
+   * advertised beside it: an operator comparing this against the host is comparing the key their
+   * passphrase is encrypted under. `null` where none could be derived, which is a state that blocks
+   * anyway — see `underivable` on the verdict.
+   */
+  fingerprint: string | null;
   /** The host's published SPKI DER public key, which the answer is encrypted under. */
   spkiDer: Uint8Array;
   /**
@@ -37,13 +46,22 @@ export interface HostPassphraseDialogProps {
    * direction. Rendering it as an ordinary first sighting would let an active substitution look
    * routine, which is precisely what the pin exists to prevent.
    *
-   * `changed` blocks the answer. `unverified` warns and does **not**: a host that cannot be
-   * pin-checked has not been caught doing anything, and refusing here would make the feature
-   * unusable in any browser that will not store a pin.
+   * `changed`, `mismatched` and `underivable` block the answer. `unverified` warns and does **not**:
+   * a host that cannot be pin-checked has not been caught doing anything, and refusing here would
+   * make the feature unusable in any browser that will not store a pin.
    */
   keyContinuity: KeyPinVerdict;
   /** Receives the RSA-OAEP ciphertext — the passphrase itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
+  /**
+   * The operator has verified the changed key with the host and accepts it as the new pin.
+   *
+   * Offered for `changed` alone. A rotated host key would otherwise lock the operator out of their
+   * own host permanently — the daemon regenerating `host-prompt-key.pem` is enough to cause it —
+   * with no remedy short of clearing browser storage. `mismatched` gets no such path: a frame whose
+   * two halves contradict each other is not a key anybody can choose to trust.
+   */
+  onAcceptChangedKey: () => void;
   onCancel: () => void;
 }
 
@@ -54,17 +72,23 @@ export function HostPassphraseDialog({
   spkiDer,
   keyContinuity,
   onSubmit,
+  onAcceptChangedKey,
   onCancel,
 }: HostPassphraseDialogProps): React.ReactElement {
   const keyChanged = keyContinuity.kind === "changed";
   const keyUnverified = keyContinuity.kind === "unverified";
+  const keyMismatched = keyContinuity.kind === "mismatched";
+  const keyUnderivable = keyContinuity.kind === "underivable";
   const [passphrase, setPassphrase] = useState("");
   const [encrypting, setEncrypting] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [changeVerified, setChangeVerified] = useState(false);
 
   // Empty is refused because an empty answer only wastes the host's single-use prompt; `encrypting`
-  // is refused because one prompt accepts exactly one answer.
-  const blocked = keyChanged || encrypting || passphrase.length === 0;
+  // is refused because one prompt accepts exactly one answer. The three key states are refused for
+  // three different reasons, spelled out beside their notices below.
+  const keyBlocks = keyChanged || keyMismatched || keyUnderivable;
+  const blocked = keyBlocks || encrypting || passphrase.length === 0;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -103,16 +127,65 @@ export function HostPassphraseDialog({
         <p className="text-xs text-muted-foreground">
           {hostId} is waiting to unlock {subject} and load it into its ssh-agent.
         </p>
-        <p className="text-xs text-muted-foreground break-all">
-          Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
-        </p>
+        {fingerprint !== null && !keyMismatched && (
+          <p className="text-xs text-muted-foreground break-all">
+            Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
+          </p>
+        )}
         {keyChanged && (
+          <>
+            <p
+              data-testid="host-key-changed-warning"
+              className="text-xs text-destructive border border-destructive rounded px-2 py-1"
+            >
+              This host&apos;s key has changed since you last answered a prompt from it. Verify the
+              fingerprint above with the host before sending anything.
+            </p>
+            <div className="flex flex-col gap-1 border border-border rounded px-2 py-1">
+              <label className="text-xs flex items-start gap-2">
+                <input
+                  data-testid="host-key-accept-confirm"
+                  type="checkbox"
+                  checked={changeVerified}
+                  onChange={(e) => setChangeVerified(e.target.checked)}
+                />
+                <span>
+                  I checked the fingerprint above with {hostId} itself, and its key changed because
+                  the host changed it.
+                </span>
+              </label>
+              <button
+                type="button"
+                data-testid="host-key-accept-submit"
+                disabled={!changeVerified}
+                onClick={onAcceptChangedKey}
+                className="self-end px-3 py-1 text-xs border border-destructive rounded hover:bg-muted disabled:opacity-50"
+              >
+                Accept this key for {hostId}
+              </button>
+            </div>
+          </>
+        )}
+        {keyMismatched && (
           <p
-            data-testid="host-key-changed-warning"
+            data-testid="host-key-mismatch-warning"
             className="text-xs text-destructive border border-destructive rounded px-2 py-1"
           >
-            This host&apos;s key has changed since you last answered a prompt from it. Verify the
-            fingerprint above with the host before sending anything.
+            This prompt contradicts itself: it advertises host key{" "}
+            <span className="font-mono break-all">{keyContinuity.advertisedFingerprint}</span>, but
+            the key it carries is{" "}
+            <span className="font-mono break-all">{keyContinuity.derivedFingerprint}</span>. A host
+            describing its own key gets it right, so something rewrote this in flight. Nothing can be
+            sent to it.
+          </p>
+        )}
+        {keyUnderivable && (
+          <p
+            data-testid="host-key-underivable-notice"
+            className="text-xs text-destructive border border-destructive rounded px-2 py-1"
+          >
+            This host&apos;s key cannot be checked or encrypted to from this page:{" "}
+            {keyContinuity.reason}. Nothing has been sent.
           </p>
         )}
         {keyUnverified && (
@@ -134,7 +207,7 @@ export function HostPassphraseDialog({
           type="password"
           autoComplete="off"
           value={passphrase}
-          disabled={keyChanged}
+          disabled={keyBlocks}
           onChange={(e) => setPassphrase(e.target.value)}
           className="border border-border rounded px-2 py-1 text-sm bg-background"
           placeholder="Passphrase"

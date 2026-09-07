@@ -901,8 +901,12 @@ impl Unpin for MpscHostStatsStream {}
 /// `packages/tddy-codegen/docs/server-streaming.md`, a handler whose stream can be silent must
 /// `tokio::select!` on `tx.closed()` as well as breaking on a send error, or its task leaks one per
 /// subscription forever. `stream_host_stats` escapes that only because it emits unconditionally.
+///
+/// Carries `Result` items rather than bare events, unlike `MpscHostStatsStream`: this RPC honours
+/// `daemon_instance_id`, and a feed served by a peer arrives as the frames-or-status channel
+/// [`ConnectionServiceImpl::stream_served_by_peer`] hands back.
 pub struct MpscHostPromptStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<HostPromptEvent>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<HostPromptEvent, Status>>,
 }
 
 impl Stream for MpscHostPromptStream {
@@ -912,11 +916,7 @@ impl Stream for MpscHostPromptStream {
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
+        self.rx.poll_recv(cx)
     }
 }
 
@@ -1040,6 +1040,10 @@ fn ssh_agent_message(agent: &crate::ssh_agent::AgentStatus) -> HostSshAgent {
 ///
 /// The three cases read very differently to whoever is at the dialog: one says try again, one says
 /// start over, and one says someone else already answered this.
+///
+/// "No prompt is waiting on that answer" also covers a prompt raised by a **different** operator,
+/// deliberately: the two must be indistinguishable, or the endpoint tells any authenticated caller
+/// which prompt ids are live. See [`HostPromptRegistry::answer`].
 fn rejection_reason(rejection: &AnswerRejection) -> String {
     match rejection {
         AnswerRejection::UnknownPrompt => "no prompt is waiting on that answer".to_string(),
@@ -1062,6 +1066,13 @@ async fn answer_before_expiry(handoff: AnswerHandoff, prompt: &PendingPrompt) ->
     tokio::time::timeout(remaining, handoff).await.ok()?.ok()
 }
 
+/// The one thing an operator is told when their answer did not open the key.
+///
+/// A single constant used by **both** failing arms of [`unlock_and_add`] — the answer this host
+/// could not decrypt and the passphrase that did not unlock the key — because the two must be
+/// indistinguishable to the caller, and two separately written strings are two strings that drift.
+const ANSWER_DID_NOT_UNLOCK: &str = "that passphrase did not unlock this key";
+
 /// Decrypt an answer, unlock the key at `subject` with it, and hand the identity to `os_user`'s
 /// agent — then drop the passphrase.
 ///
@@ -1071,20 +1082,40 @@ async fn answer_before_expiry(handoff: AnswerHandoff, prompt: &PendingPrompt) ->
 fn unlock_and_add(
     keypair: &dyn HostKeypair,
     adder: &dyn SshAgentKeyAdder,
+    files: &dyn crate::host_private_key::HostUserFiles,
     os_user: &str,
-    subject: &Path,
+    subject: &str,
     encrypted_answer: &[u8],
 ) -> AddHostKeyResponse {
-    let locked = match read_private_key(subject) {
+    // As `os_user`, and only from inside `os_user`'s home: `subject` is free text from a browser,
+    // and this daemon can reach files its caller cannot. See [`crate::host_private_key`].
+    let locked = match crate::host_private_key::read_private_key(files, os_user, subject) {
         Ok(key) => key,
         Err(reason) => return add_key_failed(AddHostKeyOutcome::KeyUnreadable, reason),
     };
     let passphrase = match keypair.decrypt(encrypted_answer) {
         Ok(plaintext) => plaintext,
-        // No arm names an answer this host cannot read: it is not a wrong passphrase — no
-        // passphrase was recovered to be wrong — and telling an operator it was would send them to
-        // retype something that will fail the same way. The reason says what actually happened.
-        Err(reason) => return add_key_failed(AddHostKeyOutcome::Unspecified, reason),
+        // Answered with the **same** refusal as a passphrase that did not unlock the key, and
+        // deliberately: a response that told the two apart would hand any authenticated session one
+        // clean bit per chosen ciphertext against this host's long-lived RSA key — the input a
+        // Manger-style attack on RSA-OAEP runs on, and `AddHostKey` → `AnswerHostPrompt` is a loop
+        // anyone with a session can drive. `decrypt_blinded` closes the timing channel; only an
+        // indistinguishable *answer* closes this one.
+        //
+        // What actually happened goes to the log instead, where the operator debugging their own
+        // host can read it and a caller probing the endpoint cannot. The reason describes the
+        // failure of the decrypt, never its input: no plaintext was recovered to leak.
+        Err(reason) => {
+            log::debug!(
+                target: "tddy_daemon::connection_service",
+                "AddHostKey: this host could not decrypt the answer to its own prompt, which is \
+                 reported to the caller as a passphrase that did not unlock the key: {reason}"
+            );
+            return add_key_failed(
+                AddHostKeyOutcome::WrongPassphrase,
+                ANSWER_DID_NOT_UNLOCK.to_string(),
+            );
+        }
     };
     let unlocked = if locked.is_encrypted() {
         match locked.decrypt(&passphrase) {
@@ -1094,7 +1125,7 @@ fn unlock_and_add(
             Err(_) => {
                 return add_key_failed(
                     AddHostKeyOutcome::WrongPassphrase,
-                    "that passphrase did not unlock this key".to_string(),
+                    ANSWER_DID_NOT_UNLOCK.to_string(),
                 )
             }
         }
@@ -1127,17 +1158,6 @@ fn unlock_and_add(
             format!("{os_user}'s ssh-agent refused the key: {reason}"),
         ),
     }
-}
-
-/// The OpenSSH private key at `subject`, still locked if it is passphrase-protected.
-///
-/// Read before the unlock so "no such key" is reported as the unreadable key it is rather than as a
-/// wrong passphrase.
-fn read_private_key(subject: &Path) -> Result<ssh_key::PrivateKey, String> {
-    let openssh = std::fs::read_to_string(subject)
-        .map_err(|e| format!("{} could not be read: {e}", subject.display()))?;
-    ssh_key::PrivateKey::from_openssh(openssh.as_bytes())
-        .map_err(|e| format!("{} is not an OpenSSH private key: {e}", subject.display()))
 }
 
 /// An add that put no key in the agent, saying which failure it was and why.
@@ -1351,6 +1371,11 @@ pub struct ConnectionServiceImpl {
     /// Injected because the add is the one step of the flow that touches the operator's real
     /// agent — everything before it (prompt, encryption, decrypt, unlock) runs for real in a test.
     ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder>,
+    /// How the private key an operator names is read — as **their** OS user, and only from inside
+    /// that user's home. Injected for the same reason the agent is: impersonating an OS user is
+    /// the one step of the flow a test cannot perform, while the confinement and the parse around
+    /// it are exercised for real. See [`crate::host_private_key`].
+    host_user_files: Arc<dyn crate::host_private_key::HostUserFiles>,
     /// Live `StreamHostPrompts` pumps.
     ///
     /// Exists so a test can observe a **leaked** pump. The prompt stream is silent by design, so a
@@ -2033,6 +2058,8 @@ impl ConnectionServiceImpl {
         let prompt_pumps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder> =
             Arc::new(crate::ssh_agent_add::WireProtocolAgentKeyAdder);
+        let host_user_files: Arc<dyn crate::host_private_key::HostUserFiles> =
+            Arc::new(crate::host_private_key::SpawnedHostUserFiles);
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -2068,6 +2095,7 @@ impl ConnectionServiceImpl {
             host_prompts,
             host_keypair,
             ssh_agent_key_adder,
+            host_user_files,
             prompt_pumps,
             common_room_livekit_room,
             telegram,
@@ -2322,6 +2350,19 @@ impl ConnectionServiceImpl {
     /// into the agent of whoever is running the suite.
     pub fn with_ssh_agent_key_adder(mut self, adder: Arc<dyn SshAgentKeyAdder>) -> Self {
         self.ssh_agent_key_adder = adder;
+        self
+    }
+
+    /// Substitute how an operator's files are reached (builder pattern).
+    ///
+    /// Stands in for impersonating an OS user, which a test cannot do. What it must **not** stand
+    /// in for is the confinement: the home directory it reports is the one the real check runs
+    /// against.
+    pub fn with_host_user_files(
+        mut self,
+        files: Arc<dyn crate::host_private_key::HostUserFiles>,
+    ) -> Self {
+        self.host_user_files = files;
         self
     }
 
@@ -13488,10 +13529,23 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
-        let _github_user = (self.user_resolver)(&req.session_token)
+
+        // Routed before anything else, as `GetHostTooling` routes: a prompt is raised by, and
+        // answerable on, exactly one host, and a browser that asked one host what it is waiting on
+        // would take this daemon's own questions for that host's.
+        if let Some(rx) = self
+            .stream_served_by_peer("StreamHostPrompts", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(MpscHostPromptStream { rx }));
+        }
+
+        // Kept, not discarded: this is the identity the feed is filtered by. A prompt names a
+        // private-key path one operator typed, and it is theirs alone to see and to answer.
+        let subscriber = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostPromptEvent>();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<HostPromptEvent, Status>>();
         let prompts = Arc::clone(&self.host_prompts);
         let keypair = Arc::clone(&self.host_keypair);
         let daemon_instance_id = local_instance_id_for_config(&self.config);
@@ -13501,8 +13555,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             // Moved into the task rather than dropped at the end of it, so the count falls when the
             // pump actually stops — including if it panics.
             let _counted = counted;
-            crate::host_prompt_stream::pump_host_prompts(prompts, keypair, daemon_instance_id, tx)
-                .await;
+            crate::host_prompt_stream::pump_host_prompts(
+                prompts,
+                keypair,
+                daemon_instance_id,
+                subscriber,
+                tx,
+            )
+            .await;
         });
 
         Ok(Response::new(MpscHostPromptStream { rx }))
@@ -13518,7 +13578,19 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<AnswerHostPromptResponse>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
-        let _github_user = (self.user_resolver)(&req.session_token)
+
+        // Routed before the prompt is looked up, and before the caller is authenticated — the same
+        // order `GetHostTooling` uses, and for the same reason: the prompt this answers exists on
+        // the host that raised it, and resolved here it belongs to nothing. Answered locally, an
+        // operator's passphrase would be spent on a refusal from the wrong machine.
+        if let Some(answered) = self
+            .rpc_served_by_peer("AnswerHostPrompt", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let answered_by = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
 
         // A refusal is a `false` on the response, not a `Status` error: an expired or replayed
@@ -13533,8 +13605,13 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Nothing about the payload is logged here at any level, deliberately: a passphrase must
         // never reach a log, and the cheapest way to keep that true is for this handler to have
         // nothing to say about what it was given.
+        //
+        // The answering session's own identity decides which prompt it may answer: a prompt raised
+        // by somebody else is refused exactly as an id that was never issued is, and is left
+        // unspent for the operator it belongs to.
         let answered = self.host_prompts.answer(
             &req.prompt_id,
+            &answered_by,
             req.encrypted_answer,
             crate::host_registry::now_unix_ms(),
         );
@@ -13564,6 +13641,18 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
     ) -> Result<Response<AddHostKeyResponse>, Status> {
         self.record_rpc_activity();
         let req = request.into_inner();
+
+        // Routed before the prompt is raised. `daemon_instance_id` names the host whose agent the
+        // key is loaded into, and answered locally this call loads it into the agent of whichever
+        // daemon the browser happened to be talking to — a private key in the wrong machine's
+        // agent, which no later request can take back.
+        if let Some(answered) = self
+            .rpc_served_by_peer("AddHostKey", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         // The agent the key lands in is the one belonging to this host's OS user, resolved exactly
@@ -13575,7 +13664,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
             .to_string();
 
+        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
+        // question: nobody else is shown it, and nobody else can spend its one answer.
         let prompt = self.host_prompts.issue(
+            &github_user,
             PromptKind::SshKeyPassphrase,
             &req.subject,
             crate::host_registry::now_unix_ms(),
@@ -13602,13 +13694,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // ends when the closure returns.
         let keypair = Arc::clone(&self.host_keypair);
         let adder = Arc::clone(&self.ssh_agent_key_adder);
+        let files = Arc::clone(&self.host_user_files);
         let subject = req.subject.clone();
         let added = tokio::task::spawn_blocking(move || {
             unlock_and_add(
                 keypair.as_ref(),
                 adder.as_ref(),
+                files.as_ref(),
                 &os_user,
-                Path::new(&subject),
+                &subject,
                 &encrypted_answer,
             )
         })
@@ -23419,7 +23513,7 @@ mod host_add_key_handler_tests {
     use crate::host_keypair::FileHostKeypair;
     use crate::host_prompts::{InMemoryHostPromptRegistry, PendingPrompt};
     use crate::ssh_agent_add::{AgentAddFailure, SshAgentKeyAdder};
-    use crate::test_util::{test_service, TEST_TOKEN};
+    use crate::test_util::{test_service, TEST_TOKEN, TEST_USER};
     use log::{Level, LevelFilter, Log, Metadata, Record};
     use ssh_key::PrivateKey;
     use std::sync::{Mutex, Once};
@@ -23442,6 +23536,28 @@ mod host_add_key_handler_tests {
     /// How long a test waits for `AddHostKey` to raise the prompt it answers.
     const PROMPT_WINDOW: Duration = Duration::from_secs(5);
     const PROMPT_POLL: Duration = Duration::from_millis(5);
+
+    /// How long a feed is watched before a test concludes nothing is coming down it.
+    ///
+    /// Short on purpose, and safe to keep short: every prompt a test looks for is already
+    /// outstanding before the feed is opened, so a feed that would deliver it delivers it at once —
+    /// and this host's keypair is generated in the fixture, not inside the window.
+    const FEED_WINDOW: Duration = Duration::from_millis(500);
+
+    /// A second operator, with their own session on the same host.
+    ///
+    /// A different GitHub user mapped to a different OS user, because that is what makes them
+    /// another operator rather than the same one with a second browser tab.
+    const OTHER_TOKEN: &str = "another-operators-token";
+    const OTHER_GITHUB_USER: &str = "otheroperator";
+
+    const TWO_OPERATOR_CONFIG: &str = r#"
+users:
+  - github_user: "testuser"
+    os_user: "testdev"
+  - github_user: "otheroperator"
+    os_user: "otherdev"
+"#;
 
     /// Emitted the moment log recording starts, so an assertion about what is *absent* from the
     /// logs can first prove the recorder was recording at all.
@@ -23490,6 +23606,9 @@ mod host_add_key_handler_tests {
         prompts: Arc<InMemoryHostPromptRegistry>,
         keypair: Arc<FileHostKeypair>,
         agent: Arc<RecordingAgent>,
+        /// The home directory of the OS user [`TEST_TOKEN`]'s operator is mapped to. Their key
+        /// lives inside it, because that is the only place a key of theirs can live.
+        home: PathBuf,
         key_path: PathBuf,
         /// The fingerprint the agent must end up holding.
         key_fingerprint: String,
@@ -23497,24 +23616,68 @@ mod host_add_key_handler_tests {
         _storage: tempfile::TempDir,
     }
 
+    /// A service on which two different GitHub users each have a session.
+    ///
+    /// `test_service` knows one operator, which cannot express the question these tests ask: whose
+    /// prompt is this? Everything else about it is the same wiring.
+    fn a_service_serving_two_operators(storage: &Path) -> ConnectionServiceImpl {
+        let config_path = storage.join("two-operator-config.yaml");
+        std::fs::write(&config_path, TWO_OPERATOR_CONFIG).expect("a config for this host");
+        let config = DaemonConfig::load(&config_path).expect("a loadable config");
+        let sessions_base = storage.to_path_buf();
+        let sessions_base_resolver: SessionsBaseResolver =
+            Arc::new(move |_| Some(sessions_base.clone()));
+        let user_resolver: SessionUserResolver = Arc::new(|token| match token {
+            TEST_TOKEN => Some(TEST_USER.to_string()),
+            OTHER_TOKEN => Some(OTHER_GITHUB_USER.to_string()),
+            _ => None,
+        });
+        ConnectionServiceImpl::new(
+            config,
+            sessions_base_resolver,
+            storage.to_path_buf(),
+            user_resolver,
+            None,
+            None,
+            None,
+            Arc::new(CliSessionManager::new()),
+        )
+    }
+
     fn a_host_with_an_encrypted_key(passphrase: &str) -> HostWithAnEncryptedKey {
         let storage = tempfile::tempdir().expect("a temp directory for this host");
-        let key_path = storage.path().join("id_ed25519");
+        // A home directory for the mapped OS user, with the key inside it: an operator's private
+        // key is a file in their own home, and a fixture that put it anywhere else would be
+        // exercising a path no real add-key flow can take.
+        let home = storage.path().join("home").join("testdev");
+        std::fs::create_dir_all(home.join(".ssh")).expect("this operator has a ~/.ssh");
+        let key_path = home.join(".ssh").join("id_ed25519");
         let key_fingerprint = an_encrypted_private_key_at(&key_path, passphrase);
 
         let prompts = Arc::new(InMemoryHostPromptRegistry::new());
         let keypair = Arc::new(FileHostKeypair::new(storage.path()));
         let agent = Arc::new(RecordingAgent::default());
-        let service = test_service(storage.path().to_path_buf())
+        let service = a_service_serving_two_operators(storage.path())
             .with_host_prompts(Arc::clone(&prompts) as Arc<dyn HostPromptRegistry>)
             .with_host_keypair(Arc::clone(&keypair) as Arc<dyn HostKeypair>)
-            .with_ssh_agent_key_adder(Arc::clone(&agent) as Arc<dyn SshAgentKeyAdder>);
+            .with_ssh_agent_key_adder(Arc::clone(&agent) as Arc<dyn SshAgentKeyAdder>)
+            // Impersonating an OS user is not something a test can do; the home directory it
+            // reports is the real confinement's own input.
+            .with_host_user_files(Arc::new(crate::host_private_key::UserFilesUnder::home(
+                &home,
+            )));
+        // Generated up front so no test's timing window has to cover an RSA keygen: the prompt feed
+        // reads the published key per event, and the first read is the one that makes the key.
+        keypair
+            .published()
+            .expect("this host can publish a key for its prompts");
 
         HostWithAnEncryptedKey {
             service,
             prompts,
             keypair,
             agent,
+            home,
             key_path,
             key_fingerprint,
             _storage: storage,
@@ -23522,20 +23685,55 @@ mod host_add_key_handler_tests {
     }
 
     impl HostWithAnEncryptedKey {
+        /// The request an add makes for this operator's own key, so each test states only the field
+        /// it is about.
+        fn an_add_of_their_key(&self) -> AddHostKeyRequest {
+            self.an_add_of(&self.key_path)
+        }
+
+        /// The request an add makes for a key the operator names themselves, which is what the
+        /// field is: free text from a browser.
+        fn an_add_of(&self, subject: &Path) -> AddHostKeyRequest {
+            AddHostKeyRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: String::new(),
+                subject: subject.display().to_string(),
+            }
+        }
+
         /// Run the whole flow: start the add, answer the prompt it raises with `passphrase`, and
         /// report what the add concluded.
+        async fn add_key_answering_with(&self, passphrase: &str) -> AddHostKeyResponse {
+            self.add_key_answered_with(self.an_answer_carrying(passphrase))
+                .await
+        }
+
+        /// [`Self::add_key_answering_with`] for an answer that is not this host's to read — the
+        /// only way to reach the decrypt failure, which no passphrase can produce.
+        async fn add_key_answered_with(&self, ciphertext: Vec<u8>) -> AddHostKeyResponse {
+            self.add_key_answering(self.an_add_of_their_key(), ciphertext)
+                .await
+        }
+
+        /// [`Self::add_key_answering_with`] for a key at a path of the operator's choosing.
+        async fn add_key_at(&self, subject: &Path, passphrase: &str) -> AddHostKeyResponse {
+            self.add_key_answering(self.an_add_of(subject), self.an_answer_carrying(passphrase))
+                .await
+        }
+
+        /// Run `request`, answering the prompt it raises with `ciphertext`.
         ///
         /// The two halves run concurrently because that is the shape of the real flow — `AddHostKey`
         /// is still in flight when the operator's answer arrives on a different call.
-        async fn add_key_answering_with(&self, passphrase: &str) -> AddHostKeyResponse {
-            let started = self.service.add_host_key(Request::new(AddHostKeyRequest {
-                session_token: TEST_TOKEN.to_string(),
-                daemon_instance_id: String::new(),
-                subject: self.key_path.display().to_string(),
-            }));
+        async fn add_key_answering(
+            &self,
+            request: AddHostKeyRequest,
+            ciphertext: Vec<u8>,
+        ) -> AddHostKeyResponse {
+            let started = self.service.add_host_key(Request::new(request));
 
             let (added, _answered) = tokio::time::timeout(ADD_KEY_WINDOW, async {
-                tokio::join!(started, self.answer_the_prompt_with(passphrase))
+                tokio::join!(started, self.answer_the_prompt_with(ciphertext))
             })
             .await
             .expect("the add settles once its prompt has been answered");
@@ -23543,31 +23741,80 @@ mod host_add_key_handler_tests {
             added.expect("a valid session may add a key").into_inner()
         }
 
-        /// Answer whatever prompt the add raises, encrypted under this host's published key exactly
-        /// as the browser's `SubtleCrypto` would.
-        async fn answer_the_prompt_with(&self, passphrase: &str) -> AnswerHostPromptResponse {
+        /// Answer whatever prompt the add raises with `ciphertext`, on the session that raised it.
+        async fn answer_the_prompt_with(&self, ciphertext: Vec<u8>) -> AnswerHostPromptResponse {
             let prompt = self.prompt_awaiting_an_answer().await;
-            let published = self
-                .keypair
-                .published()
-                .expect("this host publishes a key with its prompt");
+            self.answer_as(TEST_TOKEN, &prompt.prompt_id, ciphertext)
+                .await
+        }
+
+        /// Put this host in the state of waiting on a question `github_user` raised.
+        ///
+        /// Straight through the registry rather than through `AddHostKey`, so the prompt is
+        /// outstanding *before* a feed is opened — which is what makes every assertion below about
+        /// what does or does not come down that feed a deterministic one.
+        fn raise_a_prompt_for(&self, github_user: &str) -> PendingPrompt {
+            self.prompts.issue(
+                github_user,
+                PromptKind::SshKeyPassphrase,
+                &self.key_path.display().to_string(),
+                crate::host_registry::now_unix_ms(),
+            )
+        }
+
+        /// The first prompt this host puts on `token`'s feed, or `None` if it stays silent.
+        async fn first_prompt_on_the_feed_of(&self, token: &str) -> Option<HostPromptEvent> {
+            let mut feed = self
+                .service
+                .stream_host_prompts(Request::new(StreamHostPromptsRequest {
+                    session_token: token.to_string(),
+                    daemon_instance_id: String::new(),
+                }))
+                .await
+                .expect("a valid session subscribes to this host's prompts")
+                .into_inner();
+            tokio::time::timeout(FEED_WINDOW, feed.next())
+                .await
+                .ok()
+                .flatten()
+                .map(|frame| frame.expect("a prompt frame rather than a mid-stream error"))
+        }
+
+        /// Submit `ciphertext` as the answer to `prompt_id`, on `token`'s session.
+        async fn answer_as(
+            &self,
+            token: &str,
+            prompt_id: &str,
+            ciphertext: Vec<u8>,
+        ) -> AnswerHostPromptResponse {
             self.service
                 .answer_host_prompt(Request::new(AnswerHostPromptRequest {
-                    session_token: TEST_TOKEN.to_string(),
+                    session_token: token.to_string(),
                     daemon_instance_id: String::new(),
-                    prompt_id: prompt.prompt_id,
-                    encrypted_answer: encrypted_for(&published.spki_der, passphrase.as_bytes()),
+                    prompt_id: prompt_id.to_string(),
+                    encrypted_answer: ciphertext,
                 }))
                 .await
                 .expect("a valid session may answer a prompt")
                 .into_inner()
         }
 
-        /// The prompt `AddHostKey` raises, once it has raised one.
+        /// The passphrase, encrypted under this host's published key the way the browser would.
+        fn an_answer_carrying(&self, passphrase: &str) -> Vec<u8> {
+            let published = self
+                .keypair
+                .published()
+                .expect("this host publishes a key with its prompts");
+            encrypted_for(&published.spki_der, passphrase.as_bytes())
+        }
+
+        /// The prompt `AddHostKey` raises for [`TEST_USER`], once it has raised one.
         async fn prompt_awaiting_an_answer(&self) -> PendingPrompt {
             let deadline = tokio::time::Instant::now() + PROMPT_WINDOW;
             while tokio::time::Instant::now() < deadline {
-                let outstanding = self.prompts.pending(crate::host_registry::now_unix_ms());
+                let outstanding = self
+                    .prompts
+                    .pending(TEST_USER, crate::host_registry::now_unix_ms());
                 if let Some(prompt) = outstanding.into_iter().next() {
                     return prompt;
                 }
@@ -23599,6 +23846,23 @@ mod host_add_key_handler_tests {
             .expect("in the format ssh-keygen writes");
         std::fs::write(path, openssh.as_bytes()).expect("the key file is written");
         fingerprint
+    }
+
+    /// A well-formed RSA-OAEP answer addressed to a **different** host, which this one therefore
+    /// cannot decrypt. The only way to reach the decrypt failure: no passphrase, right or wrong,
+    /// produces it.
+    fn a_ciphertext_for_another_host() -> Vec<u8> {
+        let elsewhere = tempfile::tempdir().expect("a temp directory for another host");
+        let published = FileHostKeypair::new(elsewhere.path())
+            .published()
+            .expect("another host's published key");
+        encrypted_for(&published.spki_der, PASSPHRASE.as_bytes())
+    }
+
+    /// A payload that is not an answer to anything — what somebody who only wants to spend another
+    /// operator's single-use prompt would send, having no passphrase to offer.
+    fn a_meaningless_answer() -> Vec<u8> {
+        vec![0xde, 0xad, 0xbe, 0xef]
     }
 
     /// Encrypt with RSA-OAEP(SHA-256) against an SPKI DER, standing in for the browser's
@@ -23700,37 +23964,72 @@ mod host_add_key_handler_tests {
         fn flush(&self) {}
     }
 
-    /// Start recording log output, and prove the recording is live by putting a marker through it.
-    fn start_recording_logs() -> Arc<Mutex<Vec<String>>> {
-        let buffer = Arc::new(Mutex::new(Vec::new()));
-        *RECORDED
-            .lock()
-            .expect("the recorder slot is never poisoned") = Some(Arc::clone(&buffer));
-        INSTALL_RECORDER.call_once(|| {
-            let _ = log::set_boxed_logger(Box::new(EverythingRecorder))
-                .map(|()| log::set_max_level(LevelFilter::Trace));
-        });
-        log::log!(Level::Info, "{RECORDING_MARKER}");
-        buffer
+    /// One test's log recording, live for as long as the guard is held.
+    ///
+    /// A guard, because the recorder itself can never be uninstalled — `log` takes one logger per
+    /// process, for the life of it. A recording left in the slot afterwards would go on collecting
+    /// every other test in this binary into a leaked buffer, behind one global mutex, for the rest
+    /// of the run; dropping the guard empties the slot, and the installed recorder then has nothing
+    /// to push to.
+    struct LogRecording {
+        lines: Arc<Mutex<Vec<String>>>,
     }
 
-    /// Assert `secret` reached no log line — and that anything at all was recorded, so a recorder
-    /// that failed to install cannot make this pass by capturing nothing.
-    fn assert_no_recorded_line_contains(recorded: &Arc<Mutex<Vec<String>>>, secret: &str) {
-        let lines = recorded
-            .lock()
-            .expect("the recording buffer is only held to read it")
-            .clone();
-        assert!(
-            lines.iter().any(|line| line.contains(RECORDING_MARKER)),
-            "nothing was recorded at all, so this assertion would hold for a daemon that logged \
-             the passphrase on every line"
-        );
-        let leaked: Vec<&String> = lines.iter().filter(|line| line.contains(secret)).collect();
-        assert!(
-            leaked.is_empty(),
-            "the passphrase reached the daemon's logs: {leaked:?}"
-        );
+    impl LogRecording {
+        /// Start recording every log line this process emits, and prove the recording is live by
+        /// putting a marker through it.
+        fn started() -> Self {
+            let lines = Arc::new(Mutex::new(Vec::new()));
+            let displaced = RECORDED
+                .lock()
+                .expect("the recorder slot is never poisoned")
+                .replace(Arc::clone(&lines));
+            // One slot, so two recordings at once would each capture a fraction of the other's
+            // output — and these tests run in parallel with the rest of the binary. Stated as a
+            // failure rather than left to whichever assertion happens to lose its lines.
+            assert!(
+                displaced.is_none(),
+                "a log recording was already live, so neither it nor this one records reliably; \
+                 the recorder holds a single slot and cannot serve two tests at once"
+            );
+            INSTALL_RECORDER.call_once(|| {
+                let _ = log::set_boxed_logger(Box::new(EverythingRecorder))
+                    .map(|()| log::set_max_level(LevelFilter::Trace));
+            });
+            log::log!(Level::Info, "{RECORDING_MARKER}");
+            Self { lines }
+        }
+
+        /// Assert `secret` reached no recorded line — and that anything at all was recorded, so a
+        /// recorder that failed to install cannot make this pass by capturing nothing.
+        fn assert_nothing_recorded_contains(&self, secret: &str) {
+            let lines = self
+                .lines
+                .lock()
+                .expect("the recording buffer is only held to read it")
+                .clone();
+            assert!(
+                lines.iter().any(|line| line.contains(RECORDING_MARKER)),
+                "nothing was recorded at all, so this assertion would hold for a daemon that \
+                 logged the passphrase on every line"
+            );
+            let leaked: Vec<&String> = lines.iter().filter(|line| line.contains(secret)).collect();
+            assert!(
+                leaked.is_empty(),
+                "the passphrase reached the daemon's logs: {leaked:?}"
+            );
+        }
+    }
+
+    impl Drop for LogRecording {
+        fn drop(&mut self) {
+            // Poison is stepped over rather than unwrapped: this drop runs while a failing test is
+            // already unwinding, and a second panic here would abort the whole test binary —
+            // taking the failure that was being reported with it.
+            *RECORDED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        }
     }
 
     // -- the tests ------------------------------------------------------------------------------
@@ -23810,7 +24109,7 @@ mod host_add_key_handler_tests {
     #[tokio::test]
     async fn the_passphrase_never_appears_in_captured_logs() {
         // Given every log line this process emits being recorded
-        let recorded = start_recording_logs();
+        let recording = LogRecording::started();
         let host = a_host_with_an_encrypted_key(PASSPHRASE);
 
         // When the whole flow runs, from raising the prompt to loading the key
@@ -23818,6 +24117,352 @@ mod host_add_key_handler_tests {
 
         // Then
         reported.assert_added_the_key(&host.key_fingerprint);
-        assert_no_recorded_line_contains(&recorded, PASSPHRASE);
+        recording.assert_nothing_recorded_contains(PASSPHRASE);
+    }
+
+    // -- whose prompt is this? ------------------------------------------------------------------
+
+    /// The feed must actually carry the prompt to the operator waiting on it — the guard that stops
+    /// every "another operator sees nothing" assertion below from holding for a feed that carries
+    /// nothing to anyone.
+    #[tokio::test]
+    async fn streams_an_outstanding_prompt_to_the_operator_who_raised_it() {
+        // Given a host waiting on a question this operator raised
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let raised = host.raise_a_prompt_for(TEST_USER);
+
+        // When they open this host's prompt feed
+        let seen = host.first_prompt_on_the_feed_of(TEST_TOKEN).await;
+
+        // Then
+        assert_eq!(
+            seen.map(|event| event.prompt_id),
+            Some(raised.prompt_id),
+            "the operator who raised the prompt must be shown it, or nothing can ever answer it"
+        );
+    }
+
+    /// A prompt belongs to the session that raised it. Replayed to every subscriber, it shows
+    /// operator B the dialog A opened — disclosing the private-key path A named — and hands B a
+    /// prompt they can burn.
+    #[tokio::test]
+    async fn does_not_stream_a_prompt_to_an_operator_who_did_not_raise_it() {
+        // Given a host waiting on a question one operator raised
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        host.raise_a_prompt_for(TEST_USER);
+
+        // When a different operator opens this host's prompt feed
+        let seen = host.first_prompt_on_the_feed_of(OTHER_TOKEN).await;
+
+        // Then
+        assert_eq!(
+            seen, None,
+            "another operator was shown this prompt — with it the private-key path it names, and \
+             the chance to burn a single-use prompt that is not theirs"
+        );
+    }
+
+    /// Refusing a stranger's answer must not double as a lookup service: "that prompt is not
+    /// yours" and "there is no such prompt" have to read identically, or the endpoint tells any
+    /// authenticated caller which prompt ids are live.
+    #[tokio::test]
+    async fn an_answer_from_another_operator_is_refused_as_an_unknown_prompt_would_be() {
+        // Given a host waiting on a question one operator raised
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let raised = host.raise_a_prompt_for(TEST_USER);
+
+        // When a different operator answers it, and answers a prompt id that was never issued
+        let for_someone_elses = host
+            .answer_as(OTHER_TOKEN, &raised.prompt_id, a_meaningless_answer())
+            .await;
+        let for_a_prompt_that_never_existed = host
+            .answer_as(OTHER_TOKEN, "never-issued", a_meaningless_answer())
+            .await;
+
+        // Then
+        assert!(
+            !for_someone_elses.accepted,
+            "no key was being unlocked here"
+        );
+        assert_eq!(
+            for_someone_elses, for_a_prompt_that_never_existed,
+            "the two refusals differ, so a caller can tell a live prompt id from a fictional one"
+        );
+    }
+
+    /// A prompt answers exactly once. A stranger who can spend that one answer denies the operator
+    /// who raised it their add for the whole of the prompt's TTL.
+    #[tokio::test]
+    async fn an_answer_from_another_operator_leaves_the_prompt_answerable_by_its_owner() {
+        // Given a host waiting on a question one operator raised
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let raised = host.raise_a_prompt_for(TEST_USER);
+
+        // When a different operator answers it first, and then its owner does
+        host.answer_as(OTHER_TOKEN, &raised.prompt_id, a_meaningless_answer())
+            .await;
+        let by_its_owner = host
+            .answer_as(
+                TEST_TOKEN,
+                &raised.prompt_id,
+                host.an_answer_carrying(PASSPHRASE),
+            )
+            .await;
+
+        // Then
+        assert!(
+            by_its_owner.accepted,
+            "a stranger consumed this operator's single-use prompt: {}",
+            by_its_owner.rejection_reason
+        );
+    }
+
+    /// **An adaptive decryption oracle.** A response that distinguishes "this host could not
+    /// decrypt your answer" from "your passphrase did not unlock the key" gives any authenticated
+    /// session one clean bit per chosen ciphertext against this host's long-lived RSA key — the
+    /// input a Manger-style attack on RSA-OAEP runs on, and `AddHostKey`→`AnswerHostPrompt` is a
+    /// loop anyone with a session can drive. The two outcomes must be indistinguishable from
+    /// outside.
+    #[tokio::test]
+    async fn an_answer_this_host_cannot_decrypt_is_refused_exactly_as_a_wrong_passphrase_is() {
+        // Given a host holding a key locked with a passphrase
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When one add is answered with the wrong passphrase, and another with a ciphertext this
+        // host has no key for
+        let mistyped = host.add_key_answering_with(WRONG_PASSPHRASE).await;
+        let undecryptable = host
+            .add_key_answered_with(a_ciphertext_for_another_host())
+            .await;
+
+        // Then
+        assert_eq!(
+            undecryptable, mistyped,
+            "the response says whether the ciphertext decrypted, which is one bit per query \
+             against this host's RSA key"
+        );
+    }
+
+    /// Which arm the indistinguishable refusal actually *is*.
+    ///
+    /// [`an_answer_this_host_cannot_decrypt_is_refused_exactly_as_a_wrong_passphrase_is`] pins that
+    /// the two responses match; identical to each other would hold just as well if both reported
+    /// `UNSPECIFIED`. The arm is what the browser turns into a sentence, and the only sentence that
+    /// is any use here is the one that says "type it again" — an operator sent anywhere else is
+    /// hunting for a fault in a passphrase that was never the problem.
+    #[tokio::test]
+    async fn an_answer_this_host_cannot_decrypt_reports_the_wrong_passphrase_arm() {
+        // Given a host holding a key locked with a passphrase
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the answer is a well-formed ciphertext addressed to a different host
+        let refused = host
+            .add_key_answered_with(a_ciphertext_for_another_host())
+            .await;
+
+        // Then
+        refused.assert_refused_with(AddHostKeyOutcome::WrongPassphrase);
+    }
+
+    // -- whose key is this, and where does it live? ---------------------------------------------
+
+    /// **A file oracle.** `subject` is free text from a browser, and the two failures the read can
+    /// produce — nothing at that path, and something that is not a private key — used to come back
+    /// as two different sentences in `failure_reason`. Distinguishable, they answer "does this file
+    /// exist on your host?" for any path the caller cares to name.
+    #[tokio::test]
+    async fn a_key_that_is_absent_and_a_key_that_is_malformed_are_refused_in_the_same_words() {
+        // Given a path in this operator's home with nothing at it
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let named = host.home.join(".ssh").join("maybe-a-key");
+
+        // When they name it while nothing is there, and again once something that is not a key is
+        let while_absent = host.add_key_at(&named, PASSPHRASE).await;
+        std::fs::write(&named, "ssh-ed25519 AAAA... not a private key\n")
+            .expect("something that is not a private key");
+        let while_malformed = host.add_key_at(&named, PASSPHRASE).await;
+
+        // Then
+        assert_eq!(
+            while_malformed, while_absent,
+            "the refusal says whether the file exists, which answers that question for any path \
+             on this host"
+        );
+    }
+
+    /// The arm behind that shared wording, for the absent case.
+    ///
+    /// The test above pins the two refusals as identical, which says nothing about what they say:
+    /// two responses that both reported `WRONG_PASSPHRASE` would satisfy it, and would send an
+    /// operator who mistyped a *path* off to retype a passphrase that was correct.
+    #[tokio::test]
+    async fn reports_the_key_as_unreadable_when_nothing_is_at_the_path_the_operator_named() {
+        // Given a path inside this operator's home with no file at it
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let named = host.home.join(".ssh").join("id_ed25519.bak");
+
+        // When they name it
+        let refused = host.add_key_at(&named, PASSPHRASE).await;
+
+        // Then
+        refused.assert_refused_with(AddHostKeyOutcome::KeyUnreadable);
+    }
+
+    /// The same arm for the other half of the pair: a file that is there and is not a private key.
+    ///
+    /// A public key beside its private half is the file an operator reaches for by mistake, and the
+    /// remedy is to name the other one — not to type anything again.
+    #[tokio::test]
+    async fn reports_the_key_as_unreadable_when_the_named_file_is_not_a_private_key() {
+        // Given a file in this operator's home that is not an OpenSSH private key
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let named = host.home.join(".ssh").join("id_ed25519.pub");
+        std::fs::write(&named, "ssh-ed25519 AAAA... not a private key\n")
+            .expect("something that is not a private key");
+
+        // When they name it
+        let refused = host.add_key_at(&named, PASSPHRASE).await;
+
+        // Then
+        refused.assert_refused_with(AddHostKeyOutcome::KeyUnreadable);
+    }
+
+    /// The key is read with the **mapped OS user's** privileges and only from inside their own
+    /// home. Read as the daemon from a path the client chose, a session mapped to one user can name
+    /// another user's `~/.ssh/id_rsa` and have the host open it on their behalf.
+    #[tokio::test]
+    async fn refuses_a_key_outside_the_mapped_users_home() {
+        // Given a real, unlocked-with-this-passphrase private key that is not in this operator's
+        // home directory
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+        let somebody_elses = host.home.parent().expect("a /home").join("otherdev");
+        std::fs::create_dir_all(&somebody_elses).expect("another user's home");
+        let their_key = somebody_elses.join("id_ed25519");
+        an_encrypted_private_key_at(&their_key, PASSPHRASE);
+
+        // When this operator names it
+        let refused = host.add_key_at(&their_key, PASSPHRASE).await;
+
+        // Then
+        refused.assert_refused_with(AddHostKeyOutcome::KeyUnreadable);
+        assert_eq!(
+            host.agent.fingerprints_added(),
+            Vec::<String>::new(),
+            "this host read a key from outside the caller's own home and loaded it into an agent"
+        );
+    }
+
+    // -- which host is this for? ----------------------------------------------------------------
+
+    /// How long a call addressed to another host gets to be refused. Generous for a decision that
+    /// reads a list in memory, and far short of the 120s a prompt would wait for an answer.
+    const ROUTING_WINDOW: Duration = Duration::from_secs(2);
+
+    /// A host nobody has ever heard of. `AddHostKey` names the machine whose agent the key is
+    /// loaded into, so a name this daemon cannot place is not a call it may answer for itself.
+    const AN_UNKNOWN_HOST: &str = "daemon-on-some-other-machine";
+
+    /// `daemon_instance_id` documents itself as "the host whose agent the key is loaded into".
+    /// Unread, an operator's key is loaded into the agent of whichever daemon happened to serve the
+    /// call — a private key in the wrong machine's agent, which no later request can take back.
+    #[tokio::test]
+    async fn refuses_an_add_addressed_to_a_host_this_daemon_does_not_know() {
+        // Given an operator's key on this host
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When they address the add to a different host
+        let refused = tokio::time::timeout(
+            ROUTING_WINDOW,
+            host.service.add_host_key(Request::new(AddHostKeyRequest {
+                daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
+                ..host.an_add_of_their_key()
+            })),
+        )
+        .await
+        .expect(
+            "an add addressed to another host must be refused at once — this one raised a prompt \
+             and set about loading the key into its own agent",
+        );
+
+        // Then
+        assert_eq!(
+            refused.err().map(|status| status.code),
+            Some(tddy_rpc::Code::InvalidArgument)
+        );
+        assert_eq!(
+            host.agent.fingerprints_added(),
+            Vec::<String>::new(),
+            "a key addressed to another host reached this host's agent"
+        );
+    }
+
+    /// The other half of honouring the field: a host named by its own id serves the call itself,
+    /// rather than trying to forward it to a peer.
+    #[tokio::test]
+    async fn serves_an_add_addressed_to_this_daemon_by_its_own_instance_id() {
+        // Given an operator's key on this host
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When they address the add to this host by name
+        let added = host
+            .add_key_answering(
+                AddHostKeyRequest {
+                    daemon_instance_id: local_instance_id_for_config(&host.service.config),
+                    ..host.an_add_of_their_key()
+                },
+                host.an_answer_carrying(PASSPHRASE),
+            )
+            .await;
+
+        // Then
+        added.assert_added_the_key(&host.key_fingerprint);
+    }
+
+    /// An answer is only ever answering a prompt on the host that raised it. Served locally, it is
+    /// matched against this daemon's own prompts — where the id belongs to nothing.
+    #[tokio::test]
+    async fn refuses_an_answer_addressed_to_a_host_this_daemon_does_not_know() {
+        // Given a host serving the add-key endpoints
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When an answer is addressed to a different host
+        let refused = host
+            .service
+            .answer_host_prompt(Request::new(AnswerHostPromptRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
+                prompt_id: "a-prompt-on-another-host".to_string(),
+                encrypted_answer: a_meaningless_answer(),
+            }))
+            .await;
+
+        // Then
+        assert_eq!(
+            refused.err().map(|status| status.code),
+            Some(tddy_rpc::Code::InvalidArgument)
+        );
+    }
+
+    /// A feed addressed elsewhere must not be answered with this host's own questions: the browser
+    /// asked one host what it is waiting on, and would take another's prompt for that host's.
+    #[tokio::test]
+    async fn refuses_a_prompt_feed_addressed_to_a_host_this_daemon_does_not_know() {
+        // Given a host serving the add-key endpoints
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When a feed is opened against a different host
+        let refused = host
+            .service
+            .stream_host_prompts(Request::new(StreamHostPromptsRequest {
+                session_token: TEST_TOKEN.to_string(),
+                daemon_instance_id: AN_UNKNOWN_HOST.to_string(),
+            }))
+            .await;
+
+        // Then
+        assert_eq!(
+            refused.err().map(|status| status.code),
+            Some(tddy_rpc::Code::InvalidArgument)
+        );
     }
 }

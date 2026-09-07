@@ -14,12 +14,21 @@
  * impossible — only visible, and only after the first sighting. The alternative considered was to
  * accept passive-only protection and disclose it in the dialog.
  *
+ * The value that is pinned is **derived from the key itself** (`hostKeyFingerprint`), never the
+ * fingerprint string the prompt advertises beside it. Pinning the advertised string would make the
+ * whole mechanism decorative: it is public and non-secret, so an active peer replays the genuine one
+ * next to its own key, the check reports `unchanged`, the operator recognises the fingerprint they
+ * verified out of band — and the answer is encrypted to the peer. Pinning the digest of the key that
+ * will do the encrypting closes that, and a prompt whose two halves disagree is refused outright.
+ *
  * Where the ingredients for a conclusion are missing — no key presented, or storage that refuses to
  * be read or written — the check degrades to `unverified` rather than to `pinned-now`. `pinned-now`
  * is a positive claim the dialog acts on ("first time seeing this host, key recorded"), and making
  * it when nothing was recorded would keep it false on every later sighting too, leaving an active
  * substitution indistinguishable from ordinary first use permanently. `unverified` says so out loud.
  */
+
+import { deriveHostKeyFingerprint } from "./hostKeyFingerprint";
 
 /** What a pin check concluded about a host's key. */
 export type KeyPinVerdict =
@@ -29,8 +38,23 @@ export type KeyPinVerdict =
   | { kind: "unchanged" }
   /** Different from the pinned key — the flow must stop and say so. */
   | { kind: "changed"; pinnedFingerprint: string }
+  /**
+   * The prompt's key and the fingerprint it advertised are not the same key.
+   *
+   * Not a rotation and not a first sighting: a host describing its own key gets it right, so the
+   * two halves disagreeing means something rewrote one of them in flight. Nothing is pinned and
+   * nothing may be sent.
+   */
+  | { kind: "mismatched"; advertisedFingerprint: string; derivedFingerprint: string }
   /** No continuity conclusion is available — no key was presented, or storage is unusable. */
-  | { kind: "unverified" };
+  | { kind: "unverified" }
+  /**
+   * The key could not be fingerprinted here at all — this origin exposes no `crypto.subtle`.
+   *
+   * Distinct from `unverified`, which is about storage: nothing on this page can hash a key or
+   * encrypt an answer, so the flow is not merely uncheckable but unusable, and the reason says so.
+   */
+  | { kind: "underivable"; reason: string };
 
 /** One `localStorage` entry per host, so a pin can be dropped without touching the others. */
 const PIN_KEY_PREFIX = "tddy.hostKeyPin.";
@@ -84,6 +108,10 @@ function writePin(hostId: string, fingerprint: string): boolean {
 /**
  * Check `fingerprint` against what is pinned for `hostId`, pinning it when nothing is.
  *
+ * ⚠ `fingerprint` must be one **derived from a key** — {@link verifyHostKey} is the entry point a
+ * caller holding a `HostPromptEvent` wants. Passing the fingerprint a prompt advertised makes the
+ * pin decorative, since that string is public and a substituting peer can send it verbatim.
+ *
  * Per-browser by design: a pin is a record of what *this* operator saw, and syncing it through the
  * daemon would route the trust anchor back through the channel it exists to distrust.
  *
@@ -115,4 +143,69 @@ export function checkHostKey(hostId: string, fingerprint: string): KeyPinVerdict
  */
 export function acceptChangedHostKey(hostId: string, fingerprint: string): void {
   writePin(hostId, fingerprint);
+}
+
+// ---------------------------------------------------------------------------
+// Checking a prompt's key against the pin
+// ---------------------------------------------------------------------------
+
+/** What a prompt's key turned out to be, and what this browser had on record for it. */
+export interface HostKeyCheck {
+  /** What the sighting means for the flow — what the dialog blocks on, and what it says. */
+  verdict: KeyPinVerdict;
+  /**
+   * The fingerprint derived from the key that arrived, or `null` where none could be derived.
+   *
+   * This — not the advertised string — is what the dialog displays and what
+   * {@link acceptChangedHostKey} records, so the value an operator verifies out of band is the
+   * value bound to the key their passphrase is encrypted under.
+   */
+  fingerprint: string | null;
+}
+
+/**
+ * Check the key a prompt carried against what is pinned for `hostId`, pinning it on a first sighting.
+ *
+ * The advertised fingerprint is used for one thing only: catching a prompt whose two halves disagree.
+ * It is never pinned, never displayed and never compared against the pin, because a peer that
+ * substitutes the key can advertise whatever string it likes beside it.
+ *
+ * Resolves for every outcome, including the ones it could not reach a conclusion in — a check that
+ * threw would take down the row that renders the dialog.
+ */
+export async function verifyHostKey(
+  hostId: string,
+  spkiDer: Uint8Array,
+  advertisedFingerprint: string,
+): Promise<HostKeyCheck> {
+  if (spkiDer.length === 0) {
+    // No key presented, so there is nothing to encrypt under and nothing to hash. Pinning here would
+    // spend the first-use trust slot on nothing.
+    return { verdict: { kind: "unverified" }, fingerprint: null };
+  }
+
+  let derived: string;
+  try {
+    derived = await deriveHostKeyFingerprint(spkiDer);
+  } catch (error) {
+    return {
+      verdict: {
+        kind: "underivable",
+        reason: error instanceof Error ? error.message : String(error),
+      },
+      fingerprint: null,
+    };
+  }
+
+  if (derived !== advertisedFingerprint) {
+    // Reported rather than quietly preferred: a genuine host publishes a fingerprint of its own key,
+    // so this is a frame that was rewritten between the host and here — the substitution the pin
+    // exists to catch, caught before the first sighting rather than after it.
+    return {
+      verdict: { kind: "mismatched", advertisedFingerprint, derivedFingerprint: derived },
+      fingerprint: derived,
+    };
+  }
+
+  return { verdict: checkHostKey(hostId, derived), fingerprint: derived };
 }

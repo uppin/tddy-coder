@@ -19,6 +19,7 @@ use crate::host_keypair::HostKeypair;
 use crate::host_prompts::{HostPromptRegistry, PendingPrompt, PromptKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tddy_rpc::Status;
 use tddy_service::proto::connection::{HostPromptEvent, HostPromptKind};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::UnboundedSender;
@@ -47,21 +48,27 @@ impl Drop for PumpCount {
     }
 }
 
-/// Forward this host's prompts to one subscriber until that subscriber goes away.
+/// Forward `subscriber`'s prompts to them until they go away.
 ///
 /// Sends whatever is already outstanding first — an operator who opens the Hosts screen while a
 /// prompt is waiting must see it, not wait for the next one — then follows the registry's feed.
+///
+/// `subscriber` is the **GitHub user** this subscription belongs to, and a prompt raised by anybody
+/// else never reaches it. The registry's feed is host-wide, so the filter is here as well as in
+/// [`HostPromptRegistry::pending`]: a prompt names a private-key path on this host, and the
+/// operator who typed it is the only one it is for.
 pub async fn pump_host_prompts(
     prompts: Arc<dyn HostPromptRegistry>,
     keypair: Arc<dyn HostKeypair>,
     daemon_instance_id: String,
-    tx: UnboundedSender<HostPromptEvent>,
+    subscriber: String,
+    tx: UnboundedSender<Result<HostPromptEvent, Status>>,
 ) {
     // Subscribed before the outstanding ones are read, so a prompt issued between the two is
     // delivered by the feed rather than falling into the gap.
     let mut issued = prompts.subscribe();
 
-    for prompt in prompts.pending(crate::host_registry::now_unix_ms()) {
+    for prompt in prompts.pending(&subscriber, crate::host_registry::now_unix_ms()) {
         if !forward(&prompt, &keypair, &daemon_instance_id, &tx) {
             return;
         }
@@ -91,6 +98,11 @@ pub async fn pump_host_prompts(
                 }
             },
         };
+        // Everything the registry publishes arrives here, including other operators' prompts; this
+        // subscription carries only its own.
+        if prompt.issued_for != subscriber {
+            continue;
+        }
         if !forward(&prompt, &keypair, &daemon_instance_id, &tx) {
             return;
         }
@@ -102,7 +114,7 @@ fn forward(
     prompt: &PendingPrompt,
     keypair: &Arc<dyn HostKeypair>,
     daemon_instance_id: &str,
-    tx: &UnboundedSender<HostPromptEvent>,
+    tx: &UnboundedSender<Result<HostPromptEvent, Status>>,
 ) -> bool {
     // Read per prompt rather than once at subscribe: the key is cached behind the keypair, and a
     // subscription opened before this host had ever generated one would otherwise carry a stale
@@ -121,7 +133,9 @@ fn forward(
         }
     };
 
-    tx.send(HostPromptEvent {
+    // Always a frame, never a status: every failure this pump can hit is either the subscriber
+    // leaving or a prompt it cannot publish a key for, and neither ends the subscription.
+    tx.send(Ok(HostPromptEvent {
         prompt_id: prompt.prompt_id.clone(),
         daemon_instance_id: daemon_instance_id.to_string(),
         kind: wire_kind(prompt.kind) as i32,
@@ -129,7 +143,7 @@ fn forward(
         host_public_key: published.spki_der,
         host_public_key_fingerprint: published.fingerprint,
         expires_at_unix_ms: prompt.expires_at_unix_ms,
-    })
+    }))
     .is_ok()
 }
 

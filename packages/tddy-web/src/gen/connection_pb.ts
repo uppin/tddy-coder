@@ -2564,6 +2564,14 @@ export type StreamHostPromptsRequest = Message<"connection.StreamHostPromptsRequ
   sessionToken: string;
 
   /**
+   * The host whose questions are read. Empty means the daemon serving the call. Honoured the way
+   * GetHostToolingRequest.daemon_instance_id is: a prompt is raised by, and answerable on, exactly
+   * one host, and a feed served locally would offer this daemon's own questions under another
+   * host's name.
+   *
+   * A feed carries only the prompts raised by the SUBSCRIBING session's own GitHub user. A prompt
+   * names a private-key path an operator typed, and it accepts exactly one answer.
+   *
    * @generated from field: string daemon_instance_id = 2;
    */
   daemonInstanceId: string;
@@ -2645,11 +2653,19 @@ export type AnswerHostPromptRequest = Message<"connection.AnswerHostPromptReques
   sessionToken: string;
 
   /**
+   * The host holding the prompt being answered — the daemon_instance_id of the HostPromptEvent this
+   * answers. Empty means the daemon serving the call. Honoured as GetHostTooling honours it: the
+   * prompt exists on the host that raised it, and answered anywhere else it matches nothing.
+   *
    * @generated from field: string daemon_instance_id = 2;
    */
   daemonInstanceId: string;
 
   /**
+   * Answerable only by the session whose GitHub user raised this prompt. Anyone else is refused
+   * exactly as an id that was never issued is — the refusal reveals nothing about whether the
+   * prompt exists — and the prompt keeps its one unspent answer.
+   *
    * @generated from field: string prompt_id = 3;
    */
   promptId: string;
@@ -2680,7 +2696,8 @@ export type AnswerHostPromptResponse = Message<"connection.AnswerHostPromptRespo
   accepted: boolean;
 
   /**
-   * Why the answer was refused — a wrong passphrase, an expired prompt, or one already answered.
+   * Why the answer was refused — an expired prompt, one already answered, or no such prompt (which
+   * is also what a prompt raised by somebody else reads as). For an operator, not for parsing.
    *
    * @generated from field: string rejection_reason = 2;
    */
@@ -2713,6 +2730,9 @@ export type AddHostKeyRequest = Message<"connection.AddHostKeyRequest"> & {
   /**
    * The key to add, as the operator sees it — the path of a private key on that host. It is also
    * the `subject` of the prompt this call raises, so what the dialog names is what gets unlocked.
+   *
+   * Read as the OS user the calling session maps to, and only from inside that user's home
+   * directory: this is free text from a browser, and a daemon can reach files its caller cannot.
    *
    * @generated from field: string subject = 3;
    */
@@ -2750,6 +2770,9 @@ export type AddHostKeyResponse = Message<"connection.AddHostKeyResponse"> & {
 
   /**
    * For an operator, not for parsing. MUST NOT quote the answer, in any form.
+   *
+   * MUST NOT distinguish a key that is absent from one that is malformed either: told apart, the
+   * two answer "is there a file at this path?" for anywhere the caller can name.
    *
    * @generated from field: string failure_reason = 4;
    */
@@ -8093,7 +8116,12 @@ export enum AddHostKeyOutcome {
   ADDED = 1,
 
   /**
-   * The answer decrypted, but it did not unlock the key. The operator can try again.
+   * The answer did not open the key, and the operator can try again.
+   *
+   * Also what an answer this host could not DECRYPT reports, deliberately and indistinguishably: a
+   * response that told the two apart would give any authenticated caller one clean bit per chosen
+   * ciphertext against the host's long-lived RSA key (a Manger-style attack on RSA-OAEP), driven by
+   * looping AddHostKey -> AnswerHostPrompt. Which of the two it was goes to the host's log only.
    *
    * @generated from enum value: ADD_HOST_KEY_OUTCOME_WRONG_PASSPHRASE = 2;
    */
@@ -8114,7 +8142,8 @@ export enum AddHostKeyOutcome {
   NO_AGENT = 4,
 
   /**
-   * The key could not be read at all — no such path, or not a private key.
+   * The key could not be read at all — no such path, not a private key, or a path outside the
+   * caller's own home directory on that host.
    *
    * @generated from enum value: ADD_HOST_KEY_OUTCOME_KEY_UNREADABLE = 5;
    */

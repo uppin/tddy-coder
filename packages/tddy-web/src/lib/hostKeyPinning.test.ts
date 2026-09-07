@@ -6,8 +6,9 @@
  * including the ones a storage-blocked browser reaches.
  */
 
-import { describe, expect, it } from "bun:test";
-import { acceptChangedHostKey, checkHostKey } from "./hostKeyPinning";
+import { afterEach, describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
+import { acceptChangedHostKey, checkHostKey, verifyHostKey } from "./hostKeyPinning";
 
 // ---------------------------------------------------------------------------
 // Fixtures — two hosts and three key fingerprints, in the shape the daemon publishes
@@ -86,6 +87,22 @@ function withBrowserStorage(storage: FakeStorage, fn: () => void): void {
   global.window = { ...previousWindow, localStorage: storage } as unknown as Window;
   try {
     fn();
+  } finally {
+    if (previousWindow !== undefined) global.window = previousWindow;
+    else delete global.window;
+  }
+}
+
+/** {@link withBrowserStorage} for a check that has to await a digest before it can conclude. */
+async function withBrowserStorageAsync(
+  storage: FakeStorage,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const global = globalThis as typeof globalThis & { window?: Window };
+  const previousWindow = global.window;
+  global.window = { ...previousWindow, localStorage: storage } as unknown as Window;
+  try {
+    await fn();
   } finally {
     if (previousWindow !== undefined) global.window = previousWindow;
     else delete global.window;
@@ -295,6 +312,170 @@ describe("acceptChangedHostKey", () => {
     withBrowserStorage(storage, () => {
       // When / Then
       expect(() => acceptChangedHostKey(WORKSHOP_MINI, ROTATED_KEY)).not.toThrow();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Binding the pin to the key that encrypts, not to the string beside it
+// ---------------------------------------------------------------------------
+
+/**
+ * A prompt carries a key *and* a fingerprint string, and only one of them encrypts anything. Pinning
+ * the string would leave the pin decorative: an active peer replays the genuine, non-secret
+ * fingerprint beside its own key, the check says "unchanged", the operator recognises the
+ * fingerprint they verified out of band, and the passphrase is encrypted to the peer.
+ *
+ * `verifyHostKey` derives the fingerprint from the key's own bytes and pins *that*, so the recorded
+ * value and the encrypting key are the same fact.
+ */
+
+const realCrypto = globalThis.crypto;
+
+function setCrypto(value: unknown) {
+  Object.defineProperty(globalThis, "crypto", { value, configurable: true, writable: true });
+}
+
+/** Stands in for a published SPKI DER — the check hashes these bytes and never imports them. */
+const A_HOSTS_OWN_KEY = new Uint8Array([0x30, 0x82, 0x01, 0x22, 0x01]);
+const A_SUBSTITUTED_KEY = new Uint8Array([0x30, 0x82, 0x01, 0x22, 0x02]);
+const A_ROTATED_KEY = new Uint8Array([0x30, 0x82, 0x01, 0x22, 0x03]);
+
+/** What `host_keypair.rs` publishes for these bytes, computed here rather than through the module. */
+function fingerprintTheDaemonWouldPublish(spkiDer: Uint8Array): string {
+  return `SHA256:${createHash("sha256").update(spkiDer).digest("base64").replace(/=+$/, "")}`;
+}
+
+describe("verifyHostKey", () => {
+  afterEach(() => {
+    setCrypto(realCrypto);
+  });
+
+  it("pins the fingerprint derived from the key the prompt carried", async () => {
+    // Given a host seen for the first time, advertising its key honestly
+    const storage = aWorkingStorage();
+    const honest = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+
+    await withBrowserStorageAsync(storage, async () => {
+      // When the prompt is checked
+      const check = await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, honest);
+
+      // Then the sighting is recorded under the digest of the key itself — the value later
+      // sightings are compared against is the one that encrypts
+      expect(check).toEqual({ verdict: { kind: "pinned-now" }, fingerprint: honest });
+      expect(Object.values(storage.snapshot())).toEqual([honest]);
+    });
+  });
+
+  it("blocks a prompt whose advertised fingerprint is not the fingerprint of its key", async () => {
+    // Given a prompt carrying one key while claiming another key's fingerprint
+    const storage = aWorkingStorage();
+    const claimed = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+    const actual = fingerprintTheDaemonWouldPublish(A_SUBSTITUTED_KEY);
+
+    await withBrowserStorageAsync(storage, async () => {
+      // When it is checked
+      const check = await verifyHostKey(WORKSHOP_MINI, A_SUBSTITUTED_KEY, claimed);
+
+      // Then the two are reported as disagreeing, and nothing is pinned: a sighting that cannot say
+      // which key it saw must not spend this host's one first-use trust slot
+      expect(check.verdict).toEqual({
+        kind: "mismatched",
+        advertisedFingerprint: claimed,
+        derivedFingerprint: actual,
+      });
+      expect(storage.snapshot()).toEqual({});
+    });
+  });
+
+  it("catches a genuine fingerprint replayed beside another key", async () => {
+    // Given this host was seen once, honestly, and its key pinned
+    const storage = aWorkingStorage();
+    const honest = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+
+    await withBrowserStorageAsync(storage, async () => {
+      await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, honest);
+
+      // When a peer replays that same fingerprint — public, non-secret — beside its own key
+      const check = await verifyHostKey(WORKSHOP_MINI, A_SUBSTITUTED_KEY, honest);
+
+      // Then the substitution is caught, rather than reading as the key the operator verified
+      expect(check.verdict).toEqual({
+        kind: "mismatched",
+        advertisedFingerprint: honest,
+        derivedFingerprint: fingerprintTheDaemonWouldPublish(A_SUBSTITUTED_KEY),
+      });
+      // And the pin still records the key that was genuinely seen
+      expect(Object.values(storage.snapshot())).toEqual([honest]);
+    });
+  });
+
+  it("reports the key unchanged when the pinned key comes back", async () => {
+    // Given a host whose key was pinned on a first sighting
+    const storage = aWorkingStorage();
+    const honest = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+
+    await withBrowserStorageAsync(storage, async () => {
+      await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, honest);
+
+      // When the same key raises another prompt
+      const check = await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, honest);
+
+      // Then nothing is remarked on
+      expect(check).toEqual({ verdict: { kind: "unchanged" }, fingerprint: honest });
+    });
+  });
+
+  it("reports the key changed when a different key arrives honestly advertised", async () => {
+    // Given a host whose key was pinned, that has since regenerated its keypair
+    const storage = aWorkingStorage();
+    const original = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+    const rotated = fingerprintTheDaemonWouldPublish(A_ROTATED_KEY);
+
+    await withBrowserStorageAsync(storage, async () => {
+      await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, original);
+
+      // When the new key raises a prompt, advertising itself truthfully
+      const check = await verifyHostKey(WORKSHOP_MINI, A_ROTATED_KEY, rotated);
+
+      // Then it is a rotation to accept or refuse, not a key claiming to be one it is not
+      expect(check).toEqual({
+        verdict: { kind: "changed", pinnedFingerprint: original },
+        fingerprint: rotated,
+      });
+    });
+  });
+
+  it("draws no conclusion for a prompt that carries no key at all", async () => {
+    // Given a prompt with no key material to hash
+    const storage = aWorkingStorage();
+
+    await withBrowserStorageAsync(storage, async () => {
+      // When it is checked
+      const check = await verifyHostKey(WORKSHOP_MINI, new Uint8Array(), "");
+
+      // Then no first sighting is manufactured out of nothing
+      expect(check).toEqual({ verdict: { kind: "unverified" }, fingerprint: null });
+      expect(storage.snapshot()).toEqual({});
+    });
+  });
+
+  it("cannot check a key on an origin that exposes no crypto.subtle, and says why", async () => {
+    // Given the origin the daemon serves this bundle on: plain http, where `subtle` is withheld
+    const storage = aWorkingStorage();
+    const honest = fingerprintTheDaemonWouldPublish(A_HOSTS_OWN_KEY);
+    setCrypto({ getRandomValues: realCrypto.getRandomValues.bind(realCrypto) });
+
+    await withBrowserStorageAsync(storage, async () => {
+      // When a prompt is checked there
+      const check = await verifyHostKey(WORKSHOP_MINI, A_HOSTS_OWN_KEY, honest);
+
+      // Then the check reports that it could not run, with the reason — and pins nothing, because a
+      // fingerprint it could not derive is a fingerprint it cannot stand behind
+      expect(check.fingerprint).toBeNull();
+      expect(check.verdict.kind).toBe("underivable");
+      expect(check.verdict).toHaveProperty("reason", expect.stringMatching(/secure context/i));
+      expect(storage.snapshot()).toEqual({});
     });
   });
 });

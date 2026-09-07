@@ -165,6 +165,26 @@ export const hostPassphraseDialogPage = {
    * first is evidence of anything.
    */
   unverifiedNotice: () => byTestId("host-key-unverified-notice"),
+  /**
+   * Shown when the key a prompt carried is not the key its fingerprint describes.
+   *
+   * A third thing again: `changedWarning` means "this host is presenting a different key than
+   * before", while this means "this frame contradicts itself", which no honest host ever does.
+   */
+  mismatchWarning: () => byTestId("host-key-mismatch-warning"),
+  /** Shown when this origin cannot fingerprint a key or encrypt an answer at all. */
+  underivableNotice: () => byTestId("host-key-underivable-notice"),
+  cancel: () => byTestId("host-passphrase-cancel"),
+
+  /** The operator's statement that they checked the new key with the host itself. */
+  acceptChangedKeyConfirmation: () => byTestId("host-key-accept-confirm"),
+  /** The act of pinning the new key — refused until the statement above has been made. */
+  acceptChangedKeyButton: () => byTestId("host-key-accept-submit"),
+  /** Accept a rotated key the way an operator has to: state it was verified, then accept it. */
+  acceptChangedKey: () => {
+    hostPassphraseDialogPage.acceptChangedKeyConfirmation().check();
+    hostPassphraseDialogPage.acceptChangedKeyButton().click();
+  },
 };
 
 /**

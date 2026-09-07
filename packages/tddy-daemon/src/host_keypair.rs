@@ -135,7 +135,7 @@ impl HostKeypair for FileHostKeypair {
             .map_err(|e| format!("encoding this host's public key: {e}"))?
             .as_bytes()
             .to_vec();
-        let fingerprint = fingerprint_of(&spki_der);
+        let fingerprint = spki_fingerprint(&spki_der);
         Ok(PublishedKey {
             spki_der,
             fingerprint,
@@ -163,7 +163,11 @@ impl HostKeypair for FileHostKeypair {
 ///
 /// Hashes the published bytes themselves, so what the dialog shows is a fingerprint of exactly what
 /// the browser imported — a digest over a re-encoding could differ from the key actually in use.
-fn fingerprint_of(spki_der: &[u8]) -> String {
+///
+/// Named for the bytes it digests, because it is **not** the only `fingerprint_of` in this crate:
+/// [`crate::ssh_agent`] has one that digests an SSH public-key blob. Two same-named functions over
+/// different inputs are a trap, and the two are never interchangeable.
+fn spki_fingerprint(spki_der: &[u8]) -> String {
     use base64::Engine;
     use sha2::Digest;
 

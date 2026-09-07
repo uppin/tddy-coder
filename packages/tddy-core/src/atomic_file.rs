@@ -53,7 +53,11 @@ fn write_swapped(path: &Path, contents: &[u8], mode: Option<u32>) -> io::Result<
     let dir = parent_dir(path);
     fs::create_dir_all(&dir)?;
     let swap = swap_path(path, &dir);
-    match write_swap_then_rename(&swap, path, &dir, contents, mode) {
+    // Created before the cleanup arm is armed, because the cleanup deletes the swap file: a path
+    // this call did **not** create is not this call's to remove, and `create_swap` now refuses one
+    // that already exists rather than opening it.
+    let file = create_swap(&swap, mode)?;
+    match write_swap_then_rename(file, &swap, path, &dir, contents, mode) {
         Ok(()) => Ok(()),
         Err(e) => {
             // The swap file is this call's private scratch space; a failed call must not leave it
@@ -96,20 +100,20 @@ fn swap_path(path: &Path, dir: &Path) -> PathBuf {
 }
 
 fn write_swap_then_rename(
+    mut file: File,
     swap: &Path,
     final_path: &Path,
     dir: &Path,
     contents: &[u8],
     mode: Option<u32>,
 ) -> io::Result<()> {
-    {
-        let mut file = create_swap(swap, mode)?;
-        file.write_all(contents)?;
-        // Without this the bytes may still be in page cache, and a full disk reports `ENOSPC`
-        // long after `write` returned success. Forcing it here keeps the failure on the swap
-        // file, before the rename makes it the session's state.
-        file.sync_all()?;
-    }
+    file.write_all(contents)?;
+    // Without this the bytes may still be in page cache, and a full disk reports `ENOSPC`
+    // long after `write` returned success. Forcing it here keeps the failure on the swap
+    // file, before the rename makes it the session's state.
+    file.sync_all()?;
+    // Closed before the rename, as it was when this function opened the file itself.
+    drop(file);
     // A caller-stated mode is already on the swap file, set as it was created; carrying the
     // target's bits over it would undo the very thing that mode was asked for.
     if mode.is_none() {
@@ -136,12 +140,18 @@ fn write_swap_then_rename(
 /// The mode is passed to `open` rather than set afterwards: a `create` followed by
 /// `set_permissions` leaves a window in which the file exists at the process umask, which for a
 /// secret is a window in which anyone can read it.
+///
+/// `create_new`, not `create`: `OpenOptions::mode()` applies **only** to a file this call creates,
+/// so a swap path that already exists would be opened at whatever mode it already carries and the
+/// requested `0o600` would be silently ignored. [`swap_path`] makes a collision vanishingly
+/// unlikely, but "unlikely" is not the guarantee a private key is owed — refusing the path makes
+/// the owner-only mode structural rather than probabilistic.
 #[cfg(unix)]
 fn create_swap(swap: &Path, mode: Option<u32>) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     if let Some(mode) = mode {
         options.mode(mode);
     }
@@ -150,7 +160,10 @@ fn create_swap(swap: &Path, mode: Option<u32>) -> io::Result<File> {
 
 #[cfg(not(unix))]
 fn create_swap(swap: &Path, _mode: Option<u32>) -> io::Result<File> {
-    File::create(swap)
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(swap)
 }
 
 #[cfg(unix)]
@@ -316,5 +329,37 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "replacement must not widen the file's mode");
+    }
+
+    /// The owner-only mode is honoured **only when the file is created** — `OpenOptions::mode()` is
+    /// ignored for a path that already exists. A swap file left behind by another process (or
+    /// planted there) would therefore receive a secret at whatever mode that file already carries,
+    /// so the write must refuse the path rather than reuse it.
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_swap_path_that_already_exists_rather_than_writing_a_secret_into_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Given a swap file already sitting at the path this write would use, world-readable
+        let dir = tempfile::tempdir().unwrap();
+        let squatted = dir.path().join(".host-prompt-key.pem.squatted.swap");
+        fs::write(&squatted, "planted\n").unwrap();
+        fs::set_permissions(&squatted, fs::Permissions::from_mode(0o644)).unwrap();
+
+        // When a secret is written through it at owner-only
+        let created = create_swap(&squatted, Some(0o600));
+
+        // Then
+        assert_eq!(
+            created.err().map(|e| e.kind()),
+            Some(io::ErrorKind::AlreadyExists),
+            "a swap path that already exists must be refused: the requested mode would be ignored, \
+             and the secret would land at the mode the existing file already carries"
+        );
+        assert_eq!(
+            fs::read_to_string(&squatted).unwrap(),
+            "planted\n",
+            "the refused write must not have truncated what was there"
+        );
     }
 }

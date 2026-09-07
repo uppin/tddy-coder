@@ -7,10 +7,26 @@ secure-context-only member on them. Development on `localhost` hides this comple
 `localhost` and `127.0.0.1` *are* secure contexts — so a feature can pass every local test and every
 Cypress run and still throw on the first real device.
 
-**Rule:** never call a secure-context-only API from tddy-web without a non-secure fallback. Notably
+**Rule:** never call a secure-context-only API from tddy-web without either a non-secure fallback or
+an explicit, stated refusal. Notably `crypto.subtle` (**the whole of `SubtleCrypto`**),
 `crypto.randomUUID`, `navigator.clipboard`, `navigator.mediaDevices`, service workers, and
 `navigator.geolocation`. `crypto.getRandomValues` **is** available on insecure origins — only the
 UUID convenience wrapper is missing.
+
+## Web Crypto — `lib/subtleCrypto.ts`
+
+`requireSubtleCrypto()` is the single audited entry point to `crypto.subtle`, and unlike
+`randomUuid()` it has **no fallback and must not grow one**. Everything behind it — encrypting a key
+passphrase for a host (`encryptForHost.ts`), fingerprinting that host's published key
+(`hostKeyFingerprint.ts`) — exists to keep a secret away from a channel the trust model calls
+unauthenticated. The only "fallback" available would be sending that secret in the clear, which is
+the exposure the feature was built to remove, so the call refuses instead and names the origin as
+the reason. The host add-key dialog surfaces that refusal verbatim rather than failing silently.
+
+Units in `encryptForHost.test.ts`, `hostKeyFingerprint.test.ts` and `hostKeyPinning.test.ts` cover
+the refusal by swapping the `crypto` global for one with no `subtle`, the way `randomId.test.ts`
+covers its own fallbacks. Cypress cannot: component tests run on `localhost`, which is a secure
+context.
 
 ## Random ids — `lib/randomId.ts`
 

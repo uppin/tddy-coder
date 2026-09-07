@@ -5,10 +5,14 @@
  *
  * | State | What an operator does about it |
  * |---|---|
- * | agent holding keys | nothing — this host can reach its remotes |
- * | agent, no keys | add a key (`HostAddKeyAction`, rendered beside this summary) |
+ * | agent holding keys | nothing it must do — though a second key is still addable |
+ * | agent, no keys | add a key |
  * | no agent reachable | start an agent, or the daemon cannot see its socket |
  * | probe failed | look at the daemon log; we do not know |
+ *
+ * The add-key action (`HostAddKeyAction`, rendered beside this summary) is offered on both of the
+ * reachable states, not only the empty one: it gates on a reachable agent alone, because a host
+ * commonly needs a second key.
  *
  * ⚠ A key's `comment` is free text set when the key was generated — commonly `user@host`. It is
  * **not** a file path, and the agent does not know which file a key came from, so the row must never

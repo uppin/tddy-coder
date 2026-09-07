@@ -6,8 +6,12 @@
 //! `prompt_id` rather than an envelope sequence, and leaves the reply a unary call that can be
 //! transport-restricted the way `mint_local_token` is.
 //!
-//! # Three properties this type exists to guarantee
+//! # Four properties this type exists to guarantee
 //!
+//! - **Ownership.** A prompt belongs to the operator whose session raised it. It is shown to
+//!   nobody else and answerable by nobody else: replayed to every subscriber it would disclose the
+//!   private-key path one operator named to every other operator watching, and hand each of them
+//!   the chance to spend a single-use prompt that is not theirs.
 //! - **Expiry.** An unanswered prompt must not pin an operation forever.
 //! - **Single use.** Answering twice must not add a key twice, and must not turn the endpoint into a
 //!   passphrase-guessing oracle that silently accepts repeated attempts against one prompt.
@@ -47,6 +51,14 @@ pub enum PromptKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingPrompt {
     pub prompt_id: String,
+    /// The operator this question belongs to, as the **GitHub user** their session resolves to.
+    ///
+    /// The GitHub user and not the mapped OS user, because that is the identity all three RPCs in
+    /// this flow already have: `StreamHostPrompts` and `AnswerHostPrompt` resolve a session to a
+    /// GitHub user and stop there, and only `AddHostKey` goes on to map it to an OS user. Keying
+    /// on the OS user would also merge two operators who share one — they would see and be able to
+    /// burn each other's prompts, which is the very thing this field exists to prevent.
+    pub issued_for: String,
     pub kind: PromptKind,
     /// Human-readable subject — the key being unlocked. **Never a secret.**
     pub subject: String,
@@ -69,20 +81,37 @@ pub enum AnswerRejection {
 /// A trait so the RPC layer can be handed a deterministic double, and so time can be injected —
 /// expiry asserted with a real sleep would be slow and flaky.
 pub trait HostPromptRegistry: Send + Sync {
-    /// Register a question and return it, stamped with its expiry.
-    fn issue(&self, kind: PromptKind, subject: &str, now_unix_ms: i64) -> PendingPrompt;
+    /// Register a question `issued_for` is being asked, and return it stamped with its expiry.
+    fn issue(
+        &self,
+        issued_for: &str,
+        kind: PromptKind,
+        subject: &str,
+        now_unix_ms: i64,
+    ) -> PendingPrompt;
 
-    /// Every prompt still answerable at `now_unix_ms`.
-    fn pending(&self, now_unix_ms: i64) -> Vec<PendingPrompt>;
+    /// Every prompt of `issued_for`'s that is still answerable at `now_unix_ms`.
+    ///
+    /// Another operator's outstanding prompts are not merely uninteresting here: the subject of a
+    /// prompt is a path on this host that somebody named, and this is the call a feed primes
+    /// itself from.
+    fn pending(&self, issued_for: &str, now_unix_ms: i64) -> Vec<PendingPrompt>;
 
-    /// Submit the **encrypted** answer for `prompt_id`.
+    /// Submit `answered_by`'s **encrypted** answer for `prompt_id`.
     ///
     /// Takes ciphertext, not plaintext: decryption belongs to whoever holds the private key, and
     /// keeping the registry ignorant of the secret means it cannot leak one through a log or a
     /// debug impl.
+    ///
+    /// A prompt raised by somebody other than `answered_by` is refused as
+    /// [`AnswerRejection::UnknownPrompt`] — the same refusal a prompt id that was never issued
+    /// gets, so the endpoint cannot be used to find out which ids are live — and, crucially, is
+    /// **not consumed**: a prompt answers once, and that one answer belongs to the operator who
+    /// raised it.
     fn answer(
         &self,
         prompt_id: &str,
+        answered_by: &str,
         encrypted_answer: Vec<u8>,
         now_unix_ms: i64,
     ) -> Result<(), AnswerRejection>;
@@ -155,9 +184,16 @@ impl Default for InMemoryHostPromptRegistry {
 }
 
 impl HostPromptRegistry for InMemoryHostPromptRegistry {
-    fn issue(&self, kind: PromptKind, subject: &str, now_unix_ms: i64) -> PendingPrompt {
+    fn issue(
+        &self,
+        issued_for: &str,
+        kind: PromptKind,
+        subject: &str,
+        now_unix_ms: i64,
+    ) -> PendingPrompt {
         let prompt = PendingPrompt {
             prompt_id: uuid::Uuid::now_v7().to_string(),
+            issued_for: issued_for.to_string(),
             kind,
             subject: subject.to_string(),
             expires_at_unix_ms: now_unix_ms + PROMPT_TTL.as_millis() as i64,
@@ -184,11 +220,13 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
         prompt
     }
 
-    fn pending(&self, now_unix_ms: i64) -> Vec<PendingPrompt> {
+    fn pending(&self, issued_for: &str, now_unix_ms: i64) -> Vec<PendingPrompt> {
         self.lock()
             .values()
             .filter(|record| {
-                record.unanswered.is_some() && now_unix_ms < record.prompt.expires_at_unix_ms
+                record.prompt.issued_for == issued_for
+                    && record.unanswered.is_some()
+                    && now_unix_ms < record.prompt.expires_at_unix_ms
             })
             .map(|record| record.prompt.clone())
             .collect()
@@ -197,6 +235,7 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
     fn answer(
         &self,
         prompt_id: &str,
+        answered_by: &str,
         encrypted_answer: Vec<u8>,
         now_unix_ms: i64,
     ) -> Result<(), AnswerRejection> {
@@ -204,6 +243,13 @@ impl HostPromptRegistry for InMemoryHostPromptRegistry {
         let record = prompts
             .get_mut(prompt_id)
             .ok_or(AnswerRejection::UnknownPrompt)?;
+        // Checked before anything else, and reported as a prompt that does not exist: an answer
+        // from a session that did not raise this question is refused in terms that reveal nothing
+        // about it — not that it exists, not whose it is, not whether it is still open. It returns
+        // *before* the sender is taken, so a stranger cannot spend the one answer this prompt has.
+        if record.prompt.issued_for != answered_by {
+            return Err(AnswerRejection::UnknownPrompt);
+        }
         // Checked before expiry, so a replayed answer is reported as the replay it is rather than
         // as a timeout — the two call for different responses from whoever sent it.
         if record.unanswered.is_none() {
@@ -249,20 +295,24 @@ mod tests {
         T0 + ms
     }
 
+    /// The operator raising the prompts below, and one who is not.
+    const RAISED_BY: &str = "ada";
+    const SOMEBODY_ELSE: &str = "grace";
+
     /// An operator who walks away must not pin the operation waiting on them forever.
     #[test]
     fn an_unanswered_prompt_expires_and_releases_its_operation() {
         let registry = a_registry();
-        let prompt = registry.issue(PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+        let prompt = registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
 
         let past_ttl = after(PROMPT_TTL.as_millis() as i64 + 1);
 
         assert!(
-            registry.pending(past_ttl).is_empty(),
+            registry.pending(RAISED_BY, past_ttl).is_empty(),
             "an expired prompt is no longer pending"
         );
         assert_eq!(
-            registry.answer(&prompt.prompt_id, vec![1, 2, 3], past_ttl),
+            registry.answer(&prompt.prompt_id, RAISED_BY, vec![1, 2, 3], past_ttl),
             Err(AnswerRejection::Expired),
             "and it can no longer be answered"
         );
@@ -273,14 +323,14 @@ mod tests {
     #[test]
     fn a_prompt_accepts_exactly_one_answer() {
         let registry = a_registry();
-        let prompt = registry.issue(PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+        let prompt = registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
 
         assert_eq!(
-            registry.answer(&prompt.prompt_id, vec![1], after(10)),
+            registry.answer(&prompt.prompt_id, RAISED_BY, vec![1], after(10)),
             Ok(())
         );
         assert_eq!(
-            registry.answer(&prompt.prompt_id, vec![2], after(20)),
+            registry.answer(&prompt.prompt_id, RAISED_BY, vec![2], after(20)),
             Err(AnswerRejection::AlreadyAnswered),
             "a second answer to the same prompt is refused"
         );
@@ -291,7 +341,7 @@ mod tests {
         let registry = a_registry();
 
         assert_eq!(
-            registry.answer("never-issued", vec![1], T0),
+            registry.answer("never-issued", RAISED_BY, vec![1], T0),
             Err(AnswerRejection::UnknownPrompt)
         );
     }
@@ -301,9 +351,9 @@ mod tests {
     #[test]
     fn a_pending_prompt_names_its_subject_and_its_expiry() {
         let registry = a_registry();
-        let prompt = registry.issue(PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+        let prompt = registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
 
-        let pending = registry.pending(after(1));
+        let pending = registry.pending(RAISED_BY, after(1));
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].subject, "id_ed25519");
         assert_eq!(
@@ -311,5 +361,49 @@ mod tests {
             T0 + PROMPT_TTL.as_millis() as i64
         );
         assert_eq!(prompt.kind, PromptKind::SshKeyPassphrase);
+    }
+
+    /// A prompt's subject is a path on this host that one operator named. Listed to another, it is
+    /// disclosed to them — and offers them a single-use prompt they can spend.
+    #[test]
+    fn a_prompt_is_not_pending_for_an_operator_who_did_not_raise_it() {
+        let registry = a_registry();
+        registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+
+        assert_eq!(
+            registry.pending(SOMEBODY_ELSE, after(1)),
+            vec![],
+            "another operator was shown this prompt, and the private-key path it names"
+        );
+    }
+
+    /// Refusing a stranger must not double as a lookup service: were the refusal distinguishable
+    /// from an unknown id, any session could enumerate which prompt ids are live.
+    #[test]
+    fn an_answer_from_another_operator_is_refused_as_an_unknown_prompt_would_be() {
+        let registry = a_registry();
+        let prompt = registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+
+        assert_eq!(
+            registry.answer(&prompt.prompt_id, SOMEBODY_ELSE, vec![1], after(10)),
+            registry.answer("never-issued", SOMEBODY_ELSE, vec![1], after(10)),
+            "a live prompt id must be indistinguishable from a fictional one"
+        );
+    }
+
+    /// The single answer a prompt has belongs to the operator who raised it. Spent by anybody else,
+    /// their add is dead for the whole of the TTL and there is nothing they can do about it.
+    #[test]
+    fn an_answer_from_another_operator_does_not_consume_the_prompt() {
+        let registry = a_registry();
+        let prompt = registry.issue(RAISED_BY, PromptKind::SshKeyPassphrase, "id_ed25519", T0);
+
+        let _refused = registry.answer(&prompt.prompt_id, SOMEBODY_ELSE, vec![1], after(10));
+
+        assert_eq!(
+            registry.answer(&prompt.prompt_id, RAISED_BY, vec![2], after(20)),
+            Ok(()),
+            "a stranger's refused answer spent the one answer this prompt had"
+        );
     }
 }

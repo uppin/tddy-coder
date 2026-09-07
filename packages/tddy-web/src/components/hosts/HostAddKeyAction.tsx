@@ -16,6 +16,11 @@
  * worth retyping, an absent agent is not, and an expired prompt means answering faster — three
  * different next actions, which is the entire reason the response carries an enum.
  *
+ * The key that arrives with a prompt is fingerprinted here before any dialog is shown, and it is
+ * that derived value — never the fingerprint string the prompt advertises beside it — that is
+ * displayed and pinned. The two fields ride the same unauthenticated channel and only one of them
+ * encrypts anything; see `hostKeyPinning`.
+ *
  * The prompt feed is read only while an add is in flight. The daemon replays whatever is still
  * outstanding to a subscriber that arrives late (`host_prompt_stream.rs`), so there is no window in
  * which this component can miss the question its own call raised — and a screenful of hosts nobody
@@ -24,7 +29,7 @@
  * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   AddHostKeyOutcome,
   ConnectionService,
@@ -35,7 +40,11 @@ import {
 import { useHostClient } from "../../rpc/connections/registry";
 import { useHostPrompts } from "../../rpc/useHostPrompts";
 import { useAuthContext } from "../../hooks/authProvider";
-import { checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
+import {
+  acceptChangedHostKey,
+  verifyHostKey,
+  type HostKeyCheck,
+} from "../../lib/hostKeyPinning";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
 
 export interface HostAddKeyActionProps {
@@ -105,6 +114,10 @@ export function HostAddKeyAction({
   const { sessionToken } = useAuthContext();
   const [subject, setSubject] = useState("");
   const [adding, setAdding] = useState(false);
+  // The in-flight `AddHostKey`, so cancelling the dialog can end it. The call blocks for the
+  // prompt's whole lifetime, and a cancel that only closed the dialog would leave the row disabled
+  // for minutes with nothing on screen explaining the wait.
+  const addInFlight = useRef<AbortController | null>(null);
   const [report, setReport] = useState<AddReport | null>(null);
   const [addedFingerprint, setAddedFingerprint] = useState<string | null>(null);
   const [handledPromptId, setHandledPromptId] = useState<string | null>(null);
@@ -114,17 +127,33 @@ export function HostAddKeyAction({
   const prompt = useHostPrompts(adding ? instanceId : null);
   const outstandingPrompt = prompt && prompt.promptId !== handledPromptId ? prompt : null;
 
-  const [continuity, setContinuity] = useState<KeyPinVerdict | null>(null);
+  const [keyCheck, setKeyCheck] = useState<HostKeyCheck | null>(null);
 
   // Checked once per question, after the commit rather than during render: the check *records* the
   // pin, and a render React discards would otherwise spend this host's one first-use trust slot on
   // a dialog nobody was ever shown.
+  //
+  // The key itself is checked, not the fingerprint string beside it. Both fields ride the same
+  // unauthenticated channel, and only the key encrypts anything — so `verifyHostKey` derives a
+  // fingerprint from the published key, pins that, and refuses a prompt whose two halves disagree.
   useEffect(() => {
-    setContinuity(
-      outstandingPrompt === null
-        ? null
-        : checkHostKey(instanceId, outstandingPrompt.hostPublicKeyFingerprint),
-    );
+    if (outstandingPrompt === null) {
+      setKeyCheck(null);
+      return;
+    }
+    // Deriving a digest is asynchronous, so a prompt replaced while one is in flight would
+    // otherwise land its verdict on the question that succeeded it.
+    let current = true;
+    void verifyHostKey(
+      instanceId,
+      outstandingPrompt.hostPublicKey,
+      outstandingPrompt.hostPublicKeyFingerprint,
+    ).then((check) => {
+      if (current) setKeyCheck(check);
+    });
+    return () => {
+      current = false;
+    };
   }, [instanceId, outstandingPrompt]);
 
   if (!anAgentAnswered(sshAgent)) {
@@ -138,25 +167,63 @@ export function HostAddKeyAction({
       setReport({ text: "This host cannot be reached from here." });
       return;
     }
+    const call = new AbortController();
+    addInFlight.current = call;
     setAdding(true);
     setReport(null);
     setAddedFingerprint(null);
     setHandledPromptId(null);
     try {
-      const response = await client.addHostKey({
-        sessionToken: sessionToken ?? "",
-        daemonInstanceId: instanceId,
-        subject,
-      });
+      const response = await client.addHostKey(
+        {
+          sessionToken: sessionToken ?? "",
+          daemonInstanceId: instanceId,
+          subject,
+        },
+        { signal: call.signal },
+      );
       setReport(reportOf(response));
       // The fingerprint the agent reported, so the operator can match it against the key list
       // beside it rather than taking "done" on trust.
       setAddedFingerprint(response.added ? response.fingerprint : null);
     } catch (error) {
-      setReport({ text: `The add could not be sent: ${messageOf(error)}` });
+      // A call we aborted ourselves is not a failure to report: the operator already knows, because
+      // they are the one who cancelled, and `cancelAdd` has said so.
+      if (!call.signal.aborted) {
+        setReport({ text: `The add could not be sent: ${messageOf(error)}` });
+      }
     } finally {
       setAdding(false);
     }
+  };
+
+  /**
+   * Give up on the add the operator started.
+   *
+   * The daemon has no withdraw call, so the prompt it raised stands until it expires on its own —
+   * unanswered, which is a state it already handles. What ends here is this browser's side: the call
+   * is aborted and the control comes back, rather than staying disabled for the prompt's full TTL.
+   */
+  const cancelAdd = () => {
+    if (outstandingPrompt !== null) setHandledPromptId(outstandingPrompt.promptId);
+    addInFlight.current?.abort();
+    addInFlight.current = null;
+    // Not left to the aborted call's `finally`: the row must come back now, whether or not the
+    // transport surfaces the abort as a rejection.
+    setAdding(false);
+    setReport({ text: "The add was cancelled. Nothing was sent." });
+  };
+
+  /**
+   * Pin the key the host is presenting now, after the operator said the change is the host's own.
+   *
+   * The verdict is settled here rather than re-derived: the check that produced it already hashed
+   * this key, and asking storage again would only be able to agree with what was just written.
+   */
+  const acceptChangedKey = () => {
+    if (keyCheck === null || keyCheck.fingerprint === null) return;
+    acceptChangedHostKey(instanceId, keyCheck.fingerprint);
+    setKeyCheck({ ...keyCheck, verdict: { kind: "unchanged" } });
   };
 
   /** Send the ciphertext the dialog produced. The passphrase itself never reaches this component. */
@@ -166,12 +233,23 @@ export function HostAddKeyAction({
     // send comes back.
     setHandledPromptId(outstandingPrompt.promptId);
     try {
-      await client.answerHostPrompt({
+      const response = await client.answerHostPrompt({
         sessionToken: sessionToken ?? "",
         daemonInstanceId: instanceId,
         promptId: outstandingPrompt.promptId,
         encryptedAnswer,
       });
+      if (!response.accepted) {
+        // The dialog is gone by now, so this is the only place the refusal can be read. The
+        // daemon's own words stand in: it distinguishes an unknown prompt from an expired one from
+        // one already answered, and each sends the operator somewhere different.
+        setReport({
+          text:
+            response.rejectionReason === ""
+              ? "The host refused that answer."
+              : `The host refused that answer: ${response.rejectionReason}`,
+        });
+      }
     } catch (error) {
       setReport({ text: `The answer could not be sent: ${messageOf(error)}` });
     }
@@ -214,15 +292,18 @@ export function HostAddKeyAction({
           {addedFingerprint}
         </span>
       )}
-      {outstandingPrompt !== null && continuity !== null && (
+      {outstandingPrompt !== null && keyCheck !== null && (
         <HostPassphraseDialog
           hostId={instanceId}
           subject={outstandingPrompt.subject}
-          fingerprint={outstandingPrompt.hostPublicKeyFingerprint}
+          // The fingerprint of the key that arrived, never the string advertised beside it: what the
+          // operator verifies out of band has to be the key their passphrase is encrypted under.
+          fingerprint={keyCheck.fingerprint}
           spkiDer={outstandingPrompt.hostPublicKey}
-          keyContinuity={continuity}
+          keyContinuity={keyCheck.verdict}
           onSubmit={(encryptedAnswer) => void answerPrompt(encryptedAnswer)}
-          onCancel={() => setHandledPromptId(outstandingPrompt.promptId)}
+          onAcceptChangedKey={acceptChangedKey}
+          onCancel={cancelAdd}
         />
       )}
     </span>

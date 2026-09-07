@@ -60,6 +60,17 @@ async fn stops_the_prompt_pump_once_the_subscriber_is_gone() {
         .expect("a valid session subscribes")
         .into_inner();
 
+    // The count is taken before the drop, and taken synchronously: `PumpCount::running` increments
+    // in the handler itself, before the task is spawned, so a pump that is running is already
+    // counted by the time the subscription is handed back. Without this, `== 0` below also holds
+    // for a service that counts nothing at all — and the leak it exists to catch is invisible
+    // again.
+    assert_eq!(
+        service.pending_prompt_pump_count(),
+        1,
+        "the subscription is being pumped"
+    );
+
     // When the subscriber goes away without ever having been sent anything
     drop(stream);
     tokio::time::sleep(TEARDOWN_WINDOW).await;

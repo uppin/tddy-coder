@@ -87,3 +87,18 @@ debug = "line-tables-only"
 # contributor under `cargo test --workspace`) also carry only line tables.
 [profile.test]
 debug = "line-tables-only"
+
+# The bignum arithmetic behind RSA keygen is optimised even in test builds.
+#
+# `packages/tddy-daemon/src/host_keypair.rs` generates an RSA-2048 host-prompt key per test that
+# answers a host prompt, each inside a 10s timeout, while 750+ tests run in parallel — so a keygen
+# that costs seconds on an idle machine is a wall-clock flake under load. Measured with
+# `-- --test-threads=1`, unoptimised then with this override:
+#
+# - `--lib host_keypair` (5 tests, 6 keygens): 20.13s → 1.08s
+# - `--lib host_add_key_handler_tests` (18 tests, one keygen each): 81.86s → 13.63s
+#
+# `num-bigint-dig` and not `rsa`: the same measurement with `rsa` alone at opt-level 3 was 20.53s,
+# i.e. unchanged. The prime search is the cost, and it lives here.
+[profile.test.package.num-bigint-dig]
+opt-level = 3

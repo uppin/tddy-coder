@@ -23,7 +23,13 @@ import { HostPassphraseDialog } from "../../src/components/hosts/HostPassphraseD
 import type { KeyPinVerdict } from "../../src/lib/hostKeyPinning";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { aHostPromptFeed } from "../support/rpc/hostPromptFeed";
+import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
+import {
+  anRsaOaepKeypair,
+  anRsaOaepPublicKey,
+  fingerprintOf,
+  type AHostPromptKeypair,
+} from "../support/hostKeys";
 import {
   hostAddKeyOutcome,
   hostAddKeyPage as addKey,
@@ -42,28 +48,25 @@ const dialog = {
   submit: hostPassphraseDialogPage.submit,
   changedWarning: hostPassphraseDialogPage.changedWarning,
   unverifiedNotice: hostPassphraseDialogPage.unverifiedNotice,
+  underivableNotice: hostPassphraseDialogPage.underivableNotice,
 };
 
 /**
  * A real RSA-OAEP(SHA-256) public key in SPKI DER — the same shape the daemon publishes with a
- * prompt. Generated once for the suite so the encryption path is genuinely exercised: a stubbed
+ * prompt. Generated once per suite so the encryption path is genuinely exercised: a stubbed
  * `crypto.subtle` would hollow out the one test carrying this node's security claim.
  */
 let hostPublicKey: Uint8Array;
-
-async function anRsaOaepPublicKey(): Promise<Uint8Array> {
-  const keyPair = await crypto.subtle.generateKey(
-    {
-      name: "RSA-OAEP",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-      hash: "SHA-256",
-    },
-    true,
-    ["encrypt", "decrypt"],
-  );
-  return new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
-}
+/** The fingerprint that host honestly advertises — a digest of the key above, never a bare string. */
+let hostKeyFingerprint: string;
+/**
+ * The same key with the private half kept, for the one spec that reads the answer back.
+ *
+ * Held apart from `hostPublicKey` because only the wire-level test needs it: a dialog that hands
+ * its own `onSubmit` a ciphertext is a claim about the dialog, and the claim about the *answer* is
+ * that this host — and only this host — can decrypt it.
+ */
+let hostKeypair: AHostPromptKeypair;
 
 /** What was pinned for this host before the key the dialog is showing turned up. */
 const A_PINNED_FINGERPRINT = "SHA256:9WK1EJ1YHXbCP9V0Y13uwbHFuqWFcAe1eFf0kSPn5Ok";
@@ -93,6 +96,7 @@ function mountDialog(
         spkiDer={hostPublicKey}
         keyContinuity={keyContinuity}
         onSubmit={opts.onSubmit ?? (() => {})}
+        onAcceptChangedKey={() => {}}
         onCancel={() => {}}
       />,
     ),
@@ -145,7 +149,9 @@ describe("Host add-key passphrase prompt", () => {
         asText,
         "the passphrase must never leave the browser in the clear",
       ).to.not.contain(PASSPHRASE);
-      expect(submitted[0].byteLength, "an RSA-OAEP ciphertext is key-sized").to.be.greaterThan(64);
+      // Exactly one block under a 2048-bit key. `> 64` also held for a digest, or for a base64
+      // re-encoding of the passphrase itself.
+      expect(submitted[0].byteLength, "a 2048-bit RSA-OAEP block").to.equal(256);
     });
   });
 
@@ -192,6 +198,27 @@ describe("Host key continuity in the passphrase dialog", () => {
     // An empty notice element would satisfy `exist` and tell an operator nothing.
     dialog.unverifiedNotice().invoke("text").should("match", /could not check/i);
     dialog.submit().should("not.be.disabled");
+  });
+
+  it("blocks the answer and names the origin when the browser cannot encrypt at all", () => {
+    // Given a page served over plain http, where `crypto.subtle` does not exist — the origin the
+    // daemon actually serves this bundle on, and one no browser test can produce, since Cypress
+    // runs on localhost and localhost is a secure context
+    mountDialog({
+      continuity: {
+        kind: "underivable",
+        reason:
+          "this browser exposes no Web Crypto (crypto.subtle) on this page — browsers offer it " +
+          "only in a secure context",
+      },
+    });
+
+    // When the operator looks at the dialog
+    // Then nothing can be typed or sent, and the reason is the origin rather than the host. A
+    // plaintext fallback here would hand the passphrase to every peer in the common room.
+    dialog.underivableNotice().invoke("text").should("match", /secure context/i);
+    dialog.input().should("be.disabled");
+    dialog.submit().should("be.disabled");
   });
 
   it("distinguishes an unverifiable host key from a changed one and from a first sighting", () => {
@@ -297,5 +324,87 @@ describe("Host add-key outcomes", () => {
     addKey.addKey(HOST, KEY_PATH);
     hostAddKeyOutcome.saying(HOST, /expired/i);
     hostAddKeyOutcome.notSaying(HOST, /passphrase/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What actually goes on the wire
+// ---------------------------------------------------------------------------
+
+/**
+ * The load-bearing assertion of this node, made against the **request body** rather than against
+ * what the dialog handed its own `onSubmit` prop.
+ *
+ * The dialog-level test above proves the dialog; this proves the wire. They are not the same claim:
+ * a caller that took the ciphertext and sent the passphrase beside it would pass the first and fail
+ * this one, and `AnswerHostPrompt` is unary, so the in-memory backend records exactly what left.
+ */
+function aBackendAwaitingAnAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
+  return anInMemoryRpcBackend().implement(ConnectionService, {
+    ...feed.handlers,
+    // Never settles: the host is blocked on the passphrase, which is why the prompt exists.
+    addHostKey: () => new Promise(() => undefined),
+    answerHostPrompt: async () => ({ accepted: true, rejectionReason: "" }),
+  });
+}
+
+describe("The answer AnswerHostPrompt carries", () => {
+  before(() => {
+    cy.wrap(anRsaOaepKeypair())
+      .then((generated) => {
+        hostKeypair = generated as unknown as AHostPromptKeypair;
+        hostPublicKey = hostKeypair.spkiDer;
+        return fingerprintOf(hostPublicKey);
+      })
+      .then((fingerprint) => {
+        hostKeyFingerprint = fingerprint as unknown as string;
+      });
+  });
+
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
+  it("carries a ciphertext and no passphrase in the request the browser sends", () => {
+    // Given a host blocked on a passphrase for a key the operator named
+    const feed = aHostPromptFeed();
+    const backend = aBackendAwaitingAnAnswer(feed);
+    mountAction(backend);
+    addKey.addKey(HOST, KEY_PATH);
+    cy.wrap(feed).should((f: HostPromptFeed) => expect(f.subscriptionCount()).to.equal(1));
+    cy.then(() => {
+      feed.raise({
+        promptId: "prompt-1",
+        daemonInstanceId: HOST,
+        subject: KEY_PATH,
+        hostPublicKey,
+        hostPublicKeyFingerprint: hostKeyFingerprint,
+      });
+    });
+
+    // When the operator answers it
+    dialog.input().type(PASSPHRASE);
+    dialog.submit().click();
+
+    // Then the passphrase is nowhere in the payload that left, and what did leave is an RSA-OAEP
+    // block under this host's published 2048-bit key — the entire reason this node exists
+    cy.wrap(backend).should((b: InMemoryRpcBackend) => {
+      const calls = b.callsTo(ConnectionService.method.answerHostPrompt);
+      expect(calls, "exactly one answer is sent for one prompt").to.have.length(1);
+      expect(calls[0].promptId).to.equal("prompt-1");
+      expect(
+        new TextDecoder().decode(calls[0].encryptedAnswer),
+        "the passphrase must never leave the browser in the clear",
+      ).to.not.contain(PASSPHRASE);
+      expect(calls[0].encryptedAnswer.byteLength, "a 2048-bit RSA-OAEP block").to.equal(256);
+    });
+
+    // And the host can read it back: decrypted with the private half of the key the prompt
+    // published, the answer is exactly the passphrase. Everything above holds for a digest, or for
+    // 256 random bytes — neither of which is an answer this host could ever unlock a key with.
+    cy.then(() => {
+      const [answer] = backend.callsTo(ConnectionService.method.answerHostPrompt);
+      return hostKeypair.decrypt(answer.encryptedAnswer);
+    }).should("equal", PASSPHRASE);
   });
 });
