@@ -112,9 +112,9 @@ a machine, not to a coding session.
 - [x] Bridge start/stop at host scope, reusing the existing spawn path
 - [x] Connect action, gated on reachability **and** `media`
 - [x] Overlay mounted at host scope — ⚠ **without input forwarding**, see below
-- [~] Desktop password via node 6's encrypted prompt, not persisted — daemon side done,
-      **browser side not implemented** (no spec covers it), see below
-- [x] Rust unit/integration tests + Cypress component tests
+- [x] Desktop password via node 6's encrypted prompt, not persisted — daemon raises it, browser
+      answers it, nothing stores it
+- [~] Rust unit/integration tests + Cypress component tests — AC-7's five are **red**
 
 ## Technical changes
 
@@ -159,7 +159,7 @@ a machine, not to a coding session.
 - [x] Target model + store, unit-tested
 - [x] Host-scoped start returning overlay-ready values
 - [x] Overlay mounted, a real track rendering
-- [ ] Input forwarding verified — ⚠ **blocked, see "Input forwarding does not exist to reuse"**
+- [ ] Input forwarding verified — ⚠ **moved to `#hosts-screen 9/9`**, see below
 - [x] Stop releasing the bridge process
 - [x] Capability gating removing the action without media
 - [~] Password prompt through node 6's channel, nothing persisted — daemon decrypts and drops;
@@ -210,6 +210,10 @@ against what.
 | `stopping_a_host_desktop_releases_the_bridge_process` | AC-4 |
 | `a_host_desktop_password_never_appears_in_the_bridge_process_arguments` | AC-10 |
 | `starting_a_session_desktop_still_works_unchanged` | AC-9 |
+| `opening_a_host_desktop_asks_the_operator_for_its_password` | AC-7 |
+| `the_password_the_operator_typed_reaches_the_bridge_on_stdin_and_never_its_arguments` | AC-7 + AC-10 |
+| `the_password_the_operator_typed_is_never_written_to_disk` | AC-7 |
+| `a_desktop_password_nobody_answers_fails_the_start_rather_than_starting_without_it` | AC-7 |
 
 **`packages/tddy-web/cypress/component/HostDesktopConnectAcceptance.cy.tsx`**
 
@@ -246,6 +250,27 @@ against what.
 ## Refactoring needed
 
 _(populated by each validation phase)_
+
+### From @red (AC-7 red phase)
+
+- ⚠ **`StartHostStreamRequest.encrypted_password` is now two ways to do one thing.** With the prompt
+  raised by the daemon, no browser can fill that field — it has no key to encrypt under until a
+  prompt arrives. Green should decide whether to delete it. If it is deleted, the existing
+  `a_host_desktop_password_never_appears_in_the_bridge_process_arguments` must be rewritten to go
+  through the prompt, at which point it is subsumed by
+  `the_password_the_operator_typed_reaches_the_bridge_on_stdin_and_never_its_arguments`. It is kept
+  for now precisely so that test is not weakened in a red phase.
+- `HostPassphraseDialog`'s copy is node 6's — "is waiting to unlock … and load it into its
+  ssh-agent". Reused unchanged for the desktop password, and the AC-7 spec deliberately does not
+  assert on that sentence. Green should generalise it, or the operator is told a desktop password is
+  going into an ssh-agent.
+- `HostPromptEventLike` (`hostPromptsSubscription.ts`) carries no `kind`. Nothing needs it while a
+  surface subscribes only during its own call, but two surfaces now share the feed, and a screen
+  showing both at once would have no way to tell the questions apart.
+- The stand-in bridge writes its recordings into the same directory the daemon stores under, so
+  `files_the_daemon_wrote` has to exclude them **by name**. Installing the bridge in its own
+  directory would remove the exclusion, and with it the chance of a future recording silently
+  falling outside it.
 
 ## Validation results
 
@@ -333,6 +358,55 @@ it, persists nothing. The **browser** half — prompting over node 6's channel a
 answer — is not implemented, and no test covers it. Marked `TODO(#hosts-screen 8/8)` at
 `HostDesktopOverlay.tsx:101`.
 
+### Red phase — AC-7, the daemon-raised desktop-password prompt
+
+The green wave above left AC-7's browser half unimplemented and its planned Cypress spec unwritten
+(see the section above it). This wave writes the failing tests for the **whole** of AC-7, daemon and
+browser, against a shape the earlier wave did not have: the prompt is **raised by the daemon**, not
+supplied by the caller.
+
+**Why the design changed.** `StartHostStream.encrypted_password` assumed the browser already held
+this host's public key. It cannot: `HostPromptEvent.host_public_key` (`connection.proto`) is the only
+place that key is published, and it also carries the fingerprint the client pins. A browser that has
+not been asked anything therefore has nothing to encrypt under, which is why the earlier wave's
+browser half could not be written at all.
+
+**Surface added** (additive; node 6's crypto, keypair and pinning rules untouched):
+
+| Change | Why the tests need it |
+|---|---|
+| `HOST_PROMPT_KIND_DESKTOP_PASSWORD = 2` on `HostPromptKind` (`connection.proto`) | the kind the tests assert on, in both languages |
+| `PromptKind::DesktopPassword` + its `wire_kind` arm | the Rust half of the same |
+| `HostScope.prompts: Arc<dyn HostPromptRegistry>`, third argument to `with_host_scope` | the daemon has to have a channel to raise the question on. `#[allow(dead_code)]` + TODO until green reads it |
+| `runtime.rs` builds **one** registry and hands it to both `ConnectionService` and `ScreenSharingService` | a prompt raised on one registry and answered on another is a question nobody can answer |
+| `hostPromptFeed.ts` frames may state their `kind` (defaults to the ssh passphrase) | node 6's specs are unaffected; node 8's says which question it means |
+
+**Failing tests.** Four in `screen_sharing_service.rs`, one in
+`HostDesktopConnectAcceptance.cy.tsx`, all red for missing behaviour rather than for a compile or a
+fixture error.
+
+**Guards against a vacuous pass** — the failure mode this document already records four times:
+
+- *"the password is not in argv"* is trivially true (the daemon passes **no** argv). Both argv and
+  disk assertions are therefore preceded by `config["password"] == A_DESKTOP_PASSWORD` read from the
+  bridge's **stdin**: a password that never travelled fails there first.
+- The disk scan was proven, with a throwaway test, to cover the target store, to walk nested
+  directories, to find a password planted under them, and to exclude the stand-in bridge's own
+  recording (which is a test asking the bridge to write down what it was handed, not the daemon
+  writing a secret down).
+- The operator double was proven to deliver a **decryptable** answer under this host's real key, so
+  green is implementing against a working channel rather than a broken fixture.
+- `everythingSentTo` in the Cypress spec was proven, with a throwaway spec, to catch a plaintext
+  password on `AnswerHostPrompt` **and** on `StartHostStream.encryptedPassword`; the storage scan was
+  proven to catch one kept in either browser store.
+- The Cypress spec asserts a **positive** fact first (exactly one answer reached the host that
+  asked), so every absence assertion after it runs in a world where the password really existed.
+
+**Wired, not asserted.** `a_daemon()`'s operator answers every question with the *empty* password,
+because every desktop these tests attach is password-less. Stated rather than left absent so that
+the existing tests about rooms, identities and stop keep passing once green starts prompting,
+instead of turning into prompt tests or hanging.
+
 ### Open decisions a reviewer should weigh
 
 - **Room:** a host desktop publishes into the daemon's configured `livekit.common_room` — a session
@@ -346,6 +420,82 @@ answer — is not implemented, and no test covers it. Marked `TODO(#hosts-screen
   skips an unusable target. Pattern-consistency was chosen over an untested validation branch.
 
 
+### Green phase — AC-7, the daemon-raised desktop-password prompt
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy -p tddy-daemon --all-targets -- -D warnings` | clean |
+| `cargo test -p tddy-daemon --lib` | **757 passed, 0 failed** |
+| `cargo test -p tddy-daemon --test screen_sharing_service_acceptance` | 6 passed |
+| `HostDesktopConnectAcceptance.cy.tsx` | **8 passed** |
+| `HostAddKeyAcceptance` · `HostsScreenAddKeyAcceptance` · `HostsScreenRemoteDesktopAcceptance` | 10 · 6 · 4 — nodes 6 and 7 unregressed |
+
+`StartHostStream` issues a prompt, waits exactly as long as it is answerable, decrypts with node 6's
+`HostKeypair::decrypt`, hands the plaintext to the bridge on stdin and drops it. An unanswered prompt
+fails with `DeadlineExceeded` and spawns nothing.
+
+**`StartHostStreamRequest.encrypted_password` was removed**, resolving the red phase's open question.
+With the prompt daemon-raised no browser can fill it — the host's public key is published only on
+`HostPromptEvent`, so before a prompt arrives there is nothing to encrypt under and no fingerprint to
+pin. Its test asserted the property through that dead path and is **superseded** by
+`the_password_the_operator_typed_reaches_the_bridge_on_stdin_and_never_its_arguments`, which asserts
+the same thing through the real flow, stdin-first so the argv half cannot pass vacuously.
+
+`answer_before_expiry` moved into `host_prompts.rs` beside the registry: two callers now need "wait
+exactly as long as this prompt is answerable", and two copies are two chances for one to drift.
+
+### ⚠ A password-less desktop was locked out — caught after green, fixed
+
+The daemon asks on **every** start, and `HostPassphraseDialog` disabled submit on an empty answer
+(`blocked = keyChanged || encrypting || passphrase.length === 0`). A desktop with no password was
+therefore unopenable from the browser at all — a live break of **AC-2**, not a cosmetic gap, and it
+would have shipped marked delivered.
+
+Fixed with an additive `allowEmpty`, defaulting to `false` so node 6's ssh-key question is byte-for-byte
+unchanged. Pinned **from both sides**, because one assertion could not catch both mistakes: a dialog
+that never accepts empty fails `opens a desktop that has no password from an empty answer`; one that
+always accepts empty fails the new `refuses to send an empty passphrase, which unlocks no key` in
+node 6's own spec. Both mutations were run, not reasoned about.
+
+### Node 6-owned files touched — for the reviewer
+
+Additive or behaviour-preserving, and called out because a node 6 reviewer will see their files here:
+an optional `wording` prop on `HostPassphraseDialog` (defaults to node 6's exact sentences — without
+it an operator is told their desktop password is going into an ssh-agent), the optional `allowEmpty`
+above, an optional `kind?` on `HostPromptEventLike` (two surfaces now share one feed), the additive
+`HOST_PROMPT_KIND_DESKTOP_PASSWORD` arm, and the `answer_before_expiry` move. **The crypto, the
+keypair lifecycle, the pinning rules and the channel's behaviour are unchanged**, and node 6's specs
+are green.
+
+⚠ **Known, not fixed here:** `HostAddKeyAction` does not filter the feed by kind, so with an add-key
+and a desktop-open in flight on the same host at once its dialog could pick up the desktop prompt.
+This node's surface filters; fixing the other direction is node 6's.
+
+### AC-3 moved to `#hosts-screen 9/9`
+
+Investigation established that input forwarding is **not** a reuse and never was — both ends exist and
+the entire middle is missing:
+
+| Layer | State |
+|---|---|
+| Browser translate (`vncInput.ts` — scaling, X11 keysyms) | exists, tested |
+| Browser capture and send | missing |
+| Wire (`VncInputService.StreamInput`) | proto defined, **implemented by neither end** |
+| Daemon: serve it, route to a bridge | missing |
+| Daemon → bridge channel | **none exists** — the bridge reads one JSON config from stdin and never reads again |
+| Bridge → VNC/RDP server | `vnc_client.rs` has `pointer_event`/`KeyEvent`, `tddy-rdp` has `MousePdu` — **nothing calls them** |
+
+Delivering it means changing `packages/tddy-vnc`, `packages/tddy-rdp` and the bridge spawn path — all
+three named in `## Boundaries` — so it becomes its own node rather than widening this one. That node
+also repairs the **per-session** path, which has never forwarded input either despite `VncOverlay`'s
+docblock claiming it "Captures pointer and keyboard events". Its open design question is what the
+daemon→bridge channel should be: a second pipe, a unix socket, or a LiveKit data channel.
+
+⚠ Correcting this document's earlier claim that `vncInput.ts` was "orphaned from a `VncOverlay` that
+no longer exists": `VncOverlay.tsx` **does** exist. It simply never forwarded input either.
+
+
 ## TODO
 
 - [x] Record initial discovery (`2026-09-06-desktop-connect-initial-discovery.md`)
@@ -356,6 +506,8 @@ answer — is not implemented, and no test covers it. Marked `TODO(#hosts-screen
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
+- [~] TDD Red (AC-7) — failing tests for the daemon-raised desktop-password prompt
+- [ ] TDD Green (AC-7) — raise the prompt, await the answer, prompt in the browser
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass

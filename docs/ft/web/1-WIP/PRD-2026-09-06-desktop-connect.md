@@ -91,16 +91,46 @@ argument — but it must be made deliberately, not inherited by accident.
 
 ## Acceptance criteria
 
-- [ ] **AC-1** A host with a reachable desktop and a media-carrying connection offers a connect action.
-- [ ] **AC-2** Connecting opens the existing overlay streaming that host's desktop.
-- [ ] **AC-3** Mouse and keyboard input reach the remote desktop.
-- [ ] **AC-4** Closing the overlay stops the stream and releases the bridge process.
-- [ ] **AC-5** A host whose connection lacks `media` does **not** offer the action.
-- [ ] **AC-6** A host node 7 reports unreachable does not offer the action.
-- [ ] **AC-7** A desktop password is prompted through node 6's encrypted channel and **not persisted**.
-- [ ] **AC-8** Host-scoped targets are separate from session-scoped ones; neither leaks into the other.
-- [ ] **AC-9** Per-session screen sharing continues to work unchanged.
-- [ ] **AC-10** Credentials never appear in process arguments.
+- [x] **AC-1** A host with a reachable desktop and a media-carrying connection offers a connect action.
+- [x] **AC-2** Connecting opens the existing overlay streaming that host's desktop.
+- [ ] **AC-3** Mouse and keyboard input reach the remote desktop. — ⚠ **DEFERRED**, see below.
+- [x] **AC-4** Closing the overlay stops the stream and releases the bridge process.
+- [x] **AC-5** A host whose connection lacks `media` does **not** offer the action.
+- [x] **AC-6** A host node 7 reports unreachable does not offer the action.
+- [x] **AC-7** A desktop password is prompted through node 6's encrypted channel and **not persisted**.
+- [x] **AC-8** Host-scoped targets are separate from session-scoped ones; neither leaks into the other.
+- [x] **AC-9** Per-session screen sharing continues to work unchanged.
+- [x] **AC-10** Credentials never appear in process arguments.
+
+### ⚠ AC-3 is deferred — the reuse it was planned on does not exist
+
+This node was planned to mount the existing overlay **"with input forwarding"**, and its changeset's
+`## Boundaries` correspondingly forbids changing `ScreenSharingOverlay` or `vncInput.ts` because it
+"reuses them". Both cannot be true:
+
+- `ScreenSharingOverlay.tsx`'s only key and mouse handlers are **Escape-to-close** and
+  **click-outside-to-close** (lines 65-85). Nothing is forwarded to the remote desktop.
+- The per-session `VncOverlay.tsx` **does** still exist, and its docblock claims it "Captures pointer
+  and keyboard events" — but its code does not. It has the same two dismiss handlers and no import of
+  `vncInput`. The docblock is stale and describes a capability the component never had.
+- `vncInput.ts` has **no production consumer** — only its own `vncInput.test.ts`. Verified on
+  `master`, on this node's base, and on all seven other `#hosts-screen` branches.
+- `vnc_input.proto` defines a `VncInputService` with a `StreamInput` bidi stream, and **nothing
+  implements it** — no `tddy-daemon` or `tddy-vnc` source references it on `master`.
+
+So both ends of input forwarding are dead surface: a proto service no daemon serves, and a browser
+module nothing calls. It has never worked, in any node, for the per-session path either.
+
+So input forwarding is **new plumbing in a file this node is not allowed to touch**, not a reuse. It is
+deferred rather than delivered by quietly widening the boundary, which would also reopen a file node 7
+touches and put a conflict through the rest of the stack.
+
+**Consequence to state plainly:** a connected desktop is **view-only** in this node. That is a real
+functional limit, not a cosmetic one, and it should be weighed when this PR is reviewed.
+
+**Follow-up:** input forwarding needs its own node — it must decide whether `vncInput.ts` is revived or
+replaced, and it owns `ScreenSharingOverlay` while doing so, which benefits the per-session path too.
+Marked `TODO(#hosts-screen 8/8)` at `HostDesktopOverlay.tsx`.
 
 ## Out of scope for this node
 
