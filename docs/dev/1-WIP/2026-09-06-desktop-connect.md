@@ -347,7 +347,7 @@ differing only in capabilities, so neither a never-render nor an always-render c
 
 So AC-3 is new plumbing in a file this node's boundaries forbid it to touch, not a reuse. Left
 unimplemented and marked, rather than silently widening the boundary or quietly dropping the AC.
-Marked `TODO(#hosts-screen 8/8)` at `HostDesktopOverlay.tsx:132`.
+Marked `TODO(#hosts-screen 8/8)` in `HostDesktopOverlay.tsx`.
 
 ### ⚠ AC-7's browser half is unimplemented — its planned spec was never written
 
@@ -356,7 +356,7 @@ from `HostDesktopConnectAcceptance.cy.tsx`. The **daemon** half is complete and 
 `StartHostStream` decrypts `encrypted_password` with node 6's `HostKeypair::decrypt`, uses it, drops
 it, persists nothing. The **browser** half — prompting over node 6's channel and encrypting the
 answer — is not implemented, and no test covers it. Marked `TODO(#hosts-screen 8/8)` at
-`HostDesktopOverlay.tsx:101`.
+`HostDesktopOverlay.tsx` — **since implemented**, see the AC-7 green wave below.
 
 ### Red phase — AC-7, the daemon-raised desktop-password prompt
 
@@ -498,6 +498,65 @@ worth more than the deferral itself.
 
 ⚠ Correcting this document's earlier claim that `vncInput.ts` was "orphaned from a `VncOverlay` that
 no longer exists": `VncOverlay.tsx` **does** exist. It simply never forwarded input either.
+
+
+### Wrap validation — three passes, and what they caught
+
+Run at `/pr-wrap`: test quality, production readiness, and plan conformance + clean code.
+
+**The headline: the feature did not work end to end, and both halves of the reason were found
+independently.** The test pass reported that nothing exercised `require_user` on the host-scoped
+RPCs; the production pass reported that the browser never sent `sessionToken`. Either alone reads as
+a gap worth noting. Together they mean every LiveKit-reached host rejected the connect action as
+`unauthenticated`, and it worked locally only because the HTTP transport injects the field for a
+message that already carries it. **No test could have caught this**, because the acceptance spec
+asserted only `daemonInstanceId` and the in-memory backend enforces no auth.
+
+| Fixed | Was |
+|---|---|
+| `sessionToken` on all four host-scoped calls | omitted — feature broken against any remote host |
+| Spawn failure reported | `Ok` returned when no bridge spawned; operator watched a dead overlay after typing a secret |
+| Pre-flight before the prompt | a desktop that could never be bridged still asked for a password first |
+| Reopen terminates the previous bridge | the old pid was overwritten and its process left unkillable |
+| `list()` returns `Result` | a corrupt targets file read as "this host has no desktops" |
+| Overlay portalled to `document.body` | a `<div>` inside a `<span>` — hoisted on hydration, disturbed the row layout |
+| The desktop question is latched | a key-passphrase prompt landing mid-answer unmounted the dialog and stranded the start |
+| `RemoveHostTarget` deleted | no caller anywhere — the same dead surface that retired `encrypted_password` |
+| `require_host_scope` on `stop_host_stream` · `u16::try_from` on the port · alias dropped | small correctness gaps |
+
+**Seven tests in this node passed while proving nothing** — three gating specs, one restating its
+production function, one whose fixture never built the condition it asserted, one asserting a file
+nothing could create, and one absence assertion that ran before React committed. Six were found by
+review; the seventh was caught by its own author mid-fix. The two worst:
+
+- **The operator-identity fix was unpinned by the very commit that made it.** The fixture answered as
+  whatever identity production passed in, so stamping the wrong one still passed — and its comment
+  claimed the opposite. It now answers as an identity fixed at construction.
+- **`byteLength > 64` cannot tell what was encrypted.** RSA-OAEP is 256 bytes whatever it encrypts,
+  and the spec discarded the private key, so a dialog sending an encrypted empty string satisfied the
+  assertion that existed to prove the operator's password travelled. It decrypts and compares now.
+
+Every fix above was pinned by a test **watched failing without it**, not reasoned about.
+
+**Held:** boundaries (no `tddy-vnc`, `tddy-rdp`, `ScreenSharingOverlay`, `vncInput.ts`,
+`InspectorTabs`, `screen_sharing_vault` in the diff), no parent-owned deletions, no descendant
+behaviour, and every node 6 file touched is additive with a default reproducing node 6 byte-for-byte.
+`screen_sharing_service.rs` grew 524 → ~1,700 lines, but ~740 of that is a test module the file did
+not have at all, and the host handlers stayed out of the 24,000-line `connection_service.rs` as the
+Prerequisites section promised.
+
+**Deferred to a follow-up branch after the stack lands** (both would cascade conflicts through the
+stack now): splitting the host handlers out of `screen_sharing_service.rs`, and collapsing
+`try_spawn_bridge`'s parameter list into a struct.
+
+**Final gates:** `cargo fmt --check` clean · `clippy -p tddy-daemon --all-targets -D warnings` clean ·
+`cargo test -p tddy-daemon --lib` **788 passed** · `screen_sharing_service_acceptance` **6 passed** ·
+Cypress desktop-connect/add-key/hosts-add-key/remote-desktop **43 passed** · `bun test` **228 passed** ·
+full `cargo build` clean.
+
+⚠ **Not covered by CI:** Cypress and `tsc` are not gates in this repo, so the web half of this PR —
+including the `sessionToken` fix above — has no automated gate. It rests on the specs above being run
+by hand.
 
 
 ## TODO
