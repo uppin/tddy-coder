@@ -101,6 +101,71 @@ row of facts, would be worse than omitting it.
 The port is part of every desktop string rather than a separate cell. Only default ports are probed,
 so "No desktop" on its own would read as authoritative about a host that simply serves elsewhere.
 
+Where a reading is **connectable**, the section also renders a `hosts-row-<id>-connect-desktop`
+button. `connectableDesktop(readings)` decides that, and all three of its conditions come from the
+probe: `ProbeOutcome.OK` (a reading that could not be made is not a finding), `desktopReachable` (a
+desktop nothing is serving has nothing to stream), and `canBridge` (a reachable desktop on a daemon
+with no bridge binary is a spawn failure the operator would meet *after* asking). The first reading
+satisfying all three wins, in the probe's own order rather than a preference this row invents.
+
+A fourth fact gates the button and the row cannot read it from a probe: whether this host is reached
+over a connection that **carries media**. `useHostConnection(instanceId)` plus
+`useHasCapability(connection, "media")` — the one predicate, never re-derived from a `Room`, a
+transport or a status string ([capability-gating.md](capability-gating.md)). Without it the button
+is **absent, not disabled**: `IPC_CAPABILITIES` is `{"rpc"}`, so on a host reached that way a LiveKit
+track cannot arrive however reachable its desktop is, and a control that provably cannot work is
+worse than no control.
+
+**`HostDesktopOverlay`** is what the button mounts — a thin host-scoped mount of
+`ScreenSharingOverlay`, subscribed to the bridge participant's LiveKit `VideoTrack`. No browser-side
+VNC/RDP protocol client is added here, ever: the picture is always a daemon-produced track.
+
+- **It opens on the click, not on the reply.** Starting a bridge is a spawn on a remote machine, so
+  there is a real interval before a track exists and a failure needs somewhere to be reported.
+  Rendering nothing until `StartHostStream` returns would leave an action that appeared to do
+  nothing.
+- **It is portalled to `document.body`.** The section it is opened from is a `<span>`, and a `<div>`
+  is not permitted inside one — a parser hoists it out on any hydration path, and client-side a
+  block element in the row's inline flex flow shifts the row for as long as the overlay is open.
+  Both the overlay and its connecting state are `fixed inset-0 z-50`, so nothing was ever in flow.
+- **It resolves a target from the probed endpoint.** A row has a port and a protocol;
+  `StartHostStream` takes a target id, so `targetForProbedEndpoint` matches an existing host target
+  on `(host, port, protocol)` and adds one only when none matches — which is what stops one target
+  accumulating per connect. The address is the daemon's own loopback, because that is where the
+  probe made its reading.
+- **Start on mount, stop on unmount**, against the target the start actually used rather than one
+  re-resolved at close, so the bridge process lives exactly as long as the overlay.
+- **`sessionToken` is passed explicitly on all four host-scoped calls.** The daemon gates every one
+  of them on it, and `rpc/authGatedTransport.ts` rewrites the field *only where the request already
+  carries one* — a request that omits it is not quietly repaired on the way out, it is rejected on
+  arrival. It is read from a ref at call time rather than closed over, so re-minting the access
+  token mid-desktop does not tear the bridge down and start a second one.
+- It joins the room the start reply names — not this page's common room — with the same
+  mint-and-connect `useCommonRoom` performs.
+
+**The password question.** `StartHostStream` blocks while the host asks for the desktop's password,
+so the overlay subscribes to that host's prompt feed *only while its own start is in flight* — a
+screenful of hosts nobody is opening a desktop on opens no streams at all. The question is
+**latched** rather than read off the live feed: the feed is per host, not per surface, and a key
+passphrase prompt arriving mid-answer would otherwise replace the value a derived question reads
+from, unmounting the dialog, losing the typing and leaving the host's call blocked with nothing on
+screen to answer it. Only `HostPromptKind.DESKTOP_PASSWORD` is ever latched, because answering
+another surface's question with a desktop password would send a secret to a question nobody here
+asked.
+
+The dialog is the shared host passphrase dialog with this surface's own wording and with empty
+answers allowed. A desktop password is one question an empty answer can be the true answer to — the
+host asks on every start because it cannot know in advance whether this desktop wants one — so
+refusing empty would ask an operator to invent a password the desktop never had. The password itself
+never reaches `HostDesktopOverlay`: the dialog hands back ciphertext encrypted under the key the
+prompt published, after that key has been checked against the one pinned for this host.
+
+⚠ **A connected desktop is view-only.** `ScreenSharingOverlay`'s only pointer and key handlers are
+Escape-to-close and click-outside-to-close, and `src/gen/screen_sharing_input_pb.ts` is imported
+nowhere — so no overlay, host-scoped or session-scoped, opens the input stream the bridge already
+serves. See
+[`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../../docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md).
+
 ⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
 issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
 are covered, and the assembled path — row → RPC → probe → cells — has never run. Mounting it belongs
@@ -278,7 +343,7 @@ labelled with the tool it speaks for:
 | git | `hosts-row-<id>-git` | `Name <email>` · `Not configured` · `Could not check` · `Not supported here` · `…` |
 | gh | `hosts-row-<id>-gh` | the login · `Not authenticated` · `Not installed` · `Could not check` · `Not supported here` · `…` |
 | ssh-agent | `hosts-row-<id>-ssh-agent` | one `hosts-row-<id>-ssh-key-<fingerprint>` per held key · `No keys loaded` · `No agent` · `Could not check` · `Not supported here` · `…` |
-| remote desktop | `hosts-row-<id>-remote-desktop` | one `hosts-row-<id>-vnc` and one `hosts-row-<id>-rdp`, each `Bridge ready`/`No bridge` · `Desktop on :<port>`/`No desktop on :<port>`/`Could not check :<port>` |
+| remote desktop | `hosts-row-<id>-remote-desktop` | one `hosts-row-<id>-vnc` and one `hosts-row-<id>-rdp`, each `Bridge ready`/`No bridge` · `Desktop on :<port>`/`No desktop on :<port>`/`Could not check :<port>`; plus `hosts-row-<id>-connect-desktop` where a reading is connectable and the wire carries media |
 
 "Could not check" and "Not configured" are deliberately different strings, because they send an
 operator to two different places and only one of them is a host to go and fix. The desktop section
@@ -352,6 +417,26 @@ overrides, so each test states only the field it is about.
 `hostRemoteDesktopPage` on the page object exposes `section(id)` and `protocol(id, "vnc" | "rdp")`,
 so a test names a protocol rather than a test id.
 
+`cypress/component/HostDesktopConnectAcceptance.cy.tsx` covers the connect action and the overlay:
+the action offered over a media-carrying connection, withdrawn over one without media, withdrawn
+where the desktop is unreachable, the overlay opened for the selected host, and the password
+prompted without being persisted.
+
+Each gating spec is a **contrast**: it mounts the positive case and asserts the action exists, then
+mounts the negative case and asserts it is withdrawn. An absence assertion on its own passes
+trivially against a component that renders the action in no condition at all, and would stay green
+through an implementation that got the gating exactly backwards. Both halves mount over a *stated*
+wire — `aHostConnection(HOST)` with `room={null}`, the pattern
+`cypress/support/rpc/hostConnections.ts` documents and `PresenceCapabilityGatingAcceptance.cy.tsx`
+already uses — because `withSelectedDaemon` always injects a `Room` and the LiveKit provider claims
+every host once one exists, which makes a negative half built by varying the daemon directory
+identical to its positive half.
+
+The password specs assert a **positive** fact first — exactly one answer reached the host that asked,
+decrypted under that host's key and compared to the password typed — so every absence assertion
+after it runs in a world where the secret really existed, and a ciphertext length cannot stand in for
+knowing what was encrypted.
+
 `hostToolingPage` on that same page object owns the tooling section's DOM contract, and
 `expectGhLoginLabelledAsHosts` is why it has to. The cell renders a static `gh` label in every
 state, so asserting its text contains `"gh"` proves nothing at all; what actually distinguishes this
@@ -407,3 +492,6 @@ those unit tests run in CI.
 - Feature: [docs/ft/web/hosts-screen-add-key.md](../../../docs/ft/web/hosts-screen-add-key.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
+- Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
+  — both scopes of the remote-desktop feature
+- Daemon: [host-registry.md § Host-scoped desktop targets](../../tddy-daemon/docs/host-registry.md#host-scoped-desktop-targets)
