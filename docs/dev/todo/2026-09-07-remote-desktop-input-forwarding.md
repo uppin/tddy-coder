@@ -1,42 +1,40 @@
-# 2026-09-07 — remote desktop input forwarding
+# 2026-09-07 — remote desktop input forwarding: the browser never sends any
 
-**Category:** Missing feature (both ends built, whole middle absent)
-**Source:** `#hosts-screen 8/8` desktop-connect changeset, 2026-09-07 — recorded here because that
-node's AC-3 was deferred and its 1-WIP documents are wrapped away when the PR is readied.
+**Category:** Missing feature (daemon and bridge complete; browser client absent)
+**Source:** `#hosts-screen 8/8` desktop-connect, 2026-09-07 — recorded here because that node
+deferred AC-3 and its 1-WIP documents are wrapped away when the PR is readied.
 
-- **Input forwarding has never worked, for host-scoped *or* per-session desktops.** A connected
-  desktop is **view-only** everywhere in tddy today. This is easy to miss, because
-  `packages/tddy-web/src/components/sessions/VncOverlay.tsx`'s docblock claims it "Captures pointer
-  and keyboard events" — **it does not.** Its only key and mouse handlers are Escape-to-close and
-  click-outside-to-close, exactly like `ScreenSharingOverlay.tsx` (lines 65-85). That stale docblock
-  is what led `#hosts-screen 8/8` to plan input forwarding as a *reuse*, which cost a round of
-  investigation to disprove. **Fix the docblock even if nothing else here is done.**
+- **A remote desktop is view-only, for host-scoped *and* per-session streams.** Not because the
+  feature is unbuilt — the daemon and the bridge implement it fully — but because **nothing in the
+  browser ever opens the input stream.**
 
-- **What actually exists, layer by layer** — both ends are built and the entire middle is missing:
+- **What exists, and works:** `packages/tddy-screenshare/src/bridge.rs` serves
+  `ScreenSharingInputService` (`packages/tddy-service/proto/screen_sharing_input.proto`) over the
+  bridge's LiveKit **data channel**. `stream_input` turns each `ScreenSharingInputEvent` into an
+  `InputCmd`, and the pump loop calls `client.inject_pointer(x, y, button_mask)` /
+  `client.inject_key(keysym, pressed)` — the `ScreenShareClient` trait in
+  `packages/tddy-screenshare/src/client.rs`, implemented for both protocols.
 
-  | Layer | State |
-  |---|---|
-  | Browser translate — `src/components/sessions/vncInput.ts` (coordinate scaling, X11 keysym map) | exists, unit-tested, **no production consumer** — only its own `vncInput.test.ts` |
-  | Browser capture and send | missing |
-  | Wire — `packages/tddy-service/proto/vnc_input.proto`, `VncInputService.StreamInput` (bidi) | proto defined, **implemented by neither end** |
-  | Daemon — serve `VncInputService`, route to the right bridge | missing |
-  | Daemon → bridge channel | **none exists in any form** — a bridge reads one JSON `BridgeConfig` from stdin at startup and never reads again |
-  | Bridge → server | `packages/tddy-vnc/src/vnc_client.rs` has `pointer_event` / `KeyEvent`; `packages/tddy-rdp/src/rdp_client.rs` has `MousePdu` / `FastPathInputEvent` — **nothing calls either** |
+- **What is missing — one thing:** a browser client.
+  `packages/tddy-web/src/gen/screen_sharing_input_pb.ts` is generated and **imported nowhere**, and
+  `ScreenSharingOverlay.tsx`'s only pointer/keyboard handlers are Escape-to-close and
+  click-outside-to-close. The work is: capture pointer and key events on the overlay's video
+  element, scale coordinates from the rendered element to the framebuffer, map keys to X11 keysyms,
+  and drive the bidi `StreamInput` against the bridge participant over the data channel.
 
-  Verified on `master`, on `feature/hosts-screen/desktop-probe`, and on all seven other
-  `#hosts-screen` branches.
+- **This fixes the per-session path at the same time**, since both overlays are missing the same
+  single piece. `docs/ft/web/screen-sharing-sessions.md` § AC-SS-6 already specifies the behaviour
+  and describes it as though it works — the specification is right, the client was never written.
 
-- **The open design question is the daemon → bridge channel**, and it should be settled in planning
-  rather than during green: a second pipe on the bridge process, a unix socket, or a LiveKit data
-  channel the bridge subscribes to. That choice drives the whole feature — the other layers are
-  comparatively mechanical once it is made.
+- ⚠ **Do not follow the `vnc_*` trail.** `packages/tddy-vnc`'s input methods,
+  `packages/tddy-service/proto/vnc_input.proto` (`VncInputService`),
+  `packages/tddy-web/src/components/sessions/VncOverlay.tsx` and its `vncInput.ts` helpers are the
+  **superseded generation**, kept but unused — nothing in production references them. `vncInput.ts`
+  does contain sound, unit-tested coordinate-scaling and keysym-mapping helpers that the new client
+  can lift or re-derive. `VncOverlay.tsx`'s docblock claims it "Captures pointer and keyboard
+  events" and its code does not; **that stale docblock is what made `#hosts-screen 8/8` plan AC-3 as
+  a reuse, and then made a first audit of it conclude the feature had never been built at all.**
+  Fix or delete it while you are here.
 
-- **Scope note.** This spans `tddy-web`, `tddy-service`, `tddy-daemon` and `tddy-vnc`/`tddy-rdp`.
-  `#hosts-screen 8/8` explicitly forbade itself the last three in its `## Boundaries`, which is why
-  it deferred rather than widened. Whoever picks this up gets the per-session path fixed for free,
-  since the missing middle is shared.
-
-- **Related, smaller:** host desktop targets are auto-created on first connect and there is no UI to
-  delete one. `#hosts-screen 8/8` removed its unused `RemoveHostTarget` RPC rather than ship surface
-  nothing called; if targets ever become user-managed, that RPC and a row affordance come back
-  together.
+- **Also worth deciding:** whether the legacy `vnc_*` surface should be deleted outright rather than
+  left to mislead a third reader.

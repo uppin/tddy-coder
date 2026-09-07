@@ -102,35 +102,33 @@ argument — but it must be made deliberately, not inherited by accident.
 - [x] **AC-9** Per-session screen sharing continues to work unchanged.
 - [x] **AC-10** Credentials never appear in process arguments.
 
-### ⚠ AC-3 is deferred — the reuse it was planned on does not exist
+### ⚠ AC-3 is deferred — the browser never opens the input stream
 
-This node was planned to mount the existing overlay **"with input forwarding"**, and its changeset's
-`## Boundaries` correspondingly forbids changing `ScreenSharingOverlay` or `vncInput.ts` because it
-"reuses them". Both cannot be true:
+Input forwarding is **not** the reuse this node's plan assumed, and it is also not the unbuilt
+feature a first audit concluded. The accurate position:
 
-- `ScreenSharingOverlay.tsx`'s only key and mouse handlers are **Escape-to-close** and
-  **click-outside-to-close** (lines 65-85). Nothing is forwarded to the remote desktop.
-- The per-session `VncOverlay.tsx` **does** still exist, and its docblock claims it "Captures pointer
-  and keyboard events" — but its code does not. It has the same two dismiss handlers and no import of
-  `vncInput`. The docblock is stale and describes a capability the component never had.
-- `vncInput.ts` has **no production consumer** — only its own `vncInput.test.ts`. Verified on
-  `master`, on this node's base, and on all seven other `#hosts-screen` branches.
-- `vnc_input.proto` defines a `VncInputService` with a `StreamInput` bidi stream, and **nothing
-  implements it** — no `tddy-daemon` or `tddy-vnc` source references it on `master`.
+- **The daemon and the bridge implement it fully.** `packages/tddy-screenshare/src/bridge.rs` serves
+  `ScreenSharingInputService` (`screen_sharing_input.proto`) over the bridge's LiveKit data channel,
+  and its pump loop calls `inject_pointer` / `inject_key` on the protocol client.
+- **The browser has no client.** `src/gen/screen_sharing_input_pb.ts` is generated and imported
+  nowhere; `ScreenSharingOverlay`'s only pointer and key handlers are Escape-to-close and
+  click-outside-to-close.
 
-So both ends of input forwarding are dead surface: a proto service no daemon serves, and a browser
-module nothing calls. It has never worked, in any node, for the per-session path either.
+So a connected desktop is **view-only** — for per-session streams too, not just host-scoped ones.
+The missing piece is a single browser-side client, and it is the same missing piece on both paths.
 
-So input forwarding is **new plumbing in a file this node is not allowed to touch**, not a reuse. It is
-deferred rather than delivered by quietly widening the boundary, which would also reopen a file node 7
-touches and put a conflict through the rest of the stack.
+**Why this node did not add it.** It is a self-contained slice of work with its own tests, on a
+surface (`ScreenSharingOverlay`, shared with the per-session path) that this node's `## Boundaries`
+puts out of bounds. Folding it in would have widened an already large node into a file the session
+path depends on. Tracked at
+`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`.
 
-**Consequence to state plainly:** a connected desktop is **view-only** in this node. That is a real
-functional limit, not a cosmetic one, and it should be weighed when this PR is reviewed.
-
-**Follow-up:** input forwarding needs its own node — it must decide whether `vncInput.ts` is revived or
-replaced, and it owns `ScreenSharingOverlay` while doing so, which benefits the per-session path too.
-Marked `TODO(#hosts-screen 8/8)` at `HostDesktopOverlay.tsx`.
+⚠ **What misled two readings of this, worth knowing:** `VncOverlay.tsx`'s docblock claims it
+"Captures pointer and keyboard events" and its code does not, and the whole `vnc_*` surface —
+`tddy-vnc`'s input methods, `vnc_input.proto`, `vncInput.ts` — is a superseded generation that
+nothing references. Reading it as live suggests input forwarding once worked; reading its disuse as
+evidence suggests it was never built. Neither is true: it was built, in `tddy-screenshare`, and the
+browser half was never written.
 
 ## Out of scope for this node
 

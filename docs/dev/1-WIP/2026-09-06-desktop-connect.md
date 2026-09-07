@@ -1,7 +1,7 @@
 # Changeset: desktop-connect
 
 **Date:** 2026-09-06
-**Status:** 🚧 In Progress
+**Status:** ✅ Complete (Phase 1 — view-only; input forwarding deferred, see below)
 **Type:** New feature
 **Stack:** `#hosts-screen` 8/8 — the top node
 **Branch:** `feature/hosts-screen/desktop-connect` → base `feature/hosts-screen/desktop-probe`
@@ -159,7 +159,10 @@ a machine, not to a coding session.
 - [x] Target model + store, unit-tested
 - [x] Host-scoped start returning overlay-ready values
 - [x] Overlay mounted, a real track rendering
-- [ ] Input forwarding verified — ⚠ **moved to `#hosts-screen 9/9`**, see below
+- **DEFERRED** Input forwarding — ⚠ not a reuse as planned; both ends of the input path exist and
+      the whole middle is missing. Moved to its own node; tracked in
+      `docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`. **A connected desktop is
+      view-only in this node.**
 - [x] Stop releasing the bridge process
 - [x] Capability gating removing the action without media
 - [x] Password prompt through node 6's channel, nothing persisted — the daemon raises it, the
@@ -472,33 +475,30 @@ are green.
 and a desktop-open in flight on the same host at once its dialog could pick up the desktop prompt.
 This node's surface filters; fixing the other direction is node 6's.
 
-### AC-3 moved to `#hosts-screen 9/9`
+### AC-3 deferred to its own node — and the earlier audit here was wrong
 
-Investigation established that input forwarding is **not** a reuse and never was — both ends exist and
-the entire middle is missing:
+An initial audit in this document concluded that input forwarding had "never worked, in any node"
+and that both ends were dead surface. **That was wrong**, and the correction matters for whoever
+picks the work up:
 
-| Layer | State |
+| Layer | Actual state |
 |---|---|
-| Browser translate (`vncInput.ts` — scaling, X11 keysyms) | exists, tested |
-| Browser capture and send | missing |
-| Wire (`VncInputService.StreamInput`) | proto defined, **implemented by neither end** |
-| Daemon: serve it, route to a bridge | missing |
-| Daemon → bridge channel | **none exists** — the bridge reads one JSON config from stdin and never reads again |
-| Bridge → VNC/RDP server | `vnc_client.rs` has `pointer_event`/`KeyEvent`, `tddy-rdp` has `MousePdu` — **nothing calls them** |
+| Bridge serves `ScreenSharingInputService` over the LiveKit data channel | **implemented** — `packages/tddy-screenshare/src/bridge.rs` |
+| Pump loop → `inject_pointer` / `inject_key` on the protocol client | **implemented** — `packages/tddy-screenshare/src/client.rs` |
+| `screen_sharing_input.proto` + generated TS client | **exists** |
+| Browser client | **missing** — `src/gen/screen_sharing_input_pb.ts` is imported nowhere |
 
-Delivering it means changing `packages/tddy-vnc`, `packages/tddy-rdp` and the bridge spawn path — all
-three named in `## Boundaries` — so it becomes its own node rather than widening this one. That node
-also repairs the **per-session** path, which has never forwarded input either despite `VncOverlay`'s
-docblock claiming it "Captures pointer and keyboard events". Its open design question is what the
-daemon→bridge channel should be: a second pipe, a unix socket, or a LiveKit data channel.
+The audit followed the `vnc_*` trail — `tddy-vnc`'s input methods, `vnc_input.proto`,
+`VncOverlay.tsx`, `vncInput.ts` — which is a **superseded generation** that nothing references, and
+took its disuse as proof the feature was unbuilt. The live implementation is `tddy-screenshare`.
+`VncOverlay.tsx`'s docblock, which claims it captures pointer and keyboard events when its code does
+not, is what sent both this node's planning and that audit down the wrong path.
 
-**Tracked outside this PR** at [`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../todo/2026-09-07-remote-desktop-input-forwarding.md),
-because this document is deleted when the PR is readied and the investigation behind the deferral is
-worth more than the deferral itself.
-
-⚠ Correcting this document's earlier claim that `vncInput.ts` was "orphaned from a `VncOverlay` that
-no longer exists": `VncOverlay.tsx` **does** exist. It simply never forwarded input either.
-
+**Consequence:** AC-3 is browser-side only, and needs none of `tddy-vnc`, `tddy-rdp` or the bridge
+spawn path — the three things this node's `## Boundaries` forbids. It is deferred because it is a
+self-contained slice landing in `ScreenSharingOverlay`, shared with the per-session path, and
+because it fixes that path at the same time. Tracked at
+`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`.
 
 ### Wrap validation — three passes, and what they caught
 
@@ -571,22 +571,23 @@ by hand.
 - [x] TDD Green — implement with quality code
 - [x] TDD Red (AC-7) — failing tests for the daemon-raised desktop-password prompt
 - [x] TDD Green (AC-7) — raise the prompt, await the answer, prompt in the browser
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests (`./test`) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs)
-- [ ] USER REVIEW — work complete, decide next steps
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete — three waves: host scope, AC-7's
+      daemon-raised prompt, and the wrap-validation remediation
+- [x] Run all tests (`./test`) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -- -D warnings`, `cargo fmt`)
+- [x] Wrap documentation (/wrap-context-docs)
+- [x] USER REVIEW — work complete; AC-3 deferred to its own node by explicit decision
 
 ## Successor PRs
 
