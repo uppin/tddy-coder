@@ -17,6 +17,10 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource`. `is_local` compares against `local_instance_id_for_config`, the **routing** id, so it holds for a daemon carrying a configured `daemon_instance_id` or the startup-timestamp suffix |
 | `ListKnownHosts` | Every host this daemon has a record of, live or not — one `KnownHostEntry` per host (`instance_id`, `label`, `online`, `first_seen_unix_ms`, `last_seen_unix_ms`, `repos_base_path`, `max_attachment_bytes`, `is_local`). Where `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it leaves the room, this answers "what machines does tddy know about". **`online` is computed per call** by intersecting the durable registry with `EligibleDaemonSource::live_known_hosts()` (the roster keyed by **durable** host id, never the routing id) — it is never read from disk — and the serving daemon always has a row, flagged `is_local`. The registry is injected via `ConnectionServiceImpl::with_host_registry`; the whole join, including that local-row guarantee, belongs to `HostRegistry::known_hosts`. Details: [host-registry.md](host-registry.md). |
 | `GetHostTooling` | What one host has installed and configured: the git identity its commits would carry, the state of the GitHub CLI there, and whether an ssh-agent is reachable for the host's OS user and what it is holding. Addressed by `daemon_instance_id` (empty = the daemon serving the call) and **routed before the caller is authenticated** — see [Host tooling](#host-tooling) below. Each part of the answer carries a `ProbeOutcome` ahead of its findings, so "could not check" is never rendered as a negative finding. Backed by `host_tooling.rs`, injected via `ConnectionServiceImpl::with_host_tooling`. Details: [host-tooling-probe.md](host-tooling-probe.md). |
+| `StreamHostPrompts` | Server-streaming feed of the questions one host is waiting on **this operator** to answer. Each `HostPromptEvent` carries `prompt_id`, `daemon_instance_id`, `kind` (`HostPromptKind`), `subject` (what is being unlocked — never a secret), `host_public_key` (SPKI DER), `host_public_key_fingerprint` and `expires_at_unix_ms`. Filtered by the operator who raised the prompt, replays whatever is still outstanding to a late subscriber, and **watches `tx.closed()`** because the feed is silent by design. Backed by `host_prompt_stream.rs`. Details: [Host add-key](#host-add-key). |
+| `AnswerHostPrompt` | Unary; answers one prompt with `encrypted_answer` — **RSA-OAEP(SHA-256) ciphertext under that event's `host_public_key`**, never a plaintext. Answerable once, and only by the operator who raised it; a prompt id that was never issued and one belonging to somebody else get the *same* rejection. Response is `{accepted, rejection_reason}`. |
+| `AddHostKey` | Unary, and **blocks for as long as the add takes**: it raises a passphrase prompt on `StreamHostPrompts`, waits for the ciphertext on `AnswerHostPrompt`, decrypts it, unlocks the OpenSSH key named by `subject` — read as the mapped OS user, out of their own home — and hands the identity to that user's ssh-agent. `subject` must be an **absolute** path; nothing expands `~`. Answers with `{added, outcome (AddHostKeyOutcome), fingerprint, failure_reason}` and never with anything derived from the passphrase. Details: [Host add-key](#host-add-key). |
+| `ListHostKeyCandidates` | Unary; the private keys the caller's own OS user could load, out of their own `~/.ssh` — one `HostKeyCandidate` (`path`, `key_type`, `fingerprint`) per key **whose `.pub` sits beside it**, ordered by path. Every field comes from the public half, so no private key is opened to build the list, and every path offered is one `AddHostKey` accepts. Returns a list and never a failure: an absent, unreadable and empty `~/.ssh` are one answer. Details: [Host add-key](#host-add-key). |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). When **`pr_stack_base_session_id`** is set, the named session must be able to seed a `pr-stack` orchestrator's stack, checked before anything spawns — see [Stack-seed base session](#stack-seed-base-session-on-startsession). |
@@ -733,6 +737,68 @@ host's OS user under one 5 s deadline. Program resolution, the deadline's kill-a
 that unrecognised output is a probe failure are in
 [host-tooling-probe.md](host-tooling-probe.md).
 
+## Host add-key
+
+Four RPCs let an operator **load a key into a host's ssh-agent from the browser**, with the key's
+passphrase carried **encrypted end to end** — see
+[docs/ft/web/hosts-screen-add-key.md](../../../docs/ft/web/hosts-screen-add-key.md). The mechanism,
+and every decision behind it, is [host-add-key.md](host-add-key.md); what belongs here is the RPC
+surface.
+
+**The daemon asks and waits.** `StreamHostPrompts` (server-streaming) carries the question,
+`AnswerHostPrompt` (unary) carries the answer, and `AddHostKey` (unary) is the operation that raises
+one and consumes it. A server stream plus a unary reply rather than the ACP bidi stream: it mirrors
+`StreamWorktreeStats` + `CalculateWorktreeSize`, correlation is an explicit `prompt_id` rather than
+an envelope sequence, and the reply stays a unary call that can be transport-restricted the way
+`mint_local_token` is.
+
+**A prompt belongs to one operator.** Both the feed and the answer filter on the GitHub user whose
+session raised it — not the mapped OS user, because `config.users[]` can map two GitHub users to one
+OS user and they would then see and burn each other's prompts. Replayed to every subscriber the feed
+would disclose the private-key path one operator named to every other operator watching.
+Cross-operator answers get the `UnknownPrompt` rejection an unissued id gets, and are refused
+*before* the prompt's one answer is spent.
+
+**A prompt expires (120 s) and is answerable once.** An unanswered prompt cannot pin an `AddHostKey`
+call forever, and a repeatable answer would turn the endpoint into a passphrase-guessing oracle
+against one prompt.
+
+**Only ciphertext crosses the wire.** `HostPromptEvent.host_public_key` is the host's published SPKI
+DER; the browser encrypts under it with `SubtleCrypto` and `AnswerHostPrompt.encrypted_answer` is the
+RSA-OAEP(SHA-256) result. The registry keeps no copy — the ciphertext moves through a `oneshot` to
+the waiting `AddHostKey` — and the plaintext exists only inside the decrypt, in process.
+
+**Two `AddHostKey` failures are deliberately indistinguishable.** "This host cannot decrypt your
+answer" and "that passphrase did not unlock the key" share one arm and one message string. Told
+apart, they are an adaptive RSA-OAEP decryption oracle — one clean bit per query against the host's
+long-lived key, from any authenticated session. The real cause goes to the host's log only.
+
+**The key is read as the operator, from inside their own home.** `subject` is free text from a
+browser, so `host_private_key.rs` confines it lexically to the mapped user's home and reads the bytes
+with that user's own privileges through `spawner::run_capture_as_user`. There is no `canonicalize`:
+statting a caller-chosen path would restore the file-existence oracle the single `KEY_UNREADABLE`
+refusal closes, and the privilege drop is the real boundary anyway. Absent, unreadable and malformed
+share that one refusal; `KEY_OUTSIDE_HOME` stays distinct because it is decided by the caller's own
+input and account and discloses nothing.
+
+**`daemon_instance_id` is honoured on all four**, mirroring `GetHostTooling`: empty means the daemon
+serving the call, and a request addressed to a host this daemon is not gets `invalid_argument` rather
+than a locally served answer. A key silently loaded into the wrong host's agent is a worse version of
+the failure that handler's own comment warns about. Note the caveat these RPCs share with
+`GetHostTooling` and ~20 others: `classify_peer_route` compares the **routing** instance id while
+`ListKnownHosts` publishes the **durable** one, equal only while
+`daemon_instance_id_append_startup_timestamp` is false.
+
+**The pump's teardown is not optional.** A prompt feed emits only while an operator is adding a key,
+so the send failure a handler normally learns from is never attempted; the pump `tokio::select!`s on
+`tx.closed()`, as `packages/tddy-codegen/docs/server-streaming.md` requires, or it leaks one task per
+subscription. `pending_prompt_pump_count()` exists on the service so a wire-level test can see a leak
+that is otherwise unobservable.
+
+Injected for tests via `ConnectionServiceImpl::with_host_prompts`, `with_host_keypair`,
+`with_ssh_agent_key_adder` and `with_host_user_files` — the OS seams only. The prompt, the
+encryption, the decrypt and the key unlock run for real.
+
 ## LiveKit rooms (Rooms panel)
 
 One server-streaming RPC feeds the web's **LiveKit rooms panel** (see
@@ -858,6 +924,7 @@ so every host writes the same format; see [tddy-core architecture § Agent activ
 - **Worktrees**: **`ListWorktreesForProject`** (cached rows; **`refresh`** runs **`WorktreeStatsCache::refresh_stats_for_project`** in a blocking worker), **`RemoveWorktree`** ( **`remove_worktree_under_repo`**, then **`invalidate_project`**). Project checkout: **`main_repo_path_for_host`** with the local **`daemon_instance_id`**. Details: [worktrees.md](./worktrees.md), [docs/ft/web/worktrees.md](../../../../docs/ft/web/worktrees.md).
 - **Known hosts**: the durable registry behind `ListKnownHosts`, the routing-id/durable-id split it is keyed on, and its write policy: [host-registry.md](./host-registry.md).
 - **Host tooling**: the probe behind `GetHostTooling` — the injectable seam, the `PATH` resolution `resolve_tool_path` deliberately does not do, the shared deadline, and why an unrecognised answer is a failure rather than a negative finding: [host-tooling-probe.md](./host-tooling-probe.md).
+- **Host add-key**: the prompt registry, the host RSA keypair and its `0600` persistence, the pump's `tx.closed()` teardown, per-user private-key reading, the `.pub`-beside-it listing rule, and the two refusals that are deliberately identical: [host-add-key.md](./host-add-key.md).
 - Feature: [Session directory layout](../../../../docs/ft/coder/session-layout.md)
 - Feature: [docs/ft/daemon/project-concept.md](../../../../docs/ft/daemon/project-concept.md)
 - Feature: [Cursor Agent CLI session](../../../../docs/ft/daemon/cursor-cli-session.md)

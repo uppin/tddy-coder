@@ -13,7 +13,7 @@
  * `for await` cannot release. The daemon-side handler carries a `tokio::select!` on `tx.closed()`
  * for the same reason; this is that bug's mirror image on the browser side.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+ * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
 import { describe, it, expect } from "bun:test";

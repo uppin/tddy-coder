@@ -17,7 +17,7 @@
  * so "the feed dropped" is a fact a surface may want to show — and it is the only way to state, as a
  * test, that an abort of our own making is *not* reported.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+ * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
 /**

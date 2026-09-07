@@ -14,7 +14,7 @@
  * handler, so no counter on this fake can fall back when a stream closes. That property is pinned by
  * `src/rpc/hostPromptsSubscription.test.ts` instead.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md
+ * Feature: docs/ft/web/hosts-screen-add-key.md
  */
 
 import { create } from "@bufbuild/protobuf";

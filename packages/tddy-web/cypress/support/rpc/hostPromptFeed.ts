@@ -1,6 +1,6 @@
 /**
  * Test double for **`ConnectionService.StreamHostPrompts`** — the one channel on which a host asks
- * the browser a question (PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`).
+ * the browser a question (feature: `docs/ft/web/hosts-screen-add-key.md`).
  *
  * The real stream stays open for the life of the screen and is **silent almost all of the time**;
  * it carries a frame only when an operation on that host has blocked on an answer. The fake mirrors

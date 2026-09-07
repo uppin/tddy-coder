@@ -393,6 +393,8 @@ parse. Nothing branches on the text.
 ## See also
 
 - [connection-service.md](./connection-service.md) — the `GetHostTooling` RPC and its routing
+- [host-add-key.md](./host-add-key.md) — the agent's **write** side: loading a key into it, and the
+  socket resolution this module owns being called rather than reimplemented
 - [`docs/dev/TODO.md`](../../../docs/dev/TODO.md) § *Host tooling probe* — the open deployment
   questions this probe surfaced
 - `host_stats.rs` — the other per-host reader, documented in

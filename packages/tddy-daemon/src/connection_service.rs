@@ -23568,7 +23568,7 @@ mod ssh_agent_block_handler_tests {
 /// plaintext passphrase and called it encrypted would prove nothing about the path this node
 /// exists to build.
 ///
-/// Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+/// Feature: `docs/ft/web/hosts-screen-add-key.md`
 #[cfg(test)]
 mod host_add_key_handler_tests {
     use super::*;
@@ -23913,6 +23913,29 @@ users:
                  the passphrase it needs"
             );
         }
+
+        /// Assert `secret` reached no byte of any file this host has — and that the walk found
+        /// something to inspect, so a walk that read nothing cannot make this pass.
+        ///
+        /// One temp directory holds both the operator's key file and the daemon's own data
+        /// directory, so a single walk covers every place this flow could spill a passphrase to.
+        fn assert_nothing_on_disk_contains(&self, secret: &str) {
+            let files = every_file_under(self._storage.path());
+            assert!(
+                !files.is_empty(),
+                "the walk inspected no files at all, so this assertion would hold for a host \
+                 that wrote the passphrase into every one of them"
+            );
+            let leaked: Vec<&PathBuf> = files
+                .iter()
+                .filter(|(_, bytes)| contains_bytes(bytes, secret.as_bytes()))
+                .map(|(path, _)| path)
+                .collect();
+            assert!(
+                leaked.is_empty(),
+                "the passphrase was written to this host's disk: {leaked:?}"
+            );
+        }
     }
 
     // -- fixtures -------------------------------------------------------------------------------
@@ -23982,6 +24005,38 @@ users:
                 plaintext,
             )
             .expect("a passphrase fits comfortably in an OAEP payload")
+    }
+
+    /// Every file under `root`, recursively, paired with its bytes.
+    ///
+    /// Symlinks are stepped over rather than followed: what is being inspected is the bytes this
+    /// host wrote, and a link would either re-read a file already in the list or lead outside the
+    /// directory the host owns.
+    fn every_file_under(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        let entries = std::fs::read_dir(root).expect("a readable directory on this host");
+        for entry in entries {
+            let entry = entry.expect("a readable entry in this host's directory");
+            let kind = entry.file_type().expect("the entry's kind is readable");
+            let path = entry.path();
+            if kind.is_dir() {
+                found.extend(every_file_under(&path));
+            } else if kind.is_file() {
+                let bytes = std::fs::read(&path).expect("a readable file on this host");
+                found.push((path, bytes));
+            }
+        }
+        found
+    }
+
+    /// Whether `needle` appears anywhere in `haystack`, byte for byte.
+    ///
+    /// Over bytes rather than text, because a file that is not valid UTF-8 is exactly where a
+    /// secret would hide from a search that decoded first.
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     }
 
     // -- assertions -----------------------------------------------------------------------------
@@ -24217,6 +24272,23 @@ users:
         // Then
         reported.assert_added_the_key(&host.key_fingerprint);
         recording.assert_nothing_recorded_contains(PASSPHRASE);
+    }
+
+    /// The other half of the same promise. Encrypting the answer buys nothing if the host then
+    /// leaves the plaintext in a scratch file, a cache or a log file under its own data directory:
+    /// a passphrase on disk outlives the session that used it, and the operator has no way to know
+    /// it is there.
+    #[tokio::test]
+    async fn the_passphrase_is_never_written_to_disk() {
+        // Given a host holding a key locked with a passphrase the operator knows
+        let host = a_host_with_an_encrypted_key(PASSPHRASE);
+
+        // When the whole flow runs, from raising the prompt to loading the key
+        let reported = host.add_key_answering_with(PASSPHRASE).await;
+
+        // Then
+        reported.assert_added_the_key(&host.key_fingerprint);
+        host.assert_nothing_on_disk_contains(PASSPHRASE);
     }
 
     // -- whose prompt is this? ------------------------------------------------------------------

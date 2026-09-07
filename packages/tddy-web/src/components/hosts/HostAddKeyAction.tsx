@@ -39,7 +39,7 @@
  * which this component can miss the question its own call raised — and a screenful of hosts nobody
  * is adding a key to opens no streams at all.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+ * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
 import React, { useEffect, useRef, useState } from "react";

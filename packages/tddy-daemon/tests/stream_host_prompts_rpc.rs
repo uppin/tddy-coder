@@ -11,7 +11,7 @@
 //! `StreamHostStats` escapes it only because it emits unconditionally every five seconds, which is
 //! why no equivalent test exists for that RPC.
 //!
-//! Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+//! Feature: `docs/ft/web/hosts-screen-add-key.md`
 
 use futures_util::StreamExt;
 use std::time::Duration;

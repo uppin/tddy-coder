@@ -10,7 +10,7 @@
 //! implementation of this trait ever sees one: the decrypt happens in process, in the handler,
 //! and the plaintext is dropped there.
 //!
-//! Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+//! Feature: `docs/ft/web/hosts-screen-add-key.md`
 
 use ssh_key::PrivateKey;
 

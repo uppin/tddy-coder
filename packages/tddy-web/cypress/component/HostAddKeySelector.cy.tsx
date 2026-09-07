@@ -16,7 +16,7 @@
  * - **A list of keys is not a use of them.** The listing describes each candidate from its public
  *   half, so nothing in this UI can display key material — there is none in the message.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md
+ * Feature: docs/ft/web/hosts-screen-add-key.md
  */
 
 import { create } from "@bufbuild/protobuf";

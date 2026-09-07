@@ -24,7 +24,7 @@
 //! for any path inside the caller's home. The operator's remedy is the same in both cases: name a
 //! key that is there.
 //!
-//! Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+//! Feature: `docs/ft/web/hosts-screen-add-key.md`
 
 use ssh_key::{PrivateKey, PublicKey};
 use std::collections::BTreeSet;

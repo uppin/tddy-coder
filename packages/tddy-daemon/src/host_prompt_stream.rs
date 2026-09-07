@@ -2,7 +2,7 @@
 //!
 //! Separate from `connection_service.rs` for the same reason `livekit_rooms_stream.rs` is — the
 //! handler there is the auth check and the channel, and the loop that outlives it belongs where it
-//! can be read on its own. `docs/dev/1-WIP/2026-09-06-agent-add-key.md` records that the connection
+//! can be read on its own. `docs/dev/TODO.md` records that the connection
 //! service is already 19,600 lines; this node adds to it as little as it can.
 //!
 //! ⚠ **The teardown is the point of this module.** A prompt feed is silent almost all the time — a
@@ -13,7 +13,7 @@
 //! opened the Hosts screen. Pinned by
 //! `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs::stops_the_prompt_pump_once_the_subscriber_is_gone`.
 //!
-//! Feature: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+//! Feature: `docs/ft/web/hosts-screen-add-key.md`
 
 use crate::host_keypair::HostKeypair;
 use crate::host_prompts::{HostPromptRegistry, PendingPrompt, PromptKind};

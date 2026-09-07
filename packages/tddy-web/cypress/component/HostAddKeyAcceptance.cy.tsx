@@ -6,7 +6,7 @@
  * in the clear — which is the entire thing this node exists to prevent. Unary calls *are* recorded
  * by the in-memory backend's interceptor, so the outgoing request body is directly assertable.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md
+ * Feature: docs/ft/web/hosts-screen-add-key.md
  */
 
 import { create } from "@bufbuild/protobuf";

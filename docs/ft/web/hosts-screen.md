@@ -98,5 +98,7 @@ daemon that was asked.
 - [projects-screen-multi-host.md](./projects-screen-multi-host.md) — "a host is a daemon instance",
   which this screen extends from *currently connected* to *ever seen*
 - [host-stats-footer.md](./host-stats-footer.md) — host telemetry for the selected daemon
+- [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into a host's ssh-agent
+  from a row
 - Technical: [hosts-screen.md](../../../packages/tddy-web/docs/hosts-screen.md),
   [host-registry.md](../../../packages/tddy-daemon/docs/host-registry.md)

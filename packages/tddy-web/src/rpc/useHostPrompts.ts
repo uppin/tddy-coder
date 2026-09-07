@@ -13,7 +13,7 @@
  * closes the stream even when the host has never raised a prompt, which is the normal case for this
  * feed and which a `for await` parked on its first frame could not do.
  *
- * PRD: `docs/ft/web/1-WIP/PRD-2026-09-06-agent-add-key.md`
+ * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
 import { useEffect, useState } from "react";
