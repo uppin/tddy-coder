@@ -226,9 +226,14 @@ impl ScreenSharingServiceImpl {
     async fn prompt_for_desktop_password(
         &self,
         scope: &HostScope,
+        operator: &str,
         target: &HostDesktopTarget,
     ) -> Result<String, Status> {
+        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
+        // question: `StreamHostPrompts` shows a prompt to nobody else, and nobody else can spend
+        // its one answer. Anything else here and the question reaches no browser at all.
         let prompt = scope.prompts.issue(
+            operator,
             PromptKind::DesktopPassword,
             &desktop_prompt_subject(target),
             crate::host_registry::now_unix_ms(),
@@ -638,7 +643,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         request: Request<StartHostStreamRequest>,
     ) -> Result<Response<StartStreamResponse>, Status> {
         let req = request.into_inner();
-        self.require_user(&req.session_token)?;
+        let operator = self.require_user(&req.session_token)?;
         let scope = self.require_host_scope()?;
         let config = self.require_config()?;
 
@@ -662,7 +667,9 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         // could not have sent one — `HostPromptEvent` is the only place this host's public key is
         // published, so a caller has nothing to encrypt under until it has been asked. Read once,
         // handed to the bridge over its stdin, and dropped when this call returns.
-        let password = self.prompt_for_desktop_password(scope, &target).await?;
+        let password = self
+            .prompt_for_desktop_password(scope, &operator, &target)
+            .await?;
 
         self.try_spawn_bridge(
             config,
@@ -1074,8 +1081,14 @@ mod tests {
     }
 
     impl HostPromptRegistry for AnOperatorAtTheKeyboard {
-        fn issue(&self, kind: PromptKind, subject: &str, now_unix_ms: i64) -> PendingPrompt {
-            let issued = self.registry.issue(kind, subject, now_unix_ms);
+        fn issue(
+            &self,
+            issued_for: &str,
+            kind: PromptKind,
+            subject: &str,
+            now_unix_ms: i64,
+        ) -> PendingPrompt {
+            let issued = self.registry.issue(issued_for, kind, subject, now_unix_ms);
             self.asked
                 .lock()
                 .expect("nothing panics holding this")
@@ -1085,9 +1098,13 @@ mod tests {
                     // Answered as the browser does: the plaintext is encrypted here and only the
                     // ciphertext is handed to the registry, so nothing in this fixture proves
                     // anything the real channel would not have to.
+                    //
+                    // Answered by the operator it was issued for, which is the only operator the
+                    // registry will accept it from — so a start that stamped its prompt with the
+                    // wrong identity is refused here rather than quietly answered.
                     let ciphertext = encrypted_under(&self.keypair, password);
                     self.registry
-                        .answer(&issued.prompt_id, ciphertext, now_unix_ms)
+                        .answer(&issued.prompt_id, issued_for, ciphertext, now_unix_ms)
                         .expect("a freshly issued prompt accepts its first answer");
                     issued
                 }
@@ -1100,18 +1117,19 @@ mod tests {
             }
         }
 
-        fn pending(&self, now_unix_ms: i64) -> Vec<PendingPrompt> {
-            self.registry.pending(now_unix_ms)
+        fn pending(&self, issued_for: &str, now_unix_ms: i64) -> Vec<PendingPrompt> {
+            self.registry.pending(issued_for, now_unix_ms)
         }
 
         fn answer(
             &self,
             prompt_id: &str,
+            answered_by: &str,
             encrypted_answer: Vec<u8>,
             now_unix_ms: i64,
         ) -> Result<(), AnswerRejection> {
             self.registry
-                .answer(prompt_id, encrypted_answer, now_unix_ms)
+                .answer(prompt_id, answered_by, encrypted_answer, now_unix_ms)
         }
 
         fn awaited_answer(&self, prompt_id: &str) -> Option<AnswerHandoff> {
