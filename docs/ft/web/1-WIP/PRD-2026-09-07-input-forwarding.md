@@ -48,8 +48,10 @@ Because both scopes render through the same `ScreenSharingOverlay`, doing this o
       so a click lands where the operator aimed at any window size.
 - [ ] **AC-IF-4** Input works on a **host-scoped** desktop.
 - [ ] **AC-IF-5** Input works on a **session-scoped** desktop — the pre-existing path, unregressed.
-- [ ] **AC-IF-6** Escape still closes the overlay rather than being forwarded, and the close button
-      and backdrop click still work.
+- [ ] **AC-IF-6** `Ctrl+Alt+Esc` closes the overlay and is **not** forwarded; the close button and
+      backdrop click still work.
+- [ ] **AC-IF-9** **Escape is forwarded to the desktop**, not swallowed by the overlay — a desktop
+      that cannot receive Escape is unusable for most full-screen applications.
 - [ ] **AC-IF-7** The stream is opened when the overlay mounts and closed when it unmounts; no
       stream outlives its overlay.
 - [ ] **AC-IF-8** A failure to open the input stream leaves the picture working and says input is
@@ -62,9 +64,16 @@ Because both scopes render through the same `ScreenSharingOverlay`, doing this o
 - Touch and pen input; pointer and keyboard only.
 - Retiring the superseded `vnc_*` surface (see the technical debt note in the changeset).
 
-## Escape is the interesting case
+## Escape was the interesting case — settled
 
-Escape currently dismisses the overlay, and it is also a key a remote desktop legitimately needs.
-Forwarding everything traps the operator; forwarding nothing makes the desktop useless. The
-resolution is a product decision this node must make explicitly rather than by accident — it is
-called out in the changeset's open questions.
+Escape dismissed the overlay, and it is also a key a remote desktop legitimately needs. Forwarding
+everything traps the operator; keeping Escape makes the desktop useless for vim, dialogs and most
+full-screen applications.
+
+**Decision: the overlay keeps exactly one chord, `Ctrl+Alt+Esc`, and forwards everything else** —
+Escape included. The close button and a backdrop click are unchanged, so the chord is a convenience
+rather than the only way out, and the overlay names it on screen so it need not be memorised.
+
+One limit to state rather than pretend about: a browser reserves some combinations
+(`Cmd+W`, `Ctrl+W`, `F5`, `Cmd+Tab`) and a page cannot capture them. Those never reach the desktop,
+whatever this node does.

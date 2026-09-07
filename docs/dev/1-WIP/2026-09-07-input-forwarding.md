@@ -87,19 +87,23 @@ supplies a mount point that already exists on its branch.
 - [ ] Input-unavailable state that leaves the picture working
 - [ ] Cypress component tests for both scopes
 
-## Open questions — to settle before green, not during
+## Decisions — settled before the red phase
 
-1. **Which keys does the overlay keep?** Escape currently closes it, and a remote desktop needs
-   Escape. Options: forward everything and close only via the button; keep a single chord
-   (e.g. `Ctrl+Alt+Esc`) for close and forward the rest; keep Escape and offer a "send Escape"
-   affordance. Whichever is chosen, the browser's own reserved chords (`Cmd+W`, `Ctrl+W`, `F5`,
-   `Cmd+Tab`) cannot be captured at all, so the answer must not pretend otherwise.
-2. **Pointer capture semantics.** Whether to use Pointer Lock for relative movement, or plain
-   coordinate mapping. Lock feels right for a desktop but is a permission prompt and an escape-hatch
-   problem of its own; plain mapping is simpler and matches what `vncInput.ts` was written for.
-3. **Event rate.** A pointer-move stream at browser event rate will flood a data channel. Whether to
-   throttle, coalesce to animation frames, or send on change only — and whether the bridge's
-   `try_recv` drain loop already makes this a non-issue in practice.
+1. **The overlay keeps exactly one chord, `Ctrl+Alt+Esc`, and forwards everything else** — Escape
+   included. Keeping Escape would make the desktop useless for vim, dialogs and most full-screen
+   applications; forwarding everything with no keyboard exit would trap the operator. The close
+   button and backdrop click are unchanged, so the chord is a convenience and not the only way out,
+   and the overlay names it on screen. ⚠ Browser-reserved combinations (`Cmd+W`, `Ctrl+W`, `F5`,
+   `Cmd+Tab`) cannot be captured by a page at all and will never reach the desktop; the UI must not
+   imply otherwise.
+2. **Plain coordinate mapping, not Pointer Lock.** It is what `AC-IF-3` describes and what
+   `vncInput.ts`'s tested scaling was written for. Pointer Lock adds a permission prompt and its own
+   escape-hatch problem for a relative-motion benefit no acceptance criterion asks for. Revisit only
+   if a real desktop proves unusable without it.
+3. **Pointer moves are coalesced to at most one per animation frame.** A browser emits pointer-move
+   far faster than a desktop can consume it, and the bridge's `try_recv` drain loop discards the
+   backlog anyway — so sending it is pure data-channel cost. Not pinned by an acceptance test: a
+   frame-rate assertion in Cypress buys a flaky test for a property no operator can observe.
 
 ## Technical debt this node should consider
 
