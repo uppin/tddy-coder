@@ -218,6 +218,7 @@ export const hostAddKeyOutcome = {
     hostAddKeyPage.outcome(instanceId).invoke("text").should("match", pattern),
   notSaying: (instanceId: string, pattern: RegExp) =>
     hostAddKeyPage.outcome(instanceId).invoke("text").should("not.match", pattern),
+};
 
 /**
  * Remote-desktop section selectors — added by `#hosts-screen 7/8`.
