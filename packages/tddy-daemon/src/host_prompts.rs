@@ -45,6 +45,13 @@ pub type AnswerHandoff = oneshot::Receiver<Vec<u8>>;
 pub enum PromptKind {
     /// The passphrase unlocking a private key, so it can be added to this host's ssh-agent.
     SshKeyPassphrase,
+    /// The password of one of this host's remote desktops, asked for while a `StartHostStream` is
+    /// blocked on it.
+    ///
+    /// The same three guarantees apply unchanged — expiry, single use, no plaintext at rest — and
+    /// the last is the whole reason this kind exists rather than a stored credential: a host
+    /// desktop password is prompted, used once and dropped (`#hosts-screen 8/8`, AC-7).
+    DesktopPassword,
 }
 
 /// A question awaiting an answer.
@@ -137,6 +144,27 @@ pub trait HostPromptRegistry: Send + Sync {
     /// still be running when its subscriber had gone. Each subscriber gets every prompt issued
     /// after it subscribed; prompts already outstanding come from [`Self::pending`].
     fn subscribe(&self) -> broadcast::Receiver<PendingPrompt>;
+}
+
+/// The ciphertext answering `prompt`, or `None` once it can no longer arrive.
+///
+/// Bounded by the prompt's own expiry rather than by a timeout of the caller's choosing, so the
+/// operation releases at exactly the moment the prompt stops being answerable — and never later,
+/// whatever the operator does. A dropped sender, which is how the registry reaps an expired prompt,
+/// ends the wait the same way.
+///
+/// Lives beside the registry rather than beside either of its callers: `AddHostKey` and
+/// `StartHostStream` both block an operator's call on somebody typing, and two copies of "wait
+/// exactly as long as this prompt is answerable" are two chances for one of them to wait longer.
+pub(crate) async fn answer_before_expiry(
+    handoff: AnswerHandoff,
+    prompt: &PendingPrompt,
+) -> Option<Vec<u8>> {
+    let remaining = prompt
+        .expires_at_unix_ms
+        .saturating_sub(crate::host_registry::now_unix_ms());
+    let remaining = Duration::from_millis(u64::try_from(remaining).unwrap_or(0));
+    tokio::time::timeout(remaining, handoff).await.ok()?.ok()
 }
 
 /// The in-process registry behind `StreamHostPrompts` / `AnswerHostPrompt`.

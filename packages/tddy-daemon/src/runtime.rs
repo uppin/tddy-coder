@@ -703,6 +703,13 @@ pub async fn build(
             )))
         };
 
+        // One registry for the whole daemon. `ConnectionService` streams and answers prompts;
+        // `ScreenSharingService` raises them for a desktop password. A prompt raised on one
+        // instance and answered on another is a question nobody can answer, so both are handed
+        // this one.
+        let host_prompts: Arc<dyn crate::host_prompts::HostPromptRegistry> =
+            Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
+
         let mut connection_impl = crate::connection_service::ConnectionServiceImpl::new(
             config.clone(),
             sessions_base_resolver,
@@ -716,6 +723,7 @@ pub async fn build(
         .with_session_rooms(Arc::clone(&shared_session_rooms))
         .with_model_registry(Arc::clone(&model_registry))
         .with_host_registry(host_registry)
+        .with_host_prompts(Arc::clone(&host_prompts))
         .with_session_notification_bus(session_notification_bus);
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
@@ -946,7 +954,7 @@ pub async fn build(
             Arc::clone(&ss_key_cache),
         )
         .with_config(Arc::clone(&config_arc))
-        .with_host_scope(ss_host_targets, ss_host_keypair);
+        .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
         let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
         rpc_entries.push(tddy_rpc::ServiceEntry {
             name: "screen_sharing.ScreenSharingService",

@@ -171,14 +171,16 @@ message RemoveHostTargetResponse {
 
 // Starts a bridge for a HOST-scoped target. Returns the same StartStreamResponse the session-scoped
 // call does, because the browser overlay consumes exactly those fields already.
+//
+// The desktop password is deliberately NOT a field here. It is asked for on the #hosts-screen 6/8
+// prompt channel while this call is blocked: HostPromptEvent is the only place a host publishes the
+// public key an answer is encrypted under, so a caller has nothing to encrypt with until the daemon
+// has asked. Nothing persists the answer either — the session-scoped vault's storing model is
+// deliberately not followed for a host desktop.
 message StartHostStreamRequest {
   string session_token = 1;
   string daemon_instance_id = 2;
   string target_id = 3;
-  // A desktop password, encrypted under this host's public key via the #hosts-screen 6/8 prompt
-  // channel. Empty when the target needs none. NEVER carries a plaintext credential, and nothing
-  // persists it — the session-scoped vault's storing model is deliberately NOT followed here.
-  bytes encrypted_password = 4;
 }
 
 message StopHostStreamRequest {

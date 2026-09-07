@@ -239,4 +239,12 @@ export const hostDesktopPage = {
   connect: (instanceId: string) =>
     cy.get(`[data-testid="hosts-row-${instanceId}-connect-desktop"]`),
   overlay: (instanceId: string) => cy.get(`[data-testid="host-desktop-overlay-${instanceId}"]`),
+  /**
+   * The desktop itself, once a track is being rendered.
+   *
+   * Held apart from {@link hostDesktopPage.overlay}, which is the host-scoped mount and is there
+   * from the click onwards — including while the start is still blocked, and including when it
+   * failed. Only this one says a stream arrived.
+   */
+  stream: () => byTestId("screen-sharing-overlay"),
 };

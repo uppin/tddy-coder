@@ -22,7 +22,13 @@ import {
 export interface HostPromptFrame {
   readonly promptId: string;
   readonly daemonInstanceId: string;
-  /** What is being unlocked — the key path the operator named. Never a secret. */
+  /**
+   * What the host is asking for. Defaults to the key passphrase this channel was built for
+   * (`#hosts-screen 6/8`); `#hosts-screen 8/8` raises a desktop password on the same feed, and a
+   * spec that is about one of them has to be able to say which.
+   */
+  readonly kind?: HostPromptKind;
+  /** What is being unlocked — the key path the operator named, or the desktop being opened. Never a secret. */
   readonly subject: string;
   /** SPKI DER of the host's RSA public key. */
   readonly hostPublicKey: Uint8Array;
@@ -79,7 +85,7 @@ export function aHostPromptFeed(): HostPromptFeed {
       const event = create(HostPromptEventSchema, {
         promptId: frame.promptId,
         daemonInstanceId: frame.daemonInstanceId,
-        kind: HostPromptKind.SSH_KEY_PASSPHRASE,
+        kind: frame.kind ?? HostPromptKind.SSH_KEY_PASSPHRASE,
         subject: frame.subject,
         hostPublicKey: frame.hostPublicKey,
         hostPublicKeyFingerprint: frame.hostPublicKeyFingerprint,

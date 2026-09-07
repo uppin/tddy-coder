@@ -19,6 +19,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
+import { ConnectionService, HostPromptKind } from "../../gen/connection_pb";
 import {
   Protocol,
   ScreenSharingService,
@@ -26,9 +27,12 @@ import {
 } from "../../gen/screen_sharing_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useCommonRoom } from "../../hooks/useCommonRoom";
+import { checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
 import { presenceIdentityForUser } from "../../lib/presenceIdentity";
 import { useHostClient } from "../../rpc/connections/registry";
+import { useHostPrompts } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
+import { HostPassphraseDialog } from "./HostPassphraseDialog";
 
 export interface HostDesktopOverlayProps {
   /** The daemon instance whose desktop this is — host scope's whole addressing change. */
@@ -84,6 +88,8 @@ async function targetForProbedEndpoint(
 
 export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesktopOverlayProps) {
   const client = useHostClient(ScreenSharingService, hostId);
+  const connection = useHostClient(ConnectionService, hostId);
+  const { user, sessionToken } = useAuthContext();
   const [stream, setStream] = useState<StartStreamResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -101,16 +107,14 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
         const targetId = await targetForProbedEndpoint(client, hostId, port, protocol);
         if (cancelled) return;
         startedTargetId = targetId;
-        // TODO(#hosts-screen 8/8): a desktop needing a password must be prompted for one through
-        // node 6's encrypted channel and the ciphertext passed as `encryptedPassword`, never
-        // persisted (AC-7). Password-less desktops connect today; a protected one is refused by the
-        // daemon rather than silently retried.
+        // This call blocks while the host asks for the desktop's password — the question arrives
+        // below, on the prompt feed, and the answer released the start that is awaited here.
         const started = await client.startHostStream({ daemonInstanceId: hostId, targetId });
         if (cancelled) return;
         setStream(started);
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
+        setError(messageOf(e));
       }
     })();
 
@@ -130,12 +134,52 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
   // The bridge publishes into the room the start reply names, which is not this page's common room:
   // joining it is the same mint-and-connect `useCommonRoom` already performs, with no coordinates
   // until there is a reply.
-  const { user } = useAuthContext();
   const identity = useMemo(
     () => (user ? presenceIdentityForUser(user.login) : undefined),
     [user],
   );
   const { room } = useCommonRoom(stream?.livekitUrl, stream?.livekitRoom, identity);
+
+  // Read only while our own start is blocked: once there is a stream or a failure, this host has
+  // nothing left to ask about this desktop, and a screenful of hosts nobody is opening a desktop on
+  // opens no streams at all.
+  const awaitingStart = stream === null && error === null;
+  const raised = useHostPrompts(awaitingStart ? hostId : null);
+  // Only this overlay's own kind of question. The same feed carries the key passphrase
+  // `HostAddKeyAction` raises, and answering that one with a desktop password would send a secret to
+  // a question nobody here asked.
+  const question = raised !== null && raised.kind === HostPromptKind.DESKTOP_PASSWORD ? raised : null;
+
+  const [continuity, setContinuity] = useState<KeyPinVerdict | null>(null);
+
+  // Checked once per question, after the commit rather than during render: the check *records* the
+  // pin, and a render React discards would otherwise spend this host's one first-use trust slot on
+  // a dialog nobody was ever shown.
+  useEffect(() => {
+    setContinuity(
+      question === null ? null : checkHostKey(hostId, question.hostPublicKeyFingerprint),
+    );
+  }, [hostId, question]);
+
+  /** Send the ciphertext the dialog produced. The password itself never reaches this component. */
+  const answerWithPassword = async (encryptedAnswer: Uint8Array) => {
+    if (question === null || !connection) return;
+    try {
+      const reply = await connection.answerHostPrompt({
+        sessionToken: sessionToken ?? "",
+        daemonInstanceId: hostId,
+        promptId: question.promptId,
+        encryptedAnswer,
+      });
+      // A refused answer leaves the host waiting on a question it will never get another answer to,
+      // so say so now rather than leaving the operator in front of a dialog until the prompt expires.
+      if (!reply.accepted) {
+        setError(`That password was not accepted: ${reply.rejectionReason}`);
+      }
+    } catch (e) {
+      setError(`The password could not be sent: ${messageOf(e)}`);
+    }
+  };
 
   // TODO(#hosts-screen 8/8): forward pointer and keyboard input to the host's bridge (AC-3). The
   // session-scoped overlay does not forward either — `vncInput.ts` is left over from a `VncOverlay`
@@ -143,6 +187,30 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
 
   return (
     <div data-testid={`host-desktop-overlay-${hostId}`}>
+      {question !== null && continuity !== null && (
+        <HostPassphraseDialog
+          hostId={hostId}
+          subject={question.subject}
+          fingerprint={question.hostPublicKeyFingerprint}
+          spkiDer={question.hostPublicKey}
+          keyContinuity={continuity}
+          wording={{
+            title: `Password for ${question.subject}`,
+            explanation: `${hostId} is waiting for this desktop's password to open it. It is used once and kept nowhere. Leave it blank if this desktop has no password.`,
+            placeholder: "Desktop password",
+          }}
+          // A desktop password is one question an empty answer can be the true answer to: the host
+          // asks on every start because it cannot know in advance whether this desktop wants one,
+          // and plenty do not. Refusing empty here would ask the operator to invent a password the
+          // desktop never had, and leave them with no way in at all.
+          allowEmpty
+          onSubmit={(encryptedAnswer) => void answerWithPassword(encryptedAnswer)}
+          // Declining the question is declining the desktop: the start has nothing to proceed with,
+          // and closing releases it rather than leaving an overlay in front of a call that can only
+          // time out.
+          onCancel={onClose}
+        />
+      )}
       {stream ? (
         <ScreenSharingOverlay
           room={room}
@@ -169,4 +237,9 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
       )}
     </div>
   );
+}
+
+/** The one line of an error worth putting in front of an operator. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

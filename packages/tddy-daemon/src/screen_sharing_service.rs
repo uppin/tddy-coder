@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 use crate::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use crate::host_desktop_targets::{HostDesktopTarget, HostDesktopTargetStore};
 use crate::host_keypair::HostKeypair;
+use crate::host_prompts::{answer_before_expiry, HostPromptRegistry, PromptKind};
 use crate::screen_sharing_vault::{
     vault_path, DerivedKey, ScreenSharingTarget, ScreenSharingVault,
 };
@@ -76,6 +77,13 @@ struct HostScope {
     /// `#hosts-screen 6/8`'s keypair, reused rather than reimplemented — one key per host, and one
     /// decryption path for everything the browser encrypts to it.
     keypair: Arc<dyn HostKeypair>,
+    /// `#hosts-screen 6/8`'s prompt channel, on which this host asks its operator for a desktop
+    /// password. The browser has no other way to learn this host's public key: `HostPromptEvent`
+    /// is the only place it is published, so the prompt has to be **raised by the daemon**.
+    ///
+    /// The same instance `ConnectionService` streams and answers on — a prompt raised on one
+    /// registry and answered on another is a question nobody can answer.
+    prompts: Arc<dyn HostPromptRegistry>,
 }
 
 /// Daemon-side implementation of `ScreenSharingService`.
@@ -115,14 +123,24 @@ impl ScreenSharingServiceImpl {
         self
     }
 
-    /// Supply the store a host's desktops live in and the keypair their passwords are encrypted
-    /// under, enabling the host-scoped calls.
+    /// Supply the store a host's desktops live in, the keypair their passwords are encrypted
+    /// under, and the prompt channel those passwords are asked for on — enabling the host-scoped
+    /// calls.
+    ///
+    /// All three together rather than separately: a daemon that can store a host's desktop but
+    /// cannot ask for the password it needs can start nothing, so "host scope is wired" stays a
+    /// single fact.
     pub fn with_host_scope(
         mut self,
         targets: Arc<dyn HostDesktopTargetStore>,
         keypair: Arc<dyn HostKeypair>,
+        prompts: Arc<dyn HostPromptRegistry>,
     ) -> Self {
-        self.host_scope = Some(HostScope { targets, keypair });
+        self.host_scope = Some(HostScope {
+            targets,
+            keypair,
+            prompts,
+        });
         self
     }
 
@@ -189,6 +207,50 @@ impl ScreenSharingServiceImpl {
             .get(session_id)
             .cloned()
             .ok_or_else(|| Status::failed_precondition("vault not unlocked"))
+    }
+
+    /// Ask this host's operator for `target`'s password, and return what they typed.
+    ///
+    /// The question is raised **here**, by the daemon, rather than answered by the caller. It has to
+    /// be: `HostPromptEvent` is the only place a host publishes the public key an answer travels
+    /// under, so a browser that has not been asked anything has nothing to encrypt with — and a
+    /// desktop password is stored nowhere on this host, which is the whole point of prompting for
+    /// it.
+    ///
+    /// Every start asks. Nothing records whether a desktop wants a password, and a daemon that
+    /// guessed would either skip the question for a desktop that needs one or refuse a desktop that
+    /// does not; an operator answering with nothing is how a password-less desktop is opened.
+    ///
+    /// The wait is bounded by the prompt's own expiry, so an operator who walks away releases the
+    /// call at the moment the question stops being answerable — never later, and never never.
+    async fn prompt_for_desktop_password(
+        &self,
+        scope: &HostScope,
+        target: &HostDesktopTarget,
+    ) -> Result<String, Status> {
+        let prompt = scope.prompts.issue(
+            PromptKind::DesktopPassword,
+            &desktop_prompt_subject(target),
+            crate::host_registry::now_unix_ms(),
+        );
+        // Claimed immediately after issuing, because issuing is what puts the prompt on the feed: an
+        // operator whose browser answers at once must find a handoff already waiting for them.
+        let answer = match scope.prompts.awaited_answer(&prompt.prompt_id) {
+            Some(handoff) => answer_before_expiry(handoff, &prompt).await,
+            // The registry forgot the prompt between issuing it and being asked for its handoff,
+            // which for the operator is indistinguishable from one that ran out of time.
+            None => None,
+        };
+        let Some(encrypted_password) = answer else {
+            // Refused rather than started without one: a bridge spawned against a desktop whose
+            // password nobody supplied authenticates to nothing, and would leave a process running
+            // for a stream that can never carry a frame.
+            return Err(Status::deadline_exceeded(format!(
+                "nobody answered the password prompt for {} before it expired",
+                prompt.subject
+            )));
+        };
+        decrypt_desktop_password(scope.keypair.as_ref(), &encrypted_password)
     }
 
     /// Attempt to spawn a bridge process for the given target.
@@ -435,20 +497,27 @@ fn host_livekit_room(config: &DaemonConfig) -> Result<String, Status> {
         })
 }
 
-/// A desktop password for immediate use, from the ciphertext the browser encrypted under this
-/// host's published key.
+/// How the question this host raises names the desktop it is about.
+///
+/// The label the operator gave it, and the endpoint it points at: a host may have several desktops,
+/// and a dialog naming none of them asks somebody to type a secret into an unaddressed box. Neither
+/// half is a secret — both are already in `ListHostTargets`.
+fn desktop_prompt_subject(target: &HostDesktopTarget) -> String {
+    format!("{} ({}:{})", target.label, target.host, target.port)
+}
+
+/// A desktop password for immediate use, from the ciphertext the operator's browser encrypted under
+/// this host's published key.
 ///
 /// The plaintext is owned by the caller and dies with the call that asked for it: `#hosts-screen
 /// 6/8`'s prompt-decrypt-drop posture, deliberately not the session vault's storing one, so the
-/// Hosts screen has a single secret-handling model. Nothing here writes it anywhere.
+/// Hosts screen has a single secret-handling model. Nothing here writes it anywhere, and nothing
+/// logs it — not even the reason a decrypt failed, which is the keypair's own words about a
+/// ciphertext.
 fn decrypt_desktop_password(
     keypair: &dyn HostKeypair,
     encrypted_password: &[u8],
 ) -> Result<String, Status> {
-    if encrypted_password.is_empty() {
-        // A desktop that asks for no password: the bridges take an empty one.
-        return Ok(String::new());
-    }
     let plaintext = keypair
         .decrypt(encrypted_password)
         .map_err(Status::permission_denied)?;
@@ -589,8 +658,11 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         let bridge_identity = host_bridge_identity(&req.daemon_instance_id, &req.target_id);
         let track_name = screenshare_track_name(&req.target_id);
 
-        // Read once, handed to the bridge over its stdin, and dropped when this call returns.
-        let password = decrypt_desktop_password(scope.keypair.as_ref(), &req.encrypted_password)?;
+        // Asked for, not looked up: nothing on this host stores a desktop password, and the browser
+        // could not have sent one — `HostPromptEvent` is the only place this host's public key is
+        // published, so a caller has nothing to encrypt under until it has been asked. Read once,
+        // handed to the bridge over its stdin, and dropped when this call returns.
+        let password = self.prompt_for_desktop_password(scope, &target).await?;
 
         self.try_spawn_bridge(
             config,
@@ -839,6 +911,10 @@ mod tests {
     use crate::config::{LiveKitConfig, ScreenSharingConfig};
     use crate::host_desktop_targets::FileHostDesktopTargetStore;
     use crate::host_keypair::{FileHostKeypair, PublishedKey};
+    use crate::host_prompts::{
+        AnswerHandoff, AnswerRejection, InMemoryHostPromptRegistry, PendingPrompt, PromptKind,
+    };
+    use tddy_rpc::Code;
 
     const A_SESSION_TOKEN: &str = "a-valid-session-token";
     const THE_OS_USER: &str = "ada";
@@ -852,6 +928,12 @@ mod tests {
     const THE_BROWSER_LIVEKIT_URL: &str = "wss://livekit.example.com";
     const A_DESKTOP_PASSWORD: &str = "correct horse battery staple";
     const A_VAULT_PASSPHRASE: &str = "hunter2-passphrase";
+    /// What every desktop attached below is called. A prompt has to name the desktop it is asking
+    /// about, so this is the word the dialog has to be able to show.
+    const THE_DESKTOPS_LABEL: &str = "dev box";
+    /// The password of a desktop that has none — what the operator sends back for the
+    /// password-less desktops the rest of this module attaches.
+    const NO_PASSWORD: &str = "";
 
     /// Safety nets, not predictions: a stub that has recorded nothing by now was never spawned, and
     /// a signalled process still alive by now was never signalled. Both cost nothing when the
@@ -861,6 +943,17 @@ mod tests {
 
     /// Longer than any test here runs, so a bridge only ever exits because it was released.
     const A_BRIDGE_STAYS_UP_FOR_SECS: u32 = 300;
+
+    /// A safety net around a start whose question is never answered: long enough that no slow
+    /// machine trips it, short enough that a start which waits for ever fails as a failure rather
+    /// than as a hung suite.
+    const A_START_NOBODY_ANSWERS_GIVES_UP_WITHIN: Duration = Duration::from_secs(15);
+
+    /// Whether `haystack` contains `needle` anywhere in it — files the daemon wrote are bytes, not
+    /// text, and a keypair or a vault is not UTF-8.
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
 
     /// A stand-in for `tddy-vnc`: records how the daemon invoked it, then stays alive until it is
     /// signalled.
@@ -930,6 +1023,121 @@ mod tests {
         }
     }
 
+    /// What the person in front of the browser does when this host asks for a desktop password.
+    ///
+    /// Named for the human rather than for the registry, because that is the variable: the
+    /// registry underneath is the real [`InMemoryHostPromptRegistry`], so expiry, single use and
+    /// the handoff behave exactly as they do in production. Only *who answers, and whether* is
+    /// stood in for.
+    #[derive(Debug, Clone, Copy)]
+    enum TheOperator {
+        /// Types this password and sends it, encrypted under the host's published key — the same
+        /// RSA-OAEP(SHA-256) form the browser's `encryptForHost` produces.
+        Types(&'static str),
+        /// Walks away without answering.
+        ///
+        /// The question is stamped as already past its expiry, so "nobody answered in time" costs
+        /// no sleep. That expiry is not what is being tested here — [`crate::host_prompts`] proves
+        /// the registry reaps its own prompts — what is being tested is what the *start* does when
+        /// the answer it is waiting for never comes.
+        WalksAway,
+    }
+
+    /// The operator at the far end of node 6's prompt channel, and a record of everything this
+    /// host asked them.
+    struct AnOperatorAtTheKeyboard {
+        registry: InMemoryHostPromptRegistry,
+        asked: std::sync::Mutex<Vec<PendingPrompt>>,
+        behaviour: TheOperator,
+        /// Needed to answer at all: an answer travels as ciphertext under this host's published
+        /// key, which is the only form `StartHostStream` can accept.
+        keypair: Arc<FileHostKeypair>,
+    }
+
+    impl AnOperatorAtTheKeyboard {
+        fn new(behaviour: TheOperator, keypair: Arc<FileHostKeypair>) -> Self {
+            Self {
+                registry: InMemoryHostPromptRegistry::new(),
+                asked: std::sync::Mutex::new(Vec::new()),
+                behaviour,
+                keypair,
+            }
+        }
+
+        /// Every question this host has raised, in the order it raised them.
+        fn questions_asked(&self) -> Vec<PendingPrompt> {
+            self.asked
+                .lock()
+                .expect("nothing panics holding this")
+                .clone()
+        }
+    }
+
+    impl HostPromptRegistry for AnOperatorAtTheKeyboard {
+        fn issue(&self, kind: PromptKind, subject: &str, now_unix_ms: i64) -> PendingPrompt {
+            let issued = self.registry.issue(kind, subject, now_unix_ms);
+            self.asked
+                .lock()
+                .expect("nothing panics holding this")
+                .push(issued.clone());
+            match self.behaviour {
+                TheOperator::Types(password) => {
+                    // Answered as the browser does: the plaintext is encrypted here and only the
+                    // ciphertext is handed to the registry, so nothing in this fixture proves
+                    // anything the real channel would not have to.
+                    let ciphertext = encrypted_under(&self.keypair, password);
+                    self.registry
+                        .answer(&issued.prompt_id, ciphertext, now_unix_ms)
+                        .expect("a freshly issued prompt accepts its first answer");
+                    issued
+                }
+                // Handed back already expired, so the waiter's own deadline has passed before it
+                // starts waiting.
+                TheOperator::WalksAway => PendingPrompt {
+                    expires_at_unix_ms: now_unix_ms,
+                    ..issued
+                },
+            }
+        }
+
+        fn pending(&self, now_unix_ms: i64) -> Vec<PendingPrompt> {
+            self.registry.pending(now_unix_ms)
+        }
+
+        fn answer(
+            &self,
+            prompt_id: &str,
+            encrypted_answer: Vec<u8>,
+            now_unix_ms: i64,
+        ) -> Result<(), AnswerRejection> {
+            self.registry
+                .answer(prompt_id, encrypted_answer, now_unix_ms)
+        }
+
+        fn awaited_answer(&self, prompt_id: &str) -> Option<AnswerHandoff> {
+            self.registry.awaited_answer(prompt_id)
+        }
+
+        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<PendingPrompt> {
+            self.registry.subscribe()
+        }
+    }
+
+    /// A password as the browser sends it: RSA-OAEP(SHA-256) under this host's published key.
+    fn encrypted_under(keypair: &FileHostKeypair, password: &str) -> Vec<u8> {
+        use rsa::pkcs8::DecodePublicKey;
+
+        let PublishedKey { spki_der, .. } = keypair.published().expect("this host's published key");
+        rsa::RsaPublicKey::from_public_key_der(&spki_der)
+            .expect("a published SPKI DER public key")
+            .encrypt(
+                &mut rand::thread_rng(),
+                rsa::Oaep::new::<sha2::Sha256>(),
+                password.as_bytes(),
+            )
+            .expect("a password fits comfortably in an OAEP payload")
+    }
+
     /// The service wired the way `runtime.rs` wires it — real target store, real keypair, real
     /// vault — over throwaway directories, with the bridge binary pointed at [`FakeBridge`].
     ///
@@ -938,11 +1146,21 @@ mod tests {
     struct DaemonUnderTest {
         service: ScreenSharingServiceImpl,
         bridge: FakeBridge,
-        keypair: Arc<FileHostKeypair>,
+        operator: Arc<AnOperatorAtTheKeyboard>,
         storage: tempfile::TempDir,
     }
 
+    /// A daemon whose operator answers with the empty password.
+    ///
+    /// Every desktop these tests attach is password-less, so that is what a person in front of the
+    /// browser would send. Stated rather than left absent: a start that raises a prompt still
+    /// completes, and the tests about rooms, identities and stop keep measuring what they are
+    /// about rather than turning into prompt tests.
     fn a_daemon() -> DaemonUnderTest {
+        a_daemon_whose_operator(TheOperator::Types(NO_PASSWORD))
+    }
+
+    fn a_daemon_whose_operator(behaviour: TheOperator) -> DaemonUnderTest {
         let storage = tempfile::tempdir().expect("a storage directory");
         let bridge = FakeBridge::installed_in(storage.path());
 
@@ -965,6 +1183,10 @@ mod tests {
         let sessions_base = storage.path().to_path_buf();
         let keypair = Arc::new(FileHostKeypair::new(storage.path()));
         let targets = Arc::new(FileHostDesktopTargetStore::new(storage.path()));
+        let operator = Arc::new(AnOperatorAtTheKeyboard::new(
+            behaviour,
+            Arc::clone(&keypair),
+        ));
 
         let service = ScreenSharingServiceImpl::new(
             Arc::new(|token: &str| (token == A_SESSION_TOKEN).then(|| THE_OS_USER.to_string())),
@@ -972,12 +1194,16 @@ mod tests {
             Arc::new(Mutex::new(HashMap::new())),
         )
         .with_config(config)
-        .with_host_scope(targets, Arc::clone(&keypair) as Arc<dyn HostKeypair>);
+        .with_host_scope(
+            targets,
+            Arc::clone(&keypair) as Arc<dyn HostKeypair>,
+            Arc::clone(&operator) as Arc<dyn HostPromptRegistry>,
+        );
 
         DaemonUnderTest {
             service,
             bridge,
-            keypair,
+            operator,
             storage,
         }
     }
@@ -989,7 +1215,7 @@ mod tests {
                 .add_host_target(Request::new(AddHostTargetRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
-                    label: "dev box".to_string(),
+                    label: THE_DESKTOPS_LABEL.to_string(),
                     host: "127.0.0.1".to_string(),
                     port: 5900,
                     protocol: Protocol::Vnc as i32,
@@ -1002,26 +1228,65 @@ mod tests {
         }
 
         async fn open_the_desktop_of(&self, host: &str, target_id: &str) -> StartStreamResponse {
-            self.open_the_desktop_of_with(host, target_id, Vec::new())
+            self.try_to_open_the_desktop_of(host, target_id)
                 .await
+                .expect("opening a host's desktop")
         }
 
-        async fn open_the_desktop_of_with(
+        /// Open a desktop and hand back whatever the start came to, refusal included.
+        ///
+        /// Separate from [`Self::open_the_desktop_of`] rather than replacing it: a test about
+        /// rooms and identities should read as "it opens", and only a test about a start that
+        /// cannot finish has any business inspecting a `Status`.
+        async fn try_to_open_the_desktop_of(
             &self,
             host: &str,
             target_id: &str,
-            encrypted_password: Vec<u8>,
-        ) -> StartStreamResponse {
+        ) -> Result<StartStreamResponse, Status> {
             self.service
                 .start_host_stream(Request::new(StartHostStreamRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                     target_id: target_id.to_string(),
-                    encrypted_password,
                 }))
                 .await
-                .expect("opening a host's desktop")
-                .into_inner()
+                .map(Response::into_inner)
+        }
+
+        /// Every question this host raised on node 6's prompt channel.
+        fn questions_this_host_asked(&self) -> Vec<PendingPrompt> {
+            self.operator.questions_asked()
+        }
+
+        /// Everything the daemon itself has written under its storage directory.
+        ///
+        /// The stand-in bridge's own recordings are excluded by name — they exist because a test
+        /// asked the bridge to write down what it was handed, and they are not a daemon writing a
+        /// secret down. Everything else under this root *is* the daemon's: the host desktop target
+        /// store, this host's keypair, and any session tree.
+        fn files_the_daemon_wrote(&self) -> Vec<(PathBuf, Vec<u8>)> {
+            let recorded_by_the_bridge = [
+                self.bridge.binary.clone(),
+                self.bridge.argv_file.clone(),
+                self.bridge.stdin_file.clone(),
+            ];
+            let mut found = Vec::new();
+            let mut to_walk = vec![self.storage.path().to_path_buf()];
+            while let Some(dir) = to_walk.pop() {
+                for entry in std::fs::read_dir(&dir).expect("reading the daemon's storage") {
+                    let path = entry.expect("a directory entry").path();
+                    if path.is_dir() {
+                        to_walk.push(path);
+                        continue;
+                    }
+                    if recorded_by_the_bridge.contains(&path) {
+                        continue;
+                    }
+                    let bytes = std::fs::read(&path).expect("reading a file the daemon wrote");
+                    found.push((path, bytes));
+                }
+            }
+            found
         }
 
         async fn close_the_desktop_of(&self, host: &str, target_id: &str) {
@@ -1033,23 +1298,6 @@ mod tests {
                 }))
                 .await
                 .expect("closing a host's desktop");
-        }
-
-        /// A desktop password as the browser sends it: RSA-OAEP(SHA-256) under this host's
-        /// published key, which is the only form `StartHostStream` accepts.
-        fn encrypted_for_this_host(&self, password: &str) -> Vec<u8> {
-            use rsa::pkcs8::DecodePublicKey;
-
-            let PublishedKey { spki_der, .. } =
-                self.keypair.published().expect("this host's published key");
-            rsa::RsaPublicKey::from_public_key_der(&spki_der)
-                .expect("a published SPKI DER public key")
-                .encrypt(
-                    &mut rand::thread_rng(),
-                    rsa::Oaep::new::<sha2::Sha256>(),
-                    password.as_bytes(),
-                )
-                .expect("a password fits comfortably in an OAEP payload")
         }
 
         async fn bridge_running_for(&self, bridge_key: &str) -> Option<u32> {
@@ -1192,30 +1440,151 @@ mod tests {
         .await;
     }
 
-    /// AC-10. Argv is world-readable on this machine — `ps` shows it to every local account — so a
-    /// password on a bridge's command line is a password published to anyone logged in.
+    // ---------------------------------------------------------------------------------------
+    // AC-7 — a desktop password is prompted through node 6's channel, and never persisted
+    //
+    // The prompt is **raised by the daemon**, not supplied by the caller, and it has to be: the
+    // browser has no way to obtain this host's public key except from a prompt. `HostPromptEvent`
+    // is the only place it is published, and it carries the fingerprint the client pins — so a
+    // browser that has not been asked anything cannot encrypt anything.
+    // ---------------------------------------------------------------------------------------
+
+    /// AC-7. Nothing stores a host desktop password, so opening one has to ask for it — and the
+    /// question has to say which desktop, or the operator is typing a secret into a dialog naming
+    /// no machine.
     #[tokio::test]
-    async fn a_host_desktop_password_never_appears_in_the_bridge_process_arguments() {
-        // Given a desktop attached to a host
-        let daemon = a_daemon();
+    async fn opening_a_host_desktop_asks_the_operator_for_its_password() {
+        // Given a desktop attached to a host, and an operator ready to answer
+        let daemon = a_daemon_whose_operator(TheOperator::Types(A_DESKTOP_PASSWORD));
         let target_id = daemon.attach_a_desktop_to(A_HOST).await;
 
-        // When it is opened with a password, encrypted under this host's key
-        let encrypted_password = daemon.encrypted_for_this_host(A_DESKTOP_PASSWORD);
-        daemon
-            .open_the_desktop_of_with(A_HOST, &target_id, encrypted_password)
-            .await;
+        // When it is opened
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
 
-        // Then the bridge was given it on stdin — the assertion that makes the next one mean
-        // something, since a password that never reached the bridge is trivially not in its argv
+        // Then this host raised exactly one question, on node 6's channel, for a desktop password
+        let asked = daemon.questions_this_host_asked();
+        assert_eq!(
+            asked.len(),
+            1,
+            "opening a desktop asks its operator exactly one question, asked: {asked:?}"
+        );
+        assert_eq!(
+            asked[0].kind,
+            PromptKind::DesktopPassword,
+            "a desktop password is its own kind of question; node 6's key passphrase is not it"
+        );
+
+        // …naming the desktop it is about, which is all the dialog has to go on
+        assert!(
+            asked[0].subject.contains(THE_DESKTOPS_LABEL),
+            "the question must name the desktop being opened, said: {:?}",
+            asked[0].subject
+        );
+    }
+
+    /// AC-7 + AC-10. What the operator typed has to arrive at the bridge, and arrive on the one
+    /// channel that is not world-readable: argv is visible to every local account through `ps`.
+    ///
+    /// The stdin assertion comes first on purpose. The daemon passes the bridge **no arguments at
+    /// all**, so "the password is not in argv" is true of a password that never travelled — and an
+    /// assertion that holds for the wrong reason reports the property as verified forever.
+    #[tokio::test]
+    async fn the_password_the_operator_typed_reaches_the_bridge_on_stdin_and_never_its_arguments() {
+        // Given a desktop whose operator answers with its password
+        let daemon = a_daemon_whose_operator(TheOperator::Types(A_DESKTOP_PASSWORD));
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When it is opened
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
+
+        // Then the bridge was handed the answered password on its stdin
         let config = daemon.bridge.config_read_from_its_stdin().await;
-        assert_eq!(config["password"].as_str(), Some(A_DESKTOP_PASSWORD));
+        assert_eq!(
+            config["password"].as_str(),
+            Some(A_DESKTOP_PASSWORD),
+            "the answered password must reach the bridge, or nothing below means anything"
+        );
 
-        // Then it appears nowhere on the command line
+        // …and it appears nowhere on the command line
         let argv = daemon.bridge.recorded_argv().await;
         assert!(
             !argv.iter().any(|arg| arg.contains(A_DESKTOP_PASSWORD)),
             "the desktop password reached the bridge's argv: {argv:?}"
+        );
+    }
+
+    /// AC-7. The whole reason this node prompts instead of using the session vault: a host desktop
+    /// password is used once and dropped. A daemon that wrote it down would have quietly built the
+    /// credential store this node exists not to build.
+    #[tokio::test]
+    async fn the_password_the_operator_typed_is_never_written_to_disk() {
+        // Given a desktop whose operator answers with its password
+        let daemon = a_daemon_whose_operator(TheOperator::Types(A_DESKTOP_PASSWORD));
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When it is opened
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
+
+        // Then the password really did pass through this daemon — a secret that never existed is
+        // trivially absent from every file, and would make the rest of this test prove nothing
+        let config = daemon.bridge.config_read_from_its_stdin().await;
+        assert_eq!(
+            config["password"].as_str(),
+            Some(A_DESKTOP_PASSWORD),
+            "the answered password must reach the bridge, or nothing below means anything"
+        );
+
+        // …and it is in none of the files this daemon keeps
+        let written = daemon.files_the_daemon_wrote();
+        assert!(
+            written
+                .iter()
+                .any(|(path, _)| path.file_name() == Some("host-desktop-targets.json".as_ref())),
+            "the scan must cover where this daemon actually writes; it found only {:?}",
+            written.iter().map(|(path, _)| path).collect::<Vec<_>>()
+        );
+        for (path, bytes) in &written {
+            assert!(
+                !contains_bytes(bytes, A_DESKTOP_PASSWORD.as_bytes()),
+                "the desktop password was written to {}",
+                path.display()
+            );
+        }
+    }
+
+    /// AC-7. An operator who walks away must not leave the call parked forever, and must not leave
+    /// a bridge running against a desktop it could not authenticate to.
+    #[tokio::test]
+    async fn a_desktop_password_nobody_answers_fails_the_start_rather_than_starting_without_it() {
+        // Given a desktop whose operator never answers the question
+        let daemon = a_daemon_whose_operator(TheOperator::WalksAway);
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When it is opened
+        let outcome = tokio::time::timeout(
+            A_START_NOBODY_ANSWERS_GIVES_UP_WITHIN,
+            daemon.try_to_open_the_desktop_of(A_HOST, &target_id),
+        )
+        .await
+        .expect("a start whose question nobody answers must give up, not wait for ever");
+
+        // Then the start says the question went unanswered
+        let refusal = outcome.expect_err(
+            "a desktop that needs a password must not report a stream it never authenticated",
+        );
+        assert_eq!(
+            refusal.code(),
+            Code::DeadlineExceeded,
+            "an unanswered question is a deadline, not an internal error: {refusal:?}"
+        );
+
+        // …and no bridge was left running against a desktop it has no password for
+        assert!(
+            daemon
+                .bridge_running_for(&host_bridge_key(A_HOST, &target_id))
+                .await
+                .is_none(),
+            "a bridge was started without the password the start was waiting for"
         );
     }
 
