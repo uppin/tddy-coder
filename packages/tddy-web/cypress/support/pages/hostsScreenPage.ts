@@ -112,3 +112,71 @@ export const hostSshAgentPage = {
   key: (instanceId: string, fingerprint: string) =>
     cy.get(`[data-testid="hosts-row-${instanceId}-ssh-key-${fingerprint}"]`),
 };
+
+/**
+ * Add-key action selectors — added by `#hosts-screen 6/8`.
+ *
+ * The action lives inside the ssh-agent section that `hostSshAgentPage` above addresses, but is
+ * kept as its own page object: an operator *doing* something to a host is a different surface from
+ * the row *reporting* on it, and only one of the two has controls.
+ */
+export const hostAddKeyPage = {
+  /** The whole action — absent on a host with no agent to add a key to. */
+  action: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key`),
+  /** Where the operator names the private key to load, as a path on that host. */
+  keyField: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-subject`),
+  start: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-start`),
+  /** What the add came to — the operator-facing rendering of `AddHostKeyOutcome`. */
+  outcome: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-outcome`),
+  /**
+   * The confirmation that a key is now in the agent, naming the fingerprint the agent reported.
+   *
+   * Held apart from {@link hostAddKeyPage.outcome} so "no key was added" is assertable as the
+   * absence of a positive claim, rather than as the absence of some particular wording.
+   */
+  addedConfirmation: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-added`),
+
+  /** Name a key and ask the host to load it — the whole operator gesture, in one step. */
+  addKey: (instanceId: string, subject: string) => {
+    hostAddKeyPage.keyField(instanceId).type(subject);
+    hostAddKeyPage.start(instanceId).click();
+  },
+};
+
+/**
+ * The passphrase dialog a host raises — added by `#hosts-screen 6/8`.
+ *
+ * Server-initiated, so it is not addressed through any row: the host asked, and the dialog is the
+ * answer channel. Its selectors live here rather than in a spec so the two specs that drive it — the
+ * dialog's own behaviour, and the add-key flow that raises it — name the same elements.
+ */
+export const hostPassphraseDialogPage = {
+  root: (instanceId: string) => byTestId(`host-passphrase-dialog-${instanceId}`),
+  input: () => byTestId("host-passphrase-input"),
+  submit: () => byTestId("host-passphrase-submit"),
+  /** Shown when this host's key differs from the pinned one — the sighting that blocks the flow. */
+  changedWarning: () => byTestId("host-key-changed-warning"),
+  /**
+   * Shown when the continuity check reached no conclusion at all.
+   *
+   * Held apart from {@link hostPassphraseDialogPage.changedWarning} because the two say different
+   * things — "this key is not the one you pinned" versus "nothing could be checked" — and only the
+   * first is evidence of anything.
+   */
+  unverifiedNotice: () => byTestId("host-key-unverified-notice"),
+};
+
+/**
+ * Outcome assertions for the add-key action.
+ *
+ * Matched as patterns rather than exact strings because what is being pinned is that the three
+ * failures *say different things* — a wrong passphrase is worth retyping, an absent agent is not —
+ * not the sentence each one settled on.
+ */
+export const hostAddKeyOutcome = {
+  saying: (instanceId: string, pattern: RegExp) =>
+    hostAddKeyPage.outcome(instanceId).invoke("text").should("match", pattern),
+  notSaying: (instanceId: string, pattern: RegExp) =>
+    hostAddKeyPage.outcome(instanceId).invoke("text").should("not.match", pattern),
+};

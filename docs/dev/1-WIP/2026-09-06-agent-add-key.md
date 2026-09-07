@@ -139,7 +139,7 @@ prompts — so this node builds the channel, the crypto and the mutation togethe
 - [x] Browser `SubtleCrypto` `RSA-OAEP` encryption
 - [x] Key continuity: pin on first sight, block on change — 13 tests; unusable storage now reports `unverified`
 - [x] Daemon decrypt → private key decrypt → agent add → drop plaintext
-- [ ] ⚠ Passphrase dialog **done**; add-key action, key selector and `useHostPrompts.ts` **not implemented**
+- [~] ⚠ Passphrase dialog **done**; add-key action, key selector and the prompt subscription have **failing tests, no implementation**
 - [x] Rust unit/integration tests, teardown test, Cypress round-trip tests
 - [x] Confirm whether the git hardening needs any change at all
 
@@ -279,6 +279,31 @@ otherwise unverified, and a stray `debug!` is exactly how such a secret escapes.
 | `shows_the_hosts_public_key_fingerprint_in_the_dialog` | AC-8 |
 | `blocks_the_flow_with_a_warning_when_a_hosts_key_has_changed` | AC-9 |
 | `reports_a_failure_without_adding_a_key_when_the_passphrase_is_wrong` | AC-4 |
+| `distinguishes_a_wrong_passphrase_from_an_absent_agent_and_from_an_expired_prompt` | AC-4 — the enum's whole point |
+| `says_continuity_could_not_be_checked_without_blocking_the_answer` | AC-9 — the `unverified` verdict |
+| `distinguishes_an_unverifiable_host_key_from_a_changed_one_and_from_a_first_sighting` | AC-9 |
+
+**`packages/tddy-web/src/rpc/hostPromptsSubscription.test.ts`** (unit)
+
+| Test | Validates |
+|---|---|
+| `hands_every_prompt_the_host_raises_to_the_caller_in_order` | AC-1 |
+| `cancels_the_call_when_the_caller_unsubscribes` | AC-10 — the browser-side leak |
+| `cancels_a_feed_that_has_never_raised_a_prompt` | AC-10 — this feed's normal state |
+| `stops_delivering_prompts_once_the_caller_has_unsubscribed` | AC-10 |
+| `reports_nothing_when_the_call_it_cancelled_itself_rejects_with_an_AbortError` | AC-10 |
+| `reports_a_feed_the_daemon_drops_while_the_caller_is_still_subscribed` | AC-10 — the swallow's non-vacuity |
+
+**`packages/tddy-web/cypress/component/HostsScreenAddKeyAcceptance.cy.tsx`**
+
+| Test | Validates |
+|---|---|
+| `offers_to_add_a_key_when_an_ssh_agent_is_reachable` | AC-3 |
+| `offers_to_add_a_key_to_an_agent_that_is_already_holding_one` | AC-3 |
+| `offers_the_add_only_where_there_is_an_agent_to_add_to` | AC-3 |
+| `asks_the_host_to_load_the_key_the_operator_named` | AC-3 |
+| `raises_the_passphrase_dialog_for_the_key_the_host_asks_about` | AC-1 |
+| `confirms_the_key_the_agent_is_now_holding_once_the_add_succeeds` | AC-3 |
 
 ## Decisions & trade-offs
 
@@ -374,6 +399,62 @@ The daemon can serve the whole round trip, but nothing in the UI starts it:
 Under the boundary contract an unimplemented owned symbol is a blocker rather than a follow-up, so
 this node is **not ready to be marked ready for review**.
 
+#### Failing tests now define all four — implementation still outstanding
+
+| Gate | Result |
+|---|---|
+| `bun test src/rpc/hostPromptsSubscription.test.ts` | **6 failing** — `subscribeHostPrompts is not implemented` |
+| Cypress `HostAddKeyAcceptance.cy.tsx` | 9 tests: **5 passing** (unchanged), **4 failing** |
+| Cypress `HostsScreenAddKeyAcceptance.cy.tsx` | **6 failing** — `HostAddKeyAction is not implemented` |
+| `bun test src/rpc src/lib` | 521 passing, 6 failing (only the new file) |
+
+**The subscription follows `hostStatsSubscription`, not `useSessionNotifications`.** The changeset's
+Delta named `useHostPrompts.ts` alone, following the `useHostStats` template. That template is
+actually a **pair**, and the split is load-bearing rather than stylistic:
+`hostStatsSubscription.test.ts`'s own header records why — `createRouterTransport` propagates
+neither an abort nor a consumer's `break` to the server handler, so **no Cypress backend can observe
+a subscription closing**. Since the teardown assertion is the one this node cannot skip, the loop was
+written as `src/rpc/hostPromptsSubscription.ts` (a plain function, unit-tested against a hand-rolled
+Connect-shaped iterable) with `src/rpc/useHostPrompts.ts` as the thin hook the Delta names. A
+`for await` hook alone — the `useSessionNotifications` shape — would have left AC-10's browser half
+permanently unassertable.
+
+**The prompt feed's silence is why this leak is worse than the stats one.** `StreamHostPrompts` is
+silent almost all of the time by design; a `for await` parked on a first frame that never comes has
+no reachable `break`, so *every* quiet host leaks a subscription. `subscribeHostPrompts` therefore
+reports feed failures through an **explicit callback** rather than `console.debug` as the stats loop
+does: an idle prompt feed and a dead one look identical, and a callback is the only way to state, as
+a test, that an abort of our own making is *not* reported — paired with
+`reports_a_feed_the_daemon_drops_while_the_caller_is_still_subscribed`, without which that swallow
+would be satisfied by a loop that reported nothing at all.
+
+**`unverified` is now rendered, and does not block.** `HostPassphraseDialog` gained a
+`keyContinuity?: KeyPinVerdict` prop alongside the existing `keyChanged` — additive, so the five
+green tests are untouched. The wording chosen is *"Could not check whether this host's key has
+changed since last time. Verify the fingerprint above with the host before sending anything."*
+under `data-testid="host-key-unverified-notice"`. It **warns without disabling submission**: a host
+that cannot be pin-checked has not been caught doing anything, and blocking would make the feature
+unusable in any browser that refuses to store a pin — the opposite decision to `changed`, which does
+block. That asymmetry is deliberate and is pinned by
+`distinguishes_an_unverifiable_host_key_from_a_changed_one_and_from_a_first_sighting`.
+
+**The outcome fixtures carry an empty `failure_reason` on purpose.** A component echoing that free
+text verbatim would pass a distinguishability test that supplied one while still reporting "it
+failed" three times over. With nothing to echo, the only thing that can tell `WRONG_PASSPHRASE`,
+`NO_AGENT` and `PROMPT_EXPIRED` apart is the enum — which is the reason the response carries one.
+
+**`HostAddKeyAction` is deliberately not yet wired into `HostRowSshAgent`.** The stub throws, so
+mounting it inside the row would take node 5's four green ssh-agent tests down with it. The action's
+own spec mounts it directly, exactly as `HostsScreenSshAgentAcceptance` mounts `HostRowSshAgent`;
+wiring it into the row's section is green's first step, and node 5's four-state summary logic stays
+untouched either way.
+
+**One negative-only test was caught passing vacuously and rewritten.** "Offers nothing when no agent
+is reachable" is satisfied by a row that renders no control on *any* host — which is precisely this
+node's starting state, and it did pass against the stub. It is now
+`offers_the_add_only_where_there_is_an_agent_to_add_to`, mounting both states in one test, the same
+shape `HostsScreenSshAgentAcceptance`'s "distinguishes an empty agent from an absent one" uses.
+
 ### Two outcome gaps recorded rather than fixed
 
 `AddHostKeyOutcome` has no arm for an answer this host cannot decrypt (encrypted for the wrong host,
@@ -392,6 +473,27 @@ dependency and was not added without consent.
 ## Refactoring needed
 
 _(populated by each validation phase)_
+
+### From @red (browser-side gap)
+
+- **`hostStatsSubscription.ts` and `hostPromptsSubscription.ts` are now the same loop twice.** Both
+  hold an iterator by hand, abort on unsubscribe, guard delivery on an `unsubscribed` flag and
+  release in a `finally`. They differ only in the event type and in where a feed failure goes
+  (`console.debug` versus a callback). A third streaming surface should trigger extracting a generic
+  `subscribeServerStream<T>`; two is not yet enough to design against.
+- **The dialog now has two ways to say the same thing.** `keyChanged: boolean` and
+  `keyContinuity?: KeyPinVerdict` overlap — `keyChanged` is derivable from
+  `keyContinuity.kind === "changed"`, and nothing stops a caller from stating both and disagreeing.
+  Collapsing them to the verdict alone is the right shape; it was kept additive here only so the
+  five green dialog tests were not rewritten in the same pass that added a behaviour. Worth doing
+  before this node lands.
+- **`HostPromptFeed` and `SessionNotificationFeed` are the same fixture twice** — an always-open
+  generator, a queue, a `wake` promise and a subscription counter, differing only in the event they
+  carry. A shared `anAlwaysOpenServerStream<T>()` helper in `cypress/support/rpc/` would carry both.
+- **The add-key key field is a free-text path, not a selector.** The changeset says "key selector",
+  but `AddHostKeyRequest.subject` is a path on the host and no RPC lists candidate key files, so
+  there is nothing to select *from*. Offering real choices needs a listing RPC — a decision, not a
+  refactor, and it belongs to whoever wants it.
 
 ## Validation results
 

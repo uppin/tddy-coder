@@ -16,6 +16,7 @@
 
 import React, { useState } from "react";
 import { encryptForHost } from "../../lib/encryptForHost";
+import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
 
 export interface HostPassphraseDialogProps {
   hostId: string;
@@ -27,6 +28,25 @@ export interface HostPassphraseDialogProps {
   spkiDer: Uint8Array;
   /** True when this fingerprint differs from the one pinned for this host. */
   keyChanged: boolean;
+  /**
+   * What the continuity check concluded about this host's key.
+   *
+   * `keyChanged` above is the flow's block/allow switch; this is what the dialog *says* about the
+   * check itself, and `unverified` is the arm that must not go unsaid. It means no continuity
+   * conclusion was available at all — no key was presented, or storage refused to be read — so this
+   * sighting is not evidence of anything, in either direction. Rendering it as an ordinary first
+   * sighting would let an active substitution look routine, which is precisely what the pin exists
+   * to prevent.
+   *
+   * `unverified` warns but, unlike `changed`, does **not** block: a host that cannot be pin-checked
+   * has not been caught doing anything, and refusing here would make the feature unusable in any
+   * browser that will not store a pin. Intended copy, under `data-testid`
+   * `host-key-unverified-notice`: *"Could not check whether this host's key has changed since last
+   * time. Verify the fingerprint above with the host before sending anything."*
+   *
+   * TODO: unimplemented — accepted so callers can state the verdict, not yet rendered.
+   */
+  keyContinuity?: KeyPinVerdict;
   /** Receives the RSA-OAEP ciphertext — the passphrase itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   onCancel: () => void;
