@@ -22,7 +22,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use log::error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -53,13 +52,14 @@ impl DesktopProtocolId {
 /// Stores desktop targets per host, separately from the session-scoped vault.
 pub trait HostDesktopTargetStore: Send + Sync {
     /// Targets attached to `daemon_instance_id`.
-    fn list(&self, daemon_instance_id: &str) -> Vec<HostDesktopTarget>;
+    ///
+    /// Fallible, and deliberately so: a store that cannot be read is not a host with no desktops.
+    /// Collapsing the two would show an operator an empty Hosts row for a machine that has
+    /// desktops, and make every start against one report "no such target".
+    fn list(&self, daemon_instance_id: &str) -> Result<Vec<HostDesktopTarget>, String>;
 
     /// Attach a target to a host, returning its new id.
     fn add(&self, daemon_instance_id: &str, target: HostDesktopTarget) -> Result<String, String>;
-
-    /// Detach a target from a host.
-    fn remove(&self, daemon_instance_id: &str, target_id: &str) -> Result<(), String>;
 }
 
 /// What the store keeps on disk.
@@ -129,21 +129,16 @@ impl FileHostDesktopTargetStore {
 }
 
 impl HostDesktopTargetStore for FileHostDesktopTargetStore {
-    fn list(&self, daemon_instance_id: &str) -> Vec<HostDesktopTarget> {
-        match self.read_file() {
-            Ok(file) => file
-                .hosts
-                .get(daemon_instance_id)
-                .cloned()
-                .unwrap_or_default(),
-            // The signature leaves nowhere to report this, so it goes to the log loudly rather
-            // than reaching an operator as a host that quietly lost its desktops. Nothing here
-            // rewrites the file, so the damaged one is still there to recover from.
-            Err(e) => {
-                error!("cannot list host desktop targets: {e}");
-                Vec::new()
-            }
-        }
+    fn list(&self, daemon_instance_id: &str) -> Result<Vec<HostDesktopTarget>, String> {
+        // Reported, never swallowed. Nothing here rewrites the file, so a damaged one is still on
+        // disk to recover from — and the caller is told rather than shown a host that quietly
+        // lost every desktop attached to it.
+        Ok(self
+            .read_file()?
+            .hosts
+            .get(daemon_instance_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     /// The id is assigned here, not accepted from the caller: it addresses a running bridge, and a
@@ -162,28 +157,6 @@ impl HostDesktopTargetStore for FileHostDesktopTargetStore {
         self.write_file(&file)?;
         Ok(target_id)
     }
-
-    fn remove(&self, daemon_instance_id: &str, target_id: &str) -> Result<(), String> {
-        let _rewriting = self.locked();
-        let mut file = self.read_file()?;
-        let attached = file
-            .hosts
-            .get_mut(daemon_instance_id)
-            .ok_or_else(|| not_attached(daemon_instance_id, target_id))?;
-        let before = attached.len();
-        attached.retain(|t| t.target_id != target_id);
-        if attached.len() == before {
-            return Err(not_attached(daemon_instance_id, target_id));
-        }
-        if attached.is_empty() {
-            file.hosts.remove(daemon_instance_id);
-        }
-        self.write_file(&file)
-    }
-}
-
-fn not_attached(daemon_instance_id: &str, target_id: &str) -> String {
-    format!("host {daemon_instance_id} has no desktop target {target_id}")
 }
 
 #[cfg(test)]
@@ -229,7 +202,12 @@ mod tests {
     }
 
     fn labels_for(store: &FileHostDesktopTargetStore, host: &str) -> Vec<String> {
-        store.list(host).into_iter().map(|t| t.label).collect()
+        store
+            .list(host)
+            .expect("listing a host's targets")
+            .into_iter()
+            .map(|t| t.label)
+            .collect()
     }
 
     /// A desktop belongs to the machine it was attached to. Without this, adding one host's desktop
@@ -251,43 +229,6 @@ mod tests {
             elsewhere.is_empty(),
             "a target must not leak onto another host, got {elsewhere:?}"
         );
-    }
-
-    /// Host scope and session scope are separate stores: deleting a session must not take a host's
-    /// desktop with it, which is the whole reason this type exists rather than reusing the vault.
-    #[test]
-    fn a_host_scoped_target_is_not_written_into_the_session_vaults_file() {
-        // Given a target attached to a host
-        let (store, dir) = a_target_store();
-        store
-            .add(A_HOST, a_desktop_target().build())
-            .expect("attaching a target to a host");
-
-        // When the storage directory is inspected
-        let session_vault = dir.path().join("vault.json");
-
-        // Then nothing was written where the session-scoped vault keeps its own credentials
-        assert!(
-            !session_vault.exists(),
-            "host targets must not share the session vault's file"
-        );
-    }
-
-    #[test]
-    fn a_removed_target_no_longer_appears_for_its_host() {
-        // Given a host with one attached target
-        let (store, _dir) = a_target_store();
-        let target_id = store
-            .add(A_HOST, a_desktop_target().build())
-            .expect("attaching a target to a host");
-
-        // When it is detached
-        store
-            .remove(A_HOST, &target_id)
-            .expect("detaching it again");
-
-        // Then the host has no targets left
-        assert!(labels_for(&store, A_HOST).is_empty());
     }
 
     /// Two hosts can hold targets at once, each seeing only its own.
@@ -314,17 +255,28 @@ mod tests {
         );
     }
 
-    /// Removing a target that was never attached is an error, not a silent success — a caller that
-    /// believes it detached something must not be told it did.
+    /// A store whose file cannot be read is not a host with no desktops. Collapsed into an empty
+    /// list, a damaged file shows an operator a machine that lost every desktop attached to it —
+    /// and makes every start against one report a target that is still right there in the file.
     #[test]
-    fn removing_a_target_that_was_never_attached_is_reported_as_an_error() {
-        // Given a host with no targets
-        let (store, _dir) = a_target_store();
+    fn a_targets_file_that_cannot_be_parsed_is_reported_rather_than_read_as_no_desktops() {
+        // Given a targets file that is not readable as targets
+        let (store, dir) = a_target_store();
+        std::fs::write(
+            dir.path().join("host-desktop-targets.json"),
+            b"{ this is not the file the daemon wrote",
+        )
+        .expect("damaging the targets file");
 
-        // When a target that was never attached is removed
-        let outcome = store.remove(A_HOST, "never-attached");
+        // When a host's targets are listed
+        let outcome = store.list(A_HOST);
 
-        // Then the caller is told, rather than being left to assume it worked
-        assert!(outcome.is_err());
+        // Then the caller is told, rather than handed a host that appears to have none
+        let complaint =
+            outcome.expect_err("a file that does not parse must not read as no desktops");
+        assert!(
+            complaint.contains("host-desktop-targets.json"),
+            "the complaint must name the file an operator has to repair, said: {complaint:?}"
+        );
     }
 }

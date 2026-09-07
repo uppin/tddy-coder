@@ -11,6 +11,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { AuthService } from "../../src/gen/auth_pb";
 import {
   ConnectionService,
   HostPromptKind,
@@ -19,13 +20,27 @@ import {
 } from "../../src/gen/connection_pb";
 import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
+import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aHostConnection, aRegistryServing } from "../support/rpc/hostConnections";
-import { aHostPromptFeed, type HostPromptFeed } from "../support/rpc/hostPromptFeed";
+import {
+  aHostPromptFeed,
+  type HostPromptFeed,
+  type HostPromptFrame,
+} from "../support/rpc/hostPromptFeed";
+import {
+  ACCESS_TOKEN_KEY,
+  CURRENT_ACCESS_TOKEN,
+  REFRESH_TOKEN_KEY,
+  VALID_REFRESH_TOKEN,
+} from "../support/rpc/durableSessionBackend";
+import { aGitHubUser } from "../support/rpc/responses";
+import { anRsaOaepKeypair, type AHostPromptKeypair } from "../support/hostKeys";
 import { ConnectionProviders } from "../../src/rpc/connections/registry";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { AuthProvider } from "../../src/hooks/authProvider";
+import { useHostPrompts } from "../../src/rpc/useHostPrompts";
 import { hostDesktopPage, hostPassphraseDialogPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
@@ -185,26 +200,55 @@ const THE_DESKTOP_PASSWORD = "correct horse battery staple";
 const HOST_KEY_FINGERPRINT = "SHA256:ZLBiCcwTvIcQUyRnvSHhpsdgWLLLZtWbBAPtgWNBpAg";
 const A_HOST_TARGET = "target-1";
 
+/** The other question this same per-host feed carries — `HostAddKeyAction`'s, for a key on it. */
+const AN_SSH_KEY_PROMPT = "prompt-ssh-key-1";
+const A_KEY_ON_THAT_HOST = "/home/ada/.ssh/id_ed25519";
+
 /**
- * A real RSA-OAEP(SHA-256) public key in SPKI DER, as the daemon publishes with a prompt.
+ * The host's prompt keypair: the half it publishes with a prompt, and the half only it holds.
  *
  * Generated for real, exactly as `HostAddKeyAcceptance` does and for the same reason: a stubbed
  * `crypto.subtle` would hollow out the one assertion carrying this test's security claim.
+ *
+ * The **private** half is kept, and that is what makes an answer checkable. RSA-2048 OAEP output is
+ * 256 bytes whatever it encrypts, so a size assertion holds identically for the typed password, for
+ * the empty string, and for a constant a dialog that never read its own field would send — which is
+ * precisely the failure AC-7 exists to rule out. Only decrypting says what was sent.
  */
+let hostKey: AHostPromptKeypair;
+/** The SPKI DER a daemon publishes with a prompt — the public half of {@link hostKey}. */
 let hostPublicKey: Uint8Array;
 
-async function anRsaOaepPublicKey(): Promise<Uint8Array> {
-  const keyPair = await crypto.subtle.generateKey(
-    {
-      name: "RSA-OAEP",
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
-      hash: "SHA-256",
-    },
-    true,
-    ["encrypt", "decrypt"],
-  );
-  return new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
+/** Generate this suite's host key. Used as a `before`, once per describe that raises a prompt. */
+function givenTheHostsPromptKey() {
+  cy.wrap(anRsaOaepKeypair()).then((keypair) => {
+    hostKey = keypair as unknown as AHostPromptKeypair;
+    hostPublicKey = hostKey.spkiDer;
+  });
+}
+
+/** The desktop's own question, as the host raises it. */
+function theDesktopPasswordQuestion(): HostPromptFrame {
+  return {
+    promptId: A_PROMPT,
+    daemonInstanceId: HOST,
+    kind: HostPromptKind.DESKTOP_PASSWORD,
+    subject: THE_DESKTOP,
+    hostPublicKey,
+    hostPublicKeyFingerprint: HOST_KEY_FINGERPRINT,
+  };
+}
+
+/** A key passphrase question, on the same host and the same feed — and not this surface's. */
+function aKeyPassphraseQuestion(): HostPromptFrame {
+  return {
+    promptId: AN_SSH_KEY_PROMPT,
+    daemonInstanceId: HOST,
+    kind: HostPromptKind.SSH_KEY_PASSPHRASE,
+    subject: A_KEY_ON_THAT_HOST,
+    hostPublicKey,
+    hostPublicKeyFingerprint: HOST_KEY_FINGERPRINT,
+  };
 }
 
 /**
@@ -248,12 +292,29 @@ function everythingStoredBy(win: Cypress.AUTWindow): string {
   return `${read(win.localStorage)}\n${read(win.sessionStorage)}`;
 }
 
+/**
+ * What the host — and only the host — reads out of the single answer the browser sent it.
+ *
+ * Yields the plaintext, so a spec asserts the password that was typed rather than the size of the
+ * block it came in. Decryption is done with the private half the prompt's key was generated with,
+ * so a payload encrypted for anything else fails here by name (see `cypress/support/hostKeys.ts`).
+ */
+function theAnswerTheHostCanRead(backend: InMemoryRpcBackend): Cypress.Chainable<string> {
+  return cy
+    .wrap(backend)
+    .should((b: InMemoryRpcBackend) =>
+      expect(
+        b.callsTo(ConnectionService.method.answerHostPrompt),
+        "exactly one answer must reach the host that raised the prompt",
+      ).to.have.length(1),
+    )
+    .then((b: InMemoryRpcBackend) =>
+      hostKey.decrypt(b.callsTo(ConnectionService.method.answerHostPrompt)[0].encryptedAnswer),
+    );
+}
+
 describe("Host desktop password", () => {
-  before(() => {
-    cy.wrap(anRsaOaepPublicKey()).then((spkiDer) => {
-      hostPublicKey = spkiDer as unknown as Uint8Array;
-    });
-  });
+  before(givenTheHostsPromptKey);
 
   beforeEach(() => {
     cy.clearLocalStorage();
@@ -271,14 +332,7 @@ describe("Host desktop password", () => {
 
     // When the host asks for that desktop's password
     cy.then(() => {
-      feed.raise({
-        promptId: A_PROMPT,
-        daemonInstanceId: HOST,
-        kind: HostPromptKind.DESKTOP_PASSWORD,
-        subject: THE_DESKTOP,
-        hostPublicKey,
-        hostPublicKeyFingerprint: HOST_KEY_FINGERPRINT,
-      });
+      feed.raise(theDesktopPasswordQuestion());
     });
 
     // Then the operator is asked, for the desktop the host named and under the key to verify
@@ -299,11 +353,12 @@ describe("Host desktop password", () => {
       expect(answers, "the answer must reach the host that raised the prompt").to.have.length(1);
       expect(answers[0].promptId).to.equal(A_PROMPT);
       expect(answers[0].daemonInstanceId).to.equal(HOST);
-      expect(
-        answers[0].encryptedAnswer.byteLength,
-        "an RSA-OAEP ciphertext is key-sized; a plaintext password is not",
-      ).to.be.greaterThan(64);
     });
+
+    // …and what that answer says, read as only this host can read it, is the password the operator
+    // typed. A dialog that encrypted a constant, or the empty string, produces a ciphertext of
+    // exactly the same size and fails only here.
+    theAnswerTheHostCanRead(backend).should("equal", THE_DESKTOP_PASSWORD);
 
     // …and nothing the browser sent this host carries the password in the clear — not the answer,
     // and not the start or the target it was opened through.
@@ -396,23 +451,12 @@ function connectAndBeAskedFor(backend: InMemoryRpcBackend, feed: HostPromptFeed)
   // …with the browser listening to that host's questions, or the host is asking nobody
   cy.wrap(feed).should((f: HostPromptFeed) => expect(f.subscriptionCount()).to.equal(1));
   cy.then(() => {
-    feed.raise({
-      promptId: A_PROMPT,
-      daemonInstanceId: HOST,
-      kind: HostPromptKind.DESKTOP_PASSWORD,
-      subject: THE_DESKTOP,
-      hostPublicKey,
-      hostPublicKeyFingerprint: HOST_KEY_FINGERPRINT,
-    });
+    feed.raise(theDesktopPasswordQuestion());
   });
 }
 
 describe("Host desktop without a password", () => {
-  before(() => {
-    cy.wrap(anRsaOaepPublicKey()).then((spkiDer) => {
-      hostPublicKey = spkiDer as unknown as Uint8Array;
-    });
-  });
+  before(givenTheHostsPromptKey);
 
   beforeEach(() => {
     cy.clearLocalStorage();
@@ -436,11 +480,12 @@ describe("Host desktop without a password", () => {
         1,
       );
       expect(answers[0].promptId).to.equal(A_PROMPT);
-      expect(
-        answers[0].encryptedAnswer.byteLength,
-        "an RSA-OAEP ciphertext is key-sized whatever it encrypts",
-      ).to.be.greaterThan(64);
     });
+
+    // …and what the host reads out of it is the empty answer itself, not some stand-in the dialog
+    // substituted. Every ciphertext under this key is 256 bytes, so this is the only assertion that
+    // tells the no-password case apart from the password one at all.
+    theAnswerTheHostCanRead(backend).should("equal", "");
 
     // …and the desktop the question was blocking opened. The start settles on the answer and on
     // nothing else, so a stream on screen is that empty answer accepted end to end.
@@ -456,5 +501,290 @@ describe("Host desktop without a password", () => {
     // and invent a password the desktop never had. Matched as a pattern: what has to be true is
     // that blankness is named, not which sentence names it.
     hostPassphraseDialogPage.root(HOST).invoke("text").should("match", /blank/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The session every host-scoped call is gated on
+// ---------------------------------------------------------------------------
+
+/**
+ * A daemon refuses any host-scoped call that arrives without the operator's session token.
+ *
+ * The browser's auth gate (`src/rpc/authGatedTransport.ts`, wrapped around every LiveKit-reached
+ * host) rewrites `sessionToken` on the way out — but only on a request that **already carries the
+ * field**, since it tests `"sessionToken" in message`. A call built without it is therefore not
+ * repaired in transit: it arrives unauthenticated and is rejected. None of that shows up on the
+ * local HTTP path, where the daemon serving the page answers anyway, which is how a desktop that
+ * cannot open a single *remote* host passes a screenful of green row tests.
+ *
+ * So this is asserted on the wire, on the calls themselves, rather than on anything visible.
+ */
+function alsoServingTheOperatorsSession(backend: InMemoryRpcBackend): InMemoryRpcBackend {
+  return backend.implement(AuthService, {
+    getAuthStatus: async (req) =>
+      req.sessionToken === CURRENT_ACCESS_TOKEN
+        ? { authenticated: true, user: aGitHubUser() }
+        : { authenticated: false, user: undefined },
+  });
+}
+
+/** A browser holding a live session, as a signed-in operator's browser holds one. */
+function aSignedInOperator() {
+  cy.window().then((win) => {
+    win.localStorage.setItem(ACCESS_TOKEN_KEY, CURRENT_ACCESS_TOKEN);
+    win.localStorage.setItem(REFRESH_TOKEN_KEY, VALID_REFRESH_TOKEN);
+  });
+}
+
+describe("Host desktop calls the daemon authenticates", () => {
+  before(givenTheHostsPromptKey);
+
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
+  it("carries the operators session on every call it makes to the host", () => {
+    // Given a signed-in operator and a connectable host
+    aSignedInOperator();
+    const feed = aHostPromptFeed();
+    const backend = alsoServingTheOperatorsSession(aDaemonAwaitingADesktopPassword(feed));
+    mountWithMedia([aReachableVnc()], backend);
+
+    // When they open that host's desktop
+    hostDesktopPage.connect(HOST).click();
+
+    // Then every call the overlay made on the way — reading this host's targets, adding the one for
+    // the probed endpoint, and starting the stream on it — reached the host on that session, rather
+    // than with the empty default a request omitting the field arrives with.
+    cy.wrap(backend).should((b: InMemoryRpcBackend) => {
+      const [listed] = b.callsTo(ScreenSharingService.method.listHostTargets);
+      expect(listed, "the host's targets are read on the operator's session").to.not.be.undefined;
+      expect(listed.sessionToken).to.equal(CURRENT_ACCESS_TOKEN);
+
+      const [added] = b.callsTo(ScreenSharingService.method.addHostTarget);
+      expect(added, "the probed endpoint is added on the operator's session").to.not.be.undefined;
+      expect(added.sessionToken).to.equal(CURRENT_ACCESS_TOKEN);
+
+      const [started] = b.callsTo(ScreenSharingService.method.startHostStream);
+      expect(started, "the stream is started on the operator's session").to.not.be.undefined;
+      expect(started.sessionToken).to.equal(CURRENT_ACCESS_TOKEN);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-4 — closing the desktop releases the host's bridge
+// ---------------------------------------------------------------------------
+
+/**
+ * A bridge is a process spawned on someone else's machine, so closing the overlay has to *say so*.
+ *
+ * The daemon side of AC-4 — that a `StopHostStream` releases the bridge — is proven in Rust. What
+ * only a browser test can prove is that the browser ever asks: an overlay that unmounts silently
+ * leaves one bridge process per desktop an operator ever looked at, and the daemon has nothing to
+ * reconcile it against.
+ */
+describe("Closing a host desktop", () => {
+  before(givenTheHostsPromptKey);
+
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
+  it("asks the host to release the bridge the overlay started", () => {
+    // Given a desktop the operator opened, with the start issued against a target on that host
+    const feed = aHostPromptFeed();
+    const backend = aDaemonAwaitingADesktopPassword(feed);
+    mountWithMedia([aReachableVnc()], backend);
+    hostDesktopPage.connect(HOST).click();
+    cy.wrap(backend).should((b: InMemoryRpcBackend) =>
+      expect(
+        b.callsTo(ScreenSharingService.method.startHostStream),
+        "there is nothing to release until a start has been issued",
+      ).to.have.length(1),
+    );
+
+    // When they close it
+    hostDesktopPage.close(HOST).click();
+
+    // Then the browser asks that host to stop, naming the target the start actually used
+    cy.wrap(backend).should((b: InMemoryRpcBackend) => {
+      const stops = b.callsTo(ScreenSharingService.method.stopHostStream);
+      expect(stops, "closing the overlay must release the bridge").to.have.length(1);
+      expect(stops[0].daemonInstanceId).to.equal(HOST);
+      expect(stops[0].targetId).to.equal(A_HOST_TARGET);
+    });
+
+    // …and the desktop is gone from the screen, so the two cannot drift apart.
+    hostDesktopPage.overlay(HOST).should("not.exist");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One feed, two kinds of question
+// ---------------------------------------------------------------------------
+
+/**
+ * `StreamHostPrompts` is per **host**, not per surface, and `useHostPrompts` holds one slot.
+ *
+ * So every question that host raises — the desktop password this overlay asked for, and the key
+ * passphrase `HostAddKeyAction` asks for on the same row — arrives in the same place and overwrites
+ * whatever was there. Two distinct things have to hold, and each is pinned below: this surface must
+ * never treat a key passphrase as its own question, and a key passphrase arriving must never take
+ * the desktop's question away from the operator answering it.
+ */
+
+const A_QUESTION_ARRIVED = "a-question-arrived-probe";
+
+/**
+ * A bystander reading the same host's prompt feed, rendering whatever question arrives on it.
+ *
+ * It exists to make **delivery observable**. Raising a prompt is a frame handed to a generator, and
+ * the browser has not necessarily rendered anything by the time the next assertion runs — so
+ * "the desktop dialog did not open" asserted straight after a raise can pass simply because nothing
+ * has happened yet. That is exactly how a missing filter reads as a working one. The probe consumes
+ * the same feed as the overlay, so a question rendered here has been through the same commit as the
+ * one the overlay decided not to ask about.
+ */
+function AQuestionArrivedProbe({ hostId }: { hostId: string }) {
+  const question = useHostPrompts(hostId);
+  return <span data-testid={A_QUESTION_ARRIVED}>{question?.subject ?? ""}</span>;
+}
+
+/** What the bystander has seen this host ask for. */
+const aQuestionArrived = () => cy.get(`[data-testid="${A_QUESTION_ARRIVED}"]`);
+
+/** Open the host's desktop with a bystander watching the same feed. */
+function connectWithABystanderOn(feed: HostPromptFeed, backend: InMemoryRpcBackend) {
+  mountWithRpc(
+    withSelectedDaemon(
+      <>
+        <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />
+        <AQuestionArrivedProbe hostId={HOST} />
+      </>,
+    ),
+    backend,
+  );
+  hostDesktopPage.connect(HOST).click();
+  cy.wrap(feed).should((f: HostPromptFeed) =>
+    expect(
+      f.subscriptionCount(),
+      "the overlay and the bystander both read this host's questions",
+    ).to.equal(2),
+  );
+}
+
+describe("Host desktop password among the hosts other questions", () => {
+  before(givenTheHostsPromptKey);
+
+  beforeEach(() => {
+    cy.clearLocalStorage();
+  });
+
+  it("asks the desktops own question and not a key passphrase on the same feed", () => {
+    // Given an open host desktop whose daemon is blocked on the password
+    const desktopFeed = aHostPromptFeed();
+    connectWithABystanderOn(desktopFeed, aDaemonAwaitingADesktopPassword(desktopFeed));
+
+    // When the host asks for that desktop's password
+    cy.then(() => {
+      desktopFeed.raise(theDesktopPasswordQuestion());
+    });
+
+    // Then the operator is asked. Stated first, so the absence below is this overlay declining a
+    // question rather than an overlay that never asks anything at all.
+    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
+
+    // When the same host instead raises the other question this feed carries — a key passphrase
+    const keyFeed = aHostPromptFeed();
+    connectWithABystanderOn(keyFeed, aDaemonAwaitingADesktopPassword(keyFeed));
+    cy.then(() => {
+      keyFeed.raise(aKeyPassphraseQuestion());
+    });
+
+    // …and it has reached this browser and been rendered
+    aQuestionArrived().should("have.text", A_KEY_ON_THAT_HOST);
+
+    // Then the operator is not asked it here. A desktop password typed into a key passphrase prompt
+    // is sent as the answer to it: a secret handed to a question nobody on this surface asked.
+    hostPassphraseDialogPage.root(HOST).should("not.exist");
+  });
+
+  it("keeps the desktop question answerable when another prompt lands mid answer", () => {
+    // Given an operator part-way through answering the desktop's password question
+    const feed = aHostPromptFeed();
+    const backend = aDaemonAwaitingADesktopPassword(feed);
+    connectWithABystanderOn(feed, backend);
+    cy.then(() => {
+      feed.raise(theDesktopPasswordQuestion());
+    });
+    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
+    hostPassphraseDialogPage.input().type(THE_DESKTOP_PASSWORD);
+
+    // When an add-key passphrase question for the same host lands on the same feed
+    cy.then(() => {
+      feed.raise(aKeyPassphraseQuestion());
+    });
+
+    // …and has reached this browser and been rendered
+    aQuestionArrived().should("have.text", A_KEY_ON_THAT_HOST);
+
+    // Then the desktop's question is still in front of them, with what they typed still in it — a
+    // dialog that unmounted here loses the typing and leaves the host's start blocked until the
+    // prompt expires, with nothing left on screen to answer it.
+    hostPassphraseDialogPage.root(HOST).should("contain.text", THE_DESKTOP);
+    hostPassphraseDialogPage.input().should("have.value", THE_DESKTOP_PASSWORD);
+
+    // …and it is still answerable, against the prompt the desktop is blocked on.
+    hostPassphraseDialogPage.submit().click();
+    cy.wrap(backend).should((b: InMemoryRpcBackend) => {
+      const answers = b.callsTo(ConnectionService.method.answerHostPrompt);
+      expect(answers, "the desktop question must still be answerable").to.have.length(1);
+      expect(answers[0].promptId).to.equal(A_PROMPT);
+    });
+    theAnswerTheHostCanRead(backend).should("equal", THE_DESKTOP_PASSWORD);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where the overlay is rendered
+// ---------------------------------------------------------------------------
+
+/**
+ * The overlay is opened from inside the row, and must not be rendered there.
+ *
+ * `HostRowTooling` wraps the whole tooling section — including the remote-desktop block the connect
+ * action lives in — in a `<span>`. A `<div>` is not permitted inside one: an HTML parser hoists it
+ * out on any SSR or hydration path, so the tree the browser builds is not the tree React described,
+ * and even client-side a block element dropped into the row's inline flex flow shifts the row for
+ * as long as the desktop is open.
+ *
+ * This is the one test that mounts the section the way the screen mounts it. Mounted bare, as every
+ * other test here mounts it, the overlay has no parent to be wrong about.
+ */
+describe("Host desktop overlay placement", () => {
+  it("renders the overlay outside the rows inline flow", () => {
+    // Given the row's tooling section, with a connectable desktop in it
+    mountWithRpc(
+      withSelectedDaemon(
+        <HostRowTooling
+          instanceId={HOST}
+          git={undefined}
+          githubCli={undefined}
+          remoteDesktop={[aReachableVnc()]}
+        />,
+      ),
+      anInMemoryRpcBackend(),
+    );
+
+    // When the operator opens the desktop
+    hostDesktopPage.connect(HOST).click();
+
+    // Then it is on screen
+    hostDesktopPage.overlay(HOST).should("exist");
+
+    // …and no inline element contains it.
+    hostDesktopPage.inlineAncestorsOfOverlay(HOST).should("have.length", 0);
   });
 });

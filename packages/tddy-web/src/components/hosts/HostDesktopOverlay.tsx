@@ -17,7 +17,8 @@
  * operator with an action that appeared to do nothing, and no place to put the error.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Client } from "@connectrpc/connect";
 import { ConnectionService, HostPromptKind } from "../../gen/connection_pb";
 import {
@@ -30,7 +31,7 @@ import { useCommonRoom } from "../../hooks/useCommonRoom";
 import { checkHostKey, type KeyPinVerdict } from "../../lib/hostKeyPinning";
 import { presenceIdentityForUser } from "../../lib/presenceIdentity";
 import { useHostClient } from "../../rpc/connections/registry";
-import { useHostPrompts } from "../../rpc/useHostPrompts";
+import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { ScreenSharingOverlay } from "../sessions/ScreenSharingOverlay";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
 
@@ -61,14 +62,20 @@ const PROBED_TARGET_LABEL = "Desktop";
  *
  * A row has a port and a protocol; `StartHostStream` takes a target id. Matching on the endpoint
  * rather than adding unconditionally is what stops one target accumulating per connect.
+ *
+ * `sessionToken` is threaded in rather than left to the transport. The daemon gates every
+ * host-scoped call on it, and the auth gate every LiveKit-reached host is wrapped in
+ * (`rpc/authGatedTransport.ts`) rewrites the field **only where the request already carries one** —
+ * so a request that omits it is not quietly repaired on the way out, it is rejected on arrival.
  */
 async function targetForProbedEndpoint(
   client: Client<typeof ScreenSharingService>,
+  sessionToken: string,
   hostId: string,
   port: number,
   protocol: Protocol,
 ): Promise<string> {
-  const existing = await client.listHostTargets({ daemonInstanceId: hostId });
+  const existing = await client.listHostTargets({ sessionToken, daemonInstanceId: hostId });
   const match = existing.targets.find(
     (target) =>
       target.host === PROBED_HOST && target.port === port && target.protocol === protocol,
@@ -76,6 +83,7 @@ async function targetForProbedEndpoint(
   if (match) return match.id;
 
   const added = await client.addHostTarget({
+    sessionToken,
     daemonInstanceId: hostId,
     label: PROBED_TARGET_LABEL,
     host: PROBED_HOST,
@@ -93,6 +101,12 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
   const [stream, setStream] = useState<StartStreamResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The session every host-scoped call is gated on, read at call time rather than closed over.
+  // Putting it in the effect's dependencies instead would tear the bridge down and start a second
+  // one every time the five-minute access token is re-minted, mid-desktop.
+  const sessionTokenRef = useRef(sessionToken);
+  sessionTokenRef.current = sessionToken;
+
   // Start on mount and stop on unmount: the bridge process lives exactly as long as this overlay is
   // open, so closing it releases the process rather than leaving one per desktop an operator looked
   // at. The stop is addressed at the target the start actually used, which is why it is captured
@@ -104,12 +118,22 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
 
     void (async () => {
       try {
-        const targetId = await targetForProbedEndpoint(client, hostId, port, protocol);
+        const targetId = await targetForProbedEndpoint(
+          client,
+          sessionTokenRef.current ?? "",
+          hostId,
+          port,
+          protocol,
+        );
         if (cancelled) return;
         startedTargetId = targetId;
         // This call blocks while the host asks for the desktop's password — the question arrives
         // below, on the prompt feed, and the answer released the start that is awaited here.
-        const started = await client.startHostStream({ daemonInstanceId: hostId, targetId });
+        const started = await client.startHostStream({
+          sessionToken: sessionTokenRef.current ?? "",
+          daemonInstanceId: hostId,
+          targetId,
+        });
         if (cancelled) return;
         setStream(started);
       } catch (e) {
@@ -122,7 +146,11 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
       cancelled = true;
       if (startedTargetId) {
         void client
-          .stopHostStream({ daemonInstanceId: hostId, targetId: startedTargetId })
+          .stopHostStream({
+            sessionToken: sessionTokenRef.current ?? "",
+            daemonInstanceId: hostId,
+            targetId: startedTargetId,
+          })
           .catch(() => {
             // The overlay is already gone; a failed stop is the daemon's to reconcile, and there is
             // no surface left to report it on.
@@ -145,10 +173,32 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
   // opens no streams at all.
   const awaitingStart = stream === null && error === null;
   const raised = useHostPrompts(awaitingStart ? hostId : null);
-  // Only this overlay's own kind of question. The same feed carries the key passphrase
-  // `HostAddKeyAction` raises, and answering that one with a desktop password would send a secret to
-  // a question nobody here asked.
-  const question = raised !== null && raised.kind === HostPromptKind.DESKTOP_PASSWORD ? raised : null;
+
+  // The question this dialog is answering, **latched** rather than read off the live feed.
+  //
+  // `useHostPrompts` holds a single slot and overwrites it, and the feed is per host, not per
+  // surface: an add-key passphrase prompt raised on this same host while the operator is typing a
+  // desktop password would replace the value a derived `question` reads from. Derived, the dialog
+  // would then vanish mid-answer — the typing lost, and the host's `StartHostStream` left blocked
+  // until the prompt expires with nothing left on screen to answer it. Held, an unrelated prompt
+  // passes by without touching the question that is being answered.
+  //
+  // Only this overlay's own kind is ever latched. The same feed carries the key passphrase
+  // `HostAddKeyAction` raises, and answering that one with a desktop password would send a secret
+  // to a question nobody here asked.
+  const [question, setQuestion] = useState<HostPromptEventLike | null>(null);
+
+  useEffect(() => {
+    if (!awaitingStart) {
+      // The start settled — opened or failed — so whatever it was blocked on is no longer being
+      // waited for, and a dialog left standing over a desktop asks about nothing.
+      setQuestion(null);
+      return;
+    }
+    if (raised === null || raised.kind !== HostPromptKind.DESKTOP_PASSWORD) return;
+    // First one wins: the question the operator is answering is not replaced under them.
+    setQuestion((held) => held ?? raised);
+  }, [awaitingStart, raised]);
 
   const [continuity, setContinuity] = useState<KeyPinVerdict | null>(null);
 
@@ -185,7 +235,13 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
   // session-scoped overlay does not forward either — `vncInput.ts` is left over from a `VncOverlay`
   // that no longer exists — so this needs a host-scoped input channel rather than a reuse.
 
-  return (
+  // Portalled to `document.body`, not rendered where it was mounted from. The row section this
+  // overlay is opened from is a `<span>` (`HostRowTooling`), and a `<div>` is not permitted inside
+  // one: an HTML parser hoists it out on any SSR or hydration path, and even client-side a block
+  // element dropped into the row's inline flex flow shifts the row for as long as the overlay is
+  // open. `ScreenSharingOverlay` and the connecting state are both `fixed inset-0 z-50` — neither
+  // was ever in flow — so the body is where they already behave as though they are.
+  return createPortal(
     <div data-testid={`host-desktop-overlay-${hostId}`}>
       {question !== null && continuity !== null && (
         <HostPassphraseDialog
@@ -235,7 +291,8 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
           </button>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

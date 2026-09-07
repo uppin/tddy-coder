@@ -24,7 +24,6 @@ service ScreenSharingService {
   // must never be one.
   rpc ListHostTargets(ListHostTargetsRequest) returns (ListHostTargetsResponse);
   rpc AddHostTarget(AddHostTargetRequest) returns (AddHostTargetResponse);
-  rpc RemoveHostTarget(RemoveHostTargetRequest) returns (RemoveHostTargetResponse);
   rpc StartHostStream(StartHostStreamRequest) returns (StartStreamResponse);
   rpc StopHostStream(StopHostStreamRequest) returns (StopHostStreamResponse);
 }
@@ -158,15 +157,6 @@ message AddHostTargetRequest {
 }
 message AddHostTargetResponse {
   string target_id = 1;
-}
-
-message RemoveHostTargetRequest {
-  string session_token = 1;
-  string daemon_instance_id = 2;
-  string target_id = 3;
-}
-message RemoveHostTargetResponse {
-  bool ok = 1;
 }
 
 // Starts a bridge for a HOST-scoped target. Returns the same StartStreamResponse the session-scoped

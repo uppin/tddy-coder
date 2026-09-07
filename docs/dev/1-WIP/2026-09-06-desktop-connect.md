@@ -114,7 +114,7 @@ a machine, not to a coding session.
 - [x] Overlay mounted at host scope — ⚠ **without input forwarding**, see below
 - [x] Desktop password via node 6's encrypted prompt, not persisted — daemon raises it, browser
       answers it, nothing stores it
-- [~] Rust unit/integration tests + Cypress component tests — AC-7's five are **red**
+- [x] Rust unit/integration tests + Cypress component tests
 
 ## Technical changes
 
@@ -162,8 +162,8 @@ a machine, not to a coding session.
 - [ ] Input forwarding verified — ⚠ **moved to `#hosts-screen 9/9`**, see below
 - [x] Stop releasing the bridge process
 - [x] Capability gating removing the action without media
-- [~] Password prompt through node 6's channel, nothing persisted — daemon decrypts and drops;
-      the browser does not yet prompt
+- [x] Password prompt through node 6's channel, nothing persisted — the daemon raises it, the
+      browser answers it, nothing stores it
 
 ## Testing plan
 
@@ -492,6 +492,10 @@ also repairs the **per-session** path, which has never forwarded input either de
 docblock claiming it "Captures pointer and keyboard events". Its open design question is what the
 daemon→bridge channel should be: a second pipe, a unix socket, or a LiveKit data channel.
 
+**Tracked outside this PR** at [`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../todo/2026-09-07-remote-desktop-input-forwarding.md),
+because this document is deleted when the PR is readied and the investigation behind the deferral is
+worth more than the deferral itself.
+
 ⚠ Correcting this document's earlier claim that `vncInput.ts` was "orphaned from a `VncOverlay` that
 no longer exists": `VncOverlay.tsx` **does** exist. It simply never forwarded input either.
 
@@ -506,8 +510,8 @@ no longer exists": `VncOverlay.tsx` **does** exist. It simply never forwarded in
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [~] TDD Red (AC-7) — failing tests for the daemon-raised desktop-password prompt
-- [ ] TDD Green (AC-7) — raise the prompt, await the answer, prompt in the browser
+- [x] TDD Red (AC-7) — failing tests for the daemon-raised desktop-password prompt
+- [x] TDD Green (AC-7) — raise the prompt, await the answer, prompt in the browser
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass

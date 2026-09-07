@@ -26,11 +26,10 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddHostTargetResponse, AddTargetRequest, AddTargetResponse,
     ListHostTargetsRequest, ListHostTargetsResponse, ListTargetsRequest, ListTargetsResponse,
-    Protocol, RemoveHostTargetRequest, RemoveHostTargetResponse, RemoveTargetRequest,
-    RemoveTargetResponse, ScreenSharingService, ScreenSharingTarget as ProtoScreenSharingTarget,
-    StartHostStreamRequest, StartStreamRequest, StartStreamResponse, StopHostStreamRequest,
-    StopHostStreamResponse as HostStopStreamResponse, StopStreamRequest, StopStreamResponse,
-    UnlockVaultRequest, UnlockVaultResponse,
+    Protocol, RemoveTargetRequest, RemoveTargetResponse, ScreenSharingService,
+    ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
+    StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse, StopStreamRequest,
+    StopStreamResponse, UnlockVaultRequest, UnlockVaultResponse,
 };
 
 const DEFAULT_STREAM_WIDTH: u32 = 1920;
@@ -258,10 +257,12 @@ impl ScreenSharingServiceImpl {
         decrypt_desktop_password(scope.keypair.as_ref(), &encrypted_password)
     }
 
-    /// Attempt to spawn a bridge process for the given target.
+    /// Spawn a bridge for the given target, logging every failure and reporting none.
     ///
-    /// Logs all errors; never returns an error — the caller returns pre-computed LiveKit
-    /// coordinates regardless of whether the bridge process spawns successfully.
+    /// The **session-scoped** spawn, and deliberately silent: `start_stream` hands back its
+    /// pre-computed LiveKit coordinates whether or not a bridge came up, which is the behaviour
+    /// AC-9 pins and its callers depend on. The host path does not reuse this — it reports —
+    /// see [`Self::spawn_bridge`] and `start_host_stream`.
     #[allow(clippy::too_many_arguments)]
     async fn try_spawn_bridge(
         &self,
@@ -276,58 +277,63 @@ impl ScreenSharingServiceImpl {
         // bridge is addressed, the spawn itself does not care which.
         bridge_key: String,
     ) {
-        let spawn_config = match build_bridge_spawn_config(
+        let prepared = match prepare_bridge(
             config,
             target,
             username,
-            password,
             bridge_identity,
             track_name,
             livekit_room,
         ) {
-            Some(c) => c,
-            None => return, // already logged
-        };
-
-        let config_json = match serde_json::to_vec(&spawn_config) {
-            Ok(j) => j,
+            Ok(prepared) => prepared.for_password(password),
             Err(e) => {
-                error!("bridge spawn skipped: failed to serialize config: {}", e);
+                info!("bridge spawn skipped: {e}");
                 return;
             }
         };
 
-        let binary = match target.protocol {
-            Protocol::Vnc => resolve_vnc_binary_path(config),
-            Protocol::Rdp => resolve_rdp_binary_path(config),
-            Protocol::Unspecified => {
-                error!(
-                    "bridge spawn skipped: unspecified protocol for target {}",
-                    target.id
-                );
-                return;
-            }
-        };
+        if let Err(e) = self.spawn_bridge(prepared, bridge_key).await {
+            error!("bridge spawn failed: {e}");
+        }
+    }
 
-        let mut child = match Command::new(&binary)
+    /// Start a bridge process, and say so when it does not start.
+    ///
+    /// Takes a [`PreparedBridge`], so everything knowable without the desktop's password has
+    /// already been settled: what is left here is the spawn itself, and the only failures it can
+    /// report are real ones.
+    async fn spawn_bridge(
+        &self,
+        prepared: PreparedBridge,
+        // Built by `session_bridge_key` or `host_bridge_key`: the scope decides how a running
+        // bridge is addressed, the spawn itself does not care which.
+        bridge_key: String,
+    ) -> Result<(), String> {
+        let PreparedBridge {
+            binary,
+            spawn_config,
+        } = prepared;
+
+        let config_json = serde_json::to_vec(&spawn_config)
+            .map_err(|e| format!("encoding the bridge's config: {e}"))?;
+
+        // A second start for the same desktop must not strand the first process. `active_bridges`
+        // holds one pid per key, so a spawn that overwrote one would leave a bridge nothing can
+        // ever signal — running against a desktop nobody is watching.
+        self.terminate_bridge(&bridge_key).await;
+
+        let mut child = Command::new(&binary)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                error!("failed to spawn bridge binary '{}': {}", binary, e);
-                return;
-            }
-        };
+            .map_err(|e| format!("spawning the bridge binary '{binary}': {e}"))?;
 
         // Write the JSON config to the bridge's stdin, then close it.
         if let Some(mut stdin) = child.stdin.take() {
             if let Err(e) = stdin.write_all(&config_json).await {
-                error!("failed to write config to bridge stdin: {}", e);
                 let _ = child.kill().await;
-                return;
+                return Err(format!("writing the bridge's config to its stdin: {e}"));
             }
             // stdin dropped here → pipe closed → bridge reads EOF and proceeds
         }
@@ -347,7 +353,7 @@ impl ScreenSharingServiceImpl {
         );
 
         // Background task: wait for the process to exit (prevents zombie processes) and
-        // removes the PID from the active map when done.
+        // forget the PID when it does.
         let active_bridges = Arc::clone(&self.active_bridges);
         tokio::spawn(async move {
             match child.wait().await {
@@ -356,54 +362,102 @@ impl ScreenSharingServiceImpl {
                 }
                 Err(e) => error!("bridge wait error: key={} err={}", bridge_key, e),
             }
-            active_bridges.lock().await.remove(&bridge_key);
+            // Only while the key still names *this* bridge. A restart records a newer pid under
+            // the same key, and forgetting that one would leave the running process unstoppable.
+            let mut bridges = active_bridges.lock().await;
+            if bridges.get(&bridge_key) == Some(&pid) {
+                bridges.remove(&bridge_key);
+            }
         });
+
+        Ok(())
     }
+}
+
+/// A bridge spawn that is ready except for the password nobody has typed yet.
+///
+/// Separated from the spawn so that everything knowable *without* a secret — the LiveKit
+/// coordinates, the minted token, which binary speaks this desktop's protocol — is settled before
+/// an operator is asked for one. A desktop this host could never bridge is then refused without
+/// anybody typing a password for a stream that was never going to start.
+struct PreparedBridge {
+    binary: String,
+    spawn_config: BridgeSpawnConfig,
+}
+
+impl PreparedBridge {
+    fn for_password(mut self, password: String) -> Self {
+        self.spawn_config.password = password;
+        self
+    }
+}
+
+/// Everything a bridge spawn needs except the desktop's password.
+fn prepare_bridge(
+    config: &DaemonConfig,
+    target: &ScreenSharingTarget,
+    username: String,
+    bridge_identity: &str,
+    track_name: &str,
+    livekit_room: &str,
+) -> Result<PreparedBridge, String> {
+    let binary = match target.protocol {
+        Protocol::Vnc => resolve_vnc_binary_path(config),
+        Protocol::Rdp => resolve_rdp_binary_path(config),
+        Protocol::Unspecified => {
+            return Err(format!(
+                "target {} names no protocol to bridge it with",
+                target.id
+            ))
+        }
+    };
+
+    Ok(PreparedBridge {
+        binary,
+        spawn_config: build_bridge_spawn_config(
+            config,
+            target,
+            username,
+            bridge_identity,
+            track_name,
+            livekit_room,
+        )?,
+    })
 }
 
 /// Extract LiveKit credentials, mint a token, and assemble a `BridgeSpawnConfig`.
 ///
-/// Returns `None` (after logging) when any required config field is absent or token
-/// generation fails, signalling `try_spawn_bridge` to skip the spawn silently.
+/// Says what is missing rather than logging it: a host desktop that cannot be published anywhere
+/// has to be refused, and the caller is the only place that knows whether that refusal reaches an
+/// operator or only the log.
+///
+/// The password is left empty here and filled in by [`PreparedBridge::for_password`] — nothing in
+/// this function needs one, which is exactly why it can run before anybody is asked.
 fn build_bridge_spawn_config(
     config: &DaemonConfig,
     target: &ScreenSharingTarget,
     username: String,
-    password: String,
     bridge_identity: &str,
     track_name: &str,
     livekit_room: &str,
-) -> Option<BridgeSpawnConfig> {
-    let lk = match config.livekit.as_ref() {
-        Some(lk) => lk,
-        None => {
-            info!("bridge spawn skipped: LiveKit not configured");
-            return None;
-        }
-    };
+) -> Result<BridgeSpawnConfig, String> {
+    let lk = config
+        .livekit
+        .as_ref()
+        .ok_or("this daemon has no LiveKit configuration to publish a desktop through")?;
 
     macro_rules! require_field {
         ($opt:expr, $msg:literal) => {
             match $opt.as_deref().filter(|s| !s.is_empty()) {
                 Some(v) => v.to_string(),
-                None => {
-                    info!($msg);
-                    return None;
-                }
+                None => return Err($msg.to_string()),
             }
         };
     }
 
-    let livekit_url_internal =
-        require_field!(lk.url, "bridge spawn skipped: LiveKit URL not configured");
-    let api_key = require_field!(
-        lk.api_key,
-        "bridge spawn skipped: LiveKit API key not configured"
-    );
-    let api_secret = require_field!(
-        lk.api_secret,
-        "bridge spawn skipped: LiveKit API secret not configured"
-    );
+    let livekit_url_internal = require_field!(lk.url, "no LiveKit URL is configured");
+    let api_key = require_field!(lk.api_key, "no LiveKit API key is configured");
+    let api_secret = require_field!(lk.api_secret, "no LiveKit API secret is configured");
 
     let token = tddy_livekit::token::TokenGenerator::new(
         api_key,
@@ -413,19 +467,13 @@ fn build_bridge_spawn_config(
         std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
     )
     .generate()
-    .map_err(|e| {
-        error!(
-            "bridge spawn skipped: failed to generate LiveKit token: {}",
-            e
-        )
-    })
-    .ok()?;
+    .map_err(|e| format!("minting the bridge's LiveKit token: {e}"))?;
 
-    Some(BridgeSpawnConfig {
+    Ok(BridgeSpawnConfig {
         host: target.host.clone(),
         port: target.port,
         username,
-        password,
+        password: String::new(),
         livekit_url: livekit_url_internal,
         livekit_token: token,
         livekit_room: livekit_room.to_string(),
@@ -584,7 +632,10 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         self.require_user(&req.session_token)?;
         let scope = self.require_host_scope()?;
 
-        let targets = scope.targets.list(&req.daemon_instance_id);
+        let targets = scope
+            .targets
+            .list(&req.daemon_instance_id)
+            .map_err(Status::internal)?;
 
         Ok(Response::new(ListHostTargetsResponse {
             targets: targets.iter().map(host_target_to_proto).collect(),
@@ -599,6 +650,15 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         self.require_user(&req.session_token)?;
         let scope = self.require_host_scope()?;
 
+        // Refused rather than wrapped: proto has no 16-bit integer, so a port past 65535 arrives
+        // here intact and a cast would quietly attach a desktop to some other port entirely.
+        let port = u16::try_from(req.port).map_err(|_| {
+            Status::invalid_argument(format!(
+                "{} is not a port a desktop can listen on",
+                req.port
+            ))
+        })?;
+
         // No password field, and none accepted: a host desktop's password is prompted when it is
         // opened, never stored beside the address of the machine it opens.
         let target_id = scope
@@ -610,7 +670,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
                     target_id: String::new(),
                     label: req.label,
                     host: req.host,
-                    port: req.port as u16,
+                    port,
                     protocol: req.protocol,
                     username: req.username,
                 },
@@ -618,22 +678,6 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             .map_err(Status::internal)?;
 
         Ok(Response::new(AddHostTargetResponse { target_id }))
-    }
-
-    async fn remove_host_target(
-        &self,
-        request: Request<RemoveHostTargetRequest>,
-    ) -> Result<Response<RemoveHostTargetResponse>, Status> {
-        let req = request.into_inner();
-        self.require_user(&req.session_token)?;
-        let scope = self.require_host_scope()?;
-
-        scope
-            .targets
-            .remove(&req.daemon_instance_id, &req.target_id)
-            .map_err(Status::not_found)?;
-
-        Ok(Response::new(RemoveHostTargetResponse { ok: true }))
     }
 
     /// Starts a bridge for a host-scoped target, returning the same coordinates the session-scoped
@@ -650,6 +694,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         let target = scope
             .targets
             .list(&req.daemon_instance_id)
+            .map_err(Status::internal)?
             .into_iter()
             .find(|t| t.target_id == req.target_id)
             .ok_or_else(|| {
@@ -663,6 +708,19 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         let bridge_identity = host_bridge_identity(&req.daemon_instance_id, &req.target_id);
         let track_name = screenshare_track_name(&req.target_id);
 
+        // Settled before anybody is asked for a secret. A desktop this host cannot bridge — no
+        // LiveKit to publish through, no protocol to speak — is refused here, so an operator is
+        // never made to type a password into a dialog for a stream that could not have started.
+        let prepared = prepare_bridge(
+            config,
+            &host_target_as_bridge_target(&target),
+            target.username.clone(),
+            &bridge_identity,
+            &track_name,
+            &livekit_room,
+        )
+        .map_err(Status::failed_precondition)?;
+
         // Asked for, not looked up: nothing on this host stores a desktop password, and the browser
         // could not have sent one — `HostPromptEvent` is the only place this host's public key is
         // published, so a caller has nothing to encrypt under until it has been asked. Read once,
@@ -671,17 +729,15 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             .prompt_for_desktop_password(scope, &operator, &target)
             .await?;
 
-        self.try_spawn_bridge(
-            config,
-            &host_target_as_bridge_target(&target),
-            target.username.clone(),
-            password,
-            &bridge_identity,
-            &track_name,
-            &livekit_room,
+        // Reported, unlike the session path's deliberately silent spawn: these coordinates tell a
+        // browser to mount an overlay on a room, and a bridge that never joined it leaves the
+        // operator watching nothing having already typed a secret.
+        self.spawn_bridge(
+            prepared.for_password(password),
             host_bridge_key(&req.daemon_instance_id, &req.target_id),
         )
-        .await;
+        .await
+        .map_err(Status::internal)?;
 
         Ok(Response::new(StartStreamResponse {
             livekit_room,
@@ -696,14 +752,18 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
     async fn stop_host_stream(
         &self,
         request: Request<StopHostStreamRequest>,
-    ) -> Result<Response<HostStopStreamResponse>, Status> {
+    ) -> Result<Response<StopHostStreamResponse>, Status> {
         let req = request.into_inner();
         self.require_user(&req.session_token)?;
+        // Checked here as it is on every other host-scoped call: a daemon that serves no host
+        // desktops cannot have been holding one open, and `ok: true` for a stop it could not have
+        // performed tells the browser to tear down an overlay over a bridge still running.
+        self.require_host_scope()?;
 
         self.terminate_bridge(&host_bridge_key(&req.daemon_instance_id, &req.target_id))
             .await;
 
-        Ok(Response::new(HostStopStreamResponse { ok: true }))
+        Ok(Response::new(StopHostStreamResponse { ok: true }))
     }
 
     async fn list_targets(
@@ -933,6 +993,7 @@ mod tests {
     /// exists alongside it.
     const THE_INTERNAL_LIVEKIT_URL: &str = "ws://livekit.internal:7880";
     const THE_BROWSER_LIVEKIT_URL: &str = "wss://livekit.example.com";
+    const A_VNC_PORT: u32 = 5900;
     const A_DESKTOP_PASSWORD: &str = "correct horse battery staple";
     const A_VAULT_PASSPHRASE: &str = "hunter2-passphrase";
     /// What every desktop attached below is called. A prompt has to name the desktop it is asking
@@ -941,6 +1002,13 @@ mod tests {
     /// The password of a desktop that has none — what the operator sends back for the
     /// password-less desktops the rest of this module attaches.
     const NO_PASSWORD: &str = "";
+    /// A session token this daemon's resolver answers nothing for — somebody who is not logged in.
+    const A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW: &str = "not-a-session-token";
+    /// A path with no bridge binary at the end of it.
+    const A_BRIDGE_BINARY_THAT_IS_NOT_INSTALLED: &str = "/nonexistent/tddy-vnc";
+    /// One past the last port there is. Truncated to sixteen bits it becomes 1 — a port a machine
+    /// really could be listening on, which is what makes the silent version of this so hard to see.
+    const A_PORT_PAST_THE_LAST_ONE: u32 = 65_537;
 
     /// Safety nets, not predictions: a stub that has recorded nothing by now was never spawned, and
     /// a signalled process still alive by now was never signalled. Both cost nothing when the
@@ -1056,17 +1124,26 @@ mod tests {
         registry: InMemoryHostPromptRegistry,
         asked: std::sync::Mutex<Vec<PendingPrompt>>,
         behaviour: TheOperator,
+        /// Who this person is, fixed when they sat down — **not** whoever the prompt arrived
+        /// stamped for.
+        ///
+        /// That distinction is the whole value of this fixture. Answering as `issued_for` would
+        /// agree with production whatever identity it stamped, so the registry's ownership check
+        /// would be checking a value against itself and a prompt stamped for a stranger would sail
+        /// through. Answering as a fixed identity puts the real check in the way.
+        answers_as: String,
         /// Needed to answer at all: an answer travels as ciphertext under this host's published
         /// key, which is the only form `StartHostStream` can accept.
         keypair: Arc<FileHostKeypair>,
     }
 
     impl AnOperatorAtTheKeyboard {
-        fn new(behaviour: TheOperator, keypair: Arc<FileHostKeypair>) -> Self {
+        fn new(behaviour: TheOperator, keypair: Arc<FileHostKeypair>, answers_as: &str) -> Self {
             Self {
                 registry: InMemoryHostPromptRegistry::new(),
                 asked: std::sync::Mutex::new(Vec::new()),
                 behaviour,
+                answers_as: answers_as.to_string(),
                 keypair,
             }
         }
@@ -1099,13 +1176,21 @@ mod tests {
                     // ciphertext is handed to the registry, so nothing in this fixture proves
                     // anything the real channel would not have to.
                     //
-                    // Answered by the operator it was issued for, which is the only operator the
-                    // registry will accept it from — so a start that stamped its prompt with the
-                    // wrong identity is refused here rather than quietly answered.
+                    // Answered as **this** operator — never as `issued_for`. The registry accepts
+                    // an answer only from the operator a prompt was raised for, so a start that
+                    // stamped its question with anybody else is refused here by the real check
+                    // rather than quietly answered by a fixture agreeing with itself.
                     let ciphertext = encrypted_under(&self.keypair, password);
                     self.registry
-                        .answer(&issued.prompt_id, issued_for, ciphertext, now_unix_ms)
-                        .expect("a freshly issued prompt accepts its first answer");
+                        .answer(&issued.prompt_id, &self.answers_as, ciphertext, now_unix_ms)
+                        .unwrap_or_else(|rejection| {
+                            panic!(
+                                "the operator at this keyboard is {:?}, and the question this host \
+                                 raised was stamped for {issued_for:?}, so they cannot answer it: \
+                                 {rejection:?}",
+                                self.answers_as
+                            )
+                        });
                     issued
                 }
                 // Handed back already expired, so the waiter's own deadline has passed before it
@@ -1179,10 +1264,51 @@ mod tests {
     }
 
     fn a_daemon_whose_operator(behaviour: TheOperator) -> DaemonUnderTest {
+        a_daemon_configured(behaviour, |_as_wired_in_production| {})
+    }
+
+    /// A daemon that has a room to publish into but no credentials to mint a token with.
+    ///
+    /// Half-configured rather than unconfigured on purpose: `host_livekit_room` already refuses a
+    /// daemon with no common room, so only a daemon that gets *past* that check reaches the
+    /// preparation this is about.
+    fn a_daemon_that_cannot_mint_a_livekit_token() -> DaemonUnderTest {
+        a_daemon_configured(TheOperator::Types(NO_PASSWORD), |config| {
+            config
+                .livekit
+                .as_mut()
+                .expect("this daemon's LiveKit configuration")
+                .api_secret = None;
+        })
+    }
+
+    /// A daemon pointed at a bridge binary that is not installed.
+    fn a_daemon_whose_bridge_binary_is_missing() -> DaemonUnderTest {
+        a_daemon_configured(TheOperator::Types(NO_PASSWORD), |config| {
+            config
+                .screen_sharing
+                .as_mut()
+                .expect("this daemon's screen sharing configuration")
+                .vnc_binary_path = A_BRIDGE_BINARY_THAT_IS_NOT_INSTALLED.to_string();
+        })
+    }
+
+    /// A daemon that was never wired for host scope — `with_host_scope` uncalled, as on a daemon
+    /// serving no Hosts screen at all.
+    fn a_daemon_that_serves_no_host_desktops() -> DaemonUnderTest {
+        let mut daemon = a_daemon();
+        daemon.service.host_scope = None;
+        daemon
+    }
+
+    fn a_daemon_configured(
+        behaviour: TheOperator,
+        adjust: impl FnOnce(&mut DaemonConfig),
+    ) -> DaemonUnderTest {
         let storage = tempfile::tempdir().expect("a storage directory");
         let bridge = FakeBridge::installed_in(storage.path());
 
-        let config = Arc::new(DaemonConfig {
+        let mut config = DaemonConfig {
             livekit: Some(LiveKitConfig {
                 url: Some(THE_INTERNAL_LIVEKIT_URL.to_string()),
                 public_url: Some(THE_BROWSER_LIVEKIT_URL.to_string()),
@@ -1196,7 +1322,9 @@ mod tests {
                 ..Default::default()
             }),
             ..Default::default()
-        });
+        };
+        adjust(&mut config);
+        let config = Arc::new(config);
 
         let sessions_base = storage.path().to_path_buf();
         let keypair = Arc::new(FileHostKeypair::new(storage.path()));
@@ -1204,6 +1332,7 @@ mod tests {
         let operator = Arc::new(AnOperatorAtTheKeyboard::new(
             behaviour,
             Arc::clone(&keypair),
+            THE_OS_USER,
         ));
 
         let service = ScreenSharingServiceImpl::new(
@@ -1229,20 +1358,29 @@ mod tests {
     impl DaemonUnderTest {
         /// Attach a VNC desktop to `host`, as the Hosts screen does before opening one.
         async fn attach_a_desktop_to(&self, host: &str) -> String {
+            self.try_to_attach_a_desktop_to(host, A_VNC_PORT)
+                .await
+                .expect("attaching a desktop to a host")
+        }
+
+        /// Attach a desktop on `port` and hand back whatever the call came to, refusal included.
+        async fn try_to_attach_a_desktop_to(
+            &self,
+            host: &str,
+            port: u32,
+        ) -> Result<String, Status> {
             self.service
                 .add_host_target(Request::new(AddHostTargetRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     daemon_instance_id: host.to_string(),
                     label: THE_DESKTOPS_LABEL.to_string(),
                     host: "127.0.0.1".to_string(),
-                    port: 5900,
+                    port,
                     protocol: Protocol::Vnc as i32,
                     username: "ada".to_string(),
                 }))
                 .await
-                .expect("attaching a desktop to a host")
-                .into_inner()
-                .target_id
+                .map(|attached| attached.into_inner().target_id)
         }
 
         async fn open_the_desktop_of(&self, host: &str, target_id: &str) -> StartStreamResponse {
@@ -1308,6 +1446,17 @@ mod tests {
         }
 
         async fn close_the_desktop_of(&self, host: &str, target_id: &str) {
+            self.try_to_close_the_desktop_of(host, target_id)
+                .await
+                .expect("closing a host's desktop");
+        }
+
+        /// Close a desktop and hand back whatever the stop came to, refusal included.
+        async fn try_to_close_the_desktop_of(
+            &self,
+            host: &str,
+            target_id: &str,
+        ) -> Result<(), Status> {
             self.service
                 .stop_host_stream(Request::new(StopHostStreamRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
@@ -1315,7 +1464,89 @@ mod tests {
                     target_id: target_id.to_string(),
                 }))
                 .await
-                .expect("closing a host's desktop");
+                .map(|_| ())
+        }
+
+        /// The ids of the desktops attached to `host`, as the Hosts screen lists them.
+        async fn the_desktops_of(&self, host: &str) -> Vec<String> {
+            self.service
+                .list_host_targets(Request::new(ListHostTargetsRequest {
+                    session_token: A_SESSION_TOKEN.to_string(),
+                    daemon_instance_id: host.to_string(),
+                }))
+                .await
+                .expect("listing a host's desktops")
+                .into_inner()
+                .targets
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        }
+
+        /// The ids of the desktops in the session's own vault.
+        async fn the_desktops_of_the_session(&self) -> Vec<String> {
+            self.service
+                .list_targets(Request::new(ListTargetsRequest {
+                    session_token: A_SESSION_TOKEN.to_string(),
+                    session_id: A_SESSION.to_string(),
+                }))
+                .await
+                .expect("listing a session's desktops")
+                .into_inner()
+                .targets
+                .into_iter()
+                .map(|t| t.id)
+                .collect()
+        }
+
+        // Every host-scoped call again, as somebody whose session token this daemon does not
+        // know. Each hands back the refusal, because the refusal is the whole subject.
+
+        async fn a_stranger_lists_the_desktops_of(&self, host: &str) -> Status {
+            self.service
+                .list_host_targets(Request::new(ListHostTargetsRequest {
+                    session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
+                    daemon_instance_id: host.to_string(),
+                }))
+                .await
+                .expect_err("a stranger must not be shown a host's desktops")
+        }
+
+        async fn a_stranger_attaches_a_desktop_to(&self, host: &str) -> Status {
+            self.service
+                .add_host_target(Request::new(AddHostTargetRequest {
+                    session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
+                    daemon_instance_id: host.to_string(),
+                    label: THE_DESKTOPS_LABEL.to_string(),
+                    host: "127.0.0.1".to_string(),
+                    port: 5900,
+                    protocol: Protocol::Vnc as i32,
+                    username: "ada".to_string(),
+                }))
+                .await
+                .expect_err("a stranger must not attach a desktop to a host")
+        }
+
+        async fn a_stranger_opens_the_desktop_of(&self, host: &str, target_id: &str) -> Status {
+            self.service
+                .start_host_stream(Request::new(StartHostStreamRequest {
+                    session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
+                    daemon_instance_id: host.to_string(),
+                    target_id: target_id.to_string(),
+                }))
+                .await
+                .expect_err("a stranger must not open a host's desktop")
+        }
+
+        async fn a_stranger_closes_the_desktop_of(&self, host: &str, target_id: &str) -> Status {
+            self.service
+                .stop_host_stream(Request::new(StopHostStreamRequest {
+                    session_token: A_TOKEN_THIS_DAEMON_DOES_NOT_KNOW.to_string(),
+                    daemon_instance_id: host.to_string(),
+                    target_id: target_id.to_string(),
+                }))
+                .await
+                .expect_err("a stranger must not close a host's desktop")
         }
 
         async fn bridge_running_for(&self, bridge_key: &str) -> Option<u32> {
@@ -1431,8 +1662,11 @@ mod tests {
         let daemon = a_daemon();
         let target_id = daemon.attach_a_desktop_to(A_HOST).await;
         daemon.open_the_desktop_of(A_HOST, &target_id).await;
+        // The key is written out here rather than asked of `host_bridge_key`, which would agree
+        // with production whatever it built — including a key with the `host:` prefix dropped,
+        // the one thing keeping a daemon instance id from colliding with a session id.
         let pid = daemon
-            .bridge_running_for(&host_bridge_key(A_HOST, &target_id))
+            .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
             .await
             .expect("opening a desktop spawns a bridge and records its pid");
         assert!(
@@ -1490,6 +1724,13 @@ mod tests {
             asked[0].kind,
             PromptKind::DesktopPassword,
             "a desktop password is its own kind of question; node 6's key passphrase is not it"
+        );
+
+        // …stamped for the operator who raised it, which is what makes it reachable at all:
+        // `StreamHostPrompts` shows a prompt to nobody else, and nobody else can spend its answer
+        assert_eq!(
+            asked[0].issued_for, THE_OS_USER,
+            "a question stamped for anybody else reaches no browser and can be answered by nobody"
         );
 
         // …naming the desktop it is about, which is all the dialog has to go on
@@ -1599,7 +1840,7 @@ mod tests {
         // …and no bridge was left running against a desktop it has no password for
         assert!(
             daemon
-                .bridge_running_for(&host_bridge_key(A_HOST, &target_id))
+                .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
                 .await
                 .is_none(),
             "a bridge was started without the password the start was waiting for"
@@ -1639,6 +1880,292 @@ mod tests {
                 .await
                 .is_some(),
             "a session's bridge must stay addressable by its own session id"
+        );
+        // …and it asked nobody anything: a session desktop's password is in its vault, and routing
+        // this path through the host prompt too would put a dialog in front of an operator who
+        // already unlocked it
+        assert!(
+            daemon.questions_this_host_asked().is_empty(),
+            "opening a session desktop asked its operator a question it has no business asking: {:?}",
+            daemon.questions_this_host_asked()
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // A start that could not have started must say so
+    //
+    // Coordinates for a room no bridge ever joined are worse than a refusal: the browser mounts an
+    // overlay and waits on a track that will never appear, with nothing to say why — and by then
+    // the operator has already typed a secret into a dialog.
+    // ---------------------------------------------------------------------------------------
+
+    /// A desktop this host could never bridge is refused before the question is even raised. The
+    /// password is the one part of this flow that costs a person something to supply, so it is the
+    /// last thing to ask for, not the first.
+    #[tokio::test]
+    async fn a_desktop_this_host_cannot_bridge_is_refused_before_anybody_is_asked_for_its_password()
+    {
+        // Given a host with a room to publish into but no credentials to mint a token with
+        let daemon = a_daemon_that_cannot_mint_a_livekit_token();
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When its desktop is opened
+        let outcome = daemon.try_to_open_the_desktop_of(A_HOST, &target_id).await;
+
+        // Then the start is refused rather than reporting a stream nothing publishes into
+        let refusal =
+            outcome.expect_err("a desktop with nowhere to publish must not report a stream");
+        assert_eq!(
+            refusal.code(),
+            Code::FailedPrecondition,
+            "a host that cannot reach LiveKit is a precondition, not a bad request: {refusal:?}"
+        );
+
+        // …and nobody was made to type a password for a stream that could never have started
+        let asked = daemon.questions_this_host_asked();
+        assert!(
+            asked.is_empty(),
+            "the operator was asked for a secret before this host knew it could bridge: {asked:?}"
+        );
+    }
+
+    /// A bridge that never spawned is not a stream. Reported as a failure, the browser can say the
+    /// desktop did not open; reported as success it mounts an overlay on an empty room.
+    #[tokio::test]
+    async fn a_bridge_that_cannot_be_spawned_fails_the_start_rather_than_reporting_a_stream() {
+        // Given a host pointed at a bridge binary that is not installed
+        let daemon = a_daemon_whose_bridge_binary_is_missing();
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When its desktop is opened
+        let outcome = daemon.try_to_open_the_desktop_of(A_HOST, &target_id).await;
+
+        // Then the start says the bridge did not start
+        let refusal = outcome.expect_err("a bridge that never spawned is not a stream");
+        assert_eq!(
+            refusal.code(),
+            Code::Internal,
+            "a bridge binary that will not spawn is this host's own failure: {refusal:?}"
+        );
+
+        // …and nothing is left recorded for a desktop that never opened
+        assert!(
+            daemon
+                .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
+                .await
+                .is_none(),
+            "a bridge that never spawned must not be tracked as running"
+        );
+    }
+
+    /// A second start for the same desktop must release the first bridge. `active_bridges` holds
+    /// one pid per key, so a start that overwrote one would leave a process nothing can ever
+    /// signal — streaming a machine nobody is watching until the host reboots.
+    #[tokio::test]
+    async fn reopening_a_host_desktop_releases_the_bridge_the_previous_start_left_running() {
+        // Given a host desktop that has been opened once
+        let daemon = a_daemon();
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
+        let the_first_bridge = daemon
+            .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
+            .await
+            .expect("opening a desktop spawns a bridge and records its pid");
+
+        // When the same desktop is opened again
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
+
+        // Then the bridge the first start left behind is gone
+        eventually(
+            "the bridge of the previous start exits when a second start replaces it",
+            A_SIGNALLED_BRIDGE_EXITS_WITHIN,
+            || {
+                if process_is_alive(the_first_bridge) {
+                    Err(format!("bridge pid {the_first_bridge} is still running"))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .await;
+
+        // …and the desktop is still addressable, now by the bridge that replaced it
+        let the_current_bridge = daemon
+            .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
+            .await
+            .expect("the second start's bridge must be the one the key now names");
+        assert_ne!(
+            the_current_bridge, the_first_bridge,
+            "the second start must have spawned a bridge of its own"
+        );
+        assert!(
+            process_is_alive(the_current_bridge),
+            "the desktop's current bridge must be running"
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // AC-8 — host scope and session scope are separate stores
+    // ---------------------------------------------------------------------------------------
+
+    /// A desktop attached to a machine outlives every session on it, and a session's desktop
+    /// belongs to the work rather than to the box. Each half states what its list *does* hold as
+    /// well as what it does not: an absence on its own would hold just as well against a daemon
+    /// that lists nothing at all.
+    #[tokio::test]
+    async fn a_hosts_desktops_and_a_sessions_desktops_stay_out_of_each_others_lists() {
+        // Given one desktop in a session's unlocked vault, and one attached to this host
+        let daemon = a_daemon();
+        let the_sessions_desktop = daemon.a_session_holding_a_desktop().await;
+        let the_hosts_desktop = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When each scope is listed
+        let on_the_host = daemon.the_desktops_of(A_HOST).await;
+        let in_the_session = daemon.the_desktops_of_the_session().await;
+
+        // Then each list holds its own desktop, and only its own
+        assert_eq!(
+            on_the_host,
+            vec![the_hosts_desktop],
+            "a host lists the desktops attached to it, and nothing out of a session's vault"
+        );
+        assert_eq!(
+            in_the_session,
+            vec![the_sessions_desktop],
+            "a session lists the desktops in its vault, and nothing attached to the host"
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Every host-scoped call belongs to a logged-in operator
+    //
+    // A desktop is an address on somebody's machine and a bridge is a process on it. One test per
+    // call, because a missing check is deleted one line at a time.
+    // ---------------------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn listing_a_hosts_desktops_without_a_session_this_daemon_knows_is_refused() {
+        // Given a host with a desktop attached
+        let daemon = a_daemon();
+        daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When somebody this daemon does not know asks for its desktops
+        let refusal = daemon.a_stranger_lists_the_desktops_of(A_HOST).await;
+
+        // Then they are told who they are not, rather than shown the machine's addresses
+        assert_eq!(refusal.code(), Code::Unauthenticated, "{refusal:?}");
+    }
+
+    #[tokio::test]
+    async fn attaching_a_desktop_without_a_session_this_daemon_knows_is_refused() {
+        // Given a host
+        let daemon = a_daemon();
+
+        // When somebody this daemon does not know attaches a desktop to it
+        let refusal = daemon.a_stranger_attaches_a_desktop_to(A_HOST).await;
+
+        // Then nothing is attached on their say-so
+        assert_eq!(refusal.code(), Code::Unauthenticated, "{refusal:?}");
+        assert!(
+            daemon.the_desktops_of(A_HOST).await.is_empty(),
+            "a refused attach must not have attached anything"
+        );
+    }
+
+    #[tokio::test]
+    async fn opening_a_host_desktop_without_a_session_this_daemon_knows_is_refused() {
+        // Given a host with a desktop attached
+        let daemon = a_daemon();
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+
+        // When somebody this daemon does not know opens it
+        let refusal = daemon
+            .a_stranger_opens_the_desktop_of(A_HOST, &target_id)
+            .await;
+
+        // Then no bridge is started for them
+        assert_eq!(refusal.code(), Code::Unauthenticated, "{refusal:?}");
+        assert!(
+            daemon
+                .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
+                .await
+                .is_none(),
+            "a refused start must not have spawned a bridge"
+        );
+    }
+
+    #[tokio::test]
+    async fn closing_a_host_desktop_without_a_session_this_daemon_knows_is_refused() {
+        // Given an open host desktop
+        let daemon = a_daemon();
+        let target_id = daemon.attach_a_desktop_to(A_HOST).await;
+        daemon.open_the_desktop_of(A_HOST, &target_id).await;
+
+        // When somebody this daemon does not know closes it
+        let refusal = daemon
+            .a_stranger_closes_the_desktop_of(A_HOST, &target_id)
+            .await;
+
+        // Then the stop is refused, and the operator's bridge is left alone
+        assert_eq!(refusal.code(), Code::Unauthenticated, "{refusal:?}");
+        assert!(
+            daemon
+                .bridge_running_for(&format!("host:{A_HOST}:{target_id}"))
+                .await
+                .is_some(),
+            "a refused stop must not have released somebody else's bridge"
+        );
+    }
+
+    /// A stop is the one host-scoped call that could answer `ok: true` having done nothing at all.
+    /// On a daemon that serves no host desktops there is no bridge it could have released, and
+    /// saying otherwise tells the browser to tear down an overlay over a stream still running.
+    #[tokio::test]
+    async fn closing_a_host_desktop_on_a_daemon_that_serves_none_is_refused_rather_than_reported_ok(
+    ) {
+        // Given a daemon that was never wired for host-scoped desktops
+        let daemon = a_daemon_that_serves_no_host_desktops();
+
+        // When a desktop of a host is closed on it
+        let outcome = daemon
+            .try_to_close_the_desktop_of(A_HOST, "a-desktop-this-daemon-never-served")
+            .await;
+
+        // Then it says it serves none, rather than reporting a stop it could not have performed
+        let refusal =
+            outcome.expect_err("a daemon serving no host desktops cannot have closed one");
+        assert_eq!(
+            refusal.code(),
+            Code::FailedPrecondition,
+            "an unwired daemon is a precondition, the same one every other host call reports: {refusal:?}"
+        );
+    }
+
+    /// Proto has no sixteen-bit integer, so a port past the last one arrives here intact. Cast, it
+    /// wraps into a perfectly plausible port and the desktop is quietly attached to the wrong one —
+    /// an address nobody typed, on a machine somebody else may well be listening on.
+    #[tokio::test]
+    async fn attaching_a_desktop_on_a_port_no_machine_can_listen_on_is_refused() {
+        // Given a host
+        let daemon = a_daemon();
+
+        // When a desktop is attached on a port past the last one there is
+        let outcome = daemon
+            .try_to_attach_a_desktop_to(A_HOST, A_PORT_PAST_THE_LAST_ONE)
+            .await;
+
+        // Then the caller is told, rather than handed an id for an address they never gave
+        let refusal = outcome.expect_err("a port past 65535 is not a port a desktop listens on");
+        assert_eq!(
+            refusal.code(),
+            Code::InvalidArgument,
+            "a port that cannot exist is a bad request, not this host's failure: {refusal:?}"
+        );
+
+        // …and nothing was attached to some other port instead
+        assert!(
+            daemon.the_desktops_of(A_HOST).await.is_empty(),
+            "a refused attach must not have attached a desktop anywhere"
         );
     }
 }
