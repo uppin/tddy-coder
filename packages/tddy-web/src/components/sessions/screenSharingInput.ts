@@ -34,11 +34,56 @@ export function framebufferPointFor(
   renderedSize: Size,
   framebufferSize: Size,
 ): Point {
-  void pointerInElement;
-  void renderedSize;
-  void framebufferSize;
-  throw new Error("framebufferPointFor is not implemented");
+  return {
+    x: Math.round((pointerInElement.x / renderedSize.width) * framebufferSize.width),
+    y: Math.round((pointerInElement.y / renderedSize.height) * framebufferSize.height),
+  };
 }
+
+/**
+ * The X11 keysyms of the keys whose `KeyboardEvent.key` is a name rather than the character it
+ * types. Each modifier is the left-hand one: a browser reports which side was pressed in `location`,
+ * not in `key`, and a desktop only needs the modifier held — not which of the two produced it.
+ */
+const KEYSYM_BY_KEY_NAME: Readonly<Record<string, number>> = {
+  Enter: 0xff0d, // XK_Return
+  Escape: 0xff1b, // XK_Escape
+  Backspace: 0xff08, // XK_BackSpace
+  Delete: 0xffff, // XK_Delete
+  Tab: 0xff09, // XK_Tab
+  ArrowLeft: 0xff51, // XK_Left
+  ArrowUp: 0xff52, // XK_Up
+  ArrowRight: 0xff53, // XK_Right
+  ArrowDown: 0xff54, // XK_Down
+  Home: 0xff50, // XK_Home
+  End: 0xff57, // XK_End
+  PageUp: 0xff55, // XK_Page_Up
+  PageDown: 0xff56, // XK_Page_Down
+  Insert: 0xff63, // XK_Insert
+  F1: 0xffbe, // XK_F1 — F1…F12 are consecutive
+  F2: 0xffbf,
+  F3: 0xffc0,
+  F4: 0xffc1,
+  F5: 0xffc2,
+  F6: 0xffc3,
+  F7: 0xffc4,
+  F8: 0xffc5,
+  F9: 0xffc6,
+  F10: 0xffc7,
+  F11: 0xffc8,
+  F12: 0xffc9,
+  Shift: 0xffe1, // XK_Shift_L
+  Control: 0xffe3, // XK_Control_L
+  Alt: 0xffe9, // XK_Alt_L
+  Meta: 0xffeb, // XK_Super_L
+  CapsLock: 0xffe5, // XK_Caps_Lock
+};
+
+/** The highest code point X11 gives a keysym equal to the code point itself (Latin-1). */
+const LAST_LATIN_1_CODE_POINT = 0xff;
+
+/** X11's encoding of any other Unicode code point as a keysym: `0x01000000 | codePoint`. */
+const UNICODE_KEYSYM_BASE = 0x01000000;
 
 /**
  * The neutral keysym `ScreenSharingKeyEvent.keysym` carries for a browser `KeyboardEvent.key`.
@@ -47,6 +92,19 @@ export function framebufferPointFor(
  * dropped rather than sent as some stand-in the remote desktop would act on.
  */
 export function keysymFor(key: string): number | null {
-  void key;
-  throw new Error("keysymFor is not implemented");
+  // `hasOwn` rather than `in`: `key` is whatever string the browser reported, and `constructor` or
+  // `toString` would otherwise find something on the prototype chain that is not a keysym.
+  if (Object.hasOwn(KEYSYM_BY_KEY_NAME, key)) {
+    return KEYSYM_BY_KEY_NAME[key];
+  }
+
+  // Anything else `key` reports as a single character is the character it types, and the character
+  // is what the desktop should receive — `A` and `a` are two keysyms, not one plus a shift flag.
+  const codePoint = key.codePointAt(0);
+  const isASingleCharacter = codePoint !== undefined && String.fromCodePoint(codePoint) === key;
+  if (isASingleCharacter) {
+    return codePoint <= LAST_LATIN_1_CODE_POINT ? codePoint : UNICODE_KEYSYM_BASE | codePoint;
+  }
+
+  return null;
 }
