@@ -1,7 +1,7 @@
 # Changeset: input-forwarding
 
 **Date:** 2026-09-07
-**Status:** 🚧 Planning
+**Status:** 🟢 Green — implemented, all tests passing
 **Type:** New feature (completes an existing one)
 **Stack:** `#hosts-screen` 9/9 — the top node
 **Branch:** `feature/hosts-screen/input-forwarding` → base `feature/hosts-screen/desktop-connect`
@@ -79,12 +79,12 @@ supplies a mount point that already exists on its branch.
 
 ## Scope
 
-- [ ] `ScreenSharingInputService` client wired to the bridge participant's data channel
-- [ ] Pointer capture with coordinate scaling
-- [ ] Keyboard capture with keysym mapping
-- [ ] The keep-vs-forward key policy
-- [ ] Stream opened on mount, closed on unmount
-- [ ] Input-unavailable state that leaves the picture working
+- [x] `ScreenSharingInputService` client wired to the bridge participant's data channel
+- [x] Pointer capture with coordinate scaling
+- [x] Keyboard capture with keysym mapping
+- [x] The keep-vs-forward key policy
+- [x] Stream opened on mount, closed on unmount
+- [x] Input-unavailable state that leaves the picture working
 - [x] Cypress component tests for both scopes — written, failing (see **Red phase** below)
 
 ## Decisions — settled before the red phase
@@ -156,6 +156,63 @@ plus input capture in `ScreenSharingOverlay` turned all 28 green and left the 48
 `HostsScreenAddKeyAcceptance` and `SessionScreenSharingTargetRowsAcceptance` green as well. That
 implementation was then reverted; the probe existed only to rule out a test that cannot pass.
 
+## Green phase — what was implemented
+
+Landed in two milestones, each pushed only once its own tests were green.
+
+**1. The two pure translations** (`791d98ef`) — `screenSharingInput.ts`. The scaling formula and the
+keysym table were lifted from the superseded `vncInput.ts` as this document expects: no import from
+it, none of its surface revived, and the keys the tests do not pin (`Home`, `End`, `PageUp`,
+`PageDown`, `Insert`, `Meta`, `CapsLock`) kept, since dropping them would leave the surviving
+surface worse than the one it replaces. Two departures from the lifted logic, both corrections:
+code points above `0xff` are encoded as X11 actually encodes them, `0x01000000 | codePoint` — the
+old code returned the bare code point, so `ą` came out as keysym `0x105`, which is not a keysym for
+`ą`; and the table is read with `Object.hasOwn` rather than `in`, so a browser reporting
+`constructor` cannot return a function through a `number` return type.
+
+**2. The client and capture** — `useScreenSharingInput.ts` (new), wired into `ScreenSharingOverlay`.
+
+| Decision | Why it is not the obvious alternative |
+|---|---|
+| Transport via `useLiveKitTransportFactory` + `useLiveKitTransportFactoryIsOverridden` | `useLiveKitClient` null-guards on `room`, and the overlay is mounted with none. Mirrors `useSessionUsage.ts` exactly — it keys off how the RPC provider was configured, not off a test environment |
+| One stream per `client`, closed by `AsyncQueue.close()` on unmount | Ending the request iterable is what the bridge sees as the desktop closing. Keyed on `[client]` alone, so a re-render is not a reconnect |
+| `getBoundingClientRect()` read on **every** event | A factor fixed at mount puts the operator's clicks somewhere they did not aim the moment the window is resized |
+| Nothing forwarded from a `0×0` picture | `framebufferPointFor` yields `NaN` there, and `NaN` is not a number a `uint32` field can carry. Guarded at the call site, not inside the pure function |
+| `rfbButtonMaskFor` reads `MouseEvent.buttons` (the held set) | `button_mask` says what is down *now*: a release is the remaining buttons, and a drag carries its button along with every move |
+| Its own bit mapping rather than `vncInput.ts`'s | That helper maps `MouseEvent.button`, the index. Browser and RFB disagree in the middle, so reusing it bit-for-bit would have turned every right-click into a middle-click paste |
+| A pending move is flushed *before* a button, never dropped | A desktop told the button went down before it was told the pointer arrived acts on the wrong place |
+| Keyboard listener on `document` | A `<video>` takes no focus, so keys typed over the overlay arrive nowhere else |
+| No `preventDefault()` for a key with no keysym | Nothing is being sent, so there is nothing to swallow; the browser keeps the key rather than having it vanish into a desktop it never reached |
+
+### Resolved from the red phase's notes
+
+- `ScreenSharingOverlay.tsx`'s docblock now says it forwards input and that `Ctrl+Alt+Esc`, not
+  Escape, dismisses it. `VncOverlay.tsx`'s false capture claim — the one that misled two readings of
+  this feature in opposite directions — is corrected to say it forwards none.
+- The overlay's `width`/`height` props, previously ignored entirely, are now the framebuffer size.
+- `HostDesktopOverlay.tsx`'s `TODO(#hosts-screen 8/8)` asking for exactly this is deleted.
+
+### Left open, deliberately
+
+- **The overlay captures the keyboard app-wide while it is open**, including once the bridge has
+  refused the stream, where a key is prevented and then goes nowhere. Right for a full-screen
+  overlay and no worse than the Escape handler it replaces, but no test pins it; stopping capture
+  on refusal is a defensible change if an operator ever notices.
+- The testkit question this document raised — whether `InMemoryRpcBackend` should record streaming
+  messages the way it records unary ones, retiring `screenSharingInputBridge.ts`'s hand-rolled
+  recording — was **not** taken on. It is testkit work, not this node's, and the double is honest as
+  it stands.
+
+### Verification
+
+| Suite | Result |
+|---|---|
+| `screenSharingInput.test.ts` | 15 / 15 |
+| `ScreenSharingInputForwardingAcceptance.cy.tsx` | 11 / 11 |
+| `ScreenSharingInputScopesAcceptance.cy.tsx` | 2 / 2 |
+| `tddy-web` unit suite | 1169 / 1169 |
+| Protected specs — `HostDesktopConnect`, `HostsScreenRemoteDesktop`, `SessionScreenSharingTargetRows`, `HostAddKey`, `HostsScreenAddKey`, `VncOverlay`, `SessionVncTargetRows` | 60 / 60 |
+
 ## Refactoring needed
 
 ### From @red (TDD Red Phase)
@@ -177,7 +234,7 @@ implementation was then reverted; the probe existed only to rule out a test that
 - [ ] Record initial discovery
 - [x] Settle the open questions above
 - [x] TDD Red — failing acceptance tests
-- [ ] TDD Green — implement
+- [x] TDD Green — implement
 - [ ] Validate, refactor, wrap
 
 ## Successor PRs

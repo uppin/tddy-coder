@@ -2,7 +2,8 @@
  * Full-screen VNC desktop overlay.
  *
  * Subscribes to the bridge participant's video track via the session's LiveKit room
- * and renders it as a full-screen overlay. Captures pointer and keyboard events.
+ * and renders it as a full-screen overlay. It forwards no input: pointer and keyboard capture
+ * belongs to `ScreenSharingOverlay`, the surviving overlay, and never existed here.
  *
  * Dismiss via close button, Escape key, or clicking the backdrop.
  */

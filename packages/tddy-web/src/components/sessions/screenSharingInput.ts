@@ -108,3 +108,32 @@ export function keysymFor(key: string): number | null {
 
   return null;
 }
+
+/**
+ * The RFB button-mask bit each `MouseEvent.buttons` bit stands for, indexed by the browser's bit.
+ *
+ * The two orders disagree in the middle: a browser numbers its buttons the way it enumerates them
+ * (primary, secondary, auxiliary), RFB the way they sit on a mouse (left, middle, right). Mapping
+ * bit for bit — which is what treating one mask as the other amounts to — swaps the middle button
+ * for the right one, so every context menu the operator asks for arrives as a paste.
+ */
+const RFB_MASK_BY_MOUSE_BUTTONS_BIT = [
+  0b001, // bit 0, primary   → RFB left
+  0b100, // bit 1, secondary → RFB right
+  0b010, // bit 2, auxiliary → RFB middle
+];
+
+/**
+ * The RFB button mask for the set of buttons a `MouseEvent` reports as held (`MouseEvent.buttons`).
+ *
+ * The set, not the button that triggered the event: `ScreenSharingPointerEvent.button_mask` says
+ * what is down *now*, so a release is the remaining buttons rather than the one let go of, and a
+ * drag carries its held button along with every move. Browser-only buttons (back, forward) have no
+ * RFB bit and are left out rather than folded onto one that means something else.
+ */
+export function rfbButtonMaskFor(heldButtons: number): number {
+  return RFB_MASK_BY_MOUSE_BUTTONS_BIT.reduce(
+    (mask, rfbBit, browserBit) => (heldButtons & (1 << browserBit) ? mask | rfbBit : mask),
+    0,
+  );
+}

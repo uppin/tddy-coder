@@ -231,10 +231,6 @@ export function HostDesktopOverlay({ hostId, port, protocol, onClose }: HostDesk
     }
   };
 
-  // TODO(#hosts-screen 8/8): forward pointer and keyboard input to the host's bridge (AC-3). The
-  // session-scoped overlay does not forward either — `vncInput.ts` is left over from a `VncOverlay`
-  // that no longer exists — so this needs a host-scoped input channel rather than a reuse.
-
   // Portalled to `document.body`, not rendered where it was mounted from. The row section this
   // overlay is opened from is a `<span>` (`HostRowTooling`), and a `<div>` is not permitted inside
   // one: an HTML parser hoists it out on any SSR or hydration path, and even client-side a block
