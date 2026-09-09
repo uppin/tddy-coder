@@ -8,74 +8,72 @@ use futures_util::stream::Stream;
 use livekit::prelude::Room;
 use prost::Message as _;
 use tddy_core::output::SESSIONS_SUBDIR;
-use tddy_core::session_lifecycle::{validate_session_id_segment};
-use tddy_core::{Changeset};
+use tddy_core::session_lifecycle::validate_session_id_segment;
+use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::connection::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
     HostDocumentChunk, SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    AgentConversationChunk, HostPromptEvent, ListAgentModelsResponse,
-    ModelInfo,
+    AgentConversationChunk, HostPromptEvent, ListAgentModelsResponse, ModelInfo,
     ProjectEntry as ProtoProjectEntry, SessionTerminalInput, SessionTerminalOutput,
-    SplitAgentPlacement, StartSessionResponse, TerminalControlEvent, WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
+    SplitAgentPlacement, StartSessionResponse, TerminalControlEvent,
+    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
 };
 use uuid::Uuid;
 
 use crate::branch_intent::{
     resolve_branch_workflow, BranchIntentPolicy, BranchIntentRequest, ResolvedBranchWorkflow,
 };
-use crate::cli_session_manager::{CliSessionManager};
+use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
 use crate::host_keypair::HostKeypair;
-use crate::host_prompts::{HostPromptRegistry};
-use crate::host_registry::{HostRegistry};
-use crate::host_stats::{HostStats};
-use crate::host_tooling::{HostToolingProbe};
-use crate::livekit_rooms_stream::{RoomRoster};
-use crate::multi_host::{EligibleDaemonSource};
+use crate::host_prompts::HostPromptRegistry;
+use crate::host_registry::HostRegistry;
+use crate::host_stats::HostStats;
+use crate::host_tooling::HostToolingProbe;
+use crate::livekit_rooms_stream::RoomRoster;
+use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
-use crate::session_room::{ActivityDelta, };
+use crate::session_room::ActivityDelta;
 use crate::spawn_worker;
 use crate::spawner::{self};
-use crate::ssh_agent_add::{SshAgentKeyAdder};
+use crate::ssh_agent_add::SshAgentKeyAdder;
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
-use crate::user_sessions_path::{
-    projects_path_for_user, 
-};
+use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
 use crate::worktrees::{
-    CleanWorktreeError, RemoveWorktreeError, WorktreeSizeCalculator,
-    WorktreeSizeStatus, WorktreeStatsCache,
+    CleanWorktreeError, RemoveWorktreeError, WorktreeSizeCalculator, WorktreeSizeStatus,
+    WorktreeStatsCache,
 };
 use tddy_service::proto::connection::{
-    AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityRecord as ProtoAgentActivityRecord, ExecuteToolChunk, ExecuteToolResponse, HostStatsEvent,
-    LiveKitRoomsEvent,
+    AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityRecord as ProtoAgentActivityRecord,
+    ExecuteToolChunk, ExecuteToolResponse, HostStatsEvent, LiveKitRoomsEvent,
     SessionNotificationEvent as ProtoSessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource, WorktreeFileChunk,
 };
-use tddy_task::{TaskRegistry};
+use tddy_task::TaskRegistry;
 
 // Bound for the extracted test modules, which reach the code under test through `use super::*`.
 // The lib itself no longer names any of these — every user moved into `connection_service/` — so a
 // plain `use` would be an unused import there. `#[cfg(test)]` keeps them out of the lib build
 // entirely rather than trading a resolution error for a lint.
 #[cfg(test)]
-use futures_util::StreamExt;
-#[cfg(test)]
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
-#[cfg(test)]
 use crate::host_prompts::PromptKind;
 #[cfg(test)]
 use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
+#[cfg(test)]
+use futures_util::StreamExt;
 #[cfg(test)]
 use std::sync::Mutex as StdMutex;
 #[cfg(test)]
 use tddy_core::session_lifecycle::unified_session_dir_path;
 #[cfg(test)]
 use tddy_rpc::Request;
+#[cfg(test)]
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
     AddHostKeyRequest, AddHostKeyResponse, AddPlannedPrRequest, AnswerHostPromptRequest,
@@ -827,11 +825,16 @@ pub struct ConnectionServiceImpl {
     /// (overridable for tests).
     roster_keepalive_interval: Duration,
     /// Per-session demo VM state — keyed by session_id.
-    demo_vm_state: Arc<tokio::sync::Mutex<std::collections::HashMap<String, activity_hub::DemoVmHandle>>>,
+    demo_vm_state:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, activity_hub::DemoVmHandle>>>,
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
     /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
     /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
-    session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, seeded_clone_guard::SessionStdioEndpoint>>>,
+    session_stdio: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, seeded_clone_guard::SessionStdioEndpoint>,
+        >,
+    >,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
@@ -879,8 +882,9 @@ pub struct ConnectionServiceImpl {
     /// Open conversations with roster agents, keyed by conversation id. Local entries hold a live
     /// turn loop here; remote entries hold only the routing, because the loop runs on the owning
     /// daemon.
-    agent_conversations:
-        Arc<tokio::sync::Mutex<std::collections::HashMap<String, seed_codebase::AgentConversation>>>,
+    agent_conversations: Arc<
+        tokio::sync::Mutex<std::collections::HashMap<String, seed_codebase::AgentConversation>>,
+    >,
     /// Where this daemon publishes its session notifications
     /// (`docs/ft/daemon/session-notifications.md`). `None` means
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
@@ -1248,17 +1252,19 @@ async fn spawn_claude_cli_session_inner(
     claude_cli_manager
         .expose_terminal_to_livekit(
             session_id,
-            hooks_and_urls::claude_cli_participant_metadata(&hooks_and_urls::StartingClaudeCliSession {
-                session_id,
-                model,
-                recipe: managed_recipe
-                    .as_ref()
-                    .map(|r| r.name())
-                    .unwrap_or_default(),
-                worktree_path: &worktree_path,
-                branch: &spawned_branch,
-                stack_parent: &stack_parent,
-            }),
+            hooks_and_urls::claude_cli_participant_metadata(
+                &hooks_and_urls::StartingClaudeCliSession {
+                    session_id,
+                    model,
+                    recipe: managed_recipe
+                        .as_ref()
+                        .map(|r| r.name())
+                        .unwrap_or_default(),
+                    worktree_path: &worktree_path,
+                    branch: &spawned_branch,
+                    stack_parent: &stack_parent,
+                },
+            ),
         )
         .await;
 

@@ -240,5 +240,4 @@ impl ConnectionServiceImpl {
             &roster.agents,
         ))
     }
-
 }

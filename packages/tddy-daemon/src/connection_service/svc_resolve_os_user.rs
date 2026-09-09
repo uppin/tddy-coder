@@ -1,23 +1,24 @@
+use super::cleanup_materialized_attachments;
 use crate::tool_engine;
 use tddy_service::proto::connection::session_attachment::Source as AttachmentSource;
-use super::cleanup_materialized_attachments;
 
 use super::attachment_size_bytes;
 
 use super::AttachmentProgressReporter;
 
-use crate::{connection_service::seeded_clone_guard, session_attachments::validate_attachment_basename, workspace_session};
+use crate::{
+    connection_service::seeded_clone_guard, session_attachments::validate_attachment_basename,
+    workspace_session,
+};
 
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::connection::{ExecuteToolRequest, SessionAttachment};
 
 use super::AttachmentMaterialization;
 
-
 use livekit::prelude::Room;
 
 use std::sync::Arc;
-
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -53,7 +54,10 @@ impl ConnectionServiceImpl {
             .collect()
     }
 
-    pub(crate) fn classify_daemon_route(&self, requested_daemon: &str) -> Result<PeerRoute, Status> {
+    pub(crate) fn classify_daemon_route(
+        &self,
+        requested_daemon: &str,
+    ) -> Result<PeerRoute, Status> {
         let local_id = local_instance_id_for_config(&self.config);
         crate::livekit_peer_discovery::classify_peer_route(
             &local_id,
@@ -119,7 +123,10 @@ impl ConnectionServiceImpl {
     /// session token is a stateless HMAC, verifiable only by daemons holding the same secret), and a
     /// GitHub user mapped on the agent host but not on the codebase host. Each is also logged here,
     /// because the operator debugging it is reading *this* daemon's log.
-    pub(crate) fn authorize_exec_tool_caller(&self, req: &ExecuteToolRequest) -> Result<&str, Status> {
+    pub(crate) fn authorize_exec_tool_caller(
+        &self,
+        req: &ExecuteToolRequest,
+    ) -> Result<&str, Status> {
         let local_instance_id = local_instance_id_for_config(&self.config);
         let Some(github_user) = (self.user_resolver)(&req.session_token) else {
             log::warn!(
@@ -207,7 +214,11 @@ impl ConnectionServiceImpl {
     /// Read from what this daemon persisted about the session rather than from the request, because
     /// the request is the caller's claim and the metadata is the session's. A `workspace` session
     /// that recorded `sandbox: true` is served by the jail registered for it and by nothing else.
-    pub(crate) async fn exec_tool_route(&self, session_dir: &Path, session_id: &str) -> seeded_clone_guard::ExecToolRoute {
+    pub(crate) async fn exec_tool_route(
+        &self,
+        session_dir: &Path,
+        session_id: &str,
+    ) -> seeded_clone_guard::ExecToolRoute {
         let meta = match tddy_core::read_session_metadata(session_dir) {
             Ok(meta) => meta,
             // The callers all resolved this session's worktree out of this same file moments ago, so
@@ -502,5 +513,4 @@ impl ConnectionServiceImpl {
 
         Ok(written)
     }
-
 }

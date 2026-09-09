@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use crate::{connection_service::{agent_roster, seed_codebase, seeded_clone_guard}, livekit_peer_discovery::local_instance_id_for_config, workspace_session};
+use crate::{
+    connection_service::{agent_roster, seed_codebase, seeded_clone_guard},
+    livekit_peer_discovery::local_instance_id_for_config,
+    workspace_session,
+};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -288,7 +292,9 @@ impl ConnectionServiceImpl {
         let local_instance_id = local_instance_id_for_config(&self.config);
         let mut seeded: Vec<seeded_clone_guard::SeededAgent> = Vec::with_capacity(records.len());
         for mut record in records {
-            if let Err(status) = agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, &record) {
+            if let Err(status) =
+                agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, &record)
+            {
                 self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
                     .await;
                 return Err(status);
@@ -364,7 +370,8 @@ impl ConnectionServiceImpl {
         let local_instance_id = local_instance_id_for_config(&self.config);
         // Built before the first claim so an early return releases what the loop got through: the
         // guard is the only thing that knows a peer was asked to build a checkout.
-        let mut guard = seeded_clone_guard::SeededCloneGuard::claiming(self.clone(), session_id, session_token);
+        let mut guard =
+            seeded_clone_guard::SeededCloneGuard::claiming(self.clone(), session_id, session_token);
         for record in records.iter_mut() {
             agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, record)?;
             if record.daemon_instance_id == local_instance_id {
@@ -426,5 +433,4 @@ impl ConnectionServiceImpl {
             }
         }
     }
-
 }

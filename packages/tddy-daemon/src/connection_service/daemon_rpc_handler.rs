@@ -1,12 +1,11 @@
 use futures_util::StreamExt;
 // A `ConnectionService` trait method is called on `self` here, so the trait must be in scope.
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use tddy_service::proto::connection::CancelAgentConversationRequest;
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 
 use tddy_service::proto::connection::PromptAgentConversationRequest;
 
 use tddy_service::proto::connection::OpenAgentConversationRequest;
-
 
 use tddy_service::proto::connection::StreamSessionAgentsRequest;
 

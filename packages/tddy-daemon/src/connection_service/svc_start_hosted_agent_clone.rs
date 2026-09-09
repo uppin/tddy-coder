@@ -11,7 +11,10 @@ use std::{path::Path, sync::Arc};
 
 use std::path::PathBuf;
 
-use crate::{connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config, project_storage, workspace_session};
+use crate::{
+    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
+    project_storage, workspace_session,
+};
 
 use crate::user_sessions_path::projects_path_for_user;
 
@@ -171,7 +174,10 @@ impl ConnectionServiceImpl {
     /// own* prompts with an error naming that daemon, while the rest of the roster keeps working
     /// (PRD AC35). Waiting out `PEER_FORWARD_TIMEOUT` reaches the same answer thirty seconds later
     /// and tells the operator only that something timed out.
-    pub(crate) async fn refuse_departed_daemon(&self, daemon_instance_id: &str) -> Result<(), Status> {
+    pub(crate) async fn refuse_departed_daemon(
+        &self,
+        daemon_instance_id: &str,
+    ) -> Result<(), Status> {
         if self
             .eligible_instance_ids()
             .iter()
@@ -322,7 +328,9 @@ impl ConnectionServiceImpl {
                     tool_name,
                     args_json: args.to_string(),
                 };
-                agent_roster::dispatch_envelope(service.run_hosted_clone_tool(&request, &clone).await)
+                agent_roster::dispatch_envelope(
+                    service.run_hosted_clone_tool(&request, &clone).await,
+                )
             })
         })
     }
@@ -429,7 +437,12 @@ impl ConnectionServiceImpl {
     /// status ticks on **every tool call** — putting a whole roster on the room for each one would
     /// spend the room's bandwidth on a badge, and `rev` has not moved, so nothing those
     /// participants act on has changed.
-    pub(crate) fn republish_roster_quietly(&self, session_id: &str, session_dir: &Path, agent_id: &str) {
+    pub(crate) fn republish_roster_quietly(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        agent_id: &str,
+    ) {
         if let Err(e) = self
             .session_agent_rosters
             .republish(session_id, session_dir)
@@ -441,5 +454,4 @@ impl ConnectionServiceImpl {
             );
         }
     }
-
 }

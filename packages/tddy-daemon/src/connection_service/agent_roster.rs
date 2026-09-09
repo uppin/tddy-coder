@@ -13,7 +13,7 @@ use tddy_rpc::Request;
 
 use tddy_rpc::Status;
 
-use crate::connection_service::{SeededAgentClones, seed_codebase, seeded_clone_guard};
+use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};
 
 use super::ConnectionServiceImpl;
 

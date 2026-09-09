@@ -2,7 +2,6 @@ use super::SeededCloneGuard;
 
 use super::session_enforces_a_withdrawal;
 
-
 use tddy_rpc::Status;
 
 use std::path::Path;

@@ -1,5 +1,5 @@
-use tddy_service::proto::connection::AgentActivityRecord as ProtoAgentActivityRecord;
 use std::sync::Mutex as StdMutex;
+use tddy_service::proto::connection::AgentActivityRecord as ProtoAgentActivityRecord;
 use tokio::sync::broadcast::error::RecvError;
 
 /// Live pub/sub hub for **agent activity** records, plus the per-session pending-call stack that

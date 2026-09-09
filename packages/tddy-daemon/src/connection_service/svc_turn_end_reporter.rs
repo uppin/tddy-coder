@@ -7,7 +7,10 @@ use tddy_service::proto::connection::ListSubagentsResponse;
 
 use tddy_service::proto::connection::ListSubagentsRequest;
 
-use crate::{connection_service::{agent_roster, seed_codebase}, livekit_peer_discovery::local_instance_id_for_config};
+use crate::{
+    connection_service::{agent_roster, seed_codebase},
+    livekit_peer_discovery::local_instance_id_for_config,
+};
 
 use tddy_service::proto::connection::CancelAgentConversationRequest;
 
@@ -210,7 +213,8 @@ impl ConnectionServiceImpl {
                      found under <tddyhome>/agents, and not an assistant in its registry)"
                 ))
             })?;
-        agent_roster::roster_record(&def, &local_instance_id).map_err(|e| Status::invalid_argument(e.to_string()))
+        agent_roster::roster_record(&def, &local_instance_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))
     }
 
     /// The roster entry an id naming a **peer** resolves to, taken from that peer's own
@@ -357,5 +361,4 @@ impl ConnectionServiceImpl {
             Vec::new()
         }
     }
-
 }

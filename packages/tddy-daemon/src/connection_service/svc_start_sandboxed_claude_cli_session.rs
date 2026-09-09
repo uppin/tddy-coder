@@ -1,14 +1,11 @@
-use std::sync::Mutex as StdMutex;
 use super::DaemonRpcHandler;
+use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
-
 
 use super::sandbox_claude_passthrough_args;
 
 use super::roster_replacement_pairs;
-
-
 
 use super::WorktreeSource;
 
@@ -16,7 +13,11 @@ use super::session_worktree_source;
 
 use tddy_core::Changeset;
 
-use crate::{branch_intent::BranchIntentPolicy, connection_service::{agent_roster, hooks_and_urls, seed_codebase, service_util, stack_parent}, project_storage};
+use crate::{
+    branch_intent::BranchIntentPolicy,
+    connection_service::{agent_roster, hooks_and_urls, seed_codebase, service_util, stack_parent},
+    project_storage,
+};
 
 use crate::branch_intent::BranchIntentRequest;
 
@@ -649,5 +650,4 @@ impl ConnectionServiceImpl {
             branch_conflict: None,
         }))
     }
-
 }

@@ -1,4 +1,9 @@
-use crate::{connection_service::{seed_codebase, service_util, stack_parent}, project_storage, session_deletion, spawn_worker, spawner::{self, SpawnOptions}, workspace_session};
+use crate::{
+    connection_service::{seed_codebase, service_util, stack_parent},
+    project_storage, session_deletion, spawn_worker,
+    spawner::{self, SpawnOptions},
+    workspace_session,
+};
 
 use super::recipe_enables_conversation_spawn;
 
@@ -15,7 +20,6 @@ use std::path::Path;
 use super::validate_stack_seed_base_session;
 
 use crate::user_sessions_path::projects_path_for_user;
-
 
 use super::CodebasePlacement;
 
@@ -782,79 +786,83 @@ impl ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
-                    log::debug!(
-                        "StartSession: spawn_blocking running, using_spawn_worker={}",
-                        spawn_client.is_some()
-                    );
-                    let pid = Some(pid_for_spawn.as_str());
-                    let agent = agent_for_spawn.as_deref();
-                    let agent_def = agent_def_for_spawn.as_deref();
-                    let recipe = recipe_for_spawn.as_deref();
-                    let stack_parent = stack_parent_for_spawn.as_deref();
-                    let stack_node_id = stack_node_id_for_spawn.as_deref();
-                    let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
-                    let model = model_for_spawn.as_deref();
-                    let new_session_id = pre_session_id.as_deref();
-                    let host_socket = host_session_socket.as_deref();
-                    let coder_log_yaml =
-                        spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                    if let Some(ref client) = spawn_client {
-                        let spawn_req = spawn_worker::build_spawn_request(
-                            &os_user,
-                            &tool_path,
-                            &tddy_data_dir_for_spawn,
-                            &repo_path,
-                            &livekit,
-                            SpawnOptions {
-                                resume_session_id: None,
-                                new_session_id,
-                                project_id: pid,
-                                agent,
-                                agent_def_json: agent_def,
-                                mouse: spawn_mouse,
-                                recipe,
-                                stack_parent,
-                                stack_node_id,
-                                stack_seed_base_session,
-                                model,
-                                host_session_socket: host_socket,
-                            },
-                            daemon_log.as_ref(),
-                            coder_log_yaml,
-                            startup_watch,
+                service_util::spawn_blocking_with_timeout(
+                    timeout,
+                    "StartSession: spawn",
+                    move || {
+                        log::debug!(
+                            "StartSession: spawn_blocking running, using_spawn_worker={}",
+                            spawn_client.is_some()
                         );
-                        client.spawn(spawn_req)
-                    } else {
-                        let (child_log_level, child_log_format) =
-                            spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                        spawner::spawn_as_user(
-                            &os_user,
-                            &tool_path,
-                            &tddy_data_dir_for_spawn,
-                            &repo_path,
-                            &livekit,
-                            SpawnOptions {
-                                resume_session_id: None,
-                                new_session_id,
-                                project_id: pid,
-                                agent,
-                                agent_def_json: agent_def,
-                                mouse: spawn_mouse,
-                                recipe,
-                                stack_parent,
-                                stack_node_id,
-                                stack_seed_base_session,
-                                model,
-                                host_session_socket: host_socket,
-                            },
-                            child_log_level.as_str(),
-                            child_log_format.as_str(),
-                            coder_log_yaml.as_deref(),
-                            startup_watch,
-                        )
-                    }
-                })
+                        let pid = Some(pid_for_spawn.as_str());
+                        let agent = agent_for_spawn.as_deref();
+                        let agent_def = agent_def_for_spawn.as_deref();
+                        let recipe = recipe_for_spawn.as_deref();
+                        let stack_parent = stack_parent_for_spawn.as_deref();
+                        let stack_node_id = stack_node_id_for_spawn.as_deref();
+                        let stack_seed_base_session = stack_seed_base_session_for_spawn.as_deref();
+                        let model = model_for_spawn.as_deref();
+                        let new_session_id = pre_session_id.as_deref();
+                        let host_socket = host_session_socket.as_deref();
+                        let coder_log_yaml =
+                            spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                        if let Some(ref client) = spawn_client {
+                            let spawn_req = spawn_worker::build_spawn_request(
+                                &os_user,
+                                &tool_path,
+                                &tddy_data_dir_for_spawn,
+                                &repo_path,
+                                &livekit,
+                                SpawnOptions {
+                                    resume_session_id: None,
+                                    new_session_id,
+                                    project_id: pid,
+                                    agent,
+                                    agent_def_json: agent_def,
+                                    mouse: spawn_mouse,
+                                    recipe,
+                                    stack_parent,
+                                    stack_node_id,
+                                    stack_seed_base_session,
+                                    model,
+                                    host_session_socket: host_socket,
+                                },
+                                daemon_log.as_ref(),
+                                coder_log_yaml,
+                                startup_watch,
+                            );
+                            client.spawn(spawn_req)
+                        } else {
+                            let (child_log_level, child_log_format) =
+                                spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                            spawner::spawn_as_user(
+                                &os_user,
+                                &tool_path,
+                                &tddy_data_dir_for_spawn,
+                                &repo_path,
+                                &livekit,
+                                SpawnOptions {
+                                    resume_session_id: None,
+                                    new_session_id,
+                                    project_id: pid,
+                                    agent,
+                                    agent_def_json: agent_def,
+                                    mouse: spawn_mouse,
+                                    recipe,
+                                    stack_parent,
+                                    stack_node_id,
+                                    stack_seed_base_session,
+                                    model,
+                                    host_session_socket: host_socket,
+                                },
+                                child_log_level.as_str(),
+                                child_log_format.as_str(),
+                                coder_log_yaml.as_deref(),
+                                startup_watch,
+                            )
+                        }
+                    },
+                )
                 .await?
             }
         };

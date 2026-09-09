@@ -218,10 +218,10 @@ impl ConnectionServiceImpl {
             let (client, endpoint) =
                 tddy_stdio::StdioEndpoint::from_duplex(reader, writer, service);
             let task = tokio::spawn(endpoint.run());
-            session_stdio
-                .lock()
-                .await
-                .insert(sid.clone(), seeded_clone_guard::SessionStdioEndpoint { client, task });
+            session_stdio.lock().await.insert(
+                sid.clone(),
+                seeded_clone_guard::SessionStdioEndpoint { client, task },
+            );
             log::info!("spawn_host_session_socket({sid}): reverse endpoint connected + ready");
         });
         log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");

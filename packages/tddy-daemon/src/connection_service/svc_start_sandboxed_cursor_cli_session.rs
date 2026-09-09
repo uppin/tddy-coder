@@ -1,14 +1,17 @@
-use std::sync::Mutex as StdMutex;
 use super::DaemonRpcHandler;
+use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
-
 
 use super::roster_replacement_pairs;
 
 use tddy_core::Changeset;
 
-use crate::{branch_intent::BranchIntentPolicy, connection_service::{agent_roster, seed_codebase, service_util, stack_parent}, project_storage};
+use crate::{
+    branch_intent::BranchIntentPolicy,
+    connection_service::{agent_roster, seed_codebase, service_util, stack_parent},
+    project_storage,
+};
 
 use crate::branch_intent::BranchIntentRequest;
 
@@ -493,5 +496,4 @@ impl ConnectionServiceImpl {
             branch_conflict: None,
         }))
     }
-
 }

@@ -1,5 +1,5 @@
-use std::sync::Mutex as StdMutex;
 use crate::connection_service::agent_roster;
+use std::sync::Mutex as StdMutex;
 
 use super::DaemonRpcHandler;
 

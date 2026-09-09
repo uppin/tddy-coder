@@ -1,6 +1,8 @@
 use super::SplitStartFailure;
 
-use crate::{connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config};
+use crate::{
+    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
+};
 
 use uuid::Uuid;
 
@@ -407,5 +409,4 @@ impl ConnectionServiceImpl {
             }
         }
     }
-
 }

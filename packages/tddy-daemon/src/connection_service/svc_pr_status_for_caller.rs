@@ -1,7 +1,11 @@
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use std::path::PathBuf;
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 
-use crate::{connection_service::{service_util, stack_parent}, project_storage, user_sessions_path::projects_path_for_user};
+use crate::{
+    connection_service::{service_util, stack_parent},
+    project_storage,
+    user_sessions_path::projects_path_for_user,
+};
 
 use tddy_service::proto::connection::BranchSession;
 
@@ -17,11 +21,9 @@ use std::sync::Arc;
 
 use tddy_service::proto::connection::LinkStackNodeRequest;
 
-
 use tddy_service::proto::connection::ResolveStackBaseRequest;
 
 use tddy_rpc::Request;
-
 
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
@@ -309,7 +311,10 @@ impl ConnectionServiceImpl {
     /// The node is never derived from the branch on the routed path (D34): `new_branch_name` is the
     /// operator's to edit in the create dialog before confirming, so a rename would silently link
     /// nothing — or link the wrong node.
-    pub(crate) async fn record_spawn_on_stack_node(&self, link: &stack_parent::StackNodeLink<'_>) -> Result<(), Status> {
+    pub(crate) async fn record_spawn_on_stack_node(
+        &self,
+        link: &stack_parent::StackNodeLink<'_>,
+    ) -> Result<(), Status> {
         let node_id = link.node_id.trim();
         if node_id.is_empty() {
             return Self::link_stack_node_to_spawned_branch(
@@ -415,7 +420,6 @@ impl ConnectionServiceImpl {
         os_user: &str,
         req: &StartSessionRequest,
     ) -> Result<Option<BranchConflict>, Status> {
-
         if req.on_branch_conflict.trim() != "reject"
             || req.branch_worktree_intent.trim() != "new_branch_from_base"
         {
@@ -472,5 +476,4 @@ impl ConnectionServiceImpl {
             suggested_branch_name,
         }))
     }
-
 }

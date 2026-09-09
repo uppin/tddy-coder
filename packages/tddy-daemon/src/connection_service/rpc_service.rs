@@ -1,22 +1,56 @@
 // The parent module's own imports, carried in: this block was the whole `impl
 // ConnectionServiceTrait` and reaches the same traits and helpers it always did. Unused
 // entries are pruned below by the compiler's own spans.
-use tddy_terminal_rpc::TerminalSessionStore;
 use futures_util::StreamExt;
+use tddy_terminal_rpc::TerminalSessionStore;
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
-use prost::Message as _;
-use crate::tool_engine;
-use tddy_service::proto::connection::start_session_event::Event as StartSessionEventKind;
-use tddy_service::proto::connection::{AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, ClaimTerminalControlRequest, ClaimTerminalControlResponse, DeleteSessionUploadRequest, DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse, GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats, HostDocumentChunk, HostDocumentScope, HostLoadStats, HostMemoryStats, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse, ListSessionUploadsRequest, ListSessionUploadsResponse, ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, LiveKitRoomsEvent, MintLocalTokenRequest, MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest, ReadHostDocumentResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse, SessionNotificationEvent as ProtoSessionNotificationEvent, SessionUploadEntry, StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest, StreamHostStatsRequest, StreamLiveKitRoomsRequest, TerminalControlEvent, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest};
-use tddy_service::proto::connection::{AgentActivityRecord as ProtoAgentActivityRecord, StreamMode, StreamSessionNotificationsRequest};
-use tddy_service::proto::connection::{DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse, StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse, StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo};
-use tddy_sandbox_runner::ExecuteToolResponse;
-use tddy_service::proto::connection::{DeltaScope as ProtoDeltaScope, ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListTerminalSessionsRequest, ListTerminalSessionsResponse, StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse, TerminalSessionInfo};
-use tddy_service::proto::connection::{AddHostKeyOutcome, AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest, ProjectEntry as ProtoProjectEntry};
-use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use super::stream_document_frames;
+use crate::tool_engine;
+use prost::Message as _;
+use tddy_sandbox_runner::ExecuteToolResponse;
+use tddy_service::proto::connection::start_session_event::Event as StartSessionEventKind;
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
+use tddy_service::proto::connection::SessionEntry as ProtoSessionEntry;
+use tddy_service::proto::connection::{
+    AcpReplayFrame, AddPlannedPrRequest, AddPlannedPrResponse, ClaimTerminalControlRequest,
+    ClaimTerminalControlResponse, DeleteSessionUploadRequest, DeleteSessionUploadResponse,
+    DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, GetAcpReplayPageRequest,
+    GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
+    GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats, HostDocumentChunk, HostDocumentScope,
+    HostLoadStats, HostMemoryStats, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListSessionUploadsRequest, ListSessionUploadsResponse, ListStagedAttachmentsRequest,
+    ListStagedAttachmentsResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
+    MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest, ReadHostDocumentResponse,
+    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
+    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
+    SessionNotificationEvent as ProtoSessionNotificationEvent, SessionUploadEntry,
+    StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest, StreamHostStatsRequest,
+    StreamLiveKitRoomsRequest, TerminalControlEvent, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest,
+};
+use tddy_service::proto::connection::{
+    AddHostKeyOutcome, AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest,
+    ProjectEntry as ProtoProjectEntry,
+};
+use tddy_service::proto::connection::{
+    AgentActivityRecord as ProtoAgentActivityRecord, StreamMode, StreamSessionNotificationsRequest,
+};
+use tddy_service::proto::connection::{
+    DeltaScope as ProtoDeltaScope, ExecuteToolChunk, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ListTerminalSessionsRequest,
+    ListTerminalSessionsResponse, StartTerminalSessionResponse, StopTerminalSessionRequest,
+    StopTerminalSessionResponse, TerminalSessionInfo,
+};
+use tddy_service::proto::connection::{
+    DemoVmState, GetDemoVmStatusRequest, GetDemoVmStatusResponse, ReportAgentActivityRequest,
+    ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    StartDemoVmRequest, StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
+    StreamSessionActivityRequest, ToolCallInfo as ProtoToolCallInfo,
+};
 
 use super::file_mtime_ms;
 
@@ -26,7 +60,15 @@ use tddy_service::proto::connection::CalculateWorktreeSizeRequest;
 
 use tddy_service::proto::connection::WorktreeStatsEvent;
 
-use crate::{connection_service::{activity_hub, agent_roster, hooks_and_urls, host_messages, seed_codebase, seeded_clone_guard, service_util}, project_storage, session_deletion, session_list_enrichment, session_reader, spawn_worker, spawner, worktrees::{self, WorktreeDiffRow}};
+use crate::{
+    connection_service::{
+        activity_hub, agent_roster, hooks_and_urls, host_messages, seed_codebase,
+        seeded_clone_guard, service_util,
+    },
+    project_storage, session_deletion, session_list_enrichment, session_reader, spawn_worker,
+    spawner,
+    worktrees::{self, WorktreeDiffRow},
+};
 
 use tddy_service::proto::connection::StreamWorktreeStatsRequest;
 
@@ -500,13 +542,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let resolved = defs.len();
         let subagents: Vec<SubagentInfo> = defs
             .into_iter()
-            .filter_map(|def| match agent_roster::subagent_info(&def, &daemon_instance_id) {
-                Ok(info) => Some(info),
-                Err(e) => {
-                    log::warn!("list_subagents RPC: not advertising a def — {e}");
-                    None
-                }
-            })
+            .filter_map(
+                |def| match agent_roster::subagent_info(&def, &daemon_instance_id) {
+                    Ok(info) => Some(info),
+                    Err(e) => {
+                        log::warn!("list_subagents RPC: not advertising a def — {e}");
+                        None
+                    }
+                },
+            )
             .collect();
         // An empty answer has three very different causes — this daemon has no defs, its registry
         // was never wired in, or a def was dropped on the way out — and "returning 0" told them
@@ -1039,9 +1083,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     // Reported after the frames are on the wire, not before: a badge that drops to
                     // idle while the answer is still arriving is one a reader acts on too early.
                     let answered = format!("answered ({} chars)", content.chars().count());
-                    for frame in
-                        agent_conversation_frames(&content, agent_roster::agent_stop_reason(outcome.stop_reason))
-                    {
+                    for frame in agent_conversation_frames(
+                        &content,
+                        agent_roster::agent_stop_reason(outcome.stop_reason),
+                    ) {
                         if tx.send(Ok(frame)).is_err() {
                             // The caller hung up mid-answer. The turn is over either way, and a
                             // badge left up would strand it.
@@ -1292,8 +1337,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // seed is paid for on this blocking thread rather than on the reactor.
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
         let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
-        let entries =
-            service_util::spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
+        let entries = service_util::spawn_blocking_with_timeout(
+            timeout,
+            "ListSessions: read and enrich",
+            move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
                     .map_err(|e| anyhow::anyhow!(e))?;
                 let mut out = Vec::with_capacity(sessions.len());
@@ -1387,8 +1434,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     out.push(entry);
                 }
                 Ok(out)
-            })
-            .await?;
+            },
+        )
+        .await?;
         Ok(Response::new(ListSessionsResponse { sessions: entries }))
     }
 
@@ -1412,8 +1460,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .into_iter()
             .map(|p| {
                 let repo_root = PathBuf::from(&p.main_repo_path);
-                let default_remote =
-                    hooks_and_urls::resolve_default_remote_or_empty(&projects_dir, &p.project_id, &repo_root);
+                let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+                    &projects_dir,
+                    &p.project_id,
+                    &repo_root,
+                );
                 hooks_and_urls::project_entry_from(&p, local_daemon_id.clone(), default_remote)
             })
             .collect();
@@ -1495,17 +1546,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
-                    if let Some(ref client) = spawn_client {
-                        client.clone_repo(spawn_worker::CloneRequest {
-                            os_user: os_user_owned,
-                            git_url: git_url_owned,
-                            destination: dest_path.display().to_string(),
-                        })
-                    } else {
-                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                    }
-                })
+                service_util::spawn_blocking_with_timeout(
+                    timeout,
+                    "create_project: clone_repo",
+                    move || {
+                        if let Some(ref client) = spawn_client {
+                            client.clone_repo(spawn_worker::CloneRequest {
+                                os_user: os_user_owned,
+                                git_url: git_url_owned,
+                                destination: dest_path.display().to_string(),
+                            })
+                        } else {
+                            spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                        }
+                    },
+                )
                 .await?
             }
         }
@@ -1526,8 +1581,11 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             host_repo_paths: std::collections::HashMap::new(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
-        let default_remote =
-            hooks_and_urls::resolve_default_remote_or_empty(&projects_dir, &project.project_id, &repo_root);
+        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+            &projects_dir,
+            &project.project_id,
+            &repo_root,
+        );
         let entry = hooks_and_urls::project_entry_from(
             &project,
             local_instance_id_for_config(&self.config),
@@ -1619,10 +1677,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 project_id
             );
             let repo_root = PathBuf::from(&existing.main_repo_path);
-            let default_remote =
-                hooks_and_urls::resolve_default_remote_or_empty(&projects_dir, &existing.project_id, &repo_root);
+            let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+                &projects_dir,
+                &existing.project_id,
+                &repo_root,
+            );
             return Ok(Response::new(AddProjectToHostResponse {
-                project: Some(hooks_and_urls::project_entry_from(&existing, local_id, default_remote)),
+                project: Some(hooks_and_urls::project_entry_from(
+                    &existing,
+                    local_id,
+                    default_remote,
+                )),
             }));
         }
 
@@ -1656,17 +1721,21 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
-                    if let Some(ref client) = spawn_client {
-                        client.clone_repo(spawn_worker::CloneRequest {
-                            os_user: os_user_owned,
-                            git_url: git_url_owned,
-                            destination: dest_path.display().to_string(),
-                        })
-                    } else {
-                        spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
-                    }
-                })
+                service_util::spawn_blocking_with_timeout(
+                    timeout,
+                    "add_project_to_host: clone_repo",
+                    move || {
+                        if let Some(ref client) = spawn_client {
+                            client.clone_repo(spawn_worker::CloneRequest {
+                                os_user: os_user_owned,
+                                git_url: git_url_owned,
+                                destination: dest_path.display().to_string(),
+                            })
+                        } else {
+                            spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
+                        }
+                    },
+                )
                 .await?
             }
         }
@@ -1694,10 +1763,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote =
-            hooks_and_urls::resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
+        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+            &projects_dir,
+            &stored.project_id,
+            &repo_root,
+        );
         Ok(Response::new(AddProjectToHostResponse {
-            project: Some(hooks_and_urls::project_entry_from(&stored, local_id, default_remote)),
+            project: Some(hooks_and_urls::project_entry_from(
+                &stored,
+                local_id,
+                default_remote,
+            )),
         }))
     }
 
@@ -1787,10 +1863,17 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             stored.main_branch_ref.as_deref().unwrap_or_default()
         );
         let repo_root = PathBuf::from(&stored.main_repo_path);
-        let default_remote =
-            hooks_and_urls::resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
+        let default_remote = hooks_and_urls::resolve_default_remote_or_empty(
+            &projects_dir,
+            &stored.project_id,
+            &repo_root,
+        );
         Ok(Response::new(SetProjectDefaultBranchResponse {
-            project: Some(hooks_and_urls::project_entry_from(&stored, local_id, default_remote)),
+            project: Some(hooks_and_urls::project_entry_from(
+                &stored,
+                local_id,
+                default_remote,
+            )),
         }))
     }
 
@@ -2033,76 +2116,80 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                service_util::spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
-                    let pid = if project_id_resume.is_empty() {
-                        None
-                    } else {
-                        Some(project_id_resume.as_str())
-                    };
-                    let coder_log_yaml =
-                        spawner::coder_log_config_yaml(coder_config_path.as_deref());
-                    if let Some(ref client) = spawn_client {
-                        let spawn_req = spawn_worker::build_spawn_request(
-                            &os_user,
-                            &tool_path,
-                            &tddy_data_dir_for_spawn,
-                            &repo_path,
-                            &livekit,
-                            SpawnOptions {
-                                resume_session_id: Some(session_id.as_str()),
-                                new_session_id: None,
-                                project_id: pid,
-                                agent: resume_agent.as_deref(),
-                                agent_def_json: resume_agent_def.as_deref(),
-                                mouse: spawn_mouse,
-                                recipe: resume_recipe.as_deref(),
-                                stack_parent: None,
-                                stack_node_id: None,
-                                // Seeding a stack is a creation-time act; a resumed orchestrator
-                                // already has whatever stack it was created with.
-                                stack_seed_base_session: None,
-                                model: None,
-                                // TODO(stdio-relay): wire the resume path's reverse channel too.
-                                host_session_socket: None,
-                            },
-                            daemon_log.as_ref(),
-                            coder_log_yaml,
-                            startup_watch,
-                        );
-                        client.spawn(spawn_req)
-                    } else {
-                        let (child_log_level, child_log_format) =
-                            spawner::child_log_yaml_tuning(daemon_log.as_ref());
-                        spawner::spawn_as_user(
-                            &os_user,
-                            &tool_path,
-                            &tddy_data_dir_for_spawn,
-                            &repo_path,
-                            &livekit,
-                            SpawnOptions {
-                                resume_session_id: Some(session_id.as_str()),
-                                new_session_id: None,
-                                project_id: pid,
-                                agent: resume_agent.as_deref(),
-                                agent_def_json: resume_agent_def.as_deref(),
-                                mouse: spawn_mouse,
-                                recipe: resume_recipe.as_deref(),
-                                stack_parent: None,
-                                stack_node_id: None,
-                                // Seeding a stack is a creation-time act; a resumed orchestrator
-                                // already has whatever stack it was created with.
-                                stack_seed_base_session: None,
-                                model: None,
-                                // TODO(stdio-relay): wire the resume path's reverse channel too.
-                                host_session_socket: None,
-                            },
-                            child_log_level.as_str(),
-                            child_log_format.as_str(),
-                            coder_log_yaml.as_deref(),
-                            startup_watch,
-                        )
-                    }
-                })
+                service_util::spawn_blocking_with_timeout(
+                    timeout,
+                    "ResumeSession: spawn",
+                    move || {
+                        let pid = if project_id_resume.is_empty() {
+                            None
+                        } else {
+                            Some(project_id_resume.as_str())
+                        };
+                        let coder_log_yaml =
+                            spawner::coder_log_config_yaml(coder_config_path.as_deref());
+                        if let Some(ref client) = spawn_client {
+                            let spawn_req = spawn_worker::build_spawn_request(
+                                &os_user,
+                                &tool_path,
+                                &tddy_data_dir_for_spawn,
+                                &repo_path,
+                                &livekit,
+                                SpawnOptions {
+                                    resume_session_id: Some(session_id.as_str()),
+                                    new_session_id: None,
+                                    project_id: pid,
+                                    agent: resume_agent.as_deref(),
+                                    agent_def_json: resume_agent_def.as_deref(),
+                                    mouse: spawn_mouse,
+                                    recipe: resume_recipe.as_deref(),
+                                    stack_parent: None,
+                                    stack_node_id: None,
+                                    // Seeding a stack is a creation-time act; a resumed orchestrator
+                                    // already has whatever stack it was created with.
+                                    stack_seed_base_session: None,
+                                    model: None,
+                                    // TODO(stdio-relay): wire the resume path's reverse channel too.
+                                    host_session_socket: None,
+                                },
+                                daemon_log.as_ref(),
+                                coder_log_yaml,
+                                startup_watch,
+                            );
+                            client.spawn(spawn_req)
+                        } else {
+                            let (child_log_level, child_log_format) =
+                                spawner::child_log_yaml_tuning(daemon_log.as_ref());
+                            spawner::spawn_as_user(
+                                &os_user,
+                                &tool_path,
+                                &tddy_data_dir_for_spawn,
+                                &repo_path,
+                                &livekit,
+                                SpawnOptions {
+                                    resume_session_id: Some(session_id.as_str()),
+                                    new_session_id: None,
+                                    project_id: pid,
+                                    agent: resume_agent.as_deref(),
+                                    agent_def_json: resume_agent_def.as_deref(),
+                                    mouse: spawn_mouse,
+                                    recipe: resume_recipe.as_deref(),
+                                    stack_parent: None,
+                                    stack_node_id: None,
+                                    // Seeding a stack is a creation-time act; a resumed orchestrator
+                                    // already has whatever stack it was created with.
+                                    stack_seed_base_session: None,
+                                    model: None,
+                                    // TODO(stdio-relay): wire the resume path's reverse channel too.
+                                    host_session_socket: None,
+                                },
+                                child_log_level.as_str(),
+                                child_log_format.as_str(),
+                                coder_log_yaml.as_deref(),
+                                startup_watch,
+                            )
+                        }
+                    },
+                )
                 .await?
             }
         };
@@ -3490,7 +3577,9 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let chunk = sandbox
                     .capture
                     .lock()
-                    .map(|cap| cap.replay_from(cursor, 0, service_util::TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                    .map(|cap| {
+                        cap.replay_from(cursor, 0, service_util::TERMINAL_OUTPUT_FRAME_MAX_BYTES)
+                    })
                     .unwrap_or_else(|_| tddy_task::CaptureChunk {
                         data: Vec::new(),
                         start_offset: cursor,
@@ -4645,8 +4734,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             let state = self.demo_vm_state.lock().await;
             if let Some(h) = state.get(&req.session_id) {
                 let (state_enum, msg) = match h {
-                    activity_hub::DemoVmHandle::Booting => (DemoVmState::Booting, "already booting"),
-                    activity_hub::DemoVmHandle::Running { .. } => (DemoVmState::Running, "VM already running"),
+                    activity_hub::DemoVmHandle::Booting => {
+                        (DemoVmState::Booting, "already booting")
+                    }
+                    activity_hub::DemoVmHandle::Running { .. } => {
+                        (DemoVmState::Running, "VM already running")
+                    }
                     activity_hub::DemoVmHandle::Error(_) => {
                         // Allow retry after error.
                         return Ok(Response::new(StartDemoVmResponse {
@@ -4683,7 +4776,10 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             match vm_impl.boot(&config).await {
                 Ok(vm) => {
                     let mut state = state_ref.lock().await;
-                    state.insert(session_id, activity_hub::DemoVmHandle::Running { vm, share_url });
+                    state.insert(
+                        session_id,
+                        activity_hub::DemoVmHandle::Running { vm, share_url },
+                    );
                 }
                 Err(e) => {
                     let mut state = state_ref.lock().await;
@@ -4780,12 +4876,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 message: "booting".to_string(),
                 share_url: String::new(),
             },
-            Some(activity_hub::DemoVmHandle::Running { vm, share_url }) => GetDemoVmStatusResponse {
-                state: DemoVmState::Running as i32,
-                ssh_host_port: vm.ssh_host_port as u32,
-                message: "running".to_string(),
-                share_url: share_url.clone(),
-            },
+            Some(activity_hub::DemoVmHandle::Running { vm, share_url }) => {
+                GetDemoVmStatusResponse {
+                    state: DemoVmState::Running as i32,
+                    ssh_host_port: vm.ssh_host_port as u32,
+                    message: "running".to_string(),
+                    share_url: share_url.clone(),
+                }
+            }
             Some(activity_hub::DemoVmHandle::Error(msg)) => GetDemoVmStatusResponse {
                 state: DemoVmState::Error as i32,
                 ssh_host_port: 0,

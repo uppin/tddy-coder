@@ -4,8 +4,10 @@ use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use std::path::Path;
 
-use crate::{connection_service::agent_roster, project_storage, spawn_worker, spawner, user_sessions_path::repos_base_for_user, worktrees};
-
+use crate::{
+    connection_service::agent_roster, project_storage, spawn_worker, spawner,
+    user_sessions_path::repos_base_for_user, worktrees,
+};
 
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
@@ -259,8 +261,9 @@ impl ConnectionServiceImpl {
     /// So the ordering stands and the silence is what gets fixed. Deduplicated because this runs on
     /// every `ListAgents`; an undeduplicated line here would flood the log rather than inform it.
     pub(crate) fn report_shadowed_agent_def(agents_dir: &std::path::Path, name: &str) {
-        pub(crate) static REPORTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-            std::sync::OnceLock::new();
+        pub(crate) static REPORTED: std::sync::OnceLock<
+            std::sync::Mutex<std::collections::HashSet<String>>,
+        > = std::sync::OnceLock::new();
         let key = format!("{}\u{0}{name}", agents_dir.display());
         let mut reported = REPORTED
             .get_or_init(Default::default)
@@ -418,7 +421,11 @@ impl ConnectionServiceImpl {
     /// Auth first is load-bearing rather than tidy: attaching an agent owned by another daemon
     /// contacts that peer and provisions a checkout on it, so a check that ran afterwards would let
     /// an unauthenticated caller build a clone on another host (PRD AC12).
-    pub(crate) fn roster_session_dir(&self, session_token: &str, session_id: &str) -> Result<PathBuf, Status> {
+    pub(crate) fn roster_session_dir(
+        &self,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<PathBuf, Status> {
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         // Resolved for the authorization decision alone: a caller who maps to no OS user may not

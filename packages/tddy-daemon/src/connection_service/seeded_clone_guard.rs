@@ -4,7 +4,6 @@ use crate::connection_service::seed_codebase;
 
 use super::ConnectionServiceImpl;
 
-
 /// One agent a start has already put on a session's roster, as its unwind needs to name it.
 ///
 /// The clone is carried rather than looked up again: only the entry that *commissioned* a checkout
@@ -49,7 +48,11 @@ impl SeededCloneGuard {
 
     /// A guard for a start that is about to claim, opened before the first claim so an early
     /// return releases whatever it got through.
-    pub(crate) fn claiming(service: ConnectionServiceImpl, session_id: &str, session_token: &str) -> Self {
+    pub(crate) fn claiming(
+        service: ConnectionServiceImpl,
+        session_id: &str,
+        session_token: &str,
+    ) -> Self {
         Self {
             release: Some(SeededCloneRelease {
                 service,

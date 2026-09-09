@@ -1,5 +1,5 @@
-use tddy_service::proto::connection::ProbeOutcome as ProtoProbeOutcome;
 use tddy_service::proto::connection::HostRemoteDesktop;
+use tddy_service::proto::connection::ProbeOutcome as ProtoProbeOutcome;
 
 use tddy_service::proto::connection::HostGithubCli;
 

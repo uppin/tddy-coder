@@ -1,6 +1,10 @@
 use tddy_rpc::Status;
 
-use crate::{connection_service::{activity_hub, agent_roster, service_util}, livekit_rooms_stream::RoomRoster, spawn_worker, worktrees};
+use crate::{
+    connection_service::{activity_hub, agent_roster, service_util},
+    livekit_rooms_stream::RoomRoster,
+    spawn_worker, worktrees,
+};
 
 use std::time::Duration;
 
@@ -549,7 +553,12 @@ impl ConnectionServiceImpl {
     /// The two are independent. Gating the observer on Telegram would leave a workflow session's
     /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
     /// them; `spawn_presenter_observer_task` declines only when *neither* sink exists.
-    pub(crate) fn maybe_spawn_presenter_observer(&self, os_user: &str, session_id: &str, grpc_port: u16) {
+    pub(crate) fn maybe_spawn_presenter_observer(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        grpc_port: u16,
+    ) {
         let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
             match crate::user_sessions_path::sessions_base_for_user(
                 os_user,
@@ -577,5 +586,4 @@ impl ConnectionServiceImpl {
             grpc_port,
         );
     }
-
 }

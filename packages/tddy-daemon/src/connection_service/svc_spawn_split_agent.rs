@@ -2,8 +2,6 @@ use tddy_core::read_session_metadata;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-
-
 use super::peer_has_no_such_session;
 
 use tddy_service::proto::connection::DeleteSessionRequest;
@@ -16,7 +14,9 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use crate::{connection_service::hooks_and_urls, livekit_peer_discovery::local_instance_id_for_config};
+use crate::{
+    connection_service::hooks_and_urls, livekit_peer_discovery::local_instance_id_for_config,
+};
 
 use std::sync::Arc;
 
@@ -394,5 +394,4 @@ impl ConnectionServiceImpl {
         }
         Ok(())
     }
-
 }

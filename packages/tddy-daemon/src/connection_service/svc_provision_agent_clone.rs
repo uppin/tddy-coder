@@ -1,7 +1,7 @@
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
-use prost::Message as _;
 use crate::tool_engine;
+use prost::Message as _;
 use tddy_service::proto::connection::ExecuteToolResponse;
 
 use tddy_service::proto::connection::ExecuteToolRequest;
@@ -16,7 +16,10 @@ use super::peer_has_no_such_session;
 
 use tddy_service::proto::connection::DeleteSessionRequest;
 
-use crate::{connection_service::{agent_roster, hooks_and_urls, seed_codebase}, livekit_peer_discovery::local_instance_id_for_config};
+use crate::{
+    connection_service::{agent_roster, hooks_and_urls, seed_codebase},
+    livekit_peer_discovery::local_instance_id_for_config,
+};
 
 use tddy_service::proto::connection::StartSessionRequest;
 
@@ -464,5 +467,4 @@ impl ConnectionServiceImpl {
             job_running: outcome.job_running,
         }
     }
-
 }

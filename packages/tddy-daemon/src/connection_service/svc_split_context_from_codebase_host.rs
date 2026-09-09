@@ -1,9 +1,11 @@
 use futures_util::StreamExt;
 // A `ConnectionService` trait method is called on `self` here, so the trait must be in scope.
-use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 use std::time::Duration;
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 
-use tddy_service::proto::connection::{ContextManifestRequest, ReadContextFileBatchRequest, ResumeSessionResponse};
+use tddy_service::proto::connection::{
+    ContextManifestRequest, ReadContextFileBatchRequest, ResumeSessionResponse,
+};
 
 use tddy_rpc::Response;
 
@@ -309,5 +311,4 @@ impl ConnectionServiceImpl {
             livekit_server_identity: String::new(),
         }))
     }
-
 }

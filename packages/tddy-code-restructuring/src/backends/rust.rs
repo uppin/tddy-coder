@@ -385,7 +385,11 @@ impl ServerChatter {
 
         if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
             let phase = title.unwrap_or("working").to_string();
-            if self.furthest.as_ref().is_none_or(|(seen, _)| percentage >= *seen) {
+            if self
+                .furthest
+                .as_ref()
+                .is_none_or(|(seen, _)| percentage >= *seen)
+            {
                 self.furthest = Some((percentage, phase));
             }
         }
@@ -2575,7 +2579,10 @@ fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
     //
     // Only decisive where exactly one candidate's module is already imported from. Two candidates
     // from two imported modules is the ambiguity this function exists to refuse.
-    let modules: Vec<String> = in_scope.iter().filter_map(|path| parent_module(path)).collect();
+    let modules: Vec<String> = in_scope
+        .iter()
+        .filter_map(|path| parent_module(path))
+        .collect();
     let mut by_module = offered.iter().filter(|title| {
         import_path(title)
             .and_then(|path| parent_module(&path))
@@ -5033,7 +5040,10 @@ mod tests {
     /// `pub` glob that re-exports nothing — which `-D warnings` turns into a build failure.
     #[test]
     fn reexports_a_glob_at_pub_crate_when_nothing_the_seam_moved_is_public() {
-        let items = [moved("Hidden", "", false), moved("AlsoHidden", "pub(crate)", true)];
+        let items = [
+            moved("Hidden", "", false),
+            moved("AlsoHidden", "pub(crate)", true),
+        ];
 
         assert_eq!(
             facade_lines("rendering", &items, Reexport::Glob).unwrap(),
@@ -5049,7 +5059,11 @@ mod tests {
     fn treats_a_glob_facade_as_binding_every_moved_name() {
         let moved = [moved("SeededAgentClones", "pub", true)];
 
-        assert!(facade_will_bind("SeededAgentClones", &moved, Reexport::Glob));
+        assert!(facade_will_bind(
+            "SeededAgentClones",
+            &moved,
+            Reexport::Glob
+        ));
     }
 
     /// A named facade covers only what something outside the seam reaches, so a purely internal
@@ -5065,7 +5079,11 @@ mod tests {
     fn treats_no_facade_as_binding_nothing() {
         let moved = [moved("SeededAgentClones", "pub", true)];
 
-        assert!(!facade_will_bind("SeededAgentClones", &moved, Reexport::None));
+        assert!(!facade_will_bind(
+            "SeededAgentClones",
+            &moved,
+            Reexport::None
+        ));
     }
 
     // ---- D6: a rewrite written over itself ----
@@ -5074,7 +5092,8 @@ mod tests {
     #[test]
     fn refuses_a_qualified_path_whose_identifier_was_written_over_itself() {
         let moved = [moved("SeededCloneGuard", "pub", true)];
-        let text = "    ) -> Result<seeded_clone_guard::SeededCloneGuardloneGuardloneGuard, Status> {\n";
+        let text =
+            "    ) -> Result<seeded_clone_guard::SeededCloneGuardloneGuardloneGuard, Status> {\n";
 
         let outcome = refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
 
