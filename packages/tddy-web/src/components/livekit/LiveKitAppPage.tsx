@@ -5,7 +5,6 @@ import { useHostDirectorySource } from "../../rpc/hostDirectory/useHostDirectory
 import { useHostPresence } from "../../rpc/hostDirectory/useHostPresence";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useRoomParticipants } from "../../hooks/useRoomParticipants";
-import { useCapabilityAvailability } from "../../hooks/useCapabilityAvailability";
 import { ParticipantList } from "../ParticipantList";
 import { AppShell } from "../shell/AppShell";
 import { TooltipProvider } from "../ui/tooltip";
@@ -19,12 +18,16 @@ import { LiveKitRoomsPanel } from "./LiveKitRoomsPanel";
  * The rooms panel's metadata cards are Radix tooltips, so the screen carries their provider. The
  * delay is zero: the card is the readout, not a hint about a control.
  *
- * Everything on this screen is presence. On a host reached over a wire that carries none there is
- * no roster and no room list, so the screen renders neither — it says why instead. The route stays
- * reachable and the URL is kept: the nav entry is gone (see `DaemonNavMenu`), but a bookmark, a
- * shared link, or a URL carried over from a host that did have presence must land somewhere that
- * explains itself, and must become the real screen the moment the wire can serve it. That is the
- * same treatment `SessionInspectorDrawer` gives a media tab named on a host with no tracks.
+ * The two panels do not answer to the same wire, so the screen no longer gates itself as though
+ * they did. The roster is presence and only presence — on a wire that carries none it says so, in
+ * its own words, and that gate lives in `ParticipantList` where the roster is. The room list is
+ * plain daemon RPC, and a host reached without LiveKit — the desktop over IPC — can still be asked
+ * what rooms its LiveKit server holds and who is joined to each. Withholding the whole screen for
+ * the roster's sake hid that from the one build most likely to need it.
+ *
+ * So the screen always renders, and each panel answers for itself. A bookmark or a shared link
+ * lands on something real rather than on an explanation, and nothing here has to become "the real
+ * screen" later — it already is.
  */
 export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   // Take the connection state from the common room's own directory source, not from the room object
@@ -36,32 +39,12 @@ export function LiveKitAppPage({ onNavigate }: { onNavigate: (path: string) => v
   const commonRoom = useHostDirectorySource(LIVEKIT_SOURCE_ID);
   const room = useHostPresence(selectedInstanceId);
   const participants = useRoomParticipants(room);
-  // The wire the roster arrives over. Its `presence` capability decides whether this screen has
-  // anything to show at all; its `media` capability decides the participant camera column, since a
-  // camera track arrives the same way the roster does. The status half of that verdict is
-  // `useCapabilityAvailability`'s to read — `roomStatus` below is this screen's own, because the
-  // roster panel reports the join itself and quotes the reason it failed.
+  // The wire the roster arrives over: `ParticipantList` reads its `presence` and `media`
+  // capabilities itself and reports on them, which is why this screen no longer resolves an
+  // availability verdict of its own. `roomStatus` is the join it reports on, and stays this
+  // screen's to pass down — the panel is told which room's status it is speaking for.
   const connection = useHostConnection(selectedInstanceId);
   const roomStatus = commonRoom?.status ?? "idle";
-  const availability = useCapabilityAvailability(connection, "presence");
-
-  // Only when nothing is being joined and the wire has no presence either. A join still in flight,
-  // or one that failed with a reason, is a roster that exists and is reported on by the panels
-  // below — announcing "not available on this connection" for those would be a claim about the
-  // wire that the next second contradicts.
-  if (availability === "unavailable") {
-    return (
-      <AppShell title="LiveKit" onNavigate={onNavigate} variant="scroll">
-        <div
-          data-testid="livekit-unavailable"
-          className="rounded-md border border-border p-3 text-sm text-muted-foreground"
-        >
-          LiveKit is not available on this connection: this host is reached over a wire that
-          carries no LiveKit presence, so there is no participant roster and no room list to show.
-        </div>
-      </AppShell>
-    );
-  }
 
   return (
     <TooltipProvider delayDuration={0}>

@@ -29,46 +29,39 @@ export function LiveKitRoomsPanel() {
   // over. It resolves its own rather than taking a prop because it sources its own data too; a
   // second seam for the same host would be a second thing to keep in step.
   //
-  // The feed itself is plain daemon RPC and would survive without LiveKit. The panel is gated all
-  // the same, because what it *shows* is rooms and who is joined to them: on a host reached with no
-  // presence there is nothing for it to be about, and an empty "Rooms" heading reads as "the server
-  // has no rooms" rather than "this connection cannot see them" (PRD AC 3).
+  // The feed is plain daemon RPC, so what it needs is a *client* — not presence. That distinction is
+  // the whole of this gate.
   //
-  // Removed, not rendered empty or disabled. `LiveKitAppPage`, the only screen that mounts this
-  // panel, explains the absence once for the whole screen — saying it again here would tell the
-  // operator twice that the same wire carries no presence.
+  // A wire with no presence still has a client: the desktop reaches its own embedded daemon over
+  // IPC (`IPC_CAPABILITIES`, `connections/localHost.ts`, which declares `rpc` and nothing else), and
+  // the LiveKit server's own view of its rooms is exactly what an operator on that build goes to
+  // this screen for. Withholding it there hid real data behind a verdict about the wire — and the
+  // roster next door, which genuinely has none, already says so for the screen.
   //
-  // **Two questions, two gates, and they are not the same question.**
+  // A LiveKit wire mid-join does not have one yet, and that is what `connecting` and `error` mean
+  // here: the client arrives with the join. So those two keep the placeholder, which is what holds
+  // the panel's place while the join settles instead of letting the room list drop in underneath
+  // the roster afterwards and shift the page under the operator (PRD AC 7).
   //
-  // *Does this panel apply at all* is the availability rule, exactly as every other gated surface
-  // asks it. Returning `null` on the bare predicate meant that on every LiveKit page load — where
-  // the common room spends a second or two joining and there is no host connection yet — the screen
-  // rendered roster-only and the room list dropped in underneath afterwards, shifting the page under
-  // the operator (PRD AC 7). While the join is in flight, or has failed, the panel therefore keeps
-  // its place and says what it is waiting on.
-  //
-  // *Should the feed be opened* is the capability alone, and stays that way. `useLiveKitRooms`
-  // subscribes from an effect the moment {@link RoomsFeed} mounts, so a `StreamLiveKitRooms` the
-  // daemon has to serve is the cost of mounting it at all — and a room that is merely joining has
-  // no host connection to stream over yet. The child is mounted only once the answer is
-  // `available`, which is what keeps `PresenceCapabilityGatingAcceptance`'s "no rooms feed at all"
-  // true and stops a join in flight from opening a stream it would have to abort.
+  // {@link RoomsFeed} is still a child rather than inlined, so a state with no client mounts no
+  // subscription at all: `useLiveKitRooms` subscribes from an effect, and a `StreamLiveKitRooms` the
+  // daemon has to serve for a panel that cannot show it is a call made for nothing.
   const { selectedInstanceId } = useSelectedDaemon();
   const connection = useHostConnection(selectedInstanceId);
   const availability = useCapabilityAvailability(connection, "presence");
-  if (availability === "unavailable") return null;
+  const stillReachingTheHost = availability === "connecting" || availability === "error";
 
   return (
     <div data-testid="livekit-rooms-panel" className="mt-3 rounded-md border border-border p-3">
       <h3 className="mt-0 text-base font-semibold">Rooms</h3>
-      {availability === "available" ? (
-        <RoomsFeed />
-      ) : (
+      {stillReachingTheHost ? (
         <p data-testid="livekit-rooms-panel-joining" className="text-sm text-muted-foreground">
           {availability === "connecting"
             ? "Joining the common room…"
             : "The room list is read over the common room, which could not be joined."}
         </p>
+      ) : (
+        <RoomsFeed />
       )}
     </div>
   );

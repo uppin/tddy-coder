@@ -109,7 +109,6 @@ export const TEST_IDS = {
   /** Shown in the panel's place, frame and all, while the common room has not been joined. */
   livekitRoomsPanelJoining: "livekit-rooms-panel-joining",
   /** The whole `#/livekit` screen's stand-in on a connection that carries no LiveKit presence. */
-  livekitUnavailable: "livekit-unavailable",
 
   // Worktrees
   shellMenuWorktrees: "shell-menu-worktrees",

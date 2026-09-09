@@ -268,10 +268,14 @@ media and presence surfaces share.
     snapshot keeps the last-known rooms visible alongside the error.
 12. `StreamLiveKitRooms` rejects an invalid session token.
 13. The daemon emits nothing on a poll tick that produced no delta.
-14. On a host whose connection carries no presence, the panel does not render and no
-    `StreamLiveKitRooms` subscription is opened.
-15. While the common room is still being joined, the panel keeps its place with a "joining" note and
-    opens no subscription; the feed starts when the roster becomes available.
+14. On a host whose connection carries no presence, the panel renders and opens its subscription
+    exactly as anywhere else: the feed is daemon RPC and needs a client, not presence, and such a
+    host has one. The roster above it reports its own absence, so the screen still says which half
+    is missing and why. (Superseded the original rule, which withheld the panel there and hid the
+    server's rooms from the desktop's own host over IPC — the build with no other way to see them.)
+15. While the common room is still being joined, or after a join has failed, the panel keeps its
+    place with a "joining" note and opens no subscription; the feed starts once the host can be
+    reached. Those are the states with no client to stream over, which is what the note reports.
 
 ## Related documentation
 
