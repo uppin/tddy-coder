@@ -325,6 +325,14 @@ struct ServerChatter {
     shown: HashMap<String, String>,
     /// Whether the server has reported itself quiescent — an extension, so never the only signal.
     quiescent: bool,
+    /// The furthest percentage any phase reported, and the phase it belonged to.
+    ///
+    /// Kept apart from `last` because the two answer different questions and the server routinely
+    /// makes them disagree: it counts files inside a phase, then emits sub-steps carrying no
+    /// percentage at all (`working: tddy_desktop (lib)`). A timeout landing on one of those had a
+    /// `last` with no number in it, so the message could not say how far the index had got — which
+    /// is the one thing a reader needs in order to decide whether raising the budget will help.
+    furthest: Option<(u64, String)>,
 }
 
 impl ServerChatter {
@@ -375,6 +383,13 @@ impl ServerChatter {
         let line = progress_line(title, value);
         self.last = Some(line.clone());
 
+        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
+            let phase = title.unwrap_or("working").to_string();
+            if self.furthest.as_ref().is_none_or(|(seen, _)| percentage >= *seen) {
+                self.furthest = Some((percentage, phase));
+            }
+        }
+
         let key = match value.get("percentage").and_then(Value::as_u64) {
             Some(percentage) => percentage.to_string(),
             None => line.clone(),
@@ -384,6 +399,25 @@ impl ServerChatter {
         }
         self.shown.insert(token, key);
         Some(line)
+    }
+}
+
+impl ServerChatter {
+    /// Where the index got to, for a message that has to explain a timeout.
+    ///
+    /// The last line on its own is not enough: it is often a sub-step with no percentage. This
+    /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
+    /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
+    /// bigger budget.
+    fn how_far(&self) -> String {
+        let last = self
+            .last
+            .clone()
+            .unwrap_or_else(|| "nothing reported".to_string());
+        match &self.furthest {
+            Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
+            None => last,
+        }
     }
 }
 
@@ -976,10 +1010,7 @@ impl RustBackend {
                     answered,
                     inference,
                     started.elapsed(),
-                    self.chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    self.chatter.how_far(),
                     self.environment.clone(),
                 ));
             }
@@ -1846,11 +1877,7 @@ impl RustBackend {
                 return Err(RestructureError::IndexingIncomplete {
                     environment: self.environment.clone(),
                     seconds: started.elapsed().as_secs(),
-                    last: self
-                        .chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    last: self.chatter.how_far(),
                 });
             }
             std::thread::sleep(INDEXING_POLL);
@@ -1893,11 +1920,7 @@ impl RustBackend {
                 return Err(RestructureError::IndexingIncomplete {
                     environment: self.environment.clone(),
                     seconds: started.elapsed().as_secs(),
-                    last: self
-                        .chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    last: self.chatter.how_far(),
                 });
             }
             std::thread::sleep(INDEXING_POLL);
@@ -5013,6 +5036,51 @@ mod tests {
         let text = "    let a = other::guard::GuardSomethingElse::new();\n";
 
         assert!(refuse_mangled_rewrite(text, "guard", &moved).is_ok());
+    }
+
+    /// A timeout has to say how far the index got. The server's *last* notification is often a
+    /// sub-step with no percentage, so the furthest percentage is tracked separately.
+    #[test]
+    fn reports_how_far_the_index_got_even_when_the_last_line_has_no_percentage() {
+        // Given a phase that counted to 64% and then emitted a sub-step with no number
+        let mut chatter = ServerChatter::default();
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "begin", "title": "roots scanned" } }
+        }));
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "report", "percentage": 64 } }
+        }));
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "report", "message": "tddy_desktop (lib)" } }
+        }));
+
+        // Then the account carries both the sub-step and the number the sub-step lacks
+        let how_far = chatter.how_far();
+        assert!(how_far.contains("tddy_desktop (lib)"), "{how_far}");
+        assert!(how_far.contains("64%"), "{how_far}");
+    }
+
+    /// A stall at 12% and a timeout at 99% want opposite responses, so the number must not be the
+    /// first one seen.
+    #[test]
+    fn keeps_the_furthest_percentage_rather_than_the_first() {
+        let mut chatter = ServerChatter::default();
+        for pct in [10, 55, 91] {
+            chatter.absorb(&json!({
+                "method": "$/progress",
+                "params": { "token": "t", "value": { "kind": "report", "percentage": pct } }
+            }));
+        }
+
+        assert!(chatter.how_far().contains("91%"), "{}", chatter.how_far());
+    }
+
+    #[test]
+    fn says_nothing_was_reported_when_the_server_was_silent() {
+        assert_eq!(ServerChatter::default().how_far(), "nothing reported");
     }
 
     /// A caller who never passed `--indexing-budget` must see exactly the behaviour they saw
