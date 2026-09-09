@@ -10,7 +10,17 @@ use crate::crap::{RustFileCoverage, RustFunctionRecord};
 use crate::error::{AnalysisError, Result};
 
 const REGION_KINDS: [&str; 5] = ["code", "expansion", "skipped", "gap", "branch"];
-const FOREIGN_SOURCES_REGEX: &str = "(/cargo/registry/|/cargo/git/|/rustc/|/target/)";
+/// Path fragments identifying sources that are not part of the crate under
+/// analysis: vendored dependencies, the toolchain's own `library/`, and build
+/// output. Held as plain substrings so one list can serve both as an llvm-cov
+/// `-ignore-filename-regex` and as a Rust-side predicate; none contains a regex
+/// metacharacter, so joining them with `|` is a faithful translation.
+///
+/// Note the cargo entries carry no leading `/`. A registry checkout lives under
+/// `$CARGO_HOME`, which defaults to `~/.cargo` — so a pattern anchored at
+/// `/cargo/registry/` never matches `/Users/dev/.cargo/registry/`, and every
+/// dependency's functions land in the CRAP denominator unmeasured.
+const FOREIGN_SOURCE_MARKERS: [&str; 4] = ["cargo/registry/", "cargo/git/", "/rustc/", "/target/"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RustRegion {
@@ -82,56 +92,142 @@ fn cargo_manifest_dir(crate_path: &Path) -> Result<PathBuf> {
         .unwrap_or_else(|| PathBuf::from(".")))
 }
 
+/// A step in a capture worth surfacing.
+///
+/// The library itself never prints. Callers decide whether and how to render
+/// these, so a capture stays usable from a TUI, where stray stdout would
+/// corrupt the display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureProgress<'a> {
+    /// The instrumented build has begun. The longest silent phase, and the one
+    /// most easily mistaken for a hang.
+    BuildStarted,
+    /// The build produced this many runnable libtest harnesses.
+    BuildFinished { harnesses: usize },
+    /// A harness's tests have been enumerated and are about to run.
+    HarnessStarted {
+        index: usize,
+        total: usize,
+        spec: &'a str,
+        tests: usize,
+    },
+    /// One test ran and its per-test artifacts were written.
+    TestCaptured {
+        index: usize,
+        total: usize,
+        name: &'a str,
+        status: &'a str,
+    },
+    /// The denominator has been written and the capture is complete.
+    Finished { tests: usize, files: usize },
+}
+
 /// Capture per-test Rust coverage for the crate at `crate_path`, writing into `coverage_dir`.
-pub fn capture_coverage(crate_path: &Path, coverage_dir: &Path) -> Result<()> {
+///
+/// `progress` is called as the capture advances; pass `&mut |_| {}` to stay silent.
+pub fn capture_coverage(
+    crate_path: &Path,
+    coverage_dir: &Path,
+    progress: &mut dyn FnMut(CaptureProgress<'_>),
+) -> Result<()> {
     let manifest_dir = cargo_manifest_dir(crate_path)?;
     let per_test = coverage_dir.join("per-test");
     std::fs::create_dir_all(&per_test)?;
 
-    let instrumented = build_instrumented_tests(&manifest_dir)?;
-    let tests = list_tests(&manifest_dir, &instrumented)?;
-
+    let context = CaptureContext {
+        manifest_dir: &manifest_dir,
+        per_test: &per_test,
+    };
     let mut denominator: BTreeMap<String, DenominatorFile> = BTreeMap::new();
 
-    for (index, test_name) in tests.iter().enumerate() {
-        let profraw = std::env::temp_dir().join(format!("tddy-coverage-{index}.profraw"));
-        let profdata = std::env::temp_dir().join(format!("tddy-coverage-{index}.profdata"));
-        let profile_file = profraw.to_string_lossy();
+    progress(CaptureProgress::BuildStarted);
+    let harnesses = build_instrumented_tests(&manifest_dir)?;
+    progress(CaptureProgress::BuildFinished {
+        harnesses: harnesses.len(),
+    });
 
-        let status = run_single_test(&instrumented, test_name, &profile_file)?;
-        let exported = export_profile(&profdata, &profraw, &manifest_dir)?;
-        let normalized = normalize_export(&exported);
-
-        let spec = manifest_dir.join("src").display().to_string();
-        let id = test_artifact_id(&spec, test_name);
-        let executed = split_executed(&normalized, &mut denominator);
-
-        let meta = TestMeta {
-            id: id.clone(),
-            name: test_name.clone(),
-            full_name: test_name.clone(),
-            spec,
-            line: None,
-            status,
-            duration_ms: 0,
-            lang: "rust".to_string(),
-        };
-
-        std::fs::write(
-            per_test.join(format!("{id}.meta.json")),
-            serde_json::to_string_pretty(&meta)?,
-        )?;
-        std::fs::write(
-            per_test.join(format!("{id}.rust.json")),
-            serde_json::to_string_pretty(&executed)?,
-        )?;
-
-        let _ = std::fs::remove_file(&profraw);
-        let _ = std::fs::remove_file(&profdata);
+    let mut captured = 0usize;
+    for (position, harness) in harnesses.iter().enumerate() {
+        let tests = list_tests(&manifest_dir, &harness.executable)?;
+        progress(CaptureProgress::HarnessStarted {
+            index: position + 1,
+            total: harnesses.len(),
+            spec: &harness.spec,
+            tests: tests.len(),
+        });
+        for (test_position, test_name) in tests.iter().enumerate() {
+            let status = capture_one_test(&context, harness, test_name, &mut denominator)?;
+            captured += 1;
+            progress(CaptureProgress::TestCaptured {
+                index: test_position + 1,
+                total: tests.len(),
+                name: test_name,
+                status: &status,
+            });
+        }
     }
 
     write_denominator(coverage_dir, &denominator)?;
+    progress(CaptureProgress::Finished {
+        tests: captured,
+        files: denominator.len(),
+    });
     Ok(())
+}
+
+/// Paths shared by every per-test capture, kept together so
+/// [`capture_one_test`] stays within a readable parameter count.
+struct CaptureContext<'a> {
+    manifest_dir: &'a Path,
+    per_test: &'a Path,
+}
+
+/// Run one test under its own profile, export it, and write its two artifacts.
+/// Returns the test's libtest status.
+fn capture_one_test(
+    context: &CaptureContext<'_>,
+    harness: &TestHarness,
+    test_name: &str,
+    denominator: &mut BTreeMap<String, DenominatorFile>,
+) -> Result<String> {
+    let id = test_artifact_id(&harness.spec, test_name);
+    // Keyed by artifact id, not a running index: ids are unique across
+    // harnesses, so concurrent suites cannot clobber each other's profiles.
+    let profraw = std::env::temp_dir().join(format!("tddy-coverage-{id}.profraw"));
+    let profdata = std::env::temp_dir().join(format!("tddy-coverage-{id}.profdata"));
+
+    let status = run_single_test(&harness.executable, test_name, &profraw.to_string_lossy())?;
+    let exported = export_profile(
+        &profdata,
+        &profraw,
+        context.manifest_dir,
+        &harness.executable,
+    )?;
+    let executed = split_executed(&normalize_export(&exported), denominator);
+
+    let meta = TestMeta {
+        id: id.clone(),
+        name: test_name.to_string(),
+        full_name: test_name.to_string(),
+        spec: harness.spec.clone(),
+        line: None,
+        status: status.clone(),
+        duration_ms: 0,
+        lang: "rust".to_string(),
+    };
+
+    std::fs::write(
+        context.per_test.join(format!("{id}.meta.json")),
+        serde_json::to_string_pretty(&meta)?,
+    )?;
+    std::fs::write(
+        context.per_test.join(format!("{id}.rust.json")),
+        serde_json::to_string_pretty(&executed)?,
+    )?;
+
+    let _ = std::fs::remove_file(&profraw);
+    let _ = std::fs::remove_file(&profdata);
+    Ok(status)
 }
 
 #[derive(Default)]
@@ -148,27 +244,191 @@ fn lld_on_path() -> bool {
         .any(|driver| which::which(driver).is_ok())
 }
 
-/// `-C instrument-coverage`, plus `-fuse-ld=lld` only when lld is actually
-/// present. lld is a link-time speedup, not a requirement: hardcoding it made
-/// the instrumented build fail with `clang: error: invalid linker name in
-/// argument '-fuse-ld=lld'` on every host that ships without it — the nix dev
-/// shell on macOS, for one, which left `analyze coverage` unusable there.
-fn instrumented_rustflags_for(lld_available: bool) -> String {
-    let mut flags = String::from("-C instrument-coverage");
+/// `-fuse-ld=lld` when lld resolves, and nothing else.
+///
+/// Instrumentation is deliberately absent: putting `-C instrument-coverage` in
+/// `RUSTFLAGS` applies it to the whole dependency graph, and llvm-cov then
+/// re-decodes every dependency's coverage mapping once per test only for
+/// [`is_foreign_source`] to discard it. The rustc wrapper applies it per unit
+/// instead. lld remains a link-time speedup, not a requirement: hardcoding it
+/// failed with `clang: error: invalid linker name in argument '-fuse-ld=lld'`
+/// on every host without it, the nix dev shell on macOS among them.
+fn link_rustflags_for(lld_available: bool) -> String {
     if lld_available {
-        flags.push_str(" -C link-arg=-fuse-ld=lld");
+        "-C link-arg=-fuse-ld=lld".to_string()
+    } else {
+        String::new()
     }
-    flags
 }
 
-fn instrumented_rustflags() -> String {
-    instrumented_rustflags_for(lld_on_path())
+fn link_rustflags() -> String {
+    link_rustflags_for(lld_on_path())
 }
 
-fn build_instrumented_tests(manifest_dir: &Path) -> Result<PathBuf> {
+/// Where a package's instrumented build lives. Deliberately outside the
+/// repository: an instrumented build differs from an ordinary one only in
+/// rustflags, so sharing `target/` makes each invalidate the other on every
+/// capture.
+///
+/// Per package, not shared: the wrapper names the crate it instruments and
+/// cargo fingerprints `RUSTC_WRAPPER`, so one directory would rebuild the whole
+/// dependency graph every time the analyzed package changed — and two captures
+/// running at once would contend on the same cargo lock.
+fn instrumented_build_dir(crate_name: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("tddy-coverage-build")
+        .join(crate_name)
+}
+
+/// The rustc crate name cargo derives from a package directory.
+fn crate_name_for(manifest_dir: &Path) -> String {
+    manifest_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .replace('-', "_")
+}
+
+/// A `RUSTC_WRAPPER` that adds `-C instrument-coverage` to the package under
+/// analysis and to every libtest harness, and to nothing else.
+///
+/// The harness clause is load-bearing rather than incidental: rustc links the
+/// profiling runtime into a binary only when the unit being linked is itself
+/// instrumented, so an uninstrumented integration harness would run and write
+/// no `.profraw` at all.
+fn rustc_wrapper_script(crate_name: &str) -> String {
+    format!(
+        r#"#!/usr/bin/env sh
+# Generated by `tddy-tools analyze coverage`; edits will be overwritten.
+rustc="$1"
+shift
+prev=''
+for arg in "$@"; do
+    if [ "$prev" = "--crate-name" ] && [ "$arg" = "{crate_name}" ]; then
+        exec "$rustc" "$@" -C instrument-coverage
+    fi
+    if [ "$arg" = "--test" ]; then
+        exec "$rustc" "$@" -C instrument-coverage
+    fi
+    prev="$arg"
+done
+exec "$rustc" "$@"
+"#
+    )
+}
+
+/// Write the wrapper, leaving an already-correct one untouched.
+///
+/// Cargo folds the wrapper's mtime into its fingerprint, so rewriting an
+/// identical script would force a full rebuild on every capture.
+fn ensure_rustc_wrapper(build_dir: &Path, crate_name: &str) -> Result<PathBuf> {
+    let script = rustc_wrapper_script(crate_name);
+    let path = build_dir.join(format!("rustc-wrapper-{crate_name}.sh"));
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(script.as_str()) {
+        std::fs::write(&path, &script)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+        }
+    }
+    Ok(path)
+}
+
+/// The `-ignore-filename-regex` value handed to `llvm-cov export`, so foreign
+/// sources are dropped before they reach us rather than after.
+fn foreign_sources_regex() -> String {
+    format!("({})", FOREIGN_SOURCE_MARKERS.join("|"))
+}
+
+/// Authoritative filter for [`FOREIGN_SOURCE_MARKERS`]. `llvm-cov`'s regex is a
+/// pre-filter for payload size; this is what decides what gets analyzed.
+fn is_foreign_source(path: &str) -> bool {
+    FOREIGN_SOURCE_MARKERS
+        .iter()
+        .any(|marker| path.contains(marker))
+}
+
+/// `llvm-cov export` reads counters out of the instrumented binary itself, so
+/// the object file is a required positional argument — omitting it fails with
+/// `No filenames specified!`, which this crate then reports as "cargo failed".
+fn export_args(binary: &Path, profdata: &Path) -> Vec<String> {
+    export_args_with(binary, profdata, export_threads())
+}
+
+/// llvm-cov renders the JSON single-threaded unless told otherwise; on a large
+/// harness that is the difference between 25s and 5s per test.
+fn export_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|threads| threads.get())
+        .unwrap_or(1)
+}
+
+fn export_args_with(binary: &Path, profdata: &Path, threads: usize) -> Vec<String> {
+    vec![
+        "export".to_string(),
+        binary.display().to_string(),
+        "-instr-profile".to_string(),
+        profdata.display().to_string(),
+        "-format=text".to_string(),
+        format!("-num-threads={threads}"),
+        format!("-ignore-filename-regex={}", foreign_sources_regex()),
+    ]
+}
+
+/// One instrumented libtest harness built by `cargo test --no-run`.
+#[derive(Debug, Clone, PartialEq)]
+struct TestHarness {
+    /// The binary to enumerate with `--list` and run per test.
+    executable: PathBuf,
+    /// The test target's source file, used as each artifact's `spec` so tests
+    /// sharing a name across suites keep distinct ids.
+    spec: String,
+}
+
+/// Select the runnable libtest harnesses from `cargo test --no-run` JSON.
+///
+/// `cargo test --no-run` also emits the crate's own `[[bin]]` targets with an
+/// `executable` set. Those know nothing of libtest, so `--list` on one prints
+/// usage and exits non-zero; only a target built in test mode can be captured.
+fn test_harnesses_from_cargo_json(stdout: &str) -> Vec<TestHarness> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|value| value.get("reason").and_then(|v| v.as_str()) == Some("compiler-artifact"))
+        .filter(|value| value.pointer("/profile/test").and_then(|v| v.as_bool()) == Some(true))
+        .filter_map(|value| {
+            let executable = value
+                .pointer("/executable")
+                .and_then(|v| v.as_str())
+                .filter(|path| !path.is_empty())?;
+            let spec = value
+                .pointer("/target/src_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(executable);
+            Some(TestHarness {
+                executable: PathBuf::from(executable),
+                spec: spec.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn build_instrumented_tests(manifest_dir: &Path) -> Result<Vec<TestHarness>> {
+    let crate_name = crate_name_for(manifest_dir);
+    let build_dir = instrumented_build_dir(&crate_name);
+    std::fs::create_dir_all(&build_dir)?;
+    let wrapper = ensure_rustc_wrapper(&build_dir, &crate_name)?;
+
     let output = Command::new("cargo")
         .current_dir(manifest_dir)
-        .env("RUSTFLAGS", instrumented_rustflags())
+        .env("RUSTFLAGS", link_rustflags())
+        .env("RUSTC_WRAPPER", &wrapper)
+        .env("CARGO_TARGET_DIR", build_dir.join("target"))
+        // Anything instrumented that *runs* during the build writes its profile
+        // to the current directory, which is the repository. One capture used to
+        // leave 11k `.profraw` files behind; send them somewhere disposable.
+        .env("LLVM_PROFILE_FILE", build_dir.join("build-%p.profraw"))
         .args([
             "test",
             "--no-run",
@@ -183,41 +443,25 @@ fn build_instrumented_tests(manifest_dir: &Path) -> Result<PathBuf> {
         ));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
-            if value.get("reason").and_then(|v| v.as_str()) == Some("compiler-artifact") {
-                if let Some(path) = value
-                    .pointer("/executable")
-                    .and_then(|v| v.as_str())
-                    .filter(|p| !p.is_empty())
-                {
-                    return Ok(PathBuf::from(path));
-                }
-            }
-        }
+    let harnesses = test_harnesses_from_cargo_json(&String::from_utf8_lossy(&output.stdout));
+    if harnesses.is_empty() {
+        return Err(AnalysisError::Cargo(
+            "`cargo test --no-run` produced no libtest harness to capture".into(),
+        ));
     }
-
-    // Fallback: locate most recent test binary in target/debug/deps
-    let deps = manifest_dir.join("target/debug/deps");
-    let newest = std::fs::read_dir(&deps)
-        .map_err(AnalysisError::Io)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| !n.contains('.') && std::fs::metadata(e.path()).is_ok())
-        })
-        .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()));
-    newest
-        .map(|e| e.path())
-        .ok_or_else(|| AnalysisError::Cargo("could not locate instrumented test binary".into()))
+    Ok(harnesses)
 }
 
 fn list_tests(manifest_dir: &Path, binary: &Path) -> Result<Vec<String>> {
     let output = Command::new(binary)
         .current_dir(manifest_dir)
+        // The harness is instrumented, so merely listing its tests writes a
+        // profile. Without a destination LLVM drops `default_*.profraw` into
+        // the current directory — which is the package being analyzed.
+        .env(
+            "LLVM_PROFILE_FILE",
+            instrumented_build_dir(&crate_name_for(manifest_dir)).join("list-%p.profraw"),
+        )
         .arg("--list")
         .output()
         .map_err(|e| AnalysisError::Cargo(e.to_string()))?;
@@ -250,6 +494,7 @@ fn export_profile(
     profdata: &Path,
     profraw: &Path,
     manifest_dir: &Path,
+    binary: &Path,
 ) -> Result<serde_json::Value> {
     let llvm_profdata = llvm_tool("llvm-profdata")?;
     let llvm_cov = llvm_tool("llvm-cov")?;
@@ -267,13 +512,7 @@ fn export_profile(
 
     let export = Command::new(&llvm_cov)
         .current_dir(manifest_dir)
-        .args([
-            "export",
-            "-instr-profile",
-            &profdata.to_string_lossy(),
-            "-format=text",
-            &format!("-ignore-filename-regex={FOREIGN_SOURCES_REGEX}"),
-        ])
+        .args(export_args(binary, profdata))
         .output()
         .map_err(|e| AnalysisError::Cargo(e.to_string()))?;
     if !export.status.success() {
@@ -327,6 +566,9 @@ fn normalize_export(exported: &serde_json::Value) -> BTreeMap<String, RustFileCo
                 let Some(region_file) = filenames.get(file_id) else {
                     continue;
                 };
+                if is_foreign_source(region_file) {
+                    continue;
+                }
                 let kind_idx = region_arr[7].as_u64().unwrap_or(0) as usize;
                 let kind = REGION_KINDS
                     .get(kind_idx)
@@ -355,6 +597,9 @@ fn normalize_export(exported: &serde_json::Value) -> BTreeMap<String, RustFileCo
             let Some(primary) = filenames.first() else {
                 continue;
             };
+            if is_foreign_source(primary) {
+                continue;
+            }
             let entry = by_file.entry(primary.clone()).or_default();
             let name = function
                 .get("name")
@@ -485,34 +730,318 @@ pub fn load_per_test_meta(coverage_dir: &Path) -> Result<Vec<TestMeta>> {
 
 #[cfg(test)]
 mod tests {
-    use super::instrumented_rustflags_for;
+    use super::*;
+
+    /// Run the generated wrapper against a stand-in for rustc that echoes the
+    /// arguments it was handed, so these assert real shell behaviour.
+    fn wrapper_output(crate_name: &str, args: &[&str]) -> String {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wrapper = ensure_rustc_wrapper(dir.path(), crate_name).expect("wrapper");
+        let fake_rustc = dir.path().join("fake-rustc");
+        std::fs::write(
+            &fake_rustc,
+            "#!/usr/bin/env sh\nfor a in \"$@\"; do echo \"$a\"; done\n",
+        )
+        .expect("write");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&fake_rustc, std::fs::Permissions::from_mode(0o755))
+                .expect("chmod");
+        }
+        let out = Command::new(&wrapper)
+            .arg(&fake_rustc)
+            .args(args)
+            .output()
+            .expect("run wrapper");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
 
     #[test]
-    fn instrumented_rustflags_always_request_coverage_instrumentation() {
+    fn rustflags_do_not_instrument_the_whole_dependency_graph() {
+        // `-C instrument-coverage` in RUSTFLAGS reaches every dependency, and
+        // llvm-cov then decodes 28MB of their coverage mapping once per test
+        // purely for `is_foreign_source` to drop it again.
         for lld_available in [true, false] {
             assert!(
-                instrumented_rustflags_for(lld_available).contains("-C instrument-coverage"),
-                "coverage instrumentation must not depend on the linker"
+                !link_rustflags_for(lld_available).contains("instrument-coverage"),
+                "instrumentation is applied per unit by the rustc wrapper"
             );
         }
     }
 
     #[test]
-    fn instrumented_rustflags_omit_lld_when_it_is_not_installed() {
+    fn rustflags_omit_lld_when_it_is_not_installed() {
         // Hosts without lld (the nix dev shell on macOS) previously failed the
         // instrumented build outright with `invalid linker name`.
         assert_eq!(
-            instrumented_rustflags_for(false),
-            "-C instrument-coverage",
+            link_rustflags_for(false),
+            "",
             "must not name a linker the host does not have"
         );
     }
 
     #[test]
-    fn instrumented_rustflags_use_lld_when_it_is_installed() {
-        assert_eq!(
-            instrumented_rustflags_for(true),
-            "-C instrument-coverage -C link-arg=-fuse-ld=lld"
+    fn rustflags_use_lld_when_it_is_installed() {
+        assert_eq!(link_rustflags_for(true), "-C link-arg=-fuse-ld=lld");
+    }
+
+    #[test]
+    fn the_wrapper_instruments_the_package_under_analysis() {
+        let out = wrapper_output(
+            "tddy_daemon",
+            &["--crate-name", "tddy_daemon", "src/lib.rs"],
         );
+        assert!(
+            out.lines().any(|arg| arg == "instrument-coverage"),
+            "the crate under analysis must be instrumented, got: {out}"
+        );
+    }
+
+    #[test]
+    fn the_wrapper_instruments_every_libtest_harness() {
+        // rustc links the profiling runtime only into a unit it instruments, so
+        // an uninstrumented harness would run and write no .profraw at all.
+        let out = wrapper_output(
+            "tddy_daemon",
+            &["--crate-name", "acceptance_daemon", "--test", "tests/a.rs"],
+        );
+        assert!(
+            out.lines().any(|arg| arg == "instrument-coverage"),
+            "harnesses need the profiling runtime, got: {out}"
+        );
+    }
+
+    #[test]
+    fn the_wrapper_leaves_dependencies_uninstrumented() {
+        for args in [
+            vec!["--crate-name", "serde", "lib.rs"],
+            vec!["--crate-name", "build_script_build", "build.rs"],
+        ] {
+            let out = wrapper_output("tddy_daemon", &args);
+            assert!(
+                !out.contains("instrument-coverage"),
+                "{args:?} must compile clean, got: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_wrapper_still_forwards_the_original_arguments() {
+        let out = wrapper_output("tddy_daemon", &["--crate-name", "serde", "--edition=2021"]);
+        assert!(out.contains("--edition=2021"), "got: {out}");
+    }
+
+    #[test]
+    fn rewriting_an_unchanged_wrapper_keeps_its_mtime_so_cargo_does_not_rebuild() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first = ensure_rustc_wrapper(dir.path(), "tddy_daemon").expect("first");
+        let stamp = std::fs::metadata(&first)
+            .and_then(|m| m.modified())
+            .expect("mtime");
+        let second = ensure_rustc_wrapper(dir.path(), "tddy_daemon").expect("second");
+        assert_eq!(first, second);
+        assert_eq!(
+            std::fs::metadata(&second)
+                .and_then(|m| m.modified())
+                .expect("mtime"),
+            stamp,
+            "cargo folds the wrapper mtime into its fingerprint"
+        );
+    }
+
+    #[test]
+    fn each_package_builds_in_its_own_directory() {
+        // A shared dir would rebuild everything whenever the analyzed package
+        // changed, because the wrapper (which cargo fingerprints) names it.
+        assert_ne!(
+            instrumented_build_dir("tddy_daemon"),
+            instrumented_build_dir("tddy_code_analysis")
+        );
+    }
+
+    #[test]
+    fn crate_names_replace_dashes_the_way_cargo_does() {
+        assert_eq!(
+            crate_name_for(Path::new("/r/packages/tddy-daemon")),
+            "tddy_daemon"
+        );
+    }
+
+    #[test]
+    fn export_is_told_how_many_threads_it_may_use() {
+        let args = export_args_with(Path::new("/t/bin"), Path::new("/t/x.profdata"), 8);
+        assert!(
+            args.iter().any(|a| a == "-num-threads=8"),
+            "llvm-cov renders single-threaded otherwise: 25s vs 5s per test"
+        );
+    }
+
+    // ---- gap 4: `llvm-cov export` needs the instrumented binary ----
+
+    #[test]
+    fn export_names_the_instrumented_binary_as_its_object_file() {
+        let args = export_args_with(
+            Path::new("/t/deps/daemon-abc"),
+            Path::new("/t/x.profdata"),
+            4,
+        );
+        let export_at = args
+            .iter()
+            .position(|a| a == "export")
+            .expect("export verb");
+        assert_eq!(
+            args.get(export_at + 1).map(String::as_str),
+            Some("/t/deps/daemon-abc"),
+            "llvm-cov export takes the object file positionally; without it \
+             it fails with `No filenames specified!`"
+        );
+    }
+
+    #[test]
+    fn export_passes_the_merged_profile() {
+        let args = export_args_with(Path::new("/t/bin"), Path::new("/t/x.profdata"), 4);
+        let flag = args
+            .iter()
+            .position(|a| a == "-instr-profile")
+            .expect("-instr-profile");
+        assert_eq!(
+            args.get(flag + 1).map(String::as_str),
+            Some("/t/x.profdata")
+        );
+    }
+
+    // ---- gap 5: the foreign-source filter must actually match cargo paths ----
+
+    #[test]
+    fn vendored_dependency_sources_are_foreign() {
+        // The default CARGO_HOME is `~/.cargo`, so the registry path contains
+        // `/.cargo/registry/` — a pattern anchored at `/cargo/` never fires.
+        for path in [
+            "/Users/dev/.cargo/registry/src/index.crates.io-1/anyhow-1.0.102/src/chain.rs",
+            "/home/dev/.cargo/git/checkouts/livekit-abc/src/room.rs",
+            "/usr/local/cargo/registry/src/index/serde-1.0.0/src/lib.rs",
+            "/rustc/9b00956e56009bab2aa15d7bff10916599e3d6d6/library/core/src/option.rs",
+            "/work/repo/target/debug/build/tddy-daemon-123/out/gen.rs",
+        ] {
+            assert!(is_foreign_source(path), "should be filtered out: {path}");
+        }
+    }
+
+    #[test]
+    fn crate_sources_are_not_foreign() {
+        for path in [
+            "/work/repo/packages/tddy-daemon/src/connection_service.rs",
+            "/work/repo/packages/tddy-daemon/tests/acceptance_daemon.rs",
+            "/work/cargo-cult/src/lib.rs",
+        ] {
+            assert!(!is_foreign_source(path), "should be analyzed: {path}");
+        }
+    }
+
+    #[test]
+    fn the_ignore_regex_is_built_from_the_same_markers_as_the_predicate() {
+        let regex = foreign_sources_regex();
+        for marker in FOREIGN_SOURCE_MARKERS {
+            assert!(regex.contains(marker), "regex must carry marker {marker}");
+        }
+    }
+
+    // ---- gap 6: only libtest harnesses can be enumerated and run per-test ----
+
+    fn artifact(name: &str, kind: &str, is_test: bool, executable: &str, src: &str) -> String {
+        format!(
+            r#"{{"reason":"compiler-artifact","target":{{"name":"{name}","kind":["{kind}"],"src_path":"{src}"}},"profile":{{"test":{is_test}}},"executable":"{executable}"}}"#
+        )
+    }
+
+    #[test]
+    fn the_crates_own_binary_is_not_mistaken_for_a_test_harness() {
+        // `cargo test --no-run` emits the `[[bin]]` target first for tddy-daemon.
+        // Running `tddy-daemon --list` just prints clap usage and exits non-zero.
+        let stdout = [
+            artifact(
+                "tddy-daemon",
+                "bin",
+                false,
+                "/t/debug/tddy-daemon",
+                "src/main.rs",
+            ),
+            artifact(
+                "acceptance",
+                "test",
+                true,
+                "/t/deps/acceptance-1",
+                "tests/acceptance.rs",
+            ),
+        ]
+        .join("\n");
+
+        let harnesses = test_harnesses_from_cargo_json(&stdout);
+
+        assert_eq!(harnesses.len(), 1, "only the libtest harness is runnable");
+        assert_eq!(
+            harnesses[0].executable,
+            PathBuf::from("/t/deps/acceptance-1")
+        );
+    }
+
+    #[test]
+    fn every_test_harness_is_captured_not_just_the_first() {
+        // tddy-daemon builds 167 harnesses; capturing one reports the other 166
+        // suites' code as entirely uncovered.
+        let stdout = [
+            artifact("unittests", "lib", true, "/t/deps/lib-1", "src/lib.rs"),
+            artifact("a", "test", true, "/t/deps/a-2", "tests/a.rs"),
+            artifact("b", "test", true, "/t/deps/b-3", "tests/b.rs"),
+        ]
+        .join("\n");
+
+        let harnesses = test_harnesses_from_cargo_json(&stdout);
+
+        assert_eq!(
+            harnesses
+                .iter()
+                .map(|h| h.executable.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                PathBuf::from("/t/deps/lib-1"),
+                PathBuf::from("/t/deps/a-2"),
+                PathBuf::from("/t/deps/b-3")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_harness_is_specified_by_its_test_source_so_ids_stay_distinct() {
+        // Two suites may both define `connects`; keying the artifact id on the
+        // crate's src dir would collide them onto one file.
+        let stdout = [
+            artifact("a", "test", true, "/t/deps/a-2", "/repo/tests/a.rs"),
+            artifact("b", "test", true, "/t/deps/b-3", "/repo/tests/b.rs"),
+        ]
+        .join("\n");
+
+        let harnesses = test_harnesses_from_cargo_json(&stdout);
+
+        assert_eq!(harnesses[0].spec, "/repo/tests/a.rs");
+        assert_eq!(harnesses[1].spec, "/repo/tests/b.rs");
+        assert_ne!(
+            test_artifact_id(&harnesses[0].spec, "connects"),
+            test_artifact_id(&harnesses[1].spec, "connects"),
+            "same-named tests in different suites must not share an id"
+        );
+    }
+
+    #[test]
+    fn artifacts_without_an_executable_are_skipped() {
+        let stdout = [
+            r#"{"reason":"compiler-artifact","target":{"name":"serde","kind":["lib"],"src_path":"s.rs"},"profile":{"test":false},"executable":null}"#.to_string(),
+            r#"{"reason":"build-script-executed","package_id":"x"}"#.to_string(),
+            artifact("a", "test", true, "/t/deps/a-2", "tests/a.rs"),
+        ]
+        .join("\n");
+
+        assert_eq!(test_harnesses_from_cargo_json(&stdout).len(), 1);
     }
 }
