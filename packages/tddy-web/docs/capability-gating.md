@@ -194,6 +194,7 @@ Every mounting site therefore names the connection it is mounting with.
   video track and an input stream, and only the track needs a media wire. The whole surface is gated
   — the session inspector's tabs and the Hosts row's connect action alike — because a remote desktop
   with input and no picture is not a feature, but a later transport that carries frames some other
-  way could revisit the split. In practice the split is moot today: no browser client opens the
-  input stream on either scope, so a connected desktop is view-only. See
-  [`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../../docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md).
+  way could revisit the split. Both halves are now live on both scopes — see
+  [`remote-desktop-input.md`](./remote-desktop-input.md) — so the split is a real one: gating the
+  whole surface on the media wire is a deliberate choice about what a usable remote desktop is, not
+  a description of what happens to be built.

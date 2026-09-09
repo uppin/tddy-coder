@@ -160,11 +160,11 @@ refusing empty would ask an operator to invent a password the desktop never had.
 never reaches `HostDesktopOverlay`: the dialog hands back ciphertext encrypted under the key the
 prompt published, after that key has been checked against the one pinned for this host.
 
-⚠ **A connected desktop is view-only.** `ScreenSharingOverlay`'s only pointer and key handlers are
-Escape-to-close and click-outside-to-close, and `src/gen/screen_sharing_input_pb.ts` is imported
-nowhere — so no overlay, host-scoped or session-scoped, opens the input stream the bridge already
-serves. See
-[`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../../docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md).
+A connected desktop takes input. `ScreenSharingOverlay` opens a `ScreenSharingInputService` stream
+at the bridge participant for as long as it is mounted and forwards the operator's pointer and
+keyboard onto it — the same overlay, and so the same behaviour, on this scope and the session one.
+Escape goes to the desktop; `Ctrl+Alt+Esc` is the one chord the overlay keeps. See
+[`remote-desktop-input.md`](./remote-desktop-input.md).
 
 ⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
 issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
