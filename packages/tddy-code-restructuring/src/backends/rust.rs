@@ -485,11 +485,19 @@ const UNRESOLVED_TOKEN: &str = "unresolvedReference";
 /// the same diagnostic by rewriting the reference instead, which is not what an extraction wants.
 const IMPORT_TITLE: &str = "Import ";
 
-/// How many times the extraction will ask for one more import. Each pass restores a single name and
-/// routinely resolves several others that were only unresolved through it, so the count needed is
-/// far below this; the bound is here so a server that keeps offering an import that changes nothing
-/// stops rather than spins.
-const IMPORT_PASSES: usize = 64;
+/// How many times the extraction will ask for one more import.
+///
+/// Each pass restores a single name and routinely resolves several others that were unresolved only
+/// through it. A backstop rather than the anti-spin guarantee: a server that keeps offering an
+/// import which changes nothing is already stopped by the occurrence check — an import must reduce
+/// that name's unresolved occurrences or the operation refuses — and by the `unimportable` list,
+/// which never re-asks a name whose every offered path failed.
+///
+/// 64 was chosen when the premise was that "the count needed is far below this". That is false for
+/// a large module: relocating a 6,484-line `impl` of a generated gRPC trait needs one import per
+/// distinct proto type it names, which runs past a hundred, and the run then failed on the bound
+/// rather than on anything wrong with the plan.
+const IMPORT_PASSES: usize = 512;
 
 /// LSP `ContentModified`. The server is still catching up with a document change and asks the
 /// client to re-issue, which is what the specification prescribes rather than treating it as fatal.
@@ -1598,6 +1606,18 @@ impl RustBackend {
                 .collect();
 
             if offered.is_empty() {
+                // rust-analyzer offers `Import` for items, not for a bare module path, so a name
+                // the parent reached through `use crate::tool_engine;` is unresolved in the moved
+                // code with nothing on offer for it — and skipping silently is how three modules
+                // landed referencing an unlinked crate. The parent's own declaration says what it
+                // meant, exactly as for an alias.
+                if let Some(path) = parent_binding(text, module, &name.text) {
+                    return Ok(Some(with_module_import(
+                        text,
+                        module,
+                        &format!("use {path};"),
+                    )?));
+                }
                 continue;
             }
 
@@ -2541,8 +2561,34 @@ fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
         .iter()
         .filter(|title| import_path(title).is_some_and(|path| in_scope.contains(&path)));
 
-    let only = *narrowed.next()?;
-    narrowed.next().is_none().then_some(only)
+    if let Some(only) = narrowed.next() {
+        if narrowed.next().is_none() {
+            return Some(only);
+        }
+        return None;
+    }
+
+    // The name itself is bound nowhere — routinely true after a seam has moved the code that used
+    // it and the import pass pruned the parent's now-unused binding. The module it came from is
+    // still evidence: a file importing twenty-six names from `tddy_service::proto::connection` and
+    // one contested `Signal` meant that one, not `sysinfo::Signal`.
+    //
+    // Only decisive where exactly one candidate's module is already imported from. Two candidates
+    // from two imported modules is the ambiguity this function exists to refuse.
+    let modules: Vec<String> = in_scope.iter().filter_map(|path| parent_module(path)).collect();
+    let mut by_module = offered.iter().filter(|title| {
+        import_path(title)
+            .and_then(|path| parent_module(&path))
+            .is_some_and(|module| modules.contains(&module))
+    });
+
+    let only = *by_module.next()?;
+    by_module.next().is_none().then_some(only)
+}
+
+/// The module a path's last segment lives in — `a::b::C` is `a::b`. `None` for a bare name.
+fn parent_module(path: &str) -> Option<String> {
+    path.rsplit_once("::").map(|(module, _)| module.to_string())
 }
 
 /// `source` without the single-name `use` lines inside `block` that no import can be.
@@ -3888,6 +3934,26 @@ fn alias_target(text: &str, module: &str, alias: &str) -> Option<String> {
         .map(|(_, path)| path)
 }
 
+/// The path a *non-aliased* binding the text declares outside the module gives to `name`.
+///
+/// `use crate::tool_engine;` binds `tool_engine`; `use a::b::Thing;` binds `Thing`. Used only where
+/// the server offered nothing, so it never overrides an opinion rust-analyzer actually has.
+fn parent_binding(text: &str, module: &str, name: &str) -> Option<String> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module).ok()?;
+    let outside: String = source
+        .iter()
+        .enumerate()
+        .filter(|(line, _)| *line < block.opened || *line > block.closed)
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    imported_paths(&outside)
+        .into_iter()
+        .find(|path| path.rsplit("::").next() == Some(name))
+}
+
 /// Every `(alias, path)` pair the text's `use` declarations bind through `as`.
 fn aliased_bindings(text: &str) -> Vec<(String, String)> {
     let mut bindings = Vec::new();
@@ -5036,6 +5102,86 @@ mod tests {
         let text = "    let a = other::guard::GuardSomethingElse::new();\n";
 
         assert!(refuse_mangled_rewrite(text, "guard", &moved).is_ok());
+    }
+
+    /// rust-analyzer offers `Import` for items, never for a bare module path, so a name reached
+    /// through `use crate::tool_engine;` had nothing on offer and was skipped in silence.
+    #[test]
+    fn reads_a_module_binding_the_parent_declares() {
+        let text = "use crate::tool_engine;\n\
+                    mod svc {\n\
+                        fn f() { tool_engine::execute_tool(); }\n\
+                    }\n";
+
+        assert_eq!(
+            parent_binding(text, "svc", "tool_engine").as_deref(),
+            Some("crate::tool_engine")
+        );
+    }
+
+    #[test]
+    fn reads_a_plain_item_binding_the_parent_declares() {
+        let text = "use a::b::Thing;\nmod svc {\n    fn f(t: Thing) {}\n}\n";
+
+        assert_eq!(
+            parent_binding(text, "svc", "Thing").as_deref(),
+            Some("a::b::Thing")
+        );
+    }
+
+    /// A binding inside the module already provides the name there.
+    #[test]
+    fn ignores_a_binding_declared_inside_the_module() {
+        let text = "mod svc {\n    use crate::tool_engine;\n}\n";
+
+        assert_eq!(parent_binding(text, "svc", "tool_engine"), None);
+    }
+
+    /// After a seam moves the code that used a name, the import pass prunes the parent's binding —
+    /// so the name itself is in scope nowhere, while the module it came from still is.
+    #[test]
+    fn settles_a_contested_name_on_the_module_the_file_already_imports_from() {
+        let offered = [
+            "Import `tddy_service::proto::connection::Signal`",
+            "Import `sysinfo::Signal`",
+            "Import `tokio::signal::unix::Signal`",
+        ];
+
+        let chosen = choose_import(
+            "use tddy_service::proto::connection::{ListToolsRequest, StartSessionResponse};\n",
+            &offered,
+        );
+
+        assert_eq!(
+            chosen,
+            Some("Import `tddy_service::proto::connection::Signal`")
+        );
+    }
+
+    /// Two candidates from two imported modules is the ambiguity this refuses, not one it guesses at.
+    #[test]
+    fn settles_nothing_when_two_candidates_come_from_imported_modules() {
+        let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
+
+        let chosen = choose_import("use a::b::Other;\nuse c::d::Another;\n", &offered);
+
+        assert_eq!(chosen, None);
+    }
+
+    /// An exact binding still wins over mere module agreement.
+    #[test]
+    fn prefers_an_exact_binding_over_module_agreement() {
+        let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
+
+        let chosen = choose_import("use c::d::Thing;\nuse a::b::Other;\n", &offered);
+
+        assert_eq!(chosen, Some("Import `c::d::Thing`"));
+    }
+
+    #[test]
+    fn reads_the_module_a_path_lives_in() {
+        assert_eq!(parent_module("a::b::C").as_deref(), Some("a::b"));
+        assert_eq!(parent_module("C"), None);
     }
 
     /// A timeout has to say how far the index got. The server's *last* notification is often a
