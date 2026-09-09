@@ -29,7 +29,8 @@ use tddy_service::proto::connection::{
     ContextManifestEntry, ContextManifestRequest, CreateProjectRequest, CreateProjectResponse,
     DeleteSessionRequest, DeleteSessionResponse, DeleteSessionUploadRequest,
     DeleteSessionUploadResponse, DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse,
-    DetachSessionAgentRequest, EligibleDaemonEntry, KnownHostEntry, ListAgentModelsRequest,
+    DetachSessionAgentRequest, EligibleDaemonEntry, GetHostToolingRequest, GetHostToolingResponse,
+    HostGitIdentity, HostGithubCli, KnownHostEntry, ListAgentModelsRequest,
     ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
     ListEligibleDaemonsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
@@ -40,23 +41,24 @@ use tddy_service::proto::connection::{
     ListTerminalSessionsRequest, ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, MintLocalTokenRequest, MintLocalTokenResponse, ModelInfo,
-    OpenAgentConversationRequest, OpenAgentConversationResponse, ProjectEntry as ProtoProjectEntry,
-    PromptAgentConversationRequest, ReadContextFileBatchRequest, ReadContextFileRequest,
-    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReadWorktreeFileRequest,
-    ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    ReportSessionStatusRequest, ReportSessionStatusResponse, RestoreSessionWorktreeRequest,
-    RestoreSessionWorktreeResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionAgentRoster, SessionEntry as ProtoSessionEntry,
-    SessionTerminalInput, SessionTerminalOutput, SessionUploadEntry,
-    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal, SignalSessionRequest,
-    SignalSessionResponse, SplitAgentPlacement, StartSessionRequest, StartSessionResponse,
-    StartTerminalSessionRequest, StartTerminalSessionResponse, StopTerminalSessionRequest,
-    StopTerminalSessionResponse, StreamSessionAgentsRequest, StreamTerminalOutputRequest,
-    StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent, TerminalHistoryChunk,
-    TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
-    UploadStagedAttachmentChunkRequest, UploadStagedAttachmentChunkResponse,
-    WatchTerminalControlRequest, WorkflowFileEntry, WorktreeDirEntry, WorktreeRow,
-    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
+    OpenAgentConversationRequest, OpenAgentConversationResponse, ProbeOutcome as ProtoProbeOutcome,
+    ProjectEntry as ProtoProjectEntry, PromptAgentConversationRequest, ReadContextFileBatchRequest,
+    ReadContextFileRequest, ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse,
+    ReadWorktreeFileRequest, ReadWorktreeFileResponse, RemoveWorktreeRequest,
+    RemoveWorktreeResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
+    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, ResumeSessionRequest,
+    ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
+    SessionEntry as ProtoSessionEntry, SessionTerminalInput, SessionTerminalOutput,
+    SessionUploadEntry, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, Signal,
+    SignalSessionRequest, SignalSessionResponse, SplitAgentPlacement, StartSessionRequest,
+    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamSessionAgentsRequest,
+    StreamTerminalOutputRequest, StreamWorktreeStatsRequest, SubagentInfo, TerminalControlEvent,
+    TerminalHistoryChunk, TerminalSessionInfo, ToolInfo, UploadSessionFileChunkRequest,
+    UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
+    UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest, WorkflowFileEntry,
+    WorktreeDirEntry, WorktreeRow, WorktreeSizeStatus as ProtoWorktreeSizeStatus,
+    WorktreeStatsEvent,
 };
 use tddy_terminal_rpc::TerminalSessionStore;
 use uuid::Uuid;
@@ -69,6 +71,7 @@ use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_
 use crate::config::DaemonConfig;
 use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
+use crate::host_tooling::{HostToolingProbe, SubprocessHostToolingProbe};
 use crate::livekit_peer_discovery::{
     local_instance_id_for_config, LiveKitDiscoveryHandles, PeerRoute,
 };
@@ -940,6 +943,50 @@ fn worktree_row_from_diff(
     }
 }
 
+/// Map a probe outcome to its wire enum, keeping "could not run" apart from any finding.
+fn proto_probe_outcome(outcome: &crate::host_tooling::ProbeOutcome) -> ProtoProbeOutcome {
+    match outcome {
+        crate::host_tooling::ProbeOutcome::Ok => ProtoProbeOutcome::Ok,
+        crate::host_tooling::ProbeOutcome::Failed(_) => ProtoProbeOutcome::Failed,
+        crate::host_tooling::ProbeOutcome::Unsupported => ProtoProbeOutcome::Unsupported,
+    }
+}
+
+/// The operator-facing reason a probe failed, empty for every other outcome.
+fn probe_failure_reason(outcome: &crate::host_tooling::ProbeOutcome) -> String {
+    match outcome {
+        crate::host_tooling::ProbeOutcome::Failed(reason) => reason.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Put a probed git identity on the wire.
+///
+/// `configured` carries whether an identity was found at all, so a host with none is distinguishable
+/// from one whose probe failed — both would otherwise arrive as two empty strings, and an operator
+/// reading a blank name cannot tell which of the two to go and fix.
+fn git_identity_message(git: &crate::host_tooling::GitIdentity) -> HostGitIdentity {
+    let (user_name, user_email) = git.name_and_email.clone().unwrap_or_default();
+    HostGitIdentity {
+        outcome: proto_probe_outcome(&git.outcome) as i32,
+        configured: git.name_and_email.is_some(),
+        user_name,
+        user_email,
+        failure_reason: probe_failure_reason(&git.outcome),
+    }
+}
+
+/// Put a probed `gh` state on the wire. The login is the **host's**, not the calling session's.
+fn github_cli_message(gh: &crate::host_tooling::GithubCliStatus) -> HostGithubCli {
+    HostGithubCli {
+        outcome: proto_probe_outcome(&gh.outcome) as i32,
+        installed: gh.installed,
+        authenticated: gh.authenticated,
+        login: gh.login.clone().unwrap_or_default(),
+        failure_reason: probe_failure_reason(&gh.outcome),
+    }
+}
+
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.
 pub(crate) fn now_unix_ms() -> u64 {
     std::time::SystemTime::now()
@@ -1112,6 +1159,8 @@ pub struct ConnectionServiceImpl {
     /// Durable record of every host seen, behind `ListKnownHosts` on the Hosts screen. Distinct from
     /// `eligible_daemon_source`, which reports only who is reachable right now.
     host_registry: Arc<dyn HostRegistry>,
+    /// Probes what this host has installed and configured, behind `GetHostTooling`.
+    host_tooling: Arc<dyn HostToolingProbe>,
     /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
     host_stats: Arc<dyn HostStats>,
     /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
@@ -1775,6 +1824,7 @@ impl ConnectionServiceImpl {
         let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
             crate::host_registry::host_registry_dir(&tddy_data_dir),
         ));
+        let host_tooling: Arc<dyn HostToolingProbe> = Arc::new(SubprocessHostToolingProbe);
         let host_stats: Arc<dyn HostStats> =
             Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
@@ -1806,6 +1856,7 @@ impl ConnectionServiceImpl {
             spawn_client,
             eligible_daemon_source,
             host_registry,
+            host_tooling,
             common_room_livekit_room,
             telegram,
             worktree_stats_cache,
@@ -2022,6 +2073,13 @@ impl ConnectionServiceImpl {
         tracker: Arc<crate::relay_idle::IdleTimeoutTracker>,
     ) -> Self {
         self.idle_tracker = Some(tracker);
+        self
+    }
+
+    /// Substitute the host tooling probe (builder pattern) — lets tests state what a host has
+    /// installed instead of depending on whatever is installed on the machine running the suite.
+    pub fn with_host_tooling(mut self, host_tooling: Arc<dyn HostToolingProbe>) -> Self {
+        self.host_tooling = host_tooling;
         self
     }
 
@@ -13116,6 +13174,57 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListKnownHostsResponse { hosts }))
     }
 
+    /// What a host has installed and configured.
+    ///
+    /// Addressed by `daemon_instance_id`; the existing peer routing relays it so the probes run on
+    /// that host, as that host's OS user. Both facts are per-user — `git config` reads
+    /// `$HOME/.gitconfig`, `gh auth status` reads `$HOME/.config/gh/hosts.yml` — so running them as
+    /// the daemon's own user would answer for the wrong account.
+    ///
+    /// Routed **before** the caller is authenticated, like the roster RPCs and
+    /// [`Self::resolve_stack_base`]: the token is verified by the daemon that serves the call, and
+    /// a peer's user mapping is not this one's to judge. Authenticating first would refuse an
+    /// operator whose GitHub user maps to an OS user on the host being probed but not on whichever
+    /// host their browser happens to be talking to.
+    async fn get_host_tooling(
+        &self,
+        request: Request<GetHostToolingRequest>,
+    ) -> Result<Response<GetHostToolingResponse>, Status> {
+        self.record_rpc_activity();
+        let req = request.into_inner();
+
+        // Route before probing. Answered locally, a question about another host would come back
+        // with this daemon's own git identity under that host's name — a wrong answer that reads
+        // exactly like a right one.
+        if let Some(answered) = self
+            .rpc_served_by_peer("GetHostTooling", &req.daemon_instance_id, &req)
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        // Both probes shell out and wait, so they run on the blocking pool rather than parking a
+        // runtime worker for however long `gh` takes to reach the network.
+        let probe = Arc::clone(&self.host_tooling);
+        let probed_user = os_user.to_string();
+        let tooling = tokio::task::spawn_blocking(move || probe.probe(&probed_user))
+            .await
+            .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
+
+        Ok(Response::new(GetHostToolingResponse {
+            daemon_instance_id: local_instance_id_for_config(&self.config),
+            git: Some(git_identity_message(&tooling.git)),
+            github_cli: Some(github_cli_message(&tooling.github_cli)),
+        }))
+    }
+
     async fn list_session_workflow_files(
         &self,
         request: Request<ListSessionWorkflowFilesRequest>,
@@ -22401,5 +22510,303 @@ mod known_hosts_handler_unit_tests {
         );
         let local = entry_named(&hosts, A_CONFIGURED_ID);
         assert!(local.is_local && local.online);
+    }
+}
+
+#[cfg(test)]
+mod host_tooling_handler_unit_tests {
+    use super::*;
+    use crate::host_tooling::{GitIdentity, GithubCliStatus, HostTooling, ProbeOutcome};
+    use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
+    use tddy_service::proto::connection::GetHostToolingRequest;
+
+    /// The daemon serving the RPC — the one a browser happens to be talking to.
+    const RELAY_HOST: &str = "workstation-1";
+    /// Another host in the same common room: the one an operator asks about.
+    const PROBED_HOST: &str = "server-2";
+    /// An empty `daemon_instance_id` is the protocol's spelling for "the daemon serving this call".
+    const THIS_DAEMON: &str = "";
+
+    /// The GitHub user a verifiable session token resolves to.
+    const SIGNED_IN_GITHUB_USER: &str = "octocat";
+    /// The OS user `SIGNED_IN_GITHUB_USER` maps to in this daemon's `users[]`.
+    const MAPPED_OS_USER: &str = "ada";
+    /// A different operator, mapped on the relay so that `octocat` demonstrably is not.
+    const OTHER_OPERATOR: &str = "monalisa";
+
+    const VERIFIABLE_TOKEN: &str = "valid";
+    const EXPIRED_TOKEN: &str = "expired";
+
+    /// A probe that answers with a fixed reading and records the OS user it was run as.
+    ///
+    /// Deterministic by construction: nothing here consults the machine running the suite, so the
+    /// answer never depends on which `git` or `gh` happens to be installed on it.
+    struct RecordingHostToolingProbe {
+        answer: HostTooling,
+        probed_os_users: StdMutex<Vec<String>>,
+    }
+
+    impl HostToolingProbe for RecordingHostToolingProbe {
+        fn probe(&self, os_user: &str) -> HostTooling {
+            self.probed_os_users
+                .lock()
+                .expect("the probe recorder is never held across a panic")
+                .push(os_user.to_string());
+            self.answer.clone()
+        }
+    }
+
+    impl RecordingHostToolingProbe {
+        fn answering(answer: HostTooling) -> Arc<Self> {
+            Arc::new(Self {
+                answer,
+                probed_os_users: StdMutex::new(Vec::new()),
+            })
+        }
+
+        /// Every OS user this probe was run as, in call order.
+        fn probed_os_users(&self) -> Vec<String> {
+            self.probed_os_users
+                .lock()
+                .expect("the probe recorder is never held across a panic")
+                .clone()
+        }
+    }
+
+    /// One host's reading: a configured git identity, and a `gh` authenticated as some login.
+    fn a_host_committing_as(name: &str, email: &str, gh_login: &str) -> HostTooling {
+        HostTooling {
+            git: GitIdentity {
+                outcome: ProbeOutcome::Ok,
+                name_and_email: Some((name.to_string(), email.to_string())),
+            },
+            github_cli: GithubCliStatus {
+                outcome: ProbeOutcome::Ok,
+                installed: true,
+                authenticated: true,
+                login: Some(gh_login.to_string()),
+            },
+        }
+    }
+
+    /// The peers this daemon's common room can currently see.
+    struct FakeEligibleDaemons(Vec<String>);
+
+    impl EligibleDaemonSource for FakeEligibleDaemons {
+        fn list_eligible_daemons(&self) -> Vec<EligibleDaemonInfo> {
+            self.0
+                .iter()
+                .map(|instance_id| EligibleDaemonInfo {
+                    instance_id: DaemonInstanceId(instance_id.clone()),
+                    label: instance_id.clone(),
+                })
+                .collect()
+        }
+    }
+
+    /// A daemon stated by the three things `GetHostTooling` consults: who its `users[]` maps, which
+    /// peers its common room can see, and what its tooling probe answers.
+    struct DaemonBuilder {
+        mapped_github_user: String,
+        mapped_os_user: String,
+        peers: Vec<String>,
+        probe: Arc<RecordingHostToolingProbe>,
+    }
+
+    /// A daemon named `workstation-1` that maps `octocat` to `ada` and sees no peers.
+    fn a_daemon_probing_with(probe: Arc<RecordingHostToolingProbe>) -> DaemonBuilder {
+        DaemonBuilder {
+            mapped_github_user: SIGNED_IN_GITHUB_USER.to_string(),
+            mapped_os_user: MAPPED_OS_USER.to_string(),
+            peers: Vec::new(),
+            probe,
+        }
+    }
+
+    impl DaemonBuilder {
+        /// Replace the single `users[]` entry — naming someone other than the signed-in operator is
+        /// how a test states that this daemon has no OS user for them.
+        fn mapping(mut self, github_user: &str, os_user: &str) -> Self {
+            self.mapped_github_user = github_user.to_string();
+            self.mapped_os_user = os_user.to_string();
+            self
+        }
+
+        fn seeing_peer(mut self, instance_id: &str) -> Self {
+            self.peers.push(instance_id.to_string());
+            self
+        }
+
+        fn build(self) -> ConnectionServiceImpl {
+            let temp = tempfile::tempdir().unwrap();
+            let base = temp.path().to_path_buf();
+            let sessions_base_resolver: SessionsBaseResolver =
+                Arc::new(move |_| Some(base.clone()));
+            let user_resolver: SessionUserResolver = Arc::new(|token| {
+                (token == VERIFIABLE_TOKEN).then(|| SIGNED_IN_GITHUB_USER.to_string())
+            });
+            // The room slot is present but unconnected: this daemon is *configured* for a common
+            // room, so a forward is attempted and fails on the transport rather than being refused
+            // for a missing configuration.
+            let discovery = LiveKitDiscoveryHandles {
+                eligible_daemon_source: Arc::new(FakeEligibleDaemons(self.peers)),
+                common_room_livekit_room: Arc::new(tokio::sync::RwLock::new(None)),
+            };
+            ConnectionServiceImpl::new(
+                a_config_named(RELAY_HOST, &self.mapped_github_user, &self.mapped_os_user),
+                sessions_base_resolver,
+                temp.path().to_path_buf(),
+                user_resolver,
+                None,
+                Some(discovery),
+                None,
+                Arc::new(CliSessionManager::new()),
+            )
+            .with_host_tooling(self.probe)
+        }
+    }
+
+    fn a_config_named(
+        instance_id: &str,
+        github_user: &str,
+        os_user: &str,
+    ) -> crate::config::DaemonConfig {
+        let yaml = format!(
+            "daemon_instance_id: \"{instance_id}\"\nusers:\n  - github_user: \"{github_user}\"\n    os_user: \"{os_user}\"\n"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        crate::config::DaemonConfig::load(&path).unwrap()
+    }
+
+    /// Ask `service` what `host` has installed, as the holder of `session_token`.
+    async fn tooling_asked_of(
+        service: &ConnectionServiceImpl,
+        session_token: &str,
+        host: &str,
+    ) -> Result<GetHostToolingResponse, Status> {
+        service
+            .get_host_tooling(Request::new(GetHostToolingRequest {
+                session_token: session_token.to_string(),
+                daemon_instance_id: host.to_string(),
+            }))
+            .await
+            .map(|answered| answered.into_inner())
+    }
+
+    /// AC-8 — a token this daemon cannot verify buys nothing, and runs nothing on the host.
+    #[tokio::test]
+    async fn host_tooling_rejects_an_invalid_token() {
+        // Given a daemon whose probe would answer readily if it were ever asked
+        let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+            "Ada Lovelace",
+            "ada@example.com",
+            "hubot",
+        ));
+        let service = a_daemon_probing_with(Arc::clone(&probe)).build();
+
+        // When an expired session asks this daemon about itself
+        let error = tooling_asked_of(&service, EXPIRED_TOKEN, THIS_DAEMON)
+            .await
+            .expect_err("an unverifiable session token must be rejected");
+
+        // Then it is refused as unauthenticated, and nothing was run on the host on its behalf
+        assert_eq!(error.code, tddy_rpc::Code::Unauthenticated);
+        assert_eq!(
+            probe.probed_os_users(),
+            Vec::<String>::new(),
+            "a refused call must not shell out on the host as anyone"
+        );
+    }
+
+    /// AC-7 — both facts the probe reads are per-OS-user: `git config --global` reads
+    /// `$HOME/.gitconfig` and `gh auth status` reads `$HOME/.config/gh/hosts.yml`. Run as the
+    /// daemon's own user — or as nobody at all — the probe reports a different account's identity
+    /// under this host's name, which is a wrong answer that reads exactly like a right one and
+    /// leaves every other test in the suite green.
+    #[tokio::test]
+    async fn host_tooling_runs_the_probe_as_the_hosts_os_user() {
+        // Given a daemon mapping the signed-in GitHub user `octocat` to the OS user `ada`
+        let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+            "Ada Lovelace",
+            "ada@example.com",
+            "hubot",
+        ));
+        let service = a_daemon_probing_with(Arc::clone(&probe))
+            .mapping(SIGNED_IN_GITHUB_USER, MAPPED_OS_USER)
+            .build();
+
+        // When octocat asks this daemon what it has configured
+        let tooling = tooling_asked_of(&service, VERIFIABLE_TOKEN, THIS_DAEMON)
+            .await
+            .expect("a verifiable session asking about the serving daemon must be answered");
+
+        // Then the probe ran exactly once, as the OS user that GitHub user maps to here
+        assert_eq!(
+            probe.probed_os_users(),
+            vec![MAPPED_OS_USER.to_string()],
+            "the probe must run as the OS user `{SIGNED_IN_GITHUB_USER}` maps to via users[] — \
+             not as the daemon's own user, and not as nobody"
+        );
+        // And the answer on the wire is that probe's reading, so the identity reported is the one
+        // read as `ada` rather than something assembled elsewhere
+        assert_eq!(
+            tooling
+                .git
+                .expect("a probed host reports a git identity block")
+                .user_name,
+            "Ada Lovelace"
+        );
+    }
+
+    /// AC-9 — a request naming another host is served by that host, and the routing happens
+    /// **before** this daemon authenticates the caller locally.
+    ///
+    /// The operator here has no `users[]` entry on the relay their browser is talking to; their
+    /// entry lives on `server-2`, the host they are asking about. Authenticating first would refuse
+    /// them with `permission_denied` from a daemon the question was never about — and that is
+    /// exactly the ordering `attach_session_agent` and `resolve_stack_base` already establish.
+    ///
+    /// The refusal that comes back is what proves it: this daemon got as far as forwarding to the
+    /// peer and failed only on the transport, because the common room in this test holds no
+    /// connection to carry the call.
+    #[tokio::test]
+    async fn host_tooling_for_another_host_is_routed_to_that_peer() {
+        // Given a relay that can see `server-2`, and whose users[] maps monalisa — not octocat
+        let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+            "Ada Lovelace",
+            "ada@example.com",
+            "hubot",
+        ));
+        let service = a_daemon_probing_with(Arc::clone(&probe))
+            .mapping(OTHER_OPERATOR, OTHER_OPERATOR)
+            .seeing_peer(PROBED_HOST)
+            .build();
+
+        // When octocat asks the relay about server-2
+        let error = tooling_asked_of(&service, VERIFIABLE_TOKEN, PROBED_HOST)
+            .await
+            .expect_err("this test's common room can carry no forwarded call");
+
+        // Then the call was routed to the peer rather than judged here: the failure is the forward
+        // itself, not `permission_denied` for a user mapping the probed host is the one to hold
+        assert_eq!(
+            error.code,
+            tddy_rpc::Code::FailedPrecondition,
+            "an operator unmapped on the relay must not be refused by it; got: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains("cannot forward"),
+            "the refusal must be about carrying the call to the peer; got: {}",
+            error.message
+        );
+        // And the relay never answered for another host with its own tooling
+        assert_eq!(
+            probe.probed_os_users(),
+            Vec::<String>::new(),
+            "a question about server-2 must not be probed locally on workstation-1"
+        );
     }
 }

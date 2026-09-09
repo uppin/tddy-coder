@@ -42,16 +42,16 @@ use tddy_service::proto::connection::{
     DetachSessionAgentRequest, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
     GetAcpReplayPageRequest, GetAcpReplayPageResponse, GetAcpToolCallDetailRequest,
     GetAcpToolCallDetailResponse, GetDemoVmStatusRequest, GetDemoVmStatusResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetTerminalHistoryRequest, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListAgentModelsRequest, ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse,
-    ListEligibleDaemonsRequest, ListEligibleDaemonsResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListKnownHostsRequest, ListKnownHostsResponse,
-    ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ListSessionAgentsRequest, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse, ListSessionWorkflowFilesRequest,
-    ListSessionWorkflowFilesResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
+    GetHostToolingRequest, GetHostToolingResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetTerminalHistoryRequest, GetWorktreeSnapshotRequest, GetWorktreeSnapshotResponse,
+    HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse, ListAgentModelsRequest,
+    ListAgentModelsResponse, ListAgentsRequest, ListAgentsResponse, ListEligibleDaemonsRequest,
+    ListEligibleDaemonsResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListKnownHostsRequest, ListKnownHostsResponse, ListProjectBranchesRequest,
+    ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse,
+    ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
+    ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse,
     ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse, ListWorktreesForProjectRequest,
     ListWorktreesForProjectResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
@@ -519,6 +519,19 @@ where
         request: tonic::Request<ListKnownHostsRequest>,
     ) -> Result<tonic::Response<ListKnownHostsResponse>, tonic::Status> {
         let resp = RpcConnectionService::list_known_hosts(
+            &*self.inner,
+            tddy_rpc::Request::new(request.into_inner()),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
+
+    async fn get_host_tooling(
+        &self,
+        request: tonic::Request<GetHostToolingRequest>,
+    ) -> Result<tonic::Response<GetHostToolingResponse>, tonic::Status> {
+        let resp = RpcConnectionService::get_host_tooling(
             &*self.inner,
             tddy_rpc::Request::new(request.into_inner()),
         )
