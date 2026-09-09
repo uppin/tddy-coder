@@ -181,6 +181,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // file: `HostDocumentScope` is reached by `StartSession`, which stays, so `connection.proto`
         // and `session_files.proto` both import `types.proto` and neither declares the enum.
         "proto/session_files.proto",
+        // `#unbundle` node 7 — families B (the roster and conversations, five of whose methods are
+        // named in the sandbox runner's relay allowlist) and M+N (activity, status, notifications
+        // and ACP replay).
+        "proto/session_agents.proto",
+        "proto/activity.proto",
     ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
@@ -458,6 +463,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/worktree.proto",
                 "proto/livekit.proto",
                 "proto/session_files.proto",
+                "proto/session_agents.proto",
+                "proto/activity.proto",
                 "proto/types.proto",
                 "proto/remote_git.proto",
                 "proto/session_admission.proto",

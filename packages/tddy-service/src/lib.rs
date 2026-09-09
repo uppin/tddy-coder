@@ -34,6 +34,7 @@ pub use observer_service::PresenterObserverService;
 pub use presenter_intent_service::PresenterIntentService;
 pub use proto::acp::{AcpService, AcpServiceServer};
 pub use proto::actions::ActionServiceServer;
+pub use proto::activity::ActivityServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::connection::ConnectionServiceServer;
@@ -46,6 +47,7 @@ pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::session_admission::SessionAdmissionServiceServer;
+pub use proto::session_agents_svc::SessionAgentServiceServer;
 pub use proto::session_files::SessionFilesServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
@@ -119,6 +121,17 @@ pub mod proto {
     #[allow(unused_imports, unused_variables)]
     pub mod session_files {
         include!(concat!(env!("OUT_DIR"), "/session_files.rs"));
+    }
+    /// `SessionAgentService`: the roster of agents attached to a session, and the conversations held
+    /// with them. Split out of [`connection`] by `#unbundle` node 7.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_agents_svc {
+        include!(concat!(env!("OUT_DIR"), "/session_agents.rs"));
+    }
+    /// `ActivityService`: agent activity, session status, notifications and ACP transcript replay.
+    #[allow(unused_imports, unused_variables)]
+    pub mod activity {
+        include!(concat!(env!("OUT_DIR"), "/activity.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

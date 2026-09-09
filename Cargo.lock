@@ -12924,6 +12924,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-activity"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tddy-session-agents"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-discovery",
+ "tddy-rpc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-session-files"
 version = "0.1.0"
 dependencies = [

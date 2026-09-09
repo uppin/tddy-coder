@@ -1,0 +1,20 @@
+[package]
+name = "tddy-session-agents"
+version = "0.1.0"
+edition = "2021"
+description = "The roster of agents attached to a session and the conversations held with them — session_agents.SessionAgentService. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_session_agents"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-discovery = { path = "../tddy-discovery" }
+tddy-rpc = { path = "../tddy-rpc" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

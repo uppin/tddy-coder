@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Stack**: `#unbundle` node **7 of 8**. Base: `feature/unbundle/session-io-services` (node 6)
+**Stack**: `#unbundle` node **7 of 8**. PR [#476](https://github.com/uppin/tddy-coder/pull/476).
+Base: `feature/unbundle/session-io-services` (node 6, PR #475)
 
 ## Initial Discovery
 
@@ -337,10 +338,27 @@ Three further proofs:
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `./test -p tddy-coder` | | |
-| `./test -p tddy-session-sync` | | |
-| `./dev bun run --filter tddy-web cypress:component` | | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
+| `cargo clippy -p tddy-session-agents -p tddy-session-activity -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
+| `./dev bun run --filter tddy-web cypress:component` | not yet run — no web change in commit 2 | |
+
+**12 failing tests** define this node: 1 in `tddy-session-agents`, 3 in `tddy-session-activity`
+(including the ⛔ tick-numbering prerequisite), and 8 in `tddy-service` — the inherited ones plus the
+two new services' shape, `connection.ConnectionService` still declaring all 17, and **the sandbox
+relay allowlist still gating family B under the old coordinate**.
+
+### The allowlist is exposed as data, not repeated as strings
+
+`tddy-session-agents` publishes `IN_JAIL_RELAYABLE` — the five `(service, method)` pairs — so
+`tddy-sandbox-runner` reads them rather than repeating the literals. That is the mitigation for the
+failure mode this changeset names: an allowlist that no longer matches the served coordinate fails
+**closed**, silently, at runtime. With the pairs in one place they cannot drift.
+
+### Two more shared types, found the same way
+
+`types.proto` gains `SessionAgentStatus` and `SessionAgentActivity`, because `ListSessions` — family
+C, which stays — reaches both through `SessionEntry`. Established by walking field types, exactly as
+node 6 established `HostDocumentScope`. Families M and N share nothing with anything.
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.
 Note that several in-jail suites need a real sandbox backend and are excluded from CI; their local

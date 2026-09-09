@@ -1,0 +1,331 @@
+syntax = "proto3";
+
+package activity;
+
+// `AgentActivityRecord` carries a tool call's input and result as free-form JSON, which is what
+// `google.protobuf.Value` is for — the same import `connection.proto` uses for the same fields.
+import "google/protobuf/struct.proto";
+
+// What an agent is doing, what a session's status is, and the transcript of both.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 7 — families M and N. ACP
+// transcript replay shares this service rather than getting its own because it is a *view* of agent
+// activity: it shares `AgentActivityRecord` and `StreamMode`, and three methods do not justify a
+// fourth hand-written tonic adapter (one is needed per gRPC-served service, because
+// `tddy-codegen`'s adapter generator is a documented stub).
+//
+// # The delta tick numbering is fixed here, deliberately
+//
+// `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-which-is-also-the-wire-s-no-tick.md`
+// records that a session's first delta is numbered 0, which is also the wire's "no tick" value — so
+// a consumer cannot tell "the first delta" from "no delta yet". Carrying that ambiguity into a fresh
+// schema would make it permanent, and this is the last cheap moment to change it: ticks start at 1,
+// 0 means unset, and `tddy-session-sync` — the only consumer — migrates in the same PR.
+
+service ActivityService {
+  // Per-worktree hooks (claude-cli sessions only) report granular activity status.
+  // Auth: `hook_token` is a per-session random token written to .session.yaml at session start.
+  rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);
+  // Agent Activity pane — the agent's own tool calls (see docs/ft/web/agent-activity.md).
+  // StreamSessionActivity replays the persisted agent-activity.jsonl snapshot then streams live
+  // records for the session. ReportAgentActivity is called by per-worktree claude-cli hooks to
+  // report a PreToolUse (running) / PostToolUse (terminal) pair; bearer is the hook_token.
+  rpc StreamSessionActivity(StreamSessionActivityRequest) returns (stream AgentActivityRecord);
+  rpc ReportAgentActivity(ReportAgentActivityRequest) returns (ReportAgentActivityResponse);
+  // Session notifications — everything that happened in ANY of this daemon's sessions that an
+  // operator should know about (docs/ft/daemon/session-notifications.md).
+  // One subscription serves the whole session drawer: the events name the session they belong to,
+  // so a drawer of twelve rows opens one stream, not twelve. Live-only by construction — a
+  // notification describes a moment, and a replayed one would claim an agent is working now
+  // because it was working when the tab was last open.
+  rpc StreamSessionNotifications(StreamSessionNotificationsRequest) returns (stream SessionNotificationEvent);
+  // The patch a call produced, scoped to that call's own files, so a participant can apply an
+  // edit rather than merely learn that the checkout moved
+  // (docs/ft/daemon/session-worktree-sync.md). This is the INCREMENTAL path only: a client that
+  // has fallen behind resyncs by fetching the session's WIP ref over git, not by asking for an
+  // ever-larger patch here. Streamed, not unary: a patch has no useful upper bound, and a payload
+  // over tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES is chunk-framed, where a lost chunk wedges
+  // the call with no error rather than failing it.
+  rpc StreamAgentActivityDelta(AgentActivityDeltaRequest) returns (stream AgentActivityDeltaChunk);
+  // Read-only ACP transcript for the activity pane (see docs/ft/web/agent-activity-pane.md
+  // § Read-only ACP transcript). Replays the session's persisted acp-transcript.jsonl as ACP
+  // session/update frames, then (SNAPSHOT_THEN_LIVE) tails the live presenter. Each AcpReplayFrame
+  // wraps one AcpAgentMessage (only its session_update / error variants). Served over HTTP for any
+  // session (live or dormant) — unlike the bidi, LiveKit-only AcpService.Session. The frame is
+  // wrapped in a connection-local message so the cross-package reference is a field (prost
+  // extern_path) rather than a service return type.
+  rpc StreamAcpReplay(StreamAcpReplayRequest) returns (stream AcpReplayFrame);
+  // On-demand tool-call body lookup for the Agent Activity detail dialog. StreamAcpReplay's
+  // SNAPSHOT_THEN_LIVE / LIVE_ONLY frames carry a tool call's metadata only (title/status/kind/id) —
+  // its raw_input/raw_output are stripped so the stream's size tracks the number of tool calls, not
+  // the volume of their I/O. This unary returns one call's full raw_input/raw_output, resolved from
+  // the same coalesced transcript the stream replays (acp-transcript.jsonl + agent-activity.jsonl
+  // fallback). See docs/ft/coder/acp-replay-lazy-tool-bodies.md.
+  rpc GetAcpToolCallDetail(GetAcpToolCallDetailRequest) returns (GetAcpToolCallDetailResponse);
+  // The transcript's reverse cursor: one page of frames strictly OLDER than `before_seq`. A
+  // TAIL_THEN_LIVE replay opens on the newest page, so reading further back is paging backwards from
+  // the first delivered frame's `seq`. Unary (unlike the replay stream) so it peer-forwards on
+  // daemon_instance_id exactly as GetAcpToolCallDetail does. See
+  // docs/ft/web/agent-activity-pane.md § Read-only ACP transcript.
+  rpc GetAcpReplayPage(GetAcpReplayPageRequest) returns (GetAcpReplayPageResponse);
+}
+
+// One replay frame: a connection-local wrapper carrying an ACP `tddy.acp.v1.AcpAgentMessage`
+// (session_update / error variant) as its protobuf-encoded bytes. Bytes (rather than a direct
+// cross-package field) keep connection.proto self-contained — no import, no cross-package codegen —
+// while preserving the exact ACP data model: the web decodes the bytes with the AcpAgentMessage
+// schema and reuses the same session/update switch as the live ACP stream.
+message AcpReplayFrame {
+  bytes acp_agent_message = 1;
+  // Set only in COUNT_THEN_LIVE frames (the current number of persisted transcript frames); the
+  // SNAPSHOT_THEN_LIVE / LIVE_ONLY modes leave this 0 and carry acp_agent_message instead.
+  uint64 activity_count = 2;
+  // The frame's absolute 0-based position in the session's resolved transcript, oldest = 0. Carried
+  // by every transcript frame (snapshot, tail page, and live tail). On the FIRST frame of a tail
+  // page it doubles as the reverse cursor: `seq == 0` means the page reaches the transcript head.
+  // COUNT_THEN_LIVE frames carry no transcript payload and leave it 0.
+  uint64 seq = 3;
+}
+
+// One frame of a delta. The describing fields repeat on every frame, as HostDocumentChunk's
+// total_byte_size does: a reader knows what it is receiving from the first frame without a
+// separate header frame to special-case, and a single-frame delta is not a different shape from a
+// hundred-frame one.
+message AgentActivityDeltaChunk {
+  // One slice of `git diff --binary` output — an ordinary git patch, which is why it carries
+  // deletions, renames, file modes and binary content without any of them being a field here.
+  // A call that changed nothing is one frame with empty `patch` and total_byte_size 0, so
+  // "nothing changed" stays distinguishable from "the stream failed".
+  bytes  patch           = 1;
+  // The poll tick this patch belongs to. A client de-duplicates by this: several calls sharing a
+  // tick must apply its patch once, not once each.
+  //
+  // **Ticks start at 1; 0 means unset.** On `connection.ConnectionService` the first delta was
+  // numbered 0, which is also the wire's absent value, so a consumer could not tell "the first
+  // delta" from "no delta yet" — recorded in
+  // `docs/dev/todo/2026-08-29-a-session-s-first-delta-is-numbered-0-…`. A fresh schema is the last
+  // cheap moment to fix it.
+  uint64 seq             = 2;
+  // The tick this one follows. A gap between a client's last applied seq and this means a lost
+  // broadcast, and is a reconcile rather than something to apply out of order.
+  uint64 prev_seq        = 3;
+  // The commit the patch applies onto.
+  string base_commit     = 4;
+  // Reserved: this field carried a `cumulative` flag while reconciliation was a whole-worktree
+  // patch. It is a git fetch of the WIP ref now, so no delta is ever cumulative.
+  reserved 5;
+  // The patch's full size, so a reader can size a buffer and detect a truncated stream.
+  uint64 total_byte_size = 6;
+  // The paths this patch is limited to — the request's scope, resolved. A client compares it
+  // against what it expected rather than trusting that the server scoped the way it asked.
+  repeated string scoped_paths = 7;
+}
+
+message AgentActivityDeltaRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  // Routing, as on ExecuteTool: the daemon expected to answer. Empty means the one being called.
+  string daemon_instance_id = 3;
+  // The call whose delta is wanted: the tick's diff limited to that call's changed_paths.
+  // Required — there is no whole-worktree mode here on purpose. Reconciling is a git fetch of the
+  // session's WIP ref (see the feature doc), which is incremental and delta-compressed; a
+  // cumulative patch would re-send the entire dirty tree over a data channel every time a client
+  // fell one tick behind.
+  string call_id            = 4;
+  // What to serve when call_id is set. A client replaying a window asks for each call's scope and
+  // then the residual, and the three together reconstruct the tick exactly.
+  DeltaScope scope          = 5;
+}
+
+// One recorded state of an agent tool call. Mirrors tddy_core::agent_activity::AgentActivityRecord.
+// The same call_id appears on the running row and the terminal row; the read side coalesces them.
+message AgentActivityRecord {
+  string call_id                     = 1;
+  string tool_name                   = 2;
+  google.protobuf.Value input        = 3;
+  string status                      = 4;  // "running" | "completed" | "error"
+  google.protobuf.Value result       = 5;
+  string error_message               = 6;
+  uint64 started_unix_ms             = 7;
+  uint64 completed_unix_ms           = 8;
+  string source                      = 9;  // "coder" | "cursor-cli" | "claude-cli" | "sandbox"
+
+  // The worktree HEAD when this call was recorded. A patch is only applicable against the commit
+  // it was cut from, so a record that cannot name its base is a record a mirror must not act on.
+  // Empty when HEAD could not be read — never a fabricated sha.
+  string head_commit                 = 10;
+  // The session-room poll tick whose delta covers this call; 0 when no tick has covered it yet.
+  // Several calls in one window share a seq, but NOT the same patch — see changed_paths.
+  uint64 activity_seq                = 11;
+  // The worktree paths this call is credited with, relative to the worktree root and NOT
+  // git-C-quoted (unlike GetWorktreeSnapshot.changed_paths, which is display-only). The delta
+  // served for this call is the tick's diff limited to exactly these paths, so two calls in one
+  // poll window get two different patches rather than one shared whole-tree diff.
+  //
+  // Populated from what the call declared it would touch — an Edit's or Write's file_path. A call
+  // that declared nothing (a Bash running a formatter, a codegen step) is credited with nothing
+  // here, and whatever it changed is delivered by the tick's RESIDUAL delta instead, so no change
+  // is ever attributed away into silence.
+  repeated string changed_paths      = 12;
+}
+
+// Which slice of a tick's diff to serve.
+enum DeltaScope {
+  // The paths the named call is credited with. The default, because a client reacting to one
+  // activity record wants that record's change and not its neighbours'.
+  DELTA_SCOPE_CALL     = 0;
+  // The paths of that tick claimed by NO call — what an undeclared writer (a Bash running a
+  // formatter, a codegen step) changed. Without this a tick's diff would be lossy the moment any
+  // change was not declared by the tool that made it, and a mirror would drift with nothing
+  // reporting it.
+  DELTA_SCOPE_RESIDUAL = 1;
+  // The whole tick, unscoped. The union of every call scope and the residual.
+  DELTA_SCOPE_TICK     = 2;
+}
+
+// One page of transcript frames strictly OLDER than `before_seq` — the reverse cursor behind the
+// Activities transcript's scroll-up. Mirrors GetAcpToolCallDetail's routing (peer-forwarding on
+// daemon_instance_id) and StreamAcpReplay's auth.
+message GetAcpReplayPageRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+  uint64 before_seq         = 4;   // exclusive upper bound; frames with seq < before_seq
+  uint32 page_size          = 5;   // 0 ⇒ the server's default page size
+}
+
+// One page of the resolved transcript, oldest-first. `at_oldest` is an explicit field rather than
+// `first_seq == 0` because an EMPTY page (the cursor is already at the head) would otherwise be
+// indistinguishable from a one-frame page at the head.
+message GetAcpReplayPageResponse {
+  // Protobuf-encoded `tddy.acp.v1.AcpAgentMessage` frames, oldest-first, tool bodies stripped —
+  // byte-identical in shape to AcpReplayFrame.acp_agent_message.
+  repeated bytes frames    = 1;
+  uint64         first_seq = 2;   // absolute seq of frames[0]; meaningless when `frames` is empty
+  bool           at_oldest = 3;   // true when this page reaches the transcript head
+}
+
+// Request for one tool call's full body. Mirrors StreamAcpReplayRequest's routing (same
+// peer-forward semantics on daemon_instance_id) plus the tool_call_id to look up.
+message GetAcpToolCallDetailRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;   // same peer-forward routing as StreamAcpReplay
+  string tool_call_id       = 4;   // the ToolCall.tool_call_id from a streamed frame
+}
+
+// One tool call's stripped-out bodies: the exact JSON strings the stream used to inline. Either may
+// be absent (e.g. a still-running call has raw_input but no raw_output yet). A tool_call_id absent
+// from the transcript is a NOT_FOUND error, not an empty success.
+message GetAcpToolCallDetailResponse {
+  optional string raw_input  = 1;
+  optional string raw_output = 2;
+}
+
+/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
+message ReportAgentActivityRequest {
+  string session_id    = 1;
+  string hook_token    = 2;
+  string os_user       = 3;
+  string event         = 4;  // "PreToolUse" | "PostToolUse"
+  string tool_name     = 5;
+  string input_json    = 6;
+  string result_json   = 7;
+  bool   is_error      = 8;
+  string error_message = 9;
+}
+
+message ReportAgentActivityResponse {
+  bool ok = 1;
+}
+
+/// Sent by `tddy-tools session-hook`; bearer is the per-session hook_token.
+message ReportSessionStatusRequest {
+  // Daemon session id (baked into the hook command at worktree-prep time).
+  string session_id = 1;
+  // Per-session random token — validated against .session.yaml hook_token field.
+  string hook_token = 2;
+  // OS user (resolves the sessions_base path on the daemon).
+  string os_user = 3;
+  // Wire status string: one of Started, Running, ExecutingTool, WaitingForInput, Done, Ended.
+  string status = 4;
+}
+
+message ReportSessionStatusResponse {
+  bool ok = 1;
+}
+
+// One thing that happened in one session.
+message SessionNotificationEvent {
+  string                    session_id = 1;
+  // The session's display label, derived by the one rule every surface uses
+  // (tddy_core::session_label::session_display_label), so this event and the drawer row it belongs
+  // to name the same session identically.
+  string                    label      = 2;
+  SessionNotificationKind   kind       = 3;
+  SessionNotificationSource source     = 4;
+  // Operator-facing copy, rendered verbatim (it is what Telegram sends). Never carries a secret.
+  string                    text       = 5;
+  // Unix milliseconds, stamped when the event happened. The web ages activity out of its blink
+  // window against this, so a 0 here would leave a dot blinking for as long as the tab stayed open.
+  uint64                    at_unix_ms = 6;
+}
+
+// Whether a notification asks the operator for something, or merely reports progress.
+enum SessionNotificationKind {
+  // The daemon said nothing about the kind — not a claim that either applies.
+  SESSION_NOTIFICATION_KIND_UNSPECIFIED = 0;
+  // The agent is working. Drives the drawer's blinking green dot; reaches no chat.
+  SESSION_NOTIFICATION_KIND_ACTIVITY = 1;
+  // The session is blocked on the operator, or has finished a turn and is waiting for them.
+  // Drives the yellow dot, and is the only kind Telegram sends.
+  SESSION_NOTIFICATION_KIND_ATTENTION_REQUIRED = 2;
+}
+
+// Which of the daemon's inbound paths raised a notification.
+enum SessionNotificationSource {
+  SESSION_NOTIFICATION_SOURCE_UNSPECIFIED = 0;
+  // ReportSessionStatus — the per-worktree claude-cli / cursor-cli hooks.
+  SESSION_NOTIFICATION_SOURCE_ACTIVITY_STATUS = 1;
+  // ReportAgentActivity — the agent's own tool loop.
+  SESSION_NOTIFICATION_SOURCE_AGENT_TOOL_CALL = 2;
+  // PresenterObserver.ObserveEvents — a tddy-coder workflow session's presenter.
+  SESSION_NOTIFICATION_SOURCE_PRESENTER = 3;
+}
+
+// Request for the read-only ACP transcript replay. Mirrors StreamSessionActivityRequest — same
+// peer-forward routing and StreamMode semantics.
+message StreamAcpReplayRequest {
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+  // TAIL_THEN_LIVE only: how many newest frames to replay. 0 ⇒ the server's default page size.
+  uint32     page_size          = 5;
+}
+
+// Whether the stream replays the persisted history before tailing live records.
+enum StreamMode {
+  SNAPSHOT_THEN_LIVE = 0;   // default: replay the coalesced history, then tail live records
+  LIVE_ONLY          = 1;   // skip the snapshot; deliver only records that arrive after subscribe
+  // Count-first (StreamAcpReplay only): emit the current activity count as the first frame, then a
+  // new count for each frame appended live. Carries no transcript payload — the cheap "minimal
+  // activity data" that drives the Agent Activity icon/badge before the pane is opened.
+  COUNT_THEN_LIVE    = 2;
+  // Tail-first (StreamAcpReplay only): replay only the NEWEST `page_size` persisted frames — in
+  // recorded order, oldest-first within the page — then tail live. Older frames are reached by
+  // paging backwards with GetAcpReplayPage from the first delivered frame's `seq`.
+  TAIL_THEN_LIVE     = 3;
+}
+
+message StreamSessionActivityRequest {
+  string     session_token      = 1;
+  string     session_id         = 2;
+  string     daemon_instance_id = 3;
+  StreamMode mode               = 4;   // snapshot-then-live (default) vs live-only
+}
+
+message StreamSessionNotificationsRequest {
+  // The web session token. No session id: the stream is daemon-level by design (NFR1).
+  string session_token = 1;
+}

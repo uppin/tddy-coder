@@ -46,6 +46,8 @@ members = [
     "packages/tddy-daemon-auth",
     "packages/tddy-daemon-livekit",
     "packages/tddy-session-files",
+    "packages/tddy-session-agents",
+    "packages/tddy-session-activity",
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",
