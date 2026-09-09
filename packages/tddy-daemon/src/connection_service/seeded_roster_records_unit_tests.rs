@@ -9,6 +9,7 @@
 //! reference that cannot be turned into one has to fail the start rather than be dropped.
 
 use super::*;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// A daemon with no peers: the whole common room is this host, so a reference naming any other
 /// daemon is one nothing here can resolve.

@@ -813,7 +813,7 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
     // `tests/session_attach_staging_scope_acceptance.rs`; what only a cross-host start can show is
     // `bytes_done` moving while the bytes are still in flight.
     let total = document.len() as u64;
-    let frame = tddy_daemon::connection_service::HOST_DOCUMENT_FRAME_BYTES as u64;
+    let frame = tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES as u64;
     let expected: Vec<(String, u64, u64)> = (1..=total.div_ceil(frame))
         .map(|nth| (nth * frame).min(total))
         .chain(std::iter::once(total))

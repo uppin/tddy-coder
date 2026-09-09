@@ -63,9 +63,7 @@ pub fn advertise_daemon_url(config: &DaemonConfig) -> String {
         .listen
         .advertise_url
         .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+        .and_then(tddy_daemon_kernel::trim_to_option)
         .unwrap_or_else(|| local_daemon_hook_url(config))
 }
 

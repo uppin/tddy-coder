@@ -1,6 +1,7 @@
 use super::*;
 use crate::host_registry::{FileHostRegistry, HostRegistry, HostSighting};
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::{KnownHostEntry, ListKnownHostsRequest};
 
 /// A host that is emphatically **not** the machine running the suite: every assertion about

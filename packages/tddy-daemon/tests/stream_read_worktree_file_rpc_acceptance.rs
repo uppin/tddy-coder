@@ -18,10 +18,11 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use pretty_assertions::assert_eq;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{ConnectionServiceImpl, HOST_DOCUMENT_FRAME_BYTES};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::project_storage::{self, ProjectData};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::user_sessions_path::projects_path_for_user;
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ReadWorktreeFileRequest,

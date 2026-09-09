@@ -1,9 +1,7 @@
 use tddy_rpc::Status;
 
 use crate::{
-    connection_service::{activity_hub, agent_roster, service_util},
-    livekit_rooms_stream::RoomRoster,
-    spawn_worker, worktrees,
+    connection_service::agent_roster, livekit_rooms_stream::RoomRoster, spawn_worker, worktrees,
 };
 
 use std::time::Duration;
@@ -80,9 +78,9 @@ impl ConnectionServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
-        sessions_base_for_user: service_util::SessionsBaseResolver,
+        sessions_base_for_user: tddy_daemon_kernel::SessionsBaseResolver,
         tddy_data_dir: PathBuf,
-        user_resolver: service_util::SessionUserResolver,
+        user_resolver: tddy_daemon_kernel::SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
@@ -192,7 +190,7 @@ impl ConnectionServiceImpl {
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             session_stdio,
-            agent_activity_hub: Arc::new(activity_hub::AgentActivityHub::default()),
+            agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
@@ -355,7 +353,7 @@ impl ConnectionServiceImpl {
 
     /// Shared agent-activity hub, so the sandbox tool path can publish through the same channel the
     /// `StreamSessionActivity` subscribers read.
-    pub fn agent_activity_hub(&self) -> Arc<activity_hub::AgentActivityHub> {
+    pub fn agent_activity_hub(&self) -> Arc<tddy_daemon_kernel::AgentActivityHub> {
         Arc::clone(&self.agent_activity_hub)
     }
 

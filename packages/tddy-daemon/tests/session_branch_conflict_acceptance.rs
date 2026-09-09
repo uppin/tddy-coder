@@ -17,9 +17,8 @@ use tddy_core::changeset::{read_changeset, Changeset};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{
-    ConnectionServiceImpl, SessionUserResolver, SessionsBaseResolver,
-};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, StartSessionRequest, StartSessionResponse,

@@ -7,9 +7,10 @@
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::connection_service::{ConnectionServiceImpl, SessionUserResolver, SessionsBaseResolver};
+use crate::connection_service::ConnectionServiceImpl;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 
 /// Token accepted by [`test_service`] as a valid session token.
 pub const TEST_TOKEN: &str = "valid-token";

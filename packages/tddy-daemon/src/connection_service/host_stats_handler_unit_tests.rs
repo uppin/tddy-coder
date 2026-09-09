@@ -1,6 +1,7 @@
 use super::*;
 use crate::host_stats::{DiskUsage, HostStats};
 use std::sync::atomic::{AtomicU32, Ordering};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::{HostStatsEvent, StreamHostStatsRequest};
 
 /// Deterministic host-stats double returning fixed per-core CPU and disk figures.

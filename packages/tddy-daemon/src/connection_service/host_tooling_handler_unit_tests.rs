@@ -1,6 +1,7 @@
 use super::*;
 use crate::host_tooling::{GitIdentity, GithubCliStatus, HostTooling, ProbeOutcome};
 use crate::multi_host::{DaemonInstanceId, EligibleDaemonInfo};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::GetHostToolingRequest;
 
 /// The daemon serving the RPC — the one a browser happens to be talking to.

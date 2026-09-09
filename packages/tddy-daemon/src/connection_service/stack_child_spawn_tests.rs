@@ -1,6 +1,7 @@
 use super::*;
 use tddy_core::toolcall::ChildSpawnHandler;
 use tddy_core::{Stack, StackNode};
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_testing_commons::wait::eventually;
 use tddy_workflow::SESSION_ATTACHMENTS_SUBDIR;
 

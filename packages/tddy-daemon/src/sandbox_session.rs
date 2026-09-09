@@ -194,7 +194,7 @@ struct DaemonToolHandler {
     /// recorded as a `running` then terminal row for the web Agent Activity pane.
     session_dir: PathBuf,
     /// Live hub the recorded rows are published to for `StreamSessionActivity` subscribers.
-    agent_activity_hub: Arc<crate::connection_service::AgentActivityHub>,
+    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
 }
 
 #[async_trait]
@@ -222,7 +222,7 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
             result: serde_json::Value::Null,
             error_message: String::new(),
-            started_unix_ms: crate::connection_service::now_unix_ms(),
+            started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
             completed_unix_ms: 0,
             source: "sandbox".to_string(),
             // AC1 of the same document. Read from the filesystem, not by spawning `git rev-parse`:
@@ -259,7 +259,7 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
             result: tddy_core::agent_activity::parse_activity_json(&outcome.result_json),
             error_message: outcome.error_message.clone(),
             started_unix_ms: running.started_unix_ms,
-            completed_unix_ms: crate::connection_service::now_unix_ms(),
+            completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
             source: "sandbox".to_string(),
             // Read again rather than copied from the `running` row: the call that just finished may
             // have been a `Bash` that committed, and this row is a record of where the checkout
@@ -361,7 +361,7 @@ pub async fn dial_and_bridge(
     stdin_rx: mpsc::UnboundedReceiver<Bytes>,
     session_env: Arc<Vec<(String, String)>>,
     session_dir: PathBuf,
-    agent_activity_hub: Arc<crate::connection_service::AgentActivityHub>,
+    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     rpc_handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler>,
 ) -> Result<(), String> {
     log::info!(
@@ -996,7 +996,7 @@ mod tests {
                 stdin_rx,
                 Arc::new(Vec::new()),
                 tmp.path().join("session"),
-                Arc::new(crate::connection_service::AgentActivityHub::default()),
+                Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
                 Arc::new(tddy_sandbox_runner::NullRpcHandler),
             ),
         )
@@ -1022,7 +1022,7 @@ mod tests {
     fn a_tool_handler(
         worktree: PathBuf,
         session_dir: PathBuf,
-        hub: Arc<crate::connection_service::AgentActivityHub>,
+        hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     ) -> DaemonToolHandler {
         DaemonToolHandler {
             worktree,
@@ -1045,7 +1045,7 @@ mod tests {
         std::fs::create_dir_all(&worktree).unwrap();
         std::fs::write(worktree.join("greeting.txt"), "hello sandbox").unwrap();
         let session_dir = tmp.path().join("session");
-        let hub = Arc::new(crate::connection_service::AgentActivityHub::default());
+        let hub = Arc::new(tddy_daemon_kernel::AgentActivityHub::default());
         let handler = a_tool_handler(worktree, session_dir.clone(), Arc::clone(&hub));
 
         // When the agent reads that file through the sandbox tool handler.
@@ -1083,7 +1083,7 @@ mod tests {
         let worktree = tmp.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
         let session_dir = tmp.path().join("session");
-        let hub = Arc::new(crate::connection_service::AgentActivityHub::default());
+        let hub = Arc::new(tddy_daemon_kernel::AgentActivityHub::default());
         let handler = a_tool_handler(worktree, session_dir.clone(), hub);
 
         // When the agent reads a missing file.

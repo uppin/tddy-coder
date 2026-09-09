@@ -12081,6 +12081,7 @@ dependencies = [
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-daemon-kernel",
  "tddy-demo-runner",
  "tddy-discovery",
  "tddy-github",

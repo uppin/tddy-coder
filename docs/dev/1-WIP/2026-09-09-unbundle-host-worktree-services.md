@@ -249,7 +249,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - [x] **Prerequisite — `run_server` options struct** (⛔ blocking TODO) ✅ — **there is no desktop caller**, see the correction below
 - [x] **Prerequisite — generated-code drift gate** in CI (⛔ blocking TODO) ✅ `scripts/generated-code.sh`, green on all four generated directories
 - [x] **Kernel**: `tddy-daemon-kernel` with the five shared symbols; the trim helper's one home ✅
-- [ ] **Cycles**: all nine cut, `config.rs:85` and `host_tooling ⇄ ssh_agent` among them
+- [~] **Cycles**: audited against the tree rather than the discovery table — **3 of the 9 listed do not exist**, 3 are cut here, 3 are classification cuts that land with the crate moves. See `## Decisions & Trade-offs`
 - [~] **Proto**: `host.proto` + `worktree.proto` declared and generating; **no `types.proto` needed**; sandbox extern paths untouched (nothing they name moves in this node)
 - [ ] **Crates**: `tddy-host-service`, `tddy-worktree-service` with their modules and tests
 - [ ] **Web**: regeneration, call-site migration, the six hard-coded bindings, the Cypress fakes
@@ -313,7 +313,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - [x] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests ✅ *(deciding half only — the engine impl is untested, see `## Technical Debt`)*
 - [x] M3 — the crate-level facade produces a zero-caller-diff move ✅ — settled by a compiler, not by reading the diff; `verify --against` still to run against the real move
 - [ ] M4 — file-budget report; `run_server` options struct; CI drift gate
-- [ ] M5 — `tddy-daemon-kernel` extracted; all nine cycles cut; `cargo build -p tddy-daemon` clean
+- [~] M5 — `tddy-daemon-kernel` adopted by `tddy-daemon`, every duplicate deleted; `cargo build -p tddy-daemon` clean; cycles audited (see `## Decisions & Trade-offs`) rather than all nine cut, because three of the nine are not in the tree
 - [ ] M6 — `types.proto` + `host.proto` + `worktree.proto` generate; sandbox extern paths re-pointed
 - [ ] M7 — both crates exist and serve their methods on all three transports
 - [ ] M8 — `tddy-web` migrated; Cypress component suites green
@@ -347,7 +347,7 @@ rather than an algorithm. Three distinct kinds:
 
 ### tddy-daemon
 - [x] **Integration**: `run_server` accepts an options struct and serves the same bundle and routes (`server_options_acceptance.rs`) ✅ 6 tests
-- [ ] **Unit**: the kernel's five symbols resolve from a crate that does not depend on `tddy-daemon` (`tddy-daemon-kernel/tests/`)
+- [x] **Unit**: the kernel's five symbols resolve from a crate that does not depend on `tddy-daemon` (`tddy-daemon-kernel/tests/kernel_surface_acceptance.rs`) ✅ 10 tests
 
 ### tddy-host-service
 - [ ] **Integration**: all 8 `host.HostService` methods answer over Connect-HTTP (`host_service_acceptance.rs`)
@@ -416,6 +416,25 @@ rather than an algorithm. Three distinct kinds:
   the Rust engine driver and make it untestable without a live server. The `ModuleReferences` trait
   is the one row of this module's own decision table that only a server can answer, so that is where
   the seam is cut.
+- **The nine cycles were audited against the tree, and the table was wrong about three of them.**
+  Re-deriving the module graph found **15** mutual pairs at `ac002643`, not nine, and three the table
+  names are not cycles at all: `livekit_peer_discovery → common_room_supervisor` is 0 (the arrows all
+  run *out* of `common_room_supervisor`), `worktree_files → context_files` is 0, and
+  `session_agent_status → session_agent_inference` is 0. What the last row was really describing is
+  `connection_service ⇄ session_agent_inference`, which the `AgentActivityHub` lift does cut — along
+  with `connection_service ⇄ sandbox_session`, `⇄ telegram_session_subscriber` and `⇄ context_files`,
+  three cycles the table missed entirely and which the kernel cuts for free. Adopting the kernel plus
+  inlining `DEFAULT_SESSION_ROOM_GIT_TIMEOUT` cuts **6** real cycles. The four that remain and are
+  named in the table — `host_tooling ⇄ ssh_agent`, `host_tooling ⇄ remote_desktop_probe`,
+  `livekit_peer_discovery ⇄ multi_host`, `telegram_notifier ⇄ telegram_session_control` — are
+  *classification* cuts, not edits: each pair lands in the **same** destination crate, so the crate
+  graph is acyclic the moment the modules move and forcing a module-level cut now would be churn with
+  no boundary behind it — as is `telegram_multi_select_shortcuts ⇄ telegram_notifier`, a tenth pair
+  the table did not name. Four further real cycles the table missed —
+  `host_registry ⇄ livekit_peer_discovery`, `livekit_peer_discovery ⇄ split_session`,
+  `connection_service ⇄ cursor_cli_spawn` (the spawn preamble the kernel does **not** carry) and
+  `connection_service ⇄ test_util` — **do** span destination crates and are not cut here; they belong
+  to the nodes that move those modules. The tree goes from **15** mutual module pairs to **9**.
 - **A caller's rewritten path keeps the module segment**: `crate::host_registry::HostRegistry`
   becomes `tddy_host_service::host_registry::HostRegistry`, not `tddy_host_service::HostRegistry`.
   The module keeps its name in the crate it arrives in, which is what makes the glob facade free —

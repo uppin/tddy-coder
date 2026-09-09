@@ -7,6 +7,7 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use ssh_key::PrivateKey;
 use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_service::proto::connection::{AddHostKeyOutcome, HostKeyCandidate};
 
 /// Distinctive, and used nowhere else in the workspace, so

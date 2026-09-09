@@ -28,8 +28,8 @@ use futures_util::{Stream, StreamExt};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::connection_service::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_daemon::host_documents::MAX_HOST_DOCUMENT_BYTES;
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, start_session_event::Event as StartEvent,

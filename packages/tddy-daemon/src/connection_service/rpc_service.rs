@@ -411,9 +411,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let label = t
                     .label
                     .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
+                    .and_then(tddy_daemon_kernel::trim_to_option)
                     .unwrap_or_else(|| t.path.clone());
                 ToolInfo {
                     path: t.path.clone(),
@@ -4508,7 +4506,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &req.os_user,
                     &label,
                     &req.status,
-                    host_messages::now_unix_ms(),
+                    tddy_daemon_kernel::now_unix_ms(),
                 )
             {
                 bus.publish(notification).await;
@@ -4580,7 +4578,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
                     result: serde_json::Value::Null,
                     error_message: String::new(),
-                    started_unix_ms: host_messages::now_unix_ms(),
+                    started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     completed_unix_ms: 0,
                     source: "claude-cli".to_string(),
                     head_commit,
@@ -4610,7 +4608,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     result: tddy_core::agent_activity::parse_activity_json(&req.result_json),
                     error_message: req.error_message,
                     started_unix_ms: 0,
-                    completed_unix_ms: host_messages::now_unix_ms(),
+                    completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     source: "claude-cli".to_string(),
                     head_commit,
                     // As on the `running` row: the covering tick is the poll loop's to attribute.
@@ -4648,7 +4646,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &req.os_user,
                     &label,
                     &record.tool_name,
-                    host_messages::now_unix_ms(),
+                    tddy_daemon_kernel::now_unix_ms(),
                 ),
             )
             .await;

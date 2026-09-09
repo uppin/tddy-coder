@@ -83,8 +83,10 @@ use tddy_service::proto::connection::{
     StreamAcpReplayRequest, StreamHostPromptsRequest, StreamMode, StreamSessionActivityRequest,
 };
 
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
+
 mod service_util;
-pub use service_util::*;
+pub(crate) use service_util::*;
 
 /// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
 ///
@@ -738,10 +740,8 @@ fn proto_worktree_size_status(status: WorktreeSizeStatus) -> ProtoWorktreeSizeSt
 }
 
 mod host_messages;
-pub(crate) use host_messages::*;
 
 mod activity_hub;
-pub use activity_hub::*;
 
 /// ConnectionService implementation.
 ///
@@ -753,9 +753,9 @@ pub struct ConnectionServiceImpl {
     config: DaemonConfig,
     #[allow(dead_code)]
     // Kept for API compatibility; callers pass a resolver but tddy_data_dir is used directly.
-    sessions_base_for_user: service_util::SessionsBaseResolver,
+    sessions_base_for_user: tddy_daemon_kernel::SessionsBaseResolver,
     tddy_data_dir: PathBuf,
-    user_resolver: service_util::SessionUserResolver,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
@@ -838,7 +838,7 @@ pub struct ConnectionServiceImpl {
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
-    agent_activity_hub: Arc<activity_hub::AgentActivityHub>,
+    agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// What each agent session's own conversation says its agent is doing
     /// (`docs/ft/daemon/agent-session-status.md`), which `ListSessions` reports. Beside the hub it
     /// subscribes to, and shared across clones so the seed a listing paid for is not re-read by the
@@ -1968,11 +1968,6 @@ fn agent_conversation_frames(content: &str, stop_reason: &str) -> Vec<AgentConve
     last.last = true;
     frames
 }
-
-/// Bytes per `StreamReadHostDocument` frame. Mirrors the 48 KiB the upload path chunks with, which
-/// every transport in the stack (ConnectRPC-HTTP, LiveKit data channels) already carries per
-/// message without its own chunk framing.
-pub const HOST_DOCUMENT_FRAME_BYTES: usize = 48 * 1024;
 
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —

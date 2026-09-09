@@ -1,4 +1,5 @@
 use super::*;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 // Reached through `use super::*` until the proto converters moved to `host_messages`, whose
 // facade cannot re-export a name the module merely imports. Bound here instead.
 use crate::host_tooling::{

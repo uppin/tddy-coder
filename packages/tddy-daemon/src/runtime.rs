@@ -565,7 +565,7 @@ pub async fn build(
             };
         // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
         let vm_user_resolver = user_resolver.clone();
-        let sessions_base_resolver: crate::connection_service::SessionsBaseResolver = {
+        let sessions_base_resolver: tddy_daemon_kernel::SessionsBaseResolver = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
                 crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))

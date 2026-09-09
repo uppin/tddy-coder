@@ -38,6 +38,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tddy_core::atomic_file::write_atomic_labelled;
@@ -574,21 +575,23 @@ pub fn local_host_sighting(config: &DaemonConfig) -> HostSighting {
     }
 }
 
-/// Milliseconds since the Unix epoch, for stamping a sighting.
+/// Milliseconds since the Unix epoch as the `i64` a sighting row is stamped with.
+///
+/// The value itself comes from [`tddy_daemon_kernel::now_unix_ms`]; only the two things the shared
+/// helper deliberately does not carry are here. The registry's rows are `i64`, not `u64` — so a
+/// clock past `i64::MAX` saturates rather than wrapping into a negative "last seen". And the
+/// pre-1970 refusal stays at this call site because it is a *diagnostic*, not a value: a clock
+/// before 1970 stamps every row "20000 days ago", which reads as data loss rather than as the
+/// misconfigured clock it is, and only the registry has the context to say so. That diagnostic costs
+/// a second read of the clock, because the shared helper reports a pre-1970 clock as `0` rather than
+/// as an error and there is nothing left to diagnose by the time it returns.
 #[must_use]
 pub fn now_unix_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or_else(|e| {
-            // A clock before 1970 stamps every row "20000 days ago", which reads as data loss
-            // rather than as the misconfigured clock it is.
-            log::warn!(
-                "host registry: the system clock is before the Unix epoch ({e}); stamping 0"
-            );
-            0
-        })
+    if let Err(e) = SystemTime::now().duration_since(UNIX_EPOCH) {
+        log::warn!("host registry: the system clock is before the Unix epoch ({e}); stamping 0");
+        return 0;
+    }
+    i64::try_from(tddy_daemon_kernel::now_unix_ms()).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]

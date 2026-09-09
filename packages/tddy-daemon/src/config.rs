@@ -79,10 +79,19 @@ fn default_session_room_poll_interval_ms() -> u64 {
 }
 
 /// A `git rev-parse` / `status` / `diff` trio that has not answered in this long is a repository in
-/// trouble (a stale index lock, a filesystem that stopped responding), not a slow one. Read from
-/// the module that measures checkouts so the two cannot drift apart.
+/// trouble (a stale index lock, a filesystem that stopped responding), not a slow one. It is also
+/// the budget one measurement of a checkout gets when the caller names none, which is why
+/// [`crate::session_room`] reads it from here — a single definition, so the shipped default and the
+/// unconfigured default cannot drift apart.
+///
+/// The number lives on this side of that pair deliberately. Read the other way round — `config`
+/// naming `session_room`, and `session_room` naming `config` for its [`DaemonConfig`] — the two
+/// modules are mutually dependent, and no crate boundary can be drawn between a wiring layer and a
+/// LiveKit worktree room while that is true.
+pub const DEFAULT_SESSION_ROOM_GIT_TIMEOUT: Duration = Duration::from_millis(5_000);
+
 fn default_session_room_git_timeout_ms() -> u64 {
-    crate::session_room::DEFAULT_GIT_TIMEOUT.as_millis() as u64
+    DEFAULT_SESSION_ROOM_GIT_TIMEOUT.as_millis() as u64
 }
 
 /// The shortest interval and git budget a session room accepts.

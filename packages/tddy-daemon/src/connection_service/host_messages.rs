@@ -265,11 +265,3 @@ pub(crate) fn host_remote_desktop_message(
         failure_reason: probe_failure_reason(&reading.outcome),
     }
 }
-
-/// Milliseconds since the Unix epoch, for agent-activity timestamps.
-pub(crate) fn now_unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
