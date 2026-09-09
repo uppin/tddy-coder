@@ -15,10 +15,9 @@ must context-switch to a separate VNC viewer or RDP client, breaking their flow.
 Attach one or more **screen-sharing targets** to a tddy session. Each target has a label,
 host, port, protocol (VNC or RDP), and optional password. From the session inspector's
 **Screen Sharing tab**, the user can add/remove targets, start streaming a target's desktop
-into the browser, and close the overlay. Remote control — the browser forwarding mouse and
-keyboard events back to the desktop — is specified in
-[AC-SS-6](#ac-ss-6-overlay-remote-control) and is the one part of this the viewer does not yet
-reach; see [Current limits](#current-limits).
+into the browser, close the overlay, and control the desktop from it — the browser forwards mouse
+and keyboard events back to the remote machine, specified in
+[AC-SS-6](#ac-ss-6-overlay-remote-control).
 
 A single generalized `ScreenSharingService` RPC surface covers both protocols. The protocol
 choice (VNC or RDP) is set when adding a target and stored alongside the credentials. The
@@ -41,8 +40,7 @@ and the same overlay — see [Two scopes](#two-scopes-a-sessions-desktop-and-a-h
 - As a user I can start a stream for a target; the desktop appears as a full-screen overlay
   inside the tddy browser window.
 - As a user I can move the mouse and type keys inside the overlay and those events control
-  the remote desktop in real time — specified, and not yet reachable from the browser
-  ([AC-SS-6](#ac-ss-6-overlay-remote-control)).
+  the remote desktop in real time ([AC-SS-6](#ac-ss-6-overlay-remote-control)).
 - As a user I can close the overlay, which stops the stream and releases resources.
 - As a user I can remove a target and its credentials are deleted from the session dir.
 - As a user adding a VNC target, the port field defaults to 5900.
@@ -102,14 +100,29 @@ events are forwarded over a LiveKit bidi stream (`ScreenSharingInputService.Stre
 bridge, which translates and injects them into the remote desktop session using the
 protocol-appropriate input mechanism (RFB for VNC, fast-path input for RDP).
 
-⚠ **Not reachable from the browser.** The daemon side of this is complete: the bridge serves
-`ScreenSharingInputService` over its LiveKit data channel and injects every event it receives into
-the protocol client. What does not exist is the **browser client** that would open that stream — no
-component captures pointer or key events over the video and drives `StreamInput`, on either scope.
-So a connected desktop is view-only in practice, and this criterion describes behaviour the wire and
-the host are ready for and the viewer does not yet ask for. The remaining work — event capture,
-coordinate scaling and keysym mapping in the overlay — is recorded in
-[`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../dev/todo/2026-09-07-remote-desktop-input-forwarding.md).
+**Delivered on both scopes**, by the one overlay both of them mount. The browser opens the stream
+when the overlay mounts and closes it when the overlay goes away; pointer positions are scaled from
+the rendered picture into framebuffer pixels on every event, so a click lands where the operator
+aimed at any window size, and keys are forwarded as neutral X11 keysyms.
+
+**Escape goes to the desktop**, and `Ctrl+Alt+Esc` is the only chord the overlay keeps for itself —
+named on screen, because every other key leaves the browser. Swallowing Escape would put every
+full-screen application on the far side out of reach; forwarding everything with no keyboard exit
+would trap the operator. Browser-reserved combinations (`Cmd+W`, `F5`, `Cmd+Tab`) cannot be captured
+by a page at all and never reach the desktop.
+
+**Whatever the operator is still holding is released when the overlay closes.** Otherwise the chord
+itself would leave Ctrl and Alt down on the remote machine, and every later keystroke there would
+arrive as a Ctrl+Alt chord.
+
+A desktop whose input stream cannot be opened keeps its picture and says input is unavailable, so it
+can still be watched. Note what that notice does *not* cover: a bridge that cannot inject drops
+commands silently rather than refusing the stream, so a genuinely view-only server is ignored, not
+reported.
+
+Not forwarded: scroll wheel, audio, clipboard and file transfer. See
+[`packages/tddy-web/docs/remote-desktop-input.md`](../../../packages/tddy-web/docs/remote-desktop-input.md)
+for how the client is built.
 
 ### AC-SS-7: Close overlay / stop stream
 
@@ -268,10 +281,10 @@ it is the only thing on that screen that creates a host-scoped target or starts 
 
 ## Current limits
 
-- **A connected desktop is view-only**, on both scopes. The picture arrives; input does not go back.
-  The daemon and the bridge implement forwarding in full — see [AC-SS-6](#ac-ss-6-overlay-remote-control)
-  — and the missing piece is a browser client for `ScreenSharingInputService`, tracked in
-  [`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../dev/todo/2026-09-07-remote-desktop-input-forwarding.md).
+- **A remote desktop cannot be scrolled.** Pointer and keyboard are forwarded
+  ([AC-SS-6](#ac-ss-6-overlay-remote-control)); the wheel is not, on either scope. RFB carries scroll
+  as buttons 4 and 5, so `button_mask` could already express it — nothing but a `wheel` listener is
+  missing.
 - A bridge process runs per open desktop. That is the same resource profile on both scopes, and on
   the host scope it is reachable from a screen that lists every host at once.
 - Only the default ports are probed, so a host serving on another display is not offered a connect

@@ -1,6 +1,10 @@
 # 2026-09-07 — remote desktop input forwarding: the browser never sends any
 
 **Category:** Missing feature (daemon and bridge complete; browser client absent)
+**Status:** Resolved — `#hosts-screen 9/9`, 2026-09-09. The browser client landed: see
+[`../../../packages/tddy-web/docs/remote-desktop-input.md`](../../../packages/tddy-web/docs/remote-desktop-input.md)
+and [`../changesets/2026-09-09-remote-desktop-input-forwarding.md`](../changesets/2026-09-09-remote-desktop-input-forwarding.md).
+Scroll-wheel forwarding is the one part of this entry still open.
 **Source:** `#hosts-screen 8/8` desktop-connect, 2026-09-07 — recorded here because that node
 deferred AC-3 and its 1-WIP documents are wrapped away when the PR is readied.
 
