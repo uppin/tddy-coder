@@ -40,8 +40,10 @@
 //!   `docs/dev/todo/2026-08-13-tddy-daemon-connection-service-rs-repeats-a-trim-to-option-string-bloc.md`.
 //!   Every subsystem that carries handlers out would otherwise copy it again, once per crate.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Resolve a session token to the OS user that owns it.
 ///
@@ -72,18 +74,25 @@ pub const HOST_DOCUMENT_FRAME_BYTES: usize = 48 * 1024;
 /// about to write, and a caller that cannot proceed without a plausible clock is better served by
 /// checking the clock than by receiving an error from a timestamp function. Callers that need the
 /// pre-1970 diagnostic keep their own check.
+#[must_use]
 pub fn now_unix_ms() -> u64 {
-    // TODO(host-worktree-services): implement
-    unimplemented!("tddy-daemon-kernel::now_unix_ms")
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since_epoch| u64::try_from(since_epoch.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or_default()
 }
 
 /// A trimmed string, or `None` when it was blank.
 ///
 /// Duplicated inside `connection_service` and recorded in `docs/dev/todo/`. Every subsystem that
 /// carries handlers out of that file needs it, so it lands here once instead of once per crate.
-pub fn trim_to_option(_value: &str) -> Option<String> {
-    // TODO(host-worktree-services): implement
-    unimplemented!("tddy-daemon-kernel::trim_to_option")
+#[must_use]
+pub fn trim_to_option(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    match trimmed.is_empty() {
+        true => None,
+        false => Some(trimmed.to_string()),
+    }
 }
 
 /// Per-session live broadcast of agent activity, plus the stack of in-flight tool calls awaiting
@@ -100,7 +109,15 @@ pub fn trim_to_option(_value: &str) -> Option<String> {
 /// popped) that public fields would let a consumer break.
 #[derive(Debug, Default)]
 pub struct AgentActivityHub {
-    // TODO(host-worktree-services): implement — senders and pending, both behind a std Mutex
+    /// Per-session live broadcast; the sender is created lazily on first subscribe.
+    senders: StdMutex<
+        HashMap<
+            String,
+            tokio::sync::broadcast::Sender<tddy_core::agent_activity::AgentActivityRecord>,
+        >,
+    >,
+    /// Per-session stack of in-flight `call_id`s awaiting their terminal row.
+    pending: StdMutex<HashMap<String, Vec<String>>>,
 }
 
 impl AgentActivityHub {
@@ -113,32 +130,56 @@ impl AgentActivityHub {
     /// Subscribe to a session's activity, creating the sender on first use.
     pub fn subscribe(
         &self,
-        _session_id: &str,
+        session_id: &str,
     ) -> tokio::sync::broadcast::Receiver<tddy_core::agent_activity::AgentActivityRecord> {
-        // TODO(host-worktree-services): implement
-        unimplemented!("AgentActivityHub::subscribe")
+        self.senders
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .entry(session_id.to_string())
+            .or_insert_with(|| tokio::sync::broadcast::channel(Self::CAPACITY).0)
+            .subscribe()
     }
 
-    /// Publish a record to a session's subscribers, creating the sender on first use.
+    /// Publish a record to a session's subscribers.
+    ///
+    /// A no-op when nobody has subscribed to the session: the durable `agent-activity.jsonl` log is
+    /// the source of truth and the hub only accelerates live delivery. Minting a sender here instead
+    /// would retain up to [`CAPACITY`](Self::CAPACITY) records in the broadcast ring for a session
+    /// no reader will ever attach to.
     pub fn publish(
         &self,
-        _session_id: &str,
-        _record: tddy_core::agent_activity::AgentActivityRecord,
+        session_id: &str,
+        record: tddy_core::agent_activity::AgentActivityRecord,
     ) {
-        // TODO(host-worktree-services): implement
-        unimplemented!("AgentActivityHub::publish")
+        let sender = self
+            .senders
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .get(session_id)
+            .cloned();
+        if let Some(sender) = sender {
+            // `Err` means no live receivers; the durable log still holds the record.
+            let _ = sender.send(record);
+        }
     }
 
     /// Record a `call_id` as in flight, awaiting its terminal row.
-    pub fn push_pending(&self, _session_id: &str, _call_id: &str) {
-        // TODO(host-worktree-services): implement
-        unimplemented!("AgentActivityHub::push_pending")
+    pub fn push_pending(&self, session_id: &str, call_id: &str) {
+        self.pending
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .entry(session_id.to_string())
+            .or_default()
+            .push(call_id.to_string());
     }
 
     /// Take the most recent in-flight `call_id` for a session, if any.
-    pub fn pop_pending(&self, _session_id: &str) -> Option<String> {
-        // TODO(host-worktree-services): implement
-        unimplemented!("AgentActivityHub::pop_pending")
+    pub fn pop_pending(&self, session_id: &str) -> Option<String> {
+        self.pending
+            .lock()
+            .expect("agent activity hub mutex poisoned")
+            .get_mut(session_id)
+            .and_then(|stack| stack.pop())
     }
 }
 
