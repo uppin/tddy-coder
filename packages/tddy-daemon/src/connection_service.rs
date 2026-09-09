@@ -10,7 +10,7 @@ use prost::Message as _;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_core::{BranchWorktreeIntent, Changeset};
+use tddy_core::{Changeset};
 use tddy_rpc::{Request, Response, Status, Streaming};
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource,
@@ -125,183 +125,8 @@ use tddy_service::proto::connection::{
 };
 use tddy_task::{TaskRegistry, TerminalCapture};
 
-/// Runs blocking clone/spawn work with a wall-clock cap so hung NSS/git/spawn cannot block RPCs forever.
-pub(crate) async fn spawn_blocking_with_timeout<T: Send + 'static>(
-    timeout: Duration,
-    op_label: &'static str,
-    f: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
-) -> Result<T, Status> {
-    match tokio::time::timeout(timeout, tokio::task::spawn_blocking(f)).await {
-        Ok(Ok(Ok(v))) => Ok(v),
-        Ok(Ok(Err(e))) => {
-            log::error!("{} failed: {}", op_label, e);
-            Err(Status::internal(e.to_string()))
-        }
-        Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-        Err(_elapsed) => {
-            log::error!(
-                "{} timed out after {}s (spawn_worker_request_timeout_secs); blocking task may still run in the pool",
-                op_label,
-                timeout.as_secs()
-            );
-            Err(Status::deadline_exceeded(format!(
-                "{}: timed out after {}s (see daemon log: spawner: child I/O paths; if same_user=false, parent blocks until pre_exec/initgroups completes)",
-                op_label,
-                timeout.as_secs()
-            )))
-        }
-    }
-}
-
-/// Await a `tddy-supervisor`-brokered operation under the same deadline the forked spawn backend
-/// gets from [`spawn_blocking_with_timeout`].
-///
-/// An unreachable or refusing supervisor fails the RPC. There is deliberately no local spawn to fall
-/// back to: doing the work here would run a session as the daemon's own user, which is the isolation
-/// the supervisor exists to provide.
-pub(crate) async fn await_supervised_with_timeout<T>(
-    timeout: Duration,
-    op_label: &'static str,
-    operation: impl std::future::Future<Output = anyhow::Result<T>>,
-) -> Result<T, Status> {
-    match tokio::time::timeout(timeout, operation).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(e)) => {
-            log::error!("{} failed: {:#}", op_label, e);
-            Err(Status::internal(format!("{e:#}")))
-        }
-        Err(_elapsed) => {
-            log::error!(
-                "{} timed out after {}s (spawn_worker_request_timeout_secs) waiting for tddy-supervisor",
-                op_label,
-                timeout.as_secs()
-            );
-            Err(Status::deadline_exceeded(format!(
-                "{}: tddy-supervisor did not answer within {}s",
-                op_label,
-                timeout.as_secs()
-            )))
-        }
-    }
-}
-
-/// After a `new_branch_from_base` worktree is created, optionally push the freshly created branch to
-/// its remote. Reads the actual created branch from the session's changeset (it may carry a
-/// collision suffix), resolves the remote from the persisted integration base ref
-/// (`<remote>/<branch>`) — falling back to main-worktree detection then `origin` — runs
-/// `git push -u <remote> <branch>` from the worktree, and records `Changeset.remote_pushed = true`.
-/// A push failure fails the session start — no silent fallback.
-pub(crate) async fn push_new_branch_to_origin_if_requested(
-    create_remote_branch: bool,
-    intent: BranchWorktreeIntent,
-    session_dir: &Path,
-    worktree_path: &Path,
-    timeout: Duration,
-) -> Result<(), Status> {
-    if !create_remote_branch || !matches!(intent, BranchWorktreeIntent::NewBranchFromBase) {
-        return Ok(());
-    }
-    let session_dir = session_dir.to_path_buf();
-    let worktree_path = worktree_path.to_path_buf();
-    spawn_blocking_with_timeout(
-        timeout,
-        "StartSession: push new branch to remote",
-        move || {
-            let mut cs = tddy_core::read_changeset(&session_dir)
-                .map_err(|e| anyhow::anyhow!("read changeset for remote push: {e}"))?;
-            let branch = cs
-                .branch
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("no branch recorded after worktree setup"))?;
-            // Resolve the remote from the persisted integration base ref (`<remote>/<branch>`),
-            // falling back to main-worktree detection then `origin` as the last resort.
-            let remote = cs
-                .effective_worktree_integration_base_ref
-                .as_deref()
-                .and_then(|r| r.split_once('/').map(|(remote, _)| remote.to_string()))
-                .or_else(|| tddy_core::worktree::detect_default_remote_name(&worktree_path))
-                .unwrap_or_else(|| "origin".to_string());
-            tddy_core::worktree::push_new_branch_to_remote(&worktree_path, &branch, &remote)
-                .map_err(|e| anyhow::anyhow!(e))?;
-            cs.remote_pushed = true;
-            tddy_core::write_changeset(&session_dir, &cs)
-                .map_err(|e| anyhow::anyhow!("write changeset after remote push: {e}"))?;
-            Ok(())
-        },
-    )
-    .await
-}
-
-/// Resolves session token to GitHub user login.
-pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-/// Resolves OS user to sessions base path.
-pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-
-/// Resolve a request's `terminal_id`, defaulting an empty value to the reserved main terminal so
-/// existing single-terminal clients keep working.
-fn resolved_terminal_id(raw: &str) -> &str {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        MAIN_TERMINAL_ID
-    } else {
-        trimmed
-    }
-}
-
-/// Maximum size of a single terminal-output frame published to a client on attach. Chosen to stay
-/// well under the LiveKit/WebRTC data-channel and gRPC-web message size limits while keeping the
-/// number of replay frames for a long-lived session reasonable.
-pub(crate) const TERMINAL_OUTPUT_FRAME_MAX_BYTES: usize = 32 * 1024;
-
-/// Split a terminal capture buffer into ordered frames of at most `max_frame_bytes` each so a long
-/// session history is replayed as several bounded frames instead of one oversized frame that could
-/// exceed the transport's per-message limit and never reach the client.
-///
-/// An empty input yields no frames. Any non-empty input yields `ceil(len / max_frame_bytes)`
-/// frames; concatenating them in order reproduces the input exactly.
-///
-/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
-/// `TerminalCapture::replay_from` directly with offset-tagged frames).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn chunk_terminal_output(data: &[u8], max_frame_bytes: usize) -> Vec<bytes::Bytes> {
-    data.chunks(max_frame_bytes)
-        .map(bytes::Bytes::copy_from_slice)
-        .collect()
-}
-
-/// Frames a newly attached sandbox-session subscriber receives before the live broadcast: the
-/// mouse-tracking modes still in effect, then the retained output.
-///
-/// Without the prologue a browser attaching to a long-running sandbox session never learns the
-/// application enabled mouse reporting, because the DECSET that enabled it was evicted from the
-/// capture ring long ago and nothing re-emits it.
-///
-/// Retained for the `sandbox_replay_tests` unit tests (the production sandbox path now uses
-/// `TerminalCapture::replay_from` directly with offset-tagged frames).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn sandbox_replay_frames(
-    capture: &TerminalCapture,
-    max_frame_bytes: usize,
-) -> Vec<bytes::Bytes> {
-    chunk_terminal_output(&capture.replay(), max_frame_bytes)
-}
-
-/// Derives the agent and recipe to relaunch a resumed session with, from its persisted
-/// `.session.yaml`. Empty/whitespace-only values are treated as absent (`None`), mirroring the
-/// spawner's trimming, so a legacy session with no persisted agent/recipe restores as `None`.
-pub(crate) fn resume_agent_and_recipe(
-    metadata: &tddy_core::SessionMetadata,
-) -> (Option<String>, Option<String>) {
-    fn non_blank(value: &Option<String>) -> Option<String> {
-        value
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    }
-    (non_blank(&metadata.agent), non_blank(&metadata.recipe))
-}
+mod service_util;
+pub use service_util::*;
 
 /// Stream adapter that yields [`SessionTerminalOutput`] from a broadcast receiver.
 ///
@@ -394,7 +219,7 @@ impl TerminalFrameIdentity {
     fn new(session_id: &str, terminal_id: &str) -> Self {
         Self {
             session_id: session_id.to_string(),
-            terminal_id: resolved_terminal_id(terminal_id).to_string(),
+            terminal_id: service_util::resolved_terminal_id(terminal_id).to_string(),
         }
     }
 
@@ -1332,9 +1157,9 @@ pub struct ConnectionServiceImpl {
     config: DaemonConfig,
     #[allow(dead_code)]
     // Kept for API compatibility; callers pass a resolver but tddy_data_dir is used directly.
-    sessions_base_for_user: SessionsBaseResolver,
+    sessions_base_for_user: service_util::SessionsBaseResolver,
     tddy_data_dir: PathBuf,
-    user_resolver: SessionUserResolver,
+    user_resolver: service_util::SessionUserResolver,
     spawn_client: Option<Arc<spawn_worker::SpawnClient>>,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
@@ -1408,7 +1233,7 @@ pub struct ConnectionServiceImpl {
     /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
     /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
     /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
-    session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, SessionStdioEndpoint>>>,
+    session_stdio: Arc<tokio::sync::Mutex<std::collections::HashMap<String, seeded_clone_guard::SessionStdioEndpoint>>>,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
@@ -1457,7 +1282,7 @@ pub struct ConnectionServiceImpl {
     /// turn loop here; remote entries hold only the routing, because the loop runs on the owning
     /// daemon.
     agent_conversations:
-        Arc<tokio::sync::Mutex<std::collections::HashMap<String, AgentConversation>>>,
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, seed_codebase::AgentConversation>>>,
     /// Where this daemon publishes its session notifications
     /// (`docs/ft/daemon/session-notifications.md`). `None` means
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
@@ -1472,534 +1297,14 @@ pub struct ConnectionServiceImpl {
     self_handle: Arc<std::sync::OnceLock<std::sync::Weak<ConnectionServiceImpl>>>,
 }
 
-/// One open conversation with a roster agent.
-///
-/// The two variants are what the main agent must not be able to tell apart: both answer
-/// `{stopReason, content}`, and only the daemon deciding where the turn loop runs sees the
-/// difference.
-enum AgentConversation {
-    /// The turn loop runs here, in this process.
-    Local {
-        session_id: String,
-        agent_id: String,
-        /// Shared rather than owned by the map, so a turn can be awaited on this lock alone with the
-        /// map's lock released — a turn that pinned the map would block every cancel for its whole
-        /// duration, including the cancel meant to interrupt it.
-        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
-        /// Signalled when the conversation is closed. `notify_one` rather than `notify_waiters`, so
-        /// a cancel that lands between the turn being spawned and its first await is still seen.
-        closed: Arc<tokio::sync::Notify>,
-    },
-    /// The turn loop runs on `daemon_instance_id`; this daemon forwards to it.
-    Remote {
-        session_id: String,
-        agent_id: String,
-        daemon_instance_id: String,
-    },
-}
+mod seed_codebase;
+pub use seed_codebase::*;
 
-/// The clone an attach claimed for a remote agent.
-///
-/// `commissioned` is what makes a failed attach unwindable without taking a checkout away from an
-/// agent that is still using it: two agents on one host share one clone, and only the attach that
-/// minted it may delete it.
-struct ClaimedAgentClone {
-    codebase_session_id: String,
-    commissioned: bool,
-}
+mod stack_parent;
+pub use stack_parent::*;
 
-/// What a seed needs to know about the session's codebase.
-///
-/// Taken as arguments rather than read back from `.session.yaml`, because a co-located start seeds
-/// *before* that file exists: it cannot be written until the agent it describes has a pid, and the
-/// roster has to be in place before that agent is spawned or its withdrawal is unenforced until the
-/// first resume. Where the agent runs is not what decides whether it can be named — the codebase
-/// host serves a peer's agent over a synced clone on every placement — so the seed had to stop
-/// depending on a file only some placements have written by then.
-#[derive(Clone)]
-pub struct SeedCodebase {
-    session_dir: PathBuf,
-    /// The checkout a peer's clone mirrors. `None` for a session with no checkout on this daemon,
-    /// which can hold local agents but nothing a clone would have to be built for.
-    worktree_root: Option<PathBuf>,
-    project_id: String,
-    /// Whether a withdrawal in this seed is actually enforced against the main agent
-    /// ([`session_enforces_a_withdrawal`]).
-    enforces_withdrawal: bool,
-}
-
-impl SeedCodebase {
-    /// The codebase of a session this daemon is starting right now, as the start itself knows it.
-    ///
-    /// The checkout is required: a start that has not resolved one has nothing for a peer's clone
-    /// to mirror, and no agent of its own to seed either.
-    pub fn of_a_starting_session(
-        session_dir: PathBuf,
-        worktree_root: PathBuf,
-        project_id: &str,
-        enforces_withdrawal: bool,
-    ) -> Self {
-        Self {
-            session_dir,
-            worktree_root: Some(worktree_root),
-            project_id: project_id.to_string(),
-            enforces_withdrawal,
-        }
-    }
-
-    /// The codebase of a session already on disk — every path but a co-located start, which has no
-    /// `.session.yaml` to read at the point it seeds.
-    fn read(session_id: &str, session_dir: &Path) -> Result<Self, Status> {
-        let meta = tddy_core::read_session_metadata(session_dir).map_err(|e| {
-            Status::not_found(format!(
-                "session '{session_id}' has no readable metadata at {}: {e}",
-                session_dir.display()
-            ))
-        })?;
-        Ok(Self {
-            session_dir: session_dir.to_path_buf(),
-            worktree_root: meta.repo_path.as_ref().map(PathBuf::from),
-            project_id: meta.project_id.clone(),
-            enforces_withdrawal: session_enforces_a_withdrawal(&meta),
-        })
-    }
-}
-
-/// This daemon in its capacity as the claimant of the clones a session's seeded agents read.
-///
-/// A trait for the same reason [`StackParentHost`] is one: the co-located
-/// cursor-cli spawn is a free function, and claiming a clone is the whole of `ConnectionService`'s
-/// peer-facing surface — naming that type there would drag it through every caller of a function
-/// that otherwise mentions nothing of the kind.
-#[async_trait::async_trait]
-pub trait SeededAgentClones: Send + Sync {
-    /// Claim, on each peer the roster names, the checkout that peer's agent will read, stamping the
-    /// claimed id onto the record so the roster the start persists names it.
-    ///
-    /// The returned guard hands every claim back unless [`SeededCloneGuard::keep`] is called, which
-    /// the start does once its roster is on disk.
-    async fn claim_for_seed(
-        &self,
-        session_id: &str,
-        codebase: &SeedCodebase,
-        session_token: &str,
-        records: &mut [tddy_core::SessionAgentRecord],
-    ) -> Result<SeededCloneGuard, Status>;
-}
-
-/// A spawn's PR-stack parent, as the daemon that resolves it needs to see it.
-///
-/// Carried as one value because the resolution needs facts from both sides of the routing decision
-/// and none can be derived from the others: `sessions_base` and `repo_root` are *this* daemon's,
-/// read when the parent turns out to be this daemon's own, while `session_token` and `project_id`
-/// are what a peer needs — the credential it verifies the question with, and the logical project id
-/// (stable across hosts, because `AddProjectToHost` reuses it) it resolves its own checkout from.
-pub struct StackBaseLookup<'a> {
-    /// Authenticates the question wherever it is answered. A peer verifies the same stateless token
-    /// with the `livekit.api_secret` both daemons share, so no second credential is minted.
-    pub session_token: &'a str,
-    /// The parent session id. `None` — or blank — is a spawn with no stack parent at all, which
-    /// resolves to no chain base without asking anyone.
-    pub stack_parent: Option<&'a str>,
-    /// The daemon whose sessions tree holds the parent. Empty = this one.
-    pub stack_parent_daemon_instance_id: &'a str,
-    /// The logical project the child is being started under.
-    pub project_id: &'a str,
-    /// This daemon's sessions tree.
-    pub sessions_base: &'a Path,
-    /// This daemon's checkout of `project_id`.
-    pub repo_root: &'a Path,
-    /// The branch the child spawn is about to create — how the planned node it belongs to is found
-    /// when, and only when, `stack_node_id` is empty.
-    pub new_branch_name: &'a str,
-    /// The planned node the spawn materializes, as the surface that started it named it. Preferred
-    /// over the branch (D34) — see [`tddy_core::pr_stack_node_for_spawn`]: a renamed branch matches
-    /// no node, and a node matched by nothing means no ordering gate runs at all.
-    pub stack_node_id: &'a str,
-    /// The operator-chosen base from the Start-session dialog's "Base branch" selector. When
-    /// non-empty after trim, chain-base resolution short-circuits before the stack ordering gate
-    /// — that deliberate repoint is honored via [`tddy_core::select_worktree_base_ref`].
-    pub selected_integration_base_ref: &'a str,
-}
-
-/// A spawn's link back onto the planned node it materializes, as the daemon that records it needs
-/// to see it.
-///
-/// Carried as one value for the same reason [`StackBaseLookup`] is: `orchestrator_session_id` alone
-/// says nothing about *which disk* holds the plan it names, and recording the link on the wrong one
-/// is exactly the bug this type exists to close. `sessions_base` is this daemon's own tree, read
-/// only on the branch-derived local path — a spawn that names no node, which is the orchestrator
-/// agent's own `spawn-child` and always runs on the orchestrator's host.
-pub struct StackNodeLink<'a> {
-    /// Authenticates the write wherever it is performed. A peer verifies the same stateless token
-    /// with the `livekit.api_secret` both daemons share.
-    pub session_token: &'a str,
-    /// The pr-stack orchestrator whose plan holds the node.
-    pub orchestrator_session_id: &'a str,
-    /// The daemon whose sessions tree holds that orchestrator. Empty = this one.
-    pub orchestrator_daemon_instance_id: &'a str,
-    /// The planned node the spawn materializes. Empty = the caller named none, and the node is
-    /// looked up locally by the branch instead (D34).
-    pub node_id: &'a str,
-    /// The session that materialized the node.
-    pub child_session_id: &'a str,
-    /// The branch that session created — the load-bearing half, since a node owning no branch
-    /// refuses every descendant.
-    pub branch: &'a str,
-    /// This daemon's sessions tree, for the branch-derived local write.
-    pub sessions_base: &'a Path,
-}
-
-/// This daemon in its capacity as the resolver of a spawn's PR-stack parent.
-///
-/// A trait for the same reason [`SeededAgentClones`] is one: the co-located claude-cli and
-/// cursor-cli spawns are free functions, and reaching the daemon that owns a parent is the whole of
-/// `ConnectionService`'s peer-facing surface — naming that type there would drag it through every
-/// caller of a function that otherwise mentions nothing of the kind.
-#[async_trait::async_trait]
-pub trait StackParentHost: Send + Sync {
-    /// The ref the child's worktree is cut from, or `None` when the parent names no chain base and
-    /// the project default applies.
-    async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status>;
-
-    /// Record the spawn's session and branch on the planned node it materializes, wherever that
-    /// node's orchestrator lives.
-    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status>;
-}
-
-/// A spawn's PR-stack parent as the co-located spawn paths carry it: which session, whose sessions
-/// tree holds it, and the daemon that answers what the child's worktree bases off.
-///
-/// One value rather than four parameters because the four are meaningless apart — a parent session
-/// id without the host that owns it is exactly the bug this type exists to close — and an enum
-/// because a spawn with no stack parent names no host either. Nothing resolves it, so there is
-/// nothing for a caller to supply.
-pub enum SpawnStackParent<'a> {
-    /// The spawn is not part of a stack: no parent, and therefore no chain base. The child's
-    /// worktree is cut from the project default.
-    NoParent,
-    /// The spawn descends from `session_id`, held by `daemon_instance_id` (empty = this daemon).
-    OwnedBy {
-        /// The parent session id.
-        session_id: &'a str,
-        /// The daemon whose sessions tree holds it. Empty = this one.
-        daemon_instance_id: &'a str,
-        /// The planned node of that parent's stack this spawn materializes, as the surface that
-        /// started it named it. Empty when the caller named none — the orchestrator agent's own
-        /// `spawn-child`, which runs on the orchestrator's host where the node can be found from
-        /// the branch instead (D34).
-        stack_node_id: &'a str,
-        /// The credential a peer verifies the forwarded question with. Empty when the parent is
-        /// this daemon's own session — an agent-driven spawn is made by the orchestrator's own
-        /// process, has no caller token, and asks nothing of any peer.
-        session_token: &'a str,
-        /// The daemon that resolves the parent: this one, forwarding to the owner when it is not.
-        host: &'a dyn StackParentHost,
-    },
-}
-
-impl<'a> SpawnStackParent<'a> {
-    /// The parent this spawn records as its orchestrator, if any.
-    pub fn session_id(&self) -> Option<&'a str> {
-        match self {
-            Self::NoParent => None,
-            Self::OwnedBy { session_id, .. } => Some(session_id),
-        }
-    }
-
-    /// The daemon whose sessions tree holds the parent, for logging what a failed link addressed.
-    pub fn daemon_instance_id(&self) -> Option<&'a str> {
-        match self {
-            Self::NoParent => None,
-            Self::OwnedBy {
-                daemon_instance_id, ..
-            } => Some(daemon_instance_id),
-        }
-    }
-
-    /// The planned node this spawn materializes, as the caller named it.
-    pub fn stack_node_id(&self) -> Option<&'a str> {
-        match self {
-            Self::NoParent => None,
-            Self::OwnedBy { stack_node_id, .. } => Some(stack_node_id),
-        }
-    }
-
-    /// What the child's worktree is cut from, resolved by whichever daemon owns the parent, or
-    /// `None` when there is no parent — or the parent named no base for this branch, which leaves
-    /// the project default to apply.
-    pub async fn chain_base_ref(
-        &self,
-        project_id: &str,
-        sessions_base: &Path,
-        repo_root: &Path,
-        new_branch_name: &str,
-        selected_integration_base_ref: &str,
-    ) -> Result<Option<String>, Status> {
-        let Self::OwnedBy {
-            session_id,
-            daemon_instance_id,
-            stack_node_id,
-            session_token,
-            host,
-        } = self
-        else {
-            return Ok(None);
-        };
-        host.chain_base_ref(&StackBaseLookup {
-            session_token,
-            stack_parent: Some(session_id),
-            stack_parent_daemon_instance_id: daemon_instance_id,
-            project_id,
-            sessions_base,
-            repo_root,
-            new_branch_name,
-            stack_node_id,
-            selected_integration_base_ref,
-        })
-        .await
-    }
-
-    /// Record this spawn's session and branch on the planned node it materializes, on whichever
-    /// daemon owns the orchestrator. `Ok(())` for a spawn that is part of no stack.
-    ///
-    /// Called once the child's branch exists — that is precisely the condition
-    /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] gates descendants on.
-    pub async fn link_spawned_branch(
-        &self,
-        sessions_base: &Path,
-        branch: &str,
-        child_session_id: &str,
-    ) -> Result<(), Status> {
-        let Self::OwnedBy {
-            session_id,
-            daemon_instance_id,
-            stack_node_id,
-            session_token,
-            host,
-        } = self
-        else {
-            return Ok(());
-        };
-        host.link_spawned_branch(&StackNodeLink {
-            session_token,
-            orchestrator_session_id: session_id,
-            orchestrator_daemon_instance_id: daemon_instance_id,
-            node_id: stack_node_id,
-            child_session_id,
-            branch,
-            sessions_base,
-        })
-        .await
-    }
-
-    /// [`Self::link_spawned_branch`], with the refusal logged instead of raised (D36).
-    ///
-    /// The link lands *after* the worktree, the branch and the session already exist, so failing the
-    /// spawn here would leave an orphan session on this host and still no branch on the
-    /// orchestrator's — strictly worse than a node the operator can re-link by restarting it. The
-    /// live association still travels in participant metadata (D37), and the daemon's own spawn gate
-    /// is unaffected: a descendant of an unlinked node is refused for the real reason.
-    ///
-    /// One named seam rather than an `if let Err` at each spawn path, because "a failed link is
-    /// survivable" is a decision, not an incident — and a decision no spawn path is driveable enough
-    /// to assert on where it is written inline.
-    pub async fn link_spawned_branch_without_failing_the_spawn(
-        &self,
-        sessions_base: &Path,
-        branch: &str,
-        child_session_id: &str,
-    ) {
-        if let Err(status) = self
-            .link_spawned_branch(sessions_base, branch, child_session_id)
-            .await
-        {
-            log::error!(
-                target: "tddy_daemon::connection_service",
-                "session {child_session_id}: could not record its branch '{branch}' on pr-stack orchestrator {:?} (node {:?}, daemon {:?}): {}; the node keeps no branch and its descendants stay unspawnable until it is re-linked",
-                self.session_id().unwrap_or_default(),
-                self.stack_node_id().unwrap_or_default(),
-                self.daemon_instance_id().unwrap_or_default(),
-                status.message()
-            );
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl StackParentHost for ConnectionServiceImpl {
-    async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status> {
-        self.resolve_chain_base_ref_status(lookup).await
-    }
-
-    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
-        self.record_spawn_on_stack_node(link).await
-    }
-}
-
-/// One agent a start has already put on a session's roster, as its unwind needs to name it.
-///
-/// The clone is carried rather than looked up again: only the entry that *commissioned* a checkout
-/// may delete it, and that fact lives nowhere but in the claim this seed made.
-struct SeededAgent {
-    agent_id: String,
-    daemon_instance_id: String,
-    clone: Option<ClaimedAgentClone>,
-}
-
-/// Holds a co-located start's claimed clones until its roster is persisted, and releases them if it
-/// never is.
-///
-/// A co-located start writes `.session.yaml` last — it cannot, until the agent it describes has a
-/// pid — and may fail at any of the steps between the claim and that write. Those steps are spread
-/// over several hundred lines of three launch paths, so the release is tied to the *scope* rather
-/// than repeated at each `?`: a guard that is not [`Self::keep`]-ed on the way out takes every clone
-/// it was given back off the peer that built it. A checkout on another host is the one artifact of
-/// a failed start that this daemon cannot clean up later.
-///
-/// Spawned because `Drop` cannot await, and swallowed for the reason
-/// [`ConnectionServiceImpl::unwind_seeded_roster`] swallows: whatever is unwinding this already has
-/// the error worth reporting.
-pub struct SeededCloneGuard {
-    /// What to give back, and to whom. `None` once the start has kept the clones — and from the
-    /// start for a roster that named no peer's agent, which claimed nothing to give back.
-    release: Option<SeededCloneRelease>,
-}
-
-struct SeededCloneRelease {
-    service: ConnectionServiceImpl,
-    session_id: String,
-    session_token: String,
-    seeded: Vec<SeededAgent>,
-}
-
-impl SeededCloneGuard {
-    /// A guard over nothing: this start claimed no clone on any peer.
-    pub fn nothing_claimed() -> Self {
-        Self { release: None }
-    }
-
-    /// A guard for a start that is about to claim, opened before the first claim so an early
-    /// return releases whatever it got through.
-    fn claiming(service: ConnectionServiceImpl, session_id: &str, session_token: &str) -> Self {
-        Self {
-            release: Some(SeededCloneRelease {
-                service,
-                session_id: session_id.to_string(),
-                session_token: session_token.to_string(),
-                seeded: Vec::new(),
-            }),
-        }
-    }
-
-    /// One more clone this start is answerable for until it keeps them.
-    fn claimed(&mut self, agent: SeededAgent) {
-        if let Some(release) = self.release.as_mut() {
-            release.seeded.push(agent);
-        }
-    }
-
-    /// The start reached the point where its roster is persisted; the clones are the session's now.
-    pub fn keep(mut self) {
-        self.release = None;
-    }
-}
-
-impl Drop for SeededCloneGuard {
-    fn drop(&mut self) {
-        let Some(SeededCloneRelease {
-            service,
-            session_id,
-            session_token,
-            seeded,
-        }) = self.release.take()
-        else {
-            return;
-        };
-        tokio::spawn(async move {
-            for agent in seeded.into_iter().rev() {
-                let Some(clone) = &agent.clone else {
-                    continue;
-                };
-                log::warn!(
-                    "StartSession: session {session_id} did not come up; releasing the clone \
-                     daemon {} was building for agent '{}'",
-                    agent.daemon_instance_id,
-                    agent.agent_id
-                );
-                service
-                    .unwind_agent_clone_claim(
-                        &session_id,
-                        &agent.daemon_instance_id,
-                        clone,
-                        &session_token,
-                    )
-                    .await;
-            }
-        });
-    }
-}
-
-/// What one open conversation hands a prompt, taken out of the map so the map's lock can be
-/// released before the turn is awaited.
-enum PromptRouting {
-    Local {
-        session: Arc<tokio::sync::Mutex<Box<dyn tddy_discovery::subagent::SubagentSession>>>,
-        closed: Arc<tokio::sync::Notify>,
-    },
-    Remote(String),
-}
-
-impl AgentConversation {
-    /// The roster agent this conversation is with, whichever daemon runs its loop.
-    fn agent_id(&self) -> &str {
-        match self {
-            AgentConversation::Local { agent_id, .. }
-            | AgentConversation::Remote { agent_id, .. } => agent_id,
-        }
-    }
-
-    /// Whether this conversation is with `agent_id` on `session_id`, whichever daemon runs its loop.
-    fn is_with(&self, session_id: &str, agent_id: &str) -> bool {
-        let (open_session, open_agent) = match self {
-            AgentConversation::Local {
-                session_id,
-                agent_id,
-                ..
-            } => (session_id, agent_id),
-            AgentConversation::Remote {
-                session_id,
-                agent_id,
-                ..
-            } => (session_id, agent_id),
-        };
-        open_session == session_id && open_agent == agent_id
-    }
-}
-
-/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
-/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
-struct SessionStdioEndpoint {
-    #[allow(dead_code)]
-    client: Arc<tddy_stdio::StdioRpcClient>,
-    #[allow(dead_code)]
-    task: tokio::task::JoinHandle<()>,
-}
-
-/// Where one exec tool call of a session this daemon holds is run.
-enum ExecToolRoute {
-    /// The session's checkout on this host, through the tool engine — every session that did not
-    /// ask to be confined.
-    HostWorktree,
-    /// The session's own jail on this host: a sandboxed `workspace` session
-    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
-    Jail(Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandbox>),
-    /// Neither, and the call is answered with this as its error. A session recorded as sandboxed
-    /// whose jail this daemon does not hold is refused rather than served from the bare host: a
-    /// tool that ran unconfined on a session that asked to be confined is the one failure nobody
-    /// can see afterwards.
-    Refused(String),
-}
+mod seeded_clone_guard;
+pub use seeded_clone_guard::*;
 
 impl ConnectionServiceImpl {
     /// Resolve the `tddy-tools` binary as a sibling of the configured tool (`tddy-coder`) path, so
@@ -2017,9 +1322,9 @@ impl ConnectionServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DaemonConfig,
-        sessions_base_for_user: SessionsBaseResolver,
+        sessions_base_for_user: service_util::SessionsBaseResolver,
         tddy_data_dir: PathBuf,
-        user_resolver: SessionUserResolver,
+        user_resolver: service_util::SessionUserResolver,
         spawn_client: Option<(spawn_worker::SpawnClient, i32)>,
         livekit_discovery: Option<LiveKitDiscoveryHandles>,
         telegram: Option<Arc<TelegramDaemonHooks>>,
@@ -2634,7 +1939,7 @@ impl ConnectionServiceImpl {
         let probe_root = repo_root.to_path_buf();
         let probe_branch = branch.to_string();
         let probe_base = base_branch.to_string();
-        let probed = spawn_blocking_with_timeout(
+        let probed = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: compare branch against base",
             move || {
@@ -2672,7 +1977,7 @@ impl ConnectionServiceImpl {
     /// refusal, reported with the owner's own message.
     async fn resolve_chain_base_ref_status(
         &self,
-        lookup: &StackBaseLookup<'_>,
+        lookup: &stack_parent::StackBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
         if !lookup.selected_integration_base_ref.trim().is_empty() {
             return Ok(None);
@@ -2784,7 +2089,7 @@ impl ConnectionServiceImpl {
     /// The node is never derived from the branch on the routed path (D34): `new_branch_name` is the
     /// operator's to edit in the create dialog before confirming, so a rename would silently link
     /// nothing — or link the wrong node.
-    async fn record_spawn_on_stack_node(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
+    async fn record_spawn_on_stack_node(&self, link: &stack_parent::StackNodeLink<'_>) -> Result<(), Status> {
         let node_id = link.node_id.trim();
         if node_id.is_empty() {
             return Self::link_stack_node_to_spawned_branch(
@@ -2906,7 +2211,7 @@ impl ConnectionServiceImpl {
             crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let branch_for_scan = branch.clone();
-        let owner = spawn_blocking_with_timeout(
+        let owner = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "StartSession: scan sessions by branch",
             move || {
@@ -2925,7 +2230,7 @@ impl ConnectionServiceImpl {
             .ok_or_else(|| Status::not_found("project not found"))?;
         let repo_root = PathBuf::from(&project.main_repo_path);
         let branch_for_suggestion = branch.clone();
-        let suggested_branch_name = spawn_blocking_with_timeout(
+        let suggested_branch_name = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "StartSession: first free suffixed branch name",
             move || {
@@ -3032,14 +2337,14 @@ impl ConnectionServiceImpl {
             permission_mode,
             dangerously_skip_permissions,
             match stack_parent {
-                Some(session_id) => SpawnStackParent::OwnedBy {
+                Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
                     session_id,
                     daemon_instance_id: stack_parent_daemon_instance_id,
                     stack_node_id,
                     session_token,
                     host: self,
                 },
-                None => SpawnStackParent::NoParent,
+                None => stack_parent::SpawnStackParent::NoParent,
             },
             managed_recipe,
             child_spawn_handler,
@@ -3145,7 +2450,7 @@ impl ConnectionServiceImpl {
             session_stdio
                 .lock()
                 .await
-                .insert(sid.clone(), SessionStdioEndpoint { client, task });
+                .insert(sid.clone(), seeded_clone_guard::SessionStdioEndpoint { client, task });
             log::info!("spawn_host_session_socket({sid}): reverse endpoint connected + ready");
         });
         log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");
@@ -3287,7 +2592,7 @@ pub struct StartingClaudeCliSession<'a> {
     /// [`spawned_branch_of_session`].
     pub branch: &'a str,
     /// The pr-stack orchestrator this session was spawned under, if any.
-    pub stack_parent: &'a SpawnStackParent<'a>,
+    pub stack_parent: &'a stack_parent::SpawnStackParent<'a>,
 }
 
 /// The `session` block a claude-cli session's LiveKit participant publishes about itself.
@@ -3513,10 +2818,10 @@ impl SeededAgentClones for DaemonSeedCloneClaimant {
     async fn claim_for_seed(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         session_token: &str,
         records: &mut [tddy_core::SessionAgentRecord],
-    ) -> Result<SeededCloneGuard, Status> {
+    ) -> Result<seeded_clone_guard::SeededCloneGuard, Status> {
         self.service
             .claim_co_located_seed_clones(session_id, codebase, session_token, records)
             .await
@@ -3725,7 +3030,7 @@ fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'static s
 /// An agent that replaces nothing has nothing to enforce and attaches to either kind of session.
 fn refuse_unenforceable_withdrawal(
     session_id: &str,
-    codebase: &SeedCodebase,
+    codebase: &seed_codebase::SeedCodebase,
     record: &tddy_core::SessionAgentRecord,
 ) -> Result<(), Status> {
     if record.replaces.is_empty() {
@@ -3798,7 +3103,7 @@ async fn spawn_claude_cli_session_inner(
     initial_prompt: &str,
     permission_mode: &str,
     dangerously_skip_permissions: bool,
-    stack_parent: SpawnStackParent<'_>,
+    stack_parent: stack_parent::SpawnStackParent<'_>,
     managed_recipe: Option<Arc<dyn tddy_core::backend::WorkflowRecipe>>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
@@ -3891,7 +3196,7 @@ async fn spawn_claude_cli_session_inner(
     let repo_root_clone = repo_root.clone();
     let session_dir_clone = session_dir.clone();
     let timeout = config.spawn_worker_request_timeout();
-    let worktree_path = spawn_blocking_with_timeout(
+    let worktree_path = service_util::spawn_blocking_with_timeout(
         timeout,
         "start_claude_cli_session: create worktree",
         move || {
@@ -3905,7 +3210,7 @@ async fn spawn_claude_cli_session_inner(
     )
     .await?;
 
-    push_new_branch_to_origin_if_requested(
+    service_util::push_new_branch_to_origin_if_requested(
         create_remote_branch,
         intent,
         &session_dir,
@@ -4685,7 +3990,7 @@ impl ConnectionServiceImpl {
     async fn ensure_session_room_for_agents(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
     ) -> Result<(), Status> {
         // Asked before the checkout is, because the two questions are independent and only one of
         // them is a precondition. A session already hosting its room needs nothing from this call,
@@ -4733,10 +4038,10 @@ impl ConnectionServiceImpl {
     async fn claim_agent_clone(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         daemon_instance_id: &str,
         session_token: &str,
-    ) -> Result<ClaimedAgentClone, Status> {
+    ) -> Result<seed_codebase::ClaimedAgentClone, Status> {
         // Before the claim: a room this daemon could not open is a clone that could never sync, and
         // a claim recorded for it would leave the roster naming a checkout nobody will build.
         self.ensure_session_room_for_agents(session_id, codebase)
@@ -4748,7 +4053,7 @@ impl ConnectionServiceImpl {
                     Uuid::now_v7().to_string()
                 });
         if !provision {
-            return Ok(ClaimedAgentClone {
+            return Ok(seed_codebase::ClaimedAgentClone {
                 codebase_session_id,
                 commissioned: false,
             });
@@ -4811,7 +4116,7 @@ impl ConnectionServiceImpl {
                 .publish_roster_change(&session_id, &codebase.session_dir)
                 .await;
         });
-        Ok(ClaimedAgentClone {
+        Ok(seed_codebase::ClaimedAgentClone {
             codebase_session_id,
             commissioned: true,
         })
@@ -4829,7 +4134,7 @@ impl ConnectionServiceImpl {
         &self,
         session_id: &str,
         daemon_instance_id: &str,
-        claimed: &ClaimedAgentClone,
+        claimed: &seed_codebase::ClaimedAgentClone,
         session_token: &str,
     ) {
         if !claimed.commissioned {
@@ -4947,12 +4252,12 @@ impl ConnectionServiceImpl {
     async fn seed_session_agent_roster(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         session_token: &str,
         records: Vec<tddy_core::SessionAgentRecord>,
-    ) -> Result<Vec<SeededAgent>, Status> {
+    ) -> Result<Vec<seeded_clone_guard::SeededAgent>, Status> {
         let local_instance_id = local_instance_id_for_config(&self.config);
-        let mut seeded: Vec<SeededAgent> = Vec::with_capacity(records.len());
+        let mut seeded: Vec<seeded_clone_guard::SeededAgent> = Vec::with_capacity(records.len());
         for mut record in records {
             if let Err(status) = refuse_unenforceable_withdrawal(session_id, codebase, &record) {
                 self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
@@ -4989,7 +4294,7 @@ impl ConnectionServiceImpl {
             // Recorded as seeded before the write is inspected: the clone claimed a moment ago is
             // the half of this entry a peer has already been told to build, so a failed write must
             // still be able to take it away.
-            seeded.push(SeededAgent {
+            seeded.push(seeded_clone_guard::SeededAgent {
                 agent_id: agent_id.clone(),
                 daemon_instance_id: seeded_daemon,
                 clone,
@@ -5023,14 +4328,14 @@ impl ConnectionServiceImpl {
     async fn claim_co_located_seed_clones(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         session_token: &str,
         records: &mut [tddy_core::SessionAgentRecord],
-    ) -> Result<SeededCloneGuard, Status> {
+    ) -> Result<seeded_clone_guard::SeededCloneGuard, Status> {
         let local_instance_id = local_instance_id_for_config(&self.config);
         // Built before the first claim so an early return releases what the loop got through: the
         // guard is the only thing that knows a peer was asked to build a checkout.
-        let mut guard = SeededCloneGuard::claiming(self.clone(), session_id, session_token);
+        let mut guard = seeded_clone_guard::SeededCloneGuard::claiming(self.clone(), session_id, session_token);
         for record in records.iter_mut() {
             refuse_unenforceable_withdrawal(session_id, codebase, record)?;
             if record.daemon_instance_id == local_instance_id {
@@ -5045,7 +4350,7 @@ impl ConnectionServiceImpl {
                 )
                 .await?;
             record.codebase_session_id = Some(claimed.codebase_session_id.clone());
-            guard.claimed(SeededAgent {
+            guard.claimed(seeded_clone_guard::SeededAgent {
                 agent_id: record.agent_id.clone(),
                 daemon_instance_id: record.daemon_instance_id.clone(),
                 clone: Some(claimed),
@@ -5064,9 +4369,9 @@ impl ConnectionServiceImpl {
     async fn unwind_seeded_roster(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         session_token: &str,
-        seeded: Vec<SeededAgent>,
+        seeded: Vec<seeded_clone_guard::SeededAgent>,
     ) {
         for agent in seeded.into_iter().rev() {
             if let Err(status) = self.session_agent_rosters.detach(
@@ -5110,7 +4415,7 @@ impl ConnectionServiceImpl {
     async fn provision_agent_clone(
         &self,
         session_id: &str,
-        codebase: &SeedCodebase,
+        codebase: &seed_codebase::SeedCodebase,
         daemon_instance_id: &str,
         codebase_session_id: &str,
         session_token: &str,
@@ -6052,8 +5357,8 @@ impl ConnectionServiceImpl {
                     return true;
                 }
                 match conversation {
-                    AgentConversation::Local { closed, .. } => closed.notify_one(),
-                    AgentConversation::Remote {
+                    seed_codebase::AgentConversation::Local { closed, .. } => closed.notify_one(),
+                    seed_codebase::AgentConversation::Remote {
                         daemon_instance_id, ..
                     } => cancelled_remotely
                         .push((daemon_instance_id.clone(), conversation_id.clone())),
@@ -6445,7 +5750,7 @@ impl ConnectionServiceImpl {
                     ));
                 }
                 let chain_base_ref = self
-                    .resolve_chain_base_ref_status(&StackBaseLookup {
+                    .resolve_chain_base_ref_status(&stack_parent::StackBaseLookup {
                         session_token,
                         stack_parent,
                         stack_parent_daemon_instance_id,
@@ -6464,7 +5769,7 @@ impl ConnectionServiceImpl {
                 let repo_root_clone = repo_root.clone();
                 let session_dir_clone = session_dir.clone();
                 let timeout = self.config.spawn_worker_request_timeout();
-                let wt = spawn_blocking_with_timeout(
+                let wt = service_util::spawn_blocking_with_timeout(
                     timeout,
                     "start_sandboxed_claude_cli_session: create worktree",
                     move || {
@@ -6477,7 +5782,7 @@ impl ConnectionServiceImpl {
                     },
                 )
                 .await?;
-                push_new_branch_to_origin_if_requested(
+                service_util::push_new_branch_to_origin_if_requested(
                     create_remote_branch,
                     intent,
                     &session_dir,
@@ -6508,7 +5813,7 @@ impl ConnectionServiceImpl {
                 // `spawn_claude_cli_session_inner`.
                 if let Some(orchestrator) = stack_parent {
                     if let Err(status) = self
-                        .record_spawn_on_stack_node(&StackNodeLink {
+                        .record_spawn_on_stack_node(&stack_parent::StackNodeLink {
                             session_token,
                             orchestrator_session_id: orchestrator,
                             orchestrator_daemon_instance_id: stack_parent_daemon_instance_id,
@@ -6559,7 +5864,7 @@ impl ConnectionServiceImpl {
         let seeded_clones = self
             .claim_co_located_seed_clones(
                 session_id,
-                &SeedCodebase::of_a_starting_session(
+                &seed_codebase::SeedCodebase::of_a_starting_session(
                     session_dir.clone(),
                     worktree_path.clone(),
                     project_id,
@@ -7011,7 +6316,7 @@ impl ConnectionServiceImpl {
             .map_err(|e| Status::internal(format!("failed to write changeset: {}", e)))?;
 
         let chain_base_ref = self
-            .resolve_chain_base_ref_status(&StackBaseLookup {
+            .resolve_chain_base_ref_status(&stack_parent::StackBaseLookup {
                 session_token,
                 stack_parent,
                 stack_parent_daemon_instance_id,
@@ -7028,7 +6333,7 @@ impl ConnectionServiceImpl {
         let repo_root_clone = repo_root.clone();
         let session_dir_clone = session_dir.clone();
         let timeout = self.config.spawn_worker_request_timeout();
-        let worktree_path = spawn_blocking_with_timeout(
+        let worktree_path = service_util::spawn_blocking_with_timeout(
             timeout,
             "start_sandboxed_cursor_cli_session: create worktree",
             move || {
@@ -7042,7 +6347,7 @@ impl ConnectionServiceImpl {
         )
         .await?;
 
-        push_new_branch_to_origin_if_requested(
+        service_util::push_new_branch_to_origin_if_requested(
             create_remote_branch,
             intent,
             &session_dir,
@@ -7065,7 +6370,7 @@ impl ConnectionServiceImpl {
         let seeded_clones = self
             .claim_co_located_seed_clones(
                 session_id,
-                &SeedCodebase::of_a_starting_session(
+                &seed_codebase::SeedCodebase::of_a_starting_session(
                     session_dir.clone(),
                     worktree_path.clone(),
                     project_id,
@@ -8368,7 +7673,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             false,
             // The orchestrator is a session of this daemon, so its stack is resolved off this
             // daemon's own disk and no credential travels anywhere.
-            SpawnStackParent::OwnedBy {
+            stack_parent::SpawnStackParent::OwnedBy {
                 session_id: &self.orchestrator_session_id,
                 daemon_instance_id: &local_instance_id_for_config(&self.config),
                 // The orchestrator agent spawns by branch, in its own process on its own host, so
@@ -8511,7 +7816,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             false,
             // The orchestrator is a session of this daemon, so its stack is resolved off this
             // daemon's own disk and no credential travels anywhere.
-            SpawnStackParent::OwnedBy {
+            stack_parent::SpawnStackParent::OwnedBy {
                 session_id: &self.orchestrator_session_id,
                 daemon_instance_id: &local_instance_id_for_config(&self.config),
                 // The orchestrator agent spawns by branch, in its own process on its own host, so
@@ -9023,14 +8328,14 @@ impl ConnectionServiceImpl {
     /// Read from what this daemon persisted about the session rather than from the request, because
     /// the request is the caller's claim and the metadata is the session's. A `workspace` session
     /// that recorded `sandbox: true` is served by the jail registered for it and by nothing else.
-    async fn exec_tool_route(&self, session_dir: &Path, session_id: &str) -> ExecToolRoute {
+    async fn exec_tool_route(&self, session_dir: &Path, session_id: &str) -> seeded_clone_guard::ExecToolRoute {
         let meta = match tddy_core::read_session_metadata(session_dir) {
             Ok(meta) => meta,
             // The callers all resolved this session's worktree out of this same file moments ago, so
             // an unreadable one here is a transient failure rather than a session that is not
             // sandboxed — and "assume unconfined" is the wrong guess to make about a jail.
             Err(e) => {
-                return ExecToolRoute::Refused(format!(
+                return seeded_clone_guard::ExecToolRoute::Refused(format!(
                     "session {session_id}: cannot tell whether this session is sandboxed \
                      (.session.yaml unreadable: {e}); refusing to run its tools on the host"
                 ))
@@ -9039,11 +8344,11 @@ impl ConnectionServiceImpl {
         let sandboxed_workspace =
             meta.session_type.as_deref() == Some("workspace") && meta.sandbox == Some(true);
         if !sandboxed_workspace {
-            return ExecToolRoute::HostWorktree;
+            return seeded_clone_guard::ExecToolRoute::HostWorktree;
         }
         match self.workspace_sandboxes.get(session_id).await {
-            Some(jail) => ExecToolRoute::Jail(jail),
-            None => ExecToolRoute::Refused(format!(
+            Some(jail) => seeded_clone_guard::ExecToolRoute::Jail(jail),
+            None => seeded_clone_guard::ExecToolRoute::Refused(format!(
                 "session {session_id} is sandboxed and this daemon holds no jail for it; \
                  refusing to run its tools on the host worktree"
             )),
@@ -9069,7 +8374,7 @@ impl ConnectionServiceImpl {
     ) -> ExecuteToolResponse {
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
         let response = match self.exec_tool_route(&session_dir, &req.session_id).await {
-            ExecToolRoute::HostWorktree => {
+            seeded_clone_guard::ExecToolRoute::HostWorktree => {
                 let outcome = tool_engine::execute_tool(
                     worktree_root,
                     &req.tool_name,
@@ -9086,8 +8391,8 @@ impl ConnectionServiceImpl {
                     job_running: outcome.job_running,
                 }
             }
-            ExecToolRoute::Jail(jail) => jail.execute_tool(req).await,
-            ExecToolRoute::Refused(reason) => {
+            seeded_clone_guard::ExecToolRoute::Jail(jail) => jail.execute_tool(req).await,
+            seeded_clone_guard::ExecToolRoute::Refused(reason) => {
                 log::warn!("exec tool: {reason}");
                 ExecuteToolResponse {
                     result_json: String::new(),
@@ -10329,7 +9634,7 @@ impl ConnectionServiceImpl {
                 // session it was recorded on is the caller's to reclaim, which is what the split
                 // start's teardown does with the id it minted.
                 let session_dir = unified_session_dir_path(&sessions_base, &session_id);
-                let codebase = SeedCodebase::read(&session_id, &session_dir)?;
+                let codebase = seed_codebase::SeedCodebase::read(&session_id, &session_dir)?;
                 let seeded = self
                     .seed_session_agent_roster(&session_id, &codebase, &req.session_token, seed)
                     .await?;
@@ -10593,14 +9898,14 @@ impl ConnectionServiceImpl {
                 req.selected_branch_to_work_on.trim(),
                 req.repo_path.trim(),
                 match Some(req.stack_parent.trim()).filter(|s| !s.is_empty()) {
-                    Some(session_id) => SpawnStackParent::OwnedBy {
+                    Some(session_id) => stack_parent::SpawnStackParent::OwnedBy {
                         session_id,
                         daemon_instance_id: req.stack_parent_daemon_instance_id.trim(),
                         stack_node_id: req.stack_node_id.trim(),
                         session_token: &req.session_token,
                         host: self,
                     },
-                    None => SpawnStackParent::NoParent,
+                    None => stack_parent::SpawnStackParent::NoParent,
                 },
                 &initial_prompt,
                 req.managed_codebase,
@@ -10782,7 +10087,7 @@ impl ConnectionServiceImpl {
                     coder_log_yaml,
                     startup_watch,
                 );
-                await_supervised_with_timeout(
+                service_util::await_supervised_with_timeout(
                     timeout,
                     "StartSession: spawn via tddy-supervisor",
                     crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
@@ -10790,7 +10095,7 @@ impl ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
+                service_util::spawn_blocking_with_timeout(timeout, "StartSession: spawn", move || {
                     log::debug!(
                         "StartSession: spawn_blocking running, using_spawn_worker={}",
                         spawn_client.is_some()
@@ -11251,7 +10556,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let session_dir = self.roster_session_dir(&req.session_token, &req.session_id)?;
         let mut record = self.roster_record_for_agent_id(&req.agent_id).await?;
-        let codebase = SeedCodebase::read(&req.session_id, &session_dir)?;
+        let codebase = seed_codebase::SeedCodebase::read(&req.session_id, &session_dir)?;
         refuse_unenforceable_withdrawal(&req.session_id, &codebase, &record)?;
         // An agent owned by a peer reads a checkout on that peer, so the entry has to name one
         // before it is written. Claiming it is also what opens the session's room — and both happen
@@ -11521,7 +10826,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // and the def is here. Resolving it against a roster this daemon does not hold would report
         // a session that legitimately is not here as the reason an agent it does own cannot answer.
         let conversation = match self.hosted_clone_for(&req.session_id) {
-            Some(clone) => AgentConversation::Local {
+            Some(clone) => seed_codebase::AgentConversation::Local {
                 session_id: req.session_id.clone(),
                 agent_id: req.agent_id.clone(),
                 session: Arc::new(tokio::sync::Mutex::new(
@@ -11541,7 +10846,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     })?;
                 let local_instance_id = local_instance_id_for_config(&self.config);
                 match record.daemon_instance_id == local_instance_id {
-                    true => AgentConversation::Local {
+                    true => seed_codebase::AgentConversation::Local {
                         session_id: req.session_id.clone(),
                         agent_id: record.agent_id.clone(),
                         session: Arc::new(tokio::sync::Mutex::new(
@@ -11561,7 +10866,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                             .await?;
                         self.forward_open_agent_conversation(&req, &record, &conversation_id)
                             .await?;
-                        AgentConversation::Remote {
+                        seed_codebase::AgentConversation::Remote {
                             session_id: req.session_id.clone(),
                             agent_id: record.agent_id.clone(),
                             daemon_instance_id: record.daemon_instance_id.clone(),
@@ -11627,24 +10932,24 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                         req.conversation_id, req.session_id
                     )))
                 }
-                Some(AgentConversation::Local {
+                Some(seed_codebase::AgentConversation::Local {
                     session,
                     closed,
                     agent_id,
                     ..
                 }) => (
-                    PromptRouting::Local {
+                    seeded_clone_guard::PromptRouting::Local {
                         session: Arc::clone(session),
                         closed: Arc::clone(closed),
                     },
                     agent_id.clone(),
                 ),
-                Some(AgentConversation::Remote {
+                Some(seed_codebase::AgentConversation::Remote {
                     daemon_instance_id,
                     agent_id,
                     ..
                 }) => (
-                    PromptRouting::Remote(daemon_instance_id.clone()),
+                    seeded_clone_guard::PromptRouting::Remote(daemon_instance_id.clone()),
                     agent_id.clone(),
                 ),
             }
@@ -11661,8 +10966,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         );
 
         let (session, closed) = match routing {
-            PromptRouting::Local { session, closed } => (session, closed),
-            PromptRouting::Remote(daemon_instance_id) => {
+            seeded_clone_guard::PromptRouting::Local { session, closed } => (session, closed),
+            seeded_clone_guard::PromptRouting::Remote(daemon_instance_id) => {
                 let slot = self.common_room_slot("PromptAgentConversation")?;
                 self.refuse_departed_daemon(&daemon_instance_id).await?;
                 // Re-addressed to the agent's owning daemon, as the open was. Forwarded still naming
@@ -11801,14 +11106,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 "conversation '{}' is not open on session '{}'",
                 req.conversation_id, req.session_id
             ))),
-            Some(AgentConversation::Local { closed, .. }) => {
+            Some(seed_codebase::AgentConversation::Local { closed, .. }) => {
                 // A turn already in flight is interrupted rather than left to finish: the caller has
                 // been told the conversation is cancelled, and an answer arriving afterwards would
                 // be one it has no reason to expect.
                 closed.notify_one();
                 Ok(Response::new(CancelAgentConversationResponse {}))
             }
-            Some(AgentConversation::Remote {
+            Some(seed_codebase::AgentConversation::Remote {
                 daemon_instance_id, ..
             }) => {
                 let slot = self.common_room_slot("CancelAgentConversation")?;
@@ -11990,7 +11295,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
         let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
         let entries =
-            spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
+            service_util::spawn_blocking_with_timeout(timeout, "ListSessions: read and enrich", move || {
                 let sessions = session_reader::list_sessions_in_dir(&sessions_base_blocking)
                     .map_err(|e| anyhow::anyhow!(e))?;
                 let mut out = Vec::with_capacity(sessions.len());
@@ -12179,7 +11484,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         match crate::supervisor_client::spawn_backend_choice(&self.config) {
             crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                await_supervised_with_timeout(
+                service_util::await_supervised_with_timeout(
                     timeout,
                     "create_project: clone via tddy-supervisor",
                     crate::supervisor_spawn::clone_repo_via_supervisor(
@@ -12192,7 +11497,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
+                service_util::spawn_blocking_with_timeout(timeout, "create_project: clone_repo", move || {
                     if let Some(ref client) = spawn_client {
                         client.clone_repo(spawn_worker::CloneRequest {
                             os_user: os_user_owned,
@@ -12340,7 +11645,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         match crate::supervisor_client::spawn_backend_choice(&self.config) {
             crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                await_supervised_with_timeout(
+                service_util::await_supervised_with_timeout(
                     timeout,
                     "add_project_to_host: clone via tddy-supervisor",
                     crate::supervisor_spawn::clone_repo_via_supervisor(
@@ -12353,7 +11658,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
+                service_util::spawn_blocking_with_timeout(timeout, "add_project_to_host: clone_repo", move || {
                     if let Some(ref client) = spawn_client {
                         client.clone_repo(spawn_worker::CloneRequest {
                             os_user: os_user_owned,
@@ -12674,7 +11979,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let session_id = req.session_id.clone();
         let livekit = livekit.clone();
         let project_id_resume = metadata.project_id.clone();
-        let (resume_agent, resume_recipe) = resume_agent_and_recipe(&metadata);
+        let (resume_agent, resume_recipe) = service_util::resume_agent_and_recipe(&metadata);
         // A resumed session's agent is resolved the same way a starting one's is, so an assistant
         // this daemon defined still reaches the child as a def it can build a backend from.
         let resume_agent_def: Option<String> = match resume_agent.as_deref() {
@@ -12722,7 +12027,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     coder_log_yaml,
                     startup_watch,
                 );
-                await_supervised_with_timeout(
+                service_util::await_supervised_with_timeout(
                     timeout,
                     "ResumeSession: spawn via tddy-supervisor",
                     crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
@@ -12730,7 +12035,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 .await?
             }
             crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
+                service_util::spawn_blocking_with_timeout(timeout, "ResumeSession: spawn", move || {
                     let pid = if project_id_resume.is_empty() {
                         None
                     } else {
@@ -13922,7 +13227,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let refresh = req.refresh;
         let timeout = self.config.spawn_worker_request_timeout();
 
-        let snapshots = spawn_blocking_with_timeout(
+        let snapshots = service_util::spawn_blocking_with_timeout(
             timeout,
             "ListWorktreesForProject: cache read/refresh",
             move || {
@@ -13986,7 +13291,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = first.session_id.clone();
-        let terminal_id = resolved_terminal_id(&first.terminal_id).to_string();
+        let terminal_id = service_util::resolved_terminal_id(&first.terminal_id).to_string();
         log::info!(
             target: "tddy_daemon::connection_service",
             "stream_session_terminal_io: session_id={} terminal_id={}",
@@ -14131,7 +13436,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = req.session_id.trim().to_string();
-        let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+        let terminal_id = service_util::resolved_terminal_id(&req.terminal_id).to_string();
         log::info!(
             target: "tddy_daemon::connection_service",
             "stream_terminal_output: session_id={} terminal_id={}",
@@ -14185,7 +13490,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let chunk = sandbox
                     .capture
                     .lock()
-                    .map(|cap| cap.replay_from(cursor, 0, TERMINAL_OUTPUT_FRAME_MAX_BYTES))
+                    .map(|cap| cap.replay_from(cursor, 0, service_util::TERMINAL_OUTPUT_FRAME_MAX_BYTES))
                     .unwrap_or_else(|_| tddy_task::CaptureChunk {
                         data: Vec::new(),
                         start_offset: cursor,
@@ -14288,7 +13593,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
 
         let session_id = req.session_id.trim().to_string();
-        let terminal_id = resolved_terminal_id(&req.terminal_id).to_string();
+        let terminal_id = service_util::resolved_terminal_id(&req.terminal_id).to_string();
 
         if let Some(sandbox) = self.sandbox_manager.get(&session_id).await {
             if terminal_id != MAIN_TERMINAL_ID {
@@ -14748,7 +14053,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         )
         .map_err(|e| Status::internal(e.to_string()))?;
         let remote_for_closure = remote.clone();
-        let branches = spawn_blocking_with_timeout(
+        let branches = service_util::spawn_blocking_with_timeout(
             timeout,
             "ListProjectBranches: git remote refs",
             move || {
@@ -16228,7 +15533,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // surface that asks (prefer active, then most-recently-updated).
         let branch_for_scan = branch.clone();
         let sessions_base_for_scan = sessions_base.clone();
-        let session = spawn_blocking_with_timeout(
+        let session = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: scan sessions by branch",
             move || {
@@ -16259,7 +15564,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // worktree" rather than failing the call, which is the same contract the other four keep.
         let worktree_repo_root = repo_root.clone();
         let branch_for_worktree = branch.clone();
-        let worktree = spawn_blocking_with_timeout(
+        let worktree = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: read the branch's worktree",
             move || {
@@ -16287,7 +15592,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // inline would occupy a runtime worker thread for its whole duration.
         let remote_repo_root = repo_root.clone();
         let remote_branch = branch.clone();
-        let remote = spawn_blocking_with_timeout(
+        let remote = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "QueryBranch: remote ref",
             move || {
@@ -16736,7 +16041,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let resolution_repo_root = repo_root.clone();
         let resolution_sessions_base = sessions_base.clone();
         let resolution_base_branch = req.base_branch.trim().to_string();
-        let (session, worktree, remote, base_sync) = spawn_blocking_with_timeout(
+        let (session, worktree, remote, base_sync) = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "PullBaseIntoBranch: re-read the branch",
             move || {
@@ -17010,7 +16315,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         // Discover worktrees + branch/diff off the async runtime, without the size walk.
         let repo = main_repo.clone();
         let timeout = self.config.spawn_worker_request_timeout();
-        let diff_rows = spawn_blocking_with_timeout(
+        let diff_rows = service_util::spawn_blocking_with_timeout(
             timeout,
             "StreamWorktreeStats: git worktree list + diff",
             move || Ok(worktrees::list_worktree_diff_rows(&repo)),
@@ -17147,7 +16452,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let repo_check = main_repo.clone();
         let wt_check = worktree_path.clone();
         let timeout = self.config.spawn_worker_request_timeout();
-        let listed = spawn_blocking_with_timeout(
+        let listed = service_util::spawn_blocking_with_timeout(
             timeout,
             "CalculateWorktreeSize: worktree membership check",
             move || Ok(worktrees::worktree_path_is_listed(&repo_check, &wt_check)),
