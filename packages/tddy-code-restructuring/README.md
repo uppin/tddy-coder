@@ -10,7 +10,7 @@ Exposed via `tddy-tools restructure`:
 
 - `apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N] [--indexing-budget SECONDS]`
 - `status <plan.jsonl>`
-- `check <plan.jsonl> [--deep] [--indexing-budget SECONDS]`
+- `check <plan.jsonl> [--deep] [--budget LINES] [--indexing-budget SECONDS]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
 - `anchors <file.rs> --items A,B,C [--indexing-budget SECONDS]`
 - `verify --against <git-ref>`
 
@@ -18,4 +18,4 @@ Plans hold intents only — no source text (`text` / `code` / `content` refused)
 
 ## Operations (v1)
 
-`extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`), `extract_module_to_file`, `extract_trait`, `inline_method`.
+`extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`), `extract_module_to_file`, `extract_trait`, `inline_method`, `move_module_to_crate` (`to`, `reexport`).

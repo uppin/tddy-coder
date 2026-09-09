@@ -57,3 +57,48 @@ fn restructure_check_rejects_malformed_plan_header() {
         "stderr must report malformed plan, got: {stderr}"
     );
 }
+
+/// The file budget is a report, not a gate: a check whose plan names an over-budget file says so
+/// and still returns the verdict its findings earned. That is what makes it usable for recording an
+/// outcome rather than only for failing a build.
+#[test]
+fn restructure_check_reports_the_files_a_plan_names_that_are_over_the_budget() {
+    // Given a plan naming one 12-line module and one 3-line module
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(dir.path().join("src")).expect("src");
+    fs::write(dir.path().join("src/big.rs"), "// a line\n".repeat(12)).expect("big module");
+    fs::write(dir.path().join("src/small.rs"), "// a line\n".repeat(3)).expect("small module");
+    let plan = dir.path().join("plan.jsonl");
+    fs::write(
+        &plan,
+        r#"{"v":1,"snapshot":{}}
+{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/big.rs","path":"Registry"},"name":"HostRegistry"}
+{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/small.rs","path":"Clock"},"name":"HostClock"}
+"#,
+    )
+    .expect("plan");
+
+    // When the plan is checked against a 10-line budget
+    let mut cmd = tddy_tools_bin();
+    cmd.current_dir(dir.path());
+    cmd.args([
+        "restructure",
+        "check",
+        plan.to_str().unwrap(),
+        "--budget",
+        "10",
+    ]);
+    let assert = cmd.assert().success();
+
+    // Then only the file over the budget is reported, with how far over it is
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(
+        stdout.contains("budget: 1 of 2 file(s) over 10 lines")
+            && stdout.contains("budget: src/big.rs is 12 lines, 2 over"),
+        "the budget report did not reach stdout, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("src/small.rs"),
+        "a file within the budget was reported, got: {stdout}"
+    );
+}

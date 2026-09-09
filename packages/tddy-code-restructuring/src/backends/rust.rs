@@ -1213,6 +1213,14 @@ impl LanguageBackend for RustBackend {
             notes,
         })
     }
+
+    /// This backend *is* the reference engine a cross-crate move surveys through — the same
+    /// `documentSymbol` + `textDocument/references` implementation the move itself resolves with, so
+    /// a `check --deep` rehearsal reports the blast radius an apply would act on and not a second
+    /// approximation of it.
+    fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
+        Some(self)
+    }
 }
 
 /// The engine half of a cross-crate move.

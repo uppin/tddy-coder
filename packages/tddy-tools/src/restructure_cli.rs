@@ -56,8 +56,14 @@ pub struct RestructurePlanArgs {
 pub struct RestructureCheckArgs {
     pub plan: PathBuf,
 
+    /// Also resolve every operation through rust-analyzer, reporting the refusals an apply would
+    /// give and the blast radius of every cross-crate move.
     #[arg(long)]
     pub deep: bool,
+
+    /// Report every file the plan names that is longer than this many lines.
+    #[arg(long)]
+    pub budget: Option<usize>,
 
     #[arg(long)]
     pub indexing_budget: Option<u64>,
@@ -176,6 +182,7 @@ fn cli_vector(args: RestructureArgs) -> Vec<String> {
         RestructureCommand::Check(check) => {
             let mut v = vec!["check".to_string(), check.plan.display().to_string()];
             push_flag(&mut v, "--deep", check.deep);
+            push_opt(&mut v, "--budget", check.budget);
             push_opt(&mut v, "--indexing-budget", check.indexing_budget);
             v
         }
