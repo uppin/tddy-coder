@@ -307,7 +307,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 
 - [x] M1 — `edits_for` fixed; a rename re-points a caller in another file ✅
 - [x] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests ✅ *(deciding half only — the engine impl is untested, see `## Technical Debt`)*
-- [~] M3 — the crate-level facade produces a zero-caller-diff move ✅; `verify --against` not yet run
+- [x] M3 — the crate-level facade produces a zero-caller-diff move ✅ — settled by a compiler, not by reading the diff; `verify --against` still to run against the real move
 - [ ] M4 — file-budget report; `run_server` options struct; CI drift gate
 - [ ] M5 — `tddy-daemon-kernel` extracted; all nine cycles cut; `cargo build -p tddy-daemon` clean
 - [ ] M6 — `types.proto` + `host.proto` + `worktree.proto` generate; sandbox extern paths re-pointed
@@ -335,9 +335,9 @@ rather than an algorithm. Three distinct kinds:
 ## Acceptance Tests
 
 ### tddy-code-restructuring
-- [ ] **Integration**: a rename of a symbol referenced from another file rewrites that file too (`rename_cross_file_acceptance.rs`)
-- [ ] **Integration**: `move_module_to_crate` relocates a module, its header resolves, both manifests updated (`move_module_to_crate_acceptance.rs`)
-- [ ] **Integration**: the same move with a crate-level facade leaves every caller untouched (`move_module_to_crate_acceptance.rs`)
+- [x] **Integration**: a rename of a symbol referenced from another file rewrites that file too (`rename_cross_file_acceptance.rs`) ✅
+- [x] **Integration**: `move_module_to_crate` relocates a module, its header resolves, both manifests updated (`move_module_to_crate_acceptance.rs`) ✅
+- [x] **Integration**: the same move with a crate-level facade leaves every caller untouched (`move_module_to_crate_acceptance.rs`) ✅
 - [ ] **Unit**: a plan naming `move_module_to_crate` without a destination crate is `MalformedPlan` (`plan.rs`)
 - [ ] **Unit**: `check` lists exactly the files over a given budget (`runner.rs`)
 
@@ -428,6 +428,17 @@ rather than an algorithm. Three distinct kinds:
   depend on the destination; if the moved code still names the origin, the destination depends back,
   and cargo rejects the pair with an error naming neither the module nor the operation. The refusal
   names every path that forced it.
+- **A crate that goes on naming the moved module gains a dependency on the crate it moved to.**
+  Found by the live-rust-analyzer acceptance suite on its first run, not by review: the operation
+  emitted a tree that read correctly and did not compile (`E0433`/`E0432`), on **both** paths — the
+  facade names the destination, and so does every re-pointed caller. As written it would have broken
+  the build on all 19 daemon modules, and all 271 unit tests passed through it, because a manifest
+  that is never compiled looks fine. This is why every acceptance test here ends in `cargo check`:
+  only a compiler tells an edit that looks right from one that resolves.
+- **The dependency-cycle refusal covers the no-facade path too.** It originally fired only for
+  facades; once a re-pointed caller also creates origin → destination, the no-facade path can close
+  the same cycle. The condition is now "the destination would name the origin **and** the origin goes
+  on naming the destination". That second defect was hidden by the first.
 - **The file budget is best-effort, by agreement.** Seams are cut where they are cohesive. Whatever
   stays over 500 lines is listed in `## Scope`'s file-budget item with a reason, rather than split to
   hit a number at the cost of cohesion.
@@ -439,13 +450,16 @@ rather than an algorithm. Three distinct kinds:
       `generate_tonic_adapter` is a stub. Generating them is out of scope and belongs in `docs/dev/todo/`
 - [ ] Relocated `impl` members come out `pub(crate)` and stay there by design; each widening that has
       to stand is reported in the visibility table rather than silently narrowed
-- [ ] ⚠ **`impl ModuleReferences for RustBackend` has no test.** The deciding half of the move is
-      covered by 271 unit tests against a known reference set; the half that asks rust-analyzer
-      (`textDocument/references` + `documentSymbol`) can only be exercised against a live server, and
-      the crate has no live-server harness to reuse — every existing test is pure-unit over JSON
-      fixtures. `move_module_to_crate_acceptance.rs` is listed in `## Acceptance Tests` as a
-      deliverable of its own and is the thing to land before a real plan runs this operation against
-      a repository
+- [x] ✅ **`impl ModuleReferences for RustBackend` is now covered** by
+      `tests/move_module_to_crate_acceptance.rs` and `tests/rename_cross_file_acceptance.rs`, which
+      drive a live rust-analyzer over a real three-crate fixture and end in `cargo check`. They run
+      in the CI gate (~13.5s of a ~150-minute job), are **not** `#[ignore]`d, and fail rather than
+      skip when rust-analyzer is absent. Serialised two ways: a `rust-analyzer` test group in
+      `.config/nextest.toml` across processes, and a lock in the harness within one binary, since
+      plain `cargo test` never reads that file
+- [ ] The operation's **refusals** (cycle, undeclared module, nested module) are unit-tested only —
+      proving a refusal against a live server costs a spawn for a decision made before the server is
+      consulted
 - [ ] A caller reaching the module as `use crate::host_registry;` then `host_registry::X` is **not**
       re-pointed: the survey asks references per item, so the module-level import is outside the
       reference set. Covering it needs a second engine call on the `mod` declaration, and a test that

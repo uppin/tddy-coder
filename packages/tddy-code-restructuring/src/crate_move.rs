@@ -222,8 +222,10 @@ pub fn survey(
 ///    [`Reexport::Glob`] or [`Reexport::Named`] a `pub use <new_crate>::…;` takes its place.
 /// 4. `FileEdit::Change` for the destination crate's `lib.rs`: the new `mod` declaration.
 /// 5. `FileEdit::Change` per caller, when no facade was asked for.
-/// 6. `FileEdit::Change` for both `Cargo.toml`s — the destination's `[dependencies]` gains what the
-///    moved code needs, and the workspace `members` list gains the destination if it is new.
+/// 6. `FileEdit::Change` per `Cargo.toml` the new shape needs: the destination's `[dependencies]`
+///    gains what the moved code names; every crate that goes on naming the module — the one holding
+///    the facade, and each one whose callers were re-pointed — gains a dependency on the
+///    destination; and the workspace `members` list gains the destination if it is new.
 ///
 /// With a facade, (5) is empty by construction. That is the difference between a move a reviewer can
 /// read and one that touches ninety files.
@@ -240,7 +242,8 @@ pub fn resolve(
 
     let moved = workspace.read(&moving.source)?;
     let header = repointed_header(&moved, &moving.origin.extern_name);
-    refuse_a_dependency_cycle(&moving, &header)?;
+    let keeps_naming_it = crates_still_naming_the_module(workspace, &moving, &rewrites)?;
+    refuse_a_dependency_cycle(&moving, &header, &keeps_naming_it)?;
 
     let mut changes = vec![FileEdit::Rename {
         from: moving.source.clone(),
@@ -259,6 +262,7 @@ pub fn resolve(
     }
 
     changes.push(moving.destination_manifest(workspace, &header.crates_named)?);
+    changes.extend(moving.dependents_on_the_destination(workspace, &keeps_naming_it)?);
     changes.extend(moving.workspace_members(workspace)?);
 
     // A change with no edits names a file the operation did not touch, and the journal would hash
@@ -478,6 +482,37 @@ impl Move {
         })
     }
 
+    /// Every manifest that has to gain a dependency on the destination.
+    ///
+    /// Without this a move produces a tree that reads correctly and does not build: the facade, or
+    /// the caller this operation re-pointed, names a crate the manifest never heard of. It is the
+    /// one edit no unit test caught and the first `cargo check` did.
+    fn dependents_on_the_destination(
+        &self,
+        workspace: &Workspace<'_>,
+        crates: &BTreeSet<String>,
+    ) -> Result<Vec<FileEdit>> {
+        let mut changes = Vec::new();
+        for directory in crates {
+            let path = format!("{directory}/Cargo.toml");
+            let text = workspace.read(&path)?;
+            if declares_dependency(&text, &self.destination.extern_name) {
+                continue;
+            }
+
+            let line = format!(
+                "{} = {{ path = \"{}\" }}",
+                self.destination.package,
+                relative_from(directory, &self.destination.dir)
+            );
+            changes.push(FileEdit::Change {
+                path,
+                edits: with_dependencies(&text, &[line]),
+            });
+        }
+        Ok(changes)
+    }
+
     /// The workspace root's `members`, gaining the destination when it is not already listed.
     ///
     /// Nothing is emitted when the root manifest declares no `members` array: there is no list for
@@ -528,26 +563,69 @@ fn caller_changes(
     Ok(changes)
 }
 
-/// A move a facade would make cyclic is refused rather than written.
+/// A move that would make the two crates depend on each other is refused rather than written.
 ///
-/// A facade makes the crate the module left depend on the destination. If the moved code still
-/// names the crate it left, the destination depends on it back — and cargo refuses that pair with
-/// an error naming neither the module nor the operation that produced it. Refusing here names both,
-/// and names every path that forced it.
-fn refuse_a_dependency_cycle(moving: &Move, header: &Header) -> Result<()> {
-    if moving.reexport == Reexport::None
-        || !header.crates_named.contains(&moving.origin.extern_name)
+/// The crate the module left goes on naming it either way — through a facade, or through the
+/// callers this operation re-points — so it gains a dependency on the destination. If the moved
+/// code still names the crate it left, the destination depends on it back, and cargo refuses that
+/// pair with an error naming neither the module nor the operation that produced it. Refusing here
+/// names both, and names every path that forced it.
+fn refuse_a_dependency_cycle(
+    moving: &Move,
+    header: &Header,
+    keeps_naming_it: &BTreeSet<String>,
+) -> Result<()> {
+    if !header.crates_named.contains(&moving.origin.extern_name)
+        || !keeps_naming_it.contains(&moving.origin.dir)
     {
         return Ok(());
     }
 
     Err(malformed(format!(
         "`{}` still names `{}` ({}), so the destination would depend on the crate it left while \
-         the facade makes that crate depend on the destination — move what those paths reach, or \
-         drop the `reexport` and re-point the callers",
+         that crate goes on naming the module it lost — move what those paths reach, or move the \
+         module's own dependencies with it",
         moving.source,
         moving.origin.package,
         header.origin_paths.join(", ")
+    )))
+}
+
+/// Every crate directory that will name the destination once the move has been applied.
+///
+/// A facade keeps the crate the module left naming it. A re-pointed caller does the same from
+/// whichever crate it sits in, which need not be that one — a workspace-wide move re-points callers
+/// in crates the plan never mentioned, and each of them needs the dependency or stops compiling.
+fn crates_still_naming_the_module(
+    workspace: &Workspace<'_>,
+    moving: &Move,
+    rewrites: &[PlannedRewrite],
+) -> Result<BTreeSet<String>> {
+    let mut crates = BTreeSet::new();
+    if moving.reexport != Reexport::None {
+        crates.insert(moving.origin.dir.clone());
+        return Ok(crates);
+    }
+
+    for rewrite in rewrites {
+        crates.insert(crate_holding(workspace, &rewrite.path)?);
+    }
+    Ok(crates)
+}
+
+/// The crate directory a file belongs to — the nearest ancestor with a `Cargo.toml`.
+fn crate_holding(workspace: &Workspace<'_>, file: &str) -> Result<String> {
+    let mut directory = Path::new(file).parent();
+    while let Some(candidate) = directory {
+        if workspace.root.join(candidate).join("Cargo.toml").exists() {
+            return Ok(candidate.display().to_string());
+        }
+        directory = candidate.parent();
+    }
+
+    Err(malformed(format!(
+        "`{file}` is in no crate — no `Cargo.toml` stands above it, so there is no manifest to \
+         give the dependency its re-pointed path needs"
     )))
 }
 
@@ -1263,6 +1341,7 @@ mod tests {
                 ORIGIN_ROOT,
                 DESTINATION_ROOT,
                 DESTINATION_MANIFEST,
+                ORIGIN_MANIFEST,
                 ROOT_MANIFEST
             ],
             "a faceded move re-points no caller"
@@ -1410,6 +1489,49 @@ mod tests {
             "[workspace]\nmembers = [\n    \"packages/tddy-daemon\",\n    \
              \"packages/tddy-host-service\",\n]\n"
         );
+    }
+
+    /// The facade names the crate the module moved to, so the crate holding it has to depend on
+    /// that crate. A tree that reads correctly and does not build is the worst outcome this
+    /// operation can produce, and this is the manifest that decides which one it is.
+    #[test]
+    fn makes_the_crate_keeping_the_facade_depend_on_the_one_it_moved_to() {
+        // Given
+        let workspace = a_workspace_with_two_crates();
+        let mut engine = a_reference_set(vec![references_to("HostRegistry", CALLER, &workspace)]);
+        let mut op = a_move_of("host_registry", "packages/tddy-host-service");
+        op.reexport = Some(Reexport::Glob);
+
+        // When
+        let edit = resolve(&mut engine, &workspace.workspace(), &op).expect("the move resolves");
+
+        // Then
+        assert_eq!(
+            applied(&edit, ORIGIN_MANIFEST, &workspace),
+            "[package]\nname = \"tddy-daemon\"\n\n[dependencies]\n\
+             tddy-lsp = { path = \"../tddy-lsp\" }\n\
+             tddy-host-service = { path = \"../tddy-host-service\" }\n"
+        );
+    }
+
+    /// The same cycle without a facade: the caller this operation re-points makes its own crate
+    /// depend on the destination, and the moved code naming the crate it left points the dependency
+    /// straight back.
+    #[test]
+    fn refuses_a_move_whose_re_pointed_caller_would_close_a_dependency_cycle() {
+        // Given
+        let workspace = a_workspace_with_two_crates().with(
+            MODULE,
+            "use crate::runtime::Clock;\n\npub struct HostRegistry {\n    clock: Clock,\n}\n",
+        );
+        let mut engine = a_reference_set(vec![references_to("HostRegistry", CALLER, &workspace)]);
+        let op = a_move_of("host_registry", "packages/tddy-host-service");
+
+        // When
+        let outcome = resolve(&mut engine, &workspace.workspace(), &op);
+
+        // Then
+        assert_refusal(outcome).naming("tddy_daemon::runtime::Clock");
     }
 
     /// A facade makes the crate the module left depend on the destination. If the moved code still
