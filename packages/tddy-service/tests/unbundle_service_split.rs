@@ -314,10 +314,10 @@ fn walk_for(dir: &Path, needle: &str) -> Vec<String> {
         let path = entry.path();
         if path.is_dir() {
             found.extend(walk_for(&path, needle));
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            if std::fs::read_to_string(&path).is_ok_and(|text| text.contains(needle)) {
-                found.push(path.display().to_string());
-            }
+        } else if path.extension().is_some_and(|e| e == "rs")
+            && std::fs::read_to_string(&path).is_ok_and(|text| text.contains(needle))
+        {
+            found.push(path.display().to_string());
         }
     }
     found
