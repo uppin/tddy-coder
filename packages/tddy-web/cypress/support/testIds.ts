@@ -411,9 +411,18 @@ export const TEST_IDS = {
   shellMenuTasks: "shell-menu-tasks",
   shellMenuProjects: "shell-menu-projects",
   shellMenuVms: "shell-menu-vms",
+  shellMenuHosts: "shell-menu-hosts",
   shellMenuModels: "shell-menu-models",
   shellMenuRpcPlayground: "shell-menu-rpc-playground",
   shellMenuSettings: "shell-menu-settings",
+
+  // Hosts screen (#/hosts)
+  /** The Hosts screen root, rendered inside `AppShell` by `HostsAppPage`. */
+  hostsScreen: "hosts-screen",
+  /** The table of known hosts. Its `<tbody>` rows are the rows. */
+  hostsTable: "hosts-table",
+  /** Stands in for the table when the registry has no entries. */
+  hostsEmpty: "hosts-empty",
 
   // Models & Agents screen (#/models)
   /** The Models & Agents screen root. */

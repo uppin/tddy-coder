@@ -295,6 +295,7 @@ it("removes the LiveKit entry from the navigation menu on a connection with no p
       "Tasks",
       "Projects",
       "Models & Agents",
+      "Hosts",
       "VMs",
       "RPC Playground",
       "Settings",

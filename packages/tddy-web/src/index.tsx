@@ -57,6 +57,7 @@ import { LiveKitAppPage } from "./components/livekit/LiveKitAppPage";
 import { WorktreesAppPage } from "./components/worktrees/WorktreesAppPage";
 import { VmsAppPage } from "./components/vms/VmsAppPage";
 import { ProjectsAppPage } from "./components/projects/ProjectsAppPage";
+import { HostsAppPage } from "./components/hosts/HostsAppPage";
 import { ModelsAppPage } from "./components/models/ModelsAppPage";
 import { TasksDrawerScreen } from "./components/tasks/TasksDrawerScreen";
 import { RpcPlaygroundAppPage } from "./rpc-playground/RpcPlaygroundAppPage";
@@ -67,6 +68,7 @@ import {
   isTasksPath,
   isVmsPath,
   isProjectsPath,
+  isHostsPath,
   isModelsPath,
   isLiveKitPath,
   isSettingsPath,
@@ -485,6 +487,8 @@ export function App({ testDaemonRoom, testDaemonHosts }: AppProps = {}) {
                 <VmsAppPage onNavigate={navigate} />
               ) : isProjectsPath(path) ? (
                 <ProjectsAppPage onNavigate={navigate} />
+              ) : isHostsPath(path) ? (
+                <HostsAppPage onNavigate={navigate} />
               ) : isModelsPath(path) ? (
                 <ModelsAppPage onNavigate={navigate} />
               ) : isLiveKitPath(path) ? (

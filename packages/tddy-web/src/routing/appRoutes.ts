@@ -106,6 +106,13 @@ export function isProjectsPath(pathname: string): boolean {
   return pathname === PROJECTS_ROUTE;
 }
 
+/** Canonical path for the Hosts screen — every host tddy has seen, reachable or not. */
+export const HOSTS_ROUTE = "/hosts";
+
+export function isHostsPath(pathname: string): boolean {
+  return pathname === HOSTS_ROUTE;
+}
+
 /** Canonical path for the Models & Agents screen. */
 export const MODELS_ROUTE = "/models";
 

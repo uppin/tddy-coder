@@ -45,6 +45,7 @@ rules.
 | `#/sessions/:sessionId` | That session selected (and auto-attached when active) |
 | `#/tasks` | Tasks drawer, nothing selected |
 | `#/tasks/:taskId` | That task selected |
+| `#/hosts` | Hosts screen — every host the daemon has a record of ([hosts-screen.md](./hosts-screen.md)) |
 | `#/worktrees` · `#/projects` · `#/vms` · `#/livekit` · `#/rpc-playground` | As before |
 
 `new` is reserved as a session-id segment. Session ids are UUIDs, so the reservation cannot collide

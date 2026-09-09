@@ -510,13 +510,32 @@ pub async fn build(
 
     if let Some(user_resolver) = auth_result.user_resolver {
         let config_arc = Arc::new(config.clone());
+        // One registry for the whole daemon: peer discovery writes sightings into it and the
+        // `ListKnownHosts` handler reads them back. Two instances over the same directory would
+        // each hold their own write lock, so a sighting and an RPC-time read could disagree.
+        let host_registry: Arc<dyn crate::host_registry::HostRegistry> =
+            Arc::new(crate::host_registry::FileHostRegistry::new(
+                crate::host_registry::host_registry_dir(&tddy_data_dir),
+            ));
+        // The local row is the daemon's own, and nothing else records it: the peer registry
+        // deliberately holds only *remote* participants, and a daemon with LiveKit switched off
+        // never syncs a room at all. Recorded at startup so `first_seen` for this machine means
+        // "since tddy first ran here" rather than "since a browser first asked".
+        if let Err(e) = host_registry.record_sighting(
+            &crate::host_registry::local_host_sighting(&config),
+            crate::host_registry::now_unix_ms(),
+        ) {
+            log::warn!("host registry: could not record this daemon's own entry: {e}");
+        }
         // Peer discovery over the common room. The registry and the room slot are the handles the
         // roster is built from; the task that fills them is the host's to start.
         let livekit_discovery: Option<crate::livekit_peer_discovery::LiveKitDiscoveryHandles> =
             match CommonRoomTarget::from_livekit(config.livekit.as_ref()) {
                 Some(target) => {
-                    let registry =
-                        Arc::new(crate::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+                    let registry = Arc::new(
+                        crate::livekit_peer_discovery::CommonRoomPeerRegistry::new()
+                            .with_host_registry(Arc::clone(&host_registry)),
+                    );
                     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
                     log::info!(
                         "LiveKit common-room peer discovery configured (room {:?})",
@@ -696,6 +715,7 @@ pub async fn build(
         )
         .with_session_rooms(Arc::clone(&shared_session_rooms))
         .with_model_registry(Arc::clone(&model_registry))
+        .with_host_registry(host_registry)
         .with_session_notification_bus(session_notification_bus);
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());

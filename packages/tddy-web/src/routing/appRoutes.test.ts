@@ -7,6 +7,8 @@ import {
   isRpcPlaygroundPath,
   VMS_ROUTE,
   isVmsPath,
+  HOSTS_ROUTE,
+  isHostsPath,
   LIVEKIT_ROUTE,
   isLiveKitPath,
   MODELS_ROUTE,
@@ -110,6 +112,28 @@ describe("appRoutes — VMs route helpers", () => {
 
   it("does not match sub-paths under /vms", () => {
     expect(isVmsPath("/vms/extra")).toBe(false);
+  });
+});
+
+describe("appRoutes — Hosts route helpers", () => {
+  it("HOSTS_ROUTE is /hosts", () => {
+    expect(HOSTS_ROUTE).toBe("/hosts");
+  });
+
+  it("recognises /hosts as the Hosts path", () => {
+    expect(isHostsPath(HOSTS_ROUTE)).toBe(true);
+  });
+
+  it("does not match root as a Hosts path", () => {
+    expect(isHostsPath("/")).toBe(false);
+  });
+
+  it("does not match /vms as a Hosts path", () => {
+    expect(isHostsPath("/vms")).toBe(false);
+  });
+
+  it("does not match sub-paths under /hosts", () => {
+    expect(isHostsPath("/hosts/workstation-1")).toBe(false);
   });
 });
 
