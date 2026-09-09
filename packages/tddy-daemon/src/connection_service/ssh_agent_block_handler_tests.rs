@@ -1,10 +1,13 @@
 use super::*;
+// Reached through `use super::*` until the proto converters moved to `host_messages`, whose
+// facade cannot re-export a name the module merely imports. Bound here instead.
 use crate::host_tooling::{
     GitIdentity, GithubCliStatus, HostTooling, HostToolingProbe, ProbeOutcome,
 };
 use crate::ssh_agent::{AgentKey, AgentStatus};
 use std::sync::Mutex;
 use tddy_service::proto::connection::GetHostToolingRequest;
+use tddy_service::proto::connection::{ProbeOutcome as ProtoProbeOutcome, SshAgentKey};
 
 /// The GitHub login the session token resolves to, and the OS user it maps to on this host.
 /// Deliberately different strings: the probes are scoped to the second, and a handler passing

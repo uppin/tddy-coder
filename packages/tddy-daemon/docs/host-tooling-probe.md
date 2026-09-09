@@ -541,7 +541,7 @@ a Unix host can never honestly give for them.
 | Unit | `ssh_agent.rs` `#[cfg(test)]` | the protocol exchange, the four outcomes, fingerprint derivation |
 | Unit | `remote_desktop_probe.rs` `#[cfg(test)]` | a real socket's behaviour: reachable, refused, no bytes written, and the bridge check against a configured path |
 | Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
-| Integration | `connection_service.rs` `#[cfg(test)]` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
+| Integration | `connection_service/host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
 | Component | `packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |
 
 Shelling out to the real `git` / `gh` was rejected: CI has an arbitrary `gh` state, and a suite that

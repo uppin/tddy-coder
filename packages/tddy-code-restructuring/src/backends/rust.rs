@@ -325,6 +325,14 @@ struct ServerChatter {
     shown: HashMap<String, String>,
     /// Whether the server has reported itself quiescent — an extension, so never the only signal.
     quiescent: bool,
+    /// The furthest percentage any phase reported, and the phase it belonged to.
+    ///
+    /// Kept apart from `last` because the two answer different questions and the server routinely
+    /// makes them disagree: it counts files inside a phase, then emits sub-steps carrying no
+    /// percentage at all (`working: tddy_desktop (lib)`). A timeout landing on one of those had a
+    /// `last` with no number in it, so the message could not say how far the index had got — which
+    /// is the one thing a reader needs in order to decide whether raising the budget will help.
+    furthest: Option<(u64, String)>,
 }
 
 impl ServerChatter {
@@ -375,6 +383,17 @@ impl ServerChatter {
         let line = progress_line(title, value);
         self.last = Some(line.clone());
 
+        if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
+            let phase = title.unwrap_or("working").to_string();
+            if self
+                .furthest
+                .as_ref()
+                .is_none_or(|(seen, _)| percentage >= *seen)
+            {
+                self.furthest = Some((percentage, phase));
+            }
+        }
+
         let key = match value.get("percentage").and_then(Value::as_u64) {
             Some(percentage) => percentage.to_string(),
             None => line.clone(),
@@ -384,6 +403,25 @@ impl ServerChatter {
         }
         self.shown.insert(token, key);
         Some(line)
+    }
+}
+
+impl ServerChatter {
+    /// Where the index got to, for a message that has to explain a timeout.
+    ///
+    /// The last line on its own is not enough: it is often a sub-step with no percentage. This
+    /// pairs it with the furthest percentage seen, so the reader can tell a server that stalled at
+    /// 12% from one that timed out at 99% — the first wants investigating, the second wants a
+    /// bigger budget.
+    fn how_far(&self) -> String {
+        let last = self
+            .last
+            .clone()
+            .unwrap_or_else(|| "nothing reported".to_string());
+        match &self.furthest {
+            Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
+            None => last,
+        }
     }
 }
 
@@ -419,7 +457,23 @@ const WARMUP_BUDGET: Duration = Duration::from_secs(600);
 /// By then the graph is loaded and the only thing left to wait out is the server catching up with
 /// this client's own edits, which is seconds. Keeping this short is the point of the warm-up: these
 /// waits are paid per operation, and `survey_moved_items` pays one per moved item.
+///
+/// "Which is seconds" holds for a file of ordinary size and fails badly on a very large one: an
+/// edit to an 18,000-line module in a workspace this size takes rust-analyzer well past thirty
+/// seconds to re-resolve, and the run then reports an incomplete index for a server that was
+/// working normally. So this is the *default*, and [`settle_budget_for`] scales it when a caller
+/// has said how long it is willing to wait.
 const SETTLE_BUDGET: Duration = Duration::from_secs(30);
+
+/// The per-operation settle budget implied by a whole-run indexing budget.
+///
+/// A caller who raised `--indexing-budget` is saying the machine or the file is slow, and the
+/// per-operation waits are exactly where that slowness shows up after the first index. The divisor
+/// is chosen so the default 600s warm-up yields exactly [`SETTLE_BUDGET`]: a caller who never
+/// passed the flag sees the behaviour they saw before this was configurable, which a test pins.
+fn settle_budget_for(warmup: Duration) -> Duration {
+    std::cmp::max(SETTLE_BUDGET, warmup / 20)
+}
 
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
 /// graph, so a request that needs the graph is retried at this cadence until it is answered.
@@ -435,11 +489,19 @@ const UNRESOLVED_TOKEN: &str = "unresolvedReference";
 /// the same diagnostic by rewriting the reference instead, which is not what an extraction wants.
 const IMPORT_TITLE: &str = "Import ";
 
-/// How many times the extraction will ask for one more import. Each pass restores a single name and
-/// routinely resolves several others that were only unresolved through it, so the count needed is
-/// far below this; the bound is here so a server that keeps offering an import that changes nothing
-/// stops rather than spins.
-const IMPORT_PASSES: usize = 64;
+/// How many times the extraction will ask for one more import.
+///
+/// Each pass restores a single name and routinely resolves several others that were unresolved only
+/// through it. A backstop rather than the anti-spin guarantee: a server that keeps offering an
+/// import which changes nothing is already stopped by the occurrence check — an import must reduce
+/// that name's unresolved occurrences or the operation refuses — and by the `unimportable` list,
+/// which never re-asks a name whose every offered path failed.
+///
+/// 64 was chosen when the premise was that "the count needed is far below this". That is false for
+/// a large module: relocating a 6,484-line `impl` of a generated gRPC trait needs one import per
+/// distinct proto type it names, which runs past a hundred, and the run then failed on the bound
+/// rather than on anything wrong with the plan.
+const IMPORT_PASSES: usize = 512;
 
 /// LSP `ContentModified`. The server is still catching up with a document change and asks the
 /// client to re-issue, which is what the specification prescribes rather than treating it as fatal.
@@ -460,6 +522,8 @@ pub struct RustBackend {
     chatter: ServerChatter,
     /// How long the one-time warm-up may run before it gives up.
     warmup: Duration,
+    /// How long each later wait for name resolution may run. Derived from `warmup`.
+    settle: Duration,
     /// Where a progress line goes. Every other consequence of an operation travels back to the
     /// caller inside a [`Resolution`], but progress happens *while* a call is in flight and has
     /// nowhere to wait — so it needs a sink rather than a return value. It stays a sink rather than
@@ -596,6 +660,7 @@ impl RustBackend {
             environment: String::from("<server not started>"),
             chatter: ServerChatter::default(),
             warmup: WARMUP_BUDGET,
+            settle: settle_budget_for(WARMUP_BUDGET),
             progress: discard,
             trace: discard,
             indexed: false,
@@ -608,6 +673,7 @@ impl RustBackend {
     /// Give the warm-up a budget other than the default.
     pub fn with_indexing_budget(mut self, seconds: u64) -> Self {
         self.warmup = Duration::from_secs(seconds);
+        self.settle = settle_budget_for(self.warmup);
         self
     }
 
@@ -643,6 +709,7 @@ impl RustBackend {
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
             warmup: WARMUP_BUDGET,
+            settle: settle_budget_for(WARMUP_BUDGET),
             progress,
             trace: discard,
             indexed: false,
@@ -652,6 +719,7 @@ impl RustBackend {
         };
         if let Some(seconds) = indexing_budget {
             backend.warmup = Duration::from_secs(seconds);
+            backend.settle = settle_budget_for(backend.warmup);
         }
         backend
     }
@@ -881,6 +949,18 @@ impl RustBackend {
         )
     }
 
+    /// Whether the server can type a position — the cheapest proxy for "inference is ready here".
+    ///
+    /// Hover is answered from inference rather than from the syntax tree, so a null hover on a
+    /// position that certainly has a type means the server has not typed this body yet.
+    fn inference_ready_at(&mut self, uri: &str, at: Position) -> Result<bool> {
+        let hover = self.request_settled(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri }, "position": lsp_position(at) }),
+        )?;
+        Ok(!hover.is_null())
+    }
+
     /// Ask for a named assist, retrying while the crate graph is still loading.
     fn assist(&mut self, uri: &str, range: Range, kind: RefactorKind) -> Result<Value> {
         let assist = assist_for(kind)
@@ -926,15 +1006,23 @@ impl RustBackend {
                 return Ok(action);
             }
             if Instant::now() >= deadline {
+                // An assist that needs inference is absent for two indistinguishable reasons:
+                // the range does not support it, or inference is not ready *there*. `indexed` is
+                // a whole-file flag set from a hover on the file's first symbol, which on a
+                // large module says nothing about a body thousands of lines further down. So
+                // ask at the range itself before blaming the plan.
+                let inference = if answered && assist.needs_inference {
+                    Some(self.inference_ready_at(uri, target.start)?)
+                } else {
+                    None
+                };
                 return Err(unresolved_assist(
                     wanted,
                     &offered,
                     answered,
+                    inference,
                     started.elapsed(),
-                    self.chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    self.chatter.how_far(),
                     self.environment.clone(),
                 ));
             }
@@ -1182,7 +1270,7 @@ impl RustBackend {
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
         let pruned = self.prune_assist_imports(uri, &named, &name)?;
-        let imported = self.restore_imports(uri, &pruned, &name)?;
+        let imported = self.restore_imports(uri, &pruned, &name, &moved, reexport)?;
         let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an
@@ -1194,6 +1282,7 @@ impl RustBackend {
             &module_bounds(&relocated, &name)?,
             &impl_members,
         ));
+        refuse_mangled_rewrite(&preserved, &name, &moved)?;
         let facade = facade_lines(&name, &moved, reexport)?;
         let notes = empty_facade_note(&name, &facade, reexport)
             .into_iter()
@@ -1384,7 +1473,14 @@ impl RustBackend {
     /// too high — and the difference between a good and a useless offer is not readable from its
     /// title. Trusting the title wrote four `use` lines that did not compile across one real
     /// restructure, in a run that reported success.
-    fn restore_imports(&mut self, uri: &str, extracted: &str, module: &str) -> Result<String> {
+    fn restore_imports(
+        &mut self,
+        uri: &str,
+        extracted: &str,
+        module: &str,
+        moved: &[MovedItem],
+        reexport: Reexport,
+    ) -> Result<String> {
         let mut text = extracted.to_string();
         // Names every offered path failed. Re-asking one would be offered the same useless import
         // again, and every pass would insert another copy of it.
@@ -1393,7 +1489,7 @@ impl RustBackend {
         for _ in 0..IMPORT_PASSES {
             self.did_change(uri, &text)?;
 
-            match self.next_import(uri, &text, module, &mut unimportable)? {
+            match self.next_import(uri, &text, module, moved, reexport, &mut unimportable)? {
                 Some(imported) => text = imported,
                 None => return Ok(text),
             }
@@ -1435,11 +1531,14 @@ impl RustBackend {
     /// A name with no import offered is skipped rather than refused: most of them are methods and
     /// fields that are unresolved only because their receiver's type is, and they come back on
     /// their own once it does. What is left when no import remains is for the compiler to judge.
+    #[allow(clippy::too_many_arguments)]
     fn next_import(
         &mut self,
         uri: &str,
         text: &str,
         module: &str,
+        moved: &[MovedItem],
+        reexport: Reexport,
         unimportable: &mut Vec<String>,
     ) -> Result<Option<String>> {
         let mut asked: Vec<String> = Vec::new();
@@ -1469,6 +1568,29 @@ impl RustBackend {
                 continue;
             }
 
+            // A name this seam's own facade will re-export. The facade is written *after* this
+            // pass, so the server sees the name as unresolved and offers a path through the new
+            // module — and the named import it writes is private, which then *shadows* the
+            // `pub use module::*;` added moments later. The facade is left present and inert, and
+            // an outside caller gets `E0603` on a symbol the facade was asked to keep reachable.
+            if facade_will_bind(&name.text, moved, reexport) {
+                unimportable.push(name.text.clone());
+                continue;
+            }
+
+            // A name the parent binds under an alias — `ProbeOutcome as ProtoProbeOutcome`, which
+            // is how every generated proto type in this workspace is referred to. rust-analyzer
+            // offers the *unaliased* path, which does not bind the alias, so asking the server can
+            // only produce a `use` that resolves nothing and the run then refuses. The parent's own
+            // declaration already says what the moved code meant, so reconstruct it from there.
+            if let Some(path) = alias_target(text, module, &name.text) {
+                return Ok(Some(with_module_import(
+                    text,
+                    module,
+                    &format!("use {path} as {};", name.text),
+                )?));
+            }
+
             let actions = self.request_settled(
                 "textDocument/codeAction",
                 json!({
@@ -1488,6 +1610,18 @@ impl RustBackend {
                 .collect();
 
             if offered.is_empty() {
+                // rust-analyzer offers `Import` for items, not for a bare module path, so a name
+                // the parent reached through `use crate::tool_engine;` is unresolved in the moved
+                // code with nothing on offer for it — and skipping silently is how three modules
+                // landed referencing an unlinked crate. The parent's own declaration says what it
+                // meant, exactly as for an alias.
+                if let Some(path) = parent_binding(text, module, &name.text) {
+                    return Ok(Some(with_module_import(
+                        text,
+                        module,
+                        &format!("use {path};"),
+                    )?));
+                }
                 continue;
             }
 
@@ -1767,11 +1901,7 @@ impl RustBackend {
                 return Err(RestructureError::IndexingIncomplete {
                     environment: self.environment.clone(),
                     seconds: started.elapsed().as_secs(),
-                    last: self
-                        .chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    last: self.chatter.how_far(),
                 });
             }
             std::thread::sleep(INDEXING_POLL);
@@ -1786,7 +1916,7 @@ impl RustBackend {
     /// edits.
     fn resolution_budget(&self) -> Duration {
         if self.indexed {
-            SETTLE_BUDGET
+            self.settle
         } else {
             self.warmup
         }
@@ -1814,11 +1944,7 @@ impl RustBackend {
                 return Err(RestructureError::IndexingIncomplete {
                     environment: self.environment.clone(),
                     seconds: started.elapsed().as_secs(),
-                    last: self
-                        .chatter
-                        .last
-                        .clone()
-                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    last: self.chatter.how_far(),
                 });
             }
             std::thread::sleep(INDEXING_POLL);
@@ -2080,10 +2206,30 @@ fn unresolved_assist(
     wanted: &str,
     offered: &[String],
     answered: bool,
+    inference_ready: Option<bool>,
     waited: Duration,
     last: String,
     environment: String,
 ) -> RestructureError {
+    // The server answered, but only from the syntax tree: it cannot yet type the range, so the
+    // assist that needs inference was never going to be in the list. That is a budget problem,
+    // not a plan problem, and reporting it as an absent assist sends the reader to rewrite an
+    // anchor that was correct.
+    if answered && inference_ready == Some(false) {
+        return RestructureError::IndexingIncomplete {
+            seconds: waited.as_secs(),
+            last: format!(
+                "{last} — the server answered `codeAction` but could not type the range, so \
+                 `{wanted}` (which needs type inference) was never offered; it offered only {}",
+                if offered.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    offered.join(", ")
+                }
+            ),
+            environment,
+        };
+    }
     if answered {
         let offered = if offered.is_empty() {
             "it offered none".to_string()
@@ -2419,8 +2565,37 @@ fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
         .iter()
         .filter(|title| import_path(title).is_some_and(|path| in_scope.contains(&path)));
 
-    let only = *narrowed.next()?;
-    narrowed.next().is_none().then_some(only)
+    if let Some(only) = narrowed.next() {
+        if narrowed.next().is_none() {
+            return Some(only);
+        }
+        return None;
+    }
+
+    // The name itself is bound nowhere — routinely true after a seam has moved the code that used
+    // it and the import pass pruned the parent's now-unused binding. The module it came from is
+    // still evidence: a file importing twenty-six names from `tddy_service::proto::connection` and
+    // one contested `Signal` meant that one, not `sysinfo::Signal`.
+    //
+    // Only decisive where exactly one candidate's module is already imported from. Two candidates
+    // from two imported modules is the ambiguity this function exists to refuse.
+    let modules: Vec<String> = in_scope
+        .iter()
+        .filter_map(|path| parent_module(path))
+        .collect();
+    let mut by_module = offered.iter().filter(|title| {
+        import_path(title)
+            .and_then(|path| parent_module(&path))
+            .is_some_and(|module| modules.contains(&module))
+    });
+
+    let only = *by_module.next()?;
+    by_module.next().is_none().then_some(only)
+}
+
+/// The module a path's last segment lives in — `a::b::C` is `a::b`. `None` for a bare name.
+fn parent_module(path: &str) -> Option<String> {
+    path.rsplit_once("::").map(|(module, _)| module.to_string())
 }
 
 /// `source` without the single-name `use` lines inside `block` that no import can be.
@@ -2802,6 +2977,11 @@ fn position_at(text: &str, offset: usize) -> Value {
     let line = before.matches('\n').count();
     let character = before.rsplit('\n').next().map_or(0, str::len);
     json!({ "line": line, "character": character })
+}
+
+/// One position in LSP's zero-based coordinates.
+fn lsp_position(at: Position) -> Value {
+    json!({ "line": at.line - 1, "character": at.col - 1 })
 }
 
 fn lsp_range(range: Range) -> Value {
@@ -3321,10 +3501,94 @@ fn impl_widenings(
 /// written with, widest first. It names only the items something outside the new module reaches,
 /// because re-exporting a helper that travelled with its only caller would make it reachable for
 /// nobody and undo the privacy the seam just preserved.
+/// Refuse a rewrite that produced a qualified path naming something the seam never moved.
+///
+/// One real run wrote `seeded_clone_guard::SeededCloneGuardloneGuardloneGuard` — the identifier's
+/// tail inserted twice at a four-character offset, which is two edits against the same reference
+/// with the second computed on pre-first-edit text. It appeared once among ~20 rewrites of that
+/// symbol and the run still reported success.
+///
+/// The existing residual-placeholder check cannot see this: it counts occurrences of the
+/// *placeholder* (`modname`, `fun_name`), not of the references the assist rewrote. This one is
+/// keyed to what the seam moved, which the backend already knows, and costs a single pass over the
+/// produced text with no server round trip.
+///
+/// Only paths whose qualifier is this module are weighed. A path through any other module was not
+/// written by this operation.
+fn refuse_mangled_rewrite(text: &str, module: &str, moved: &[MovedItem]) -> Result<()> {
+    let known: Vec<&str> = moved.iter().map(|item| item.name.as_str()).collect();
+    let needle = format!("{module}::");
+
+    for (index, line) in text.split('\n').enumerate() {
+        let mut rest = line;
+        while let Some(at) = rest.find(&needle) {
+            // A longer qualifier ending in this module's name is a different module.
+            let boundary_ok = rest[..at]
+                .chars()
+                .last()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != ':');
+            rest = &rest[at + needle.len()..];
+            if !boundary_ok {
+                continue;
+            }
+            let ident: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            // Nested modules and associated items are reached through further segments, and a
+            // lower-case head is a module or function rather than a moved type.
+            if ident.is_empty() || known.contains(&ident.as_str()) {
+                continue;
+            }
+            if let Some(base) = known.iter().find(|name| ident.starts_with(*name)) {
+                return Err(failure(format!(
+                    "the rewrite of `{base}` produced `{module}::{ident}` on line {} — the \
+                     identifier was written over itself, which is a corrupted edit rather than a \
+                     path. Refusing rather than reporting success over source that will not build.",
+                    index + 1
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// The widest visibility any relocated item carries, as the keyword a facade should re-export at.
+///
+/// Defaults to `pub(crate)` rather than `pub`: a seam that moved nothing public has nothing to
+/// publish, and `pub(crate)` is both what the assist widened its members to and the visibility the
+/// parent's own dependents reach the facade through.
+fn widest_visibility(items: &[MovedItem]) -> &'static str {
+    if items.iter().any(|item| item.visibility == "pub") {
+        "pub"
+    } else {
+        "pub(crate)"
+    }
+}
+
+/// Whether the facade this seam is getting will itself bind `name` in the parent's scope.
+///
+/// Mirrors [`facade_lines`]: a glob re-exports everything the module holds, while a named facade
+/// covers only the top-level items something outside the seam reaches.
+fn facade_will_bind(name: &str, moved: &[MovedItem], kind: Reexport) -> bool {
+    match kind {
+        Reexport::None => false,
+        Reexport::Glob => moved.iter().any(|item| item.name == name),
+        Reexport::Named => moved
+            .iter()
+            .any(|item| item.name == name && item.reached_from_outside && item.within.is_empty()),
+    }
+}
+
 fn facade_lines(module: &str, items: &[MovedItem], kind: Reexport) -> Result<Vec<String>> {
     Ok(match kind {
         Reexport::None => Vec::new(),
-        Reexport::Glob => vec![format!("pub use {module}::*;")],
+        // `pub use` only where something the module holds is actually `pub`. The assist rewrites
+        // what it relocates to `pub(crate)`, so a seam of private items yields a `pub` glob that
+        // re-exports nothing — `clippy::unused_imports` calls that out by name, and under
+        // `-D warnings` it fails the build the restructure was supposed to leave green.
+        Reexport::Glob => vec![format!("{} use {module}::*;", widest_visibility(items))],
         Reexport::Named => {
             refuse_uncovered_nesting(items)?;
             let reached: Vec<&MovedItem> = items
@@ -3653,6 +3917,93 @@ fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
         closed,
         indent,
     })
+}
+
+/// The path an `as` alias binds, for an alias the text declares *outside* the extracted module.
+///
+/// Read from the parent's own `use` tree rather than from the server, because the server reports
+/// what a path resolves to and not what a file chose to call it. Only declarations outside the
+/// module are considered: one inside it would already have bound the name.
+fn alias_target(text: &str, module: &str, alias: &str) -> Option<String> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module).ok()?;
+    let outside: String = source
+        .iter()
+        .enumerate()
+        .filter(|(line, _)| *line < block.opened || *line > block.closed)
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    aliased_bindings(&outside)
+        .into_iter()
+        .find(|(bound, _)| bound == alias)
+        .map(|(_, path)| path)
+}
+
+/// The path a *non-aliased* binding the text declares outside the module gives to `name`.
+///
+/// `use crate::tool_engine;` binds `tool_engine`; `use a::b::Thing;` binds `Thing`. Used only where
+/// the server offered nothing, so it never overrides an opinion rust-analyzer actually has.
+fn parent_binding(text: &str, module: &str, name: &str) -> Option<String> {
+    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module).ok()?;
+    let outside: String = source
+        .iter()
+        .enumerate()
+        .filter(|(line, _)| *line < block.opened || *line > block.closed)
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    imported_paths(&outside)
+        .into_iter()
+        .find(|path| path.rsplit("::").next() == Some(name))
+}
+
+/// Every `(alias, path)` pair the text's `use` declarations bind through `as`.
+fn aliased_bindings(text: &str) -> Vec<(String, String)> {
+    let mut bindings = Vec::new();
+
+    for statement in text.split(';') {
+        if let Some(tree) = use_tree(statement) {
+            collect_aliases(tree, "", &mut bindings);
+        }
+    }
+
+    bindings
+}
+
+/// Walk a `use` tree, recording only the members that carry an `as` clause.
+fn collect_aliases(tree: &str, prefix: &str, bindings: &mut Vec<(String, String)>) {
+    let tree = tree.trim();
+
+    let Some(open) = tree.find('{') else {
+        if let Some((path, alias)) = tree.split_once(" as ") {
+            let alias = alias.trim();
+            let path = path.trim();
+            // `as _` binds no name, so nothing can be unresolved under it.
+            if alias != "_" && !path.is_empty() {
+                bindings.push((alias.to_string(), format!("{prefix}{path}")));
+            }
+        }
+        return;
+    };
+
+    let head = format!("{prefix}{}", &tree[..open]);
+    let close = tree.rfind('}').unwrap_or(tree.len());
+
+    for member in group_members(&tree[open + 1..close]) {
+        collect_aliases(member, &head, bindings);
+    }
+}
+
+/// The text with `line` inserted as the extracted module's first declaration.
+fn with_module_import(text: &str, module: &str, line: &str) -> Result<String> {
+    let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
+    let block = module_bounds(&source, module)?;
+    source.insert(block.opened + 1, format!("{}    {line}", block.indent));
+    Ok(source.join("\n"))
 }
 
 /// The visibility the assist widens everything it relocates to.
@@ -4618,6 +4969,318 @@ mod tests {
         assert!(carries_placeholder_type("fn f() -> Vec<_> {"));
     }
 
+    // ---- D8: an alias the parent binds ----
+
+    /// `ProbeOutcome as ProtoProbeOutcome` is how every generated proto type in this workspace is
+    /// referred to. rust-analyzer offers the unaliased path, which binds nothing.
+    #[test]
+    fn reads_the_path_behind_an_alias_the_parent_declares() {
+        let text = "use tddy_service::proto::connection::ProbeOutcome as ProtoProbeOutcome;\n\
+                    mod host_messages {\n\
+                        fn f(o: &ProtoProbeOutcome) {}\n\
+                    }\n";
+
+        assert_eq!(
+            alias_target(text, "host_messages", "ProtoProbeOutcome").as_deref(),
+            Some("tddy_service::proto::connection::ProbeOutcome")
+        );
+    }
+
+    /// An alias inside the extracted module already binds the name there, so it is not the
+    /// parent's declaration and reconstructing it would be a duplicate binding.
+    #[test]
+    fn ignores_an_alias_declared_inside_the_extracted_module() {
+        let text = "mod host_messages {\n\
+                        use x::Y as Z;\n\
+                    }\n";
+
+        assert_eq!(alias_target(text, "host_messages", "Z"), None);
+    }
+
+    #[test]
+    fn reads_an_alias_out_of_a_grouped_use_tree() {
+        let bindings = aliased_bindings("use a::b::{C as D, E, F as G};\n");
+
+        assert_eq!(
+            bindings,
+            vec![
+                ("D".to_string(), "a::b::C".to_string()),
+                ("G".to_string(), "a::b::F".to_string())
+            ]
+        );
+    }
+
+    /// `as _` imports a trait without binding a name, so nothing can be unresolved under it.
+    #[test]
+    fn records_no_binding_for_an_anonymous_import() {
+        assert!(aliased_bindings("use prost::Message as _;\n").is_empty());
+    }
+
+    #[test]
+    fn writes_the_reconstructed_import_as_the_modules_first_line() {
+        let text = "mod m {\n    fn f() {}\n}\n";
+
+        let out = with_module_import(text, "m", "use x::Y as Z;").unwrap();
+
+        assert_eq!(out, "mod m {\n    use x::Y as Z;\n    fn f() {}\n}\n");
+    }
+
+    /// A seam carrying something `pub` still publishes it.
+    #[test]
+    fn reexports_a_glob_at_pub_when_the_seam_moved_something_public() {
+        let items = [moved("Visible", "pub", true), moved("Hidden", "", false)];
+
+        assert_eq!(
+            facade_lines("rendering", &items, Reexport::Glob).unwrap(),
+            ["pub use rendering::*;"]
+        );
+    }
+
+    /// The assist rewrites what it relocates to `pub(crate)`, so a seam of private items yields a
+    /// `pub` glob that re-exports nothing — which `-D warnings` turns into a build failure.
+    #[test]
+    fn reexports_a_glob_at_pub_crate_when_nothing_the_seam_moved_is_public() {
+        let items = [
+            moved("Hidden", "", false),
+            moved("AlsoHidden", "pub(crate)", true),
+        ];
+
+        assert_eq!(
+            facade_lines("rendering", &items, Reexport::Glob).unwrap(),
+            ["pub(crate) use rendering::*;"]
+        );
+    }
+
+    // ---- D7: the facade the import pass used to defeat ----
+
+    /// A glob facade re-exports everything the module holds, so the parent needs no named import
+    /// for any of it — and a named one would be private and would shadow the facade.
+    #[test]
+    fn treats_a_glob_facade_as_binding_every_moved_name() {
+        let moved = [moved("SeededAgentClones", "pub", true)];
+
+        assert!(facade_will_bind(
+            "SeededAgentClones",
+            &moved,
+            Reexport::Glob
+        ));
+    }
+
+    /// A named facade covers only what something outside the seam reaches, so a purely internal
+    /// item still needs its import.
+    #[test]
+    fn treats_a_named_facade_as_binding_only_what_it_reexports() {
+        let moved = [moved("Internal", "", false)];
+
+        assert!(!facade_will_bind("Internal", &moved, Reexport::Named));
+    }
+
+    #[test]
+    fn treats_no_facade_as_binding_nothing() {
+        let moved = [moved("SeededAgentClones", "pub", true)];
+
+        assert!(!facade_will_bind(
+            "SeededAgentClones",
+            &moved,
+            Reexport::None
+        ));
+    }
+
+    // ---- D6: a rewrite written over itself ----
+
+    /// The exact corruption one real run produced and reported success over.
+    #[test]
+    fn refuses_a_qualified_path_whose_identifier_was_written_over_itself() {
+        let moved = [moved("SeededCloneGuard", "pub", true)];
+        let text =
+            "    ) -> Result<seeded_clone_guard::SeededCloneGuardloneGuardloneGuard, Status> {\n";
+
+        let outcome = refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
+
+        let message = match outcome {
+            Err(RestructureError::MalformedPlan(m)) => m,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(message.contains("SeededCloneGuard"), "{message}");
+        assert!(message.contains("written over itself"), "{message}");
+    }
+
+    #[test]
+    fn accepts_a_qualified_path_naming_something_the_seam_moved() {
+        let moved = [moved("SeededCloneGuard", "pub", true)];
+        let text = "    ) -> Result<seeded_clone_guard::SeededCloneGuard, Status> {\n";
+
+        assert!(refuse_mangled_rewrite(text, "seeded_clone_guard", &moved).is_ok());
+    }
+
+    /// A path through a different module was not written by this operation, so it is not weighed —
+    /// including one whose qualifier merely ends with this module's name.
+    #[test]
+    fn ignores_a_path_through_another_module() {
+        let moved = [moved("Guard", "pub", true)];
+        let text = "    let a = other::guard::GuardSomethingElse::new();\n";
+
+        assert!(refuse_mangled_rewrite(text, "guard", &moved).is_ok());
+    }
+
+    /// rust-analyzer offers `Import` for items, never for a bare module path, so a name reached
+    /// through `use crate::tool_engine;` had nothing on offer and was skipped in silence.
+    #[test]
+    fn reads_a_module_binding_the_parent_declares() {
+        let text = "use crate::tool_engine;\n\
+                    mod svc {\n\
+                        fn f() { tool_engine::execute_tool(); }\n\
+                    }\n";
+
+        assert_eq!(
+            parent_binding(text, "svc", "tool_engine").as_deref(),
+            Some("crate::tool_engine")
+        );
+    }
+
+    #[test]
+    fn reads_a_plain_item_binding_the_parent_declares() {
+        let text = "use a::b::Thing;\nmod svc {\n    fn f(t: Thing) {}\n}\n";
+
+        assert_eq!(
+            parent_binding(text, "svc", "Thing").as_deref(),
+            Some("a::b::Thing")
+        );
+    }
+
+    /// A binding inside the module already provides the name there.
+    #[test]
+    fn ignores_a_binding_declared_inside_the_module() {
+        let text = "mod svc {\n    use crate::tool_engine;\n}\n";
+
+        assert_eq!(parent_binding(text, "svc", "tool_engine"), None);
+    }
+
+    /// After a seam moves the code that used a name, the import pass prunes the parent's binding —
+    /// so the name itself is in scope nowhere, while the module it came from still is.
+    #[test]
+    fn settles_a_contested_name_on_the_module_the_file_already_imports_from() {
+        let offered = [
+            "Import `tddy_service::proto::connection::Signal`",
+            "Import `sysinfo::Signal`",
+            "Import `tokio::signal::unix::Signal`",
+        ];
+
+        let chosen = choose_import(
+            "use tddy_service::proto::connection::{ListToolsRequest, StartSessionResponse};\n",
+            &offered,
+        );
+
+        assert_eq!(
+            chosen,
+            Some("Import `tddy_service::proto::connection::Signal`")
+        );
+    }
+
+    /// Two candidates from two imported modules is the ambiguity this refuses, not one it guesses at.
+    #[test]
+    fn settles_nothing_when_two_candidates_come_from_imported_modules() {
+        let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
+
+        let chosen = choose_import("use a::b::Other;\nuse c::d::Another;\n", &offered);
+
+        assert_eq!(chosen, None);
+    }
+
+    /// An exact binding still wins over mere module agreement.
+    #[test]
+    fn prefers_an_exact_binding_over_module_agreement() {
+        let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
+
+        let chosen = choose_import("use c::d::Thing;\nuse a::b::Other;\n", &offered);
+
+        assert_eq!(chosen, Some("Import `c::d::Thing`"));
+    }
+
+    #[test]
+    fn reads_the_module_a_path_lives_in() {
+        assert_eq!(parent_module("a::b::C").as_deref(), Some("a::b"));
+        assert_eq!(parent_module("C"), None);
+    }
+
+    /// A timeout has to say how far the index got. The server's *last* notification is often a
+    /// sub-step with no percentage, so the furthest percentage is tracked separately.
+    #[test]
+    fn reports_how_far_the_index_got_even_when_the_last_line_has_no_percentage() {
+        // Given a phase that counted to 64% and then emitted a sub-step with no number
+        let mut chatter = ServerChatter::default();
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "begin", "title": "roots scanned" } }
+        }));
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "report", "percentage": 64 } }
+        }));
+        chatter.absorb(&json!({
+            "method": "$/progress",
+            "params": { "token": "t", "value": { "kind": "report", "message": "tddy_desktop (lib)" } }
+        }));
+
+        // Then the account carries both the sub-step and the number the sub-step lacks
+        let how_far = chatter.how_far();
+        assert!(how_far.contains("tddy_desktop (lib)"), "{how_far}");
+        assert!(how_far.contains("64%"), "{how_far}");
+    }
+
+    /// A stall at 12% and a timeout at 99% want opposite responses, so the number must not be the
+    /// first one seen.
+    #[test]
+    fn keeps_the_furthest_percentage_rather_than_the_first() {
+        let mut chatter = ServerChatter::default();
+        for pct in [10, 55, 91] {
+            chatter.absorb(&json!({
+                "method": "$/progress",
+                "params": { "token": "t", "value": { "kind": "report", "percentage": pct } }
+            }));
+        }
+
+        assert!(chatter.how_far().contains("91%"), "{}", chatter.how_far());
+    }
+
+    #[test]
+    fn says_nothing_was_reported_when_the_server_was_silent() {
+        assert_eq!(ServerChatter::default().how_far(), "nothing reported");
+    }
+
+    /// A caller who never passed `--indexing-budget` must see exactly the behaviour they saw
+    /// before this became configurable.
+    #[test]
+    fn leaves_the_settle_budget_at_its_default_for_the_default_warmup() {
+        // Given the default warm-up budget
+        let settle = settle_budget_for(WARMUP_BUDGET);
+
+        // Then the per-operation wait is unchanged
+        assert_eq!(settle, SETTLE_BUDGET);
+    }
+
+    /// Raising the run budget is the caller saying the machine or the file is slow, and the
+    /// per-operation waits are where that shows up once the first index is done. A 30s cap there
+    /// reported an incomplete index for a server that was working normally.
+    #[test]
+    fn scales_the_settle_budget_with_a_raised_indexing_budget() {
+        // Given a caller who allowed 2400s for the run
+        let settle = settle_budget_for(Duration::from_secs(2400));
+
+        // Then each later wait scales with it rather than staying at the 30s default
+        assert_eq!(settle, Duration::from_secs(120));
+    }
+
+    /// Lowering the budget must not drop the per-operation wait below what a normal settle needs.
+    #[test]
+    fn never_lowers_the_settle_budget_below_its_default() {
+        // Given a caller who allowed only 60s
+        let settle = settle_budget_for(Duration::from_secs(60));
+
+        // Then the default floor still applies
+        assert_eq!(settle, SETTLE_BUDGET);
+    }
+
     /// A server that answered and offered nothing is a seam refusal; the reader should look at
     /// the range they asked for.
     #[test]
@@ -4627,6 +5290,7 @@ mod tests {
             "extract into function",
             &["Extract into variable".to_string()],
             true,
+            Some(true),
             Duration::from_secs(30),
             "indexing".to_string(),
             "cargo 1.94".to_string(),
@@ -4644,6 +5308,34 @@ mod tests {
         }
     }
 
+    /// The case that cost hours: the server answers `codeAction` from the syntax tree while it
+    /// still cannot type the range, so an assist needing inference is absent for a reason that
+    /// has nothing to do with the range. Reported as an absent assist, it reads as a plan defect.
+    #[test]
+    fn reports_an_incomplete_index_when_the_range_could_not_be_typed() {
+        // Given a server that answered with syntax-level assists but could not type the range
+        let error = unresolved_assist(
+            "extract into function",
+            &["Extract into variable".to_string()],
+            true,
+            Some(false),
+            Duration::from_secs(120),
+            "working (100%)".to_string(),
+            "cargo 1.94".to_string(),
+        );
+
+        // Then it is an indexing problem, and it says why the assist was never offered
+        match error {
+            RestructureError::IndexingIncomplete { seconds, last, .. } => {
+                assert_eq!(seconds, 120);
+                assert!(last.contains("could not type the range"), "{last}");
+                assert!(last.contains("needs type inference"), "{last}");
+                assert!(last.contains("Extract into variable"), "{last}");
+            }
+            other => panic!("expected IndexingIncomplete, got {other:?}"),
+        }
+    }
+
     /// A server that never answered is an index that was not ready, and the remedy is the
     /// budget rather than the anchors.
     #[test]
@@ -4653,6 +5345,7 @@ mod tests {
             "extract into function",
             &[],
             false,
+            None,
             Duration::from_secs(45),
             "discovering sysroot".to_string(),
             "cargo 1.94".to_string(),
