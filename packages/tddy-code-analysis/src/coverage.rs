@@ -92,8 +92,44 @@ fn cargo_manifest_dir(crate_path: &Path) -> Result<PathBuf> {
         .unwrap_or_else(|| PathBuf::from(".")))
 }
 
+/// A step in a capture worth surfacing.
+///
+/// The library itself never prints. Callers decide whether and how to render
+/// these, so a capture stays usable from a TUI, where stray stdout would
+/// corrupt the display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureProgress<'a> {
+    /// The instrumented build has begun. The longest silent phase, and the one
+    /// most easily mistaken for a hang.
+    BuildStarted,
+    /// The build produced this many runnable libtest harnesses.
+    BuildFinished { harnesses: usize },
+    /// A harness's tests have been enumerated and are about to run.
+    HarnessStarted {
+        index: usize,
+        total: usize,
+        spec: &'a str,
+        tests: usize,
+    },
+    /// One test ran and its per-test artifacts were written.
+    TestCaptured {
+        index: usize,
+        total: usize,
+        name: &'a str,
+        status: &'a str,
+    },
+    /// The denominator has been written and the capture is complete.
+    Finished { tests: usize, files: usize },
+}
+
 /// Capture per-test Rust coverage for the crate at `crate_path`, writing into `coverage_dir`.
-pub fn capture_coverage(crate_path: &Path, coverage_dir: &Path) -> Result<()> {
+///
+/// `progress` is called as the capture advances; pass `&mut |_| {}` to stay silent.
+pub fn capture_coverage(
+    crate_path: &Path,
+    coverage_dir: &Path,
+    progress: &mut dyn FnMut(CaptureProgress<'_>),
+) -> Result<()> {
     let manifest_dir = cargo_manifest_dir(crate_path)?;
     let per_test = coverage_dir.join("per-test");
     std::fs::create_dir_all(&per_test)?;
@@ -104,13 +140,38 @@ pub fn capture_coverage(crate_path: &Path, coverage_dir: &Path) -> Result<()> {
     };
     let mut denominator: BTreeMap<String, DenominatorFile> = BTreeMap::new();
 
-    for harness in build_instrumented_tests(&manifest_dir)? {
-        for test_name in list_tests(&manifest_dir, &harness.executable)? {
-            capture_one_test(&context, &harness, &test_name, &mut denominator)?;
+    progress(CaptureProgress::BuildStarted);
+    let harnesses = build_instrumented_tests(&manifest_dir)?;
+    progress(CaptureProgress::BuildFinished {
+        harnesses: harnesses.len(),
+    });
+
+    let mut captured = 0usize;
+    for (position, harness) in harnesses.iter().enumerate() {
+        let tests = list_tests(&manifest_dir, &harness.executable)?;
+        progress(CaptureProgress::HarnessStarted {
+            index: position + 1,
+            total: harnesses.len(),
+            spec: &harness.spec,
+            tests: tests.len(),
+        });
+        for (test_position, test_name) in tests.iter().enumerate() {
+            let status = capture_one_test(&context, harness, test_name, &mut denominator)?;
+            captured += 1;
+            progress(CaptureProgress::TestCaptured {
+                index: test_position + 1,
+                total: tests.len(),
+                name: test_name,
+                status: &status,
+            });
         }
     }
 
     write_denominator(coverage_dir, &denominator)?;
+    progress(CaptureProgress::Finished {
+        tests: captured,
+        files: denominator.len(),
+    });
     Ok(())
 }
 
@@ -122,12 +183,13 @@ struct CaptureContext<'a> {
 }
 
 /// Run one test under its own profile, export it, and write its two artifacts.
+/// Returns the test's libtest status.
 fn capture_one_test(
     context: &CaptureContext<'_>,
     harness: &TestHarness,
     test_name: &str,
     denominator: &mut BTreeMap<String, DenominatorFile>,
-) -> Result<()> {
+) -> Result<String> {
     let id = test_artifact_id(&harness.spec, test_name);
     // Keyed by artifact id, not a running index: ids are unique across
     // harnesses, so concurrent suites cannot clobber each other's profiles.
@@ -149,7 +211,7 @@ fn capture_one_test(
         full_name: test_name.to_string(),
         spec: harness.spec.clone(),
         line: None,
-        status,
+        status: status.clone(),
         duration_ms: 0,
         lang: "rust".to_string(),
     };
@@ -165,7 +227,7 @@ fn capture_one_test(
 
     let _ = std::fs::remove_file(&profraw);
     let _ = std::fs::remove_file(&profdata);
-    Ok(())
+    Ok(status)
 }
 
 #[derive(Default)]
@@ -203,11 +265,19 @@ fn link_rustflags() -> String {
     link_rustflags_for(lld_on_path())
 }
 
-/// Where instrumented builds live. Deliberately outside the repository: an
-/// instrumented build differs from an ordinary one only in rustflags, so
-/// sharing `target/` makes each invalidate the other on every capture.
-fn instrumented_build_dir() -> PathBuf {
-    std::env::temp_dir().join("tddy-coverage-build")
+/// Where a package's instrumented build lives. Deliberately outside the
+/// repository: an instrumented build differs from an ordinary one only in
+/// rustflags, so sharing `target/` makes each invalidate the other on every
+/// capture.
+///
+/// Per package, not shared: the wrapper names the crate it instruments and
+/// cargo fingerprints `RUSTC_WRAPPER`, so one directory would rebuild the whole
+/// dependency graph every time the analyzed package changed — and two captures
+/// running at once would contend on the same cargo lock.
+fn instrumented_build_dir(crate_name: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("tddy-coverage-build")
+        .join(crate_name)
 }
 
 /// The rustc crate name cargo derives from a package directory.
@@ -345,9 +415,10 @@ fn test_harnesses_from_cargo_json(stdout: &str) -> Vec<TestHarness> {
 }
 
 fn build_instrumented_tests(manifest_dir: &Path) -> Result<Vec<TestHarness>> {
-    let build_dir = instrumented_build_dir();
+    let crate_name = crate_name_for(manifest_dir);
+    let build_dir = instrumented_build_dir(&crate_name);
     std::fs::create_dir_all(&build_dir)?;
-    let wrapper = ensure_rustc_wrapper(&build_dir, &crate_name_for(manifest_dir))?;
+    let wrapper = ensure_rustc_wrapper(&build_dir, &crate_name)?;
 
     let output = Command::new("cargo")
         .current_dir(manifest_dir)
@@ -389,7 +460,7 @@ fn list_tests(manifest_dir: &Path, binary: &Path) -> Result<Vec<String>> {
         // the current directory — which is the package being analyzed.
         .env(
             "LLVM_PROFILE_FILE",
-            instrumented_build_dir().join("list-%p.profraw"),
+            instrumented_build_dir(&crate_name_for(manifest_dir)).join("list-%p.profraw"),
         )
         .arg("--list")
         .output()
@@ -776,6 +847,16 @@ mod tests {
                 .expect("mtime"),
             stamp,
             "cargo folds the wrapper mtime into its fingerprint"
+        );
+    }
+
+    #[test]
+    fn each_package_builds_in_its_own_directory() {
+        // A shared dir would rebuild everything whenever the analyzed package
+        // changed, because the wrapper (which cargo fingerprints) names it.
+        assert_ne!(
+            instrumented_build_dir("tddy_daemon"),
+            instrumented_build_dir("tddy_code_analysis")
         );
     }
 
