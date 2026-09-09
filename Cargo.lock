@@ -12922,6 +12922,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-session-files"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-session-sync"
 version = "0.1.0"
 dependencies = [

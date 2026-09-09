@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Stack**: `#unbundle` node **6 of 8**. Base: `feature/unbundle/tools-thinning` (node 5)
+**Stack**: `#unbundle` node **6 of 8**. PR [#475](https://github.com/uppin/tddy-coder/pull/475).
+Base: `feature/unbundle/tools-thinning` (node 5, PR #474)
 
 ## Initial Discovery
 
@@ -329,10 +330,27 @@ Three further proofs:
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `./test -p tddy-coder` | | |
-| `./test -p tddy-terminal-rpc` | | |
-| `./dev bun run --filter tddy-web cypress:component` | | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
+| `cargo clippy -p tddy-session-files -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
+| `./dev bun run --filter tddy-web cypress:component` | not yet run — no web change in commit 2 | |
+
+**8 failing tests** define this node: 3 in `tddy-session-files` and 5 in `tddy-service` (the
+inherited ones plus `session_files`/terminal shape and the converter-absence sweep).
+
+### The shared types file arrived here, for one enum
+
+Node 1's changeset already corrected the plan's claim that it would introduce `types.proto`. Node 6
+is where one is genuinely needed — and it holds **exactly one type**, `HostDocumentScope`, because
+`connection.ConnectionService`'s `StartSession` reaches it too: a session start names the staged
+attachments to materialise, and each carries a scope. Node 6's own terminal family (K) turned out to
+be a **fourth** fully self-contained cut, sharing nothing with anything.
+
+A test pins the file at one declaration, so anything added later has to be reached by two
+really-served services, established the same way.
+
+`connection.proto` keeps its own copy of the enum until the green phase removes the moved methods and
+repoints it — two definitions in two packages is legal, and repointing a staying family now would put
+that change in a red-phase commit.
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.
 

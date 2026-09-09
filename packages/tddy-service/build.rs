@@ -168,6 +168,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // `#unbundle` node 4 — family T, LiveKit rooms observability. Same story as the two above:
         // its closure of 12 messages overlaps nothing that stayed, so it imports nothing.
         "proto/livekit.proto",
+        // `#unbundle` node 6 — families I, J, R and S. The first cut that needed a shared types
+        // file: `HostDocumentScope` is reached by `StartSession`, which stays.
+        "proto/session_files.proto",
     ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
@@ -431,6 +434,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/host.proto",
                 "proto/worktree.proto",
                 "proto/livekit.proto",
+                "proto/session_files.proto",
+                "proto/types.proto",
                 "proto/remote_git.proto",
                 "proto/session_admission.proto",
                 "proto/loopback_tunnel.proto",

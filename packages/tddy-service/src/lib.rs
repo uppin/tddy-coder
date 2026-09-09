@@ -44,6 +44,7 @@ pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
 pub use proto::session_admission::SessionAdmissionServiceServer;
+pub use proto::session_files::SessionFilesServiceServer;
 pub use proto::tasks::TaskServiceServer;
 pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
@@ -102,6 +103,18 @@ pub mod proto {
     /// [`connection`] by `#unbundle` node 4; its 12 messages overlap nothing that stayed.
     pub mod livekit {
         include!(concat!(env!("OUT_DIR"), "/livekit.rs"));
+    }
+    /// The types more than one service needs. Created by `#unbundle` node 6 for exactly one enum,
+    /// `HostDocumentScope` — see `proto/types.proto` for why it is not larger.
+    #[allow(unused_imports, unused_variables)]
+    pub mod types {
+        include!(concat!(env!("OUT_DIR"), "/types.rs"));
+    }
+    /// `SessionFilesService`: workflow files, agent context sync, uploads, staged attachments and
+    /// host documents. Split out of [`connection`] by `#unbundle` node 6.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_files {
+        include!(concat!(env!("OUT_DIR"), "/session_files.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

@@ -173,3 +173,152 @@ fn connection_service_no_longer_declares_the_rooms_stream() {
         );
     }
 }
+
+const SESSION_FILES_METHODS: [&str; 13] = [
+    "ListSessionWorkflowFiles",
+    "ReadSessionWorkflowFile",
+    "StreamContextManifest",
+    "StreamReadContextFile",
+    "StreamReadContextFileBatch",
+    "UploadSessionFileChunk",
+    "ListSessionUploads",
+    "DeleteSessionUpload",
+    "UploadStagedAttachmentChunk",
+    "ListStagedAttachments",
+    "DeleteStagedAttachment",
+    "ReadHostDocument",
+    "StreamReadHostDocument",
+];
+
+const TERMINAL_METHODS: [&str; 9] = [
+    "StreamSessionTerminalIO",
+    "StreamTerminalOutput",
+    "SendTerminalInput",
+    "GetTerminalHistory",
+    "StartTerminalSession",
+    "StopTerminalSession",
+    "ListTerminalSessions",
+    "ClaimTerminalControl",
+    "WatchTerminalControl",
+];
+
+#[test]
+fn session_files_service_declares_every_file_method() {
+    let block = service_block(&read("session_files.proto"), "SessionFilesService");
+    for method in SESSION_FILES_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "session_files.SessionFilesService is missing {method}"
+        );
+    }
+}
+
+/// The shared types file is created by node 6, **not** node 1 — and for exactly one enum.
+///
+/// The plan had node 1 introduce it on the strength of a planning-time list of ~25 cross-family
+/// shared messages. That list was wrong for node 1's families, node 4's, and node 6's terminal
+/// family: all three cuts were fully self-contained. `HostDocumentScope` is the first type that
+/// genuinely crosses, because `connection.ConnectionService`'s `StartSession` needs it too.
+#[test]
+fn the_shared_types_file_holds_only_what_two_served_services_both_need() {
+    // Given
+    let types = read("types.proto");
+
+    // Then
+    assert!(
+        types.contains("enum HostDocumentScope"),
+        "types.proto exists for HostDocumentScope"
+    );
+
+    let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
+    assert_eq!(
+        declared, 1,
+        "types.proto must hold only what genuinely crosses; anything added needs two really-served \
+         services reaching it"
+    );
+}
+
+#[test]
+fn the_session_files_proto_reaches_the_shared_scope_rather_than_copying_it() {
+    // Given
+    let proto = read("session_files.proto");
+
+    // Then
+    assert!(
+        proto.contains("import \"types.proto\""),
+        "session_files.proto imports the shared scope"
+    );
+    assert!(
+        !proto.contains("enum HostDocumentScope"),
+        "session_files.proto must reach the shared enum, not redeclare it"
+    );
+}
+
+/// **The terminal family already had a service, and it was served nowhere.**
+///
+/// `packages/tddy-terminal-rpc/proto/terminal_session.proto` declares 9 rpcs duplicating family K
+/// exactly, and `grep -rn 'TerminalSessionService'` outside that package returns zero hits. What was
+/// actually shared was the *bridge*, and its two call sites hand-converted between the two message
+/// sets. Node 6 serves the coordinate and deletes both converters.
+#[test]
+fn the_terminal_service_that_already_existed_declares_every_terminal_method() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tddy-terminal-rpc/proto/terminal_session.proto");
+    let proto = std::fs::read_to_string(path).expect("terminal_session.proto is readable");
+    let block = service_block(&proto, "TerminalSessionService");
+
+    for method in TERMINAL_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "terminal_session.TerminalSessionService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn connection_service_no_longer_declares_the_session_file_or_terminal_methods() {
+    let block = service_block(&connection_proto(), "ConnectionService");
+    let still_there: Vec<&str> = SESSION_FILES_METHODS
+        .into_iter()
+        .chain(TERMINAL_METHODS)
+        .filter(|method| block.contains(&format!("rpc {method}(")))
+        .collect();
+
+    assert!(
+        still_there.is_empty(),
+        "these moved to session_files.SessionFilesService / \
+         terminal_session.TerminalSessionService but are still on connection.ConnectionService: \
+         {still_there:?}"
+    );
+}
+
+/// Both hand-written converters go. Keeping them would leave three message shapes for one stream —
+/// `connection.*`, `terminal_session.*`, and the converter between them — inside the service whose
+/// whole purpose is to be the single terminal surface.
+#[test]
+fn no_source_converts_between_the_two_terminal_message_sets() {
+    let daemon = Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-daemon/src");
+    let hits = walk_for(&daemon, "connection::SessionTerminalInput");
+    assert!(
+        hits.is_empty(),
+        "these still convert between connection.* and terminal_session.* terminal messages: {hits:?}"
+    );
+}
+
+fn walk_for(dir: &Path, needle: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(walk_for(&path, needle));
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            if std::fs::read_to_string(&path).is_ok_and(|text| text.contains(needle)) {
+                found.push(path.display().to_string());
+            }
+        }
+    }
+    found
+}
