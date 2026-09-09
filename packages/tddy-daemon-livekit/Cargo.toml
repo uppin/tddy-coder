@@ -1,0 +1,20 @@
+[package]
+name = "tddy-daemon-livekit"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's LiveKit surface — per-worktree session rooms, common-room peer discovery, and the rooms observability service. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_daemon_livekit"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-rpc = { path = "../tddy-rpc" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt"] }

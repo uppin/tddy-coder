@@ -12114,6 +12114,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-daemon-auth"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-daemon-kernel"
 version = "0.1.0"
 dependencies = [
@@ -12134,6 +12147,19 @@ dependencies = [
  "tddy-sandbox",
  "tddy-service",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-daemon-livekit"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

@@ -162,7 +162,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // generated module and its own `NAME`. No `.extern_path` is needed in either direction: the
     // closure of messages these 17 methods reach shares nothing with what stayed in
     // `connection.proto`, which is why the split needed no shared `types.proto`.
-    for proto in ["proto/host.proto", "proto/worktree.proto"] {
+    for proto in [
+        "proto/host.proto",
+        "proto/worktree.proto",
+        // `#unbundle` node 4 — family T, LiveKit rooms observability. Same story as the two above:
+        // its closure of 12 messages overlaps nothing that stayed, so it imports nothing.
+        "proto/livekit.proto",
+    ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
             .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
@@ -424,6 +430,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/connection.proto",
                 "proto/host.proto",
                 "proto/worktree.proto",
+                "proto/livekit.proto",
                 "proto/remote_git.proto",
                 "proto/session_admission.proto",
                 "proto/loopback_tunnel.proto",

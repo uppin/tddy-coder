@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Stack**: `#unbundle` node **4 of 8**. Base: `feature/unbundle/sandbox-spawn-services` (node 3)
+**Stack**: `#unbundle` node **4 of 8**. PR [#473](https://github.com/uppin/tddy-coder/pull/473).
+Base: `feature/unbundle/sandbox-spawn-services` (node 3, PR #472)
 
 ## Initial Discovery
 
@@ -325,9 +326,16 @@ and write, and assert the previous value survives.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `cargo clippy -p tddy-daemon -- -D warnings` | | |
-| LiveKit suites with `/var/run/docker.sock` absent (skip count) | | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
+| `cargo clippy -p tddy-daemon-auth -p tddy-daemon-livekit -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
+| LiveKit suites with `/var/run/docker.sock` absent (skip count) | not yet measured — no suite has moved in commit 2 | |
+
+**9 failing tests** define this node: 3 in `tddy-daemon-auth` (one of them the ⛔ atomic-write
+prerequisite), 3 in `tddy-daemon-livekit`, and 3 in `tddy-service` — the two inherited from node 1
+plus one asserting `StreamLiveKitRooms` has actually left `connection.ConnectionService`.
+
+`livekit.proto` turned out to be a third self-contained cut: its closure is **12 messages with zero
+overlap** with anything that stays, so like `host.proto` and `worktree.proto` it imports nothing.
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.
 
