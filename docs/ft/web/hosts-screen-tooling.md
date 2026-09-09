@@ -97,16 +97,24 @@ check", with the permission error on hover — never "No agent", and never an em
 A daemon installed with `--user`, or run as the operator's own account, reports that account's agent
 in the ordinary way.
 
-Loading a key onto a supervised host needs a privileged path to the socket, which is a change to
+Loading a key onto such a host runs into the same wall, and for the same reason: the add speaks to
+the socket the read side resolved. It needs a privileged path to it, which is a change to
 `tddy-supervisor` rather than to this screen. See
 [`packages/tddy-daemon/docs/host-tooling-probe.md`](../../../packages/tddy-daemon/docs/host-tooling-probe.md#reaching-the-socket-on-a-supervised-host).
 
-## Reading, never writing
+## Reporting, and the one action
 
-The screen reports; it changes nothing. There is no "configure git", "log in" or "add key" action on
-a row, and no general "run this on host X" primitive exists — the daemon runs three fixed probes and
-nothing else. No key is added, removed or unlocked, no passphrase is asked for, prompted for, or
-carried on any wire.
+The probes themselves change nothing. There is no "configure git" and no "log in" action, and no
+general "run this on host X" primitive exists — the daemon runs three fixed probes and nothing else.
+
+The ssh-agent section carries the screen's **only** write action: **loading a key into that host's
+agent**, offered on a row whose agent answered, and only there. A host whose agent did not answer
+needs an agent started, not a key loaded. The passphrase for that key is asked for by the host,
+answered in the browser, and carried back encrypted under that host's own public key; it is never
+persisted, logged or written to disk. That flow is its own feature —
+[hosts-screen-add-key.md](./hosts-screen-add-key.md) — and nothing else on the row writes anything.
+
+Removing a key from an agent, and generating one, are not offered.
 
 ## Relationship to the rest of the screen
 
@@ -154,3 +162,5 @@ then this page describes a contract rather than a screen someone can open, and t
 - Daemon: [`packages/tddy-daemon/docs/host-tooling-probe.md`](../../../packages/tddy-daemon/docs/host-tooling-probe.md),
   [`connection-service.md`](../../../packages/tddy-daemon/docs/connection-service.md)
 - Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md)
+- Feature: [hosts-screen-add-key.md](./hosts-screen-add-key.md) — loading a key into the agent this
+  section reports on

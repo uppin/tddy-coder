@@ -114,6 +114,16 @@ LiveKit common room appears as an eligible daemon and can receive forwarded RPCs
 (including the caller's `session_token`). The common room is treated as a trusted
 peer group, not a cryptographically authenticated one.
 
+**A secret that has to cross the room is encrypted for the host it is addressed to**, rather than
+relying on that trust. The one such secret today is an ssh key's passphrase: the host publishes an RSA
+public key with its question and the browser encrypts the answer under it, so the room and any
+forwarding daemon carry ciphertext. Because the browser learns that key over this same unauthenticated
+channel, encryption alone bounds a *passive* relay and not an active peer publishing its own key — the
+client pins each host's key on first sight, derives the fingerprint it shows from the key bytes rather
+than from the string advertised beside them, and blocks loudly on a change. That makes an active
+substitution visible rather than impossible, and it is the honest limit of this trust model, not a
+patch over it. See [hosts-screen-add-key.md](./hosts-screen-add-key.md).
+
 ## Related documentation
 
 - **[LiveKit common room: owned project count](livekit-participant-owned-projects.md)** — participant discovery + project registry presence

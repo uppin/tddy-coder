@@ -80,6 +80,49 @@ service ConnectionService {
   // probes run there, as that host's OS user. Every block distinguishes "absent" from "we could not
   // find out": an empty string would be a fabricated answer an operator acts on.
   rpc GetHostTooling(GetHostToolingRequest) returns (GetHostToolingResponse);
+  // Hosts screen — the host asks the operator a question and waits for the answer.
+  //
+  // Server-stream + unary reply, mirroring StreamWorktreeStats + CalculateWorktreeSize rather than
+  // the ACP bidi envelope: the reply is then a unary call that can be transport-restricted the way
+  // MintLocalToken is, and correlation is by prompt_id rather than an envelope sequence.
+  //
+  // ⚠ This stream is SILENT almost all the time — that is its normal state. Per
+  // packages/tddy-codegen/docs/server-streaming.md a handler whose stream can be silent MUST
+  // tokio::select! on tx.closed() as well as breaking on a send error, or it leaks one task per
+  // subscription forever. StreamHostStats escapes that only because it emits unconditionally.
+  rpc StreamHostPrompts(StreamHostPromptsRequest) returns (stream HostPromptEvent);
+  // Answers a prompt raised on StreamHostPrompts. The answer is encrypted under the host's public
+  // key (see HostPromptEvent.host_public_key), so neither the common room nor any forwarding daemon
+  // sees the plaintext. A prompt accepts exactly one answer.
+  rpc AnswerHostPrompt(AnswerHostPromptRequest) returns (AnswerHostPromptResponse);
+  // Hosts screen — load a private key into this host's ssh-agent.
+  //
+  // This is the call that RAISES a passphrase prompt: it issues the prompt, waits for the answer to
+  // arrive on AnswerHostPrompt, decrypts it with this host's private key, unlocks the key named by
+  // `subject`, hands the identity to the agent and drops the plaintext. It returns only when the
+  // add has succeeded or failed, so the browser learns the outcome from the same call it started.
+  //
+  // The passphrase NEVER travels on this method, in either direction — it reaches the host only as
+  // ciphertext on AnswerHostPrompt, and the response says whether the key was added, never what was
+  // tried.
+  rpc AddHostKey(AddHostKeyRequest) returns (AddHostKeyResponse);
+  // Hosts screen — the private keys this host's OS user could load into their ssh-agent, so an
+  // operator picks one instead of typing a path.
+  //
+  // Addressed by `daemon_instance_id` and honoured the way AddHostKey honours it: the keys are
+  // files on one machine, and a listing served by whichever daemon took the call would offer paths
+  // that do not exist on the host the operator is looking at.
+  //
+  // Enumerated as the OS user the calling session maps to, and only inside that user's own
+  // ~/.ssh — the same confinement AddHostKey.subject is read under, so every path offered here is
+  // a path that add will accept. A candidate is a private key whose PUBLIC half sits beside it:
+  // that is where the type and fingerprint come from, so listing never opens a private key at all.
+  //
+  // Says nothing about whether a directory is there. A user with no ~/.ssh and one whose ~/.ssh
+  // cannot be read both get an empty list, for the reason AddHostKeyResponse.failure_reason must
+  // not distinguish absent from malformed: an authenticated caller must not be able to use this as
+  // a probe for what exists on the host.
+  rpc ListHostKeyCandidates(ListHostKeyCandidatesRequest) returns (ListHostKeyCandidatesResponse);
   rpc ListSessionWorkflowFiles(ListSessionWorkflowFilesRequest) returns (ListSessionWorkflowFilesResponse);
   rpc ReadSessionWorkflowFile(ReadSessionWorkflowFileRequest) returns (ReadSessionWorkflowFileResponse);
   rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
@@ -1161,6 +1204,146 @@ message GetHostToolingResponse {
   HostGitIdentity git = 2;
   HostGithubCli github_cli = 3;
   HostSshAgent ssh_agent = 4;
+}
+
+message StreamHostPromptsRequest {
+  string session_token = 1;
+  // The host whose questions are read. Empty means the daemon serving the call. Honoured the way
+  // GetHostToolingRequest.daemon_instance_id is: a prompt is raised by, and answerable on, exactly
+  // one host, and a feed served locally would offer this daemon's own questions under another
+  // host's name.
+  //
+  // A feed carries only the prompts raised by the SUBSCRIBING session's own GitHub user. A prompt
+  // names a private-key path an operator typed, and it accepts exactly one answer.
+  string daemon_instance_id = 2;
+}
+
+// What the host is asking for.
+enum HostPromptKind {
+  HOST_PROMPT_KIND_UNSPECIFIED = 0;
+  // The passphrase unlocking a private key so it can be added to this host's ssh-agent.
+  HOST_PROMPT_KIND_SSH_KEY_PASSPHRASE = 1;
+}
+
+// A question the host is waiting on. Carries the key material the answer must be encrypted under, so
+// the browser never has to fetch it separately.
+message HostPromptEvent {
+  string prompt_id = 1;
+  string daemon_instance_id = 2;
+  HostPromptKind kind = 3;
+  // Human-readable subject — e.g. the key being unlocked. Never a secret.
+  string subject = 4;
+  // SPKI DER of the host's RSA public key, for RSA-OAEP (SHA-256) in the browser's SubtleCrypto.
+  bytes host_public_key = 5;
+  // SHA256 fingerprint of `host_public_key`, shown in the dialog so an operator can verify it out of
+  // band, and pinned by the client so a CHANGED key blocks the flow instead of proceeding silently.
+  string host_public_key_fingerprint = 6;
+  // When this prompt stops being answerable. An unanswered prompt must not pin an operation forever.
+  int64 expires_at_unix_ms = 7;
+}
+
+message AnswerHostPromptRequest {
+  string session_token = 1;
+  // The host holding the prompt being answered — the daemon_instance_id of the HostPromptEvent this
+  // answers. Empty means the daemon serving the call. Honoured as GetHostTooling honours it: the
+  // prompt exists on the host that raised it, and answered anywhere else it matches nothing.
+  string daemon_instance_id = 2;
+  // Answerable only by the session whose GitHub user raised this prompt. Anyone else is refused
+  // exactly as an id that was never issued is — the refusal reveals nothing about whether the
+  // prompt exists — and the prompt keeps its one unspent answer.
+  string prompt_id = 3;
+  // RSA-OAEP(SHA-256) ciphertext of the answer under HostPromptEvent.host_public_key.
+  // The plaintext MUST NOT appear anywhere on this message.
+  bytes encrypted_answer = 4;
+}
+
+message AnswerHostPromptResponse {
+  bool accepted = 1;
+  // Why the answer was refused — an expired prompt, one already answered, or no such prompt (which
+  // is also what a prompt raised by somebody else reads as). For an operator, not for parsing.
+  string rejection_reason = 2;
+}
+
+message AddHostKeyRequest {
+  string session_token = 1;
+  // The host whose agent the key is loaded into. Empty means the daemon serving the call.
+  string daemon_instance_id = 2;
+  // The key to add, as the operator sees it — the ABSOLUTE path of a private key on that host. It is
+  // also the `subject` of the prompt this call raises, so what the dialog names is what gets
+  // unlocked.
+  //
+  // Read as the OS user the calling session maps to, and only from inside that user's home
+  // directory: this is free text from a browser, and a daemon can reach files its caller cannot.
+  //
+  // MUST be absolute. The confinement that reads it is lexical — no canonicalize, no stat, nothing
+  // that could answer "does this exist?" — so nothing expands `~` or resolves a relative path, here
+  // or anywhere else in this flow. A `~/.ssh/id_ed25519` is refused, and the refusal names no path,
+  // so the caller is the only side that can explain it. ListHostKeyCandidates returns absolute
+  // paths for the same reason: one path syntax across the picker and the field.
+  string subject = 3;
+}
+
+// Why an add did not put a key in the agent. Every arm is something an operator can act on.
+enum AddHostKeyOutcome {
+  ADD_HOST_KEY_OUTCOME_UNSPECIFIED = 0;
+  // The key was unlocked and the agent is now holding it.
+  ADD_HOST_KEY_OUTCOME_ADDED = 1;
+  // The answer did not open the key, and the operator can try again.
+  //
+  // Also what an answer this host could not DECRYPT reports, deliberately and indistinguishably: a
+  // response that told the two apart would give any authenticated caller one clean bit per chosen
+  // ciphertext against the host's long-lived RSA key (a Manger-style attack on RSA-OAEP), driven by
+  // looping AddHostKey -> AnswerHostPrompt. Which of the two it was goes to the host's log only.
+  ADD_HOST_KEY_OUTCOME_WRONG_PASSPHRASE = 2;
+  // Nobody answered the prompt before it stopped being answerable.
+  ADD_HOST_KEY_OUTCOME_PROMPT_EXPIRED = 3;
+  // No ssh-agent was reachable for this host's OS user, so there was nothing to add the key to.
+  ADD_HOST_KEY_OUTCOME_NO_AGENT = 4;
+  // The key could not be read at all — no such path, not a private key, or a path outside the
+  // caller's own home directory on that host.
+  ADD_HOST_KEY_OUTCOME_KEY_UNREADABLE = 5;
+}
+
+message AddHostKeyResponse {
+  bool added = 1;
+  AddHostKeyOutcome outcome = 2;
+  // SHA256 fingerprint of the identity now in the agent, when `added`. Lets the row confirm the key
+  // it just loaded is the one the agent lists.
+  string fingerprint = 3;
+  // For an operator, not for parsing. MUST NOT quote the answer, in any form.
+  //
+  // MUST NOT distinguish a key that is absent from one that is malformed either: told apart, the
+  // two answer "is there a file at this path?" for anywhere the caller can name.
+  string failure_reason = 4;
+}
+
+message ListHostKeyCandidatesRequest {
+  string session_token = 1;
+  // The host whose keys are listed. Empty means the daemon serving the call. Honoured as
+  // AddHostKeyRequest.daemon_instance_id is: the paths are files on one machine.
+  string daemon_instance_id = 2;
+}
+
+// One private key an operator could pick, described entirely from its PUBLIC half.
+//
+// Carries no key material, and by construction cannot: the fields below are derived from
+// `<path>.pub`, and the private file at `path` is never opened to build this message.
+message HostKeyCandidate {
+  // The absolute path of the PRIVATE key on that host — what goes in AddHostKeyRequest.subject.
+  string path = 1;
+  // e.g. "ssh-ed25519", read from the public half. Two keys of different types are told apart by
+  // this alone, without the operator having to recognise a digest.
+  string key_type = 2;
+  // SHA256 fingerprint in the form `ssh-add -l` prints, including the "SHA256:" prefix, over the
+  // public half. The same string the ssh_agent block reports, so an operator can see at a glance
+  // which of these keys the agent is already holding.
+  string fingerprint = 3;
+}
+
+message ListHostKeyCandidatesResponse {
+  // Ordered by path, so the list an operator reads is stable across calls. Empty when this user has
+  // no keys, no ~/.ssh, or a ~/.ssh this host could not read — deliberately indistinguishable.
+  repeated HostKeyCandidate candidates = 1;
 }
 
 message ListSessionWorkflowFilesRequest {

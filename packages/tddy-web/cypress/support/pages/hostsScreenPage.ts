@@ -112,3 +112,110 @@ export const hostSshAgentPage = {
   key: (instanceId: string, fingerprint: string) =>
     cy.get(`[data-testid="hosts-row-${instanceId}-ssh-key-${fingerprint}"]`),
 };
+
+/**
+ * Add-key action selectors — added by `#hosts-screen 6/8`.
+ *
+ * The action lives inside the ssh-agent section that `hostSshAgentPage` above addresses, but is
+ * kept as its own page object: an operator *doing* something to a host is a different surface from
+ * the row *reporting* on it, and only one of the two has controls.
+ */
+export const hostAddKeyPage = {
+  /** The whole action — absent on a host with no agent to add a key to. */
+  action: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key`),
+  /** Where the operator names the private key to load, as a path on that host. */
+  keyField: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-subject`),
+  start: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-start`),
+  /** What the add came to — the operator-facing rendering of `AddHostKeyOutcome`. */
+  outcome: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-outcome`),
+  /**
+   * The confirmation that a key is now in the agent, naming the fingerprint the agent reported.
+   *
+   * Held apart from {@link hostAddKeyPage.outcome} so "no key was added" is assertable as the
+   * absence of a positive claim, rather than as the absence of some particular wording.
+   */
+  addedConfirmation: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-added`),
+
+  /**
+   * The keys the host said its operator could load — `ListHostKeyCandidates`, on screen.
+   *
+   * A picker rather than a second text field: the paths are the host's, not the browser's, and an
+   * operator who has to retype one is being asked to remember something the host just said.
+   */
+  keyChoices: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-add-key-choices`),
+
+  /**
+   * Pick one of the offered keys, by its path on the host.
+   *
+   * The path is the identity: it is what goes back as `AddHostKeyRequest.subject`, and it is the
+   * one field of a candidate that is guaranteed to be unique among them.
+   */
+  pickKey: (instanceId: string, path: string) => {
+    hostAddKeyPage.keyChoices(instanceId).select(path);
+  },
+
+  /** Name a key and ask the host to load it — the whole operator gesture, in one step. */
+  addKey: (instanceId: string, subject: string) => {
+    hostAddKeyPage.keyField(instanceId).type(subject);
+    hostAddKeyPage.start(instanceId).click();
+  },
+};
+
+/**
+ * The passphrase dialog a host raises — added by `#hosts-screen 6/8`.
+ *
+ * Server-initiated, so it is not addressed through any row: the host asked, and the dialog is the
+ * answer channel. Its selectors live here rather than in a spec so the two specs that drive it — the
+ * dialog's own behaviour, and the add-key flow that raises it — name the same elements.
+ */
+export const hostPassphraseDialogPage = {
+  root: (instanceId: string) => byTestId(`host-passphrase-dialog-${instanceId}`),
+  input: () => byTestId("host-passphrase-input"),
+  submit: () => byTestId("host-passphrase-submit"),
+  /** Shown when this host's key differs from the pinned one — the sighting that blocks the flow. */
+  changedWarning: () => byTestId("host-key-changed-warning"),
+  /**
+   * Shown when the continuity check reached no conclusion at all.
+   *
+   * Held apart from {@link hostPassphraseDialogPage.changedWarning} because the two say different
+   * things — "this key is not the one you pinned" versus "nothing could be checked" — and only the
+   * first is evidence of anything.
+   */
+  unverifiedNotice: () => byTestId("host-key-unverified-notice"),
+  /**
+   * Shown when the key a prompt carried is not the key its fingerprint describes.
+   *
+   * A third thing again: `changedWarning` means "this host is presenting a different key than
+   * before", while this means "this frame contradicts itself", which no honest host ever does.
+   */
+  mismatchWarning: () => byTestId("host-key-mismatch-warning"),
+  /** Shown when this origin cannot fingerprint a key or encrypt an answer at all. */
+  underivableNotice: () => byTestId("host-key-underivable-notice"),
+  cancel: () => byTestId("host-passphrase-cancel"),
+
+  /** The operator's statement that they checked the new key with the host itself. */
+  acceptChangedKeyConfirmation: () => byTestId("host-key-accept-confirm"),
+  /** The act of pinning the new key — refused until the statement above has been made. */
+  acceptChangedKeyButton: () => byTestId("host-key-accept-submit"),
+  /** Accept a rotated key the way an operator has to: state it was verified, then accept it. */
+  acceptChangedKey: () => {
+    hostPassphraseDialogPage.acceptChangedKeyConfirmation().check();
+    hostPassphraseDialogPage.acceptChangedKeyButton().click();
+  },
+};
+
+/**
+ * Outcome assertions for the add-key action.
+ *
+ * Matched as patterns rather than exact strings because what is being pinned is that the three
+ * failures *say different things* — a wrong passphrase is worth retyping, an absent agent is not —
+ * not the sentence each one settled on.
+ */
+export const hostAddKeyOutcome = {
+  saying: (instanceId: string, pattern: RegExp) =>
+    hostAddKeyPage.outcome(instanceId).invoke("text").should("match", pattern),
+  notSaying: (instanceId: string, pattern: RegExp) =>
+    hostAddKeyPage.outcome(instanceId).invoke("text").should("not.match", pattern),
+};

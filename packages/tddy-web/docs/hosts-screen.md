@@ -78,7 +78,157 @@ free text.
 ⚠ **Nothing mounts `HostRowTooling`.** No component in `src/` renders it, and nothing in `src/`
 issues `GetHostTooling`; its only call sites are the Cypress component specs. The section's states
 are covered, and the assembled path — row → RPC → probe → cells — has never run. Mounting it belongs
-to the node that owns the row.
+to the node that owns the row. Everything `HostRowSshAgent` mounts inherits that limit, including the
+add-key action below: it is wired, covered and reachable over the wire, and an operator cannot yet
+open a screen that shows it.
+
+## Adding a key to a host's agent
+
+**`HostAddKeyAction`** is the surface that *starts* the add, and `HostRowSshAgent` mounts it beside
+the agent summary. `AddHostKey` blocks for as long as the add takes — it raises a passphrase prompt,
+waits for the ciphertext, unlocks the key and hands it to the agent — so this one component both
+issues that call and, through `useHostPrompts`, renders the dialog the same call is waiting on.
+
+**It is offered only where there is an agent to add to.** A host whose agent did not answer needs an
+agent started, not a key loaded, and the control would do nothing there. `anAgentAnswered` reads the
+same block `HostRowSshAgent` summarises and applies the same outcome-first guard: only
+`ProbeOutcome.OK` with `reachable` licenses the action, so an outcome a newer daemon added and this
+bundle cannot name never reads as a reachable agent. An agent already holding keys is still an agent
+worth adding to — a host commonly needs a second key.
+
+**The outcome is read from `AddHostKeyOutcome`, never from `added` alone.** `reportOf` is written per
+arm rather than by echoing `failureReason`, because the enum exists precisely so that a daemon with
+nothing to say still distinguishes the failures an operator would act on differently: a wrong
+passphrase is worth retyping, an absent agent is not, an expired prompt means answering faster, and
+an unreadable key means naming a different one. `failureReason` rides along as detail — except on
+`UNSPECIFIED`, the daemon's own fallback for an answer it could not decrypt or an agent that refused,
+where it is the only account there is.
+
+**The prompt feed is read only while an add is in flight.** `useHostPrompts(adding ? instanceId :
+null)` opens no stream for a screenful of hosts nobody is adding a key to, and the daemon replays
+whatever is still outstanding to a subscriber that arrives late, so there is no window in which the
+component can miss the question its own call raised.
+
+**Cancel cancels.** It aborts the call client-side rather than leaving the row disabled for the
+prompt's full 120 s TTL with nothing explaining why. The daemon has no withdraw path, so the prompt
+simply expires unanswered.
+
+`hostPromptsSubscription.ts` is the read loop, extracted from the hook as a plain function so that
+closing it is observable: it holds the iterator by hand, aborts on unsubscribe, guards delivery on an
+`unsubscribed` flag and releases in a `finally`. An `AbortError` from the call it cancelled itself is
+not reported; a feed the daemon drops while the caller is still subscribed is.
+
+## Host key trust
+
+The answer is encrypted under the host's own public key, so which key that is decides everything.
+
+**The fingerprint is derived in the browser from the key bytes, never taken from the wire.**
+`hostKeyFingerprint.ts` computes `SHA256:<base64-no-pad>` over the received SPKI DER — the same digest
+the daemon calls `spki_fingerprint` — and it is that value that is displayed and pinned.
+`HostPromptEvent` carries an advertised fingerprint string beside the key, and both fields ride the
+channel this feature exists to distrust, but only one of them encrypts anything. The advertised string
+is public and non-secret, so pinning *it* makes the mechanism decorative: an active peer replays the
+genuine fingerprint next to its own key, the check reports `unchanged`, the operator recognises the
+value they verified out of band, and the passphrase is encrypted to the peer. A prompt whose two
+halves disagree is refused outright.
+
+**`hostKeyPinning.ts` is trust on first use, with six verdicts**, and the distinctions between them
+are the design:
+
+| Verdict | Means | Dialog |
+|---|---|---|
+| `pinned-now` | never seen this host; the derived key is now pinned | proceeds, says so |
+| `unchanged` | the same key as last time | proceeds |
+| `changed` | a different key from the pinned one | **blocks**, with an explicit accept path |
+| `mismatched` | the key and the fingerprint it advertised are not the same key | **blocks**, no accept path |
+| `unverified` | no conclusion available — no key presented, or storage unusable | warns, does **not** block |
+| `unchecked` | this key's digest is not back yet | **blocks**, silently |
+
+`mismatched` has **no accept path** because it is not a rotation and not a first sighting: a host
+describing its own key gets it right, so two halves that disagree mean something rewrote one of them
+in flight. An **empty** advertised field blocks for the same reason — "stripped in flight" and "an
+older daemon" are indistinguishable from the browser.
+
+`unverified` exists so that a missing conclusion is never reported as a positive one. Unusable storage
+degrading to `pinned-now` would make a claim the dialog acts on ("first time seeing this host, key
+recorded") when nothing was recorded — false on every later sighting too, leaving an active
+substitution indistinguishable from ordinary first use *permanently*. An empty fingerprint takes the
+same route rather than burning the one first-use trust slot.
+
+`unchecked` is the caller's in-flight state, never returned by `verifyHostKey`, and it exists because
+every alternative is a lie: `unverified` claims a check was attempted and reached nothing, and
+`unchanged` claims continuity nobody established. A key whose digest is not back is a key nothing may
+be encrypted to, because "which key is this?" has no answer yet.
+
+**A checked key is held together with the prompt it arrived on.** `CheckedPromptKey` pairs the
+verdict with the very prompt frame whose bytes were digested — compared by **object identity, not by
+`prompt_id`**, because two frames can carry the same id and different keys. Only a pair whose prompt
+is the one in hand is shown, so the fingerprint on screen is always the digest of the key that would
+do the encrypting. Left as two pieces of state, the frame between a new key arriving and its digest
+resolving shows the *previous* key's fingerprint and its reassuring `unchanged` verdict beside bytes
+that would encrypt for somebody else — and a peer in the routing path widens that window at will by
+emitting frames faster than SHA-256 resolves.
+
+**`acceptChangedHostKey` is a deliberate two-step**: a checkbox confirming the operator verified the
+new key with the host itself, gating the accept button. A rotated host key would otherwise lock an
+operator out of their own host permanently — the daemon regenerating `host-prompt-key.pem` is enough
+to cause it — and a one-click accept is a warning nobody reads.
+
+⚠ This is the most arguable decision in the flow. Pinning makes an active key substitution *visible*,
+not impossible, and gives nothing on a first-ever connection to an already-compromised host. The
+alternative considered was to accept passive-only protection and disclose it in the dialog.
+
+## The passphrase dialog
+
+**`HostPassphraseDialog`** is server-initiated, unlike `ScreenSharingPassphraseDialog` and
+`VncPassphraseDialog` — those are the UI deciding to ask before making a call; here the host raised
+the question and is blocked until an answer comes back. It always names the host and shows the
+derived fingerprint, so an operator can verify out of band before handing over a secret.
+
+**The encryption happens inside the dialog, not in its caller.** `encryptForHost` runs there, so the
+plaintext exists only inside this component's state and every path out of it carries ciphertext. A
+caller handed the passphrase would be one `console.log` away from undoing the whole feature.
+
+`keyContinuity` is the **only** thing the dialog is told about the pin, and both what it blocks on and
+what it says. A `keyChanged: boolean` stood beside it while the verdict had no reader; two props
+encoding the same fact can disagree, and the arm that would have gone unsaid — `unverified` — is
+exactly the one worth saying.
+
+## Encrypting on a plain-http origin
+
+`encryptForHost.ts` and `hostKeyFingerprint.ts` both go through **`lib/subtleCrypto.ts`**, the single
+audited entry point to `crypto.subtle`, which **refuses loudly on an insecure origin and names it as
+the reason**. The refusal surfaces as the `underivable` verdict, so the dialog blocks with a stated
+cause instead of throwing at submit.
+
+There is deliberately **no fallback and must not grow one**: the only thing behind `subtle` here is a
+passphrase being encrypted, so the only available fallback would hand that secret to every peer in
+the room — the exact exposure the feature was built to remove.
+
+⚠ **This bounds the feature, not just the code.** The daemon serves this bundle over `http://` on a
+LAN address, which is not a secure context, so **add-key works only on a secure origin**. Making it
+work over LAN needs TLS, which the daemon has nowhere today. Cypress cannot catch a regression here —
+component tests run on `localhost`, which *is* a secure context — so the refusal is covered by units
+that swap the `crypto` global. See
+[insecure-origin-constraints.md](insecure-origin-constraints.md).
+
+## Picking a key instead of recalling one
+
+`HostAddKeyAction` calls `ListHostKeyCandidates` for the row's host — and only when there is an agent
+to add to — and offers the returned keys by **type and fingerprint**, not by path alone: two paths can
+hold the same key, and a path alone is what an operator was already failing to recall. A host that
+will not list its keys is treated as one with no keys to offer, not as an error.
+
+**The free-text path field stays beside the picker.** A key with no `.pub` file beside it is invisible
+to a listing that never opens private keys, and it is still perfectly loadable — so the listing is a
+convenience, not the boundary of what may be added.
+
+**Both fields speak absolute paths, and `~` is expanded nowhere.** Not here, which does not know the
+host's home; and not in the daemon, whose confinement is valuable precisely because it is a pure
+function of the caller's input. Its refusal (`KEY_OUTSIDE_HOME`) names no path on purpose, so an
+operator who sent `~/.ssh/id_ed25519` would be told only that their key must be inside a home it
+already was inside. This side holds the context that makes that legible, so this side refuses it —
+and the placeholder shows an absolute example rather than the tilde path the host is bound to reject.
 
 ## Rows
 
@@ -160,6 +310,36 @@ state, so asserting its text contains `"gh"` proves nothing at all; what actuall
 host's login from the signed-in user is the `title`, and which attribute carries that is the page
 object's business rather than a test body's.
 
+`cypress/component/HostAddKeyAcceptance.cy.tsx` mounts the add-key flow against the in-memory
+backend and carries the security claims. Three of them do the load-bearing work:
+
+- **The submitted payload is decrypted and compared.** Asserting only that the ciphertext "does not
+  contain the passphrase", with a loose length check, is satisfied by base64, a hash or random bytes.
+  The spec decrypts the recorded `AnswerHostPrompt` payload with the test keypair's private half and
+  asserts it equals the passphrase exactly, at 256 bytes. Unary calls *are* recorded by the in-memory
+  backend interceptor, which is what makes this directly assertable.
+- **The dialog never shows the previous key's fingerprint beside the key that would encrypt.** The
+  spec holds `crypto.subtle.digest` open so it can stand inside the window a second prompt frame
+  opens.
+- **A replayed fingerprint beside a different key is caught**, which is the whole point of deriving
+  the digest rather than trusting the advertised one.
+
+`cypress/component/HostAddKeySelector.cy.tsx` covers the picker, including the two guards on
+behaviour that must not regress: a typed path still works, and a host that refuses the listing is not
+an error. `cypress/component/HostsScreenAddKeyAcceptance.cy.tsx` covers the flow from the row — where
+the action is offered and where it is not, the dialog the host's question raises, the changed-key
+block and its two-step accept, the accepted key becoming the next pin, the daemon's rejection reaching
+the operator, and cancel freeing the row.
+
+`src/rpc/hostPromptsSubscription.test.ts` pins the read loop directly: prompts delivered in order,
+the call cancelled on unsubscribe, a feed cancelled having never raised a prompt (this feed's normal
+state), delivery stopping after unsubscribe, the self-inflicted `AbortError` swallowed — and, so that
+swallow is not vacuous, a feed the daemon drops while the caller is still subscribed being reported.
+
+`src/lib/hostKeyPinning.test.ts`, `hostKeyFingerprint.test.ts` and `encryptForHost.test.ts` cover the
+verdicts, the derivation and the insecure-origin refusal, the last by swapping the `crypto` global for
+one with no `subtle`. Cypress cannot reach that path: component tests run on `localhost`.
+
 `src/components/hosts/hostRowFormat.test.ts` pins the phrasing against a frozen clock;
 `src/routing/appRoutes.test.ts` pins `isHostsPath` (positive, root, a sibling route, a sub-path).
 `src/components/hosts` is listed in `package.json`'s `test:unit` directories, which is what makes
@@ -172,5 +352,10 @@ those unit tests run in CI.
 - Web: [host-directory.md](host-directory.md), [host-connections.md](host-connections.md)
 - Daemon: [host-tooling-probe.md](../../tddy-daemon/docs/host-tooling-probe.md) — the probe behind
   `GetHostTooling`
+- Daemon: [host-add-key.md](../../tddy-daemon/docs/host-add-key.md) — the prompt registry, the host
+  keypair and the per-user key read behind the add
+- Web: [insecure-origin-constraints.md](insecure-origin-constraints.md) — why `crypto.subtle` has no
+  fallback here
+- Feature: [docs/ft/web/hosts-screen-add-key.md](../../../docs/ft/web/hosts-screen-add-key.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
