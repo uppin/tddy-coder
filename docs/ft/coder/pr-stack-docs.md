@@ -1,7 +1,7 @@
 # PR-stack documents — per-PR PRD and changeset, attached to the child session
 
 A `pr-stack` orchestrator today plans a stack and hands each child session two strings: the node's
-`title` and its `description` (`PrStackScreen.tsx:254`, `connection_service.rs:6913`). Everything the
+`title` and its `description` (`PrStackScreen.tsx:254`, `connection_service.rs`). Everything the
 orchestrator learned while planning — the code-discovery map in `exploration.md`, the shape of the
 stack in `pr-stack-plan.md`, and above all *where this PR stops and the next one starts* — stays on
 the orchestrator and never reaches the agent that has to build the thing.
@@ -223,7 +223,7 @@ a hard prerequisite for all work. The operator is told which documents were unav
 A child must not differ by how it was started, so both paths build the same attachment list from one
 helper:
 
-- **Agent** — `StackChildSpawnHandler::spawn_child` (`connection_service.rs:6893`), reached by the
+- **Agent** — `StackChildSpawnHandler::spawn_child` (`connection_service.rs`), reached by the
   `pr_spawn_child` tool. It already reads the orchestrator's changeset and session metadata, so it
   has everything the helper needs.
 - **Web** — the Start-session dialog opened from a planned-PR row (`PrStackScreen.tsx:233-256`).

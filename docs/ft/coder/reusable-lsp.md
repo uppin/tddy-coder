@@ -151,6 +151,30 @@ locations/diagnostics (fixed fake values), and the exact set of MCP tool names.
 
 The five agent MCP LSP tools (`LspDiagnostics`, `LspDefinition`, …) are unchanged. Assist-grade typed methods (`textDocument/codeAction`, `textDocument/rename`, `textDocument/semanticTokens/full`, `$/progress`) are a follow-up on top of the raw RPC surface. See [rust-code-restructuring.md](rust-code-restructuring.md).
 
+### What the client carries for an assist consumer
+
+A consumer that asks for refactorings needs more from the transport than one that asks for
+definitions, and three parts of `LspClient` exist for it:
+
+- **The handshake is the caller's to choose.** `LaunchSpec::with_capabilities` and
+  `with_initialization_options` are advertised verbatim at `initialize`, and `LspClient::handshake()`
+  returns what the server negotiated. A server tailors its answers to this: rust-analyzer returns no
+  code actions at all to a client that advertised no `codeAction` support, and it counts positions in
+  utf-16 code units unless asked for utf-8. The allow-list entry is where a consumer states both.
+- **A JSON-RPC `error` reaches the caller** as `LspError::Server { code, message }`. The code is the
+  server's own and consumers dispatch on it — rust-analyzer's `ContentModified` (-32801) means "ask
+  again" rather than "this failed", and a caller that cannot tell those apart either retries forever
+  or gives up on a live server.
+- **Server notifications are retained for a consumer to drain.** `drain_notifications` returns the
+  ones the client does not consume itself, newest last, bounded so an undrained backlog cannot grow
+  without limit. `$/progress` and `experimental/serverStatus` are the two that matter: during a load
+  that answers no requests they are the only account of what the server is doing, and the only way a
+  wait can report progress or a timeout can say where the server got to.
+
+`set_request_timeout` adjusts the per-request wait through `&self`, because consumers hold the client
+behind an `Arc` from the registry. Ten seconds suits the interactive queries; a code-action request
+against a cold index does not fit in it, which is why the wait is the caller's to set.
+
 ## Future Considerations (Not In Scope)
 
 - Additional languages (TypeScript / Python / Go) beyond the Rust allow-list entry.

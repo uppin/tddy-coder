@@ -120,7 +120,7 @@ Task bodies `select!` on `ctx.cancel_token().cancelled()` at each subprocess wai
 their own cleanup:
 
 1. Task body sends `SIGINT` to each registered child PID via `libc::kill` (same pattern as
-   `SignalSession` at `connection_service.rs:1311-1325`).
+   `SignalSession` in `connection_service.rs`).
 2. Body awaits child exit with a grace period, then returns `TaskStatus::Cancelled`.
 3. Safety-net (registry-level, fires if body does not terminate within ~5 s):
    `SIGTERM → wait → SIGKILL` (mirroring `session_deletion.rs:66-90`).
