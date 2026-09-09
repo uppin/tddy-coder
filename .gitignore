@@ -85,3 +85,9 @@ local.bun.lock
 # Cursor hooks config is generated per session by install_cursor_hooks_in_worktree and
 # embeds a per-session hook_token (a secret used to authenticate session-hook RPCs).
 **/.cursor/hooks.json
+
+# `tddy-tools analyze coverage` artifacts. The instrumented test binaries drop
+# raw profiles wherever they are run (repo root and package dirs) and the
+# capture writes its normalized output under coverage/.
+*.profraw
+/coverage/

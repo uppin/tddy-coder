@@ -88,6 +88,16 @@
           shellHook = ''
             echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
             export BUILDROOT_DIR="${buildrootSrc}"
+
+            # The `llvm-tools-preview` extension above ships llvm-cov / llvm-profdata
+            # inside the toolchain's rustlib tree, which is NOT on PATH by default.
+            # `tddy-tools analyze coverage` resolves both by name, so export the dir.
+            if _tddy_llvm_bin="$(rustc --print target-libdir 2>/dev/null)"; then
+              _tddy_llvm_bin="''${_tddy_llvm_bin%/lib}/bin"
+              if [[ -x "$_tddy_llvm_bin/llvm-profdata" ]]; then
+                export PATH="$_tddy_llvm_bin:$PATH"
+              fi
+            fi
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             export LIBCLANG_PATH="${pkgs.llvmPackages.libclang.lib}/lib"
           '' + ''

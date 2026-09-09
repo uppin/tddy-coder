@@ -140,13 +140,35 @@ struct DenominatorFile {
     functions: BTreeMap<String, RustFunctionRecord>,
 }
 
+/// Is an lld driver resolvable under any of the names clang accepts for
+/// `-fuse-ld=lld`?
+fn lld_on_path() -> bool {
+    ["lld", "ld.lld", "ld64.lld"]
+        .iter()
+        .any(|driver| which::which(driver).is_ok())
+}
+
+/// `-C instrument-coverage`, plus `-fuse-ld=lld` only when lld is actually
+/// present. lld is a link-time speedup, not a requirement: hardcoding it made
+/// the instrumented build fail with `clang: error: invalid linker name in
+/// argument '-fuse-ld=lld'` on every host that ships without it — the nix dev
+/// shell on macOS, for one, which left `analyze coverage` unusable there.
+fn instrumented_rustflags_for(lld_available: bool) -> String {
+    let mut flags = String::from("-C instrument-coverage");
+    if lld_available {
+        flags.push_str(" -C link-arg=-fuse-ld=lld");
+    }
+    flags
+}
+
+fn instrumented_rustflags() -> String {
+    instrumented_rustflags_for(lld_on_path())
+}
+
 fn build_instrumented_tests(manifest_dir: &Path) -> Result<PathBuf> {
     let output = Command::new("cargo")
         .current_dir(manifest_dir)
-        .env(
-            "RUSTFLAGS",
-            "-C instrument-coverage -C link-arg=-fuse-ld=lld",
-        )
+        .env("RUSTFLAGS", instrumented_rustflags())
         .args([
             "test",
             "--no-run",
@@ -459,4 +481,38 @@ pub fn load_per_test_meta(coverage_dir: &Path) -> Result<Vec<TestMeta>> {
         });
     }
     Ok(metas)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::instrumented_rustflags_for;
+
+    #[test]
+    fn instrumented_rustflags_always_request_coverage_instrumentation() {
+        for lld_available in [true, false] {
+            assert!(
+                instrumented_rustflags_for(lld_available).contains("-C instrument-coverage"),
+                "coverage instrumentation must not depend on the linker"
+            );
+        }
+    }
+
+    #[test]
+    fn instrumented_rustflags_omit_lld_when_it_is_not_installed() {
+        // Hosts without lld (the nix dev shell on macOS) previously failed the
+        // instrumented build outright with `invalid linker name`.
+        assert_eq!(
+            instrumented_rustflags_for(false),
+            "-C instrument-coverage",
+            "must not name a linker the host does not have"
+        );
+    }
+
+    #[test]
+    fn instrumented_rustflags_use_lld_when_it_is_installed() {
+        assert_eq!(
+            instrumented_rustflags_for(true),
+            "-C instrument-coverage -C link-arg=-fuse-ld=lld"
+        );
+    }
 }
