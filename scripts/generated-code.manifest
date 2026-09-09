@@ -1,0 +1,24 @@
+# Committed generated code under the CI drift gate.
+#
+# One line per `buf generate` invocation:
+#
+#     <package dir, from the repo root> | <gen dir, from the package> | <buf generate arguments>
+#
+# A package may appear more than once: several of these directories are generated
+# from more than one proto root, and every invocation writes into the same gen dir.
+# `scripts/generated-code.sh` clears that directory before the first invocation, so
+# the committed set is exactly what the listed invocations produce — a file no proto
+# generates any more is drift, not a leftover.
+#
+# Only TypeScript is listed because only TypeScript is committed. The Rust bindings
+# come from the `build.rs` passes in packages/tddy-service, which write into OUT_DIR
+# on every build and therefore cannot drift; packages/tddy-service/src/gen holds a
+# .gitkeep and nothing else.
+
+packages/tddy-web                   | src/gen | ../tddy-service/proto
+packages/tddy-rpc-web               | src/gen | ../tddy-rpc/proto
+packages/tddy-rpc-web               | src/gen | ../tddy-livekit/proto --path ../tddy-livekit/proto/test
+packages/tddy-livekit-web           | src/gen | ../tddy-livekit/proto
+packages/tddy-livekit-web           | src/gen | ../tddy-rpc/proto
+packages/tddy-livekit-web           | src/gen | ../tddy-service/proto --path ../tddy-service/proto/terminal.proto
+packages/tddy-rust-typescript-tests | gen     | ../tddy-service/proto

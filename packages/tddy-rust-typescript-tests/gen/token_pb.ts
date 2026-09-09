@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file token.proto.
  */
 export const file_token: GenFile = /*@__PURE__*/
-  fileDesc("Cgt0b2tlbi5wcm90bxIFdG9rZW4iNgoUR2VuZXJhdGVUb2tlblJlcXVlc3QSDAoEcm9vbRgBIAEoCRIQCghpZGVudGl0eRgCIAEoCSI7ChVHZW5lcmF0ZVRva2VuUmVzcG9uc2USDQoFdG9rZW4YASABKAkSEwoLdHRsX3NlY29uZHMYAiABKAQiNQoTUmVmcmVzaFRva2VuUmVxdWVzdBIMCgRyb29tGAEgASgJEhAKCGlkZW50aXR5GAIgASgJIjoKFFJlZnJlc2hUb2tlblJlc3BvbnNlEg0KBXRva2VuGAEgASgJEhMKC3R0bF9zZWNvbmRzGAIgASgEMqMBCgxUb2tlblNlcnZpY2USSgoNR2VuZXJhdGVUb2tlbhIbLnRva2VuLkdlbmVyYXRlVG9rZW5SZXF1ZXN0GhwudG9rZW4uR2VuZXJhdGVUb2tlblJlc3BvbnNlEkcKDFJlZnJlc2hUb2tlbhIaLnRva2VuLlJlZnJlc2hUb2tlblJlcXVlc3QaGy50b2tlbi5SZWZyZXNoVG9rZW5SZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cgt0b2tlbi5wcm90bxIFdG9rZW4iTQoUR2VuZXJhdGVUb2tlblJlcXVlc3QSDAoEcm9vbRgBIAEoCRIQCghpZGVudGl0eRgCIAEoCRIVCg1zZXNzaW9uX3Rva2VuGAMgASgJIjsKFUdlbmVyYXRlVG9rZW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRITCgt0dGxfc2Vjb25kcxgCIAEoBCJMChNSZWZyZXNoVG9rZW5SZXF1ZXN0EgwKBHJvb20YASABKAkSEAoIaWRlbnRpdHkYAiABKAkSFQoNc2Vzc2lvbl90b2tlbhgDIAEoCSI6ChRSZWZyZXNoVG9rZW5SZXNwb25zZRINCgV0b2tlbhgBIAEoCRITCgt0dGxfc2Vjb25kcxgCIAEoBDKjAQoMVG9rZW5TZXJ2aWNlEkoKDUdlbmVyYXRlVG9rZW4SGy50b2tlbi5HZW5lcmF0ZVRva2VuUmVxdWVzdBocLnRva2VuLkdlbmVyYXRlVG9rZW5SZXNwb25zZRJHCgxSZWZyZXNoVG9rZW4SGi50b2tlbi5SZWZyZXNoVG9rZW5SZXF1ZXN0GhsudG9rZW4uUmVmcmVzaFRva2VuUmVzcG9uc2ViBnByb3RvMw");
 
 /**
  * @generated from message token.GenerateTokenRequest
@@ -25,6 +25,14 @@ export type GenerateTokenRequest = Message<"token.GenerateTokenRequest"> & {
    * @generated from field: string identity = 2;
    */
   identity: string;
+
+  /**
+   * Daemon access token. Registrations that install an authenticator refuse the call unless this
+   * verifies; unauthenticated registrations (a session coder's own web port) ignore it.
+   *
+   * @generated from field: string session_token = 3;
+   */
+  sessionToken: string;
 };
 
 /**
@@ -69,6 +77,14 @@ export type RefreshTokenRequest = Message<"token.RefreshTokenRequest"> & {
    * @generated from field: string identity = 2;
    */
   identity: string;
+
+  /**
+   * Same credential as GenerateTokenRequest: a refresh mints a brand-new JWT, so it is gated
+   * exactly like the first mint rather than trusting the token being replaced.
+   *
+   * @generated from field: string session_token = 3;
+   */
+  sessionToken: string;
 };
 
 /**
