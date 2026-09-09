@@ -124,7 +124,12 @@ fn byte_span(contents: &str, range: Range) -> Result<std::ops::Range<usize>> {
     Ok(start..end.max(start))
 }
 
-fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> {
+/// Resolve a one-based line/column to a byte offset in `contents`.
+///
+/// `pub(crate)` because `crate_move` authors edits of its own and has to address them in the same
+/// coordinates this module reads them back in — a second implementation would be free to disagree
+/// with the one that writes to disk, which is the reason [`edited`] is shared for the same job.
+pub(crate) fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> {
     let mut offset = 0usize;
     for _ in 1..line {
         match contents[offset..].find('\n') {

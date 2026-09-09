@@ -111,6 +111,7 @@ all clean, so nodes 2–8 compile against it):
 |---|---|
 | `RefactorKind::MoveModuleToCrate`, its `to`/`reexport` validation, `SUPPORTED` 7 → 8 | `tddy-code-restructuring/src/plan.rs`, `backends/rust.rs` |
 | `Destination`, `CallerRewrite`, `Survey`, `survey`, `resolve`, `facade_line` | `tddy-code-restructuring/src/crate_move.rs` (new) |
+| `ModuleReferences`, `ItemReferences`, `Reference` — the engine seam `survey`/`resolve` take (green phase; see `## Decisions & Trade-offs`) | `tddy-code-restructuring/src/crate_move.rs` |
 | `workspace_edits_for` — the multi-document primitive the rename fix and the caller re-pointing both need | `backends/rust.rs`, `#[allow(dead_code)]` with a TODO |
 | the five kernel symbols plus `trim_to_option` | `tddy-daemon-kernel/src/lib.rs` (new crate, workspace member) |
 | `host.HostService`, `worktree.WorktreeService` | `tddy-service/proto/`, `build.rs`, `src/lib.rs` |
@@ -238,12 +239,12 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 
 ## Scope
 
-- [ ] **Tooling — cross-file edits**: `edits_for` stops discarding other documents' rename edits
-- [ ] **Tooling — `move_module_to_crate`**: the operation, its schema, manifest edits, crate-level facade
+- [x] **Tooling — cross-file edits**: `edits_for` stops discarding other documents' rename edits ✅
+- [~] **Tooling — `move_module_to_crate`**: the operation, its schema, manifest edits, crate-level facade — deciding half green, engine impl untested
 - [ ] **Tooling — file-budget report**: `restructure check` reports files over a budget
 - [ ] **Prerequisite — `run_server` options struct** (⛔ blocking TODO), including the desktop caller
 - [ ] **Prerequisite — generated-code drift gate** in CI (⛔ blocking TODO)
-- [ ] **Kernel**: `tddy-daemon-kernel` with the five shared symbols; the trim helper's one home
+- [x] **Kernel**: `tddy-daemon-kernel` with the five shared symbols; the trim helper's one home ✅
 - [ ] **Cycles**: all nine cut, `config.rs:85` and `host_tooling ⇄ ssh_agent` among them
 - [~] **Proto**: `host.proto` + `worktree.proto` declared and generating; **no `types.proto` needed**; sandbox extern paths untouched (nothing they name moves in this node)
 - [ ] **Crates**: `tddy-host-service`, `tddy-worktree-service` with their modules and tests
@@ -304,9 +305,9 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 
 ## Implementation Milestones
 
-- [ ] M1 — `edits_for` fixed; a rename re-points a caller in another file
-- [ ] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests
-- [ ] M3 — the crate-level facade produces a zero-caller-diff move; `verify --against` clean
+- [x] M1 — `edits_for` fixed; a rename re-points a caller in another file ✅
+- [x] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests ✅ *(deciding half only — the engine impl is untested, see `## Technical Debt`)*
+- [~] M3 — the crate-level facade produces a zero-caller-diff move ✅; `verify --against` not yet run
 - [ ] M4 — file-budget report; `run_server` options struct; CI drift gate
 - [ ] M5 — `tddy-daemon-kernel` extracted; all nine cycles cut; `cargo build -p tddy-daemon` clean
 - [ ] M6 — `types.proto` + `host.proto` + `worktree.proto` generate; sandbox extern paths re-pointed
@@ -402,6 +403,31 @@ rather than an algorithm. Three distinct kinds:
   every single-document assist, and swapping it now would panic the 251 tests already passing through
   that path. The alternative — deleting it until the green phase — would leave nodes 2–8 without the
   signature this node exists to publish.
+- **`survey` and `resolve` take an engine seam, not the backend.** Their red-phase signature
+  `(&Workspace, &RefactorOp)` could not reach `textDocument/references` at all — `Workspace` carries
+  only a root and an overlay — so `callers` could only ever have come back empty. Taking
+  `&mut RustBackend` instead would have made `crate_move` and `backends/rust.rs` mutually dependent
+  (the backend now imports `crate_move` to route the op), and making them `RustBackend` methods would
+  put a language-agnostic transformation — a `git mv`, two manifest edits, a `pub use` line — inside
+  the Rust engine driver and make it untestable without a live server. The `ModuleReferences` trait
+  is the one row of this module's own decision table that only a server can answer, so that is where
+  the seam is cut.
+- **A caller's rewritten path keeps the module segment**: `crate::host_registry::HostRegistry`
+  becomes `tddy_host_service::host_registry::HostRegistry`, not `tddy_host_service::HostRegistry`.
+  The module keeps its name in the crate it arrives in, which is what makes the glob facade free —
+  `pub use tddy_host_service::*;` re-exports the module, so `crate::host_registry::X` keeps resolving
+  in the crate it left. Re-exporting items at the destination root instead would need an authored
+  `pub use` per move and a second rewrite rule.
+- **The moved file's header pass is mechanical, and deliberately not `extract_module`'s.** That
+  operation can ask the server which names went unresolved, because the items stay in a file it holds
+  open; a module that has left its crate cannot be typed until it is *in* the destination, so there is
+  no equivalent answer to ask for. What is provable without the server is that a `crate::`/`super::`
+  qualifier at the head of a `use` declaration changed meaning by definition when the file changed
+  crates, so those are re-pointed and nothing else is.
+- **A facade that would make the workspace cyclic is refused up front.** A facade makes the origin
+  depend on the destination; if the moved code still names the origin, the destination depends back,
+  and cargo rejects the pair with an error naming neither the module nor the operation. The refusal
+  names every path that forced it.
 - **The file budget is best-effort, by agreement.** Seams are cut where they are cohesive. Whatever
   stays over 500 lines is listed in `## Scope`'s file-budget item with a reason, rather than split to
   hit a number at the cost of cohesion.
@@ -413,6 +439,22 @@ rather than an algorithm. Three distinct kinds:
       `generate_tonic_adapter` is a stub. Generating them is out of scope and belongs in `docs/dev/todo/`
 - [ ] Relocated `impl` members come out `pub(crate)` and stay there by design; each widening that has
       to stand is reported in the visibility table rather than silently narrowed
+- [ ] ⚠ **`impl ModuleReferences for RustBackend` has no test.** The deciding half of the move is
+      covered by 271 unit tests against a known reference set; the half that asks rust-analyzer
+      (`textDocument/references` + `documentSymbol`) can only be exercised against a live server, and
+      the crate has no live-server harness to reuse — every existing test is pure-unit over JSON
+      fixtures. `move_module_to_crate_acceptance.rs` is listed in `## Acceptance Tests` as a
+      deliverable of its own and is the thing to land before a real plan runs this operation against
+      a repository
+- [ ] A caller reaching the module as `use crate::host_registry;` then `host_registry::X` is **not**
+      re-pointed: the survey asks references per item, so the module-level import is outside the
+      reference set. Covering it needs a second engine call on the `mod` declaration, and a test that
+      can only be written against a live server
+- [ ] A `crate::` path in the moved file's **function bodies** is left alone; only `use` declarations
+      are re-pointed. A build after the move surfaces it. Belongs in
+      `docs/ft/coder/rust-code-restructuring.md` § Known limitations
+- [ ] Nested modules and crate roots are **refused, not guessed** — only `<crate>/src/<module>.rs`
+      moves, because a nested module's `mod` line lives in a file this operation would have to guess at
 
 ## Baseline
 

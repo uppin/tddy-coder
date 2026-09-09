@@ -9,6 +9,7 @@
 //! that a non-editor client would write straight into the source.
 
 use crate::backends::lsp_bridge::LspClientBridge;
+use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
@@ -1171,6 +1172,14 @@ impl LanguageBackend for RustBackend {
             }
         }
 
+        // rust-analyzer has no cross-crate move assist, so this operation is authored rather than
+        // delegated — every caller it re-points still comes from the server's own reference set,
+        // which is what this backend supplies it. It opens the module for itself, so the document
+        // is deliberately not opened here first.
+        if op.op == RefactorKind::MoveModuleToCrate {
+            return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+        }
+
         self.start(workspace.root)?;
         self.did_open(&uri, &original)?;
         self.ensure_indexed(&uri)?;
@@ -1206,7 +1215,93 @@ impl LanguageBackend for RustBackend {
     }
 }
 
+/// The engine half of a cross-crate move.
+///
+/// `move_module_to_crate` decides what to write; this decides what is out there to be written to.
+/// Both halves of the answer are the server's own: `documentSymbol` for the items a module path can
+/// name, and `textDocument/references` for every place outside the file that names one.
+impl ModuleReferences for RustBackend {
+    fn outside_references(
+        &mut self,
+        workspace: &Workspace<'_>,
+        file: &str,
+    ) -> Result<Vec<ItemReferences>> {
+        let text = workspace.read(file)?;
+        let uri = uri_of(&workspace.root.join(file));
+
+        self.start(workspace.root)?;
+        self.did_open(&uri, &text)?;
+        self.ensure_indexed(&uri)?;
+
+        let symbols = self.request_settled(
+            "textDocument/documentSymbol",
+            json!({ "textDocument": { "uri": uri } }),
+        )?;
+
+        let mut found = Vec::new();
+        for item in path_reached_within(&symbols, whole_of(&text)) {
+            // An item nested in an inline module is reached through that module's own name, which
+            // is itself one of these — so re-pointing the outer name carries the inner path with
+            // it, and naming the inner one flat would write a facade line that resolves to nothing.
+            if !item.within.is_empty() {
+                continue;
+            }
+
+            found.push(ItemReferences {
+                referenced_at: self.references_outside(&uri, &item.position, workspace)?,
+                item: item.name,
+            });
+        }
+
+        Ok(found)
+    }
+}
+
 impl RustBackend {
+    /// Every place outside `uri` that names the item at `position`.
+    ///
+    /// Columns come back as byte offsets, per the encoding this client negotiates, and are
+    /// converted to the character columns [`crate::edit::Position`] is read in — the one place the
+    /// two counts have to be reconciled, because a caller is addressed in a file this backend never
+    /// opened.
+    fn references_outside(
+        &mut self,
+        uri: &str,
+        position: &Value,
+        workspace: &Workspace<'_>,
+    ) -> Result<Vec<Reference>> {
+        // References answer empty rather than pending while the crate graph is still loading, so an
+        // empty answer is only worth believing once the position resolves at all.
+        self.wait_until_resolved(uri, position)?;
+
+        let references = self.request_settled(
+            "textDocument/references",
+            json!({
+                "textDocument": { "uri": uri },
+                "position": position,
+                "context": { "includeDeclaration": false }
+            }),
+        )?;
+
+        let mut sites = Vec::new();
+        for reference in references.as_array().into_iter().flatten() {
+            let referrer = reference
+                .get("uri")
+                .and_then(Value::as_str)
+                .ok_or_else(|| failure("a reference carries no uri"))?;
+            if referrer == uri {
+                continue;
+            }
+
+            let path = relative_to(referrer, workspace.root)?;
+            let text = workspace.read(&path)?;
+            let at = character_column(&text, LspPoint::read(reference.pointer("/range/start"))?);
+            sites.push(Reference { path, at });
+        }
+
+        Ok(sites)
+    }
+
     /// Run an assist that introduces a new symbol, then give that symbol its real name.
     fn assisted_edit(
         &mut self,
@@ -2462,6 +2557,37 @@ fn collect_path_reached(
                 collect_path_reached(children, range, &inside, found);
             }
         }
+    }
+}
+
+/// The range covering a whole document, for a survey that asks about all of it.
+fn whole_of(text: &str) -> Range {
+    Range {
+        start: Position { line: 1, col: 1 },
+        end: Position {
+            line: text.lines().count() as u32 + 1,
+            col: 1,
+        },
+    }
+}
+
+/// An LSP position as a one-based line and *character* column.
+fn character_column(text: &str, point: LspPoint) -> Position {
+    let line_start = offset_of(
+        text,
+        LspPoint {
+            line: point.line,
+            character: 0,
+        },
+    );
+    let line = &text[line_start..];
+    let column = line
+        .get(..point.character)
+        .map_or(point.character, |head| head.chars().count());
+
+    Position {
+        line: point.line as u32 + 1,
+        col: column as u32 + 1,
     }
 }
 
