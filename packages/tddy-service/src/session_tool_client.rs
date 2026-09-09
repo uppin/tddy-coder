@@ -99,12 +99,20 @@ mod tests {
     /// The far side must give up *after* this side stops waiting. If the remote ceiling were the
     /// higher of the two, a caller would see a timeout for a call that then succeeded invisibly —
     /// and the tool would have run twice on a retry.
+    // The assertion is deliberately over two constants: pinning the *relationship* between them is
+    // the whole point, and clippy's objection assumes a constant comparison is a mistake rather
+    // than a guard against drift.
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn stops_waiting_before_the_tool_engine_does() {
+        // `tddy-tool-engine`'s own default, restated here because this crate does not depend on it.
+        // If that default drops below this ceiling, this test is what notices.
         const TOOL_ENGINE_DEFAULT_MS: u64 = 30_000;
+
         assert!(
             MAX_REMOTE_BLOCK_MS < TOOL_ENGINE_DEFAULT_MS,
-            "a remote call must not outlive the caller's patience"
+            "a remote call must not outlive the caller's patience: {MAX_REMOTE_BLOCK_MS}ms vs \
+             {TOOL_ENGINE_DEFAULT_MS}ms"
         );
     }
 
