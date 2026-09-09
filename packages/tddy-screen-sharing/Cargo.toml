@@ -1,0 +1,18 @@
+[package]
+name = "tddy-screen-sharing"
+version = "0.1.0"
+edition = "2021"
+description = "Screen sharing — screen_sharing.ScreenSharingService and its key vault, extracted from tddy-daemon"
+
+[lib]
+name = "tddy_screen_sharing"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-core = { path = "../tddy-core" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

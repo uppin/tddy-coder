@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Stack**: `#unbundle` node **2 of 8**. Base: `feature/unbundle/host-worktree-services` (node 1)
+**Stack**: `#unbundle` node **2 of 8**. PR [#471](https://github.com/uppin/tddy-coder/pull/471).
+Base: `feature/unbundle/host-worktree-services` (node 1, PR #470)
 
 ## Initial Discovery
 
@@ -159,9 +160,9 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
 
 ## Scope
 
-- [ ] **`tddy-model-registry`**: crate, 13 modules, both services, 8 test files
-- [ ] **`tddy-telegram`**: crate, 10 modules, 14 test files, `teloxide` moved
-- [ ] **`tddy-screen-sharing`**: crate, 2 modules, 2 test files
+- [~] **`tddy-model-registry`**: crate and surface published; 13 modules and 8 test files still to move
+- [~] **`tddy-telegram`**: crate and surface published; 10 modules, 14 test files and `teloxide` still to move
+- [~] **`tddy-screen-sharing`**: crate and surface published; 2 modules and 2 test files still to move
 - [ ] **Delete unreachable VNC**: `vnc_service.rs`, `vnc_vault.rs`, both acceptance suites, the two `lib.rs` entries
 - [ ] **Wiring**: three `ServiceEntry` registrations move behind `build_*_entry` calls in `runtime.rs`
 - [ ] **File budget**: record which of this node's over-500-line files landed under budget and which did not, with why
@@ -284,8 +285,14 @@ Recorded before any change.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `cargo clippy -p tddy-daemon -- -D warnings` | | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
+| `cargo clippy -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing --all-targets -- -D warnings` | ✅ exit 0 | |
+
+**12 failing tests** define this node: 3 in `tddy-model-registry`, 2 in `tddy-telegram`, 4 in
+`tddy-screen-sharing`, and 3 asserting the unreachable VNC service's four files are gone. That last
+set is asserted against the daemon's **source** rather than its service registry, because
+`vnc.VncService` is already absent from the registry — which is precisely the problem: the module is
+declared, compiled, tested, and reachable by nothing.
 
 The one known pre-existing failure
 (`cursor_cli_session_acceptance::cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available`,

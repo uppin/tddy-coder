@@ -1,0 +1,20 @@
+[package]
+name = "tddy-model-registry"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's model registry and its ACP bridge — models.ModelRegistryService and acp.AcpService, extracted from tddy-daemon"
+
+[lib]
+name = "tddy_model_registry"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-core = { path = "../tddy-core" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

@@ -12460,6 +12460,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-model-registry"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-rpc",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-pty"
 version = "0.1.0"
 dependencies = [
@@ -12689,6 +12702,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-screen-sharing"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-rpc",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tddy-screenshare"
 version = "0.1.0"
 dependencies = [
@@ -12835,6 +12859,19 @@ dependencies = [
  "async-trait",
  "log",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-telegram"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
