@@ -29,6 +29,7 @@
 //! makes a staged cross-crate move affordable: move first with a facade, remove the facade later
 //! when the callers are ready.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::edit::WorkspaceEdit;
@@ -58,12 +59,51 @@ impl Destination {
     ///
     /// Refuses a directory with no manifest rather than creating one: a plan that names a crate
     /// which does not exist is a plan defect, and scaffolding a crate is authoring, not moving.
-    pub fn read(_root: &Path, _dir: &str) -> Result<Destination> {
-        // TODO(host-worktree-services): implement
-        Err(RestructureError::MalformedPlan(
-            "move_module_to_crate is not implemented yet".to_string(),
-        ))
+    pub fn read(root: &Path, dir: &str) -> Result<Destination> {
+        let manifest = root.join(dir).join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).map_err(|error| {
+            RestructureError::MalformedPlan(format!(
+                "`{dir}` is not a crate: {} could not be read ({error})",
+                manifest.display()
+            ))
+        })?;
+        let package = declared_package_name(&text).ok_or_else(|| {
+            RestructureError::MalformedPlan(format!(
+                "{} declares no `[package] name`",
+                manifest.display()
+            ))
+        })?;
+
+        Ok(Destination {
+            dir: dir.to_string(),
+            package: package.to_string(),
+            extern_name: package.replace('-', "_"),
+        })
     }
+}
+
+/// The `[package] name` a manifest declares, read without a TOML parser.
+///
+/// One key of one table is all this needs, and the shape it has to survive is a workspace manifest
+/// where `[dependencies]` and `[[bin]]` also carry a `name`. Scoping the search to the lines between
+/// `[package]` and the next table header is what keeps those out; a dependency's name being returned
+/// as the crate's would produce a `use` path that compiles nowhere.
+fn declared_package_name(manifest: &str) -> Option<&str> {
+    manifest
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| *line != "[package]")
+        .skip(1)
+        .take_while(|line| !line.starts_with('['))
+        .filter_map(|line| line.split_once('='))
+        .find(|(key, _)| key.trim() == "name")
+        .and_then(|(_, value)| quoted(value))
+}
+
+/// The contents of the first double-quoted string in `value`, or `None` if it is not one.
+fn quoted(value: &str) -> Option<&str> {
+    let opened = value.trim_start().strip_prefix('"')?;
+    opened.find('"').map(|end| &opened[..end])
 }
 
 /// One caller this move has to re-point, and the path it needs afterwards.
@@ -138,16 +178,28 @@ pub fn resolve(_workspace: &Workspace<'_>, _op: &RefactorOp) -> Result<Workspace
 /// reaches, which the survey already knows. [`Reexport::None`] leaves nothing, and then every caller
 /// in the survey is rewritten instead.
 pub fn facade_line(
-    _destination: &Destination,
-    _reexport: Reexport,
-    _reached: &[String],
+    destination: &Destination,
+    reexport: Reexport,
+    reached: &[String],
 ) -> Option<String> {
-    // TODO(host-worktree-services): implement
-    //
-    // Deliberately `unimplemented!` rather than `None`: a stub returning a plausible value makes
-    // `writes_no_facade_when_none_was_asked_for` pass for the wrong reason, which is worse than a
-    // failing test because it reads as coverage.
-    unimplemented!("crate_move::facade_line")
+    let crate_name = &destination.extern_name;
+    match reexport {
+        Reexport::Glob => Some(format!("pub use {crate_name}::*;")),
+        // A group is ordered and de-duplicated so the same survey always writes the same line: the
+        // reference set arrives in whatever order the server listed it, and a facade that reordered
+        // itself between runs would show up as a diff nobody asked for.
+        Reexport::Named => {
+            let named: BTreeSet<&str> = reached.iter().map(String::as_str).collect();
+            if named.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "pub use {crate_name}::{{{}}};",
+                named.into_iter().collect::<Vec<_>>().join(", ")
+            ))
+        }
+        Reexport::None => None,
+    }
 }
 
 #[cfg(test)]

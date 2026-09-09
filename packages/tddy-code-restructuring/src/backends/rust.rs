@@ -1181,14 +1181,13 @@ impl LanguageBackend for RustBackend {
             return Ok(Resolution::of(self.multi_file_assist(&uri, workspace, op)?));
         }
 
-        let (final_text, report, notes) = match op.op {
-            RefactorKind::RenameSymbol => (
-                self.rename_symbol(&uri, &original, op)?,
-                Vec::new(),
-                Vec::new(),
-            ),
-            _ => self.assisted_edit(&uri, &original, op)?,
-        };
+        // A rename reaches every document the server names, so it produces its edits directly
+        // rather than through the single-document path the in-place assists share.
+        if op.op == RefactorKind::RenameSymbol {
+            return Ok(Resolution::of(self.rename_symbol(&uri, workspace, op)?));
+        }
+
+        let (final_text, report, notes) = self.assisted_edit(&uri, &original, op)?;
 
         Ok(Resolution {
             edit: self.edit_for(
@@ -1839,7 +1838,16 @@ impl RustBackend {
     ///
     /// Both anchor kinds work: a range names a position directly, and a symbol is resolved through
     /// `workspace/symbol` so a plan need not carry different anchors per language.
-    fn rename_symbol(&mut self, uri: &str, original: &str, op: &RefactorOp) -> Result<String> {
+    ///
+    /// Every document the server names is edited, not only the anchor's own. rust-analyzer computes
+    /// the cross-file edits; keeping one of them is what left a caller in another file naming a
+    /// symbol that no longer existed, and the anchor's file looked right the whole time.
+    fn rename_symbol(
+        &mut self,
+        uri: &str,
+        workspace: &Workspace<'_>,
+        op: &RefactorOp,
+    ) -> Result<WorkspaceEdit> {
         let name = op
             .name
             .clone()
@@ -1857,7 +1865,21 @@ impl RustBackend {
             "textDocument/rename",
             json!({ "textDocument": { "uri": uri }, "position": position, "newName": name }),
         )?;
-        Ok(apply_lsp_edit(original, edits_for(&renamed, uri)?))
+
+        let mut changes = Vec::new();
+        for (document, edits) in workspace_edits_for(&renamed)? {
+            let path = relative_to(&document, workspace.root)?;
+            // Read through the overlay, as every other multi-document path does, so a caller an
+            // earlier operation in the same plan already edited is renamed against that text.
+            let original = workspace.read(&path)?;
+            let updated = apply_lsp_edit(&original, edits);
+            changes.push(FileEdit::Change {
+                path,
+                edits: minimal_edits(&original, &updated),
+            });
+        }
+
+        Ok(WorkspaceEdit { changes })
     }
 
     /// Wait, once per process, for the crate graph to load — with the server's progress on screen.
@@ -2528,6 +2550,14 @@ fn relative_path(uri: Option<&Value>, root: &Path) -> Result<String> {
     let uri = uri
         .and_then(Value::as_str)
         .ok_or_else(|| failure("a document change carries no uri"))?;
+    relative_to(uri, root)
+}
+
+/// The workspace-relative path a `file://` uri names.
+///
+/// A uri outside the root is refused rather than skipped: an edit this executor cannot address is
+/// one the operation was counting on, and dropping it is how a rename half-lands.
+fn relative_to(uri: &str, root: &Path) -> Result<String> {
     let path = uri
         .strip_prefix("file://")
         .ok_or_else(|| failure(format!("`{uri}` is not a file uri")))?;
@@ -2938,15 +2968,50 @@ fn edits_for(response: &Value, uri: &str) -> Result<Vec<LspEdit>> {
 ///
 /// Documents come back in the order the server listed them, so a caller can report them in a stable
 /// order. An edit naming no documents is still an error: this widens what counts as an answer, it
-/// does not make silence acceptable.
-// TODO(host-worktree-services): wire this into `rename_symbol` in place of `edits_for`, which is
-// what removes the single-document filter. It is published unwired so nodes 2-8 compile against the
-// signature; `edits_for` deliberately still routes the single-document assists, so wiring it here
-// now would panic the 251 tests that already pass through that path.
-#[allow(dead_code)]
-fn workspace_edits_for(_response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> {
-    // TODO(host-worktree-services): implement
-    unimplemented!("workspace_edits_for")
+/// does not make silence acceptable, and neither does a document whose edit list is empty.
+///
+/// Text edits are all it carries. A `documentChanges` entry that is a resource operation — a
+/// `create`, `rename` or `delete` — names no `textDocument`, and so is not one of these pairs;
+/// [`convert_change`] is where those are read.
+fn workspace_edits_for(response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> {
+    let workspace_edit = response.get("edit").unwrap_or(response);
+
+    let documents: Vec<(String, &Vec<Value>)> = match workspace_edit
+        .get("documentChanges")
+        .and_then(Value::as_array)
+    {
+        Some(changes) => changes
+            .iter()
+            .filter_map(|change| {
+                let uri = change
+                    .pointer("/textDocument/uri")
+                    .and_then(Value::as_str)?;
+                let edits = change.get("edits").and_then(Value::as_array)?;
+                Some((uri.to_string(), edits))
+            })
+            .filter(|(_, edits)| !edits.is_empty())
+            .collect(),
+        None => workspace_edit
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|documents| {
+                documents
+                    .iter()
+                    .filter_map(|(uri, edits)| Some((uri.clone(), edits.as_array()?)))
+                    .filter(|(_, edits)| !edits.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+
+    if documents.is_empty() {
+        return Err(failure("rust-analyzer returned no edits for any document"));
+    }
+
+    documents
+        .into_iter()
+        .map(|(uri, edits)| Ok((uri, edits.iter().map(read_edit).collect::<Result<_>>()?)))
+        .collect()
 }
 
 /// One text edit, refusing anything malformed rather than guessing at it.
