@@ -19,7 +19,6 @@ import { HostRemoteDesktopSchema, ProbeOutcome } from "../../src/gen/connection_
 import { Protocol, ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { SessionsDrawerScreen } from "../../src/components/sessions/SessionsDrawerScreen";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { mountWithRecordingLiveKitRpc, type RecordedRpcCall } from "../support/rpc/recordingLiveKitRpc";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionsDrawerBackend } from "../support/rpc/screenSharingBackend";
@@ -155,7 +154,14 @@ describe("Input on a session's desktop", () => {
         }))
         .onUnary(ScreenSharingService.method.stopStream, () => ({ ok: true })),
     );
-    mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    // Mounted through the recording adapter, not `mountWithRpc`: that one hands every LiveKit
+    // client the same in-memory transport and throws `targetIdentity` away, so a client that sent
+    // this session's input to the host's bridge — or to a hard-coded participant — would look
+    // exactly like a correct one here, and `THE_SESSIONS_BRIDGE` would be a fixture nothing reads.
+    const recorded = mountWithRecordingLiveKitRpc(
+      withSelectedDaemon(<SessionsDrawerScreen />),
+      backend,
+    );
     sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
     sessionsDrawerPage.inspectorScreenSharingTab().click();
     sessionsDrawerPage.screenSharingStartBtn(A_SESSION_TARGET.id).click();
@@ -169,5 +175,14 @@ describe("Input on a session's desktop", () => {
       { keysym: KEYSYM.Enter, pressed: true },
       { keysym: KEYSYM.Enter, pressed: false },
     );
+
+    // …on a stream addressed at the participant *this session target's* start reply named, which is
+    // a different participant from the host scope's above. Both scopes share one overlay and one
+    // in-memory backend, so this is the only assertion in either that can tell them apart.
+    cy.wrap(recorded.rpcCalls).should((calls: RecordedRpcCall[]) => {
+      const inputStreams = calls.filter((c) => c.method === "StreamInput");
+      expect(inputStreams, "one input stream, opened against the session's bridge").to.have.length(1);
+      expect(inputStreams[0].targetIdentity).to.equal(THE_SESSIONS_BRIDGE);
+    });
   });
 });

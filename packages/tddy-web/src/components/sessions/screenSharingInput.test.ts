@@ -1,8 +1,9 @@
 /**
- * Unit tests for the two translations input forwarding makes before anything reaches the wire.
+ * Unit tests for the translations input forwarding makes before anything reaches the wire.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-07-input-forwarding.md — AC-IF-2 (keysyms, special keys
- * included) and AC-IF-3 (a click lands where the operator aimed, at any window size).
+ * PRD: docs/ft/web/1-WIP/PRD-2026-09-07-input-forwarding.md — AC-IF-1 (which button the desktop is
+ * told is down), AC-IF-2 (keysyms, special keys included) and AC-IF-3 (a click lands where the
+ * operator aimed, at any window size).
  *
  * Held apart from the mounted-overlay acceptance tests on purpose: a component test can prove that
  * *a* coordinate reached the bridge, but the arithmetic that decides *which* coordinate is a pure
@@ -10,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { framebufferPointFor, keysymFor } from "./screenSharingInput";
+import { framebufferPointFor, keysymFor, rfbButtonMaskFor } from "./screenSharingInput";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -51,15 +52,19 @@ describe("the framebuffer point a pointer lands on", () => {
     expect(landed).toEqual({ x: 0, y: 0 });
   });
 
-  it("keeps the bottom-right corner inside the framebuffer it addresses", () => {
-    // Given the operator points at the opposite corner
+  it("addresses the far edge of the desktop from the far edge of the picture", () => {
+    // Given the operator points at the picture's opposite edge — its width and height, which is one
+    // past its last addressable pixel
     const landed = framebufferPointFor(
       { x: 960, y: 540 },
       A_HALF_SIZE_WINDOW,
       A_FULL_HD_FRAMEBUFFER,
     );
 
-    // Then it is the desktop's opposite corner, and not a pixel beyond it
+    // Then the desktop's edge is addressed the same way, one past its last pixel, and nothing here
+    // clamps that back to 1919,1079. Deliberate: a remote server clamps whatever it is sent to its
+    // own screen, so the overshoot at the very edge costs nothing — while clamping here would move
+    // every edge aim inward by a pixel on every frame.
     expect(landed).toEqual({ x: 1920, y: 1080 });
   });
 
@@ -127,5 +132,77 @@ describe("the keysym a key is forwarded as", () => {
     // A key with no mapping is dropped rather than sent as some stand-in the desktop would act on.
     expect(keysymFor("MediaPlayPause")).toBeNull();
     expect(keysymFor("BrowserBack")).toBeNull();
+  });
+
+  it("sends a Latin-1 character as the code point itself", () => {
+    // X11 gives every Latin-1 code point a keysym equal to that code point, and nothing else does.
+    expect(keysymFor("\u00e9")).toBe(0xe9);
+    expect(keysymFor("\u00ff")).toBe(0xff);
+  });
+
+  it("sends a character above Latin-1 as the keysym X11 encodes it with", () => {
+    // Above Latin-1 the two part company: X11 encodes the code point as `0x01000000 | codePoint`.
+    // Sending the bare code point instead names a completely different keysym, and the desktop
+    // types some other character — which is exactly what a client that just returns the code point
+    // does, and what every other case in this suite would fail to notice.
+    expect(keysymFor("\u0142")).toBe(0x01000142);
+    expect(keysymFor("\u20ac")).toBe(0x010020ac);
+  });
+
+  it("has no keysym for a name that only exists on Object's prototype", () => {
+    // `key` is whatever string the browser reported. Looked up with `in` rather than `hasOwn`,
+    // these find `Object.prototype` members — and a `number | null` return type would then be
+    // carrying a Function into the wire encoder.
+    expect(keysymFor("constructor")).toBeNull();
+    expect(keysymFor("toString")).toBeNull();
+    expect(keysymFor("valueOf")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-IF-1 — which button the desktop is told is down
+// ---------------------------------------------------------------------------
+
+describe("the RFB button mask a browser's held buttons become", () => {
+  /** `MouseEvent.buttons` bits, as a browser sets them. */
+  const BROWSER = { primary: 1, secondary: 2, auxiliary: 4, back: 8, forward: 16 } as const;
+
+  /** `ScreenSharingPointerEvent.button_mask` bits, as RFB defines them. */
+  const RFB = { left: 0b001, middle: 0b010, right: 0b100 } as const;
+
+  it("reports nothing held when nothing is held", () => {
+    expect(rfbButtonMaskFor(0)).toBe(0);
+  });
+
+  it("sends the primary button as RFB's left", () => {
+    expect(rfbButtonMaskFor(BROWSER.primary)).toBe(RFB.left);
+  });
+
+  it("sends the auxiliary button as RFB's middle rather than folding it onto the right", () => {
+    // This is the one bit where the two orders disagree: a browser enumerates its buttons
+    // (primary, secondary, auxiliary), RFB sits them on a mouse (left, middle, right). A client
+    // passing the browser's mask straight through turns every middle-click paste on the remote
+    // machine into a context menu.
+    expect(rfbButtonMaskFor(BROWSER.auxiliary)).toBe(RFB.middle);
+  });
+
+  it("sends the secondary button as RFB's right", () => {
+    expect(rfbButtonMaskFor(BROWSER.secondary)).toBe(RFB.right);
+  });
+
+  it("carries every button of a multi-button grip at once", () => {
+    // `button_mask` says what is down *now*, not which button last changed — so two buttons held
+    // is two bits set, and releasing one of them is the other one still set.
+    expect(rfbButtonMaskFor(BROWSER.primary | BROWSER.auxiliary)).toBe(RFB.left | RFB.middle);
+    expect(rfbButtonMaskFor(BROWSER.primary | BROWSER.secondary | BROWSER.auxiliary)).toBe(
+      RFB.left | RFB.middle | RFB.right,
+    );
+  });
+
+  it("leaves out the browser-only buttons no RFB bit stands for", () => {
+    // Back and forward mean nothing to a remote framebuffer; folding them onto a bit that does
+    // would click something over there that the operator never asked for.
+    expect(rfbButtonMaskFor(BROWSER.back | BROWSER.forward)).toBe(0);
+    expect(rfbButtonMaskFor(BROWSER.primary | BROWSER.back)).toBe(RFB.left);
   });
 });

@@ -45,6 +45,14 @@ const THE_MIDDLE_OF_THE_WINDOW = { x: 480, y: 270 };
 const THE_MIDDLE_OF_THE_DESKTOP = { x: 960, y: 540 };
 
 /**
+ * `XK_Control_L` — the keysym a held Ctrl is forwarded as.
+ *
+ * Spelled out here rather than imported from the production mapping: a test that asked the code
+ * under test what the right answer is would pass whatever that code decided to send.
+ */
+const CONTROL_KEYSYM = 0xffe3;
+
+/**
  * A desktop the operator can close — an overlay that goes away, as both real scopes' do.
  *
  * `onClose` has to actually unmount something, or "the chord closed the overlay" and "the stream
@@ -112,6 +120,44 @@ describe("Pointer forwarding", () => {
     bridge.expectPointerLandings({ x: 480, y: 270, buttonMask: BUTTON.none });
   });
 
+  it("tells the desktop where the pointer is before it tells it a button went down", () => {
+    // Given an open desktop
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+
+    // When the operator moves onto a spot and presses there
+    desktopPage.movePointerTo({ x: 240, y: 135 });
+    desktopPage.pressLeftButtonAt({ x: 240, y: 135 });
+
+    // Then both reached the desktop, and the move reached it first. Movement is coalesced to one
+    // event per animation frame; a press that let a still-pending move overtake it would have the
+    // desktop click wherever the pointer was *before* the operator aimed.
+    bridge.expectPointerLandings(
+      { x: 480, y: 270, buttonMask: BUTTON.none },
+      { x: 480, y: 270, buttonMask: BUTTON.left },
+    );
+  });
+
+  it("clears the button mask when the operator lets go outside the picture", () => {
+    // Given an open desktop
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+
+    // When the operator presses inside the picture and lets go in the letterbox around it — which
+    // is what dragging past the edge of a picture that keeps its aspect ratio amounts to
+    desktopPage.pressLeftButtonAt(THE_MIDDLE_OF_THE_WINDOW);
+    desktopPage.releaseLeftButtonOutsideThePicture();
+
+    // Then the desktop was told the button came up. Without that it goes on dragging: every later
+    // move is a selection, every later click is a drop.
+    //
+    // Reported at the last point the pointer was actually seen inside the picture, because scaling
+    // a point outside the element produces a framebuffer coordinate off the end of the desktop —
+    // and `button_mask` is what this event is for, not the position.
+    bridge.expectPointerLandings(
+      { ...THE_MIDDLE_OF_THE_DESKTOP, buttonMask: BUTTON.left },
+      { ...THE_MIDDLE_OF_THE_DESKTOP, buttonMask: BUTTON.none },
+    );
+  });
+
   it("distinguishes the right button from the left", () => {
     // Given an open desktop
     const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
@@ -165,6 +211,24 @@ describe("Keyboard forwarding", () => {
     desktopPage.tapKey("a");
 
     // Then the desktop saw that key pressed and released, as its own keysym
+    bridge.expectKeyStrokes(
+      { keysym: KEYSYM.a, pressed: true },
+      { keysym: KEYSYM.a, pressed: false },
+    );
+  });
+
+  it("forwards nothing at all for a key that has no keysym", () => {
+    // Given an open desktop
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+
+    // When the operator hits a key the mapping has nothing for, and then one it does
+    desktopPage.tapKey("MediaPlayPause");
+    desktopPage.tapKey("a");
+
+    // Then only the second one reached the desktop, and the first left no trace. Both halves are
+    // load-bearing: on its own, "the bridge received no MediaPlayPause" is satisfied by a client
+    // that forwards nothing whatsoever, and the exact list rules out the other failure — a client
+    // sending `keysym ?? 0`, which would put two phantom key events in front of the `a`.
     bridge.expectKeyStrokes(
       { keysym: KEYSYM.a, pressed: true },
       { keysym: KEYSYM.a, pressed: false },
@@ -254,8 +318,36 @@ describe("Escape and the chord that closes the desktop", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-IF-7 — the stream lives exactly as long as the overlay
+// AC-IF-7 — the stream lives exactly as long as the overlay, and leaves nothing held
 // ---------------------------------------------------------------------------
+
+describe("What the desktop is left holding when the overlay goes away", () => {
+  it("lets go of a modifier the operator was still holding when the desktop closed", () => {
+    // Given an open desktop with a modifier held down and never released — which is the ordinary
+    // way out of here, since the advertised chord is Ctrl+Alt+Esc and the Escape closes the overlay
+    // before either modifier has come up
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+    desktopPage.pressKey("Control");
+    bridge.expectKeyStrokes({ keysym: CONTROL_KEYSYM, pressed: true });
+
+    // When the desktop closes with it still down
+    desktopPage.close().click();
+    desktopPage.root().should("not.exist");
+
+    // Then the bridge was told the key came up. Nothing else can tell it: the listeners are gone,
+    // so the real `keyup` is never forwarded, and a remote machine left holding Ctrl reads every
+    // subsequent keystroke as a Ctrl chord.
+    //
+    // This also pins *where* the release is sent from. The outbound queue is closed in the stream
+    // effect's cleanup, and React runs cleanups in the order their effects were defined — so a
+    // release flushed from the capture effect's cleanup, which runs second, would be enqueued onto
+    // a closed queue and silently dropped, and this assertion would see only the press.
+    bridge.expectKeyStrokes(
+      { keysym: CONTROL_KEYSYM, pressed: true },
+      { keysym: CONTROL_KEYSYM, pressed: false },
+    );
+  });
+});
 
 describe("The input stream's lifetime", () => {
   it("opens one stream for an open desktop and ends it when the desktop closes", () => {

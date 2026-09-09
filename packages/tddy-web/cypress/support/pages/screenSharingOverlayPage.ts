@@ -93,6 +93,30 @@ export const desktopPage = {
     mouseAt("mousedown", at, { button: 2, buttons: 2 });
   },
 
+  /**
+   * Let a held button go somewhere that is not the picture.
+   *
+   * The picture keeps its aspect ratio inside a full-screen container, so there is always letterbox
+   * around it — press inside, drag out, release there is an ordinary thing to do with a mouse, and
+   * the release never reaches the picture's own listeners. Dispatched on `body` at a point measured
+   * to be outside the picture, so this gesture cannot quietly become an inside-the-picture one if
+   * the layout changes.
+   */
+  releaseLeftButtonOutsideThePicture() {
+    video().then(($el) => {
+      const box = $el[0].getBoundingClientRect();
+      const outside = { clientX: box.left + box.width / 2, clientY: box.top - 10 };
+      expect(outside.clientY, "a point in the letterbox above the picture").to.be.lessThan(box.top);
+      expect(outside.clientY, "a point still inside the window").to.be.at.least(0);
+      cy.get("body").trigger("mouseup", {
+        ...outside,
+        button: 0,
+        buttons: 0,
+        force: true,
+      });
+    });
+  },
+
   pressKey(keyName: string, modifiers: Record<string, boolean> = {}) {
     key("keydown", keyName, modifiers);
   },
