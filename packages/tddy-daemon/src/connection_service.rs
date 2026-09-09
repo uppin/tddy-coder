@@ -73,9 +73,7 @@ use crate::branch_intent::{
 use crate::cli_session_manager::{ClaimOutcome, CliSessionManager, MAIN_TERMINAL_ID};
 use crate::config::DaemonConfig;
 use crate::host_keypair::HostKeypair;
-use crate::host_prompts::{
-    AnswerHandoff, AnswerRejection, HostPromptRegistry, PendingPrompt, PromptKind,
-};
+use crate::host_prompts::{answer_before_expiry, AnswerRejection, HostPromptRegistry, PromptKind};
 use crate::host_registry::{FileHostRegistry, HostRegistry};
 use crate::host_stats::{HostStats, SysinfoHostStats};
 use crate::host_tooling::{HostToolingProbe, SubprocessHostToolingProbe};
@@ -1051,20 +1049,6 @@ fn rejection_reason(rejection: &AnswerRejection) -> String {
         AnswerRejection::Expired => "this prompt expired before the answer arrived".to_string(),
         AnswerRejection::AlreadyAnswered => "this prompt has already been answered".to_string(),
     }
-}
-
-/// The ciphertext answering `prompt`, or `None` once it can no longer arrive.
-///
-/// Bounded by the prompt's own expiry rather than by a timeout of the caller's choosing, so the
-/// operation releases at exactly the moment the prompt stops being answerable — and never later,
-/// whatever the operator does. A dropped sender, which is how the registry reaps an expired prompt,
-/// ends the wait the same way.
-async fn answer_before_expiry(handoff: AnswerHandoff, prompt: &PendingPrompt) -> Option<Vec<u8>> {
-    let remaining = prompt
-        .expires_at_unix_ms
-        .saturating_sub(crate::host_registry::now_unix_ms());
-    let remaining = Duration::from_millis(u64::try_from(remaining).unwrap_or(0));
-    tokio::time::timeout(remaining, handoff).await.ok()?.ok()
 }
 
 /// The one thing an operator is told when their answer did not open the key.

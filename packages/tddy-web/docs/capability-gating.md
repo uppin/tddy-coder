@@ -131,6 +131,7 @@ carries no LiveKit presence".
 | `RpcPlaygroundScreen`'s participant picker | host connection + common-room status | replaced by the reason there is nobody to address |
 | `SessionsDrawerScreen` cross-host rows | host connection + common-room status | `ListSessions` rows plus a footnote naming what is out of view |
 | `SessionInspectorDrawer`'s VNC and Screen Sharing tabs, panel dispatch and `?inspector=` fallback | host connection + common-room status | removed from the strip; a media tab named in the URL degrades to Details |
+| `HostRowRemoteDesktop`'s connect action on the Hosts screen | host connection, bare predicate | no connect action on the row; the reachability facts beside it are still reported |
 | `ParticipantVideoPreviewDialog` and the roster's camera column | host connection, bare predicate | no camera affordance in the roster |
 
 **Whether a panel applies and whether its feed is opened are two questions, and they get two gates.**
@@ -140,9 +141,11 @@ room list drops in; but `useLiveKitRooms` subscribes from an effect the moment t
 The feed is therefore a child component mounted only on `available` — the hook cannot be skipped by
 the component that decides whether the panel applies.
 
-Two media reads deliberately stay on the bare predicate. The roster's camera column sits *inside* the
-rendered roster, which exists only once presence has resolved, so there is no strip to reflow; and
-`SessionRuntime`'s `carriesMedia` is session-scoped, as above.
+Three media reads deliberately stay on the bare predicate. The roster's camera column sits *inside*
+the rendered roster, which exists only once presence has resolved, so there is no strip to reflow;
+`SessionRuntime`'s `carriesMedia` is session-scoped, as above; and the Hosts row's connect action is
+one control inside a section that renders its other facts either way, so there is no strip whose
+width changes under the cursor and nothing to keep in place while a join is in flight.
 
 ## Absence is stated, never defaulted
 
@@ -188,6 +191,9 @@ Every mounting site therefore names the connection it is mounting with.
   whether a terminal claim is offered, are unaffected by capability.
 
 - **The input half of a remote desktop is ordinary RPC.** VNC and screen sharing each split into a
-  video track and an input stream, and only the track needs a media wire. The whole tab is gated
-  because a remote desktop with input and no picture is not a feature, but a later transport that
-  carries frames some other way could revisit the split.
+  video track and an input stream, and only the track needs a media wire. The whole surface is gated
+  — the session inspector's tabs and the Hosts row's connect action alike — because a remote desktop
+  with input and no picture is not a feature, but a later transport that carries frames some other
+  way could revisit the split. In practice the split is moot today: no browser client opens the
+  input stream on either scope, so a connected desktop is view-only. See
+  [`docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md`](../../../docs/dev/todo/2026-09-07-remote-desktop-input-forwarding.md).

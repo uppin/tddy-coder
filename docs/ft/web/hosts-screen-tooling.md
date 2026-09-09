@@ -149,17 +149,20 @@ the socket the read side resolved. It needs a privileged path to it, which is a 
 The probes themselves change nothing. There is no "configure git" and no "log in" action, and no
 general "run this on host X" primitive exists — the daemon runs a fixed set of probes and nothing else.
 
-The ssh-agent section carries the screen's **only** write action: **loading a key into that host's
+The ssh-agent section carries one of the screen's two write actions: **loading a key into that host's
 agent**, offered on a row whose agent answered, and only there. A host whose agent did not answer
 needs an agent started, not a key loaded. The passphrase for that key is asked for by the host,
 answered in the browser, and carried back encrypted under that host's own public key; it is never
 persisted, logged or written to disk. That flow is its own feature —
-[hosts-screen-add-key.md](./hosts-screen-add-key.md) — and nothing else on the row writes anything.
+[hosts-screen-add-key.md](./hosts-screen-add-key.md) — and nothing else in that section writes anything.
 
 Removing a key from an agent, and generating one, are not offered.
 
-The desktop section starts no stream and opens no viewer either: it reports what is reachable, and
-opening it is [PR #460](https://github.com/uppin/tddy-coder/pull/460).
+The desktop section is the other. Its **probe** starts no stream, spawns no bridge and creates no
+target — it reports what is reachable and nothing more. **Opening** a host's desktop is a separate
+action on the same row, and that one does write: it attaches a target to the host and starts a bridge
+process. It is described in
+[`screen-sharing-sessions.md`](./screen-sharing-sessions.md) rather than here.
 
 ## Relationship to the rest of the screen
 

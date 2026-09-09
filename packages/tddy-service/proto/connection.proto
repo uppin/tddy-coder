@@ -1248,6 +1248,10 @@ enum HostPromptKind {
   HOST_PROMPT_KIND_UNSPECIFIED = 0;
   // The passphrase unlocking a private key so it can be added to this host's ssh-agent.
   HOST_PROMPT_KIND_SSH_KEY_PASSPHRASE = 1;
+  // The password of a host's remote desktop, asked for while StartHostStream is blocked on it.
+  // Reuses this channel rather than storing the password: a host desktop password is prompted,
+  // encrypted under the host's key, used and dropped (#hosts-screen 8/8, AC-7).
+  HOST_PROMPT_KIND_DESKTOP_PASSWORD = 2;
 }
 
 // A question the host is waiting on. Carries the key material the answer must be encrypted under, so

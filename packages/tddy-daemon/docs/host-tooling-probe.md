@@ -492,10 +492,11 @@ actually spawns the bridges.
 
 ### What this block does not do
 
-It reports. It starts no stream, spawns no bridge, opens no viewer, and creates no host-scoped target
-or vault — `ScreenSharingService`, its per-session targets and its vault are untouched, and its
-resolution order along with them. Opening a host's desktop from the Hosts screen is
-[PR #460](https://github.com/uppin/tddy-coder/pull/460).
+It reports. It starts no stream, spawns no bridge, opens no viewer, and creates no target of either
+scope — `ScreenSharingService`, its per-session targets and its vault are untouched, and its
+resolution order along with them. Opening a host's desktop is a separate action on
+`ScreenSharingService`, and the target it needs is created there; see
+[host-registry.md § Host-scoped desktop targets](./host-registry.md#host-scoped-desktop-targets).
 
 **Known cost.** Probing on every screen refresh is a TCP connect per host per protocol. If a fleet
 makes that noticeable, the fix is a short-TTL cache in front of the block; it is recorded rather than

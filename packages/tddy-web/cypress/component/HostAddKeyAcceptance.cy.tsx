@@ -156,6 +156,26 @@ describe("Host add-key passphrase prompt", () => {
     });
   });
 
+  it("refuses to send an empty passphrase, which unlocks no key", () => {
+    // Given a prompt for an encrypted key, with nothing typed
+    const submitted: Uint8Array[] = [];
+    mountDialog({ onSubmit: (encrypted: unknown) => submitted.push(encrypted as Uint8Array) });
+
+    // When the operator tries to send it anyway
+    dialog.submit().click({ force: true });
+
+    // Then nothing went back to the host. Asserted on what left rather than on the control, so a
+    // dialog that quietly accepted an empty answer would fail here even with the button still
+    // rendered disabled — an empty passphrase unlocks no encrypted key, and answering with one
+    // spends the single-use prompt the host is blocked on.
+    cy.then(() => {
+      expect(submitted, "an empty passphrase is not an answer").to.have.length(0);
+    });
+
+    // …and the dialog says so, rather than swallowing the click without explanation.
+    dialog.submit().should("be.disabled");
+  });
+
   it("does not echo the passphrase back into the dom after submission", () => {
     mountDialog();
 

@@ -12,6 +12,10 @@ stops being visible, and **never removes an entry**. It backs the web's Hosts sc
 ([hosts-screen.md](../../tddy-web/docs/hosts-screen.md), feature
 [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)).
 
+Its directory is where the daemon keeps everything else scoped to a host rather than to a session —
+the host keypair, and the [desktop targets](#host-scoped-desktop-targets) a machine's remote
+desktops are opened from.
+
 ## Storage
 
 | | |
@@ -44,6 +48,96 @@ that exclusion does not apply here.
 an empty registry (with a warning), so the screen falls back to the live roster alone. A failed
 **write** is returned to the caller: a registry that silently fails to persist is indistinguishable
 from a working one until the restart that loses everything.
+
+## Host-scoped desktop targets
+
+`host_desktop_targets.rs` keeps the remote desktops attached to a **host** rather than to a session,
+in `host-desktop-targets.json` in the same `host_registry_dir(tddy_data_dir)` the known-hosts file
+lives in. That is where it belongs: a desktop is a property of a machine, and the host keypair a
+desktop password is encrypted under is already resolved from this directory, so one host has one
+directory holding everything scoped to it.
+
+| | |
+|---|---|
+| File | `host-desktop-targets.json` — `{ hosts: { <daemon_instance_id>: [HostDesktopTarget] } }` |
+| A target | `target_id`, `label`, `host`, `port`, `protocol`, `username` |
+| Publication | `tddy_core::atomic_file`, under a mutex held across each read-modify-write |
+
+The map is a `BTreeMap` so the file an operator opens is ordered the same way between writes rather
+than reshuffled by hash order, and the wrapper object exists so a later field — a format version,
+say — does not make every already-written file unreadable. `protocol` holds
+`screen_sharing.proto`'s `Protocol` discriminants rather than a second enumeration of them, for the
+same reason the tooling probe's block does: two enums meaning one thing are two enums that drift.
+
+**This store is not a credential store**, which is what keeps it out of the exclusion that applies
+to the daemon's secret files: a label, a host, a port and a username grant nothing, so plain
+`write_atomic` is right here and the hand-rolled staging-file pattern is not copied by reflex.
+
+**A file that exists and does not parse is an error, never an empty set.** Collapsing the two would
+show an operator a machine with no desktops when it has several, make every start against one report
+"no such target", and — because the callers that go on to write would replace a damaged file with a
+file holding one target — lose every other host's desktops with no way back. `list` is therefore
+fallible, and the read-modify-write is serialised so two concurrent attaches do not drop one
+another's target.
+
+The two scopes never see each other. A host-scoped target is invisible to
+`screen_sharing_vault`'s session store and a session-scoped one is invisible here, so deleting a
+session cannot delete a machine's desktop.
+
+### Starting and stopping a host's desktop
+
+`ScreenSharingService` carries the host-scoped half of its surface —
+`ListHostTargets`, `AddHostTarget`, `StartHostStream`, `StopHostStream` — addressed by
+`daemon_instance_id` and `target_id` where the session-scoped calls take a `session_id`. They call
+the same spawn path the session calls do; host scope is an addressing and storage change, and the
+bridges, the LiveKit republishing and the browser overlay are reused unchanged.
+
+- **Every one of them requires the operator's session token**, and the daemon resolves the GitHub
+  user from it. A daemon that was built without host scope answers all four with
+  `FAILED_PRECONDITION` rather than a plausible empty result.
+- **The room is the daemon's configured `livekit.common_room`.** A session has a room in its
+  metadata; a host has none, and the common room is the one a browser on the Hosts screen already
+  holds a token for. A daemon with no LiveKit configuration is a `FAILED_PRECONDITION`, not a start
+  that returns coordinates nothing can join. This is deliberately not gated on `livekit.enabled`,
+  which governs whether *this* daemon joins a room.
+- **The bridge identity is `screenshare-host-{instance_id}-{target_id}`.** Every host's bridge lands
+  in that one common room, so the host id has to be part of the identity. The track name is the same
+  `screenshare:<target_id>` the session path publishes.
+- **Spawn failure is reported**, unlike the deliberately silent session-scoped spawn whose callers
+  depend on getting coordinates back regardless. These coordinates tell a browser to mount an
+  overlay, and an operator who has just typed a secret must not be left watching a room no bridge
+  joined.
+- **A reopen terminates the bridge the previous open left**, keyed by host and target, so a second
+  start cannot orphan the first process.
+- `StopHostStream` checks host scope for the same reason: `ok: true` from a daemon that could not
+  have been holding a bridge open tells the browser to tear down an overlay over a process still
+  running.
+
+### The desktop password is prompted, never stored
+
+The session-scoped path keeps its credential in an encrypted vault. A host desktop's password is
+**not stored anywhere**:
+
+1. `StartHostStream` settles everything that can fail without a secret first — the target, the room,
+   the bridge binary, the protocol — so nobody is asked to type a password for a stream that could
+   not have started.
+2. It then raises a `DESKTOP_PASSWORD` prompt on the host prompt channel, stamped with the GitHub
+   user resolved from the caller's session token. That stamping is what makes it *this* operator's
+   question: it is shown to no other browser and no other browser can spend its one answer.
+3. The browser encrypts its answer under the public key the host publishes with the prompt. The
+   daemon decrypts it with the host keypair — the same one read from this directory — hands the
+   plaintext to the bridge on the bridge's **stdin**, and drops it when the call returns. No argv,
+   no file, no daemon state.
+
+**Every start asks.** Nothing records whether a desktop wants a password, and a daemon that guessed
+would either skip the question for one that needs it or refuse one that does not; an operator
+answering with nothing is how a password-less desktop is opened.
+
+**The wait is exactly the prompt's own expiry.** An operator who walks away releases the call the
+moment the question stops being answerable — never later and never never. An unanswered prompt fails
+the start with `DeadlineExceeded` and **spawns no bridge**: a bridge started without the password it
+needed authenticates to nothing and would leave a process running for a stream that can never carry
+a frame.
 
 ## Identity — the routing id and the durable id
 
@@ -184,6 +278,9 @@ for — a handful of machines; a deployment with hundreds would want a map.
 ## See also
 
 - RPC surface: [connection-service.md](connection-service.md)
+- Desktop reachability on the same row: [host-tooling-probe.md](host-tooling-probe.md#remote-desktop)
+- Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
+  — both scopes of the remote-desktop feature
 - Web: [hosts-screen.md](../../tddy-web/docs/hosts-screen.md),
   [host-directory.md](../../tddy-web/docs/host-directory.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)

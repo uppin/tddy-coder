@@ -233,3 +233,32 @@ export const hostRemoteDesktopPage = {
   protocol: (instanceId: string, protocol: "vnc" | "rdp") =>
     byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-${protocol}`),
 };
+
+/** Host desktop connect selectors — added by `#hosts-screen 8/8`. */
+export const hostDesktopPage = {
+  connect: (instanceId: string) =>
+    cy.get(`[data-testid="hosts-row-${instanceId}-connect-desktop"]`),
+  overlay: (instanceId: string) => cy.get(`[data-testid="host-desktop-overlay-${instanceId}"]`),
+  /**
+   * The desktop itself, once a track is being rendered.
+   *
+   * Held apart from {@link hostDesktopPage.overlay}, which is the host-scoped mount and is there
+   * from the click onwards — including while the start is still blocked, and including when it
+   * failed. Only this one says a stream arrived.
+   */
+  stream: () => byTestId("screen-sharing-overlay"),
+  /** What the overlay says while no track has arrived — "connecting", or why it will not. */
+  status: (instanceId: string) => byTestId(`host-desktop-overlay-${instanceId}-status`),
+  /** Give up on the desktop. The bridge on the host lives exactly as long as this overlay does. */
+  close: (instanceId: string) => byTestId(`host-desktop-overlay-${instanceId}-close`),
+  /**
+   * The inline elements the overlay is rendered inside — which must be none of them.
+   *
+   * The row section a desktop is opened from is a `<span>`, and a `<div>` is not permitted inside
+   * one: an HTML parser hoists it out on any SSR or hydration path, so the tree the browser builds
+   * is not the tree React described. Expressed as an ancestor query rather than as "is a child of
+   * body" so it states the constraint — never in the row's inline flow — instead of one particular
+   * way of satisfying it.
+   */
+  inlineAncestorsOfOverlay: (instanceId: string) => hostDesktopPage.overlay(instanceId).parents("span"),
+};

@@ -1,5 +1,10 @@
 /**
- * Asks the operator for a key passphrase, on behalf of a host that is waiting.
+ * Asks the operator for a secret, on behalf of a host that is waiting on it.
+ *
+ * One dialog for every question on `StreamHostPrompts` — a key passphrase (`#hosts-screen 6/8`) and
+ * a desktop password (`#hosts-screen 8/8`) — because what has to be got right is the same for both:
+ * the fingerprint is shown, a changed key blocks the answer, and the plaintext never leaves this
+ * component. Only the words differ, and they are the caller's to supply.
  *
  * Server-initiated, unlike `ScreenSharingPassphraseDialog` — that one is the UI deciding to ask
  * before making a call. Here the host raised the question on `StreamHostPrompts` and is blocked
@@ -19,6 +24,22 @@
 import React, { useState } from "react";
 import { encryptForHost } from "../../lib/encryptForHost";
 import type { KeyPinVerdict } from "../../lib/hostKeyPinning";
+
+/**
+ * The words one question is asked in.
+ *
+ * The dialog is the same on both of this feed's flows — a host is waiting, and the answer leaves as
+ * ciphertext — but what it is waiting *for* is not, and an operator told a desktop password is going
+ * into an ssh-agent has been told something untrue.
+ */
+export interface HostPromptWording {
+  /** The line the dialog leads with. */
+  title: string;
+  /** One sentence saying what the host will do with the answer. */
+  explanation: string;
+  /** What the operator is being asked to type. */
+  placeholder: string;
+}
 
 export interface HostPassphraseDialogProps {
   hostId: string;
@@ -51,7 +72,25 @@ export interface HostPassphraseDialogProps {
    * here would make the feature unusable in any browser that will not store a pin.
    */
   keyContinuity: KeyPinVerdict;
-  /** Receives the RSA-OAEP ciphertext — the passphrase itself never leaves this component. */
+  /**
+   * The words to ask in. Defaults to the key passphrase this dialog was built for
+   * (`#hosts-screen 6/8`), so a caller answering that question says nothing.
+   */
+  wording?: HostPromptWording;
+  /**
+   * Whether nothing is a real answer to this question.
+   *
+   * Defaults to `false`, which is the key passphrase (`#hosts-screen 6/8`): an empty passphrase
+   * unlocks no encrypted key, so sending one only spends the single-use prompt the host is blocked
+   * on. A desktop password (`#hosts-screen 8/8`) is the opposite case — plenty of desktops have
+   * none, and the host asks on every start because it cannot know in advance which — so refusing an
+   * empty answer there refuses the desktop itself.
+   *
+   * Whether an empty answer means anything is a property of the question, and only the caller knows
+   * which question it asked; this dialog cannot read it off the prompt.
+   */
+  allowEmpty?: boolean;
+  /** Receives the RSA-OAEP ciphertext — the answer itself never leaves this component. */
   onSubmit: (encryptedAnswer: Uint8Array) => void;
   /**
    * The operator has verified the changed key with the host and accepts it as the new pin.
@@ -71,10 +110,17 @@ export function HostPassphraseDialog({
   fingerprint,
   spkiDer,
   keyContinuity,
+  wording,
+  allowEmpty = false,
   onSubmit,
   onAcceptChangedKey,
   onCancel,
 }: HostPassphraseDialogProps): React.ReactElement {
+  const words = wording ?? {
+    title: `Passphrase for ${subject}`,
+    explanation: `${hostId} is waiting to unlock ${subject} and load it into its ssh-agent.`,
+    placeholder: "Passphrase",
+  };
   const keyChanged = keyContinuity.kind === "changed";
   const keyUnverified = keyContinuity.kind === "unverified";
   const keyMismatched = keyContinuity.kind === "mismatched";
@@ -88,11 +134,13 @@ export function HostPassphraseDialog({
   const [failure, setFailure] = useState<string | null>(null);
   const [changeVerified, setChangeVerified] = useState(false);
 
-  // Empty is refused because an empty answer only wastes the host's single-use prompt; `encrypting`
-  // is refused because one prompt accepts exactly one answer. Each blocking key state is refused for
-  // a reason of its own, spelled out beside its notice below.
+  // Empty is refused because an empty answer only wastes the host's single-use prompt — unless the
+  // caller said that nothing IS a real answer here, which is true of a desktop with no password.
+  // `encrypting` is refused because one prompt accepts exactly one answer. Each blocking key state
+  // is refused for a reason of its own, spelled out beside its notice below.
   const keyBlocks = keyChanged || keyMismatched || keyUnderivable || keyUnchecked;
-  const blocked = keyBlocks || encrypting || passphrase.length === 0;
+  const answerMissing = !allowEmpty && passphrase.length === 0;
+  const blocked = keyBlocks || encrypting || answerMissing;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -127,10 +175,8 @@ export function HostPassphraseDialog({
         onSubmit={handleSubmit}
         className="bg-background border border-border rounded-md p-4 w-96 flex flex-col gap-3"
       >
-        <p className="text-sm font-medium">Passphrase for {subject}</p>
-        <p className="text-xs text-muted-foreground">
-          {hostId} is waiting to unlock {subject} and load it into its ssh-agent.
-        </p>
+        <p className="text-sm font-medium">{words.title}</p>
+        <p className="text-xs text-muted-foreground">{words.explanation}</p>
         {fingerprint !== null && !keyMismatched && (
           <p className="text-xs text-muted-foreground break-all">
             Answer encrypted for host key <span className="font-mono">{fingerprint}</span>
@@ -222,7 +268,7 @@ export function HostPassphraseDialog({
           disabled={keyBlocks}
           onChange={(e) => setPassphrase(e.target.value)}
           className="border border-border rounded px-2 py-1 text-sm bg-background"
-          placeholder="Passphrase"
+          placeholder={words.placeholder}
         />
         <div className="flex gap-2 justify-end">
           <button

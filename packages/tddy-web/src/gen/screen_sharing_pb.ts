@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file screen_sharing.proto.
  */
 export const file_screen_sharing: GenFile = /*@__PURE__*/
-  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmciigEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkiPwoSTGlzdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJLChNMaXN0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IrgBChBBZGRUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIMCgRob3N0GAQgASgJEgwKBHBvcnQYBSABKA0SEAoIcGFzc3dvcmQYBiABKAkSKgoIcHJvdG9jb2wYByABKA4yGC5zY3JlZW5fc2hhcmluZy5Qcm90b2NvbBIQCgh1c2VybmFtZRgIIAEoCSJIChFBZGRUYXJnZXRSZXNwb25zZRIzCgZ0YXJnZXQYASABKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IlMKE1JlbW92ZVRhcmdldFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIiChRSZW1vdmVUYXJnZXRSZXNwb25zZRIKCgJvaxgBIAEoCCJTChJVbmxvY2tWYXVsdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhIKCnBhc3NwaHJhc2UYAyABKAkiIQoTVW5sb2NrVmF1bHRSZXNwb25zZRIKCgJvaxgBIAEoCCJSChJTdGFydFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSKMAQoTU3RhcnRTdHJlYW1SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSFwoPYnJpZGdlX2lkZW50aXR5GAMgASgJEhIKCnRyYWNrX25hbWUYBCABKAkSDQoFd2lkdGgYBSABKA0SDgoGaGVpZ2h0GAYgASgNIlEKEVN0b3BTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiIAoSU3RvcFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIKkgKCFByb3RvY29sEhgKFFBST1RPQ09MX1VOU1BFQ0lGSUVEEAASEAoMUFJPVE9DT0xfVk5DEAESEAoMUFJPVE9DT0xfUkRQEAIyoAQKFFNjcmVlblNoYXJpbmdTZXJ2aWNlElYKC0xpc3RUYXJnZXRzEiIuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXNwb25zZRJQCglBZGRUYXJnZXQSIC5zY3JlZW5fc2hhcmluZy5BZGRUYXJnZXRSZXF1ZXN0GiEuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVzcG9uc2USWQoMUmVtb3ZlVGFyZ2V0EiMuc2NyZWVuX3NoYXJpbmcuUmVtb3ZlVGFyZ2V0UmVxdWVzdBokLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlc3BvbnNlElYKC1VubG9ja1ZhdWx0EiIuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXNwb25zZRJWCgtTdGFydFN0cmVhbRIiLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USUwoKU3RvcFN0cmVhbRIhLnNjcmVlbl9zaGFyaW5nLlN0b3BTdHJlYW1SZXF1ZXN0GiIuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmciigEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkiPwoSTGlzdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJLChNMaXN0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IrgBChBBZGRUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIMCgRob3N0GAQgASgJEgwKBHBvcnQYBSABKA0SEAoIcGFzc3dvcmQYBiABKAkSKgoIcHJvdG9jb2wYByABKA4yGC5zY3JlZW5fc2hhcmluZy5Qcm90b2NvbBIQCgh1c2VybmFtZRgIIAEoCSJIChFBZGRUYXJnZXRSZXNwb25zZRIzCgZ0YXJnZXQYASABKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0IlMKE1JlbW92ZVRhcmdldFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIiChRSZW1vdmVUYXJnZXRSZXNwb25zZRIKCgJvaxgBIAEoCCJTChJVbmxvY2tWYXVsdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhIKCnBhc3NwaHJhc2UYAyABKAkiIQoTVW5sb2NrVmF1bHRSZXNwb25zZRIKCgJvaxgBIAEoCCJSChJTdGFydFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSKMAQoTU3RhcnRTdHJlYW1SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSFwoPYnJpZGdlX2lkZW50aXR5GAMgASgJEhIKCnRyYWNrX25hbWUYBCABKAkSDQoFd2lkdGgYBSABKA0SDgoGaGVpZ2h0GAYgASgNIlEKEVN0b3BTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiIAoSU3RvcFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIIksKFkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiTwoXTGlzdEhvc3RUYXJnZXRzUmVzcG9uc2USNAoHdGFyZ2V0cxgBIAMoCzIjLnNjcmVlbl9zaGFyaW5nLlNjcmVlblNoYXJpbmdUYXJnZXQisgEKFEFkZEhvc3RUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEgwKBGhvc3QYBCABKAkSDAoEcG9ydBgFIAEoDRIqCghwcm90b2NvbBgGIAEoDjIYLnNjcmVlbl9zaGFyaW5nLlByb3RvY29sEhAKCHVzZXJuYW1lGAcgASgJIioKFUFkZEhvc3RUYXJnZXRSZXNwb25zZRIRCgl0YXJnZXRfaWQYASABKAkiXgoWU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiXQoVU3RvcEhvc3RTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIkChZTdG9wSG9zdFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIKkgKCFByb3RvY29sEhgKFFBST1RPQ09MX1VOU1BFQ0lGSUVEEAASEAoMUFJPVE9DT0xfVk5DEAESEAoMUFJPVE9DT0xfUkRQEAIyowcKFFNjcmVlblNoYXJpbmdTZXJ2aWNlElYKC0xpc3RUYXJnZXRzEiIuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXNwb25zZRJQCglBZGRUYXJnZXQSIC5zY3JlZW5fc2hhcmluZy5BZGRUYXJnZXRSZXF1ZXN0GiEuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVzcG9uc2USWQoMUmVtb3ZlVGFyZ2V0EiMuc2NyZWVuX3NoYXJpbmcuUmVtb3ZlVGFyZ2V0UmVxdWVzdBokLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlc3BvbnNlElYKC1VubG9ja1ZhdWx0EiIuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuVW5sb2NrVmF1bHRSZXNwb25zZRJWCgtTdGFydFN0cmVhbRIiLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USUwoKU3RvcFN0cmVhbRIhLnNjcmVlbl9zaGFyaW5nLlN0b3BTdHJlYW1SZXF1ZXN0GiIuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlc3BvbnNlEmIKD0xpc3RIb3N0VGFyZ2V0cxImLnNjcmVlbl9zaGFyaW5nLkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QaJy5zY3JlZW5fc2hhcmluZy5MaXN0SG9zdFRhcmdldHNSZXNwb25zZRJcCg1BZGRIb3N0VGFyZ2V0EiQuc2NyZWVuX3NoYXJpbmcuQWRkSG9zdFRhcmdldFJlcXVlc3QaJS5zY3JlZW5fc2hhcmluZy5BZGRIb3N0VGFyZ2V0UmVzcG9uc2USXgoPU3RhcnRIb3N0U3RyZWFtEiYuc2NyZWVuX3NoYXJpbmcuU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USXwoOU3RvcEhvc3RTdHJlYW0SJS5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlcXVlc3QaJi5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message screen_sharing.ScreenSharingTarget
@@ -386,6 +386,189 @@ export const StopStreamResponseSchema: GenMessage<StopStreamResponse> = /*@__PUR
   messageDesc(file_screen_sharing, 12);
 
 /**
+ * @generated from message screen_sharing.ListHostTargetsRequest
+ */
+export type ListHostTargetsRequest = Message<"screen_sharing.ListHostTargetsRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message screen_sharing.ListHostTargetsRequest.
+ * Use `create(ListHostTargetsRequestSchema)` to create a new message.
+ */
+export const ListHostTargetsRequestSchema: GenMessage<ListHostTargetsRequest> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 13);
+
+/**
+ * @generated from message screen_sharing.ListHostTargetsResponse
+ */
+export type ListHostTargetsResponse = Message<"screen_sharing.ListHostTargetsResponse"> & {
+  /**
+   * @generated from field: repeated screen_sharing.ScreenSharingTarget targets = 1;
+   */
+  targets: ScreenSharingTarget[];
+};
+
+/**
+ * Describes the message screen_sharing.ListHostTargetsResponse.
+ * Use `create(ListHostTargetsResponseSchema)` to create a new message.
+ */
+export const ListHostTargetsResponseSchema: GenMessage<ListHostTargetsResponse> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 14);
+
+/**
+ * @generated from message screen_sharing.AddHostTargetRequest
+ */
+export type AddHostTargetRequest = Message<"screen_sharing.AddHostTargetRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string label = 3;
+   */
+  label: string;
+
+  /**
+   * @generated from field: string host = 4;
+   */
+  host: string;
+
+  /**
+   * @generated from field: uint32 port = 5;
+   */
+  port: number;
+
+  /**
+   * @generated from field: screen_sharing.Protocol protocol = 6;
+   */
+  protocol: Protocol;
+
+  /**
+   * @generated from field: string username = 7;
+   */
+  username: string;
+};
+
+/**
+ * Describes the message screen_sharing.AddHostTargetRequest.
+ * Use `create(AddHostTargetRequestSchema)` to create a new message.
+ */
+export const AddHostTargetRequestSchema: GenMessage<AddHostTargetRequest> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 15);
+
+/**
+ * @generated from message screen_sharing.AddHostTargetResponse
+ */
+export type AddHostTargetResponse = Message<"screen_sharing.AddHostTargetResponse"> & {
+  /**
+   * @generated from field: string target_id = 1;
+   */
+  targetId: string;
+};
+
+/**
+ * Describes the message screen_sharing.AddHostTargetResponse.
+ * Use `create(AddHostTargetResponseSchema)` to create a new message.
+ */
+export const AddHostTargetResponseSchema: GenMessage<AddHostTargetResponse> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 16);
+
+/**
+ * Starts a bridge for a HOST-scoped target. Returns the same StartStreamResponse the session-scoped
+ * call does, because the browser overlay consumes exactly those fields already.
+ *
+ * The desktop password is deliberately NOT a field here. It is asked for on the #hosts-screen 6/8
+ * prompt channel while this call is blocked: HostPromptEvent is the only place a host publishes the
+ * public key an answer is encrypted under, so a caller has nothing to encrypt with until the daemon
+ * has asked. Nothing persists the answer either — the session-scoped vault's storing model is
+ * deliberately not followed for a host desktop.
+ *
+ * @generated from message screen_sharing.StartHostStreamRequest
+ */
+export type StartHostStreamRequest = Message<"screen_sharing.StartHostStreamRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string target_id = 3;
+   */
+  targetId: string;
+};
+
+/**
+ * Describes the message screen_sharing.StartHostStreamRequest.
+ * Use `create(StartHostStreamRequestSchema)` to create a new message.
+ */
+export const StartHostStreamRequestSchema: GenMessage<StartHostStreamRequest> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 17);
+
+/**
+ * @generated from message screen_sharing.StopHostStreamRequest
+ */
+export type StopHostStreamRequest = Message<"screen_sharing.StopHostStreamRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string target_id = 3;
+   */
+  targetId: string;
+};
+
+/**
+ * Describes the message screen_sharing.StopHostStreamRequest.
+ * Use `create(StopHostStreamRequestSchema)` to create a new message.
+ */
+export const StopHostStreamRequestSchema: GenMessage<StopHostStreamRequest> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 18);
+
+/**
+ * @generated from message screen_sharing.StopHostStreamResponse
+ */
+export type StopHostStreamResponse = Message<"screen_sharing.StopHostStreamResponse"> & {
+  /**
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+};
+
+/**
+ * Describes the message screen_sharing.StopHostStreamResponse.
+ * Use `create(StopHostStreamResponseSchema)` to create a new message.
+ */
+export const StopHostStreamResponseSchema: GenMessage<StopHostStreamResponse> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 19);
+
+/**
  * @generated from enum screen_sharing.Protocol
  */
 export enum Protocol {
@@ -467,6 +650,48 @@ export const ScreenSharingService: GenService<{
     methodKind: "unary";
     input: typeof StopStreamRequestSchema;
     output: typeof StopStreamResponseSchema;
+  },
+  /**
+   * --- Host-scoped targets (#hosts-screen 8/8) ---
+   *
+   * A desktop belongs to a MACHINE, not to a coding session. Every RPC above carries a session_id
+   * and its vault lives under the session directory, so there is no way to say "this host's
+   * desktop" today. These mirror the session-scoped calls, addressed by daemon_instance_id.
+   *
+   * The bridge, the LiveKit republishing and the browser overlay are all REUSED unchanged — this is
+   * a scoping change, not a second implementation. There is no browser-side VNC/RDP client and there
+   * must never be one.
+   *
+   * @generated from rpc screen_sharing.ScreenSharingService.ListHostTargets
+   */
+  listHostTargets: {
+    methodKind: "unary";
+    input: typeof ListHostTargetsRequestSchema;
+    output: typeof ListHostTargetsResponseSchema;
+  },
+  /**
+   * @generated from rpc screen_sharing.ScreenSharingService.AddHostTarget
+   */
+  addHostTarget: {
+    methodKind: "unary";
+    input: typeof AddHostTargetRequestSchema;
+    output: typeof AddHostTargetResponseSchema;
+  },
+  /**
+   * @generated from rpc screen_sharing.ScreenSharingService.StartHostStream
+   */
+  startHostStream: {
+    methodKind: "unary";
+    input: typeof StartHostStreamRequestSchema;
+    output: typeof StartStreamResponseSchema;
+  },
+  /**
+   * @generated from rpc screen_sharing.ScreenSharingService.StopHostStream
+   */
+  stopHostStream: {
+    methodKind: "unary";
+    input: typeof StopHostStreamRequestSchema;
+    output: typeof StopHostStreamResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_screen_sharing, 0);

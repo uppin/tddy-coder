@@ -20,6 +20,8 @@
  * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
+import type { HostPromptKind } from "../gen/connection_pb";
+
 /**
  * The part of a `HostPromptEvent` this loop passes on — structurally satisfied by the generated
  * message, so the hook hands over the wire type unchanged and tests can hand over a literal.
@@ -27,6 +29,16 @@
 export interface HostPromptEventLike {
   promptId: string;
   daemonInstanceId: string;
+  /**
+   * What the host is asking for, so a surface can tell its own question from another's.
+   *
+   * Two surfaces now read this feed — a key passphrase (`#hosts-screen 6/8`) and a desktop password
+   * (`#hosts-screen 8/8`) — and a dialog that answered the wrong one would send a secret to a
+   * question nobody asked it. Optional because the loop passes events through untouched and states
+   * only what it reads; the wire type always carries it, and a prompt whose kind is absent is one
+   * no surface can claim.
+   */
+  kind?: HostPromptKind;
   subject: string;
   /** SPKI DER of the host's RSA public key; the answer is encrypted under it. */
   hostPublicKey: Uint8Array;
