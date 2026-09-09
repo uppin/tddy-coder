@@ -243,7 +243,7 @@ which has **no fixed release upstream**. The mitigations are recorded with the a
 | Unit | `host_prompts.rs` | expiry, single use, unknown id, ownership |
 | Unit | `host_keypair.rs` | fingerprint stability, decrypt of an independently produced ciphertext, refusal of one addressed elsewhere |
 | Unit | `host_private_key.rs` | the confinement, the single refusal, and 13 listing behaviours |
-| Integration | `connection_service.rs` (`host_add_key_handler_tests`) | the whole flow — real prompt, real RSA-OAEP, real OpenSSH key unlock — with only the agent stood in for |
+| Integration | `connection_service/host_add_key_handler_tests.rs` | the whole flow — real prompt, real RSA-OAEP, real OpenSSH key unlock — with only the agent stood in for |
 | Wire-level | `tests/stream_host_prompts_rpc.rs` | the pump's teardown and its idle liveness |
 
 **Only the agent is a double.** A test that handed the handler a plaintext passphrase and called it

@@ -2,6 +2,19 @@
 
 Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` in **daemon mode**.
 
+## Where the code lives
+
+`src/connection_service.rs` holds the service — the `ConnectionServiceImpl` struct, its inherent
+impls, the `ConnectionService` trait impl carrying the RPC handlers, and the free helpers they share.
+
+Its **tests live in `src/connection_service/`**, one file per module, declared from the parent as
+`#[cfg(test)] mod <name>;`. Each reaches the code under test through `use super::*`, so a name the
+parent only *imports* — rather than defines — has to be bound in the test file itself, or under
+`#[cfg(test)]` in the parent where several test modules need it. The naming says what a file covers:
+`host_add_key_handler_tests.rs`, `agent_activity_unit_tests.rs`, `workspace_start_request_unit_tests.rs`.
+
+Add a test to the file that owns its area; add a new area as a new file plus its `mod` line.
+
 ## Endpoints
 
 | RPC | Purpose |
