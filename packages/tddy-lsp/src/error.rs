@@ -19,6 +19,14 @@ pub enum LspError {
     #[error("lsp request timed out")]
     Timeout,
 
+    /// The server answered the request with a JSON-RPC `error` instead of a `result`.
+    ///
+    /// The code is the server's own, and callers dispatch on it: rust-analyzer's
+    /// `ContentModified` (-32801) means "ask again" rather than "this failed", and a caller
+    /// that cannot tell the two apart either retries forever or gives up on a live server.
+    #[error("lsp server error {code}: {message}")]
+    Server { code: i64, message: String },
+
     /// The server process exited before the request completed.
     #[error("lsp server exited")]
     ServerExited,

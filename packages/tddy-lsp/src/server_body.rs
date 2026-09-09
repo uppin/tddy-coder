@@ -122,7 +122,14 @@ impl TaskBody for LspServerBody {
 
         // Complete the LSP handshake and publish the client to the registry.
         let root_uri = format!("file://{}", root_dir.display());
-        let client = match LspClient::initialize(stdin_tx, out_channel.subscribe(), &root_uri).await
+        let client = match LspClient::initialize(
+            stdin_tx,
+            out_channel.subscribe(),
+            &root_uri,
+            spec.capabilities.clone(),
+            spec.initialization_options.clone(),
+        )
+        .await
         {
             Ok(client) => Arc::new(client),
             Err(err) => {

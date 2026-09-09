@@ -137,7 +137,7 @@ fn titled(actions: &Value, wanted: &str) -> Option<Value> {
 /// which a rename refuses. Semantic tokens are requested for the one type rust-analyzer adds to the
 /// standard set — `unresolvedReference`, which is how a moved item's lost names are found — and the
 /// declared type list is left empty because the legend comes back from the server either way.
-fn client_capabilities() -> Value {
+pub fn client_capabilities() -> Value {
     json!({
         "workspace": {
             "workspaceEdit": {
@@ -203,7 +203,7 @@ fn negotiated_encoding(handshake: &Value) -> &str {
 /// import pass adds one `use` per round trip: unpinned, a dozen names from one crate arrive as a
 /// dozen separate declarations, and which of them merge depends on the order the names came back in.
 /// Asking for crate-level grouping, enforced, makes the result both tidier and the same every run.
-fn server_settings() -> Value {
+pub fn server_settings() -> Value {
     json!({
         "imports": {
             "granularity": { "group": "crate", "enforce": true },
@@ -663,8 +663,16 @@ impl RustBackend {
 
     /// Start rust-analyzer and complete the initialize handshake, once per run.
     fn start(&mut self, root: &Path) -> Result<()> {
-        if self.bridge.is_some() {
-            return Ok(());
+        if let Some(bridge) = &self.bridge {
+            // The handshake was someone else's, so the one thing that cannot be assumed is the
+            // unit its columns are in. A server left on the LSP default counts utf-16 code
+            // units while this client counts bytes, and the two agree on every line until one
+            // carries a character outside ASCII — at which point every column is silently
+            // wrong rather than refused.
+            let handshake = bridge.handshake();
+            let encoding = negotiated_encoding(&handshake).to_string();
+            self.unresolved_token = token_type_index(&handshake, UNRESOLVED_TOKEN);
+            return refuse_foreign_encoding(&encoding);
         }
         if self.server.is_some() {
             return Ok(());
@@ -731,15 +739,7 @@ impl RustBackend {
                 "initializationOptions": server_settings()
             }),
         )?;
-        let encoding = negotiated_encoding(&handshake);
-        if encoding != BYTE_ENCODING {
-            return Err(failure(format!(
-                "rust-analyzer settled on `{encoding}` positions, and this client counts \
-                 `{BYTE_ENCODING}` — every column it converted would be wrong on any line carrying a \
-                 character outside the BMP. Refusing rather than resolving anchors against the wrong \
-                 unit."
-            )));
-        }
+        refuse_foreign_encoding(negotiated_encoding(&handshake))?;
 
         self.unresolved_token = token_type_index(&handshake, UNRESOLVED_TOKEN);
         self.notify("initialized", json!({}))
@@ -747,7 +747,16 @@ impl RustBackend {
 
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
         if let Some(bridge) = &self.bridge {
-            return bridge.request(method, params);
+            let outcome = bridge.request(method, params);
+            // The self-spawned transport folds progress in as it reads the stream; a bridged one
+            // never sees the stream, so it collects what arrived and folds it in here. Without
+            // this the whole load is silent and a timeout cannot say where the server got to.
+            for notification in bridge.drain_notifications() {
+                if let Some(line) = self.chatter.absorb(&notification) {
+                    (self.progress)(&line);
+                }
+            }
+            return outcome;
         }
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
         loop {
@@ -885,7 +894,13 @@ impl RustBackend {
         } else {
             range
         };
-        let deadline = Instant::now() + self.resolution_budget();
+        let started = Instant::now();
+        let deadline = started + self.resolution_budget();
+        // Whether the server ever answered this request at all, which decides what an expired
+        // budget means, and what it offered when it did — the one piece of evidence that makes
+        // an absent assist actionable.
+        let mut answered = false;
+        let mut offered: Vec<String> = Vec::new();
         loop {
             let id = self.take_id();
             let actions = match self.request(
@@ -897,7 +912,11 @@ impl RustBackend {
                     "context": context_for(assist.kinds)
                 }),
             ) {
-                Ok(actions) => actions,
+                Ok(actions) => {
+                    answered = true;
+                    offered = offered_titles(&actions);
+                    actions
+                }
                 // Still loading the crate graph; that is what this loop is waiting out.
                 Err(RestructureError::ServerCatchingUp) => Value::Null,
                 Err(error) => return Err(error),
@@ -907,9 +926,17 @@ impl RustBackend {
                 return Ok(action);
             }
             if Instant::now() >= deadline {
-                return Err(failure(format!(
-                    "rust-analyzer offers no \"{wanted}\" assist for the given range"
-                )));
+                return Err(unresolved_assist(
+                    wanted,
+                    &offered,
+                    answered,
+                    started.elapsed(),
+                    self.chatter
+                        .last
+                        .clone()
+                        .unwrap_or_else(|| "nothing reported".to_string()),
+                    self.environment.clone(),
+                ));
             }
             std::thread::sleep(INDEXING_POLL);
         }
@@ -2008,6 +2035,72 @@ fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
 }
 
 /// The keyword a module declaration opens with, including its trailing space.
+/// Refuse a handshake that settled on any position unit but the one this client counts.
+///
+/// Shared by both transports on purpose: the self-spawned path asks for [`BYTE_ENCODING`] in its
+/// own capabilities and would be astonished not to get it, while a bridged client was
+/// initialized by someone else and may never have asked at all.
+fn refuse_foreign_encoding(encoding: &str) -> Result<()> {
+    if encoding == BYTE_ENCODING {
+        return Ok(());
+    }
+    Err(failure(format!(
+        "rust-analyzer settled on `{encoding}` positions, and this client counts \
+         `{BYTE_ENCODING}` — every column it converted would be wrong on any line carrying a \
+         character outside the BMP. Refusing rather than resolving anchors against the wrong \
+         unit."
+    )))
+}
+
+/// Every code-action title the server offered, in the order it offered them.
+fn offered_titles(actions: &Value) -> Vec<String> {
+    actions
+        .as_array()
+        .map(|actions| {
+            actions
+                .iter()
+                .filter_map(|action| action.get("title").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The failure to report when a requested assist never arrived inside the budget.
+///
+/// The two causes want opposite advice. A server that answered and offered nothing is a seam
+/// refusal: the reader should look at the range. A server that never answered at all is an index
+/// that was not ready: the reader should look at the budget. Reporting both as an absent assist
+/// sent half of them to rewrite anchors that were never wrong.
+///
+/// What the server *did* offer is named either way, because an assist that is absent under one
+/// title and present under another is otherwise indistinguishable from a range that supports no
+/// refactoring at all.
+fn unresolved_assist(
+    wanted: &str,
+    offered: &[String],
+    answered: bool,
+    waited: Duration,
+    last: String,
+    environment: String,
+) -> RestructureError {
+    if answered {
+        let offered = if offered.is_empty() {
+            "it offered none".to_string()
+        } else {
+            format!("it offered: {}", offered.join(", "))
+        };
+        return failure(format!(
+            "rust-analyzer offers no \"{wanted}\" assist for the given range ({offered})"
+        ));
+    }
+    RestructureError::IndexingIncomplete {
+        seconds: waited.as_secs(),
+        last,
+        environment,
+    }
+}
+
 const MOD_KEYWORD: &str = "mod ";
 
 /// A caret on the `mod` keyword of a module the extraction just wrote.
@@ -4523,6 +4616,61 @@ mod tests {
         assert!(carries_placeholder_type("fn f() -> _ {"));
         assert!(carries_placeholder_type("fn f(value: _) -> f64 {"));
         assert!(carries_placeholder_type("fn f() -> Vec<_> {"));
+    }
+
+    /// A server that answered and offered nothing is a seam refusal; the reader should look at
+    /// the range they asked for.
+    #[test]
+    fn names_the_absent_assist_when_the_server_answered() {
+        // Given a budget that expired after the server had answered
+        let error = unresolved_assist(
+            "extract into function",
+            &["Extract into variable".to_string()],
+            true,
+            Duration::from_secs(30),
+            "indexing".to_string(),
+            "cargo 1.94".to_string(),
+        );
+
+        // Then the failure points at the range
+        match error {
+            RestructureError::MalformedPlan(message) => {
+                assert!(message.contains("extract into function"), "{message}");
+                assert!(message.contains("given range"), "{message}");
+                // The evidence that separates a wrong title from an unrefactorable range.
+                assert!(message.contains("Extract into variable"), "{message}");
+            }
+            other => panic!("expected MalformedPlan, got {other:?}"),
+        }
+    }
+
+    /// A server that never answered is an index that was not ready, and the remedy is the
+    /// budget rather than the anchors.
+    #[test]
+    fn reports_an_incomplete_index_when_the_server_never_answered() {
+        // Given a budget that expired without a single answer
+        let error = unresolved_assist(
+            "extract into function",
+            &[],
+            false,
+            Duration::from_secs(45),
+            "discovering sysroot".to_string(),
+            "cargo 1.94".to_string(),
+        );
+
+        // Then the failure names the budget and where the server got to
+        match error {
+            RestructureError::IndexingIncomplete {
+                seconds,
+                last,
+                environment,
+            } => {
+                assert_eq!(seconds, 45);
+                assert_eq!(last, "discovering sysroot");
+                assert_eq!(environment, "cargo 1.94");
+            }
+            other => panic!("expected IndexingIncomplete, got {other:?}"),
+        }
     }
 
     fn block_of(text: &str) -> (Vec<String>, ModuleBlock) {

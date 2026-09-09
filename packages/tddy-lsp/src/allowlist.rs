@@ -3,6 +3,7 @@
 //! maps a build-target type to a [`Language`] (pure), and [`LspAllowList`] decides policy
 //! (which languages are permitted, and how to launch them).
 
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// A programming language, decoupled from any specific server binary.
@@ -29,6 +30,18 @@ pub struct LaunchSpec {
     pub args: Vec<String>,
     /// Extra environment variables for the server process.
     pub env: Vec<(String, String)>,
+    /// What the client advertises in the `initialize` handshake.
+    ///
+    /// A language server tailors its answers to this, and rust-analyzer in particular returns no
+    /// code actions at all to a client that advertised no `codeAction` support — which is
+    /// indistinguishable from a range that supports no refactoring. Empty by default, because
+    /// the queries this registry was built for (definition, references, hover, symbols) need
+    /// nothing declared.
+    pub capabilities: Value,
+    /// The server's own settings, sent as `initializationOptions` in the same handshake.
+    ///
+    /// Null by default, which leaves the server on its defaults.
+    pub initialization_options: Value,
 }
 
 impl LaunchSpec {
@@ -38,7 +51,21 @@ impl LaunchSpec {
             program: program.into(),
             args: Vec::new(),
             env: Vec::new(),
+            capabilities: Value::Object(Default::default()),
+            initialization_options: Value::Null,
         }
+    }
+
+    /// Advertise `capabilities` in the `initialize` handshake.
+    pub fn with_capabilities(mut self, capabilities: Value) -> Self {
+        self.capabilities = capabilities;
+        self
+    }
+
+    /// Send `options` as the handshake's `initializationOptions`.
+    pub fn with_initialization_options(mut self, options: Value) -> Self {
+        self.initialization_options = options;
+        self
     }
 }
 
