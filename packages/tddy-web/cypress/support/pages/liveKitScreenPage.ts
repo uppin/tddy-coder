@@ -13,11 +13,4 @@ export const liveKitScreenPage = {
   /** The "Connected participants" panel that wraps the roster. */
   participantsPanel: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.connectedParticipantsPanel, { timeout: 5000, ...options }),
-
-  /**
-   * What a deep link lands on when the host is reached over a wire with no presence: the screen
-   * still renders, and names the connection as the reason it has nothing to show.
-   */
-  unavailable: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.livekitUnavailable, { timeout: 5000, ...options }),
 };

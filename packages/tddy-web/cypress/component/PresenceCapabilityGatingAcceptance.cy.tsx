@@ -208,21 +208,24 @@ it("keeps saying the join is in flight rather than blaming a connection that is 
 // The LiveKit screen
 // ---------------------------------------------------------------------------
 
-it("explains the LiveKit screen instead of rendering it dead when reached by link", () => {
-  // Given a host reached without LiveKit
+it("serves the room list on a host with no presence, and says why the roster is missing", () => {
+  // Given a host reached without LiveKit — the desktop over IPC, which reaches its own embedded
+  // daemon and so can be asked what rooms the LiveKit server holds
   const rooms = aDaemonServingOneRoom();
 
-  // When `#/livekit` is opened anyway — a bookmark, or a link from a host that did have presence
+  // When `#/livekit` is opened on it
   mountOn(aHostReachedWithoutLiveKit(rooms.backend), rooms.backend, <LiveKitAppPage onNavigate={cy.stub()} />);
 
-  // Then the screen names the connection as the reason it has nothing to show, and neither panel is
-  // there to sit empty behind it
-  liveKitScreen
+  // Then the room list is there with the server's own view, because that is daemon RPC and does not
+  // need presence at all
+  roomsPanel.room(A_ROOM_ON_THE_SERVER).should("exist");
+
+  // And the half that genuinely is presence names the connection as the reason it is empty, in its
+  // own words on the screen — not by the whole screen refusing to render
+  roster
     .unavailable()
     .should("contain.text", "not available on this connection")
     .and("contain.text", "carries no LiveKit presence");
-  liveKitScreen.participantsPanel().should("not.exist");
-  roomsPanel.panel().should("not.exist");
 });
 
 it("renders the roster and the room list on a host reached over the common room", () => {
@@ -235,21 +238,21 @@ it("renders the roster and the room list on a host reached over the common room"
   // Then both panels are there, exactly as before this node
   liveKitScreen.participantsPanel().should("be.visible");
   roomsPanel.room(A_ROOM_ON_THE_SERVER).should("exist");
-  liveKitScreen.unavailable().should("not.exist");
 });
 
-it("asks the daemon for no rooms feed at all when the connection has no presence", () => {
+it("asks the daemon for the rooms feed over a wire that carries no presence", () => {
   // Given a host reached without LiveKit
   const rooms = aDaemonServingOneRoom();
 
   // When the LiveKit screen is opened on it
   mountOn(aHostReachedWithoutLiveKit(rooms.backend), rooms.backend, <LiveKitAppPage onNavigate={cy.stub()} />);
 
-  // Then the panel is not merely hidden: the stream behind it is never subscribed, so the daemon is
-  // not left serving a feed for a panel nobody can see
-  liveKitScreen.unavailable().should("be.visible");
+  // Then the feed is opened, because what it needs is a daemon client and this wire has one. The
+  // stream is the point: without it the panel would be showing nothing on the one build whose
+  // operator has no other way to see the server's rooms
+  roomsPanel.room(A_ROOM_ON_THE_SERVER).should("exist");
   cy.wrap(rooms).should((feed) => {
-    expect(feed.roomsStreamCount()).to.equal(0);
+    expect(feed.roomsStreamCount()).to.equal(1);
   });
 });
 
@@ -277,7 +280,7 @@ it("keeps the rooms panel in place, unsubscribed, while the common room is still
 // The navigation entry
 // ---------------------------------------------------------------------------
 
-it("removes the LiveKit entry from the navigation menu on a connection with no presence", () => {
+it("keeps the LiveKit entry on a connection with no presence", () => {
   // Given a host reached without LiveKit
   const backend = aConnectionServiceBackend();
   mountOn(aHostReachedWithoutLiveKit(backend), backend, <DaemonNavMenu onNavigate={cy.stub()} />);
@@ -285,8 +288,8 @@ it("removes the LiveKit entry from the navigation menu on a connection with no p
   // When the operator opens the menu
   shell.openMenu();
 
-  // Then the entry is gone rather than present-and-dead, and every other entry is untouched — the
-  // full list is asserted, so a removal that took a neighbour with it fails here
+  // Then the entry is offered, because the screen behind it has the room list to show on this wire.
+  // The full list is asserted, so a change that took a neighbour with it fails here
   shell
     .menuItemLabels()
     .should("deep.equal", [
@@ -297,10 +300,11 @@ it("removes the LiveKit entry from the navigation menu on a connection with no p
       "Models & Agents",
       "Hosts",
       "VMs",
+      "LiveKit",
       "RPC Playground",
       "Settings",
     ]);
-  shell.livekitItem().should("not.exist");
+  shell.livekitItem().should("be.visible");
 });
 
 it("keeps the LiveKit entry while the common room is still being joined", () => {

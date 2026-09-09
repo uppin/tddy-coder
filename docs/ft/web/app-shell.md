@@ -62,13 +62,13 @@ screen can render without the navigation menu.
 The former separate "Sessions" (`#/`) and "Sessions (new)" (`#/sessions`) items are
 collapsed into the single **Sessions** entry.
 
-**The LiveKit entry is offered only where it leads somewhere.** The whole screen is participant
-presence, so on a selected host reached over a wire that carries none, the entry is **removed from
-the menu** rather than shown disabled — a menu item that cannot be used is worse than one that is
-not there. The entry and the screen read the same rule, so they cannot disagree about what the
-operator is being told: while the common room is still being joined, or has failed to join, the
-entry stays, because the screen it points at is where the reason for a failed join is reported. See
-[capability gating](../../../packages/tddy-web/docs/capability-gating.md).
+**The LiveKit entry is always offered.** It was once removed on a host reached over a wire that
+carries no presence, on the reading that the whole screen was participant presence — but only the
+roster is. The room list beside it is plain daemon RPC and shows the LiveKit server's own view of
+its rooms on every connection the menu can be rendered for, the desktop's own host over IPC
+included. Since the screen always leads somewhere, the rule that removed the entry no longer has a
+case to answer, and the missing half explains itself on the screen where the operator can see which
+half it is. See [capability gating](../../../packages/tddy-web/docs/capability-gating.md).
 
 ## Default route
 
