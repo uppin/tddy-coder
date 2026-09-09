@@ -264,7 +264,9 @@ async fn honours_a_request_timeout_raised_after_the_client_was_built() {
     // Given a bound service whose per-request wait has been shortened
     let registry = registry();
     let service = bound_service(&registry).await;
-    service.client.set_request_timeout(Duration::from_millis(150));
+    service
+        .client
+        .set_request_timeout(Duration::from_millis(150));
 
     // When a request the fake never answers is issued
     let started = std::time::Instant::now();

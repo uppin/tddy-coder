@@ -89,9 +89,7 @@ fn handle_message(message: &Value, hang: bool) {
         "textDocument/diagnostic" => reply(id, pull_diagnostic_result()),
         // rust-analyzer answers a request issued against a document it has since seen change
         // with `ContentModified` rather than a result. The client must surface it as an error.
-        "textDocument/codeAction" => {
-            reply_error(id, FAKE_CONTENT_MODIFIED, "content modified")
-        }
+        "textDocument/codeAction" => reply_error(id, FAKE_CONTENT_MODIFIED, "content modified"),
         // Sends nothing back, so the only thing that ends the wait is the request timeout.
         "tddy/neverAnswers" => {}
         "workspace/diagnostic" => reply(id, workspace_diagnostic_result()),

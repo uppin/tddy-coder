@@ -65,8 +65,7 @@ fn a_key(key_type: &str, comment: &str) -> AgentKey {
 }
 
 fn a_config_mapping_ada() -> crate::config::DaemonConfig {
-    let yaml =
-        format!("users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{OS_USER}\"\n");
+    let yaml = format!("users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{OS_USER}\"\n");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.yaml");
     std::fs::write(&path, yaml).unwrap();

@@ -110,9 +110,7 @@ async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorkspace {
     let provisioner = Arc::new(RecordingProvisioner::default());
     let sandbox_double = Arc::clone(&provisioner.sandbox);
     let service = test_service(sessions.path().to_path_buf())
-        .with_workspace_sandbox_provisioner(
-            provisioner as Arc<dyn WorkspaceSandboxProvisioner>,
-        );
+        .with_workspace_sandbox_provisioner(provisioner as Arc<dyn WorkspaceSandboxProvisioner>);
 
     let started = service
         .start_session(Request::new(StartSessionRequest {
@@ -209,8 +207,7 @@ async fn a_roster_agents_shell_on_a_sandboxed_workspace_session_goes_through_the
 /// The control: on an unsandboxed workspace session the agent still reaches the host worktree
 /// directly, so the assertions above are about the sandbox flag and not about roster agents.
 #[tokio::test]
-async fn a_roster_agents_mutation_on_an_unsandboxed_workspace_session_reaches_the_host_worktree(
-) {
+async fn a_roster_agents_mutation_on_an_unsandboxed_workspace_session_reaches_the_host_worktree() {
     // Given
     let workspace = a_sandboxed_workspace_session(false).await;
 

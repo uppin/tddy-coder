@@ -7,8 +7,8 @@
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, git_output, hash_touched_files};
 use crate::backends::RustBackend;
 use crate::journal::{Journal, JournalRecord, OpStatus, ResumeDecision};
-use crate::registry::{BackendRegistry, Workspace};
 use crate::plan::RefactorKind;
+use crate::registry::{BackendRegistry, Workspace};
 use crate::{LedgerCheckpoint, Overlay, Plan, PositionLedger, RestructureError, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -2,9 +2,7 @@ use super::*;
 
 /// A daemon config with GitHub auth enabled and, when `api_secret` is `Some`, a LiveKit
 /// secret that signs/verifies session tokens. Maps GitHub login "u" to OS user "u".
-fn a_daemon_config(
-    api_secret: Option<&str>,
-) -> (crate::config::DaemonConfig, tempfile::TempDir) {
+fn a_daemon_config(api_secret: Option<&str>) -> (crate::config::DaemonConfig, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let livekit = match api_secret {
         Some(s) => format!("livekit:\n  api_secret: \"{s}\"\n"),

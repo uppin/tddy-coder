@@ -129,8 +129,7 @@ impl DaemonBuilder {
     fn build(self) -> ConnectionServiceImpl {
         let temp = tempfile::tempdir().unwrap();
         let base = temp.path().to_path_buf();
-        let sessions_base_resolver: SessionsBaseResolver =
-            Arc::new(move |_| Some(base.clone()));
+        let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
         let user_resolver: SessionUserResolver = Arc::new(|token| {
             (token == VERIFIABLE_TOKEN).then(|| SIGNED_IN_GITHUB_USER.to_string())
         });

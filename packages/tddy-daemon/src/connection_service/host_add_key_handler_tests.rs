@@ -73,11 +73,7 @@ impl RecordingAgent {
 }
 
 impl SshAgentKeyAdder for RecordingAgent {
-    fn add_identity(
-        &self,
-        _os_user: &str,
-        identity: &PrivateKey,
-    ) -> Result<(), AgentAddFailure> {
+    fn add_identity(&self, _os_user: &str, identity: &PrivateKey) -> Result<(), AgentAddFailure> {
         self.added
             .lock()
             .expect("the recording lock is only held to push a fingerprint")

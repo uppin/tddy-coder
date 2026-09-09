@@ -43,9 +43,7 @@ fn a_sighting_of(instance_id: &str) -> HostSighting {
     )
 }
 
-fn a_config_naming_this_daemon(
-    daemon_instance_id: Option<&str>,
-) -> crate::config::DaemonConfig {
+fn a_config_naming_this_daemon(daemon_instance_id: Option<&str>) -> crate::config::DaemonConfig {
     let mut yaml = "users:\n  - github_user: \"u\"\n    os_user: \"u\"\n".to_string();
     if let Some(id) = daemon_instance_id {
         // The desktop ships this pair, and it is what made one machine show up twice.

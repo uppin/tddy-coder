@@ -728,7 +728,10 @@ mod tests {
         // Then the waiting request is handed the error, not an empty success
         let delivered = rx.blocking_recv().expect("a response was delivered");
         let error = delivered.expect_err("a JSON-RPC error must not arrive as a result");
-        assert_eq!((error.code, error.message.as_str()), (-32801, "content modified"));
+        assert_eq!(
+            (error.code, error.message.as_str()),
+            (-32801, "content modified")
+        );
     }
 
     #[test]
@@ -752,7 +755,10 @@ mod tests {
 
         // Then the result arrives unchanged
         let delivered = rx.blocking_recv().expect("a response was delivered");
-        assert_eq!(delivered.expect("a successful result"), json!({ "ok": true }));
+        assert_eq!(
+            delivered.expect("a successful result"),
+            json!({ "ok": true })
+        );
     }
 
     #[test]

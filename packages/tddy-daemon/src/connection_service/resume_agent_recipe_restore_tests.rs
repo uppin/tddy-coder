@@ -2,8 +2,7 @@ use super::resume_agent_and_recipe;
 use tddy_core::SessionMetadata;
 
 fn metadata_from_yaml(yaml: &str) -> SessionMetadata {
-    serde_yaml::from_str(yaml)
-        .expect("test metadata YAML must deserialize into SessionMetadata")
+    serde_yaml::from_str(yaml).expect("test metadata YAML must deserialize into SessionMetadata")
 }
 
 #[test]

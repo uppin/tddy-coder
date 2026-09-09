@@ -432,8 +432,7 @@ async fn next_replay_frame(
         .expect("no replay frame arrived within the timeout")
         .expect("replay stream closed unexpectedly")
         .expect("replay stream yielded an error");
-    prost::Message::decode(&envelope.acp_agent_message[..])
-        .expect("decode inner AcpAgentMessage")
+    prost::Message::decode(&envelope.acp_agent_message[..]).expect("decode inner AcpAgentMessage")
 }
 
 /// The text of an `agent_message_chunk` ACP frame (panics on any other shape).
@@ -867,8 +866,7 @@ async fn get_acp_tool_call_detail_returns_the_full_tool_bodies() {
     let raw_input: serde_json::Value =
         serde_json::from_str(&detail.raw_input.expect("raw_input")).expect("raw_input is JSON");
     let raw_output: serde_json::Value =
-        serde_json::from_str(&detail.raw_output.expect("raw_output"))
-            .expect("raw_output is JSON");
+        serde_json::from_str(&detail.raw_output.expect("raw_output")).expect("raw_output is JSON");
     assert_eq!(raw_input, serde_json::json!({ "path": "src/main.rs" }));
     assert_eq!(raw_output, serde_json::json!({ "content": "fn main() {}" }));
 }
@@ -919,10 +917,7 @@ fn a_session_recording(sessions_base: &std::path::Path, session_id: &str, entry_
     for n in 1..=entry_count {
         tddy_service::acp_replay::append_acp_frame(
             &session_dir,
-            &tddy_service::acp_replay::agent_text_frame(
-                &format!("Entry {n}"),
-                1_000 * n as i64,
-            ),
+            &tddy_service::acp_replay::agent_text_frame(&format!("Entry {n}"), 1_000 * n as i64),
         )
         .unwrap();
     }
@@ -1086,8 +1081,7 @@ fn a_running_record(call_id: &str, tool_name: &str) -> AgentActivityRecord {
 /// that entry's position — the two records coalesce into one transcript row, and a live reader
 /// must be able to replace the row it already placed rather than append a second one.
 #[tokio::test]
-async fn stream_acp_replay_gives_a_tool_calls_terminal_record_the_position_of_its_running_record(
-) {
+async fn stream_acp_replay_gives_a_tool_calls_terminal_record_the_position_of_its_running_record() {
     // Given a session whose transcript holds two entries, streamed tail-first.
     let temp = tempfile::tempdir().unwrap();
     let sessions_base = temp.path().to_path_buf();

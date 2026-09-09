@@ -122,8 +122,8 @@ async fn add_planned_pr_succeeds_for_a_pr_stack_orchestrator_session() {
     let resp = result
         .expect("a pr-stack orchestrator session must be accepted")
         .into_inner();
-    let parsed: serde_json::Value = serde_json::from_str(&resp.stack_plan_json)
-        .expect("stack_plan_json must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&resp.stack_plan_json).expect("stack_plan_json must be valid JSON");
     assert_eq!(parsed["nodes"][0]["node_id"], "n1");
     assert_eq!(parsed["nodes"][0]["title"], "Add auth middleware");
     assert_eq!(parsed["nodes"][0]["parents"], serde_json::json!([]));
