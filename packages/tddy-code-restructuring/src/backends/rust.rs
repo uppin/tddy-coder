@@ -903,6 +903,18 @@ impl RustBackend {
         )
     }
 
+    /// Whether the server can type a position — the cheapest proxy for "inference is ready here".
+    ///
+    /// Hover is answered from inference rather than from the syntax tree, so a null hover on a
+    /// position that certainly has a type means the server has not typed this body yet.
+    fn inference_ready_at(&mut self, uri: &str, at: Position) -> Result<bool> {
+        let hover = self.request_settled(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": uri }, "position": lsp_position(at) }),
+        )?;
+        Ok(!hover.is_null())
+    }
+
     /// Ask for a named assist, retrying while the crate graph is still loading.
     fn assist(&mut self, uri: &str, range: Range, kind: RefactorKind) -> Result<Value> {
         let assist = assist_for(kind)
@@ -948,10 +960,21 @@ impl RustBackend {
                 return Ok(action);
             }
             if Instant::now() >= deadline {
+                // An assist that needs inference is absent for two indistinguishable reasons:
+                // the range does not support it, or inference is not ready *there*. `indexed` is
+                // a whole-file flag set from a hover on the file's first symbol, which on a
+                // large module says nothing about a body thousands of lines further down. So
+                // ask at the range itself before blaming the plan.
+                let inference = if answered && assist.needs_inference {
+                    Some(self.inference_ready_at(uri, target.start)?)
+                } else {
+                    None
+                };
                 return Err(unresolved_assist(
                     wanted,
                     &offered,
                     answered,
+                    inference,
                     started.elapsed(),
                     self.chatter
                         .last
@@ -2102,10 +2125,30 @@ fn unresolved_assist(
     wanted: &str,
     offered: &[String],
     answered: bool,
+    inference_ready: Option<bool>,
     waited: Duration,
     last: String,
     environment: String,
 ) -> RestructureError {
+    // The server answered, but only from the syntax tree: it cannot yet type the range, so the
+    // assist that needs inference was never going to be in the list. That is a budget problem,
+    // not a plan problem, and reporting it as an absent assist sends the reader to rewrite an
+    // anchor that was correct.
+    if answered && inference_ready == Some(false) {
+        return RestructureError::IndexingIncomplete {
+            seconds: waited.as_secs(),
+            last: format!(
+                "{last} — the server answered `codeAction` but could not type the range, so \
+                 `{wanted}` (which needs type inference) was never offered; it offered only {}",
+                if offered.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    offered.join(", ")
+                }
+            ),
+            environment,
+        };
+    }
     if answered {
         let offered = if offered.is_empty() {
             "it offered none".to_string()
@@ -2824,6 +2867,11 @@ fn position_at(text: &str, offset: usize) -> Value {
     let line = before.matches('\n').count();
     let character = before.rsplit('\n').next().map_or(0, str::len);
     json!({ "line": line, "character": character })
+}
+
+/// One position in LSP's zero-based coordinates.
+fn lsp_position(at: Position) -> Value {
+    json!({ "line": at.line - 1, "character": at.col - 1 })
 }
 
 fn lsp_range(range: Range) -> Value {
@@ -4682,6 +4730,7 @@ mod tests {
             "extract into function",
             &["Extract into variable".to_string()],
             true,
+            Some(true),
             Duration::from_secs(30),
             "indexing".to_string(),
             "cargo 1.94".to_string(),
@@ -4699,6 +4748,34 @@ mod tests {
         }
     }
 
+    /// The case that cost hours: the server answers `codeAction` from the syntax tree while it
+    /// still cannot type the range, so an assist needing inference is absent for a reason that
+    /// has nothing to do with the range. Reported as an absent assist, it reads as a plan defect.
+    #[test]
+    fn reports_an_incomplete_index_when_the_range_could_not_be_typed() {
+        // Given a server that answered with syntax-level assists but could not type the range
+        let error = unresolved_assist(
+            "extract into function",
+            &["Extract into variable".to_string()],
+            true,
+            Some(false),
+            Duration::from_secs(120),
+            "working (100%)".to_string(),
+            "cargo 1.94".to_string(),
+        );
+
+        // Then it is an indexing problem, and it says why the assist was never offered
+        match error {
+            RestructureError::IndexingIncomplete { seconds, last, .. } => {
+                assert_eq!(seconds, 120);
+                assert!(last.contains("could not type the range"), "{last}");
+                assert!(last.contains("needs type inference"), "{last}");
+                assert!(last.contains("Extract into variable"), "{last}");
+            }
+            other => panic!("expected IndexingIncomplete, got {other:?}"),
+        }
+    }
+
     /// A server that never answered is an index that was not ready, and the remedy is the
     /// budget rather than the anchors.
     #[test]
@@ -4708,6 +4785,7 @@ mod tests {
             "extract into function",
             &[],
             false,
+            None,
             Duration::from_secs(45),
             "discovering sysroot".to_string(),
             "cargo 1.94".to_string(),
