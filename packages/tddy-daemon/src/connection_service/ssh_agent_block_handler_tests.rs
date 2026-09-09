@@ -1,4 +1,7 @@
 use super::*;
+// Reached through `use super::*` until the proto converters moved to `host_messages`, whose
+// facade cannot re-export a name the module merely imports. Bound here instead.
+use tddy_service::proto::connection::{ProbeOutcome as ProtoProbeOutcome, SshAgentKey};
 use crate::host_tooling::{
     GitIdentity, GithubCliStatus, HostTooling, HostToolingProbe, ProbeOutcome,
 };

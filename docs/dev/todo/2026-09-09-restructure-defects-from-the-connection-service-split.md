@@ -1,5 +1,10 @@
 # Restructure defects found by the `connection_service.rs` split
 
+> **Status: D6, D7, D8 and D9 are fixed** (branch `feature/connection-service-split/lsp-settle-budget`).
+> D8's fix is proven end-to-end: the four seams it blocked now apply, and the run writes the five
+> aliased `use` lines rust-analyzer could never offer. Kept as the record of what each defect was
+> and how it presented, because each one presented as something it was not.
+
 **Date:** 2026-09-09
 **Found by:** applying `plan-4-free-items` / `plan-5-seed-and-stack` to
 `packages/tddy-daemon/src/connection_service.rs` (17,605 lines).
@@ -28,10 +33,10 @@ extraction *placeholder* occurs more often after the assist than before. That ch
 placeholder name (`modname`, `fun_name`), not to rewritten references, so a mangled *reference*
 passes it.
 
-**Suggested guard, cheap and targeted.** The backend knows the set of names it moved. After the
-assist, every `<modname>::<Ident>` it wrote should have `Ident` in that set; an `Ident` that is not
-is a mangled rewrite, and the operation should refuse and name the line. That catches this exactly,
-costs one pass over the produced text, and needs no server round trip.
+**Fixed** by `refuse_mangled_rewrite`, exactly as suggested: the backend knows the set of names it
+moved, so every `<modname>::<Ident>` it wrote must have `Ident` in that set. One pass over the
+produced text, no server round trip. A path through any other module is not weighed, including one
+whose qualifier merely ends with this module's name.
 
 Rust identifiers must resolve, so this class is loud rather than silent — the compiler caught it.
 That is luck about Rust, not a property of the tool.
@@ -55,9 +60,10 @@ and inert.
 The named import is also **redundant**: the glob brings the name into the parent's own scope, which
 is why deleting it compiles.
 
-**Suggested fix.** When a seam carries a facade, the import pass must not add a named import to the
-parent for any symbol that facade re-exports. Alternatively, emit such an import as `pub use`. The
-first is better — it is one fewer binding, and the facade is already the declared mechanism.
+**Fixed** by `facade_will_bind`, taking the first option: `restore_imports` now receives the moved
+items and the reexport kind, and treats a name the facade will re-export as needing no import. The
+predicate mirrors `facade_lines` — a glob covers everything the module holds, a named facade only
+the top-level items something outside reaches.
 
 ## D8 — an aliased import cannot be reconstructed, and four seams are blocked on it
 
@@ -87,8 +93,21 @@ It blocks four planned seams: `host_messages`, `activity_hub`, `hooks_and_urls`,
 2. Qualify the aliased names in the seam before extracting (mechanical, per-seam, hand-edited).
 3. Drop the aliases at source and use the unaliased names throughout — a large, unrelated diff.
 
-Option 1 is the one worth building: without it, any seam touching a proto type in this crate is
-unreachable, which is most of them.
+**Fixed** by `alias_target` / `aliased_bindings` / `with_module_import`, taking option 1. When a
+name is unresolved in moved code and the parent's own `use` tree binds it via `as`, the binding is
+reconstructed from that declaration and written as the module's first line — no server involvement,
+because the server reports what a path resolves to and not what a file chose to call it. Only
+declarations outside the module count, and `as _` binds no name so it contributes none.
+
+Proven on the four seams it blocked (992 lines), which now apply and receive:
+
+```rust
+use tddy_service::proto::connection::ProbeOutcome as ProtoProbeOutcome;      // host_messages
+use tddy_service::proto::connection::AgentActivityRecord as ProtoAgentActivityRecord;
+use std::sync::Mutex as StdMutex;                                            // activity_hub
+use tddy_service::proto::connection::ProjectEntry as ProtoProjectEntry;      // hooks_and_urls
+use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
+```
 
 ## What this says about the order of work
 
@@ -96,3 +115,37 @@ unreachable, which is most of them.
 inference-readiness wall that stops `extract_method`), and it has now applied 41 times on this file.
 The remaining obstacles are all in the **import-restoration pass**, not in the assist or the
 anchors. D8 then D7 then D6 is the order that unblocks the most lines per unit of work.
+
+
+## D9 — a `pub` glob facade over a module that publishes nothing
+
+Found while validating the D8 fix. `facade_lines` emitted `pub use <module>::*;` unconditionally,
+but the assist rewrites what it relocates to `pub(crate)`, so a seam of private items produced a
+`pub` glob re-exporting nothing:
+
+```
+error: glob import doesn't reexport anything with visibility `pub`
+       because no imported item is public enough
+   --> connection_service.rs:781:9  |  pub use host_messages::*;
+```
+
+`clippy::unused_imports` names it, and under `-D warnings` it fails the build the restructure was
+supposed to leave green — so this is not cosmetic.
+
+**Fixed** by `widest_visibility`: `pub use` where some relocated item is `pub`, `pub(crate) use`
+otherwise. `pub(crate)` is the right default — a seam that moved nothing public has nothing to
+publish, and it is both what the assist widened its members to and how the parent's own dependents
+reach the facade.
+
+## What a facade still cannot do, and it is worth stating
+
+A glob facade re-exports the module's **items**. It cannot re-export a name the module merely
+**imports**, because a private `use` is not a re-export. So a child of the parent — one of the 29
+extracted test modules, reaching names through `use super::*` — loses any name that was a *parent
+import* consumed by moved code and pruned when that code left.
+
+That is what `ssh_agent_block_handler_tests.rs` hit for `SshAgentKey` and `ProtoProbeOutcome`. The
+fix is local and belongs in the test file (bind the two names there), not in the parent, which no
+longer uses either in its lib target — carrying them would trade a resolution error for an
+unused-import error. Worth knowing before the next seam: **check the extracted test modules, not
+only the lib, after a seam that moves proto converters.**
