@@ -37,3 +37,46 @@ export const hostsScreenPage = {
   localMarker: (instanceId: string) => byTestId(`hosts-local-marker-${instanceId}`),
   navEntry: () => byTestId(TEST_IDS.shellMenuHosts),
 };
+
+/**
+ * Telemetry cell accessors — added by `#hosts-screen 2/8`.
+ *
+ * Every selector, `data-` attribute and presentation glyph the telemetry cell renders lives here,
+ * so a test body reads as behaviour rather than as DOM. The `expect*` helpers exist for the same
+ * reason: `data-core-{n}` is the cell's contract with this page object, not something a test should
+ * spell out.
+ */
+export const hostTelemetryPage = {
+  cell: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry`),
+  cpu: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-cpu`),
+  disk: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-disk`),
+  unavailable: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-unavailable`),
+  /** A reading arrived carrying disk but no CPU — the CPU slot alone is still waiting. */
+  cpuPending: (instanceId: string) => byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-cpu-pending`),
+  /** Subscribed, but the host has not reported a reading yet. */
+  pending: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-pending`),
+  /** Not in the roster — distinct from "reachable but silent", and never a number. */
+  offline: (instanceId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${instanceId}-telemetry-offline`),
+
+  /** Assert the per-core percentages the row is showing, core 0 first. */
+  expectCpuCores: (instanceId: string, percents: number[]) => {
+    percents.forEach((percent, index) => {
+      hostTelemetryPage
+        .cpu(instanceId)
+        .should("have.attr", `data-core-${index}`, String(percent));
+    });
+  },
+
+  /** Assert the free-disk figure the row is showing, as an operator reads it. */
+  expectFreeDisk: (instanceId: string, formatted: string) =>
+    hostTelemetryPage.disk(instanceId).should("contain.text", formatted),
+
+  /** Assert the row is showing no reading at all — neither metric rendered. */
+  expectNoReading: (instanceId: string) => {
+    hostTelemetryPage.cpu(instanceId).should("not.exist");
+    hostTelemetryPage.disk(instanceId).should("not.exist");
+  },
+};

@@ -56,6 +56,11 @@ Disk and CPU figures describe the **currently selected daemon's** host (the daem
 the daemon selector). Switching the selected daemon re-fetches and re-renders the figures for
 the newly selected host.
 
+The footer shares `useHostStats` with the Hosts screen, which reads a host per row
+([`hosts-screen-telemetry.md`](./hosts-screen-telemetry.md)). The hook's zero-argument call is the
+footer's: it follows the selector and opens one subscription, independently of any the Hosts screen
+holds.
+
 ### Available disk space
 
 - Reports **available** and **total** bytes for the filesystem that contains the daemon's
