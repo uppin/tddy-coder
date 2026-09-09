@@ -4,16 +4,27 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 
 ## Where the code lives
 
-`src/connection_service.rs` holds the service — the `ConnectionServiceImpl` struct, its inherent
-impls, the `ConnectionService` trait impl carrying the RPC handlers, and the free helpers they share.
+`src/connection_service.rs` is a facade: the crate-facing `use` header, a `mod` declaration per
+submodule, and a `pub use` re-export for the families whose symbols are named from outside. Everything
+else lives in `src/connection_service/`.
 
-Its **tests live in `src/connection_service/`**, one file per module, declared from the parent as
-`#[cfg(test)] mod <name>;`. Each reaches the code under test through `use super::*`, so a name the
-parent only *imports* — rather than defines — has to be bound in the test file itself, or under
-`#[cfg(test)]` in the parent where several test modules need it. The naming says what a file covers:
-`host_add_key_handler_tests.rs`, `agent_activity_unit_tests.rs`, `workspace_start_request_unit_tests.rs`.
+| Group | Files | What is in them |
+|---|---|---|
+| `rpc_service.rs` | 1 | `impl ConnectionService for ConnectionServiceImpl` — every RPC handler, and the `type …Stream` associated types |
+| `svc_*.rs` | 17 | the inherent `impl ConnectionServiceImpl` blocks, each named after the first method it carries — `svc_start_session_core`, `svc_provision_agent_clone`, `svc_resolve_os_user`, … |
+| `*_handler.rs`, `*_impl.rs` | 4 | trait impls for the service's helper types: `child_spawn_handler`, `conversation_spawn_handler`, `daemon_rpc_handler`, `terminal_bridge_impl` |
+| families | 8 | free items grouped by what they serve: `service_util`, `host_messages`, `activity_hub`, `stack_parent`, `seed_codebase`, `seeded_clone_guard`, `hooks_and_urls`, `agent_roster` |
+| `*_tests.rs` | 29 | one file per test module, declared `#[cfg(test)] mod <name>;` |
 
-Add a test to the file that owns its area; add a new area as a new file plus its `mod` line.
+**Where to put new code.** A new RPC handler is a method on the trait impl in `rpc_service.rs`, with
+its body in whichever `svc_*` block owns that area — or a new one, which is a `}` / `impl
+ConnectionServiceImpl {` pair plus a `mod` line. A new free helper joins the family it serves. A test
+joins the `*_tests.rs` file covering its area, or a new file plus its `mod` line.
+
+**Two rules the module boundary imposes.** A method reached from another `impl` block is `pub(crate)`,
+because the blocks are separate modules now. And a facade re-exports a module's **items**, not its
+imports — so a name the parent only *imports* is not reachable from a child through `use super::*`:
+bind it in the child, or under `#[cfg(test)]` in the parent where only its test modules need it.
 
 ## Endpoints
 
