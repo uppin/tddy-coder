@@ -19,7 +19,7 @@
  */
 
 import { useState } from "react";
-import { ProbeOutcome, type HostRemoteDesktop } from "../../gen/connection_pb";
+import { ProbeOutcome, type HostRemoteDesktop } from "../../gen/host_pb";
 import { Protocol } from "../../gen/screen_sharing_pb";
 import { useHostConnection } from "../../rpc/connections/registry";
 import { useHasCapability } from "../../rpc/connections/useHasCapability";

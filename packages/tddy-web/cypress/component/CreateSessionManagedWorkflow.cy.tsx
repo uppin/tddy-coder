@@ -12,6 +12,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import { TEST_IDS, byTestId, createSessionAgentOption } from "../support/testIds";
 
 /** The daemon serving this form. Agents are offered — and submitted — as `<name>@<host>`, since a
@@ -51,9 +52,12 @@ function aCreateSessionBackend() {
 
 function mountCreatePane(backend: ReturnType<typeof aCreateSessionBackend>) {
   const client = createClient(ConnectionService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <CreateSessionPane
       client={client}
+      worktreeClient={worktreeClient}
       sessionToken="tok"
       onCancel={cy.stub()}
       onCreated={cy.stub()}

@@ -45,12 +45,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   AddHostKeyOutcome,
-  ConnectionService,
+  HostService,
   ProbeOutcome,
   type AddHostKeyResponse,
   type HostKeyCandidate,
   type HostSshAgent,
-} from "../../gen/connection_pb";
+} from "../../gen/host_pb";
 import { useHostClient } from "../../rpc/connections/registry";
 import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -138,7 +138,7 @@ export function HostAddKeyAction({
   instanceId,
   sshAgent,
 }: HostAddKeyActionProps): React.ReactElement | null {
-  const client = useHostClient(ConnectionService, instanceId);
+  const client = useHostClient(HostService, instanceId);
   const { sessionToken } = useAuthContext();
   const [subject, setSubject] = useState("");
   const [adding, setAdding] = useState(false);

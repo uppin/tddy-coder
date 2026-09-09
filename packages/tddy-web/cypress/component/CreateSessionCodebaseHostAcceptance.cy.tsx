@@ -19,6 +19,7 @@ import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { createSessionPage } from "../support/pages/createSessionPage";
@@ -94,10 +95,13 @@ function aCreateSessionBackend(offeredAgents: OfferedAgent[] = []): InMemoryRpcB
 
 function mountCreatePane(backend: InMemoryRpcBackend) {
   const client = createClient(ConnectionService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, backend.transport());
   cy.mount(
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={AGENT_HOST}>
       <CreateSessionPane
         client={client}
+        worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={cy.stub()}

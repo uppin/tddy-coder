@@ -1,7 +1,7 @@
 /**
  * Cypress component acceptance: Worktrees manager screen — lazy, streamed disk usage.
  *
- * `WorktreesAppPage` subscribes to `ConnectionService.StreamWorktreeStats` (daemon-routed, over the
+ * `WorktreesAppPage` subscribes to `WorktreeService.StreamWorktreeStats` (daemon-routed, over the
  * shared common-room LiveKit connection) and renders each worktree's size lifecycle live: a first
  * snapshot frame lists every worktree with its status, then per-worktree "updated" frames flip a
  * worktree from Calculating/None to Cached carrying its byte count. The screen also drives
@@ -9,13 +9,13 @@
  *
  * Feature: docs/ft/web/worktree-disk-usage-streaming.md
  *
- * The in-memory `ConnectionService` backend stubs the stream; assertions on what the daemon received
+ * The in-memory backend stubs the stream; assertions on what the daemon received
  * read from its recording spies, never from wire format.
  */
 
 import React from "react";
 import { WorktreesAppPage } from "../../src/components/worktrees/WorktreesAppPage";
-import { WorktreeSizeStatus } from "../../src/gen/connection_pb";
+import { WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import {

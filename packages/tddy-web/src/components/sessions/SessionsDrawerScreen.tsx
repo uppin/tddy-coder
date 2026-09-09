@@ -8,6 +8,7 @@ import {
   type SessionEntry,
   type ProjectEntry,
 } from "../../gen/connection_pb";
+import { WorktreeService } from "../../gen/worktree_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemonClientFor, useDaemons, useSelectedDaemon } from "../../rpc/selectedDaemon";
@@ -80,6 +81,12 @@ export function SessionsDrawerScreen({
   // The selected-daemon `client` still owns the CREATE flow (a new session is created on the
   // selected host); cross-host interaction routes through `activeClient` (computed below).
   const client = useDaemonClient(ConnectionService);
+  // The worktree RPCs left `ConnectionService` for `worktree.WorktreeService`, so they need their
+  // own client — the same daemon, over the same wire, addressed under the service that now serves
+  // them. It follows `client`'s routing exactly (selected daemon here, owning host in
+  // `activeWorktreeClient` below) so the pane and its worktree reads cannot disagree about which
+  // host they are talking to.
+  const worktreeClient = useDaemonClient(WorktreeService);
 
   // One daemon-level notification feed for the whole drawer, however many rows it has (NFR1). The
   // hook's only output is the write into `sessionNotificationRegistry`, which each row reads for
@@ -429,6 +436,7 @@ export function SessionsDrawerScreen({
     [selectedSession, selectedInstanceId],
   );
   const activeClient = useDaemonClientFor(ConnectionService, selectedOwningHost);
+  const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
   // The same daemon as a connection rather than as a client: attaching a session opens a connection
   // on its host, and the spawned-child runtimes attach theirs on the same one.
   const activeHost = useHostConnection(selectedOwningHost);
@@ -832,6 +840,11 @@ export function SessionsDrawerScreen({
               onTerminate={handleTerminate}
               isCreating={mode === "creating"}
               client={mode === "creating" ? (client ?? undefined) : (activeClient ?? client ?? undefined)}
+              worktreeClient={
+                mode === "creating"
+                  ? (worktreeClient ?? undefined)
+                  : (activeWorktreeClient ?? worktreeClient ?? undefined)
+              }
               host={activeHost}
               sessionToken={sessionToken}
               onCancelCreate={handleCancelCreate}

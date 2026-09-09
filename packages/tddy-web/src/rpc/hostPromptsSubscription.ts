@@ -20,7 +20,7 @@
  * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
 
-import type { HostPromptKind } from "../gen/connection_pb";
+import type { HostPromptKind } from "../gen/host_pb";
 
 /**
  * The part of a `HostPromptEvent` this loop passes on — structurally satisfied by the generated

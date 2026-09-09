@@ -22,6 +22,7 @@ import {
   StartSessionEventSchema,
   type StartSessionRequest,
 } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
 import { mountWithRecordingLiveKitRpc } from "../support/rpc/recordingLiveKitRpc";
@@ -176,6 +177,8 @@ function aBackendRefusingTheFirstStartAsABranchConflict(
 
 function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("onCreated")) {
   const client = createClient(ConnectionService, backend.transport());
+  // The same host over the same wire, under the service that now serves the worktree RPCs.
+  const worktreeClient = createClient(WorktreeService, backend.transport());
   // Both hosts answer over the same backend: the form reads every advertised host's agent catalog
   // (`ListAgents` has no routing field, so each host is asked for itself), and a host that cannot be
   // asked offers no agent for a session moved onto it.
@@ -183,6 +186,7 @@ function mountCreatePane(backend: InMemoryRpcBackend, onCreated = cy.stub().as("
     <SelectedDaemonProvider room={new Room()} daemons={DAEMON_HOSTS} servingInstanceId={LOCAL_HOST}>
       <CreateSessionPane
         client={client}
+        worktreeClient={worktreeClient}
         sessionToken="fake-token"
         onCancel={cy.stub()}
         onCreated={onCreated}

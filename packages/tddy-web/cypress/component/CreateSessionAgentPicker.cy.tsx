@@ -16,6 +16,7 @@ import React from "react";
 import { createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { ConnectionService } from "../../src/gen/connection_pb";
+import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import { daemonRpcIdentity, type DaemonHost } from "../../src/lib/participantRole";
 import { mountWithPerDaemonLiveKitRpc } from "../support/rpc/perDaemonLiveKitRpc";
@@ -76,6 +77,7 @@ function mountPicker(hostB: InMemoryRpcBackend): InMemoryRpcBackend {
     withSelectedDaemon(
       <CreateSessionPane
         client={createClient(ConnectionService, hostABackend.transport())}
+        worktreeClient={createClient(WorktreeService, hostABackend.transport())}
         sessionToken="tok"
         onCancel={cy.stub()}
         onCreated={cy.stub()}

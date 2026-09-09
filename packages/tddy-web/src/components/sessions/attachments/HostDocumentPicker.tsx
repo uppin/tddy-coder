@@ -30,6 +30,7 @@ import {
   type SessionEntry,
   type SessionUploadEntry,
 } from "../../../gen/connection_pb";
+import type { WorktreeService } from "../../../gen/worktree_pb";
 import { formatAttachmentBytes } from "../../../lib/attachmentBytes";
 import { WorktreeFileTree } from "../../session/WorktreeFileTree";
 import { createWorktreeFilesApi, type WorktreeFilesApi } from "../../session/worktreeFilesApi";
@@ -46,6 +47,16 @@ export interface HostDocumentPick {
 
 export interface HostDocumentPickerProps {
   client: Client<typeof ConnectionService>;
+  /**
+   * The worktree service on the **same** host `client` enumerates from — the tree scopes browse
+   * through it (`ListWorktreeDirectory`, `ReadWorktreeFile`).
+   *
+   * Required, with no default, for the reason `browsedDaemonInstanceId` is documented below: the
+   * only possible default is "no client", and a picker with no client lists an empty tree — which is
+   * indistinguishable from a worktree that really is empty. A call site that forgot the prop would
+   * lose both tree scopes silently.
+   */
+  worktreeClient: Client<typeof WorktreeService>;
   sessionToken: string;
   /**
    * The host being browsed — stamped on every ref this picker yields.
@@ -166,6 +177,7 @@ function browsableTree(base: WorktreeFilesApi): BrowsableTree {
 
 export function HostDocumentPicker({
   client,
+  worktreeClient,
   sessionToken,
   browsedDaemonInstanceId,
   project,
@@ -243,8 +255,8 @@ export function HostDocumentPicker({
     () =>
       treeSource === undefined || treeSource.worktreePath === ""
         ? undefined
-        : browsableTree(createWorktreeFilesApi(client, { sessionToken, ...treeSource })),
-    [client, sessionToken, treeSource],
+        : browsableTree(createWorktreeFilesApi(worktreeClient, { sessionToken, ...treeSource })),
+    [worktreeClient, sessionToken, treeSource],
   );
 
   /**

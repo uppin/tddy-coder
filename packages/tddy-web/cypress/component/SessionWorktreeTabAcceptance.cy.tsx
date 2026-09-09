@@ -1,6 +1,6 @@
 import React from "react";
 import { createClient } from "@connectrpc/connect";
-import { ConnectionService, WorktreeSizeStatus } from "../../src/gen/connection_pb";
+import { WorktreeService, WorktreeSizeStatus } from "../../src/gen/worktree_pb";
 import { SessionWorktreeTab } from "../../src/components/sessions/SessionWorktreeTab";
 import {
   aConnectionServiceBackend,
@@ -16,7 +16,7 @@ const REPO_PATH = "/repos/demo/.worktrees/feat-x";
 const ONE_POINT_TWO_GB = 1288490189n;
 
 function mountTab(backend: ConnectionServiceBackend, repoPath: string = REPO_PATH) {
-  const client = createClient(ConnectionService, backend.transport());
+  const client = createClient(WorktreeService, backend.transport());
   cy.mountWithRpc(
     <SessionWorktreeTab
       client={client}
