@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Stack**: `#unbundle` node **5 of 8**. Base: `feature/unbundle/auth-livekit` (node 4)
+**Stack**: `#unbundle` node **5 of 8**. PR [#474](https://github.com/uppin/tddy-coder/pull/474).
+Base: `feature/unbundle/auth-livekit` (node 4, PR #473)
 
 ## Initial Discovery
 
@@ -399,9 +400,17 @@ afterwards, verified by grep over the destinations rather than by assumption.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-tools` | | |
-| `cargo clippy -p tddy-tools -- -D warnings` | | |
+| `./test -p tddy-tools` | 80 lib tests passing before `mcp_primitives` was added | |
+| `cargo clippy -p tddy-tools -p tddy-service -p tddy-tool-engine -p tddy-terminal-rpc -p tddy-discovery --all-targets -- -D warnings` | ✅ exit 0 | |
 | advertised MCP tool count over `--mcp` | **43** | |
+
+**16 failing tests** define this node: 5 in `tddy-tools`' `mcp_primitives` (step zero — the module
+that breaks all three `server.rs` cycles), 1 in `tddy-service`'s `session_tool_client`, 2 in
+`tddy-tool-engine`'s `dynamic_proxy`, 1 in `tddy-terminal-rpc`'s `pty_relay`, 2 in
+`tddy-discovery`'s `roster`, and **3 dependency-drop assertions** — one each in `tddy-daemon`,
+`tddy-sandbox-app` and `tddy-sandbox-darwin`. Those three are asserted against the manifest rather
+than described, because a **dev**-dependency survives invisibly: nothing fails to compile when it is
+merely unused.
 
 ## Final Checklist
 

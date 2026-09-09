@@ -9,6 +9,7 @@ name = "tddy_terminal_rpc"
 path = "src/lib.rs"
 
 [dependencies]
+thiserror = "2"
 anyhow = "1"
 async-trait = "0.1"
 bytes = "1"

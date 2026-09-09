@@ -10,6 +10,7 @@ pub mod action_tools;
 pub mod github_pr;
 pub mod list_models;
 pub mod lsp_tools;
+pub mod mcp_primitives;
 pub mod relay;
 pub mod review_persist;
 pub mod schema;

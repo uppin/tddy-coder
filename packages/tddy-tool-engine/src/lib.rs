@@ -687,3 +687,87 @@ async fn tool_semantic_search(
     // is, an existing index cannot be queried. See docs/ft/coder/semantic-index.md.
     ToolOutcome::err("SemanticSearch: index query not yet wired")
 }
+
+/// The MCP→daemon dynamic tool proxy, moved here from `tddy-tools` by `#unbundle` node 5.
+///
+/// # This is where a duplication ends
+///
+/// `tddy-tools`' `server::exec_tool_catalog()` was a hand-copied `RemoteToolDef` clone of this
+/// crate's [`catalog::tool_catalog`], kept in step by **matched guard tests in both crates** plus a
+/// third that lived in the daemon as `tool_catalog_sync.rs`. The codebase already knew about the
+/// duplication and was paying to maintain it.
+///
+/// With the proxy here, there is one catalog: this crate defines the ten tools, executes them, and —
+/// after node 8 — serves them. Node 8 deletes the guard tests as vacuous, because a test whose
+/// failure is impossible reads as coverage without being any.
+pub mod dynamic_proxy {
+    /// One tool a remote host advertises, as the proxy forwards rather than executes it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct RemoteToolDef {
+        pub name: String,
+        pub description: String,
+        pub input_schema: String,
+    }
+
+    /// The tools to advertise for a session: this crate's own catalog, plus whatever the host adds,
+    /// minus anything a roster agent has taken over.
+    pub fn build_dynamic_tool_list(
+        _host_tools: &[RemoteToolDef],
+        _withdrawn: &[String],
+    ) -> Vec<RemoteToolDef> {
+        // TODO(tools-thinning): implement
+        unimplemented!("dynamic_proxy::build_dynamic_tool_list")
+    }
+
+    /// Whether a native tool is denied because the session is in remote-codebase mode.
+    ///
+    /// A denial rather than an absence: the tool exists, and an agent that asks for it needs to know
+    /// it was refused and why, not that it was never there.
+    pub fn is_native_tool_denied_in_remote_mode(_name: &str) -> bool {
+        // TODO(tools-thinning): implement
+        unimplemented!("dynamic_proxy::is_native_tool_denied_in_remote_mode")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The catalog this crate defines is the one advertised — not a second copy that has to be
+        /// kept in step with it.
+        #[test]
+        fn advertises_this_crates_own_catalog_when_the_host_adds_nothing() {
+            // Given a host advertising no extra tools
+            // When
+            let advertised = build_dynamic_tool_list(&[], &[]);
+
+            // Then
+            let names: Vec<&str> = advertised.iter().map(|t| t.name.as_str()).collect();
+            for expected in crate::catalog::tool_catalog()
+                .iter()
+                .map(|t| t.name.as_str())
+            {
+                assert!(
+                    names.contains(&expected),
+                    "{expected} is in this crate's catalog but was not advertised"
+                );
+            }
+        }
+
+        /// A tool a roster agent has taken over must stop being advertised, or two things claim to
+        /// serve it and the agent's own tool wins or loses by ordering.
+        #[test]
+        fn stops_advertising_a_tool_an_agent_has_taken_over() {
+            // Given
+            let withdrawn = vec!["Read".to_string()];
+
+            // When
+            let advertised = build_dynamic_tool_list(&[], &withdrawn);
+
+            // Then
+            assert!(
+                !advertised.iter().any(|t| t.name == "Read"),
+                "a withdrawn tool must not still be advertised"
+            );
+        }
+    }
+}
