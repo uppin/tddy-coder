@@ -223,7 +223,9 @@ matches the repo's de-facto policy — *"break freely, migrate every consumer in
 
 - Changeset: [2026-09-09-unbundle-host-worktree-services.md](../../../docs/dev/1-WIP/2026-09-09-unbundle-host-worktree-services.md)
 - Discovery: [2026-09-09-unbundle-host-worktree-services-initial-discovery.md](../../../docs/dev/1-WIP/2026-09-09-unbundle-host-worktree-services-initial-discovery.md)
-- Base branch's changeset: `docs/dev/1-WIP/2026-09-09-connection-service-split.md` (PR #468)
+- Predecessor: PR #468 `feature/connection-service-split/lsp-settle-budget` — **merged into `master` on
+  2026-09-09** as `ac002643`, and its changeset wrapped out of `docs/dev/1-WIP/` with that merge. This
+  PR bases on `master`.
 - [rust-code-restructuring.md](../../coder/rust-code-restructuring.md)
 - [`docs/dev/todo/2026-08-29-connection-service-rs-is-19-600-lines.md`](../../../docs/dev/todo/2026-08-29-connection-service-rs-is-19-600-lines.md)
 - [`docs/dev/todo/2026-09-06-server-rs-run-server-takes-12-positional-arguments.md`](../../../docs/dev/todo/2026-09-06-server-rs-run-server-takes-12-positional-arguments.md)

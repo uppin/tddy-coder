@@ -4,8 +4,8 @@
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
 **Stack**: `#unbundle` node **1 of 8** — the root. PR [#470](https://github.com/uppin/tddy-coder/pull/470).
-Base: `feature/connection-service-split/lsp-settle-budget` (PR #468 — now **open, not draft, and based
-on `master`**, so the repoint obligation below is live rather than hypothetical)
+Base: `master`. PR #468 (`feature/connection-service-split/lsp-settle-budget`) **merged on 2026-09-09**
+(squash commit `ac002643`), and this node was repointed onto `master` the same day.
 
 ## Initial Discovery
 
@@ -72,17 +72,20 @@ This PR explicitly does **not**:
 
 ## Dependencies
 
-**None — this is the stack's root.** Its base is `feature/connection-service-split/lsp-settle-budget`
-(PR #468), which is not a `#unbundle` node but supplies two things this PR requires:
+**None — this is the stack's root, and it now bases on `master`.** It was cut on
+`feature/connection-service-split/lsp-settle-budget` (PR #468), which is not a `#unbundle` node but
+supplies two things this PR requires. **PR #468 landed in `master` on 2026-09-09** (squash commit
+`ac002643`), so both are now in the trunk:
 
 | From the base branch | What it delivers | How this PR consumes it |
 |---|---|---|
 | the four `tddy-lsp` bridge fixes (`28fa278d`, `2afaec79`, `0af927b4`, `3d264466`) | JSON-RPC errors reach the caller; `ContentModified`/timeout classify as `ServerCatchingUp`; `--indexing-budget` drives the request timeout; the bridge client advertises `codeAction` support and utf-8 positions | **without them `restructure apply` fails on every operation** with a message that reads like a plan defect. This is why the stack is based here and not on `master` |
 | the intra-package split of `connection_service.rs` | a 2,416-line facade over 60 modules under `connection_service/` | the host and worktree handler bodies are already in named modules, so this PR moves modules rather than carving a 23,000-line file |
 
-⚠ **Standing obligation.** When PR #468 merges, its branch is deleted — and **a deleted base branch
-closes its dependent PR**. This PR must be repointed onto `master` at that moment (`/repoint`), before
-or immediately after #468 lands.
+✅ **Repoint done.** #468 merged on 2026-09-09 and this PR was repointed onto `master` the same day:
+its two commits were restacked with `git rebase --onto origin/master e6fd2213`, and the `#unbundle`
+stack was re-registered on GitHub with `master` as its trunk (stack #479). Successor nodes 2–8 keep
+their existing bases and each need their own `/pr-stack-rebase`.
 
 ## Draft PR contract
 
