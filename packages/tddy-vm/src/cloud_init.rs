@@ -685,6 +685,50 @@ pub fn cloud_init_boot_argv(config: &CloudInitBootConfig) -> Vec<String> {
 
 // ── Serial classification ─────────────────────────────────────────────────────────
 
+/// The guest's serial console, line by line, tolerating bytes that are not valid UTF-8.
+///
+/// The console carries whatever the guest's kernel and systemd write to it — ANSI colour
+/// escapes, and, when two writers interleave, a line torn in the middle of a multi-byte
+/// character. Tokio's [`Lines`](tokio::io::Lines) decodes strictly and fails the **whole**
+/// read on the first stray byte, which aborts a boot that is otherwise perfectly healthy and
+/// reports it as `failed reading qemu serial console output`.
+///
+/// [`crate::serial_shell::decode_utf8_prefix`] already made this call for the interactive
+/// shell, for the same reason and in the same words: line noise on a UART becomes the
+/// replacement character rather than derailing the decode. This is that decision applied to
+/// the boot watcher, which had been left strict.
+struct LossySerialLines<R> {
+    reader: R,
+    buf: Vec<u8>,
+}
+
+impl<R: tokio::io::AsyncBufRead + Unpin> LossySerialLines<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: Vec::new(),
+        }
+    }
+
+    /// The next line, or `None` at end of stream.
+    ///
+    /// Cancellation-safe: bytes already read stay in `self.buf`, so a `select!` that drops
+    /// this future for a timeout does not lose a partially-read line.
+    async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        use tokio::io::AsyncBufReadExt;
+
+        let read = self.reader.read_until(b'\n', &mut self.buf).await?;
+        if read == 0 && self.buf.is_empty() {
+            return Ok(None);
+        }
+        let mut line = std::mem::take(&mut self.buf);
+        while matches!(line.last(), Some(b'\n' | b'\r')) {
+            line.pop();
+        }
+        Ok(Some(String::from_utf8_lossy(&line).into_owned()))
+    }
+}
+
 /// Outcome of classifying one line of serial console output while waiting for
 /// cloud-init to finish baking provisioning into the overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -957,7 +1001,7 @@ async fn boot_and_bake(
     boot_log_path: &Path,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<(), VmError> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncWriteExt, BufReader};
 
     let boot_config = CloudInitBootConfig {
         overlay_path: overlay_path.display().to_string(),
@@ -997,7 +1041,7 @@ async fn boot_and_bake(
         .stdout
         .take()
         .ok_or_else(|| VmError::BootFailed(format!("{binary} stdout unavailable")))?;
-    let mut lines = BufReader::new(stdout).lines();
+    let mut lines = LossySerialLines::new(BufReader::new(stdout));
 
     let deadline = tokio::time::Instant::now() + opts.timeout;
 
@@ -1400,4 +1444,44 @@ pub async fn write_vm_login_seed_iso(
         .await
         .map_err(VmError::BuildFailed)?;
     Ok(iso_output.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LossySerialLines;
+
+    /// A guest writes its console with more than one writer, so a line can be torn in the
+    /// middle of a multi-byte character, and a UART can drop noise onto it besides. Decoding
+    /// strictly fails the **whole** read on the first such byte and aborts a boot that is
+    /// otherwise healthy — reported as `failed reading qemu serial console output`.
+    #[tokio::test]
+    async fn reads_console_lines_whose_bytes_are_not_valid_utf8() {
+        // Given a console stream carrying a lone continuation byte between two good lines,
+        // and a final line the guest never terminated
+        let console: Vec<u8> = b"[  OK  ] Mounted /boot\n\x81 torn\nunterminated".to_vec();
+        let mut lines = LossySerialLines::new(tokio::io::BufReader::new(&console[..]));
+
+        // When the boot watcher reads the console to its end
+        let mut read = Vec::new();
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .expect("a byte that is not UTF-8 must not fail the read")
+        {
+            read.push(line);
+        }
+
+        // Then every line arrives, the bad byte shown rather than the stream rejected
+        assert_eq!(read.len(), 3, "got {read:?}");
+        assert_eq!(read[0], "[  OK  ] Mounted /boot");
+        assert!(
+            read[1].contains('\u{FFFD}'),
+            "the invalid byte becomes the replacement character, got {:?}",
+            read[1]
+        );
+        assert_eq!(
+            read[2], "unterminated",
+            "a trailing line with no newline is still delivered"
+        );
+    }
 }

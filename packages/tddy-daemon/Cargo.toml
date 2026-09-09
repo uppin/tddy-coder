@@ -92,6 +92,10 @@ uuid = { version = "1", features = ["v4", "v7"] }
 teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 
 portable-pty = "0.9"
+# `default = ["agent"]` is the *server* side — tokio, futures, async-trait, service-binding and
+# a log facade we do not use. The blocking client and the protocol types are ungated.
+ssh-agent-lib = { version = "0.6.0", default-features = false }
+ssh-key = "0.6.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }

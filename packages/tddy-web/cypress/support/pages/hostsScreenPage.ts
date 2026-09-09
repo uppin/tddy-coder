@@ -104,3 +104,11 @@ export const hostToolingPage = {
     hostToolingPage.githubCli(instanceId).should("have.attr", "title").and("contain", login);
   },
 };
+
+/** ssh-agent section selectors — added by `#hosts-screen 5/8`. */
+export const hostSshAgentPage = {
+  section: (instanceId: string) => cy.get(`[data-testid="hosts-row-${instanceId}-ssh-agent"]`),
+  keys: (instanceId: string) => cy.get(`[data-testid^="hosts-row-${instanceId}-ssh-key-"]`),
+  key: (instanceId: string, fingerprint: string) =>
+    cy.get(`[data-testid="hosts-row-${instanceId}-ssh-key-${fingerprint}"]`),
+};

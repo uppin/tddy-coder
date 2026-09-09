@@ -61,6 +61,9 @@ pub struct GithubCliStatus {
 pub struct HostTooling {
     pub git: GitIdentity,
     pub github_cli: GithubCliStatus,
+    /// Added by `#hosts-screen 5/8`. `HostToolingProbe` owns the git and `gh` halves; this block is
+    /// filled from [`crate::ssh_agent`].
+    pub ssh_agent: crate::ssh_agent::AgentStatus,
 }
 
 /// Probes a host for what it has installed and configured.
@@ -189,6 +192,10 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         // Hosts screen wait for the sum of them and let a slow `gh` — it can reach the network —
         // decide how long the git answer takes.
         let deadline = std::time::Instant::now() + PROBE_TIMEOUT;
+        // Started before the others for the same reason they are started together: the agent probe
+        // carries its own, shorter bound, and running it last would add that bound to whatever `gh`
+        // took.
+        let ssh_agent = start_agent_probe(os_user);
         let name = git_program
             .as_deref()
             .map(|git| start_probe(os_user, git, &["config", "--global", "--get", "user.name"]));
@@ -198,6 +205,12 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         let github_cli = gh_program
             .as_deref()
             .map(|gh| start_probe(os_user, gh, &["auth", "status"]));
+
+        // Collected before the two commands for the reason it was started before them: a struct
+        // literal evaluates its fields in order, and a probe still in flight when it is collected is
+        // judged on whatever is left of the shared deadline — so collecting it after `gh`, which can
+        // reach the network, would fail it for time `gh` had spent.
+        let ssh_agent = agent_status_of(ssh_agent, deadline);
 
         let tooling = HostTooling {
             git: match (name, email) {
@@ -221,10 +234,12 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 // distinguishes an absent binary from a spawn that failed for another reason.
                 None => classify_gh_auth_status(None, ""),
             },
+            ssh_agent,
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
         warn_if_failed("gh", os_user, &tooling.github_cli.outcome);
+        warn_if_failed("ssh-agent", os_user, &tooling.ssh_agent.outcome);
         tooling
     }
 
@@ -244,6 +259,55 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 authenticated: false,
                 login: None,
             },
+            ssh_agent: crate::ssh_agent::AgentStatus::unsupported(),
+        }
+    }
+}
+
+/// Start the ssh-agent probe for `os_user` without waiting for it.
+///
+/// The agent conversation blocks on a socket — `ssh-agent-lib`'s client is a blocking one — so it
+/// runs on a thread of its own like the two commands beside it, and like them it is abandoned
+/// rather than killed if it overruns. This is the thread that client runs on; it starts none of its
+/// own.
+#[cfg(unix)]
+fn start_agent_probe(os_user: &str) -> std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus> {
+    use crate::ssh_agent::SshAgentProbe;
+
+    let owned_user = os_user.to_string();
+    let (tx, outcome) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let probe =
+            crate::ssh_agent::WireProtocolAgentProbe::new(crate::ssh_agent::WellKnownAgentSockets);
+        let _ = tx.send(probe.identities(&owned_user));
+    });
+    outcome
+}
+
+/// Wait for the agent probe until `deadline`, then give up on it.
+///
+/// Its own worst case is *twice* [`crate::ssh_agent::AGENT_TIMEOUT`] — one read may begin just
+/// inside its deadline and then take a full socket timeout of its own — so it is longer than
+/// [`PROBE_TIMEOUT`] and this deadline can be the one that expires first. `probe` collects the agent
+/// before the commands beside it, so reaching this deadline means the probe did have the whole of
+/// [`PROBE_TIMEOUT`] and never came back — a failure, and never the empty key list an operator would
+/// read as "this host has no keys loaded".
+#[cfg(unix)]
+fn agent_status_of(
+    started: std::sync::mpsc::Receiver<crate::ssh_agent::AgentStatus>,
+    deadline: std::time::Instant,
+) -> crate::ssh_agent::AgentStatus {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    match started.recv_timeout(remaining) {
+        Ok(status) => status,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            crate::ssh_agent::AgentStatus::failed(format!(
+                "the ssh-agent probe did not finish within {}s",
+                PROBE_TIMEOUT.as_secs()
+            ))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            crate::ssh_agent::AgentStatus::failed("the ssh-agent probe ended without reporting")
         }
     }
 }

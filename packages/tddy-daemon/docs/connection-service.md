@@ -16,7 +16,7 @@ Connect-RPC service for tools, sessions, and **projects** when using `tddy-web` 
 | `AddProjectToHost` | Makes an existing project available on another host, **reusing its `project_id`**. Routes by target **`daemon_instance_id`** (empty/local = handle locally; a peer = forward over the LiveKit common room via **`forward_add_project_to_host_via_livekit`**, same `classify_peer_route` routing as **`StartSession`**). The handling daemon clones the repo (like **`CreateProject`**) and persists a **`projects.yaml`** row with the **given** `project_id` via **`project_storage::add_or_get_project`** — **idempotent**: if the host already registers that id, the existing row is returned with no re-clone. Rejects blank `project_id`/`name`/`git_url` (`INVALID_ARGUMENT`) and unknown/unreachable target hosts (`FAILED_PRECONDITION`). See [projects-screen-multi-host.md](../../../docs/ft/web/projects-screen-multi-host.md). |
 | `ListEligibleDaemons` | Eligible daemon instances for host selection (`instance_id`, `label`, `is_local`); sourced from `EligibleDaemonSource`. `is_local` compares against `local_instance_id_for_config`, the **routing** id, so it holds for a daemon carrying a configured `daemon_instance_id` or the startup-timestamp suffix |
 | `ListKnownHosts` | Every host this daemon has a record of, live or not — one `KnownHostEntry` per host (`instance_id`, `label`, `online`, `first_seen_unix_ms`, `last_seen_unix_ms`, `repos_base_path`, `max_attachment_bytes`, `is_local`). Where `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it leaves the room, this answers "what machines does tddy know about". **`online` is computed per call** by intersecting the durable registry with `EligibleDaemonSource::live_known_hosts()` (the roster keyed by **durable** host id, never the routing id) — it is never read from disk — and the serving daemon always has a row, flagged `is_local`. The registry is injected via `ConnectionServiceImpl::with_host_registry`; the whole join, including that local-row guarantee, belongs to `HostRegistry::known_hosts`. Details: [host-registry.md](host-registry.md). |
-| `GetHostTooling` | What one host has installed and configured: the git identity its commits would carry, and the state of the GitHub CLI there. Addressed by `daemon_instance_id` (empty = the daemon serving the call) and **routed before the caller is authenticated** — see [Host tooling](#host-tooling) below. Each half of the answer carries a `ProbeOutcome` ahead of its findings, so "could not check" is never rendered as a negative finding. Backed by `host_tooling.rs`, injected via `ConnectionServiceImpl::with_host_tooling`. Details: [host-tooling-probe.md](host-tooling-probe.md). |
+| `GetHostTooling` | What one host has installed and configured: the git identity its commits would carry, the state of the GitHub CLI there, and whether an ssh-agent is reachable for the host's OS user and what it is holding. Addressed by `daemon_instance_id` (empty = the daemon serving the call) and **routed before the caller is authenticated** — see [Host tooling](#host-tooling) below. Each part of the answer carries a `ProbeOutcome` ahead of its findings, so "could not check" is never rendered as a negative finding. Backed by `host_tooling.rs`, injected via `ConnectionServiceImpl::with_host_tooling`. Details: [host-tooling-probe.md](host-tooling-probe.md). |
 | `ListSessionWorkflowFiles` | Lists workflow file **basenames** present on disk under `{sessions_base}/sessions/{session_id}/` using a **fixed server allowlist** (`changeset.yaml`, `.session.yaml`, `PRD.md`, `TODO.md`). Requires the same **`session_token`** → user → **`sessions_base`** resolution as **`ListSessions`**; **`session_id`** is validated with **`validate_session_id_segment`** before path construction. Entries whose canonical path falls outside the canonical session directory (e.g. symlink escape) are omitted from the list. |
 | `ReadSessionWorkflowFile` | Returns UTF-8 text for one allowlisted **basename** under the same resolved session directory. Rejects empty, non-allowlisted, or path-segment-unsafe **`basename`** values (`..`, `/`, `\`). Uses canonical path checks so resolved file paths cannot sit outside the session root. |
 | `StartSession` | Resolve `project_id` → `main_repo_path`, spawn tool with `--project-id`; optional `daemon_instance_id` selects target instance (local spawn when empty or local; non-local targets are unsupported until cross-daemon routing exists). For a new-branch-from-base worktree with an empty `selected_integration_base_ref`, the base ref is the project's stored **`main_branch_ref`** when set; a legacy project (no stored default) falls through to worktree setup's live default resolution — so the project default applies to web sessions, not only Telegram. When **`allowed_agents`** in config is non-empty, a non-empty **`agent`** on the request must match an entry **`id`** (after trim); otherwise the RPC returns **`INVALID_ARGUMENT`**. When **`allowed_agents`** is empty, **`agent`** is not restricted by this allowlist. When `session_type == "claude-cli"` or `"cursor-cli"`, the tool-spawn path is bypassed — see [Claude Code CLI sessions](#claude-code-cli-sessions) and [Cursor Agent CLI sessions](#cursor-agent-cli-sessions). When **`create_remote_branch`** is set (claude-cli/cursor-cli, new-branch-from-base only), the daemon **`git push -u origin <branch>`** right after worktree setup (**`tddy_core::worktree::push_new_branch_to_origin`**) and sets **`Changeset.remote_pushed`**; a push failure fails the RPC (no fallback). When **`on_branch_conflict = "reject"`** and a session already owns **`new_branch_name`**, the RPC creates nothing and answers with **`branch_conflict`** instead of a session id — see [Branch-conflict guard](#branch-conflict-guard-on-startsession). When **`pr_stack_base_session_id`** is set, the named session must be able to seed a `pr-stack` orchestrator's stack, checked before anything spawns — see [Stack-seed base session](#stack-seed-base-session-on-startsession). |
@@ -682,12 +682,15 @@ One unary RPC reports what a host has **installed and configured**, as opposed t
 backing the tooling cells on each Hosts row
 ([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)):
 
-- `GetHostTooling({session_token, daemon_instance_id})` → `{daemon_instance_id, git, github_cli}`.
+- `GetHostTooling({session_token, daemon_instance_id})` →
+  `{daemon_instance_id, git, github_cli, ssh_agent}`.
   `HostGitIdentity` carries `outcome`, `configured`, `user_name`, `user_email`, `failure_reason`;
-  `HostGithubCli` carries `outcome`, `installed`, `authenticated`, `login`, `failure_reason`.
+  `HostGithubCli` carries `outcome`, `installed`, `authenticated`, `login`, `failure_reason`;
+  `HostSshAgent` carries `outcome`, `reachable`, `keys` (`repeated SshAgentKey`) and
+  `failure_reason`.
 
 **Every outcome is distinguishable on the wire.** `ProbeOutcome` (`OK` / `FAILED` / `UNSUPPORTED`)
-sits ahead of the findings in both blocks, so a probe that could not run is never collapsed into
+sits ahead of the findings in every block, so a probe that could not run is never collapsed into
 "not configured" or "not installed". Collapsing them would put a fabricated fact in front of an
 operator, and the two states send them to two different places. The enum is proto3, therefore open:
 nodes extending this message add outcomes, and a consumer must treat only `OK` as licensing a
@@ -695,6 +698,16 @@ finding rather than listing the outcomes that do not.
 
 **`login` is the host's `gh` login**, not the web session's user and not a `GITHUB_TOKEN` in some
 environment. Three identities that can disagree, and the field's meaning is the narrow one.
+
+**`reachable` is what separates an empty agent from an absent one.** Both arrive with an empty
+`keys`, and they send an operator to two different fixes — load a key, or start an agent — so
+whether anything answered is its own field rather than an inference from emptiness. `false` with
+`OK` means no agent answered; `true` with an empty `keys` means one did, holding nothing.
+
+**No `SshAgentKey` carries a path.** The agent knows a public key blob and a free-text `comment`,
+commonly `user@host`, and does not know which file an identity came from. `fingerprint` is the
+`SHA256:`-prefixed form `ssh-add -l` prints. Details, including what a supervised daemon can and
+cannot reach: [host-tooling-probe.md § The ssh-agent](host-tooling-probe.md#the-ssh-agent).
 
 **Routing precedes authentication.** `rpc_served_by_peer` runs before the `session_token` is
 resolved, as it does for the roster RPCs and `ResolveStackBase`. Two reasons, and both matter:
@@ -708,8 +721,9 @@ resolved, as it does for the roster RPCs and `ResolveStackBase`. Two reasons, an
   correct answer.
 
 Once local, the handler resolves `session_token` → GitHub user → OS user by the same path as every
-other endpoint, and runs the probe on the **blocking pool**: both halves shell out and wait, and
-`gh auth status` can reach the network, so a runtime worker is not parked for its duration. The
+other endpoint, and runs the probe on the **blocking pool**: two of the three parts shell out and
+wait, the third blocks on a Unix socket, and `gh auth status` can reach the network, so a runtime
+worker is not parked for its duration. The
 response stamps `local_instance_id_for_config`, so a relayed answer names the host that produced it.
 
 Backed by **`host_tooling.rs`** — the `HostToolingProbe` trait, injected via
