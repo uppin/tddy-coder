@@ -158,7 +158,11 @@ it moves the `tddy-service`, `tddy-terminal-rpc` and `tddy-tool-engine` surfaces
   `build.rs` gains passes and its sandbox extern paths are re-pointed; `src/lib.rs` gains modules
 - **tddy-web**: every host and worktree call site, six hard-coded `ConnectionService` bindings, the
   regenerated `src/gen/`, and the Cypress fakes
-- **tddy-desktop**: `src-tauri/src/lib.rs` — the `run_server` caller. **Outside the CI gate**
+- **tddy-desktop**: **not affected after all.** The plan recorded `src-tauri/src/lib.rs` as "the
+  `run_server` caller"; it is not one. The package's only occurrence of `run_server` is a prose
+  reference inside a `TODO` comment at `lib.rs:257` — the desktop host builds its own
+  `MultiRpcService` and serves over Tauri IPC with no HTTP listener. It was still built and linted
+  locally (it is **outside the CI gate**) to prove the options struct did not reach it: both clean
 
 ## Related Feature Documentation
 
@@ -241,9 +245,9 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 
 - [x] **Tooling — cross-file edits**: `edits_for` stops discarding other documents' rename edits ✅
 - [~] **Tooling — `move_module_to_crate`**: the operation, its schema, manifest edits, crate-level facade — deciding half green, engine impl untested
-- [ ] **Tooling — file-budget report**: `restructure check` reports files over a budget
-- [ ] **Prerequisite — `run_server` options struct** (⛔ blocking TODO), including the desktop caller
-- [ ] **Prerequisite — generated-code drift gate** in CI (⛔ blocking TODO)
+- [x] **Tooling — file-budget report**: `restructure check --budget LINES` reports the files a plan's own anchors name that exceed it ✅ — a **report, not a gate**, per the best-effort decision below
+- [x] **Prerequisite — `run_server` options struct** (⛔ blocking TODO) ✅ — **there is no desktop caller**, see the correction below
+- [x] **Prerequisite — generated-code drift gate** in CI (⛔ blocking TODO) ✅ `scripts/generated-code.sh`, green on all four generated directories
 - [x] **Kernel**: `tddy-daemon-kernel` with the five shared symbols; the trim helper's one home ✅
 - [ ] **Cycles**: all nine cut, `config.rs:85` and `host_tooling ⇄ ssh_agent` among them
 - [~] **Proto**: `host.proto` + `worktree.proto` declared and generating; **no `types.proto` needed**; sandbox extern paths untouched (nothing they name moves in this node)
@@ -339,10 +343,10 @@ rather than an algorithm. Three distinct kinds:
 - [x] **Integration**: `move_module_to_crate` relocates a module, its header resolves, both manifests updated (`move_module_to_crate_acceptance.rs`) ✅
 - [x] **Integration**: the same move with a crate-level facade leaves every caller untouched (`move_module_to_crate_acceptance.rs`) ✅
 - [ ] **Unit**: a plan naming `move_module_to_crate` without a destination crate is `MalformedPlan` (`plan.rs`)
-- [ ] **Unit**: `check` lists exactly the files over a given budget (`runner.rs`)
+- [x] **Unit**: `check` lists exactly the files over a given budget (`runner.rs`) ✅
 
 ### tddy-daemon
-- [ ] **Integration**: `run_server` accepts an options struct and serves the same bundle and routes (`server_options_acceptance.rs`)
+- [x] **Integration**: `run_server` accepts an options struct and serves the same bundle and routes (`server_options_acceptance.rs`) ✅ 6 tests
 - [ ] **Unit**: the kernel's five symbols resolve from a crate that does not depend on `tddy-daemon` (`tddy-daemon-kernel/tests/`)
 
 ### tddy-host-service
@@ -359,7 +363,7 @@ rather than an algorithm. Three distinct kinds:
 - [ ] **Cypress component**: the worktrees screen loads through `worktree.WorktreeService` (`WorktreesAppPage.cy.tsx`)
 
 ### CI
-- [ ] **Integration**: the drift gate fails on a deliberately stale committed `*_pb.ts` and passes on a fresh one
+- [x] **Integration**: the drift gate fails on a deliberately stale committed `*_pb.ts` and passes on a fresh one ✅ (`scripts/generated-code.test.ts`, 5 tests, runs in CI before the gate itself)
 
 ## Decisions & Trade-offs
 
@@ -439,6 +443,16 @@ rather than an algorithm. Three distinct kinds:
   facades; once a re-pointed caller also creates origin → destination, the no-facade path can close
   the same cycle. The condition is now "the destination would name the origin **and** the origin goes
   on naming the destination". That second defect was hidden by the first.
+- **The drift gate's inherited rot was settled, not excluded.** It was red the day it was added, on
+  drift no PR introduced. Rather than exclude a directory to get a green check, the stale directories
+  were regenerated through the script's own `write` mode and the two `codex_oauth_pb.ts` orphans — no
+  generating `.proto`, no TypeScript importer — deleted. The gate's first run found
+  `tddy-web/src/gen/sandbox_pb.ts` genuinely stale: `sandbox.proto` had gained
+  `in_jail_tool_request`/`in_jail_tool_response` and the committed TypeScript predated them.
+- **`run_server`'s options struct has no `Default`.** A defaulted `host: ""` would fail to bind at
+  runtime instead of failing to compile, so every caller states all twelve fields. Four call sites
+  migrated — `main.rs` and three in the daemon's own tests; the desktop, which the plan expected to
+  be one, is not.
 - **The file budget is best-effort, by agreement.** Seams are cut where they are cohesive. Whatever
   stays over 500 lines is listed in `## Scope`'s file-budget item with a reason, rather than split to
   hit a number at the cost of cohesion.

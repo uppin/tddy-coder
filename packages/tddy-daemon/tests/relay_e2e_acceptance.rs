@@ -84,6 +84,27 @@ livekit:
 
 // ── Idle-timeout integration (non-LiveKit) ───────────────────────────────────────────────────────
 
+/// Options for a relay-mode server that `shutdown` stops: no bundle, no RPC services and no
+/// common room, because a relay serves no page — the shutdown channel is the wiring under test.
+fn a_relay_server_stopped_by(
+    shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> tddy_daemon::server::RunServerOptions {
+    tddy_daemon::server::RunServerOptions {
+        host: "127.0.0.1".to_string(),
+        port: 0, // ephemeral
+        bundle_path: PathBuf::new(),
+        rpc_entries: vec![],
+        livekit_url: None,
+        common_room: None,
+        livekit_enabled: false, // relay mode joins no common room
+        daemon_instance_id: "test-instance".to_string(),
+        allowed_agents: vec![],
+        debug: None,
+        lifecycle_telegram: None,
+        shutdown_rx: Some(shutdown),
+    }
+}
+
 /// Phase 6 AC: relay idle monitor fires the external shutdown channel when the tracker expires,
 /// causing `run_server` to exit cleanly — the full chain mirrors what `main.rs` wires in relay mode.
 #[tokio::test]
@@ -105,21 +126,7 @@ async fn relay_idle_monitor_triggers_server_shutdown() {
     });
 
     // When
-    let result = tddy_daemon::server::run_server(
-        "127.0.0.1",
-        0,              // ephemeral port
-        PathBuf::new(), // no bundle (relay mode)
-        vec![],
-        None,
-        None,
-        false,                       // relay mode joins no common room
-        "test-instance".to_string(), // serving daemon instance id (relay mode has no real one)
-        vec![],
-        None, // web_debug mask
-        None,
-        Some(rx), // external idle-timeout shutdown channel
-    )
-    .await;
+    let result = tddy_daemon::server::run_server(a_relay_server_stopped_by(rx)).await;
 
     // Then
     assert!(

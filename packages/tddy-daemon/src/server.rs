@@ -11,28 +11,58 @@ use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::telegram_notifier::{send_daemon_lifecycle_message, TelegramSender};
 
-/// Start the web server with static bundle and RPC services.
+/// Everything [`run_server`] needs to bring the daemon's HTTP surface up.
 ///
-/// The optional `shutdown_rx` channel allows an external task (e.g. an idle-timeout monitor)
-/// to trigger graceful shutdown without ctrl_c or SIGTERM. When `None`, only OS signals shut
-/// the server down (existing behaviour).
-#[allow(clippy::too_many_arguments)] // Server bootstrap threads many handles; grouping is churn for little gain.
-pub async fn run_server(
-    host: &str,
-    port: u16,
-    bundle_path: PathBuf,
-    rpc_entries: Vec<tddy_rpc::ServiceEntry>,
-    livekit_url: Option<String>,
-    common_room: Option<String>,
-    // Whether this daemon joins the common room above (`livekit.enabled`). The page is told, so a
-    // daemon that stays out of it serves a page that does too.
-    livekit_enabled: bool,
-    daemon_instance_id: String,
-    allowed_agents: Vec<ClientAllowedAgent>,
-    debug: Option<String>,
-    lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
-    shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
-) -> anyhow::Result<()> {
+/// One struct rather than a positional list because the fields are wiring a caller assembles
+/// piecemeal — every one of them reads as a name at the call site, and adding or removing a
+/// service is a field, not a renumbering.
+pub struct RunServerOptions {
+    /// Interface the HTTP listener binds to (daemon `listen.web_host`).
+    pub host: String,
+    /// Port the HTTP listener binds to (daemon `listen.web_port`).
+    pub port: u16,
+    /// Directory holding the built `tddy-web` bundle, served as static files with an
+    /// `index.html` fallback for client-side routes. Empty in relay mode, which serves no page.
+    pub bundle_path: PathBuf,
+    /// Services published over ConnectRPC at `/rpc/{service}/{method}`. No entries, no RPC route.
+    pub rpc_entries: Vec<tddy_rpc::ServiceEntry>,
+    /// LiveKit URL the served page connects to (`livekit.public_url`, else `livekit.url`).
+    pub livekit_url: Option<String>,
+    /// Shared presence room the served page joins (`livekit.common_room`).
+    pub common_room: Option<String>,
+    /// Whether this daemon joins the common room above (`livekit.enabled`). The page is told, so a
+    /// daemon that stays out of it serves a page that does too.
+    pub livekit_enabled: bool,
+    /// This daemon's own instance id, so the page can tell which common-room daemon served it.
+    pub daemon_instance_id: String,
+    /// Startup snapshot of the agent allowlist, for the UI before `ListAgents` hydrates it.
+    pub allowed_agents: Vec<ClientAllowedAgent>,
+    /// Browser `DEBUG` mask served at `/api/config` (daemon `debug`). `None` = off.
+    pub debug: Option<String>,
+    /// Config and sender for the "started"/"stopped" Telegram lifecycle messages. `None` sends none.
+    pub lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
+    /// Lets an external task (e.g. an idle-timeout monitor) trigger graceful shutdown without
+    /// ctrl_c or SIGTERM. When `None`, only OS signals shut the server down.
+    pub shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+/// Start the web server with static bundle and RPC services.
+pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
+    let RunServerOptions {
+        host,
+        port,
+        bundle_path,
+        rpc_entries,
+        livekit_url,
+        common_room,
+        livekit_enabled,
+        daemon_instance_id,
+        allowed_agents,
+        debug,
+        lifecycle_telegram,
+        shutdown_rx,
+    } = options;
+
     if let Some((ref cfg, ref sender)) = lifecycle_telegram {
         let instance_id = local_instance_id_for_config(cfg);
         let msg = format!("tddy-daemon started ({})", instance_id);
@@ -75,7 +105,7 @@ pub async fn run_server(
     };
 
     serve_web_bundle_with_shutdown(
-        host,
+        host.as_str(),
         port,
         bundle_path,
         rpc_router,
