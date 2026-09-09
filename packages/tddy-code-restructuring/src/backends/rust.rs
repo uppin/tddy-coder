@@ -419,7 +419,23 @@ const WARMUP_BUDGET: Duration = Duration::from_secs(600);
 /// By then the graph is loaded and the only thing left to wait out is the server catching up with
 /// this client's own edits, which is seconds. Keeping this short is the point of the warm-up: these
 /// waits are paid per operation, and `survey_moved_items` pays one per moved item.
+///
+/// "Which is seconds" holds for a file of ordinary size and fails badly on a very large one: an
+/// edit to an 18,000-line module in a workspace this size takes rust-analyzer well past thirty
+/// seconds to re-resolve, and the run then reports an incomplete index for a server that was
+/// working normally. So this is the *default*, and [`settle_budget_for`] scales it when a caller
+/// has said how long it is willing to wait.
 const SETTLE_BUDGET: Duration = Duration::from_secs(30);
+
+/// The per-operation settle budget implied by a whole-run indexing budget.
+///
+/// A caller who raised `--indexing-budget` is saying the machine or the file is slow, and the
+/// per-operation waits are exactly where that slowness shows up after the first index. The divisor
+/// is chosen so the default 600s warm-up yields exactly [`SETTLE_BUDGET`]: a caller who never
+/// passed the flag sees the behaviour they saw before this was configurable, which a test pins.
+fn settle_budget_for(warmup: Duration) -> Duration {
+    std::cmp::max(SETTLE_BUDGET, warmup / 20)
+}
 
 /// rust-analyzer answers `codeAction` with an empty list until it has finished loading the crate
 /// graph, so a request that needs the graph is retried at this cadence until it is answered.
@@ -460,6 +476,8 @@ pub struct RustBackend {
     chatter: ServerChatter,
     /// How long the one-time warm-up may run before it gives up.
     warmup: Duration,
+    /// How long each later wait for name resolution may run. Derived from `warmup`.
+    settle: Duration,
     /// Where a progress line goes. Every other consequence of an operation travels back to the
     /// caller inside a [`Resolution`], but progress happens *while* a call is in flight and has
     /// nowhere to wait — so it needs a sink rather than a return value. It stays a sink rather than
@@ -596,6 +614,7 @@ impl RustBackend {
             environment: String::from("<server not started>"),
             chatter: ServerChatter::default(),
             warmup: WARMUP_BUDGET,
+            settle: settle_budget_for(WARMUP_BUDGET),
             progress: discard,
             trace: discard,
             indexed: false,
@@ -608,6 +627,7 @@ impl RustBackend {
     /// Give the warm-up a budget other than the default.
     pub fn with_indexing_budget(mut self, seconds: u64) -> Self {
         self.warmup = Duration::from_secs(seconds);
+        self.settle = settle_budget_for(self.warmup);
         self
     }
 
@@ -643,6 +663,7 @@ impl RustBackend {
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
             warmup: WARMUP_BUDGET,
+            settle: settle_budget_for(WARMUP_BUDGET),
             progress,
             trace: discard,
             indexed: false,
@@ -652,6 +673,7 @@ impl RustBackend {
         };
         if let Some(seconds) = indexing_budget {
             backend.warmup = Duration::from_secs(seconds);
+            backend.settle = settle_budget_for(backend.warmup);
         }
         backend
     }
@@ -1786,7 +1808,7 @@ impl RustBackend {
     /// edits.
     fn resolution_budget(&self) -> Duration {
         if self.indexed {
-            SETTLE_BUDGET
+            self.settle
         } else {
             self.warmup
         }
@@ -4616,6 +4638,39 @@ mod tests {
         assert!(carries_placeholder_type("fn f() -> _ {"));
         assert!(carries_placeholder_type("fn f(value: _) -> f64 {"));
         assert!(carries_placeholder_type("fn f() -> Vec<_> {"));
+    }
+
+    /// A caller who never passed `--indexing-budget` must see exactly the behaviour they saw
+    /// before this became configurable.
+    #[test]
+    fn leaves_the_settle_budget_at_its_default_for_the_default_warmup() {
+        // Given the default warm-up budget
+        let settle = settle_budget_for(WARMUP_BUDGET);
+
+        // Then the per-operation wait is unchanged
+        assert_eq!(settle, SETTLE_BUDGET);
+    }
+
+    /// Raising the run budget is the caller saying the machine or the file is slow, and the
+    /// per-operation waits are where that shows up once the first index is done. A 30s cap there
+    /// reported an incomplete index for a server that was working normally.
+    #[test]
+    fn scales_the_settle_budget_with_a_raised_indexing_budget() {
+        // Given a caller who allowed 2400s for the run
+        let settle = settle_budget_for(Duration::from_secs(2400));
+
+        // Then each later wait scales with it rather than staying at the 30s default
+        assert_eq!(settle, Duration::from_secs(120));
+    }
+
+    /// Lowering the budget must not drop the per-operation wait below what a normal settle needs.
+    #[test]
+    fn never_lowers_the_settle_budget_below_its_default() {
+        // Given a caller who allowed only 60s
+        let settle = settle_budget_for(Duration::from_secs(60));
+
+        // Then the default floor still applies
+        assert_eq!(settle, SETTLE_BUDGET);
     }
 
     /// A server that answered and offered nothing is a seam refusal; the reader should look at
