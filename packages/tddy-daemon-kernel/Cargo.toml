@@ -1,0 +1,18 @@
+[package]
+name = "tddy-daemon-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Types and helpers every tddy-daemon subsystem crate reaches for, extracted from connection_service so a subsystem can leave the daemon without depending on it"
+
+[lib]
+name = "tddy_daemon_kernel"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tokio = { version = "1", features = ["sync"] }
+serde_json = "1"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }

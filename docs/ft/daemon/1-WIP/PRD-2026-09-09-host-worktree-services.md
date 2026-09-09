@@ -135,9 +135,18 @@ indistinguishable from pre-existing drift.
 | `host.HostService` | `ListEligibleDaemons`, `ListKnownHosts`, `GetHostTooling`, `StreamHostPrompts`, `AnswerHostPrompt`, `AddHostKey`, `ListHostKeyCandidates`, `StreamHostStats` |
 | `worktree.WorktreeService` | `ListWorktreesForProject`, `RemoveWorktree`, `StreamWorktreeStats`, `CalculateWorktreeSize`, `CleanWorktree`, `RestoreSessionWorktree`, `ListWorktreeDirectory`, `ReadWorktreeFile`, `StreamReadWorktreeFile` |
 
-Roughly 25 messages in `connection.proto` are reached from more than one family. This node introduces
-the **shared `types.proto`** that every later node imports, and that decision is the single most
-consequential thing it establishes for the rest of the stack.
+**Corrected during implementation.** The plan assumed this node would introduce the shared
+`types.proto` every later node imports, on the strength of a planning-time list of ~25 cross-family
+shared messages. Walking the field types of `connection.proto`'s 238 messages refutes that for *these*
+families: the closure families E and F reach is 31 messages, G and H reach 20, and there is **zero
+overlap between them and zero overlap with the closure of everything that stays**. `WorktreeRow`,
+`ProbeOutcome` and `WorktreeSizeStatus` were all on that list and are reached only from inside the
+moving set.
+
+So this cut needs no shared types file, and the shared-types decision belongs to **node 6**, where
+families I, J, R and S genuinely do share `SessionAttachment`, `StagedAttachmentRef` and
+`HostDocumentRef`. A test pins the absence so a later node cannot re-couple the protos by importing
+one out of habit.
 
 The Rust source moves with the surface: the host subsystem (9 modules), the git/worktree subsystem
 (8 modules), and the host-key path (`host_keypair`, `host_private_key`, `ssh_agent`, `ssh_agent_add`)
@@ -182,8 +191,9 @@ matches the repo's de-facto policy — *"break freely, migrate every consumer in
 2. Add `move_module_to_crate` end to end, with the manifest edits and the crate-level facade.
 3. Add the file-budget report to `restructure check`.
 4. Extract `tddy-daemon-kernel`; cut the nine cycles; `run_server` options struct; the CI drift gate.
-5. Cut `connection.proto` into `types.proto` + `host.proto` + `worktree.proto`; wire `build.rs`,
-   `lib.rs`, the descriptor set, and the re-pointed sandbox extern paths.
+5. Cut `connection.proto` into `host.proto` + `worktree.proto`; wire `build.rs`, `lib.rs` and the
+   descriptor set. No shared types file and no sandbox extern-path change — nothing those name moves
+   in this node.
 6. Move the host, worktree and host-key modules into their two new crates **using the operation from
    step 2** — the first real use, and the proof it works.
 7. Migrate `tddy-web`, the daemon's own peer-forwarding literals, and the ~85 affected daemon tests.

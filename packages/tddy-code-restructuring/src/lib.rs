@@ -7,6 +7,7 @@
 
 pub mod apply;
 pub mod backends;
+pub mod crate_move;
 pub mod edit;
 pub mod journal;
 pub mod ledger;
@@ -17,6 +18,7 @@ pub mod runner;
 pub mod verify;
 
 pub use backends::rust::{client_capabilities, server_settings};
+pub use crate_move::{CallerRewrite, Destination, Survey};
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus};
 pub use ledger::{LedgerCheckpoint, PositionLedger};

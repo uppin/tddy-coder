@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package worktree;
+
+// Everything about worktrees: listing them per project, their disk usage, their lifecycle, and
+// browsing and reading the files inside one.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 1, alongside `host.proto`. The two
+// share no message with each other and none with what stayed behind.
+
+service WorktreeService {
+  rpc ListWorktreesForProject(ListWorktreesForProjectRequest) returns (ListWorktreesForProjectResponse);
+  rpc RemoveWorktree(RemoveWorktreeRequest) returns (RemoveWorktreeResponse);
+  // Lazy, semaphore-bounded per-worktree disk usage (docs/ft/web/worktree-disk-usage-streaming.md).
+  // StreamWorktreeStats emits a full snapshot frame, then one frame per worktree as its size flips
+  // Calculating -> Cached. CalculateWorktreeSize (re)triggers one worktree; the result surfaces on
+  // any open stream.
+  rpc StreamWorktreeStats(StreamWorktreeStatsRequest) returns (stream WorktreeStatsEvent);
+  rpc CalculateWorktreeSize(CalculateWorktreeSizeRequest) returns (CalculateWorktreeSizeResponse);
+  // Session Worktree inspector tab (docs/ft/web/session-worktree-inspector.md).
+  // CleanWorktree runs `git clean -fdx` in a secondary session worktree (membership-gated, primary
+  // refused). RestoreSessionWorktree recreates a missing session worktree from its persisted
+  // changeset (reusing tddy-core session-worktree setup).
+  rpc CleanWorktree(CleanWorktreeRequest) returns (CleanWorktreeResponse);
+  rpc RestoreSessionWorktree(RestoreSessionWorktreeRequest) returns (RestoreSessionWorktreeResponse);
+  // Code pane: browse a session's worktree files (docs/ft/web/session-code-pane.md).
+  rpc ListWorktreeDirectory(ListWorktreeDirectoryRequest) returns (ListWorktreeDirectoryResponse);
+  rpc ReadWorktreeFile(ReadWorktreeFileRequest) returns (ReadWorktreeFileResponse);
+  // The streaming, byte-exact sibling of ReadWorktreeFile (docs/ft/daemon/session-worktree-sync.md).
+  // Same request, same worktree resolution and same guards; `bytes` rather than a UTF-8 string, so
+  // a PNG or a file in any encoding round-trips intact, and oversized files are REFUSED before the
+  // first frame rather than truncated — a truncated mirror is a wrong mirror.
+  rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
+}
+
+message CalculateWorktreeSizeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path; must appear in git worktree list (membership-gated).
+  string worktree_path = 3;
+}
+
+message CalculateWorktreeSizeResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message CleanWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path; must appear in git worktree list. The primary (first-listed)
+  // worktree is refused — only secondary session worktrees are clearable.
+  string worktree_path = 3;
+}
+
+message CleanWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message ListWorktreeDirectoryRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // The session's worktree (SessionEntry.repo_path); must appear in the project's git worktree list.
+  string worktree_path = 3;
+  // Directory to list, relative to the worktree root (empty = root). No traversal / absolute paths.
+  string rel_path = 4;
+}
+
+message ListWorktreeDirectoryResponse {
+  // Directories first, then files; each group alphabetical. Excludes .git and .gitignore'd paths.
+  repeated WorktreeDirEntry entries = 1;
+}
+
+message ListWorktreesForProjectRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // When true, runs git/diff/stat refresh for this project before returning cached rows.
+  bool refresh = 3;
+}
+
+message ListWorktreesForProjectResponse {
+  repeated WorktreeRow worktrees = 1;
+}
+
+message ReadWorktreeFileRequest {
+  string session_token = 1;
+  string project_id = 2;
+  string worktree_path = 3;
+  // File to read, relative to the worktree root. No traversal / absolute paths.
+  string rel_path = 4;
+}
+
+message ReadWorktreeFileResponse {
+  string content_utf8 = 1;
+  // True when the file exceeded the server read cap and content_utf8 was truncated.
+  bool truncated = 2;
+  // Full size of the file on disk in bytes (before any truncation).
+  uint64 byte_size = 3;
+}
+
+message RemoveWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Absolute or repo-relative path as accepted by server validation (must appear in git worktree list).
+  string worktree_path = 3;
+}
+
+message RemoveWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message RestoreSessionWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // Session whose persisted changeset (branch + integration base) drives the recreation.
+  string session_id = 3;
+}
+
+message RestoreSessionWorktreeResponse {
+  bool ok = 1;
+  string message = 2;
+  // Absolute path of the recreated worktree.
+  string worktree_path = 3;
+}
+
+message StreamWorktreeStatsRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // When true, (re)enqueue a size calculation for every worktree on subscribe. When false, only
+  // worktrees currently NONE are lazily enqueued.
+  bool recalculate_all = 3;
+}
+
+// One entry in a single directory level of a session's worktree.
+message WorktreeDirEntry {
+  // Path segment (basename) of the entry, relative to its parent directory.
+  string name = 1;
+  bool is_dir = 2;
+  // On-disk size of a file entry, so a picker can refuse an oversized document before requesting
+  // it. Always 0 for a directory.
+  uint64 size_bytes = 3;
+}
+
+// One frame of StreamReadWorktreeFile. `data` is raw file bytes with no encoding applied at any
+// point on the path, so any file round-trips intact. A zero-byte file yields exactly one frame with
+// empty `data`, which is how "the file is empty" stays distinguishable from "the stream failed".
+message WorktreeFileChunk {
+  bytes data = 1;
+  // The file's full size, repeated on every frame so a reader knows the total from the first one.
+  uint64 total_byte_size = 2;
+}
+
+message WorktreeRow {
+  string path = 1;
+  string branch_label = 2;
+  uint64 disk_bytes = 3;
+  uint32 changed_files = 4;
+  int64 lines_added = 5;
+  int64 lines_removed = 6;
+  int64 updated_at_unix_ms = 7;
+  bool stale = 8;
+  // Disk-size lifecycle for this worktree, and when the size was last calculated (0 when never).
+  WorktreeSizeStatus size_status = 9;
+  int64 size_calculated_at_unix_ms = 10;
+}
+
+// Lifecycle of a worktree's on-disk size calculation (docs/ft/web/worktree-disk-usage-streaming.md).
+enum WorktreeSizeStatus {
+  WORKTREE_SIZE_STATUS_UNSPECIFIED = 0;
+  // Never calculated and no walk in flight.
+  WORKTREE_SIZE_STATUS_NONE = 1;
+  // A size walk is queued or running.
+  WORKTREE_SIZE_STATUS_CALCULATING = 2;
+  // A size has been computed and is available (in memory or persisted).
+  WORKTREE_SIZE_STATUS_CACHED = 3;
+}
+
+// One event on the StreamWorktreeStats server stream. The first event carries the full snapshot;
+// subsequent events carry a single updated worktree row (its size flipped Calculating -> Cached).
+message WorktreeStatsEvent {
+  repeated WorktreeRow snapshot = 1;
+  WorktreeRow updated = 2;
+}

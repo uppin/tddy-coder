@@ -12121,6 +12121,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-daemon-kernel"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde_json",
+ "tddy-core",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-demo"
 version = "0.1.0"
 dependencies = [
