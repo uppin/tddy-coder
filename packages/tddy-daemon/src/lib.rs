@@ -45,6 +45,7 @@ pub mod project_storage;
 pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
+pub mod remote_desktop_probe;
 pub mod remote_git_service;
 pub mod runtime;
 pub mod semantic_index;
