@@ -43,11 +43,14 @@ pub use proto::actions::ActionServiceServer;
 pub use proto::activity::ActivityServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
+pub use proto::catalog::CatalogServiceServer;
 pub use proto::connection::ConnectionServiceServer;
+pub use proto::exec_tools::ExecToolServiceServer;
 pub use proto::host::HostServiceServer;
 pub use proto::livekit::LiveKitServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
+pub use proto::pr_stack::PrStackServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
@@ -139,7 +142,6 @@ pub mod proto {
     pub mod activity {
         include!(concat!(env!("OUT_DIR"), "/activity.rs"));
     }
-
     /// Tonic-generated gRPC / Connect-HTTP server and client for `session_agents.proto`, sharing
     /// [`session_agents_svc`]'s message types via `extern_path`.
     ///
@@ -161,6 +163,26 @@ pub mod proto {
     pub mod tonic_activity {
         #![allow(unused_imports, clippy::all)]
         include!(concat!(env!("OUT_DIR"), "/tonic_activity/activity.rs"));
+    }
+
+    /// `CatalogService`: the tools, backends, models and subagents this daemon can offer. Split out
+    /// of [`connection`] by `#unbundle` node 8; served from `tddy-discovery`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod catalog {
+        include!(concat!(env!("OUT_DIR"), "/catalog.rs"));
+    }
+    /// `ExecToolService`: executing a tool, and what has been executed. Served from
+    /// `tddy-tool-engine`, which also defines and executes those tools — one catalog, one executor,
+    /// one served coordinate.
+    #[allow(unused_imports, unused_variables)]
+    pub mod exec_tools {
+        include!(concat!(env!("OUT_DIR"), "/exec_tools.rs"));
+    }
+    /// `PrStackService`: planning, querying and repointing a stack of dependent pull requests.
+    /// Served from `tddy-workflow-recipes`, which already owns the recipes and the MCP tools.
+    #[allow(unused_imports, unused_variables)]
+    pub mod pr_stack {
+        include!(concat!(env!("OUT_DIR"), "/pr_stack.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

@@ -13,11 +13,11 @@
 - [model-registry.md](../../../packages/tddy-model-registry/docs/model-registry.md) — `ListAgentModels` moves
 - [rpc-playground.md](../rpc-playground.md) — the picker reaches its final shape
 - [connection-service.md](../../../packages/tddy-daemon/docs/connection-service.md) — the 931-line
-  endpoint reference reaches its final 21 entries
+  endpoint reference reaches its final 17 entries
 
 ## Summary
 
-The last 16 methods this stack moves leave `connection.ConnectionService`, taking it from 33 to **21**.
+The last 16 methods this stack moves leave `connection.ConnectionService`, taking it from 33 to **17**.
 The tools-and-agents catalogue (family A, 4) becomes `catalog.CatalogService`; tool execution
 (family L, 4) becomes `exec_tools.ExecToolService`; PR-stack orchestration (family P, 8) becomes
 `pr_stack.PrStackService`.
@@ -81,7 +81,7 @@ takes rows rather than a `DaemonConfig`.
 ### What stays the same
 
 - Every catalogue, execution and PR-stack behaviour.
-- **The 21 methods that remain**, deliberately: family C (sessions lifecycle, 8), D (projects and
+- **The 17 methods that remain**, deliberately: family C (sessions lifecycle, 8), D (projects and
   branches, 5), O (demo VM, 3), Q (`MintLocalToken`, UDS-only, 1), and the 4 that stay with them. That
   is the irreducible core — a daemon that starts, resumes, signals and deletes sessions, owns
   projects, and mints a local token over a peer-credentialled socket.
@@ -92,7 +92,7 @@ takes rows rather than a `DaemonConfig`.
 
 | Area | Impact |
 |---|---|
-| `tddy-daemon` | −3 modules, −588 prod LoC; three `ServiceEntry` groups; `connection.ConnectionService` reaches its final 21 methods |
+| `tddy-daemon` | −3 modules, −588 prod LoC; three `ServiceEntry` groups; `connection.ConnectionService` reaches its final 17 methods |
 | `tddy-tool-engine` | defines, executes **and serves** the same ten tools; the guard tests become vacuous and are deleted |
 | `tddy-discovery` | serves the catalogue it already resolves; its hard-coded URL becomes a generated client call |
 | `tddy-workflow-recipes` | serves the PR-stack surface it already implements and already exposes as MCP tools |
@@ -120,7 +120,7 @@ stack; there is no partial-compatibility window left.
 
 - [ ] `catalog.CatalogService`, `exec_tools.ExecToolService` and `pr_stack.PrStackService` each serve
       their methods on all transports
-- [ ] `connection.ConnectionService` declares exactly **21** methods — families C, D, O and Q
+- [ ] `connection.ConnectionService` declares exactly **17** methods — families C, D, O and Q
 - [ ] **an in-jail agent executes a tool through the updated relay allowlist** — tested through a real jail
 - [ ] `tddy-discovery` reaches the exec-tool coordinate through a generated client, with no
       hand-built URL anywhere in the repo

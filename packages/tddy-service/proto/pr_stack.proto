@@ -1,0 +1,338 @@
+syntax = "proto3";
+
+package pr_stack;
+
+import "types.proto";
+
+// Planning, querying and repointing a stack of dependent pull requests.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family P — and served from
+// `tddy-workflow-recipes`, which already owns `orchestrate_pr_stack`, `pr_stack`, `plan_pr_stack`
+// and — since node 5 — the 14 PR-stack MCP tools. A `tddy-pr-stack-service` crate would have split
+// one domain across two.
+//
+// Imports `types.proto` for `BranchSession`, which `ListSessions` reaches too.
+
+service PrStackService {
+  // PR-Stack Chat Screen: manually append a planned PR to an orchestrator session's stack,
+  // choosing its ancestors (parent node ids) from the already-planned nodes. See
+  // docs/ft/coder/pr-stacking.md § Manually adding a planned PR.
+  rpc AddPlannedPr(AddPlannedPrRequest) returns (AddPlannedPrResponse);
+  // PR-Stack Chat Screen: live GitHub PR status for one planned-PR branch (number, link, state).
+  // Polled by the web so the stack view shows PR status without the orchestrator agent running.
+  // See docs/ft/coder/pr-stack-live-status.md.
+  rpc GetPrStatus(GetPrStatusRequest) returns (GetPrStatusResponse);
+  // PR-Stack Chat Screen: repoint a planned node after a predecessor merged — drop merged parents,
+  // rebase the local branch onto the effective base, and re-target the open PR's base branch.
+  rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
+  // PR-Stack Chat Screen: move one planned node up or down the operator's reading order. Changes
+  // only `StackNode.display_order` — the dependency graph (`parents`) is a different fact and is
+  // left alone. See docs/ft/coder/pr-stack-live-status.md.
+  rpc ReorderPlannedPr(ReorderPlannedPrRequest) returns (ReorderPlannedPrResponse);
+  // PR-Stack Chat Screen: take a base branch's commits into a planned node's branch, inside that
+  // node's own worktree, and push the result. Merge by default; rebase on request.
+  rpc PullBaseIntoBranch(PullBaseIntoBranchRequest) returns (PullBaseIntoBranchResponse);
+  // PR-Stack Chat Screen: resolve one head branch to its in-progress child session, on-disk
+  // worktree, and live GitHub PR status in a single call. Polled by the web per rendered branch.
+  // See docs/ft/coder/pr-stack-live-status.md.
+  rpc QueryBranch(QueryBranchRequest) returns (QueryBranchResponse);
+  // Resolve, on the daemon that **owns** a PR-stack parent, what a child spawn's branch bases off.
+  //
+  // `stack_parent` is a bare session id, and every resolver behind it reads the parent's
+  // `changeset.yaml` out of the serving daemon's own sessions tree. The new-session form's
+  // orchestrator picker is fed by a fanned-out, all-host `ListSessions`, so it routinely offers an
+  // orchestrator that lives on a different daemon than the child is started on — and resolved
+  // locally that parent is not "not yet planned" but simply absent, which refuses the spawn over a
+  // session that exists one host over.
+  //
+  // So the spawning daemon asks the owner instead. The owner is the only place the parent's stack,
+  // its already-spawned child sessions and a checkout of the same logical project exist together,
+  // which is exactly what the answer is assembled from. See docs/ft/coder/pr-stacking.md.
+  rpc ResolveStackBase(ResolveStackBaseRequest) returns (ResolveStackBaseResponse);
+  // Record, on the daemon that **owns** a PR-stack orchestrator, that one of its planned nodes has
+  // been materialized: which child session did it, and which branch that session created.
+  //
+  // The write half of `ResolveStackBase`, routed for the same reason. A planned node lives in its
+  // orchestrator's own `changeset.yaml`, so a child spawned on another host writing its own sessions
+  // tree writes nothing at all — the node keeps neither a branch nor a child, and every descendant
+  // stays unspawnable because `Stack::base_ref_for_spawn` gates on a parent owning a branch. See
+  // docs/ft/coder/pr-stack-live-status.md (D35).
+  rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
+}
+
+message AddPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack the new node is appended to.
+  string session_id = 2;
+  string title = 3;
+  string description = 4;
+  // Optional; empty string = none.
+  string branch_suggestion = 5;
+  // Ancestor node ids (StackNode.parents) chosen from the orchestrator's existing planned PRs.
+  // Empty = root node (branches off the stack base).
+  repeated string parents = 6;
+  // Optional workflow recipe for the eventual child session (e.g. "tdd"). Empty = default ("tdd").
+  string child_recipe = 7;
+}
+
+message AddPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23)
+  // — callers re-use the existing `parseStackPlan` parser rather than a second message schema.
+  string stack_plan_json = 1;
+  // Node id of the node this call appended, assigned server-side. Named explicitly because the
+  // caller cannot infer it: the orchestrator agent appends nodes too, so a plan returned to a web
+  // client that last refreshed one poll ago can hold more than one node the client has never seen,
+  // and picking any of them by position would open the "Add & start session" dialog on somebody
+  // else's node. See docs/ft/coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13.
+  string node_id = 2;
+}
+
+// How a branch stands against its base: how far behind, how far ahead, and whether taking the
+// base's commits would conflict.
+//
+// Computed with `git rev-list --left-right --count` and `git merge-tree --write-tree`, neither of
+// which touches the index, the working tree, `HEAD`, any ref, or the network — the probe runs on a
+// poll against worktrees that may have a live agent in them. It reads the base as of the last
+// fetch, so it can report a branch behind that has just caught up, never the reverse.
+message BranchBaseSync {
+  // The base that was actually compared, which is not always the one requested: a requested
+  // `origin/master` is normalised, and a base resolves remote-first. The row names this, not what
+  // it asked for.
+  string base_branch = 1;
+  // Commits on the base that the branch lacks.
+  uint32 behind_count = 2;
+  // Commits on the branch that the base lacks.
+  uint32 ahead_count = 3;
+  // True when taking the base's commits would conflict. Always false when behind_count = 0, which
+  // is short-circuited without a merge probe.
+  bool has_conflicts = 4;
+  // The files that cannot be merged, when has_conflicts = true.
+  repeated string conflicted_paths = 5;
+  // True when the comparison could not be made at all — no base named, no repository, an
+  // unresolvable ref, unrelated histories. A failed comparison is byte-identical to a healthy one
+  // (nothing behind, no conflicts), so it carries this discriminator and must never render as
+  // "in sync".
+  bool unavailable = 6;
+  // Operator-facing reason when unavailable = true; empty otherwise.
+  string unavailable_reason = 7;
+  // The fully-resolved ref the base was read from, e.g. "origin/master" or "master".
+  string base_ref = 8;
+  // The fully-resolved ref the head was read from, e.g. "feature/x" or "origin/feature/x".
+  string head_ref = 9;
+}
+
+// The remote-tracking state of a branch on `origin`.
+message BranchRemote {
+  // False when `origin/<branch>` is absent — a descendant cannot be based onto it yet.
+  bool exists = 1;
+  // Commit the remote ref points at when exists = true; empty otherwise.
+  string sha = 2;
+}
+
+// Everything the PR-Stack view needs about one branch, resolved server-side by branch name.
+message BranchResolution {
+  // Echoes the request; lets a response self-identify.
+  string branch = 1;
+  // The in-progress child session working the branch.
+  types.BranchSession session = 2;
+  // The worktree checked out for the branch on disk.
+  BranchWorktree worktree = 3;
+  // Live GitHub PR status (reuses the existing PrStatusView).
+  PrStatusView pr = 4;
+  // The branch on `origin` — whether it can be based onto by a descendant's worktree.
+  BranchRemote remote = 5;
+  // How the branch stands against the base named in the request. Always present, including when
+  // the request named no base — that is reported as `unavailable`, not omitted. Absent only from a
+  // daemon that predates the field, which a client must read as "unknown" rather than "in sync".
+  BranchBaseSync base_sync = 6;
+}
+
+message BranchWorktree {
+  // False when no worktree is checked out for the branch.
+  bool exists = 1;
+  // Absolute worktree path when exists = true.
+  string path = 2;
+  // True when the worktree holds uncommitted changes to *tracked* files. Untracked files are
+  // deliberately not dirtiness here: git refuses loudly rather than clobbering one, and counting
+  // them would leave the pull control permanently blocked in any worktree an agent works in.
+  bool dirty = 3;
+  // The tracked paths with outstanding changes, when dirty = true.
+  repeated string dirty_paths = 4;
+}
+
+message GetPrStatusRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session — resolves the repo (owner/repo) to query.
+  string session_id = 2;
+  // Head branch to look up (the planned PR's branch).
+  string branch = 3;
+}
+
+message GetPrStatusResponse {
+  PrStatusView status = 1;
+}
+
+// Record a child session and its branch on a planned node of a pr-stack orchestrator, on the daemon
+// that owns that orchestrator.
+message LinkStackNodeRequest {
+  string session_token = 1;
+  // The daemon whose sessions tree holds `orchestrator_session_id`. Empty or matching the local
+  // instance = this daemon answers from its own disk.
+  string daemon_instance_id = 2;
+  // The pr-stack orchestrator whose plan holds the node.
+  string orchestrator_session_id = 3;
+  // The planned node to link. Required — a link is never derived from the branch on this path (D34).
+  string node_id = 4;
+  // The child session that materialized the node.
+  string child_session_id = 5;
+  // The branch that session created. Recorded as the node's `branch`, which is what makes the
+  // node's descendants spawnable.
+  string branch = 6;
+}
+
+message LinkStackNodeResponse {
+  // The plan as it stands after the link, so a caller that renders it does not re-read.
+  string stack_plan_json = 1;
+}
+
+// Live GitHub PR status for one head branch.
+message PrStatusView {
+  // False when no PR (open, merged, or closed) exists for the queried head branch.
+  bool exists = 1;
+  uint64 number = 2;
+  string url = 3;
+  // "open" | "merged" | "closed" | "draft". Empty when exists = false.
+  string state = 4;
+  // True when the lookup could not be performed (no GitHub credential, rate limit, transport
+  // error). Distinct from exists = false, which means "no PR exists for this head branch".
+  bool unavailable = 5;
+  // Operator-facing reason when unavailable = true; empty otherwise.
+  string unavailable_reason = 6;
+}
+
+message PullBaseIntoBranchRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The node whose branch takes the base's commits. The pull runs in that node's own worktree.
+  string node_id = 3;
+  // The base to take from — the base the operator's control named, so the operation matches what
+  // the row's base-sync badge stated.
+  string base_branch = 4;
+  // "merge" (default, and what an empty string means) or "rebase". Merge disturbs no review
+  // anchors on the open PR and needs no force-push; rebase rewrites history and force-pushes with
+  // a lease, which is the right trade only when the operator chooses it.
+  string strategy = 5;
+  // What to do about uncommitted changes to tracked files in the worktree. Empty refuses the pull
+  // and names the paths; "commit" commits and pushes them first, then pulls.
+  string dirty_worktree_action = 6;
+  // The commit message for dirty_worktree_action = "commit". Meaningless otherwise.
+  string commit_message = 7;
+}
+
+message PullBaseIntoBranchResponse {
+  // The branch re-resolved after the pull, uncached — the refs just moved, so the row repaints
+  // without waiting for the next poll tick.
+  BranchResolution resolution = 1;
+  // The strategy that actually ran: "merge" or "rebase".
+  string strategy = 2;
+  // False when the branch already contained every commit on its base, in which case nothing was
+  // committed and nothing was pushed.
+  bool changed = 3;
+  // False when the push failed. The local merge or rebase still landed — rolling it back would be
+  // strictly worse than reporting the truth.
+  bool pushed = 4;
+  // Why the push failed, when pushed = false and changed = true.
+  string push_error = 5;
+}
+
+message QueryBranchRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session — resolves the repo (owner/repo + repo_path) and the
+  // sessions root to scan.
+  string session_id = 2;
+  // Head branch to resolve.
+  string branch = 3;
+  // The base the branch is compared against for `BranchResolution.base_sync`. Usually
+  // `ProjectEntry.main_branch_ref`, so it commonly already carries a `<remote>/` prefix — the
+  // daemon normalises one off before probing. Empty means the caller named no base, which is
+  // reported as `base_sync.unavailable` rather than substituting one: the count beside a row must
+  // describe the same base the row's own base line shows.
+  string base_branch = 4;
+}
+
+message QueryBranchResponse {
+  BranchResolution resolution = 1;
+}
+
+message ReorderPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The planned node to move.
+  string node_id = 3;
+  // "up" or "down". Moving past either end is a successful no-op — the control at the end of the
+  // list is inert, not wrong.
+  string direction = 4;
+}
+
+message ReorderPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
+  string stack_plan_json = 1;
+}
+
+message RepointPlannedPrRequest {
+  string session_token = 1;
+  // The "pr-stack" orchestrator session whose Changeset.stack holds the node.
+  string session_id = 2;
+  // The planned node to repoint (drop merged parents, rebase, re-target PR base).
+  string node_id = 3;
+  // The branch the node should be based onto after the repoint — the target the operator's
+  // "Repoint to <target>" control named. The daemon retains exactly the parents that own this
+  // branch and drops the rest; a target no parent owns means "detach", and the node's base
+  // collapses to the project default. Rejected when it names neither the resolved default branch
+  // nor any parent's branch. Empty keeps the original behaviour: drop merged parents only.
+  string target_base_branch = 4;
+}
+
+message RepointPlannedPrResponse {
+  // Updated JSON-serialized `Stack`, same wire shape as `SessionEntry.stack_plan_json` (field 23).
+  string stack_plan_json = 1;
+}
+
+// What a child spawn's branch bases off, asked of the daemon that owns the stack parent.
+message ResolveStackBaseRequest {
+  string session_token = 1;
+  // The daemon whose sessions tree holds `stack_parent`. Empty or matching the local instance =
+  // this daemon answers from its own disk, which is what every single-host deployment — and every
+  // caller predating the field — sends. Naming a daemon this one shares no common room with is a
+  // request error, not a silent local answer.
+  string daemon_instance_id = 2;
+  // The parent session: a pr-stack orchestrator, whose planned node for `new_branch_name` names the
+  // ancestor to base onto, or an ordinary code session, whose own branch it is.
+  string stack_parent = 3;
+  // The **logical** project id, which is stable across hosts (`AddProjectToHost` reuses it rather
+  // than minting a new one). That is what lets the owner resolve *its* checkout of the same
+  // repository from the id the child's host sent: the base is a remote-tracking ref, so the two
+  // checkouts need only share an origin, not a path.
+  string project_id = 4;
+  // The branch the child spawn is about to create — how the planned node it belongs to is found
+  // when, and only when, `stack_node_id` is empty.
+  string new_branch_name = 5;
+  // The planned node the child spawn materializes, as the surface that started it named it. Takes
+  // precedence over `new_branch_name` (D34): the branch is the operator's to edit in the create
+  // dialog before confirming, and a node carrying no `branch_suggestion` never matched a typed name
+  // at all — either way the branch-derived lookup finds no node, and "no node" means no ordering
+  // gate runs and the child is cut from the project default for a node whose non-merged parent owns
+  // no branch. Empty keeps the branch-derived lookup.
+  string stack_node_id = 6;
+}
+
+message ResolveStackBaseResponse {
+  // The remote-tracking ref the child's worktree is cut from (e.g. `origin/feature/token-store`).
+  // Empty means the parent named no chain base — an unplanned branch, on a stack that has one for
+  // other branches — and the child's host applies the project default instead. That is not an
+  // error, and is deliberately distinct from one: a spawn refused here reports the owner's own
+  // refusal verbatim.
+  string base_ref = 1;
+}

@@ -511,3 +511,180 @@ fn connection_service_no_longer_declares_the_agent_or_activity_methods() {
          {still_there:?}"
     );
 }
+
+/// ⛔ The security-relevant edit. `packages/tddy-sandbox-runner/src/runner.rs` holds the
+/// `(service, method)` allowlist of what an in-jail agent may relay to its host, and five family-B
+/// methods are in it. Move the coordinate without the allowlist and every in-jail conversation fails
+/// **closed** — silently, at runtime.
+///
+/// The permitted operation *set* must not change; only the service name each tuple carries.
+#[test]
+fn the_sandbox_relay_allowlist_names_the_new_service() {
+    let runner = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../tddy-sandbox-runner/src/runner.rs"),
+    )
+    .expect("the sandbox runner's source is readable");
+
+    assert!(
+        !runner.contains("\"connection.ConnectionService\", \"StreamSessionAgents\"")
+            && !runner.contains("\"StreamSessionAgents\""),
+        "the relay allowlist still gates family B under connection.ConnectionService"
+    );
+    assert!(
+        runner.contains("session_agents.SessionAgentService")
+            || runner.contains("IN_JAIL_RELAYABLE"),
+        "the relay allowlist must name the new service, or read it from tddy-session-agents"
+    );
+}
+
+const CATALOG_METHODS: [&str; 4] = [
+    "ListTools",
+    "ListAgents",
+    "ListAgentModels",
+    "ListSubagents",
+];
+
+const EXEC_TOOL_METHODS: [&str; 4] = [
+    "ExecuteTool",
+    "StreamExecuteTool",
+    "ListExecTools",
+    "ListSessionToolCalls",
+];
+
+const PR_STACK_METHODS: [&str; 8] = [
+    "AddPlannedPr",
+    "GetPrStatus",
+    "RepointPlannedPr",
+    "ReorderPlannedPr",
+    "PullBaseIntoBranch",
+    "QueryBranch",
+    "ResolveStackBase",
+    "LinkStackNode",
+];
+
+/// Families C, D, O and Q — the deliberate endpoint of the whole stack.
+///
+/// A daemon that starts, resumes, signals and deletes sessions, owns projects and their branches,
+/// runs the demo VM, and mints a local token over a peer-credentialled socket. A
+/// `connection.ConnectionService` of zero methods would mean inventing a ninth service for the one
+/// thing the daemon genuinely is.
+const RESIDUAL_METHODS: [&str; 17] = [
+    "ListSessions",
+    "StartSession",
+    "StreamStartSession",
+    "ConnectSession",
+    "ResumeSession",
+    "SignalSession",
+    "DeleteSession",
+    "GetWorktreeSnapshot",
+    "ListProjects",
+    "CreateProject",
+    "AddProjectToHost",
+    "ListProjectBranches",
+    "SetProjectDefaultBranch",
+    "StartDemoVm",
+    "StopDemoVm",
+    "GetDemoVmStatus",
+    "MintLocalToken",
+];
+
+#[test]
+fn catalog_service_declares_every_catalogue_method() {
+    let block = service_block(&read("catalog.proto"), "CatalogService");
+    for method in CATALOG_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "catalog.CatalogService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn exec_tool_service_declares_every_execution_method() {
+    let block = service_block(&read("exec_tools.proto"), "ExecToolService");
+    for method in EXEC_TOOL_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "exec_tools.ExecToolService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn pr_stack_service_declares_every_stack_method() {
+    let block = service_block(&read("pr_stack.proto"), "PrStackService");
+    for method in PR_STACK_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "pr_stack.PrStackService is missing {method}"
+        );
+    }
+}
+
+/// **The completion criterion for the whole `#unbundle` stack.**
+///
+/// 90 → 17. Every other node's shape test checks its own families; this one checks that what is left
+/// is *exactly* the residual and nothing else — so a method that was forgotten by every node, or one
+/// added while the stack was in flight, fails here rather than quietly surviving.
+#[test]
+fn connection_service_ends_at_exactly_the_residual() {
+    // Given
+    let block = service_block(&connection_proto(), "ConnectionService");
+
+    // When
+    let declared: Vec<String> = block
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("rpc "))
+        .filter_map(|rest| rest.split('(').next())
+        .map(str::to_string)
+        .collect();
+
+    // Then
+    let mut unexpected: Vec<&String> = declared
+        .iter()
+        .filter(|name| !RESIDUAL_METHODS.contains(&name.as_str()))
+        .collect();
+    unexpected.sort();
+
+    assert!(
+        unexpected.is_empty(),
+        "connection.ConnectionService should end at families C, D, O and Q; these are still \
+         declared: {unexpected:?}"
+    );
+    assert_eq!(
+        declared.len(),
+        RESIDUAL_METHODS.len(),
+        "the stack moves 73 of 90 methods, leaving 17"
+    );
+}
+
+/// The three protos node 8 adds are the last, and the shared types file must not have grown beyond
+/// what genuinely crosses: `HostDocumentScope` (node 6), `SessionAgentStatus` and
+/// `SessionAgentActivity` (node 7), `BranchSession` (node 8) — four types, each reached by a service
+/// that stays as well as one that moved, each established by walking field types.
+#[test]
+fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
+    // Given
+    let types = read("types.proto");
+
+    // When
+    let declared = types.matches("\nenum ").count() + types.matches("\nmessage ").count();
+
+    // Then
+    assert_eq!(
+        declared, 4,
+        "types.proto grew past what two really-served services both reach"
+    );
+    for expected in [
+        "HostDocumentScope",
+        "SessionAgentStatus",
+        "SessionAgentActivity",
+        "BranchSession",
+    ] {
+        assert!(
+            types.contains(expected),
+            "types.proto is missing {expected}"
+        );
+    }
+}
+

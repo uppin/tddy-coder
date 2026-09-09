@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package catalog;
+
+// What this daemon can offer: the tools it allows, the coding backends it allows, each backend's
+// models, and every subagent a name resolves against here.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 8 — family A — and served from
+// `tddy-discovery`, which already resolves every one of these answers.
+//
+// The four methods are answered from **configuration rows and the agent catalogue**, not from daemon
+// state. `main.rs` already extracts the rows with `agent_list_mapping::agent_allowlist_rows`, so the
+// serving crate takes rows rather than a `DaemonConfig` — giving a leaf crate the daemon's whole
+// configuration type would be the wrong trade.
+
+service CatalogService {
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Models selectable for a given agent (or the "claude-cli" pseudo-agent). Enumerated from the
+  // underlying agent command where possible (cursor --list-models, ACP available_models), else a
+  // curated tddy-core list. Probes the agent subprocess, so it is called on demand per selected
+  // agent — not folded into the cheap ListAgents. See docs/ft/web/tool-session-model-selection.md.
+  rpc ListAgentModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
+  // Specialized subagents (YAML-defined; see docs/ft/coder/specialized-subagents.md) available to
+  // wire into a managed-codebase session — builtin defs plus <tddyhome>/agents/*.yaml.
+  rpc ListSubagents(ListSubagentsRequest) returns (ListSubagentsResponse);
+}
+
+message AgentInfo {
+  string id = 1;
+  string label = 2;
+}
+
+message ListAgentModelsRequest {
+  string session_token = 1;
+  // Agent id ("claude", "cursor", "codex-acp", …) or the pseudo-agent "claude-cli".
+  string agent = 2;
+  // Optional daemon instance to run the probe on (multi-host). Empty = local.
+  string daemon_instance_id = 3;
+}
+
+message ListAgentModelsResponse {
+  repeated ModelInfo models = 1;
+  // Id (within `models`) to preselect — the backend's current/default model.
+  string default_model = 2;
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+message ListSubagentsRequest {}
+
+message ListSubagentsResponse {
+  repeated SubagentInfo subagents = 1;
+}
+
+message ListToolsRequest {}
+
+message ListToolsResponse {
+  repeated ToolInfo tools = 1;
+}
+
+message ModelInfo {
+  // Value passed as --model (e.g. "gpt-5.2", "opus", "claude-opus-4-8").
+  string id = 1;
+  // Human-readable label (e.g. "GPT-5.2", "Claude Opus 4.8").
+  string label = 2;
+}
+
+message SubagentInfo {
+  string name = 1;
+  string label = 2;
+  string model = 3;
+  // Stamped by the daemon that resolved this def. A picker fans ListSubagents out across every
+  // common-room daemon, and two of them routinely answer with a def called "explorer" — without the
+  // stamp the merged list cannot say which host offers which row.
+  string daemon_instance_id = 4;
+  // "name@daemon_instance_id", ready to hand to AttachSessionAgent. Carried rather than assembled
+  // by the caller so the id a picker sends is the one the serving daemon minted, character for
+  // character.
+  string agent_id = 5;
+  // Exec-catalog tools this agent would take over from the main agent, so a picker can warn what
+  // the main agent loses before the operator attaches it.
+  repeated string replaces = 6;
+  // Exec-catalog tools the agent's own loop may call.
+  repeated string tools = 7;
+}
+
+message ToolInfo {
+  string path = 1;
+  string label = 2;
+}

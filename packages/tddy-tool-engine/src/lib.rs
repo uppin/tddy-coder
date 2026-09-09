@@ -770,3 +770,29 @@ pub mod dynamic_proxy {
         }
     }
 }
+
+/// The `exec_tools.ExecToolService` entry — `#unbundle` node 8, family L.
+///
+/// This crate defines the ten tools, executes them, and — with this — serves them. One catalog, one
+/// executor, one served coordinate.
+///
+/// Until node 5 there were three copies of that catalog: this crate's, a hand-written
+/// `RemoteToolDef` clone in `tddy-tools`, and a guard test in the daemon, kept in step by matched
+/// tests in both crates. Node 5 collapsed the clone. Node 8 deletes the guards, because with one
+/// catalog they compare a value to itself — and a test whose failure is impossible reads as coverage
+/// without being any.
+pub fn build_exec_tool_entry() -> tddy_rpc::ServiceEntry {
+    // TODO(exec-prstack-services): implement
+    unimplemented!("build_exec_tool_entry")
+}
+
+#[cfg(test)]
+mod unbundle_exec_tool_entry_tests {
+    #[test]
+    fn names_the_service_family_l_moves_to() {
+        assert_eq!(
+            super::build_exec_tool_entry().name,
+            "exec_tools.ExecToolService"
+        );
+    }
+}

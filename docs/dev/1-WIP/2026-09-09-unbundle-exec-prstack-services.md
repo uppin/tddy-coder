@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
-**Stack**: `#unbundle` node **8 of 8** — the last. Base: `feature/unbundle/session-agent-services` (node 7)
+**Stack**: `#unbundle` node **8 of 8** — the last. PR [#477](https://github.com/uppin/tddy-coder/pull/477).
+Base: `feature/unbundle/session-agent-services` (node 7, PR #476)
 
 ## Initial Discovery
 
@@ -14,7 +15,7 @@ State A below is distilled from that file. Do not duplicate grep traces or item 
 
 ## Responsibility
 
-The last 16 methods this stack moves leave `connection.ConnectionService`, taking it from 33 to **21**.
+The last 16 methods this stack moves leave `connection.ConnectionService`, taking it from 33 to **17**.
 
 | New coordinate | Family | Methods | Served by | Source that moves |
 |---|---|---:|---|---|
@@ -44,7 +45,7 @@ Three things end here:
 
 This PR explicitly does **not**:
 
-- Move families C, D, O or Q. **Those 21 methods are the deliberate endpoint**: a daemon that starts,
+- Move families C, D, O or Q. **Those 17 methods are the deliberate endpoint**: a daemon that starts,
   resumes, signals and deletes sessions, owns projects and their branches, runs the demo VM, and mints
   a local token over a peer-credentialled socket. Taking them would leave nothing coherent behind.
 - Move `session_list_enrichment.rs`, `split_session.rs`, `cli_session_manager.rs`,
@@ -85,7 +86,7 @@ What lands in this PR's **second commit**:
   `tddy-sandbox-app/src/sandboxed_session.rs:708` — **pushed early because it is the second
   security-relevant edit in the stack**, for the same reason node 7 pushed the first.
 - The failing acceptance tests, including the through-a-real-jail tool-execution test and the
-  final-shape assertion that `connection.ConnectionService` declares exactly 21 methods.
+  final-shape assertion that `connection.ConnectionService` declares exactly 17 methods.
 
 **This is the first push of a PR that goes on to implement the same thing. It must never merge in
 that state.**
@@ -117,7 +118,7 @@ node's changes.
   `session_toolcall.rs`; **defines, executes and serves the same ten tools**
 - **tddy-workflow-recipes** — serves `pr_stack.PrStackService`
 - **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 3 modules and 588 prod LoC leave;
-  `connection.ConnectionService` reaches its final 21 methods
+  `connection.ConnectionService` reaches its final 17 methods
   - [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md) — the 931-line
     endpoint reference reaches its final shape
 - **tddy-sandbox-runner**, **tddy-sandbox-app** — the family-L allowlist and its mirror guard
@@ -130,11 +131,31 @@ node's changes.
 
 - [PRD-2026-09-09-exec-prstack-services.md](../../ft/daemon/1-WIP/PRD-2026-09-09-exec-prstack-services.md)
 
+## Arithmetic, corrected in wave 2
+
+This document and its PRD said the residual was **21 methods**. Counting the declarations in
+`connection.proto` says **17**, and node 1's changeset had it right all along:
+
+| Node | Families | Methods |
+|---|---|---:|
+| 1 | E, F, G, H | 17 |
+| 4 | T | 1 |
+| 6 | I, J, K, R, S | 22 |
+| 7 | B, M, N | 17 |
+| 8 | A, L, P | 16 |
+| **moved** | | **73** |
+| **residual** | C (8), D (5), O (3), Q (1) | **17** |
+
+The 21 came from an arithmetic slip while consolidating 25 nodes into 8, and it survived into two
+documents because nothing checked it. Node 8's completion test now enumerates the residual **by
+name** rather than by count, so a method forgotten by every node — or added while the stack was in
+flight — fails there instead of quietly surviving.
+
 ## Summary
 
 The tools-and-agents catalogue, tool execution and PR-stack orchestration leave
 `connection.ConnectionService` for three services hosted by the crates that already own those domains.
-No new crates. `connection.ConnectionService` ends at 21 methods.
+No new crates. `connection.ConnectionService` ends at 17 methods.
 
 ## Background
 
@@ -181,7 +202,7 @@ becomes unambiguous — the crate that owns the recipe also owns the RPC. Update
 ## Scope
 
 - [ ] **Proto**: `catalog.proto` (4), `exec_tools.proto` (4), `pr_stack.proto` (8); `connection.proto`
-      reaches 21 methods with vacated numbers `reserved`
+      reaches 17 methods with vacated numbers `reserved`
 - [ ] **`tddy-tool-engine` serves family L**; gains 2 modules; **the vacuous guard tests deleted**
 - [ ] **`tddy-discovery` serves family A**; gains `agent_list_mapping.rs`; **the hand-built URL replaced
       by a generated client call**, with its 4 wiremock assertions updated
@@ -190,7 +211,7 @@ becomes unambiguous — the crate that owns the recipe also owns the RPC. Update
 - [ ] **⛔ `tddy-coder` lockstep**: family L moved in this PR
 - [ ] **⛔ Action-tool advertisement**: verified closed from node 5
 - [ ] **Web**: 7 components and hooks migrated; the Cypress fakes reach their final split
-- [ ] **Final shape**: `connection.ConnectionService` declares exactly 21 methods, asserted
+- [ ] **Final shape**: `connection.ConnectionService` declares exactly 17 methods, asserted
 - [ ] **Baseline**: `./test` per touched package back to the recorded numbers
 - [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
 - [ ] **Documentation**: doc triage executed at wrap
@@ -209,7 +230,7 @@ serves family L.
 
 ### State B
 
-`connection.ConnectionService` has **21 methods** — families C, D, O and Q. Three new services are
+`connection.ConnectionService` has **17 methods** — families C, D, O and Q. Three new services are
 served from `tddy-discovery`, `tddy-tool-engine` and `tddy-workflow-recipes`. The tool catalog has one
 definition, one executor and one served coordinate. No hand-built RPC URL exists in the repo.
 
@@ -245,7 +266,7 @@ definition, one executor and one served coordinate. No hand-built RPC URL exists
 - [ ] M4 — `tddy-discovery` serves family A; the hand-built URL gone
 - [ ] M5 — `tddy-workflow-recipes` serves family P
 - [ ] M6 — `tddy-coder`'s participant moved; HTTP and LiveKit answer a session identically
-- [ ] M7 — web migrated; `connection.ConnectionService` asserted at 21 methods; baselines restored
+- [ ] M7 — web migrated; `connection.ConnectionService` asserted at 17 methods; baselines restored
 
 ## Testing Plan
 
@@ -261,7 +282,7 @@ the code.
 - **A through-a-real-jail tool execution.** As in node 7, an allowlist that no longer matches the
   served coordinate fails *closed*, so a test inspecting the condition would pass while every in-jail
   tool call was broken. The test spawns a real sandboxed session and executes a tool from inside it.
-- **The final-shape assertion.** `connection.ConnectionService` declares exactly 21 methods, and they
+- **The final-shape assertion.** `connection.ConnectionService` declares exactly 17 methods, and they
   are families C, D, O and Q. This is the stack's completion criterion expressed as a test, and it
   belongs in the last node.
 
@@ -302,7 +323,7 @@ Three further proofs:
 - [ ] **Cypress component**: the PR-stack screen adds, repoints and reorders a planned PR (`PrStackScreen.cy.tsx`)
 
 ### tddy-service
-- [ ] **Unit**: `connection.ConnectionService` declares exactly 21 methods, and they are families C, D, O and Q (`connection_final_shape_unit.rs`)
+- [ ] **Unit**: `connection.ConnectionService` declares exactly 17 methods, and they are families C, D, O and Q (`connection_final_shape_unit.rs`)
 - [ ] **Unit**: no source file composes an RPC path from a service-name string literal (`no_handbuilt_urls_unit.rs`)
 
 ## Decisions & Trade-offs
@@ -316,7 +337,7 @@ Three further proofs:
   would give a leaf crate the daemon's whole configuration type. `main.rs` already extracts what is
   needed with `agent_list_mapping::agent_allowlist_rows`, so the crate takes rows and the wiring keeps
   owning the config.
-- **21 methods stay, and that is the answer rather than a compromise.** Families C, D, O and Q are
+- **17 methods stay, and that is the answer rather than a compromise.** Families C, D, O and Q are
   session lifecycle, projects and branches, the demo VM, and a UDS-only local token mint. A daemon
   that does those things and wires everything else is exactly what the brief asked for; a
   `connection.ConnectionService` of zero methods would mean inventing a ninth service for the one
@@ -344,7 +365,7 @@ Three further proofs:
 | `./test -p tddy-tool-engine -p tddy-discovery -p tddy-workflow-recipes` | | |
 | `./test -p tddy-coder` | | |
 | `./dev bun run --filter tddy-web cypress:component` | | |
-| `connection.ConnectionService` method count | **33** | **21** |
+| `connection.ConnectionService` method count | **33** | **17** |
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.
 In-jail suites need a real sandbox backend and are excluded from CI; their local results are stated
@@ -353,9 +374,9 @@ rather than claimed from a green build.
 ## Final Checklist
 
 - [ ] `docs/dev/changesets/2026-09-09-unbundle-exec-prstack-services.md` — the release-note file,
-      carrying the final 90 → 21 method count for the whole stack
+      carrying the final 90 → 17 method count for the whole stack
 - [ ] `packages/tddy-daemon/docs/connection-service.md` — reduce the 931-line reference to its final
-      21 endpoints and point at the eight new services
+      17 endpoints and point at the eight new services
 - [ ] `docs/ft/coder/pr-stacking.md`, `docs/ft/web/pr-stack-live-status.md`,
       `docs/ft/daemon/remote-codebase-mode.md`, `docs/ft/coder/specialized-subagents.md` — new coordinates
 - [ ] Update `docs/dev/todo/2026-08-29-stack-progress-json-is-documented-as-a-host-guarantee-…md`

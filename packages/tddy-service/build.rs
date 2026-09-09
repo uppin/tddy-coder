@@ -181,6 +181,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // file: `HostDocumentScope` is reached by `StartSession`, which stays, so `connection.proto`
         // and `session_files.proto` both import `types.proto` and neither declares the enum.
         "proto/session_files.proto",
+        // `#unbundle` node 8 — families A (the catalogue), L (tool execution) and P (PR-stack), each
+        // served from the crate that already owns its domain. No new crates.
+        "proto/catalog.proto",
+        "proto/exec_tools.proto",
+        "proto/pr_stack.proto",
     ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
@@ -509,6 +514,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/session_files.proto",
                 "proto/session_agents.proto",
                 "proto/activity.proto",
+                "proto/catalog.proto",
+                "proto/exec_tools.proto",
+                "proto/pr_stack.proto",
                 "proto/types.proto",
                 "proto/remote_git.proto",
                 "proto/session_admission.proto",
