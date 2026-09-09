@@ -1,3 +1,0 @@
-{"v":1,"snapshot":{"packages/tddy-daemon/src/connection_service.rs": "sha256:d684ddd915325e575d88aebaad1d5c2a6cfc1b5f80ff6190c3e222b7db70df53"}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":4689,"col":9},"end":{"line":5241,"col":12}},"name":"start_sandboxed_claude_cli_session_body"}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":8421,"col":9},"end":{"line":9242,"col":12}},"name":"start_session_core_body"}

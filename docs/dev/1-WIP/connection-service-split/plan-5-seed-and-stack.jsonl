@@ -1,4 +1,0 @@
-{"v":1,"snapshot":{"packages/tddy-daemon/src/connection_service.rs": "sha256:bfe2c1c6575673dccfcf917ffda7b5511c1d10396e66fecee8207a80781e0304"}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1300,"col":1},"end":{"line":1413,"col":2}},"name":"seed_codebase","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1415,"col":1},"end":{"line":1663,"col":2}},"name":"stack_parent","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1665,"col":1},"end":{"line":1827,"col":2}},"name":"seeded_clone_guard","to_file":true,"reexport":"glob"}

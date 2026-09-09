@@ -244,9 +244,14 @@ pre-existing noise unrelated to this change.
 
 ## Plan
 
-`docs/dev/1-WIP/connection-service-split/plan-*.jsonl` — 6 plans, applied in the order above. Each
-plan's header line carries the snapshot digest of the tree it was written against; a plan is written
-only after its predecessor has been applied and verified.
+Plans are **execution artifacts, not documentation, and are not kept in the repo.** Each is a command
+log addressed to one snapshot of one file — its header carries that file's `sha256`, so it is
+unreplayable the moment the next plan runs and unreadable as a record of intent. The seam list in
+*Delta* above is the durable statement of what moved and in what order; the per-plan outcomes are in
+*Applied so far* and in the commit messages.
+
+A plan is written only after its predecessor has been applied and verified, against the tree that
+predecessor left.
 
 ## Decisions & Trade-offs
 

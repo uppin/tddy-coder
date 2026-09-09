@@ -1,9 +1,0 @@
-{"v":1,"snapshot":{"packages/tddy-daemon/src/connection_service.rs": "sha256:162ba34b0724b41018eab814fc6322edaf642b645fe39043078a3c49269f781b"}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":128,"col":1},"end":{"line":304,"col":2}},"name":"service_util","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":957,"col":1},"end":{"line":1200,"col":2}},"name":"host_messages","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1202,"col":1},"end":{"line":1323,"col":2}},"name":"activity_hub","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1475,"col":1},"end":{"line":1588,"col":2}},"name":"seed_codebase","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1590,"col":1},"end":{"line":1838,"col":2}},"name":"stack_parent","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":1840,"col":1},"end":{"line":2002,"col":2}},"name":"seeded_clone_guard","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":3156,"col":1},"end":{"line":3458,"col":2}},"name":"hooks_and_urls","to_file":true,"reexport":"glob"}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-daemon/src/connection_service.rs","start":{"line":3460,"col":1},"end":{"line":3782,"col":2}},"name":"agent_roster","to_file":true,"reexport":"glob"}
