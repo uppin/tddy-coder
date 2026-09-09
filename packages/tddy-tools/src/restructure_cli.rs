@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tddy_lsp::allowlist::{Language, LspAllowList};
+use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
 use tddy_lsp::registry::{LspKey, LspRegistry};
 use tddy_task::TaskRegistry;
 
@@ -88,7 +88,7 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
         let root = std::env::current_dir().context("current_dir")?;
         let task_registry = TaskRegistry::new();
         let lsp_registry = LspRegistry::new(
-            LspAllowList::rust_only(),
+            restructure_allow_list(),
             task_registry,
             Duration::from_secs(600),
         );
@@ -100,6 +100,12 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
             .get_or_spawn(key)
             .await
             .context("rust-analyzer LSP")?;
+        // The client's own per-request default is sized for interactive queries. A code-action
+        // request against a cold index routinely outlasts it, and `--indexing-budget` is
+        // documented as the remedy — so it has to reach the wait that actually fires.
+        service
+            .client
+            .set_request_timeout(request_timeout(&cli_args));
         Some(Arc::clone(&service.client))
     } else {
         None
@@ -110,6 +116,40 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
         .context("restructure task join")?
         .map_err(anyhow::Error::msg)
 }
+
+/// rust-analyzer, launched with the handshake the restructure backend needs.
+///
+/// `LspAllowList::rust_only` advertises nothing, and a server told nothing answers accordingly:
+/// it returns no code actions at all — which reads as a range that supports no refactoring —
+/// and it counts positions in utf-16 code units while this client counts bytes. Both are
+/// settled by the handshake, so the handshake is what this carries.
+fn restructure_allow_list() -> LspAllowList {
+    let mut allow = LspAllowList::new();
+    allow.allow(
+        Language::Rust,
+        LaunchSpec::new("rust-analyzer")
+            .with_capabilities(tddy_code_restructuring::client_capabilities())
+            .with_initialization_options(tddy_code_restructuring::server_settings()),
+    );
+    allow
+}
+
+/// How long one LSP request may take, taken from `--indexing-budget` where it was given.
+///
+/// The budget is the caller's statement of how long the whole resolution may take, so no single
+/// request inside it should be cut short by a smaller default.
+fn request_timeout(args: &[String]) -> Duration {
+    let budget = args
+        .iter()
+        .position(|a| a == "--indexing-budget")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|seconds| seconds.parse::<u64>().ok());
+    Duration::from_secs(budget.unwrap_or(DEFAULT_INDEXING_BUDGET_SECONDS))
+}
+
+/// The backend's own warm-up budget, used when `--indexing-budget` is absent so that the
+/// request wait and the retry loop expire together.
+const DEFAULT_INDEXING_BUDGET_SECONDS: u64 = 600;
 
 fn needs_lsp_client(args: &[String]) -> bool {
     match args.first().map(String::as_str) {

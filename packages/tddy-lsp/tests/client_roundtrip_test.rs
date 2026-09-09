@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_lsp::{
-    Diagnostic, DocumentSource, Language, LaunchSpec, Location, LspAllowList, LspKey, LspRegistry,
-    LspService, Position, Range, SymbolInfo,
+    Diagnostic, DocumentSource, Language, LaunchSpec, Location, LspAllowList, LspError, LspKey,
+    LspRegistry, LspService, Position, Range, SymbolInfo,
 };
 use tddy_task::TaskRegistry;
 
@@ -227,4 +227,100 @@ async fn correlates_concurrent_requests_by_id() {
     // Then each request receives its own correct response (no id cross-talk)
     assert_eq!(definition.expect("definition").len(), 1);
     assert_eq!(references.expect("references").len(), 2);
+}
+
+/// The fake answers `textDocument/codeAction` with a JSON-RPC `ContentModified` error, which is
+/// what rust-analyzer sends when a request lands against a document it has since seen change.
+/// It has to reach the caller as an error: a caller that receives an empty success instead
+/// concludes the server had nothing to offer and stops retrying.
+#[tokio::test]
+async fn surfaces_a_server_error_response_as_an_error() {
+    // Given a bound service over the fake server
+    let registry = registry();
+    let service = bound_service(&registry).await;
+
+    // When a request the fake answers with a JSON-RPC error is issued
+    let outcome = service
+        .client
+        .request_raw(
+            "textDocument/codeAction",
+            serde_json::json!({ "textDocument": { "uri": LIB_URI } }),
+        )
+        .await;
+
+    // Then the caller is handed the server's error, code and message intact
+    match outcome {
+        Err(LspError::Server { code, message }) => {
+            assert_eq!((code, message.as_str()), (-32801, "content modified"));
+        }
+        other => panic!("expected a server error, got {other:?}"),
+    }
+}
+
+/// `--indexing-budget` is documented as the remedy for a slow machine, so the per-request wait
+/// has to be governed by it rather than by a constant the flag cannot reach.
+#[tokio::test]
+async fn honours_a_request_timeout_raised_after_the_client_was_built() {
+    // Given a bound service whose per-request wait has been shortened
+    let registry = registry();
+    let service = bound_service(&registry).await;
+    service.client.set_request_timeout(Duration::from_millis(150));
+
+    // When a request the fake never answers is issued
+    let started = std::time::Instant::now();
+    let outcome = service
+        .client
+        .request_raw("tddy/neverAnswers", serde_json::json!({}))
+        .await;
+
+    // Then it gives up at the configured wait rather than at the built-in default
+    assert!(matches!(outcome, Err(LspError::Timeout)), "got {outcome:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "waited {:?}, so the configured timeout was ignored",
+        started.elapsed()
+    );
+}
+
+/// rust-analyzer decides what to answer a `textDocument/codeAction` with from what the client
+/// advertised: with no `codeAction` capability it returns an empty list for every range, which
+/// reads exactly like a range that supports no refactoring. So what a caller advertises has to
+/// reach the server, or the capability it built is dead code.
+#[tokio::test]
+async fn advertises_the_capabilities_the_launch_spec_carries() {
+    // Given an allow-list whose Rust server advertises code-action support
+    let capabilities = serde_json::json!({
+        "textDocument": {
+            "codeAction": {
+                "codeActionLiteralSupport": {
+                    "codeActionKind": { "valueSet": ["refactor.extract"] }
+                }
+            }
+        }
+    });
+    let mut allow = LspAllowList::new();
+    allow.allow(
+        Language::Rust,
+        LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp")).with_capabilities(capabilities.clone()),
+    );
+    let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60));
+
+    // When a server is spawned and asked what it was initialized with
+    let service = registry
+        .get_or_spawn(workspace_key())
+        .await
+        .expect("spawn server");
+    let params = service
+        .client
+        .request_raw("tddy/initializeParams", serde_json::json!({}))
+        .await
+        .expect("initialize params replayed");
+
+    // Then the server received them, rather than an empty capability set
+    assert_eq!(
+        params.get("capabilities"),
+        Some(&capabilities),
+        "the server was initialized with {:?}",
+        params.get("capabilities")
+    );
 }

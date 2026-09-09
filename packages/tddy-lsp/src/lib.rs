@@ -16,7 +16,7 @@ pub mod registry;
 pub mod server_body;
 
 pub use allowlist::{language_for_target_type, Language, LaunchSpec, LspAllowList};
-pub use client::{Diagnostic, Location, LspClient, Position, Range, SymbolInfo};
+pub use client::{Diagnostic, Location, LspClient, Position, Range, ResponseError, SymbolInfo};
 pub use error::LspError;
 pub use registry::{DocumentSource, LspKey, LspRegistry, LspService};
 pub use server_body::LspServerBody;

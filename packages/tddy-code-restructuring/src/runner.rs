@@ -8,6 +8,7 @@ use crate::apply::{apply_workspace_edit, ensure_git_worktree, git_output, hash_t
 use crate::backends::RustBackend;
 use crate::journal::{Journal, JournalRecord, OpStatus, ResumeDecision};
 use crate::registry::{BackendRegistry, Workspace};
+use crate::plan::RefactorKind;
 use crate::{LedgerCheckpoint, Overlay, Plan, PositionLedger, RestructureError, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -216,16 +217,18 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
     let mut registry = registry_for(client, options.indexing_budget, report_progress);
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
+    let mut done = 0usize;
 
     for (index, op) in plan.ops.iter().enumerate().skip(start) {
+        // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
+        // than raising. Reporting it as a malformed plan — with a usage dump — described a
+        // successful partial run as a defective one.
         if options
             .stop_after
             .is_some_and(|limit| index >= start + limit)
         {
-            return Err(usage(format!(
-                "stopped after {} operations as requested",
-                index - start
-            )));
+            println!("   stopped after {} operations as requested", index - start);
+            break;
         }
 
         let anchor = ledger.translate_anchor(&op.anchor)?;
@@ -241,21 +244,60 @@ pub fn apply(options: Options, client: Option<Arc<LspClient>>) -> Result<()> {
 
         report_visibility(&resolved);
 
+        let files = resolved.edit.changes.len();
         if options.dry_run {
             println!(
-                "{index}: {:?} -> {} file(s)",
-                op.op,
-                resolved.edit.changes.len()
+                "{}",
+                progress_line(index, done, plan.ops.len(), op.op, files, false)
             );
             ledger.record(&resolved.edit);
             overlay.record(&root, &resolved.edit)?;
+            done += 1;
             continue;
         }
 
         commit_operation(index, &resolved, &root, &paths, &mut journal, &mut ledger)?;
+        // Printed *after* the commit, so a line on stdout means the edit is on disk and in the
+        // journal. An apply used to report nothing at all — the dry run, where nothing is at
+        // stake, was the only mode that spoke.
+        println!(
+            "{}",
+            progress_line(index, done, plan.ops.len(), op.op, files, true)
+        );
+        done += 1;
     }
 
+    println!(
+        "{} {done} of {} operations",
+        if options.dry_run {
+            "resolved"
+        } else {
+            "applied"
+        },
+        plan.ops.len()
+    );
     Ok(())
+}
+
+/// One line of per-operation progress.
+///
+/// Two numbers, because they answer different questions and are not interchangeable: `[4/29]` is
+/// how far the run has got, and `op 3` is the operation's own index — the one `--from` and
+/// `--stop-after` take and the one the journal records. Printing only a human counter would make
+/// the number in the log the wrong number to resume from.
+fn progress_line(
+    index: usize,
+    done: usize,
+    total: usize,
+    op: RefactorKind,
+    files: usize,
+    applied: bool,
+) -> String {
+    format!(
+        "[{}/{total}] op {index}: {op:?} -> {files} file(s) {}",
+        done + 1,
+        if applied { "applied" } else { "resolved" }
+    )
 }
 
 /// Report journal progress for a plan.
@@ -665,6 +707,42 @@ mod tests {
 
         // Then the budget is parsed
         assert_eq!(options.indexing_budget, Some(900));
+    }
+
+    /// An apply that rewrites the tree has to say what it did as it does it. The line is printed
+    /// after the commit, so its presence means the edit reached disk.
+    #[test]
+    fn reports_an_applied_operation_with_both_its_counter_and_its_index() {
+        // Given the fourth operation of a 29-operation plan, whose index is 3
+        let line = progress_line(3, 3, 29, RefactorKind::ExtractModuleToFile, 3, true);
+
+        // Then the line carries how far the run has got, the resumable index, and the edit's width
+        assert_eq!(
+            line,
+            "[4/29] op 3: ExtractModuleToFile -> 3 file(s) applied"
+        );
+    }
+
+    /// A dry run resolves without writing, and must not claim to have applied anything.
+    #[test]
+    fn distinguishes_a_resolved_operation_from_an_applied_one() {
+        // Given the same operation resolved rather than applied
+        let line = progress_line(3, 3, 29, RefactorKind::ExtractModuleToFile, 3, false);
+
+        // Then it says so
+        assert!(line.ends_with("resolved"), "{line}");
+    }
+
+    /// The counter is what the run has completed; the index is what `--from` would resume at. A
+    /// plan run with `--from 20` has them far apart, and conflating them would print the wrong
+    /// number to resume from.
+    #[test]
+    fn keeps_the_counter_and_the_index_independent() {
+        // Given a run resumed at operation 20, on its first operation
+        let line = progress_line(20, 0, 29, RefactorKind::ExtractMethod, 1, true);
+
+        // Then the counter restarts while the index stays absolute
+        assert!(line.starts_with("[1/29] op 20:"), "{line}");
     }
 
     #[test]

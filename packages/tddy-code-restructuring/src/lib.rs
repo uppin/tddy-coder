@@ -21,6 +21,7 @@ pub use journal::{Journal, JournalRecord, OpStatus};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{Anchor, Plan, Reexport, RefactorKind, RefactorOp};
+pub use backends::rust::{client_capabilities, server_settings};
 pub use registry::{BackendRegistry, LanguageBackend};
 
 /// Errors surfaced by the executor. Every variant is fatal — the executor never falls back.
