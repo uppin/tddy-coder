@@ -2279,10 +2279,29 @@ message StreamHostStatsRequest {
 message HostStatsEvent {
   HostCpuStats cpu = 1;  // always populated — latest CPU snapshot
   HostDiskStats disk = 2; // always populated — latest disk snapshot
+  HostMemoryStats memory = 3; // always populated — latest memory snapshot
+  // Populated only where the platform reports a load average. Absent means "this host does not
+  // report one" — which is NOT the same as a load of zero, and must not be rendered as one.
+  HostLoadStats load = 4;
+}
+// Total and available physical memory, in bytes. Refreshed on the fast (CPU) tick.
+message HostMemoryStats {
+  uint64 available_bytes = 1;
+  uint64 total_bytes = 2;
+}
+// 1/5/15-minute load averages, on platforms that have them. See HostStatsEvent.load: a host that
+// cannot report a load average omits this message rather than sending zeros.
+message HostLoadStats {
+  double one_minute = 1;
+  double five_minutes = 2;
+  double fifteen_minutes = 3;
 }
 message HostCpuStats {
   // Utilization percentage (0..100) of each logical core, core 0 first.
   repeated float per_core_percent = 1;
+  // Logical core count, reported explicitly rather than left as per_core_percent.len() so a reader
+  // does not have to infer it from an array that is empty before the first sample.
+  uint32 logical_cores = 2;
 }
 message HostDiskStats {
   // Free bytes on the filesystem containing the daemon's default project directory.

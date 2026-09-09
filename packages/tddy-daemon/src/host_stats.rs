@@ -59,6 +59,36 @@ pub trait HostStats: Send + Sync {
     fn cpu_per_core_percent(&self) -> Vec<f32>;
     /// Free/total capacity of the filesystem holding the daemon's default project directory.
     fn disk_for_project_dir(&self) -> DiskUsage;
+
+    /// Total and available physical memory. Refreshed on the same (fast) tick as CPU, because it
+    /// moves on the same timescale — an operator watching a build eat memory needs it live.
+    fn memory(&self) -> MemoryUsage;
+
+    /// Logical core count, reported explicitly so a reader is not left inferring it from a
+    /// `cpu_per_core_percent` that is empty before the first sample has been taken.
+    fn logical_cores(&self) -> u32;
+
+    /// 1/5/15-minute load averages, or `None` where the platform does not provide them.
+    ///
+    /// `None` is a real answer and must survive all the way to the wire. `sysinfo` reports zeros on
+    /// platforms without a load average, and rendering `0.00` would tell an operator the machine is
+    /// idle — the opposite of "we cannot tell". See CLAUDE.md on fallbacks.
+    fn load_average(&self) -> Option<LoadAverage>;
+}
+
+/// Physical memory, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryUsage {
+    pub available_bytes: u64,
+    pub total_bytes: u64,
+}
+
+/// 1/5/15-minute load averages.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LoadAverage {
+    pub one_minute: f64,
+    pub five_minutes: f64,
+    pub fifteen_minutes: f64,
 }
 
 /// Live host stats backed by the `sysinfo` crate.
@@ -69,8 +99,9 @@ pub trait HostStats: Send + Sync {
 pub struct SysinfoHostStats {
     /// The daemon's default project directory; its filesystem is the one the footer reports on.
     project_dir: PathBuf,
-    /// CPU sampling state. `sysinfo` computes per-core usage as the delta between two refreshes, so
-    /// this must persist across calls.
+    /// Sampling state shared by every reading taken from `sysinfo`. It must persist across calls
+    /// because per-core CPU usage is computed as the delta between two refreshes; memory and the
+    /// core list are read from the same long-lived `System`.
     system: Mutex<sysinfo::System>,
 }
 
@@ -89,7 +120,10 @@ impl SysinfoHostStats {
 
 impl HostStats for SysinfoHostStats {
     fn cpu_per_core_percent(&self) -> Vec<f32> {
-        let mut system = self.system.lock().expect("host stats CPU mutex poisoned");
+        let mut system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
         system.refresh_cpu_usage();
         system.cpus().iter().map(|cpu| cpu.cpu_usage()).collect()
     }
@@ -132,6 +166,62 @@ impl HostStats for SysinfoHostStats {
                 total_bytes: 0,
                 project_dir,
             },
+        }
+    }
+
+    fn memory(&self) -> MemoryUsage {
+        let mut system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
+        // Unlike CPU, memory is a point-in-time reading rather than a delta, but `System` still
+        // caches the last refresh, so it has to be re-read on every call to be live.
+        system.refresh_memory();
+        MemoryUsage {
+            available_bytes: system.available_memory(),
+            total_bytes: system.total_memory(),
+        }
+    }
+
+    fn logical_cores(&self) -> u32 {
+        let system = self
+            .system
+            .lock()
+            .expect("host stats system mutex poisoned");
+        // The constructor primes the CPU sampler, so the core list is populated before the first
+        // call. Counting it keeps this consistent with `cpu_per_core_percent`'s length.
+        system.cpus().len() as u32
+    }
+
+    fn load_average(&self) -> Option<LoadAverage> {
+        // A load average is a platform fact, not a runtime one: `sysinfo` only implements it for
+        // the targets below and returns an all-zero `LoadAvg` everywhere else. Reporting those
+        // zeros would render as "idle" instead of "cannot tell", so the unsupported targets say
+        // `None` and never reach the wire as a reading.
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        ))]
+        {
+            let average = sysinfo::System::load_average();
+            Some(LoadAverage {
+                one_minute: average.one,
+                five_minutes: average.five,
+                fifteen_minutes: average.fifteen,
+            })
+        }
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        )))]
+        {
+            None
         }
     }
 }
@@ -199,5 +289,61 @@ mod tests {
 
         // Then no mount matches
         assert!(selected.is_none());
+    }
+}
+
+#[cfg(test)]
+mod resource_reading_tests {
+    use super::*;
+
+    fn a_live_provider() -> SysinfoHostStats {
+        SysinfoHostStats::new(std::env::temp_dir())
+    }
+
+    /// Memory is the reading an operator actually needs when a session dies: CPU being busy is
+    /// normal, running out of memory is not.
+    #[test]
+    fn reports_total_and_available_memory_for_the_host() {
+        let memory = a_live_provider().memory();
+
+        assert!(
+            memory.total_bytes > 0,
+            "a host must report some total memory"
+        );
+        assert!(
+            memory.available_bytes <= memory.total_bytes,
+            "available memory ({}) cannot exceed total ({})",
+            memory.available_bytes,
+            memory.total_bytes
+        );
+    }
+
+    /// Reported explicitly rather than inferred from `cpu_per_core_percent`, which is empty until
+    /// the first sample has been taken.
+    #[test]
+    fn reports_the_logical_core_count() {
+        assert!(
+            a_live_provider().logical_cores() > 0,
+            "a host must report at least one logical core"
+        );
+    }
+
+    /// The honesty case. `sysinfo` reports zeros where no load average exists, and a `0.00` in the
+    /// UI reads as "idle" — the opposite of "cannot tell". Whatever this platform does, the two must
+    /// stay distinguishable: either a genuine reading, or `None`.
+    #[test]
+    fn reports_no_load_average_on_a_platform_that_does_not_provide_one() {
+        let load = a_live_provider().load_average();
+
+        // `None` is equally valid — and the whole point of the Option. What must not happen is a
+        // reported average that is really the all-zero sentinel `sysinfo` returns where the platform
+        // has none.
+        if let Some(avg) = load {
+            assert!(
+                avg.one_minute != 0.0 || avg.five_minutes != 0.0 || avg.fifteen_minutes != 0.0,
+                "an all-zero load average is the unsupported-platform sentinel and must be reported \
+                 as None rather than as a reading"
+            );
+        }
     }
 }

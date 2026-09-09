@@ -33,6 +33,8 @@ import {
   ExecuteToolResponseSchema,
   HostStatsEventSchema,
   HostCpuStatsSchema,
+  HostLoadStatsSchema,
+  HostMemoryStatsSchema,
   HostDiskStatsSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
@@ -218,6 +220,11 @@ export interface ConnectionServiceScenario {
   /** When true, `StreamHostStats` opens and then emits nothing — a host that is subscribed but has
    *  not reported yet, which is what a caller must render as pending rather than as zeroes. */
   hostStatsSilent?: boolean;
+  /** Total/available memory the fake host reports. Omitted means it reports none. */
+  hostMemoryBytes?: { availableBytes: bigint; totalBytes: bigint };
+  /** 1/5/15-minute load averages. **Omitted models a platform that has no load average** — the
+   *  case the UI must render as "no reading" rather than as 0.00. */
+  hostLoadAverage?: { oneMinute: number; fiveMinutes: number; fifteenMinutes: number };
   /** Rows returned by `ListWorktreesForProject` (Session Worktree tab). Default: none. */
   worktrees?: Array<{
     path: string;
@@ -581,14 +588,40 @@ export function aConnectionServiceBackend(
           totalBytes: scenario.hostDisk?.totalBytes ?? 0n,
           projectDir: scenario.hostDisk?.projectDir ?? "",
         });
+        const memory = scenario.hostMemoryBytes
+          ? create(HostMemoryStatsSchema, {
+              availableBytes: scenario.hostMemoryBytes.availableBytes,
+              totalBytes: scenario.hostMemoryBytes.totalBytes,
+            })
+          : undefined;
+        // Left `undefined` when the scenario names no load average, so the fake reproduces a host
+        // whose platform has none — the case the UI must not render as 0.00.
+        const load = scenario.hostLoadAverage
+          ? create(HostLoadStatsSchema, {
+              oneMinute: scenario.hostLoadAverage.oneMinute,
+              fiveMinutes: scenario.hostLoadAverage.fiveMinutes,
+              fifteenMinutes: scenario.hostLoadAverage.fifteenMinutes,
+            })
+          : undefined;
+        const cores = (scenario.hostCpuPerCore ?? []).length;
         yield create(HostStatsEventSchema, {
-          cpu: create(HostCpuStatsSchema, { perCorePercent: scenario.hostCpuPerCore ?? [] }),
+          cpu: create(HostCpuStatsSchema, {
+            perCorePercent: scenario.hostCpuPerCore ?? [],
+            logicalCores: cores,
+          }),
           disk,
+          memory,
+          load,
         });
         if (scenario.hostCpuPerCoreUpdate) {
           yield create(HostStatsEventSchema, {
-            cpu: create(HostCpuStatsSchema, { perCorePercent: scenario.hostCpuPerCoreUpdate }),
+            cpu: create(HostCpuStatsSchema, {
+              perCorePercent: scenario.hostCpuPerCoreUpdate,
+              logicalCores: scenario.hostCpuPerCoreUpdate.length,
+            }),
             disk,
+            memory,
+            load,
           });
         }
         await new Promise<never>(() => undefined);

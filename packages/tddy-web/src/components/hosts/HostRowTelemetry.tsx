@@ -34,6 +34,7 @@ import { useDaemons } from "../../rpc/selectedDaemon";
 import { useHostStats } from "../../rpc/useHostStats";
 import { CpuCoresIndicator } from "../sessions/CpuCoresIndicator";
 import { DiskSpaceIndicator } from "../sessions/DiskSpaceIndicator";
+import { MemoryIndicator } from "../sessions/MemoryIndicator";
 import { clampCorePercent } from "../sessions/hostStatsFormat";
 import { telemetryFeedFor } from "./hostTelemetryState";
 
@@ -67,7 +68,9 @@ export function HostRowTelemetry({ instanceId, online }: HostRowTelemetryProps) 
   const connection = useHostConnection(online && inDirectory ? instanceId : null);
   // Reachability is two answers together: the directory names the host, and a wire resolved for it.
   const routable = connection !== null;
-  const { perCorePercent, disk } = useHostStats(telemetryFeedFor({ instanceId, online, routable }));
+  const { perCorePercent, disk, memory } = useHostStats(
+    telemetryFeedFor({ instanceId, online, routable }),
+  );
 
   // Until the first event lands there is no reading — not a reading of zero. The daemon emits its
   // snapshot on subscribe, so this is the brief window between opening the stream and its first
@@ -109,6 +112,9 @@ export function HostRowTelemetry({ instanceId, online }: HostRowTelemetryProps) 
       )}
       <span data-testid={`hosts-row-${instanceId}-disk`}>
         <DiskSpaceIndicator availableBytes={disk ? disk.availableBytes : null} />
+      </span>
+      <span data-testid={`hosts-row-${instanceId}-memory`}>
+        <MemoryIndicator memory={memory} />
       </span>
     </>
   );
