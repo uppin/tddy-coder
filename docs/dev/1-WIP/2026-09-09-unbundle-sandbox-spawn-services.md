@@ -3,7 +3,8 @@
 **Date**: 2026-09-09
 **Status**: 🚧 In Progress
 **Type**: Refactor
-**Stack**: `#unbundle` node **3 of 8**. Base: `feature/unbundle/model-telegram-screen` (node 2)
+**Stack**: `#unbundle` node **3 of 8**. PR [#472](https://github.com/uppin/tddy-coder/pull/472).
+Base: `feature/unbundle/model-telegram-screen` (node 2, PR #471)
 
 ## Initial Discovery
 
@@ -322,9 +323,15 @@ One assertion is new rather than moved: that `tddy-sandbox-app` reaches the sand
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | | |
-| `cargo clippy -p tddy-daemon -- -D warnings` | | |
-| `cargo nextest run --profile ci -p tddy-daemon` (excluded-set audit) | | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
+| `cargo clippy -p <the 6 touched crates> --all-targets -- -D warnings` | ✅ exit 0 | |
+| `cargo nextest run --profile ci -p tddy-daemon` (excluded-set audit) | not yet run — no suite has moved in commit 2 | |
+
+**11 failing tests** define this node: 1 in `tddy-daemon-sandbox`, 3 in `tddy-spawn`, one per leaf
+service in `tddy-actions`/`tddy-task`/`tddy-bsp`/`tddy-semantic-index`, and 3 asserting the
+`tddy-sandbox-app` dependency reversal and the relocated catalog guard. The existing suites in the
+owner crates still pass — 18 in `tddy-task`, 4 in `tddy-bsp`, 2 in `tddy-actions` — so the added
+surface breaks nothing it landed beside.
 
 The known pre-existing failure inherited from node 1's baseline
 (`cursor_cli_session_acceptance::…self_arc called before set_self_handle`) is expected to stay at

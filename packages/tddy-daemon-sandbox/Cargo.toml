@@ -1,0 +1,20 @@
+[package]
+name = "tddy-daemon-sandbox"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's sandbox orchestration — jailed session lifecycle, the workspace tool sandbox, and the plans that describe them. Extracted from tddy-daemon"
+
+[lib]
+name = "tddy_daemon_sandbox"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-rpc = { path = "../tddy-rpc" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt"] }

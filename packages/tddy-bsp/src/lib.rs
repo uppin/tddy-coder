@@ -20,3 +20,21 @@ pub mod service;
 pub use plugins::plugin_registry;
 pub use provider::register_catalog_provider;
 pub use service::BspServiceImpl;
+
+/// The `bsp.BspService` entry the daemon's wiring layer registers.
+///
+/// `#unbundle` node 3 moved this service out of `tddy-daemon` and into the crate that already owns
+/// both the BSP implementation and `plugins::plugin_registry` — the same five-plugin set
+/// `tddy-tools`' `build_cli` duplicates verbatim, which node 5 then deletes.
+pub fn build_bsp_service_entry() -> tddy_rpc::ServiceEntry {
+    // TODO(sandbox-spawn-services): implement
+    unimplemented!("build_bsp_service_entry")
+}
+
+#[cfg(test)]
+mod unbundle_service_entry_tests {
+    #[test]
+    fn names_the_service_the_wiring_layer_registers() {
+        assert_eq!(super::build_bsp_service_entry().name, "bsp.BspService");
+    }
+}
