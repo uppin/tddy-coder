@@ -154,16 +154,17 @@ mod tests {
                 &key_a,
             )
             .unwrap();
-        let (vault_b, _) =
+        let (_vault_b, key_b) =
             ScreenSharingVault::create(&vault_path(session_b.path()), A_PASSPHRASE).unwrap();
+        let as_desktop = vault_a.list_targets()[0].id.clone();
 
-        // When
-        let bs_targets = vault_b.list_targets();
+        // When session B's key is offered for session A's sealed password
+        let opened = vault_a.decrypt_password(&as_desktop, &key_b);
 
         // Then
         assert!(
-            bs_targets.is_empty(),
-            "a sealed key is scoped to its own session"
+            opened.is_err(),
+            "a sealed password opens only with its own session's key"
         );
     }
 }
