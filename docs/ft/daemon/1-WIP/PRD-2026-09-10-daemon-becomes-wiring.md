@@ -160,7 +160,8 @@ The last 17 coordinates move and a service disappears. After this node **no clie
       `self_arc called before set_self_handle` failure is gone because its subject is
 - [ ] `tddy-daemon` is under 6,000 non-blank source lines, and every file in it is wiring, config, or
       its own settings service
-- [ ] the UDS socket serves every service a local caller needs, not one
+- [ ] the UDS socket serves every service the stack moved onto it — nodes 1, 7, 8 and this one — not one
+- [ ] this node's two adapters are **generated** by node 6's `generate_tonic_adapter`
 - [ ] `tddy-desktop` builds (verified locally — outside the CI gate)
 - [ ] `./test` per touched package matches the recorded baseline
 
