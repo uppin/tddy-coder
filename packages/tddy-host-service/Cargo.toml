@@ -22,8 +22,6 @@ sysinfo = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util"] }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-tddy-livekit = { path = "../tddy-livekit" }
-tddy-pty = { path = "../tddy-pty" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
 tokio-stream = "0.1"
@@ -50,4 +48,3 @@ futures-util = "0.3"
 serial_test = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
-tempfile = "3"

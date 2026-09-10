@@ -47,10 +47,10 @@ use crate::stream::{MpscHostPromptStream, MpscHostStatsStream};
 const SERVICE_NAME: &str = "host.HostService";
 
 /// Default cadence for refreshing per-core CPU utilization on the host-stats sampling loop.
-pub const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Default cadence for refreshing project-dir disk figures on the host-stats sampling loop.
-pub const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
+pub(crate) const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Everything `host.HostService` answers from.
 ///

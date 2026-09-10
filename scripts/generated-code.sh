@@ -142,6 +142,12 @@ while IFS= read -r line; do
   rest="${line#*|}"
   gen_dir="$(echo "${rest%%|*}" | xargs)"
   gen_args="$(echo "${rest#*|}" | xargs)"
+  # All three fields must be present. An empty gen_dir would make the write path's target
+  # "$package/", i.e. the whole package -- and `${ROOT:?}` guards only an empty ROOT, not this.
+  if [ -z "$gen_dir" ] || [ -z "$gen_args" ]; then
+    echo "generated-code.sh: $MANIFEST: '$package' needs 'package | gen_dir | buf args'" >&2
+    exit 2
+  fi
   wanted "$package" || continue
   if existing="$(index_of "$package")"; then
     PACKAGE_ARGS[$existing]="${PACKAGE_ARGS[$existing]}"$'\n'"$gen_args"
@@ -173,8 +179,17 @@ if [ "$MODE" = write ]; then
   while [ "$i" -lt "${#PACKAGES[@]}" ]; do
     package="${PACKAGES[$i]}"
     gen_dir="${GEN_DIRS[$i]}"
+    # Generate into a scratch tree and swap only once it has succeeded. `write` is on the release
+    # path -- each package's `bun run generate` routes through it, and `bun run build` runs that
+    # first -- so an `rm -rf` followed by a failing `buf` would leave tracked source deleted, with
+    # `set -e` aborting before it could be put back.
+    staged="$WORK_DIR/write/$package"
+    rm -rf "$staged"
+    mkdir -p "$staged"
+    generate_into "$package" "$staged" "${PACKAGE_ARGS[$i]}"
     rm -rf "${ROOT:?}/$package/$gen_dir"
-    generate_into "$package" "$ROOT/$package" "${PACKAGE_ARGS[$i]}"
+    mkdir -p "$(dirname "${ROOT:?}/$package/$gen_dir")"
+    mv "$staged/$gen_dir" "${ROOT:?}/$package/$gen_dir"
     echo "regenerated $package/$gen_dir"
     i=$((i + 1))
   done
@@ -193,8 +208,13 @@ while [ "$i" -lt "${#PACKAGES[@]}" ]; do
   mkdir -p "$fresh"
   generate_into "$package" "$fresh" "${PACKAGE_ARGS[$i]}"
 
-  mkdir -p "$committed"
-  (cd "$committed" && find . -type f | sort) >"$WORK_DIR/committed.txt"
+  # `check` is read-only: never create the directory it is inspecting. A package with no committed
+  # output yet reads as empty, which the report already renders as every file being uncommitted.
+  if [ -d "$committed" ]; then
+    (cd "$committed" && find . -type f | sort) >"$WORK_DIR/committed.txt"
+  else
+    : >"$WORK_DIR/committed.txt"
+  fi
   (cd "$fresh/$gen_dir" && find . -type f | sort) >"$WORK_DIR/fresh.txt"
 
   report=""

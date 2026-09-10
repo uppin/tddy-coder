@@ -247,6 +247,20 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         )));
     }
 
+    // A named facade cannot serve a *module* move, and refusing it beats emitting a tree that does
+    // not compile. Callers of a moved module write `crate::<module>::Item`, so the facade has to put
+    // something at `crate::<module>`; a `pub use <crate>::{Item, …};` puts the items at the crate
+    // root instead, and because a facade also suppresses caller re-pointing, every one of those
+    // callers is left naming a module that no longer exists. `glob` works because
+    // `pub use <crate>::*;` re-exports the destination's `pub mod <module>` under its own name.
+    // Refusing follows this file's own rule that a vocabulary advertising what it cannot perform is
+    // worse than a smaller one.
+    if op.op == RefactorKind::MoveModuleToCrate && op.reexport == Some(Reexport::Named) {
+        return Err(malformed(
+            "`move_module_to_crate` cannot write a named facade: a caller writes              `crate::<module>::Item`, and a named re-export puts the items at the crate root, so              every caller would stop resolving — use `glob`, which re-exports the module itself",
+        ));
+    }
+
     // A cross-crate move with no destination has nowhere to go, and defaulting one would guess at a
     // crate — the one thing a plan of intents must never do on the author's behalf.
     if op.op == RefactorKind::MoveModuleToCrate && op.to.is_none() {
@@ -585,6 +599,23 @@ mod tests {
             panic!("expected a malformed-plan refusal, got {outcome:?}");
         };
         assert!(reason.contains("`to`"), "{reason}");
+    }
+
+    /// A named facade would leave every caller naming a module that no longer exists, and a facade
+    /// also suppresses caller re-pointing — so the tree would not compile and nothing would say why.
+    #[test]
+    fn refuses_a_named_facade_on_a_cross_crate_move() {
+        let outcome = Plan::parse(&plan_with(
+            r#"{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-daemon/src/host_registry.rs","path":"host_registry"},"to":"packages/tddy-host-service","reexport":"named"}"#,
+        ));
+
+        let Err(RestructureError::MalformedPlan(reason)) = outcome else {
+            panic!("expected a malformed-plan refusal, got {outcome:?}");
+        };
+        assert!(
+            reason.contains("glob"),
+            "the refusal must name the alternative: {reason}"
+        );
     }
 
     /// Every plan written before the field existed has to go on meaning what it meant.

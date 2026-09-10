@@ -27,7 +27,7 @@ pub mod stream;
 /// `tests/` reach for them, and a `#[cfg(test)]` module is invisible from there.
 pub mod test_util;
 
-pub use service::{HostServiceImpl, HOST_CPU_INTERVAL, HOST_DISK_INTERVAL};
+pub use service::HostServiceImpl;
 pub use stream::{MpscHostPromptStream, MpscHostStatsStream};
 
 // The handler tests that came out of `connection_service` with the code they exercise. They drive

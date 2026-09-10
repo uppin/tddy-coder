@@ -1211,10 +1211,9 @@ mod tests {
         let outcome = Destination::read(root.path(), "packages/tddy-host-service");
 
         // Then
-        assert!(
-            outcome.is_err(),
-            "a directory with no Cargo.toml is not a crate"
-        );
+        assert_refusal(outcome)
+            .naming("packages/tddy-host-service")
+            .naming("Cargo.toml");
     }
 
     /// The `use` path a caller needs is the declared package name with hyphens turned into

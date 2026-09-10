@@ -43,7 +43,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // What `#unbundle` node 1 added, and the granularity rule it follows.
 //
@@ -99,8 +99,19 @@ pub const HOST_DOCUMENT_FRAME_BYTES: usize = 48 * 1024;
 pub fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|since_epoch| u64::try_from(since_epoch.as_millis()).unwrap_or(u64::MAX))
+        .map(unix_ms_of)
         .unwrap_or_default()
+}
+
+/// The conversion [`now_unix_ms`] is built on: milliseconds since the epoch, saturated at
+/// `u64::MAX`.
+///
+/// Split out from the clock read because it is the half that carries the behaviour decision, and a
+/// function that reads `SystemTime::now()` cannot be handed a duration that overflows — a test
+/// against the wall clock would pass just as happily against the truncating cast this replaces.
+/// `Duration` counts seconds in a `u64`, so its millisecond count genuinely does not fit in one.
+fn unix_ms_of(since_epoch: Duration) -> u64 {
+    u64::try_from(since_epoch.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// A trimmed string, or `None` when it was blank.
@@ -208,10 +219,9 @@ impl AgentActivityHub {
 mod tests {
     use super::*;
 
-    /// The three implementations this replaces disagreed about overflow, and one of them truncated.
-    /// A truncating cast turns a far-future clock into a timestamp in the *past*, which downstream
-    /// is indistinguishable from correct data — so the stamp has to be monotonic in the input right
-    /// up to the ceiling.
+    /// That the epoch and the unit are right: a stamp taken now has to land in this century. This
+    /// says nothing about overflow — see [`saturates_a_millisecond_count_too_large_for_a_u64`],
+    /// which is where that decision is actually pinned.
     #[test]
     fn stamps_a_plausible_current_time() {
         // Given a clock that is roughly now
@@ -226,6 +236,9 @@ mod tests {
         assert!(stamped < 4_102_444_800_000, "stamp {stamped} is after 2100");
     }
 
+    /// A smoke test on the clock read, and nothing more: two reads nanoseconds apart would come
+    /// back ordered from a truncating implementation too. The overflow behaviour is the
+    /// conversion's, and it is asserted on the conversion.
     #[test]
     fn stamps_do_not_go_backwards() {
         // Given
@@ -236,6 +249,57 @@ mod tests {
 
         // Then
         assert!(second >= first, "{second} came back before {first}");
+    }
+
+    /// The behaviour decision this crate records. Of the three implementations consolidated here
+    /// one used a bare `as u64`, which **wraps**: a clock far in the future comes back as a
+    /// timestamp in the past, and downstream that is indistinguishable from correct data. The
+    /// ceiling has to be reached and stayed at.
+    #[test]
+    fn saturates_a_millisecond_count_too_large_for_a_u64() {
+        // Given a duration whose millisecond count overflows `u64` — `Duration` counts seconds in
+        // a `u64`, so this is representable as a duration and not as a stamp
+        let far_future = Duration::from_secs(u64::MAX);
+
+        // When
+        let stamped = unix_ms_of(far_future);
+
+        // Then — the ceiling, not the wrapped remainder a truncating cast would produce
+        assert_eq!(
+            stamped,
+            u64::MAX,
+            "{} ms saturates to the ceiling; a truncating cast would have wrapped it to {}",
+            far_future.as_millis(),
+            far_future.as_millis() as u64
+        );
+    }
+
+    /// Saturation must not start early: the largest stamp a `u64` can hold is a real timestamp, not
+    /// an overflow, and it comes back exactly.
+    #[test]
+    fn converts_the_largest_representable_millisecond_count_exactly() {
+        // Given
+        let at_the_ceiling = Duration::from_millis(u64::MAX);
+
+        // When
+        let stamped = unix_ms_of(at_the_ceiling);
+
+        // Then
+        assert_eq!(stamped, u64::MAX);
+    }
+
+    /// The ordinary case the clock actually hands it, so the ceiling logic cannot be hiding a
+    /// constant.
+    #[test]
+    fn converts_a_duration_the_clock_plausibly_yields_to_its_milliseconds() {
+        // Given 2020-01-01T00:00:00Z as the clock would report it
+        let since_epoch = Duration::from_secs(1_577_836_800) + Duration::from_millis(250);
+
+        // When
+        let stamped = unix_ms_of(since_epoch);
+
+        // Then
+        assert_eq!(stamped, 1_577_836_800_250);
     }
 
     #[test]

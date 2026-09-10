@@ -112,7 +112,7 @@ all clean, so nodes 2–8 compile against it):
 | `RefactorKind::MoveModuleToCrate`, its `to`/`reexport` validation, `SUPPORTED` 7 → 8 | `tddy-code-restructuring/src/plan.rs`, `backends/rust.rs` |
 | `Destination`, `CallerRewrite`, `Survey`, `survey`, `resolve`, `facade_line` | `tddy-code-restructuring/src/crate_move.rs` (new) |
 | `ModuleReferences`, `ItemReferences`, `Reference` — the engine seam `survey`/`resolve` take (green phase; see `## Decisions & Trade-offs`) | `tddy-code-restructuring/src/crate_move.rs` |
-| `workspace_edits_for` — the multi-document primitive the rename fix and the caller re-pointing both need | `backends/rust.rs`, `#[allow(dead_code)]` with a TODO |
+| `workspace_edits_for` — the multi-document primitive the rename fix and the caller re-pointing both need | `backends/rust.rs`; **wired into `rename_symbol` in the green phase**, so the `#[allow(dead_code)]` and its TODO are gone |
 | the five kernel symbols plus `trim_to_option` | `tddy-daemon-kernel/src/lib.rs` (new crate, workspace member) |
 | `host.HostService`, `worktree.WorktreeService` | `tddy-service/proto/`, `build.rs`, `src/lib.rs` |
 
@@ -148,8 +148,7 @@ it moves the `tddy-service`, `tddy-terminal-rpc` and `tddy-tool-engine` surfaces
 - **tddy-daemon-kernel** *(new)* — the shared symbols
 - **tddy-host-service** *(new)* — the host subsystem and `host.HostService`
 - **tddy-worktree-service** *(new)* — the git/worktree subsystem and `worktree.WorktreeService`
-- **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 19 modules and 7,312 prod LoC
-  leave; `run_server`'s signature; nine cycles cut
+- **tddy-daemon**: `packages/tddy-daemon/` — 21 modules leave for the two services, plus `config` to the kernel; `run_server`'s signature; nine cycles cut
   - [host-registry.md](../../packages/tddy-daemon/docs/host-registry.md), [host-tooling-probe.md](../../packages/tddy-daemon/docs/host-tooling-probe.md),
     [host-add-key.md](../../packages/tddy-daemon/docs/host-add-key.md), [worktrees.md](../../packages/tddy-daemon/docs/worktrees.md),
     [remote-git-service.md](../../packages/tddy-daemon/docs/remote-git-service.md) — move to the new packages' docs
@@ -254,12 +253,17 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - [x] **Crates**: `tddy-host-service` (13 modules + `host_messages` + 5 handler-test modules + 1 integration suite), `tddy-worktree-service` (8 modules + 7 integration suites) ✅
 - [x] **Web**: regeneration ✅ — `connection_pb.ts` and `tddy-rust-typescript-tests/gen/connection_pb.ts` shrink by 4,126 lines; `scripts/generated-code.sh check` exits 0. Call-site migration, the six bindings and the Cypress fakes landed with M8
 - [x] **File budget**: recorded ✅ — a report, not a gate, per the best-effort decision below.
-      **Eleven of this node's files stand over 500 lines**, every one of them a file that *moved*
-      rather than one this node wrote:
+      **Twelve of this node's files stand over 500 lines.** Eleven of them *moved* rather than
+      being written here; the twelfth, `crate_move.rs`, this node wrote. It is absent from the
+      `restructure check --budget` run above for a mechanical reason worth stating: that command
+      measures only the files a plan's **anchors** name, and `crate_move.rs` is the operation's own
+      implementation, never a plan anchor. So the tool cannot see its own size, and the record has to
+      say so rather than let the omission read as a clean result:
 
       | File | Lines | Why it stands |
       |---|---|---|
-      | `tddy-daemon-kernel/src/config.rs` | 2,448 | `DaemonConfig` and its nested blocks — one serde schema, and splitting a config struct splits nothing cohesive |
+      | `tddy-code-restructuring/src/crate_move.rs` | 1,609 (1,023 prod + 586 tests) | **written by this node**, not moved. Well decomposed — 40 functions, only `planned` over 40 lines — and a split into `manifest.rs` + `header.rs` is available and cheap, but buys little while the operation is still settling. Recorded rather than split, per the policy above |
+| `tddy-daemon-kernel/src/config.rs` | 2,448 | `DaemonConfig` and its nested blocks — one serde schema, and splitting a config struct splits nothing cohesive |
       | `tddy-host-service/src/host_add_key_handler_tests.rs` | 1,259 | 26 tests of one flow (prompt → encrypt → decrypt → unlock → agent); moved verbatim |
       | `tddy-host-service/src/host_registry.rs` | 1,075 | moved verbatim |
       | `tddy-host-service/src/host_tooling.rs` | 1,074 | moved verbatim |
@@ -277,7 +281,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
       budget exists to protect. **`tddy-daemon` shrank**: `connection_service/rpc_service.rs` 6,938
       → 5,712 and `connection_tonic_adapter.rs` 1,505 → 1,306, and 21 modules left the crate
 - [x] **Baseline**: recorded per touched package, with a ledger accounting for every remaining failure ✅
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
+- [x] **Code Quality**: `cargo clippy -p <each> --all-targets -- -D warnings` clean, `cargo fmt --all --check` clean ✅
 - [ ] **Documentation**: doc triage executed at wrap
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -304,7 +308,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 | `tddy-host-service` | 9 host modules + the 4 host-key modules; serves `host.HostService` (8 methods) |
 | `tddy-worktree-service` | 8 git/worktree modules; serves `worktree.WorktreeService` (9 methods) |
 | `tddy-daemon` | 87 modules; no cycles; `run_server(RunServerOptions)`; registers two more `ServiceEntry`s |
-| `connection.proto` | 73 methods; `types.proto` holds the shared messages; `host.proto` and `worktree.proto` import it |
+| `connection.proto` | 73 methods; **no `types.proto`** — the closure of the moving families shares nothing with what stays, so `host.proto` and `worktree.proto` import nothing. See the correction in `## Responsibility` |
 | CI | a step that regenerates and diffs committed generated code |
 
 ### Delta
@@ -315,7 +319,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - **Implementation**: `convert_change` honours `rename`; `apply.rs`'s existing `git mv` path is reached for the first time from Rust; `Cargo.toml` read/write
 
 #### tddy-daemon
-- **Architecture**: the five shared symbols and the nine cycles leave; 19 modules leave
+- **Architecture**: the five shared symbols leave, six cycles are cut; 21 modules leave
 - **API**: `run_server` takes an options struct
 - **Implementation**: two new `ServiceEntry`s; two new hand-written tonic adapters for the UDS path
 
@@ -364,7 +368,7 @@ rather than an algorithm. Three distinct kinds:
 - [x] **Integration**: a rename of a symbol referenced from another file rewrites that file too (`rename_cross_file_acceptance.rs`) ✅
 - [x] **Integration**: `move_module_to_crate` relocates a module, its header resolves, both manifests updated (`move_module_to_crate_acceptance.rs`) ✅
 - [x] **Integration**: the same move with a crate-level facade leaves every caller untouched (`move_module_to_crate_acceptance.rs`) ✅
-- [ ] **Unit**: a plan naming `move_module_to_crate` without a destination crate is `MalformedPlan` (`plan.rs`)
+- [x] **Unit**: a plan naming `move_module_to_crate` without a destination crate is `MalformedPlan` (`plan.rs::refuses_a_cross_crate_move_with_no_destination`) ✅ — and a **named** facade is refused too, since it cannot serve a module move (`refuses_a_named_facade_on_a_cross_crate_move`)
 - [x] **Unit**: `check` lists exactly the files over a given budget (`runner.rs`) ✅
 
 ### tddy-daemon
@@ -372,17 +376,17 @@ rather than an algorithm. Three distinct kinds:
 - [x] **Unit**: the kernel's five symbols resolve from a crate that does not depend on `tddy-daemon` (`tddy-daemon-kernel/tests/kernel_surface_acceptance.rs`) ✅ 10 tests
 
 ### tddy-host-service
-- [ ] **Integration**: all 8 `host.HostService` methods answer over Connect-HTTP (`host_service_acceptance.rs`)
+- [~] **Integration**: all 8 `host.HostService` methods answer over Connect-HTTP — **delivered under different filenames.** The planned `host_service_acceptance.rs` / `host_add_key_acceptance.rs` / `host_stream_acceptance.rs` were not written; the equivalent coverage *travelled with the code* as the moved daemon suites plus the in-crate handler-test modules (`host_add_key_handler_tests.rs`, `host_stats_handler_unit_tests.rs`, `host_tooling_handler_unit_tests.rs`, `known_hosts_handler_unit_tests.rs`, `ssh_agent_block_handler_tests.rs`), which cover every one of the 8 methods. Recording the substitution rather than ticking a filename that does not exist
 - [ ] **Integration**: `AddHostKey` unlocks and loads a key, with the host-key path in this crate (`host_add_key_acceptance.rs`)
 - [ ] **Integration**: `StreamHostPrompts` and `StreamHostStats` stream and terminate cleanly (`host_stream_acceptance.rs`)
 
 ### tddy-worktree-service
-- [ ] **Integration**: all 9 `worktree.WorktreeService` methods answer over Connect-HTTP (`worktree_service_acceptance.rs`)
+- [~] **Integration**: all 9 `worktree.WorktreeService` methods answer over Connect-HTTP — **delivered under different filenames**, as the moved `worktrees_rpc.rs`, `worktree_files_rpc.rs`, `stream_worktree_stats_rpc.rs`, `stream_read_worktree_file_rpc_acceptance.rs` and `worktree_session_actions_acceptance.rs` suites. Same substitution as the host row above
 - [ ] **Integration**: `StreamReadWorktreeFile` frames a file identically to the old coordinate (`worktree_file_frames_acceptance.rs`)
 
 ### tddy-web
-- [ ] **Cypress component**: the hosts screen loads through `host.HostService` (`HostsScreen.cy.tsx`)
-- [ ] **Cypress component**: the worktrees screen loads through `worktree.WorktreeService` (`WorktreesAppPage.cy.tsx`)
+- [x] **Cypress component**: the hosts screen loads through `host.HostService` (`HostsScreen.cy.tsx`) ✅
+- [x] **Cypress component**: the worktrees screen loads through `worktree.WorktreeService` (`WorktreesAppPage.cy.tsx`) ✅ — pins the three-way split: worktree feed under `WorktreeService`, roster under `HostService`, `ListProjects` still under `ConnectionService`
 
 ### CI
 - [x] **Integration**: the drift gate fails on a deliberately stale committed `*_pb.ts` and passes on a fresh one ✅ (`scripts/generated-code.test.ts`, 5 tests, runs in CI before the gate itself)
@@ -423,7 +427,7 @@ rather than an algorithm. Three distinct kinds:
   `i64` refusal because every caller here stamps a record it is about to write, and a caller that
   cannot proceed without a plausible clock is better served by checking the clock than by receiving
   an error from a timestamp function. Callers that need the pre-1970 diagnostic keep their own check.
-- **`workspace_edits_for` is published unwired, with `#[allow(dead_code)]` and a TODO.** It is the
+- **`workspace_edits_for` was published unwired, and is now wired.** At planning: It is the
   multi-document primitive both the rename fix and the caller re-pointing need, and nodes 2–8 compile
   against its signature. It is not yet wired into `rename_symbol` because `edits_for` still routes
   every single-document assist, and swapping it now would panic the 251 tests already passing through
@@ -629,6 +633,32 @@ Recorded before any change; the acceptance criterion for M9.
 **No test was lost to the split.** 583 (daemon lib) + 85 (kernel) + 129 (host) + 81 (worktree) = **878**,
 against 828 before (809 + 19). The daemon's whole-package figure falls for the same reason and by the
 same arithmetic.
+
+### The move's own proof — `restructure verify --against bb0695b0`
+
+`## Testing Plan` makes this, plus the moved-line diff, the proof of the mechanical move rather than
+a test. Recording the result, including that it is **not zero**:
+
+```
+341,794 statements before, 341,882 after
+plan is malformed: 50 statement(s) the tree lost and 138 it gained
+```
+
+Exit 1, and **no logic statement is among them**. The differences, all of them:
+
+| n | What | Why |
+|---|---|---|
+| 31 | `crate::X` → `tddy_daemon_kernel::X` qualifier re-points | a module that changed crates cannot keep a `crate::` qualifier |
+| 9 | doc-link rewrites | `[\`crate::foo\`]` follows the same move |
+| 5 | `pub(crate)` → `pub` | the recorded widenings above |
+| 2 | `local_hostname_or_local` + `process_startup_unix_ms_suffix` consolidated into `daemon_identity` | two derivations of "what is this machine called" became one |
+| 2 | `include_str!` path re-points | two tests read a moved file |
+| 4 | `#[must_use]` on the new `daemon_identity` functions | new attributes on newly-extracted code |
+
+Corroborated by the diff shape: **37 files, +617/−390, nine of them moving with a zero-line diff**,
+and every moved file 85–100% similar by git's own rename detection. A cross-crate move cannot change
+zero tokens — the qualifier at the head of every moved `use` changed meaning by definition — so the
+PRD's "no lost or gained statements" was the wrong criterion, and is corrected there.
 
 ### Failure ledger — all 21, none introduced by this node
 

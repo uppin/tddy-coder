@@ -200,24 +200,45 @@ matches the repo's de-facto policy — *"break freely, migrate every consumer in
 
 ## Acceptance Criteria
 
-- [ ] `rename_symbol` re-points a caller in a different file; a rename that would strand a caller no
-      longer silently does so
-- [ ] `move_module_to_crate` moves a module to another crate, rewrites its header, re-points every
-      caller found by `textDocument/references`, and edits both manifests
-- [ ] `move_module_to_crate` with a crate-level facade produces **zero caller diff**
-- [ ] `restructure verify --against <pre-move ref>` reports no lost or gained statements across the move
-- [ ] `restructure check` reports which files exceed a given line budget
-- [ ] `tddy-daemon` no longer holds `AgentActivityHub`, `now_unix_ms`, `HOST_DOCUMENT_FRAME_BYTES` or
-      the two resolver aliases in `connection_service`
-- [ ] `cargo build -p tddy-daemon` succeeds with **no** cycle between the wiring layer and any subsystem
-- [ ] `run_server` takes one options struct; `tddy-desktop` builds (verified locally, not by CI)
-- [ ] CI fails when committed generated TypeScript does not match a fresh generation
-- [ ] `host.HostService` serves all 8 methods and `worktree.WorktreeService` all 9, over Connect-HTTP,
-      LiveKit and the local UDS socket
-- [ ] `connection.ConnectionService` no longer declares any of those 17 methods
-- [ ] `tddy-web` reaches every host and worktree RPC at its new coordinate
-- [ ] `./test -p tddy-daemon -p tddy-host-service -p tddy-worktree-service -p tddy-code-restructuring`
-      matches the recorded baseline, with the one known pre-existing failure still at exactly one
+- [x] ✅ `rename_symbol` re-points a caller in a different file; a rename that would strand a caller no
+      longer silently does so — proven against a live rust-analyzer (`rename_cross_file_acceptance.rs`)
+- [x] ✅ `move_module_to_crate` moves a module to another crate, rewrites its header, re-points every
+      caller found by `textDocument/references`, and edits both manifests — and performed **10 of this
+      node's 21 module moves**; the other 11 were hand-moved for the reasons in the changeset's debt section
+- [x] ✅ `move_module_to_crate` with a crate-level facade produces **zero caller diff** —
+      `leaves_every_caller_untouched_when_a_facade_is_left_behind` asserts the caller file is
+      byte-identical *and* that the workspace still compiles. **Only `glob` writes a usable facade**;
+      a `named` one is now refused, because it cannot serve a module move
+- [~] ⚠ `restructure verify --against bb0695b0` reports **50 statements lost and 138 gained**, not zero —
+      so this criterion is **not met as written**. Every one is accounted for and none is a logic
+      statement: 31 `crate::X` → `tddy_daemon_kernel::X` qualifier re-points, 9 doc-link rewrites, the
+      5 recorded visibility widenings, the `local_hostname_or_local` consolidation into
+      `daemon_identity`, two `include_str!` re-points, and `#[must_use]` on four new functions. The
+      criterion assumed a move that changes no token, which a cross-crate move cannot be
+- [x] ✅ `restructure check --budget LINES` reports which of the files a plan's anchors name exceed it
+- [x] ✅ `tddy-daemon` no longer holds `AgentActivityHub`, `now_unix_ms`, `HOST_DOCUMENT_FRAME_BYTES` or
+      the two resolver aliases. `host_registry::now_unix_ms` remains as a deliberate **adapter** over the
+      kernel's — it returns `i64` and keeps the pre-1970 diagnostic — not as a duplicate
+- [~] ⚠ `cargo build -p tddy-daemon` succeeds. **Six cycles cut, nine remain** — five are module pairs
+      whose members land in the *same* destination crate, so the crate graph is acyclic the moment they
+      move; four genuinely span destination crates and belong to later nodes. The discovery doc's table
+      was wrong (three of its nine do not exist; it missed six). Full audit in the changeset
+- [x] ✅ `run_server` takes one options struct and the `too_many_arguments` allow is gone.
+      `tddy-desktop` builds and lints clean locally — and is **not** a `run_server` caller, contrary to
+      the plan: its only mention is prose in a `TODO` comment
+- [x] ✅ CI fails when committed generated TypeScript does not match a fresh generation, and it caught a
+      real one on its first run — `sandbox_pb.ts` was stale against `sandbox.proto`'s new fields
+- [x] ✅ `host.HostService` serves all 8 and `worktree.WorktreeService` all 9, over Connect-HTTP, the
+      LiveKit common room and the local UDS socket — two `ServiceEntry` registrations plus two
+      hand-written tonic adapters
+- [x] ✅ `connection.ConnectionService` no longer declares any of the 17; 90 → 73 rpcs, and the proto
+      diff is **pure deletion**, so the remaining 73 are wire-identical
+- [x] ✅ `tddy-web` reaches every host and worktree RPC at its new coordinate — no consumer imports a
+      moved symbol from `connection_pb` any more; 231 Cypress specs, 1419/1419
+- [~] ⚠ Per-package suites all green (host 129, worktree 81, kernel 85, restructuring 287, service 109,
+      daemon lib 583). The "exactly one known failure" figure came from a run **truncated by cargo's
+      fail-fast** at binary 25 of 169; the true `--no-fail-fast` number is **21 failures**, every one
+      pre-existing or environmental, itemised in the changeset's failure ledger
 
 ## References
 

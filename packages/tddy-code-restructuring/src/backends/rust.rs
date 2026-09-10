@@ -2589,9 +2589,15 @@ fn character_column(text: &str, point: LspPoint) -> Position {
         },
     );
     let line = &text[line_start..];
+    // Count characters that start strictly before the byte offset. The obvious
+    // `line[..point.character].chars().count()` is only defined when the offset lands on a UTF-8
+    // boundary, and falling back to the byte offset there would report a byte count as a character
+    // column — a plausible-looking wrong answer for exactly the non-ASCII line where it matters.
+    // This form is in character units for every offset, boundary or not.
     let column = line
-        .get(..point.character)
-        .map_or(point.character, |head| head.chars().count());
+        .char_indices()
+        .take_while(|(offset, _)| *offset < point.character)
+        .count();
 
     Position {
         line: point.line as u32 + 1,

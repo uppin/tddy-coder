@@ -90,7 +90,6 @@ tddy-supervisor = { path = "../tddy-supervisor" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-sandbox-qemu = { path = "../tddy-sandbox-qemu" }
-sysinfo = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
@@ -99,12 +98,10 @@ teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-featur
 portable-pty = "0.9"
 # `default = ["agent"]` is the *server* side — tokio, futures, async-trait, service-binding and
 # a log facade we do not use. The blocking client and the protocol types are ungated.
-ssh-agent-lib = { version = "0.6.0", default-features = false }
 # `encryption` (and the ed25519 support the fixtures use): an OpenSSH private key on disk is
 # passphrase-protected, and unlocking one in process is the whole reason this daemon never needs a
 # TTY or `SSH_ASKPASS`. Without the feature `PrivateKey::decrypt` does not exist and the passphrase
 # would have to reach `ssh-add` as a subprocess, which is the design node 5 rejected.
-ssh-key = { version = "0.6.7", features = ["encryption", "ed25519"] }
 # `host_keypair.rs`: the host's RSA keypair, and RSA-OAEP(SHA-256) decryption of an answer the
 # browser encrypted with `SubtleCrypto`. Pinned — it is a cryptographic implementation, and a patch
 # release changing key generation or padding behaviour is not something to pick up silently.

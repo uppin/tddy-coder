@@ -93,9 +93,12 @@ fn restructure_check_reports_the_files_a_plan_names_that_are_over_the_budget() {
     // Then only the file over the budget is reported, with how far over it is
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
     assert!(
-        stdout.contains("budget: 1 of 2 file(s) over 10 lines")
-            && stdout.contains("budget: src/big.rs is 12 lines, 2 over"),
-        "the budget report did not reach stdout, got: {stdout}"
+        stdout.contains("budget: 1 of 2 file(s) over 10 lines"),
+        "the budget summary did not reach stdout, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("budget: src/big.rs is 12 lines, 2 over"),
+        "the over-budget file was not named with how far over it is, got: {stdout}"
     );
     assert!(
         !stdout.contains("src/small.rs"),

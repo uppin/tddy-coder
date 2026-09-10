@@ -31,7 +31,7 @@ pub struct SessionEntry {
 
 /// Check if a process with the given PID is alive (same semantics as listing sessions).
 #[cfg(unix)]
-pub fn is_pid_alive(pid: u32) -> bool {
+pub(crate) fn is_pid_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as i32, 0) };
     ret == 0
 }
@@ -40,7 +40,7 @@ pub fn is_pid_alive(pid: u32) -> bool {
 /// Session delete therefore does not use `kill(2)` semantics; callers on non-Unix targets should
 /// treat process state as best-effort only.
 #[cfg(not(unix))]
-pub fn is_pid_alive(_pid: u32) -> bool {
+pub(crate) fn is_pid_alive(_pid: u32) -> bool {
     false
 }
 
