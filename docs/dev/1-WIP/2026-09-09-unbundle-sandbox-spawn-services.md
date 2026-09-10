@@ -217,7 +217,7 @@ Open items in the spawn/supervisor path. They move unchanged; recorded so a revi
 - [x] **Desktop**: `spawn_worker`/`supervisor_client` callers migrated to `tddy_spawn::` and
       `tddy-desktop` **built locally** — `cargo build -p tddy-desktop` clean in 4m02s. This is the
       one break CI cannot catch: `tddy-desktop` is outside the gate ✅
-- [x] **File budget**: recorded — `spawner.rs` (2,152), `spawn_worker.rs` (568) and
+- [x] **File budget**: recorded — `sandbox_session.rs` (1,115), `spawner.rs` (2,152), `spawn_worker.rs` (568) and
       `workspace_tool_sandbox.rs` (521) stayed over budget, moved unsplit so the rename-similarity
       evidence survives. See [`../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md`](../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md) ✅
 - [~] **Baseline**: scoped per-package runs green (`tddy-daemon-sandbox` 27/0, `tddy-spawn` 45/0, the

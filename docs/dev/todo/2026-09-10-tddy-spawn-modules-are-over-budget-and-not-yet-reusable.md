@@ -1,4 +1,4 @@
-# 2026-09-10 — `tddy-spawn`'s modules are over the file budget and were moved unsplit
+# 2026-09-10 — The modules extracted into `tddy-spawn` and `tddy-daemon-sandbox` are over the file budget and were moved unsplit
 
 **Category:** Deferred refactor
 **Source:** `#unbundle` node 3, [#472](https://github.com/uppin/tddy-coder/pull/472), milestone M2
@@ -12,8 +12,11 @@ recorded them as renames at 98–100% similarity. Two are well over the repo's 5
 | `packages/tddy-spawn/src/spawn_worker.rs` | 568 |
 | `packages/tddy-spawn/src/supervisor_spawn.rs` | 362 |
 | `packages/tddy-spawn/src/supervisor_client.rs` | 79 |
+| `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 1,115 |
+| `packages/tddy-daemon-sandbox/src/workspace_tool_sandbox.rs` | 521 |
 
-Both were already over budget inside `tddy-daemon`; the move neither caused nor worsened it.
+All four over-budget files were already over budget inside `tddy-daemon`; the moves neither caused
+nor worsened it.
 
 ## Why they were not split during the move
 
@@ -39,6 +42,16 @@ signal and made the diff unreviewable as either a move or a refactor.
   internal.
 - **startup watch / timings** — `StartupWatch`, its `from_config` and the millisecond-pair form
   carried across the spawn-worker JSON IPC.
+
+`sandbox_session.rs` is the other candidate, and it is four concerns rather than one:
+
+- **the session-state registry** — `SandboxSessionState`, its `Init` struct and the handle map;
+- **ready-marker polling and `dial_and_bridge`** — the transport half, and the piece
+  `docs/dev/todo/2026-07-01-tddy-daemon.md` wants switched onto stdio. Isolating it is what would
+  make that switch a contained change rather than a daemon-wide one;
+- **`DaemonToolHandler`** — the in-jail tool-call dispatch;
+- **context-dir and persistent jail-`$HOME` preparation** — `prepare_persistent_claude_home` and
+  friends, which are filesystem setup rather than session lifecycle.
 
 Do it **after** the `#unbundle` stack lands, against green tests, as its own change. Doing it while
 nodes 4–8 are still rebasing on this branch would conflict every one of them.
