@@ -5,7 +5,7 @@ use futures_util::StreamExt;
 use tddy_terminal_rpc::TerminalSessionStore;
 // `encode_to_vec` is a `prost::Message` method; the trait is imported anonymously because
 // only its methods are used.
-use super::stream_document_frames;
+use crate::host_documents::stream_document_frames;
 use crate::tool_engine;
 use prost::Message as _;
 use tddy_sandbox_runner::ExecuteToolResponse;
@@ -18,13 +18,13 @@ use tddy_service::proto::connection::{
     DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, GetAcpReplayPageRequest,
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
     GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, HostDocumentChunk, HostDocumentScope, LinkStackNodeRequest,
-    LinkStackNodeResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
-    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, MintLocalTokenRequest,
-    MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest, ReadHostDocumentResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
+    GetWorktreeSnapshotResponse, HostDocumentChunk, LinkStackNodeRequest, LinkStackNodeResponse,
+    ListSessionUploadsRequest, ListSessionUploadsResponse, ListStagedAttachmentsRequest,
+    ListStagedAttachmentsResponse, MintLocalTokenRequest, MintLocalTokenResponse,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReadHostDocumentRequest, ReadHostDocumentResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ResolveStackBaseRequest, ResolveStackBaseResponse,
     SessionNotificationEvent as ProtoSessionNotificationEvent, SessionUploadEntry,
     StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest, TerminalControlEvent,
     UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
@@ -294,6 +294,47 @@ use tddy_service::proto::connection::ListToolsRequest;
 use tddy_rpc::Request;
 
 use super::ConnectionServiceImpl;
+
+/// The three agent-context frames, restated in `connection.proto`'s copies of them.
+///
+/// `tddy-session-files` builds the `session_files.proto` messages, because that is the service it
+/// serves and the one these methods are moving to. `connection.ConnectionService` still declares
+/// its own copies of the same four families, so its handlers translate on the way out — three
+/// field-for-field renames of the same numbering, deleted along with those declarations when the
+/// coordinate moves.
+///
+/// Written as three named functions rather than `From` impls: both types are generated in
+/// `tddy-service`, so neither is local to this crate and a blanket conversion is not ours to
+/// define.
+fn as_connection_manifest_entry(
+    entry: tddy_service::proto::session_files::ContextManifestEntry,
+) -> ContextManifestEntry {
+    ContextManifestEntry {
+        rel_path: entry.rel_path,
+        sha256: entry.sha256,
+        size_bytes: entry.size_bytes,
+    }
+}
+
+fn as_connection_file_chunk(
+    frame: tddy_service::proto::session_files::ContextFileChunk,
+) -> ContextFileChunk {
+    ContextFileChunk {
+        data: frame.data,
+        total_byte_size: frame.total_byte_size,
+    }
+}
+
+fn as_connection_batch_chunk(
+    frame: tddy_service::proto::session_files::ContextFileBatchChunk,
+) -> ContextFileBatchChunk {
+    ContextFileBatchChunk {
+        rel_path: frame.rel_path,
+        data: frame.data,
+        total_byte_size: frame.total_byte_size,
+        end_of_file: frame.end_of_file,
+    }
+}
 
 #[async_trait::async_trait]
 impl ConnectionServiceTrait for ConnectionServiceImpl {
@@ -2410,7 +2451,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (tx, rx) =
             tokio::sync::mpsc::unbounded_channel::<Result<ContextManifestEntry, Status>>();
         for entry in entries {
-            if tx.send(Ok(entry)).is_err() {
+            if tx.send(Ok(as_connection_manifest_entry(entry))).is_err() {
                 break;
             }
         }
@@ -2482,7 +2523,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<ContextFileChunk, Status>>();
         for frame in crate::context_files::context_file_frames(&bytes) {
-            if tx.send(Ok(frame)).is_err() {
+            if tx.send(Ok(as_connection_file_chunk(frame))).is_err() {
                 break;
             }
         }
@@ -2563,7 +2604,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let (tx, rx) =
             tokio::sync::mpsc::unbounded_channel::<Result<ContextFileBatchChunk, Status>>();
         for frame in crate::context_files::context_file_batch_frames(&files) {
-            if tx.send(Ok(frame)).is_err() {
+            if tx.send(Ok(as_connection_batch_chunk(frame))).is_err() {
                 break;
             }
         }
@@ -5549,8 +5590,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(inner));
         }
 
-        let scope =
-            HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let scope = tddy_service::proto::types::HostDocumentScope::try_from(req.scope)
+            .unwrap_or(tddy_service::proto::types::HostDocumentScope::Unspecified);
         let doc = crate::host_documents::read_host_document_bytes(
             &os_user,
             &self.tddy_data_dir,
@@ -5599,8 +5640,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             return Ok(Response::new(MpscResultStream { rx }));
         }
 
-        let scope =
-            HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let scope = tddy_service::proto::types::HostDocumentScope::try_from(req.scope)
+            .unwrap_or(tddy_service::proto::types::HostDocumentScope::Unspecified);
         let resolved = crate::host_documents::resolve_host_document(
             &os_user,
             &self.tddy_data_dir,
@@ -5623,7 +5664,15 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<HostDocumentChunk, Status>>();
         tokio::task::spawn_blocking(move || {
-            stream_document_frames(&resolved.path, resolved.byte_size, &tx);
+            stream_document_frames(
+                &resolved.path,
+                resolved.byte_size,
+                |data, total_byte_size| HostDocumentChunk {
+                    data,
+                    total_byte_size,
+                },
+                &tx,
+            );
         });
         Ok(Response::new(MpscResultStream { rx }))
     }

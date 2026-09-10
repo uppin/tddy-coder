@@ -12,16 +12,16 @@
 //! PRD: docs/ft/daemon/agent-context-sync.md § Design.
 
 use pretty_assertions::assert_eq;
-use tddy_daemon::context_files::{
+use tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES;
+use tddy_session_files::context_files::{
     context_file_batch_frames, context_file_frames, CONTEXT_FILE_FRAME_BYTES,
 };
-use tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES;
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-fn reassembled(frames: &[tddy_service::proto::connection::ContextFileChunk]) -> Vec<u8> {
+fn reassembled(frames: &[tddy_service::proto::session_files::ContextFileChunk]) -> Vec<u8> {
     frames.iter().flat_map(|f| f.data.clone()).collect()
 }
 

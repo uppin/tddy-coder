@@ -13,7 +13,7 @@ use tddy_core::Changeset;
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::connection::{
     start_session_event::Event as StartSessionEventKind, AttachmentMaterializationProgress,
-    HostDocumentChunk, SessionAttachment, StartSessionEvent,
+    SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
     AgentConversationChunk, ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
@@ -1822,62 +1822,6 @@ const _: () = assert!(
         <= tddy_livekit::chunking::MAX_CHUNK_FRAME_BYTES,
     "HOST_DOCUMENT_FRAME_BYTES must fit in one LiveKit data packet with envelope headroom"
 );
-
-/// Reads `path` in [`HOST_DOCUMENT_FRAME_BYTES`] slices into `tx`, stamping `total_byte_size` on
-/// every frame. A zero-byte document still yields exactly one (empty) frame, so a consumer never
-/// has to tell "empty document" from "stream produced nothing". A read error terminates the stream
-/// with a status rather than closing it, so a partial document is never mistaken for a whole one.
-fn stream_document_frames(
-    path: &Path,
-    total_byte_size: u64,
-    tx: &tokio::sync::mpsc::UnboundedSender<Result<HostDocumentChunk, Status>>,
-) {
-    use std::io::Read as _;
-
-    let mut file = match std::fs::File::open(path) {
-        Ok(f) => f,
-        Err(e) => {
-            log::error!("stream_read_host_document: open {path:?} failed: {e}");
-            let _ = tx.send(Err(Status::internal(format!(
-                "failed to read host document: {e}"
-            ))));
-            return;
-        }
-    };
-
-    let mut buf = vec![0u8; HOST_DOCUMENT_FRAME_BYTES];
-    let mut sent_any = false;
-    loop {
-        let read = match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) => {
-                log::error!("stream_read_host_document: read {path:?} failed: {e}");
-                let _ = tx.send(Err(Status::internal(format!(
-                    "failed to read host document: {e}"
-                ))));
-                return;
-            }
-        };
-        sent_any = true;
-        if tx
-            .send(Ok(HostDocumentChunk {
-                data: buf[..read].to_vec(),
-                total_byte_size,
-            }))
-            .is_err()
-        {
-            return;
-        }
-    }
-
-    if !sent_any {
-        let _ = tx.send(Ok(HostDocumentChunk {
-            data: Vec::new(),
-            total_byte_size,
-        }));
-    }
-}
 
 /// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
 ///

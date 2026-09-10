@@ -22,7 +22,7 @@ use std::path::Path;
 use std::process::Command;
 
 use pretty_assertions::assert_eq;
-use tddy_daemon::context_files::{
+use tddy_session_files::context_files::{
     context_manifest, read_context_file_bytes, read_context_files_bytes,
 };
 

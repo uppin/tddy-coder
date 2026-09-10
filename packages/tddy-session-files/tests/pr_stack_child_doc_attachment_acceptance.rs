@@ -14,10 +14,10 @@
 use std::fs;
 use std::path::Path;
 
-use tddy_daemon::stack_doc_attachments::stack_doc_attachments;
 use tddy_service::proto::connection::{
     session_attachment::Source, HostDocumentRef, HostDocumentScope, SessionAttachment,
 };
+use tddy_session_files::stack_doc_attachments::stack_doc_attachments;
 
 const ORCHESTRATOR_ID: &str = "018f1111-aaaa-7000-1111-000000000001";
 const ORCHESTRATOR_HOST: &str = "daemon-alpha";

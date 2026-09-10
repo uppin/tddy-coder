@@ -8,8 +8,8 @@
 //! that become path components, so each must be a pure basename. These pin the parser in isolation;
 //! `tests/session_attach_staging_scope_acceptance.rs` pins the same rules through the RPC.
 
-use tddy_daemon::host_documents::validate_staged_attachment_relative_path;
 use tddy_rpc::Code;
+use tddy_session_files::host_documents::validate_staged_attachment_relative_path;
 
 const STAGING_ID: &str = "aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa";
 

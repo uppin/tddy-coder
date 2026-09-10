@@ -69,8 +69,18 @@ fn mtime_ms(metadata: &fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn staged_complete_marker(canonical_dir: &Path, file_name: &str) -> PathBuf {
+pub fn staged_complete_marker(canonical_dir: &Path, file_name: &str) -> PathBuf {
     canonical_dir.join(format!("{file_name}{STAGED_COMPLETE_SUFFIX}"))
+}
+
+/// The staged-at timestamp of one file already on disk, in unix milliseconds.
+///
+/// Shares [`mtime_ms`] with [`list_staged_attachments`] so an entry answered on the upload's final
+/// chunk carries the same timestamp a later listing reports for it. Two derivations would be two
+/// answers to "when was this staged", and the form would sort by one and display the other.
+#[must_use]
+pub fn staged_at_ms(host_path: &Path) -> i64 {
+    fs::metadata(host_path).map(|m| mtime_ms(&m)).unwrap_or(0)
 }
 
 fn is_staged_complete_marker_name(name: &str) -> bool {

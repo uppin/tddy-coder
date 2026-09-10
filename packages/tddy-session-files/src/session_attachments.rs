@@ -33,7 +33,7 @@ pub use tddy_workflow::artifact_paths::{list_session_attachments, SessionAttachm
 /// message is written for that surface's `upload_id` / `file_name` fields, which are not concepts in
 /// the attachment API. A caller who sends a bad `SessionAttachment.basename` gets told about the
 /// field it actually sent.
-pub(crate) fn validate_attachment_basename(basename: &str) -> Result<&str, Status> {
+pub fn validate_attachment_basename(basename: &str) -> Result<&str, Status> {
     validate_segment(basename)
         .map_err(|_| Status::invalid_argument("attachment basename must be a single path segment"))
 }
@@ -209,7 +209,7 @@ pub fn copy_attachment_into_session(
 /// attachments directory must resolve inside the canonical `artifacts/` root, the target is created
 /// exclusively so an existing attachment is refused with [`Status::failed_precondition`] rather than
 /// truncated, and a failed write removes the partial file so a retry is not blocked.
-pub(crate) fn write_attachment_bytes(
+pub fn write_attachment_bytes(
     session_dir: &Path,
     basename: &str,
     data: &[u8],

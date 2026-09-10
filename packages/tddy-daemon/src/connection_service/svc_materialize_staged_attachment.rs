@@ -17,6 +17,11 @@ use tddy_service::proto::connection::StartSessionRequest;
 use tddy_service::proto::connection::HostDocumentRef;
 
 use tddy_service::proto::connection::HostDocumentScope;
+/// The scope `host_documents` resolves against — `types.proto`'s, which `session_files.proto`
+/// imports rather than duplicating. `connection.proto` still carries its own copy for
+/// `StartSession`'s `HostDocumentRef`, so a ref built here is read through that one and resolved
+/// through this one; both are generated from the same numbering.
+use tddy_service::proto::types::HostDocumentScope as ResolvedScope;
 
 use tddy_service::proto::connection::ReadHostDocumentRequest;
 
@@ -188,8 +193,7 @@ impl ConnectionServiceImpl {
         basename: &str,
         local_instance_id: &str,
     ) -> Result<(), Status> {
-        let scope =
-            HostDocumentScope::try_from(host_doc.scope).unwrap_or(HostDocumentScope::Unspecified);
+        let scope = ResolvedScope::try_from(host_doc.scope).unwrap_or(ResolvedScope::Unspecified);
         let ref_daemon = host_doc.daemon_instance_id.trim();
 
         let bytes = if ref_daemon.is_empty() || ref_daemon == local_instance_id {

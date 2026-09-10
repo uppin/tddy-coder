@@ -23,7 +23,7 @@ use tddy_sandbox::{
 };
 
 use crate::context_files::read_context_file_bytes;
-use crate::worktree_files::validate_rel_path_shape;
+use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 
 /// Where the agent's guidance is read from, for one session.
 ///
@@ -198,7 +198,7 @@ impl ContextSyncer {
 
     /// Populates a context directory and records what it now holds.
     ///
-    /// Shared with [`crate::split_session::build_split_context_dir`], which owns the directory's
+    /// Shared with `tddy_daemon::split_session::build_split_context_dir`, which owns the directory's
     /// creation and the preamble's rendering; this owns what goes *into* it, so setup and every
     /// later tick agree on the answer by construction.
     ///
@@ -206,7 +206,7 @@ impl ContextSyncer {
     /// the previous run left behind, populated with a manifest the repository has since moved on
     /// from — which is the whole reason a resume re-fetches at all — so it goes through the same
     /// [`synchronize_directory`] a tick does, delete pass included.
-    pub(crate) fn populate(
+    pub fn populate(
         context_dir: &Path,
         preamble: &str,
         globs: &[&str],

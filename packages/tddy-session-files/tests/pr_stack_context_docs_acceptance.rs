@@ -14,7 +14,9 @@
 use std::fs;
 use std::path::Path;
 
-use tddy_daemon::session_context_docs::{context_docs_for_session, ContextDoc, ContextDocKind};
+use tddy_session_files::session_context_docs::{
+    context_docs_for_session, ContextDoc, ContextDocKind,
+};
 
 // ── Builders ────────────────────────────────────────────────────────────────────────────────
 

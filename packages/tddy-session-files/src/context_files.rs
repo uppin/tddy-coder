@@ -1,6 +1,6 @@
 //! The allow-list-gated reader an agent's context directory is synced from.
 //!
-//! Deliberately **not** [`crate::worktree_files`]. That reader gates on git's listing, and the gate
+//! Deliberately **not** [`tddy_worktree_service::worktree_files`]. That reader gates on git's listing, and the gate
 //! is load-bearing: it is what keeps a `.gitignore`d `.env`, a credential a build wrote or a private
 //! key unreadable. But agent configuration is routinely gitignored — Claude Code writes
 //! `.claude/settings.local.json`, and this repo's own `.gitignore` hides `**/.cursor/mcp.json` and
@@ -8,7 +8,7 @@
 //! the agent reads.
 //!
 //! So this reader keeps every traversal, containment and symlink guard its sibling applies
-//! ([`crate::worktree_files::validate_rel_path_shape`], the canonicalize-and-contain check) and
+//! ([`tddy_worktree_service::worktree_files::validate_rel_path_shape`], the canonicalize-and-contain check) and
 //! replaces only the git-listing gate with [`tddy_sandbox::matches_context_globs`].
 //!
 //! It also applies the allow-list **at both ends of a symlink** — the name a file is asked for by
@@ -34,12 +34,12 @@ use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
 use tddy_sandbox::{matches_context_globs, root_relative, ContextManifest};
-use tddy_service::proto::connection::{
+use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextFileChunk, ContextManifestEntry,
 };
 
-use crate::worktree_files::{canonicalize_root, validate_rel_path_shape};
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
+use tddy_worktree_service::worktree_files::{canonicalize_root, validate_rel_path_shape};
 
 /// Bytes of file content carried per `StreamReadContextFile` frame.
 ///
@@ -157,7 +157,7 @@ pub fn context_manifest(
 
 /// The raw bytes of one allow-listed path, or why it may not be read.
 ///
-/// Mirrors [`crate::worktree_files::read_worktree_file_bytes`] in everything but the gate, including
+/// Mirrors [`tddy_worktree_service::worktree_files::read_worktree_file_bytes`] in everything but the gate, including
 /// the size refusal: `max_bytes` is measured with a `stat` and refused **before** the read, because
 /// a caller cannot tell a truncated file from a whole one once the frames have started, and a
 /// truncated `CLAUDE.md` is a wrong `CLAUDE.md` — it silently drops the project's last rule.

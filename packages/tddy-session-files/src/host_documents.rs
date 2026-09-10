@@ -16,13 +16,14 @@ use std::path::{Component, Path, PathBuf};
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 use tddy_rpc::Status;
-use tddy_service::proto::connection::HostDocumentScope;
+use tddy_service::proto::types::HostDocumentScope;
 
-use crate::project_storage;
 use crate::session_file_upload::{contained_canonical_dir, validate_segment};
-use crate::user_sessions_path::sessions_base_for_user;
-use crate::worktree_files::git_listed_files;
+use tddy_daemon_kernel::user_paths::sessions_base_for_user;
+use tddy_worktree_service::project_storage;
+use tddy_worktree_service::worktree_files::git_listed_files;
 
 /// Hard cap on a single `ReadHostDocument` response. Matches gRPC's default max message size so
 /// the unary response stays within transport limits. Larger documents must be staged (chunked,
@@ -60,13 +61,29 @@ fn validate_relative_path(relative_path: &str) -> Result<(), Status> {
     Ok(())
 }
 
-fn validate_session_upload_relative_path(relative_path: &str) -> Result<(), Status> {
+/// The two-basename address shape both `HOST_DOCUMENT_SCOPE_SESSION_UPLOAD` and
+/// `HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT` use: exactly `<id>/<file_name>`.
+///
+/// Both segments are untrusted client input that become path components, so each must be a pure
+/// basename — the batch or drop is not a directory the caller may descend into or climb out of. The
+/// basename rule is [`validate_segment`]'s, reused rather than restated, so a host-document fetch
+/// cannot be a weaker gate than the upload that wrote the file.
+///
+/// `addressed` and `id_field` spell the scope into the refusal — "session upload" /
+/// `<upload_id>`, "staged attachment" / `<staging_id>` — because the two scopes resolve to
+/// different roots, and a caller that got the shape wrong needs to know which one it was
+/// addressing and what the first segment should have named.
+pub fn validate_two_segment_relative_path(
+    relative_path: &str,
+    addressed: &str,
+    id_field: &str,
+) -> Result<(), Status> {
     validate_relative_path(relative_path)?;
     let parts: Vec<&str> = relative_path.split('/').collect();
     if parts.len() != 2 {
-        return Err(Status::invalid_argument(
-            "session upload relative_path must be <upload_id>/<file_name>",
-        ));
+        return Err(Status::invalid_argument(format!(
+            "{addressed} relative_path must be <{id_field}>/<file_name>"
+        )));
     }
     validate_segment(parts[0])?;
     validate_segment(parts[1])?;
@@ -74,20 +91,9 @@ fn validate_session_upload_relative_path(relative_path: &str) -> Result<(), Stat
 }
 
 /// The `HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT` address shape: exactly `<staging_id>/<file_name>`,
-/// the same two-segment form `SESSION_UPLOAD` uses. Both segments are untrusted client input that
-/// become path components, so each must be a pure basename — the batch is not a directory the
-/// caller may descend into or climb out of.
+/// the same two-segment form `SESSION_UPLOAD` uses.
 pub fn validate_staged_attachment_relative_path(relative_path: &str) -> Result<(), Status> {
-    validate_relative_path(relative_path)?;
-    let parts: Vec<&str> = relative_path.split('/').collect();
-    if parts.len() != 2 {
-        return Err(Status::invalid_argument(
-            "staged attachment relative_path must be <staging_id>/<file_name>",
-        ));
-    }
-    validate_segment(parts[0])?;
-    validate_segment(parts[1])?;
-    Ok(())
+    validate_two_segment_relative_path(relative_path, "staged attachment", "staging_id")
 }
 
 fn resolve_scope_root(
@@ -179,7 +185,7 @@ pub fn resolve_host_document(
     )?;
 
     if scope == HostDocumentScope::SessionUpload {
-        validate_session_upload_relative_path(relative_path)?;
+        validate_two_segment_relative_path(relative_path, "session upload", "upload_id")?;
     } else if scope == HostDocumentScope::StagedAttachment {
         validate_staged_attachment_relative_path(relative_path)?;
     } else if scope == HostDocumentScope::SessionWorktree {
@@ -330,6 +336,63 @@ pub fn read_host_document_bytes(
     Ok(HostDocumentBytes { data, byte_size })
 }
 
+/// Reads `path` in [`HOST_DOCUMENT_FRAME_BYTES`] slices into `tx`, stamping `total_byte_size` on
+/// every frame. A zero-byte document still yields exactly one (empty) frame, so a consumer never
+/// has to tell "empty document" from "stream produced nothing". A read error terminates the stream
+/// with a status rather than closing it, so a partial document is never mistaken for a whole one.
+///
+/// `frame` builds the wire message from one slice and the total, so the *slicing* — the part a
+/// consumer's boundaries depend on — has one implementation while `session_files.HostDocumentChunk`
+/// and `connection.proto`'s surviving copy of it stay two types. Two loops, each free to pick its
+/// own slice size, is how a consumer switching between the streaming and unary reads would start
+/// seeing different boundaries.
+pub fn stream_document_frames<T>(
+    path: &Path,
+    total_byte_size: u64,
+    frame: impl Fn(Vec<u8>, u64) -> T,
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<T, Status>>,
+) {
+    use std::io::Read as _;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("stream_read_host_document: open {path:?} failed: {e}");
+            let _ = tx.send(Err(Status::internal(format!(
+                "failed to read host document: {e}"
+            ))));
+            return;
+        }
+    };
+
+    let mut buf = vec![0u8; HOST_DOCUMENT_FRAME_BYTES];
+    let mut sent_any = false;
+    loop {
+        let read = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("stream_read_host_document: read {path:?} failed: {e}");
+                let _ = tx.send(Err(Status::internal(format!(
+                    "failed to read host document: {e}"
+                ))));
+                return;
+            }
+        };
+        sent_any = true;
+        if tx
+            .send(Ok(frame(buf[..read].to_vec(), total_byte_size)))
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    if !sent_any {
+        let _ = tx.send(Ok(frame(Vec::new(), total_byte_size)));
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -455,9 +518,9 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let repo = tempfile::tempdir().unwrap();
         std::fs::write(repo.path().join("README.md"), b"repo doc").unwrap();
-        crate::project_storage::write_projects(
+        project_storage::write_projects(
             &data.path().join("projects"),
-            &[crate::project_storage::ProjectData {
+            &[project_storage::ProjectData {
                 project_id: PROJECT_ID.to_string(),
                 name: "host-doc-proj".to_string(),
                 git_url: String::new(),

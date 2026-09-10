@@ -8,7 +8,7 @@
 //!
 //! `upload_id` and `file_name` are both untrusted client input that become path segments, so each
 //! is validated as a pure basename (path separators, `.`/`..`, and the empty string are rejected).
-//! A canonicalize-and-contain guard (mirroring [`crate::worktree_files`] /
+//! A canonicalize-and-contain guard (mirroring [`tddy_worktree_service::worktree_files`] /
 //! [`crate::session_workflow_files`]) then confirms the per-drop directory resolves inside the
 //! session's trusted `uploads` root before any bytes are written.
 
@@ -91,7 +91,7 @@ pub fn write_upload_chunk(
 /// `.`, `..`, any value containing a path separator, and any value whose [`Path::file_name`]
 /// differs from the input. Applied to both the `upload_id` and the `file_name` by every operation
 /// (upload, list, delete) that turns untrusted client input into an `uploads` path segment.
-pub(crate) fn validate_segment(value: &str) -> Result<&str, Status> {
+pub fn validate_segment(value: &str) -> Result<&str, Status> {
     if value.is_empty()
         || value == "."
         || value == ".."
@@ -115,7 +115,7 @@ pub(crate) fn validate_segment(value: &str) -> Result<&str, Status> {
 /// `uploads_root` (which holds no untrusted component) rather than `dir` makes it a real guard
 /// against a symlink escape, not a tautology. Shared by the upload writer and the delete path so a
 /// delete is never a weaker gate than a write. Both paths must already exist on disk.
-pub(crate) fn contained_canonical_dir(uploads_root: &Path, dir: &Path) -> Result<PathBuf, Status> {
+pub fn contained_canonical_dir(uploads_root: &Path, dir: &Path) -> Result<PathBuf, Status> {
     let canonical_root = uploads_root.canonicalize().map_err(|e| {
         log::error!("session uploads: canonicalize {uploads_root:?} failed: {e}");
         Status::internal(format!("failed to resolve uploads dir: {e}"))
