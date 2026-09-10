@@ -7,32 +7,19 @@
 //!
 //! Moved here from `tddy-tools` by `#unbundle` node 5: the dispatch carried a second, verbatim copy
 //! of the five-plugin registry, and keeping it in the CLI crate forced all six `tddy-build*`
-//! dependencies on a crate that otherwise has no build knowledge at all.
+//! dependencies on a crate that otherwise has no build knowledge at all. The relay reached the
+//! socket through a `ToolcallRelay` function pointer until the same node moved the toolcall client
+//! into `tddy-core`; it is [`tddy_core::toolcall::dispatch_toolcall`] directly now.
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 
 use tddy_build::service::{build_json, build_list_json, BuildListQuery};
+use tddy_core::toolcall::dispatch_toolcall;
 
 use crate::plugins::plugin_registry;
-
-/// An in-flight relay call to the session-owning process.
-pub type RelayFuture =
-    Pin<Box<dyn Future<Output = std::result::Result<serde_json::Value, String>> + Send>>;
-
-/// How a relayed request reaches the session-owning process over `TDDY_SOCKET`.
-///
-/// The toolcall relay client is `tddy-tools`' `toolcall_client`, and this crate is one of that
-/// binary's dependencies — so the transport arrives as a parameter rather than as an edge back onto
-/// the CLI crate.
-///
-/// TODO(tools-thinning): `#unbundle` node 5's M5 moves `toolcall_client` into `tddy-core`, which
-/// this crate already depends on. At that point this parameter goes and the call is direct.
-pub type ToolcallRelay = fn(PathBuf, serde_json::Value) -> RelayFuture;
 
 /// Resolve `--repo-dir` to an absolute path. Action specs require absolute input
 /// `host_path`s (they become jail mounts), so the repo root must be absolute before
@@ -85,10 +72,10 @@ pub struct BuildArgs {
     pub dry_run: bool,
 }
 
-pub async fn run_build_list(args: BuildListArgs, dispatch: ToolcallRelay) -> Result<()> {
+pub async fn run_build_list(args: BuildListArgs) -> Result<()> {
     let repo_dir = resolve_repo_dir(&args.repo_dir)?;
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build_list(Path::new(&socket_path), &args, &repo_dir, dispatch).await;
+        return relay_build_list(Path::new(&socket_path), &args, &repo_dir).await;
     }
     let query = BuildListQuery {
         query: args.query.clone(),
@@ -100,10 +87,10 @@ pub async fn run_build_list(args: BuildListArgs, dispatch: ToolcallRelay) -> Res
     Ok(())
 }
 
-pub async fn run_build(args: BuildArgs, dispatch: ToolcallRelay) -> Result<()> {
+pub async fn run_build(args: BuildArgs) -> Result<()> {
     let repo_dir = resolve_repo_dir(&args.repo_dir)?;
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
-        return relay_build(Path::new(&socket_path), &args, &repo_dir, dispatch).await;
+        return relay_build(Path::new(&socket_path), &args, &repo_dir).await;
     }
     let registry = plugin_registry();
     let value = build_json(
@@ -152,12 +139,7 @@ struct BuildRelayResponse {
 }
 
 #[cfg(unix)]
-async fn relay_build_list(
-    socket_path: &Path,
-    args: &BuildListArgs,
-    repo_dir: &Path,
-    dispatch: ToolcallRelay,
-) -> Result<()> {
+async fn relay_build_list(socket_path: &Path, args: &BuildListArgs, repo_dir: &Path) -> Result<()> {
     let request = BuildListRelayRequest {
         r#type: "build-list",
         repo_dir: repo_dir.to_string_lossy().into_owned(),
@@ -165,16 +147,11 @@ async fn relay_build_list(
         limit: args.limit,
         offset: args.offset,
     };
-    relay(socket_path, &request, dispatch).await
+    relay(socket_path, &request).await
 }
 
 #[cfg(unix)]
-async fn relay_build(
-    socket_path: &Path,
-    args: &BuildArgs,
-    repo_dir: &Path,
-    dispatch: ToolcallRelay,
-) -> Result<()> {
+async fn relay_build(socket_path: &Path, args: &BuildArgs, repo_dir: &Path) -> Result<()> {
     let request = BuildRelayRequest {
         r#type: "build",
         repo_dir: repo_dir.to_string_lossy().into_owned(),
@@ -182,17 +159,13 @@ async fn relay_build(
         no_cache: args.no_cache,
         dry_run: args.dry_run,
     };
-    relay(socket_path, &request, dispatch).await
+    relay(socket_path, &request).await
 }
 
 #[cfg(unix)]
-async fn relay<T: Serialize>(
-    socket_path: &Path,
-    request: &T,
-    dispatch: ToolcallRelay,
-) -> Result<()> {
+async fn relay<T: Serialize>(socket_path: &Path, request: &T) -> Result<()> {
     let req = serde_json::to_value(request)?;
-    let response_json = dispatch(socket_path.to_path_buf(), req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     let response: BuildRelayResponse =
@@ -231,17 +204,11 @@ async fn relay_build_list(
     _socket_path: &Path,
     _args: &BuildListArgs,
     _repo_dir: &Path,
-    _dispatch: ToolcallRelay,
 ) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }
 
 #[cfg(not(unix))]
-async fn relay_build(
-    _socket_path: &Path,
-    _args: &BuildArgs,
-    _repo_dir: &Path,
-    _dispatch: ToolcallRelay,
-) -> Result<()> {
+async fn relay_build(_socket_path: &Path, _args: &BuildArgs, _repo_dir: &Path) -> Result<()> {
     anyhow::bail!("TDDY_SOCKET relay is not supported on this platform")
 }

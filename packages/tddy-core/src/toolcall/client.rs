@@ -3,6 +3,12 @@
 //! newline-delimited-JSON protocol. The wire *payloads* (the same `"type"`-discriminated JSON
 //! objects the old protocol used) are unchanged — only the framing/dispatch that carries them
 //! changed, mirroring the sandbox tool-IPC migration (see `session_tool_client`).
+//!
+//! Moved here from `tddy-tools` by `#unbundle` node 5. This is the client half of a wire whose
+//! server half — [`ToolcallRpcService`](super::ToolcallRpcService) and the `*RequestWire` shapes —
+//! already lives in this module. Keeping the halves in separate crates is what forced `tddy-bsp`'s
+//! build dispatch to take the relay as a function pointer (`build_cli::ToolcallRelay`) rather than
+//! call it; with both halves here, it calls it.
 
 use std::path::Path;
 

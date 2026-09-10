@@ -313,13 +313,18 @@ impl PermissionServer {
                 .collect();
             tool_router.merge(dynamic_tool_router(&catalog));
             // Session-action tools (request_action/list_actions/invoke_action). All three are host
-            // round-trips over this very transport — `EstablishAction`, `ListActions`,
-            // `InvokeAction` — since the session directory the actions live in exists only on the
-            // host. So having that surface to reach is the whole of what they need, and the whole
-            // of what gates them. Nothing here reads a def's `replaces`: an action surface is not
-            // granted by an agent happening to name a particular tool
+            // round-trips — `EstablishAction`, `ListActions`, `InvokeAction` — since the session
+            // directory the actions live in exists only on the host. A reachable transport is
+            // therefore necessary but *not* sufficient: it says a host is there, not that the host
+            // routes these three to anything. `tddy-daemon`'s handler does not
+            // (`tddy_tool_engine::execute_tool_with_env` has no arm for them), so the host says so
+            // itself through `TDDY_SESSION_ACTION_TOOLS` — the same shape as the `TDDY_LSP_TOOLS`
+            // gate below. Nothing here reads a def's `replaces`: an action surface is not granted
+            // by an agent happening to name a particular tool
             // (docs/ft/daemon/session-agent-roster.md § Tool replacement, without behaviour).
-            tool_router.merge(crate::action_tools::action_tool_router());
+            if tddy_core::session_actions::session_action_tools_enabled() {
+                tool_router.merge(crate::action_tools::action_tool_router());
+            }
         }
         // Discovery-subagent tools (ACP-shaped: subagent_new_session/prompt/cancel) — registered
         // unconditionally, and *advertised* only while the roster has someone to address (see
@@ -901,7 +906,7 @@ impl PermissionServer {
             .to_string();
         };
         let request = serde_json::json!({ "type": "spawn-child", "node_id": p.node_id });
-        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
             Ok(resp) => resp.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         }
@@ -974,7 +979,7 @@ impl PermissionServer {
         };
         let request =
             spawn_conversation_request_json(&p.prompt, p.branch.as_deref(), p.base_ref.as_deref());
-        match crate::toolcall_client::dispatch_toolcall(&socket, request).await {
+        match tddy_core::toolcall::dispatch_toolcall(&socket, request).await {
             Ok(resp) => resp.to_string(),
             Err(e) => serde_json::json!({ "error": e }).to_string(),
         }

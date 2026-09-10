@@ -6,8 +6,8 @@ use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_core::toolcall::dispatch_toolcall;
 use tddy_core::toolcall::{start_toolcall_listener, BuildExecutor, BuildListQuery, BuildOptions};
-use tddy_tools::toolcall_client::dispatch_toolcall;
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(3);
 

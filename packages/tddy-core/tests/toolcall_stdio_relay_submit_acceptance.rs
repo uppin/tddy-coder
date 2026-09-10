@@ -12,8 +12,8 @@
 
 use serde_json::json;
 use std::time::Duration;
+use tddy_core::toolcall::dispatch_toolcall;
 use tddy_core::toolcall::start_toolcall_listener;
-use tddy_tools::toolcall_client::dispatch_toolcall;
 
 /// Bounded safety net, not the expected duration — see "Testing Async Code" in the fluent-tests
 /// guidelines. A real listener + real socket round trip normally completes in well under 100ms;

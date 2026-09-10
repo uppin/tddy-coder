@@ -7,10 +7,14 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::info;
-use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+use tddy_core::toolcall::{
+    dispatch_toolcall, AskQuestionItem, AskRequest, AskResponse, InvokeActionRelayRequest,
+    InvokeActionRelayResponse, ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest,
+    SubmitResponse, TransitionRequest,
+};
 use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
 use tddy_tools::session_actions_cli;
 use tddy_tools::session_context;
@@ -169,65 +173,6 @@ pub struct GetSchemaArgs {
     pub output: Option<PathBuf>,
 }
 
-/// Wire format for submit request (sent to socket).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SubmitRequest {
-    pub r#type: String,
-    pub goal: String,
-    pub data: serde_json::Value,
-}
-
-/// Wire format for submit response (from socket).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SubmitResponse {
-    pub status: String,
-    pub goal: Option<String>,
-    pub errors: Option<Vec<String>>,
-    /// Transport / relay failures from tddy-coder (`ToolCallResponse::Error`).
-    #[serde(default)]
-    pub message: Option<String>,
-}
-
-/// Wire format for ask request (matches ClarificationQuestion).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AskRequest {
-    pub r#type: String,
-    pub questions: Vec<AskQuestionItem>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AskQuestionItem {
-    pub header: String,
-    pub question: String,
-    #[serde(default)]
-    pub options: Vec<QuestionOption>,
-    #[serde(default, rename = "multiSelect")]
-    pub multi_select: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct QuestionOption {
-    pub label: String,
-    #[serde(default)]
-    pub description: String,
-}
-
-/// Wire format for ask response.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AskResponse {
-    pub status: String,
-    pub answers: Option<String>,
-    pub error: Option<String>,
-}
-
-/// Wire format for transition request (sent to socket).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TransitionRequest {
-    pub r#type: String,
-    pub to: String,
-    pub provisional: bool,
-}
-
 /// Exit codes: 0=success, 1=general failure, 2=usage error, 3=validation error
 pub async fn run_submit(args: SubmitArgs) -> Result<()> {
     let json_str = read_input(&args.data, args.data_stdin)?;
@@ -379,7 +324,7 @@ async fn relay_submit(
         goal: goal.to_string(),
         data: data.clone(),
     })?;
-    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     let response: SubmitResponse = serde_json::from_value(response_json)
@@ -449,7 +394,7 @@ async fn relay_ask(socket_path: &std::path::Path, questions: &[AskQuestionItem])
         r#type: "ask".to_string(),
         questions: questions.to_vec(),
     })?;
-    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     let response: AskResponse = serde_json::from_value(response_json)
@@ -493,13 +438,12 @@ pub async fn run_spawn_conversation(args: SpawnConversationArgs) -> Result<()> {
         output_error("TDDY_SOCKET not set; spawn_conversation not relayed", 1);
         return Ok(());
     };
-    let response_json =
-        tddy_tools::toolcall_client::dispatch_toolcall(std::path::Path::new(&socket_path), request)
-            .await
-            .map_err(|e| {
-                output_error(&e, 1);
-                anyhow::anyhow!(e)
-            })?;
+    let response_json = dispatch_toolcall(std::path::Path::new(&socket_path), request)
+        .await
+        .map_err(|e| {
+            output_error(&e, 1);
+            anyhow::anyhow!(e)
+        })?;
     println!("{}", response_json);
     Ok(())
 }
@@ -673,22 +617,6 @@ pub async fn run_call_tool(args: CallToolArgs) -> Result<()> {
     }
 }
 
-#[cfg(test)]
-mod list_tools_tests {
-    use super::all_session_tools;
-
-    #[test]
-    fn list_tools_includes_mcp_exec_and_cli_tools() {
-        let names: Vec<String> = all_session_tools().into_iter().map(|t| t.name).collect();
-        for expected in ["spawn_conversation", "Read", "Shell", "submit"] {
-            assert!(
-                names.iter().any(|n| n == expected),
-                "list-tools must advertise {expected}; got {names:?}"
-            );
-        }
-    }
-}
-
 pub async fn run_transition(args: TransitionArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_transition(
@@ -718,7 +646,7 @@ async fn relay_transition(
         to: to.to_string(),
         provisional,
     })?;
-    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     // Print the relay's JSON verbatim so the agent reads `instructions` (committed),
@@ -808,52 +736,6 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
     session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
 }
 
-/// Wire format for `list-actions` relay request (sent to TDDY_SOCKET).
-#[derive(Debug, Serialize)]
-struct ListActionsRelayRequest {
-    r#type: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path_prefix: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    query: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    limit: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    offset: Option<usize>,
-}
-
-/// Wire format for `list-actions` relay response.
-#[derive(Debug, Deserialize)]
-struct ListActionsRelayResponse {
-    status: String,
-    #[serde(default)]
-    actions: Option<serde_json::Value>,
-    #[serde(default)]
-    total: Option<usize>,
-    #[serde(default)]
-    message: Option<String>,
-}
-
-/// Wire format for `invoke-action` relay request.
-#[derive(Debug, Serialize)]
-struct InvokeActionRelayRequest {
-    r#type: &'static str,
-    action: String,
-    data: String,
-}
-
-/// Wire format for `invoke-action` relay response.
-#[derive(Debug, Deserialize)]
-struct InvokeActionRelayResponse {
-    status: String,
-    #[serde(default)]
-    record: Option<serde_json::Value>,
-    #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
-    exit_code: Option<i32>,
-}
-
 pub async fn run_list_actions(args: ListActionsArgs) -> Result<()> {
     if let Some(socket_path) = std::env::var_os("TDDY_SOCKET") {
         relay_list_actions(std::path::Path::new(&socket_path), &args).await?;
@@ -897,7 +779,7 @@ async fn relay_list_actions(socket_path: &std::path::Path, args: &ListActionsArg
             None
         },
     })?;
-    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     let response: ListActionsRelayResponse =
@@ -946,7 +828,7 @@ async fn relay_invoke_action(socket_path: &std::path::Path, args: &InvokeActionA
         action: args.action.clone(),
         data: args.data.clone(),
     })?;
-    let response_json = tddy_tools::toolcall_client::dispatch_toolcall(socket_path, req)
+    let response_json = dispatch_toolcall(socket_path, req)
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     let response: InvokeActionRelayResponse =
@@ -1010,4 +892,20 @@ async fn relay_ask(_socket_path: &std::path::Path, _questions: &[AskQuestionItem
     });
     println!("{}", serde_json::to_string(&out).unwrap());
     Ok(())
+}
+
+#[cfg(test)]
+mod list_tools_tests {
+    use super::all_session_tools;
+
+    #[test]
+    fn list_tools_includes_mcp_exec_and_cli_tools() {
+        let names: Vec<String> = all_session_tools().into_iter().map(|t| t.name).collect();
+        for expected in ["spawn_conversation", "Read", "Shell", "submit"] {
+            assert!(
+                names.iter().any(|n| n == expected),
+                "list-tools must advertise {expected}; got {names:?}"
+            );
+        }
+    }
 }

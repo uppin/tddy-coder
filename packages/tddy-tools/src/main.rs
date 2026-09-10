@@ -123,20 +123,6 @@ fn init_logging() {
     let _ = builder.try_init();
 }
 
-/// Reach the session-owning process over `TDDY_SOCKET` for `tddy-bsp`'s relayed build requests.
-///
-/// The build dispatch lives in `tddy-bsp`, which owns the build plugins; the toolcall relay client
-/// lives here. This is the one line that joins them, and it is a function pointer rather than a
-/// dependency edge because `tddy-bsp` is a dependency of this binary, not the other way round.
-fn relay_toolcall(
-    socket_path: std::path::PathBuf,
-    request: serde_json::Value,
-) -> tddy_bsp::build_cli::RelayFuture {
-    Box::pin(
-        async move { tddy_tools::toolcall_client::dispatch_toolcall(&socket_path, request).await },
-    )
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     init_logging();
@@ -160,10 +146,8 @@ async fn main() -> Result<()> {
         Some(Subcommand::PersistChangesetWorkflow(s)) => cli::run_persist_changeset_workflow(s)?,
         Some(Subcommand::ListActions(s)) => cli::run_list_actions(s).await?,
         Some(Subcommand::InvokeAction(s)) => cli::run_invoke_action(s).await?,
-        Some(Subcommand::BuildList(s)) => {
-            tddy_bsp::build_cli::run_build_list(s, relay_toolcall).await?
-        }
-        Some(Subcommand::Build(s)) => tddy_bsp::build_cli::run_build(s, relay_toolcall).await?,
+        Some(Subcommand::BuildList(s)) => tddy_bsp::build_cli::run_build_list(s).await?,
+        Some(Subcommand::Build(s)) => tddy_bsp::build_cli::run_build(s).await?,
         Some(Subcommand::PtyRelay(s)) => pty_relay::run_pty_relay(*s).await?,
         Some(Subcommand::Remote(s)) => remote_cli::run_remote(s).await?,
         Some(Subcommand::SessionHook(s)) => session_hook::run_session_hook(s).await,

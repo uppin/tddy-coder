@@ -691,6 +691,16 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
         env.insert("TDDY_LSP_TOOLS".to_string(), "rust".to_string());
     }
 
+    // Claim the session-action surface for the in-jail MCP server: `bridge::AppToolHandler` is the
+    // one host handler that answers `EstablishAction`/`ListActions`/`InvokeAction` (see
+    // `crate::host_actions`), and this is the spawn path that ends in it. Deliberately not set for
+    // the sandboxed-codebase session (`crate::sandboxed_session`), whose host tool IPC forwards
+    // every call *into* the jail's exec-tool engine, which implements none of the three.
+    env.insert(
+        tddy_core::session_actions::SESSION_ACTION_TOOLS_ENV.to_string(),
+        "1".to_string(),
+    );
+
     spawn_trace(
         &session_dir,
         "spawning sandbox-exec → tddy-sandbox-runner …",
