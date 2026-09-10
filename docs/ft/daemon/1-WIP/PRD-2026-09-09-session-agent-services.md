@@ -45,6 +45,18 @@ from inside a jail), `tddy-session-sync` (`StreamAgentActivityDelta`), `tddy-san
 `tddy-discovery`, and `tddy-coder`'s session participant — which serves families M and N itself and
 must move in lockstep for the same reason node 6 documents.
 
+### The local socket keeps its surface
+
+`connection.ConnectionService` carried all 90 methods on the daemon's local Unix socket, so any local
+caller could reach any family. **Every family that moves stays reachable there** — dropping one is a
+silent capability removal on a privileged interface, whose failure mode is a caller that used to work
+receiving `unimplemented` with no announcement.
+
+This node's two services therefore go on the socket: 9 + 8 = **17 adapter methods**, exactly matching
+node 1's. They are **generated** by the `generate_tonic_adapter` node 6 implements, which makes node 6
+a dependency on behaviour rather than on published surface — and moves this node from wave 3 to
+wave 4.
+
 ## Proposed Changes
 
 ### What changes
@@ -101,6 +113,9 @@ conversation, or render the activity and replay panes.
 6. `tddy-web` migrated; the four Cypress fakes split.
 
 ## Acceptance Criteria
+
+- [ ] both services answer over the **local Unix socket**, not only over Connect-HTTP
+- [ ] both adapters are **generated**; this node adds no hand-written `*_tonic_adapter.rs`
 
 - [ ] `session_agents.SessionAgentService` serves all 9 family-B methods on all transports
 - [ ] `activity.ActivityService` serves all 8 methods of families M and N

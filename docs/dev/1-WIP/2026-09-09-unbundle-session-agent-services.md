@@ -22,6 +22,22 @@ State A below is distilled from that file. Do not duplicate grep traces or item 
 | `session_agents.SessionAgentService` | B | 9 | `tddy-session-agents` *(new)* | `session_agent_clone.rs` (1,173), `session_agent_status.rs` (685), `session_agent_roster.rs` (605), `session_agent_inference.rs` (285) |
 | `activity.ActivityService` | M, N | 8 | `tddy-session-activity` *(new)* | `session_notifications.rs` (433), `session_notification_subscribers.rs` (194) |
 
+### The local socket keeps its surface
+
+**Policy, set for the whole stack:** every family that was reachable on the local Unix socket as part
+of `connection.ConnectionService` **stays reachable there after it moves**. That service carried all
+90 methods on that socket, so any local caller — `tddy-sandbox-app` dials it today, and nothing
+constrains callers outside this repo — could reach any of them. Dropping a family is a **silent
+capability removal on a privileged local interface**, and its failure mode is a caller that used to
+work receiving `unimplemented` with no announcement.
+
+So this node puts both its services on the socket: `session_agents.SessionAgentService` (9 methods)
+and `activity.ActivityService` (8) = **17 adapter methods**, matching node 1's 17 exactly.
+
+They are **generated**, not hand-written, by the `generate_tonic_adapter` node 6 implements. That
+makes node 6 a dependency on *behaviour* rather than on published surface — see `## Green wave`,
+which moves this node to wave 4 as a result.
+
 **This node has the widest consumer fan-out in the stack**, and one of those consumers is
 security-relevant. `packages/tddy-sandbox-runner/src/runner.rs:89-94` holds the `(service, method)`
 tuple allowlist of what an in-jail agent may relay to its host:
@@ -43,6 +59,9 @@ This PR explicitly does **not**:
 - Move `session_list_enrichment.rs` (1,740 LoC). It enriches `ListSessions`, which is family C and
   stays in the daemon deliberately.
 - Take families A, L or P — node 8 — or C, D, O and Q, which stay.
+- **Hand-write a tonic adapter.** If node 6's generator cannot produce one of these 17 methods, that
+  is a gap in node 6 to report upward, not a licence to write 17 `async fn`s here — the whole reason
+  the generator landed in node 6 is that hand-writing them is the cost being removed.
 - Change what the sandbox relay allowlist *permits*. The set of allowed operations is identical; only
   the service name each tuple carries changes. Widening or narrowing the allowlist is out of scope
   and would hide a security change inside a mechanical one.
@@ -64,7 +83,7 @@ implementing one here collides with the PR that owns it.
 | `n1` host-worktree-services | `move_module_to_crate`; `types.proto`; the proto-split pattern | `session_agents.proto` and `activity.proto` import `types.proto` for `SessionAgentEntry`, `SessionAgentRoster`, `AgentActivityRecord` and `StreamMode` | change `types.proto`'s shape |
 | `n1` host-worktree-services | `tddy-daemon-kernel` exporting `AgentActivityHub` and `now_unix_ms` | `session_agent_inference.rs:36` imports the hub; the activity service publishes through it | re-define either symbol, or change the hub's broadcast semantics |
 | **`n5` tools-thinning** | **`tddy-service`'s `SessionToolTransport` and roster client, and `tddy-discovery`'s subagent conversation runtime and `LiveAgentRoster`** | this node serves family B in front of both. Its `Draft PR contract` fixed those surfaces precisely so this node could compile against them | move, rename or reshape anything node 5 placed in `tddy-service` or `tddy-discovery` |
-| `n6` session-io-services | nothing this PR consumes | — | — |
+| **`n6` session-io-services** | **a working `generate_tonic_adapter`** in `tddy-codegen` — unary, server-streaming and bidirectional | both this node's services go on the local socket per the policy above, and their 17 adapter methods are generated rather than hand-written. This is a dependency on node 6's **behaviour**, not merely its published surface, which is what puts this node in wave 4 | implement or extend the generator; a gap found here is reported to node 6 |
 
 `n6` is a branch ancestor, not a dependency — but **both edit
 `packages/tddy-coder/src/session_participant/mod.rs`** (node 6 for family K, this node for families M
@@ -90,17 +109,27 @@ that state.**
 
 ## Green wave
 
-**Wave:** 3 of 3
-**Greenable independently:** **not until node 5 is green.** Family B is served in front of
-`tddy-discovery`'s conversation runtime and `tddy-service`'s roster client, both of which node 5 puts
-there.
-**Concurrent with:** nodes 4, 6 and 8 — disjoint proto families and disjoint source modules, with the
-two shared-file conflicts noted above.
-**Blocks:** nothing.
+**Wave:** **4 of 5** — moved from 3 by the local-socket policy.
+**Greenable independently:** **not until node 6 is green.** Two reasons, and the second is new. Family
+B is served in front of `tddy-discovery`'s conversation runtime and `tddy-service`'s roster client,
+both of which node 5 puts there — that was always true. And under the reachability policy this node's
+17 adapter methods are **generated** by node 6's `generate_tonic_adapter`, which is a dependency on a
+predecessor's *behaviour*: the generator has to actually work, not merely be declared.
+**Concurrent with:** node 8, which depends on node 6 for the same reason and shares this node's wave.
+**Blocks:** nothing directly, but node 9 is now wave 5, behind this one.
 
 Real dependency edges, as opposed to the branch line:
 
-    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8
+    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8      n6 → n7, n8      n7, n8 → n9
+
+    w1  n1
+    w2  n2, n3, n5
+    w3  n4, n6
+    w4  n7, n8        ← this node
+    w5  n9
+
+The local-socket policy is what deepened the graph from four waves to five: before it, nodes 7 and 8
+needed nothing from node 6 and sat beside it in wave 3.
 
 ⚠ **Three recurring conflicts**: `packages/tddy-daemon/src/runtime.rs` (every node),
 `packages/tddy-coder/src/session_participant/mod.rs` (nodes 6, 7, 8), and
@@ -186,6 +215,8 @@ Asks about a documentation claim regarding `TaskService`. Node 3 moved `task_ser
 - [ ] **⛔ Delta tick numbering**: `activity.proto` numbers ticks from 1 with an explicit unset; `tddy-session-sync` migrated
 - [ ] **`tddy-session-agents`**: crate, 4 modules, its suites
 - [ ] **`tddy-session-activity`**: crate, 2 modules, ACP replay, its suites
+- [ ] **Local socket**: both services adapted and `add_service`d on the one `Server::builder()`;
+      17 methods, **generated** by node 6's `generate_tonic_adapter`, not hand-written
 - [ ] **⛔ Sandbox relay allowlist**: the five family-B tuples re-pointed; permitted set unchanged
 - [ ] **⛔ `tddy-coder` lockstep**: families M and N moved in this PR
 - [ ] **Consumers**: `tddy-service`'s roster client, `tddy-discovery`'s runtime, `tddy-session-sync`, `tddy-sandbox-app`
@@ -287,6 +318,11 @@ Three further proofs:
       conversation through the updated relay allowlist (`in_jail_conversation_acceptance.rs`)
 - [ ] **Unit**: the allowlist permits exactly the same operation set as before, under the new service name (`runner.rs`)
 
+### tddy-daemon (the local socket)
+- [ ] **Integration**: both `session_agents.SessionAgentService` and `activity.ActivityService` answer
+      over the **local Unix socket**, not only over Connect-HTTP (`local_socket_reachability_acceptance.rs`)
+- [ ] **Unit**: no hand-written `*_tonic_adapter.rs` is added by this node — both adapters are generated (`local_socket_reachability_acceptance.rs`)
+
 ### tddy-session-activity
 - [ ] **Integration**: all 8 methods of families M and N answer (`activity_service_acceptance.rs`)
 - [ ] **Integration**: ACP replay pages and tool-call details match the old coordinate's output (`acp_replay_parity_acceptance.rs`)
@@ -308,6 +344,12 @@ Three further proofs:
 
 ## Decisions & Trade-offs
 
+- **The local socket keeps its surface, and node 4 is now inconsistent with that.** The policy was
+  set after node 4 had already **dropped** family T from the socket — there is no
+  `livekit_tonic_adapter.rs`, and `local_socket_server.rs` still serves three services. Node 1
+  preserved its families, node 4 did not, and nobody recorded either as a decision. Closing family
+  T's gap is not this node's to do — it is a predecessor's file — so it is recorded in
+  `docs/dev/todo/` where the inconsistency is visible rather than latent.
 - **Families M and N share one service.** ACP transcript replay is arguably its own concern, but it is
   a *view* of agent activity, shares `AgentActivityRecord` and `StreamMode`, and three methods do not
   justify a fourth hand-written tonic adapter (one is needed per gRPC-served service, because the
