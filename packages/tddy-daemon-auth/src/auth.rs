@@ -21,7 +21,7 @@ use tddy_service::proto::token::{
 };
 use tddy_service::{AuthServiceServer, LiveKitTokenServiceServer};
 
-use crate::config::{DaemonConfig, LiveKitConfig};
+use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
 use tddy_daemon_kernel::SessionUserResolver;
 
 /// Result of building auth: RPC entries, a resolver for session token -> GitHub login, and the
@@ -1008,7 +1008,7 @@ mod tests {
         // its RPC on
         let (config, _dir) = a_daemon_serving_a_common_room();
         let request = GenerateTokenRequest {
-            identity: crate::livekit_peer_discovery::daemon_rpc_identity("udoo"),
+            identity: tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity("udoo"),
             ..a_generate_request(&an_access_token_for("operator"))
         };
 
@@ -1060,7 +1060,7 @@ mod tests {
     #[test]
     fn addresses_a_daemons_rpc_participant_with_the_prefix_the_mint_refuses() {
         // Given the identity a daemon actually serves RPC on
-        let identity = crate::livekit_peer_discovery::daemon_rpc_identity("udoo");
+        let identity = tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity("udoo");
 
         // When compared against the prefix `token.TokenService` refuses to mint
 

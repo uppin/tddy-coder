@@ -38,9 +38,10 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest,
     ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    HostDocumentScope, LiveKitRoomInfo, ReadHostDocumentRequest, ReadHostDocumentResponse,
-    SessionAttachment, StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
+    HostDocumentScope, ReadHostDocumentRequest, ReadHostDocumentResponse, SessionAttachment,
+    StagedAttachmentRef, StartSessionRequest, StartSessionResponse,
 };
+use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
@@ -1279,12 +1280,14 @@ impl FacilitatingDaemon {
     /// Read from the server's own room list rather than by joining: joining a room that does not
     /// exist creates it, which would make the question change its own answer.
     async fn room_on_the_server(&self, room: &str) -> Option<LiveKitRoomInfo> {
-        tddy_daemon::livekit_rooms_stream::room_roster_from_config(self.config.livekit.as_ref())
-            .list_rooms()
-            .await
-            .expect("the LiveKit server must answer its room list")
-            .into_iter()
-            .find(|listed| listed.name == room)
+        tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
+            self.config.livekit.as_ref(),
+        )
+        .list_rooms()
+        .await
+        .expect("the LiveKit server must answer its room list")
+        .into_iter()
+        .find(|listed| listed.name == room)
     }
 }
 
@@ -1441,7 +1444,7 @@ impl FacilitatingDaemon {
     async fn terminal_bridge_of(
         &self,
         session_id: &str,
-    ) -> Option<tddy_service::proto::connection::LiveKitParticipantInfo> {
+    ) -> Option<tddy_service::proto::livekit::LiveKitParticipantInfo> {
         self.room_on_the_server(COMMON_ROOM)
             .await?
             .participants

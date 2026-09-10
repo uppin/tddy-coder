@@ -481,7 +481,7 @@ pub async fn run_clone_mirror(
     spec: CloneMirrorSpec,
     hosted: Arc<HostedAgentClones>,
 ) -> Result<(), Status> {
-    let room_name = crate::session_room::session_room_name(&spec.session_id);
+    let room_name = tddy_daemon_livekit::session_room::session_room_name(&spec.session_id);
     let identity =
         crate::livekit_peer_discovery::daemon_rpc_identity(&spec.owning_daemon_instance_id);
     let facilitator_identity =

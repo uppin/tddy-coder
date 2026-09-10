@@ -27,16 +27,16 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::livekit_rooms_stream::RoomRoster;
 use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
-use crate::session_room::ActivityDelta;
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
+use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
+use tddy_daemon_livekit::session_room::ActivityDelta;
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityRecord as ProtoAgentActivityRecord,
-    ExecuteToolChunk, ExecuteToolResponse, LiveKitRoomsEvent,
+    ExecuteToolChunk, ExecuteToolResponse,
     SessionNotificationEvent as ProtoSessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
@@ -586,10 +586,6 @@ async fn relay_acp_replay_count(
     }
 }
 
-/// Cadence at which a `StreamLiveKitRooms` subscription re-reads the LiveKit roster. Presence is
-/// the volatile fact on that panel, hence far shorter than the host-stats disk tick.
-const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
-
 /// Cadence at which a `StreamSessionAgents` subscription re-sends the roster it last sent, when
 /// nothing has been published in the meantime.
 ///
@@ -613,26 +609,6 @@ const _: () = assert!(
     "two roster keepalives must fit inside a relay's idle deadline, or one lost frame ends a \
      forwarded subscription"
 );
-
-/// Stream adapter backed by an mpsc channel for [`LiveKitRoomsEvent`] server-streaming.
-///
-/// Carries results rather than events: a roster read that fails ends the stream with that error,
-/// since an empty room list would read to the panel as "the server has no rooms".
-#[derive(Debug)]
-pub struct MpscLiveKitRoomsStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<Result<LiveKitRoomsEvent, Status>>,
-}
-
-impl Stream for MpscLiveKitRoomsStream {
-    type Item = Result<LiveKitRoomsEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx)
-    }
-}
 
 mod activity_hub;
 
@@ -670,11 +646,10 @@ pub struct ConnectionServiceImpl {
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
-    /// Reader for the LiveKit server's rooms and their participants, behind `StreamLiveKitRooms`.
+    /// Reader for the LiveKit server's rooms and their participants. `StreamLiveKitRooms` left for
+    /// `livekit.LiveKitService`; what still reads the roster here is agent-clone provisioning,
+    /// which needs to know whether a session's room already exists.
     room_roster: Arc<dyn RoomRoster>,
-    /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the roster (overridable for
-    /// tests).
-    room_poll_interval: Duration,
     /// Cadence at which a `StreamSessionAgents` subscription re-sends an unchanged roster
     /// (overridable for tests).
     roster_keepalive_interval: Duration,
@@ -711,7 +686,7 @@ pub struct ConnectionServiceImpl {
     /// (`docs/ft/daemon/session-room.md`). Holding the joined participant
     /// here is what keeps a room open past the `StartSession` that created it; `DeleteSession`
     /// closes it again.
-    session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    session_rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     /// This daemon's model registry, whose assistants are selectable agents alongside the
     /// `allowed_agents` config entries. `None` means no registry is wired (a test fixture), in
     /// which case `ListAgents` reports the config entries alone.

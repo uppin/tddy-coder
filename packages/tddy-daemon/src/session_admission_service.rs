@@ -27,7 +27,7 @@ use tddy_service::proto::session_admission::{
 
 use crate::config::DaemonConfig;
 use crate::livekit_peer_discovery::{daemon_rpc_identity, livekit_common_room_connect_strings};
-use crate::session_room::session_room_name;
+use tddy_daemon_livekit::session_room::session_room_name;
 
 /// The TTL of an admission token. Short on purpose: it is the re-admit cadence and the revocation
 /// window. A daemon whose admission has been revoked keeps its current token only until this

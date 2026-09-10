@@ -222,7 +222,10 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
 /// the session over LiveKit ([`crate::session_room::SessionRoomRegistry::ensure_open`]), so a
 /// session nobody connected to, and every session on a daemon with no LiveKit credentials, has
 /// none.
-pub fn close_session_room(rooms: &crate::session_room::SessionRoomRegistry, session_id: &str) {
+pub fn close_session_room(
+    rooms: &tddy_daemon_livekit::session_room::SessionRoomRegistry,
+    session_id: &str,
+) {
     rooms.close(session_id.trim());
 }
 

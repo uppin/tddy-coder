@@ -8,7 +8,15 @@ pub mod action_service;
 /// resolving unchanged. No caller moved with it.
 pub use tddy_telegram::active_elicitation;
 pub mod agent_list_mapping;
-pub mod auth;
+/// The three modules of `tddy-daemon-auth` this crate still names, out of the seven that moved
+/// there.
+///
+/// Named one by one rather than globbed, for the same reason the worktree and host lines below
+/// give — and the four that are absent are the point: `github_token_store`, `token_provider` and
+/// `codex_oauth_participant_metadata` had exactly one caller each and it moved with them, while
+/// `codex_oauth_relay`'s only caller was `tddy-integration-tests`, which now depends on the auth
+/// crate directly. A re-export kept for nobody is an edge that reads as real.
+pub use tddy_daemon_auth::{auth, github_pr_credentials, oauth_loopback_tunnel};
 /// The eight git/worktree modules, which now live in `tddy-worktree-service`.
 ///
 /// Named one by one rather than globbed: both new crates carry a `service` and a `stream`
@@ -21,9 +29,6 @@ pub use tddy_worktree_service::{
 };
 pub mod claude_cli_session;
 pub mod cli_session_manager;
-mod codex_oauth_participant_metadata;
-pub mod codex_oauth_relay;
-pub mod common_room_supervisor;
 pub use tddy_daemon_kernel::config;
 pub mod connection_service;
 pub mod connection_tonic_adapter;
@@ -37,8 +42,6 @@ pub mod daemon_settings;
 /// `session_list_enrichment` and `session_notifications` are its callers and stay here; that edge
 /// is `tddy-daemon` → `tddy-telegram`, the same direction as every other facade in this file.
 pub use tddy_telegram::elicitation;
-pub mod github_pr_credentials;
-pub mod github_token_store;
 pub mod host_tonic_adapter;
 /// The nine host modules and the four host-key ones, which now live in `tddy-host-service`.
 ///
@@ -49,10 +52,16 @@ pub use tddy_host_service::{
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
 pub mod host_documents;
-pub mod livekit_peer_discovery;
-pub mod livekit_rooms_stream;
+/// The five LiveKit modules, which now live in `tddy-daemon-livekit`.
+///
+/// Named one by one for the reason the worktree and host facades above give: every module keeps
+/// its own name in the crate it moved to, so `crate::session_room::X` goes on resolving here and
+/// no caller in this crate changed.
+pub use tddy_daemon_livekit::{
+    common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
+    session_room,
+};
 pub mod local_socket_server;
-mod oauth_loopback_tunnel;
 pub mod presenter_intent_client;
 pub mod pty_registry;
 pub mod pty_runtime;
@@ -73,7 +82,6 @@ pub mod session_list_enrichment;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
 pub mod session_reader;
-pub mod session_room;
 pub mod session_toolcall;
 pub mod session_uploads;
 pub mod session_workflow_files;
@@ -90,7 +98,6 @@ pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
 pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
-pub mod token_provider;
 pub mod tool_call_log;
 pub mod user_sessions_path;
 pub mod workspace_session;

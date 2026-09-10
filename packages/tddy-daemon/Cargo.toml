@@ -113,6 +113,10 @@ tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 # OAuth-state signer's and left with it; `base64` stays, because `auth.rs` uses it too. `teloxide`
 # also stays — the four modules that keep it here are on the blocked side of the cycle.
 tddy-telegram = { path = "../tddy-telegram" }
+# The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
+# three of its seven modules that something here still names.
+tddy-daemon-auth = { path = "../tddy-daemon-auth" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -102,6 +102,7 @@ systemd — so a live PR read as "no PR".
 
 ## Related documentation
 
+- [The identity boundary and the LiveKit service](auth-livekit-services.md) — where the signing, verifying and credential-holding code lives, and why the one shared secret is not split when the crates are.
 - [docs/ft/web/daemon-selector-livekit-rpc.md](../web/daemon-selector-livekit-rpc.md) — daemon switching in the web UI (the surface where the original cross-daemon bug appeared).
 - [docs/ft/daemon/livekit-peer-discovery.md](livekit-peer-discovery.md) — peer fan-out that forwards `session_token` between daemons.
 - `packages/tddy-github/src/session_token.rs` — signer/verifier implementation (`TokenKind`, `mint_access`/`mint_refresh`, `REFRESH_TOKEN_TTL`).

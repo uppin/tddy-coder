@@ -14,3 +14,11 @@ wait times out after 10 s (`packages/tddy-tools/src/session_tool_client.rs:448`)
 The fix is a startup sweep that re-opens a room for each split session whose `.session.yaml` names a
 codebase daemon — the same shape as the existing startup reconciliation in
 `packages/tddy-daemon/src/startup.rs`.
+
+**Moved, not fixed, 2026-09-10.** `#unbundle` node 4
+([#473](https://github.com/uppin/tddy-coder/pull/473)) moved `session_room` to
+`packages/tddy-daemon-livekit`; `SessionRoomRegistry` is now
+`tddy_daemon_livekit::session_room::SessionRoomRegistry`. The defect crossed unchanged, and it is
+recorded here so a reader who meets it in the new crate knows it is inherited rather than
+introduced. Note that the sweep would live in `tddy-daemon`'s `startup.rs` and call **into** this
+crate — the direction the split already allows.

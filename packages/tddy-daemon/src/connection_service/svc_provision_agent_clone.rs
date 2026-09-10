@@ -92,13 +92,14 @@ impl ConnectionServiceImpl {
         // The split forward's deadline, for the split forward's reason: giving up after the ordinary
         // 30 s would mean erroring while the peer is still cloning, and a peer that carried on would
         // leave a checkout on a host nobody is watching.
-        let answered = crate::livekit_peer_discovery::forward_start_session_via_livekit_within(
-            &slot,
-            daemon_instance_id,
-            &request,
-            self.split_forward_deadline(),
-        )
-        .await?;
+        let answered =
+            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
+                &slot,
+                daemon_instance_id,
+                &request,
+                self.split_forward_deadline(),
+            )
+            .await?;
         let created = answered.session_id.trim();
         if created != codebase_session_id {
             // A peer that ignored `requested_session_id` cannot give the guarantee above, so what it
@@ -139,7 +140,7 @@ impl ConnectionServiceImpl {
             );
             return;
         };
-        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
             slot,
             daemon_instance_id,
             &DeleteSessionRequest {
@@ -195,7 +196,7 @@ impl ConnectionServiceImpl {
                  the daemons can see each other"
             )));
         }
-        match crate::livekit_peer_discovery::forward_delete_session_via_livekit(
+        match tddy_daemon_livekit::livekit_peer_discovery::forward_delete_session_via_livekit(
             slot,
             daemon_instance_id,
             &DeleteSessionRequest {
@@ -314,7 +315,7 @@ impl ConnectionServiceImpl {
         &self,
         session_id: &str,
     ) -> Result<Vec<String>, Status> {
-        let room_name = crate::session_room::session_room_name(session_id);
+        let room_name = tddy_daemon_livekit::session_room::session_room_name(session_id);
         let rooms = self.room_roster.list_rooms().await.map_err(Status::from)?;
         let room = rooms
             .into_iter()

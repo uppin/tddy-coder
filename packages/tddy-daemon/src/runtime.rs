@@ -178,10 +178,32 @@ pub struct RuntimeTasks {
 }
 
 /// The OAuth loopback TCP proxy, which follows the common room across a reconnect rather than
-/// belonging to any one connection — see [`crate::livekit_peer_discovery::spawn_oauth_loopback_tunnel`].
+/// belonging to any one connection — see [`crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel`].
 struct OauthLoopbackTunnel {
     config: Arc<DaemonConfig>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
+}
+
+/// Join `livekit.common_room`, keep [`CommonRoomPeerRegistry`] in sync, and run the OAuth loopback
+/// tunnel supervisor alongside — for an embedder that owns both for the lifetime of its process.
+///
+/// [`CommonRoomPeerRegistry`]: tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry
+///
+/// The daemon itself does not use it: its discovery loop is owned by
+/// [`crate::common_room_supervisor`], which stops and restarts it when the configured room changes,
+/// while the tunnel supervisor follows `room_slot` across that and so is started once. It composes
+/// a loop from `tddy-daemon-livekit` with a supervisor from `tddy-daemon-auth`, and this is the
+/// only crate that has both — which is why it is assembly and lives here rather than with either
+/// half.
+pub fn spawn_common_room_discovery_task(
+    config: Arc<DaemonConfig>,
+    registry: Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
+) {
+    crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(&config, room_slot.clone());
+    tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
+        config, registry, room_slot,
+    );
 }
 
 /// The local Unix-domain-socket `ConnectionService` transport (SO_PEERCRED peer-trust plus
@@ -202,7 +224,7 @@ struct LocalSocketTransport {
 }
 
 /// This daemon's session rooms, as the closer `tddy-worktree-service` asks for before a removal.
-struct SessionRoomWorktreeCloser(Arc<crate::session_room::SessionRoomRegistry>);
+struct SessionRoomWorktreeCloser(Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>);
 
 impl tddy_worktree_service::WorktreeRoomCloser for SessionRoomWorktreeCloser {
     fn close_for_worktree(&self, worktree_path: &std::path::Path) {
@@ -243,7 +265,7 @@ impl RuntimeTasks {
         let mut handles = Vec::new();
 
         if let Some(tunnel) = self.oauth_loopback_tunnel {
-            if let Some(handle) = crate::livekit_peer_discovery::spawn_oauth_loopback_tunnel(
+            if let Some(handle) = crate::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
                 &tunnel.config,
                 tunnel.room_slot,
             ) {
@@ -485,7 +507,8 @@ pub async fn build(
     // One registry of hosted session rooms for the whole daemon: `StartSession` opens rooms in it
     // and both deletion paths — the `DeleteSession` RPC and Telegram's Delete button — close them
     // there. Two registries would mean a room only one of them could ever stop hosting.
-    let shared_session_rooms = Arc::new(crate::session_room::SessionRoomRegistry::new());
+    let shared_session_rooms =
+        Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
 
     let telegram = build_telegram(
         &config,
@@ -547,29 +570,30 @@ pub async fn build(
         }
         // Peer discovery over the common room. The registry and the room slot are the handles the
         // roster is built from; the task that fills them is the host's to start.
-        let livekit_discovery: Option<crate::livekit_peer_discovery::LiveKitDiscoveryHandles> =
-            match CommonRoomTarget::from_livekit(config.livekit.as_ref()) {
-                Some(target) => {
-                    let registry = Arc::new(
-                        crate::livekit_peer_discovery::CommonRoomPeerRegistry::new()
-                            .with_host_registry(Arc::clone(&host_registry)),
-                    );
-                    let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-                    log::info!(
-                        "LiveKit common-room peer discovery configured (room {:?})",
-                        target.room()
-                    );
-                    peer_discovery = Some(PeerDiscoveryHandles {
-                        registry: registry.clone(),
-                        room_slot: room_slot.clone(),
-                    });
-                    tasks.oauth_loopback_tunnel = Some(OauthLoopbackTunnel {
-                        config: config_arc.clone(),
-                        room_slot: room_slot.clone(),
-                    });
-                    Some(crate::livekit_peer_discovery::LiveKitDiscoveryHandles {
+        let livekit_discovery: Option<
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles,
+        > = match CommonRoomTarget::from_livekit(config.livekit.as_ref()) {
+            Some(target) => {
+                let registry = Arc::new(
+                    tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()
+                        .with_host_registry(Arc::clone(&host_registry)),
+                );
+                let room_slot = Arc::new(tokio::sync::RwLock::new(None));
+                log::info!(
+                    "LiveKit common-room peer discovery configured (room {:?})",
+                    target.room()
+                );
+                peer_discovery = Some(PeerDiscoveryHandles {
+                    registry: registry.clone(),
+                    room_slot: room_slot.clone(),
+                });
+                tasks.oauth_loopback_tunnel = Some(OauthLoopbackTunnel {
+                    config: config_arc.clone(),
+                    room_slot: room_slot.clone(),
+                });
+                Some(tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
-                            crate::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+                            tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
                                 config_arc.clone(),
                                 registry,
                                 room_slot.clone(),
@@ -578,9 +602,9 @@ pub async fn build(
                             as Arc<dyn crate::multi_host::EligibleDaemonSource>,
                         common_room_livekit_room: room_slot,
                     })
-                }
-                None => None,
-            };
+            }
+            None => None,
+        };
         // Clone before moving into ConnectionServiceImpl — VmService and ScreenSharingService need the same resolver.
         let vm_user_resolver = user_resolver.clone();
         let sessions_base_resolver: tddy_daemon_kernel::SessionsBaseResolver = {
@@ -865,6 +889,16 @@ pub async fn build(
             service: Arc::new(host_server) as Arc<dyn tddy_rpc::RpcService>,
         });
 
+        // LiveKitService — the rooms this daemon can see on the LiveKit server and who is joined
+        // to each. Family T left `connection.ConnectionService` in `#unbundle` node 4; the entry
+        // comes from `tddy-daemon-livekit` assembled, so this wiring never names the poll cadence.
+        rpc_entries.push(tddy_daemon_livekit::livekit_service::build_livekit_entry(
+            tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
+                config_arc.livekit.as_ref(),
+            ),
+            vm_user_resolver.clone(),
+        ));
+
         // WorktreeService — listing, cleaning, sizing, restoring and reading a project's checkouts.
         let worktree_server =
             tddy_service::WorktreeServiceServer::from_arc(Arc::clone(&worktree_service_impl));
@@ -1080,7 +1114,7 @@ fn build_telegram(
     tddy_data_dir: &Path,
     options: &RuntimeOptions,
     claude_cli_manager: &Arc<crate::cli_session_manager::CliSessionManager>,
-    session_rooms: &Arc<crate::session_room::SessionRoomRegistry>,
+    session_rooms: &Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
 ) -> TelegramWiring {
     let tg = match config.telegram.as_ref() {
         Some(tg) if tg.enabled && !tg.bot_token.is_empty() => tg,

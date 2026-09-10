@@ -12069,7 +12069,9 @@ dependencies = [
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-daemon-auth",
  "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
  "tddy-demo-runner",
  "tddy-discovery",
@@ -12114,6 +12116,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-daemon-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "livekit",
+ "livekit-api",
+ "log",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-github",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-service",
+ "tempfile",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-daemon-kernel"
 version = "0.1.0"
 dependencies = [
@@ -12133,6 +12160,36 @@ dependencies = [
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-daemon-livekit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "livekit",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-host-service",
+ "tddy-livekit",
+ "tddy-livekit-testkit",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-testing-commons",
+ "tddy-workflow",
+ "tddy-worktree-service",
  "tempfile",
  "tokio",
 ]
@@ -12374,7 +12431,7 @@ dependencies = [
  "serial_test",
  "tddy-coder",
  "tddy-core",
- "tddy-daemon",
+ "tddy-daemon-auth",
  "tddy-rpc",
  "tddy-sandbox-runner",
  "tddy-stdio",

@@ -38,9 +38,9 @@ use tddy_daemon::claude_cli_session::ClaudeCliSessionManager;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::{
-    spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
-    LiveKitEligibleDaemonSource,
+    CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::test_util::wait_until_peer_discovered;
 use tddy_github::{GitHubUser, SessionTokenSigner};
 use tddy_livekit::LiveKitParticipant;
@@ -550,7 +550,7 @@ async fn a_resumed_split_agents_tool_transport_is_rebuilt_from_the_persisted_pai
     );
     assert_eq!(
         resumed.agent_env_var("TDDY_REMOTE_LIVEKIT_ROOM"),
-        tddy_daemon::session_room::session_room_name(AGENT_SESSION_ID),
+        tddy_daemon_livekit::session_room::session_room_name(AGENT_SESSION_ID),
         "a resumed agent rejoins its own session's room — the one this daemon hosts as the session's \
          facilitating daemon, not one named after the codebase session on the other host"
     );

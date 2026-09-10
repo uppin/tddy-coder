@@ -124,5 +124,5 @@ The full flag/environment table is in the [README](../README.md#credentials).
 ## Related
 
 - [Session worktree sync (product)](../../../docs/ft/daemon/session-worktree-sync.md)
-- [Session room module](../../tddy-daemon/docs/session-room.md) — the WIP tree, the delta ring, and the two RPCs this consumes
+- [Session room module](../../tddy-daemon-livekit/docs/session-room.md) — the WIP tree, the delta ring, and the two RPCs this consumes
 - [`tddy-remote-git-repo`](../../tddy-remote-git-repo/README.md) — the git transport committed work rides
