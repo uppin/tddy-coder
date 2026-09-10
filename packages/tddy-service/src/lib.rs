@@ -45,16 +45,20 @@ pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::catalog::CatalogServiceServer;
 pub use proto::connection::ConnectionServiceServer;
+pub use proto::demo_vm::DemoVmServiceServer;
 pub use proto::exec_tools::ExecToolServiceServer;
 pub use proto::host::HostServiceServer;
 pub use proto::livekit::LiveKitServiceServer;
+pub use proto::local_token::LocalTokenServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
 pub use proto::pr_stack::PrStackServiceServer;
+pub use proto::project::ProjectServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
 pub use proto::remote_git::RemoteGitServiceServer;
 pub use proto::screen_sharing::ScreenSharingServiceServer;
+pub use proto::session::SessionServiceServer;
 pub use proto::session_admission::SessionAdmissionServiceServer;
 pub use proto::session_agents_svc::SessionAgentServiceServer;
 pub use proto::session_files::SessionFilesServiceServer;
@@ -201,6 +205,28 @@ pub mod proto {
     pub mod tonic_pr_stack {
         #![allow(unused_imports, clippy::all)]
         include!(concat!(env!("OUT_DIR"), "/tonic_pr_stack/pr_stack.rs"));
+    }
+    /// `SessionService`: a session's whole life. Split out of [`connection`] by `#unbundle` node 9 —
+    /// the family whose needs made `ConnectionServiceImpl` a god object.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session {
+        include!(concat!(env!("OUT_DIR"), "/session.rs"));
+    }
+    /// `ProjectService`: the repositories a daemon knows, their hosts and their branches.
+    #[allow(unused_imports, unused_variables)]
+    pub mod project {
+        include!(concat!(env!("OUT_DIR"), "/project.rs"));
+    }
+    /// `DemoVmService`: the demo VM a session can be shown against. Served from `tddy-vm`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod demo_vm {
+        include!(concat!(env!("OUT_DIR"), "/demo_vm.rs"));
+    }
+    /// `LocalTokenService`: the one transport-restricted method in the surface — answered from
+    /// `SO_PEERCRED` on the local socket and nowhere else.
+    #[allow(unused_imports, unused_variables)]
+    pub mod local_token {
+        include!(concat!(env!("OUT_DIR"), "/local_token.rs"));
     }
     /// `RemoteGitService`: a daemon project served as a git remote. See
     /// `docs/ft/daemon/remote-git-repo.md`.

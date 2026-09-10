@@ -689,3 +689,113 @@ fn the_shared_types_file_holds_only_the_four_types_that_genuinely_cross() {
         );
     }
 }
+
+const SESSION_METHODS: [&str; 8] = [
+    "ListSessions",
+    "StartSession",
+    "StreamStartSession",
+    "ConnectSession",
+    "ResumeSession",
+    "SignalSession",
+    "DeleteSession",
+    "GetWorktreeSnapshot",
+];
+
+const PROJECT_METHODS: [&str; 5] = [
+    "ListProjects",
+    "CreateProject",
+    "AddProjectToHost",
+    "ListProjectBranches",
+    "SetProjectDefaultBranch",
+];
+
+const DEMO_VM_METHODS: [&str; 3] = ["StartDemoVm", "StopDemoVm", "GetDemoVmStatus"];
+
+#[test]
+fn session_service_declares_every_lifecycle_method() {
+    let block = service_block(&read("session.proto"), "SessionService");
+    for method in SESSION_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "session.SessionService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn project_service_declares_every_project_method() {
+    let block = service_block(&read("project.proto"), "ProjectService");
+    for method in PROJECT_METHODS {
+        assert!(
+            block.contains(&format!("rpc {method}(")),
+            "project.ProjectService is missing {method}"
+        );
+    }
+}
+
+#[test]
+fn demo_vm_and_local_token_services_declare_their_methods() {
+    let vm = service_block(&read("demo_vm.proto"), "DemoVmService");
+    for method in DEMO_VM_METHODS {
+        assert!(
+            vm.contains(&format!("rpc {method}(")),
+            "demo_vm is missing {method}"
+        );
+    }
+    let token = service_block(&read("local_token.proto"), "LocalTokenService");
+    assert!(token.contains("rpc MintLocalToken("));
+}
+
+/// `session.proto` needs all four of `types.proto`'s types, and reaches them rather than copying.
+///
+/// Those four were justified in nodes 6-8 because a *staying* family reached them. This node moves
+/// that family, so all four are now shared between services that all moved — the file is still
+/// right, and its reason changed.
+#[test]
+fn the_session_proto_reaches_all_four_shared_types_rather_than_copying_them() {
+    let proto = read("session.proto");
+    assert!(proto.contains("import \"types.proto\""));
+    for shared in [
+        "HostDocumentScope",
+        "SessionAgentStatus",
+        "SessionAgentActivity",
+        "BranchSession",
+    ] {
+        assert!(
+            !proto.contains(&format!("enum {shared}"))
+                && !proto.contains(&format!("message {shared}")),
+            "session.proto redeclares {shared} instead of importing it"
+        );
+    }
+}
+
+/// **The completion criterion for the whole `#unbundle` effort.**
+///
+/// Not "connection.ConnectionService is down to N methods" — the file is *gone*. A service with zero
+/// methods would mean inventing a ninth service for the one thing the daemon genuinely is; the answer
+/// is that the daemon implements no session service at all.
+#[test]
+fn the_connection_proto_no_longer_exists() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto/connection.proto");
+    assert!(
+        !path.exists(),
+        "connection.proto still exists; every family has left it, so it has nothing left to declare"
+    );
+}
+
+/// A deleted proto that something still names is a deletion in name only.
+#[test]
+fn nothing_in_the_workspace_names_the_connection_service() {
+    let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut hits = Vec::new();
+    for needle in ["ConnectionServiceImpl", "connection.ConnectionService"] {
+        hits.extend(walk_for(&packages, needle));
+    }
+    hits.retain(|p| !p.contains("unbundle_service_split.rs"));
+    hits.sort();
+    hits.dedup();
+    assert!(
+        hits.is_empty(),
+        "these still name the deleted service: {hits:?}"
+    );
+}

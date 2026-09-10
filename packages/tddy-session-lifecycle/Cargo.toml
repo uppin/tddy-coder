@@ -1,0 +1,21 @@
+[package]
+name = "tddy-session-lifecycle"
+version = "0.1.0"
+edition = "2021"
+description = "A session's whole life — listing, starting, connecting, resuming, signalling and deleting. Extracted from tddy-daemon, and the owner of the TaskRegistry"
+
+[lib]
+name = "tddy_session_lifecycle"
+path = "src/lib.rs"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
+thiserror = "2"
+
+[dev-dependencies]
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt"] }

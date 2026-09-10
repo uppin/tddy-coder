@@ -181,6 +181,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // file: `HostDocumentScope` is reached by `StartSession`, which stays, so `connection.proto`
         // and `session_files.proto` both import `types.proto` and neither declares the enum.
         "proto/session_files.proto",
+        // `#unbundle` node 9 — families C, D, O and Q, the last to leave. `connection.proto` is
+        // deleted once these land, and with it the two passes above that compile it.
+        "proto/session.proto",
+        "proto/project.proto",
+        "proto/demo_vm.proto",
+        "proto/local_token.proto",
     ] {
         prost_build::Config::new()
             .out_dir(std::env::var("OUT_DIR")?)
@@ -550,6 +556,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/catalog.proto",
                 "proto/exec_tools.proto",
                 "proto/pr_stack.proto",
+                "proto/session.proto",
+                "proto/project.proto",
+                "proto/demo_vm.proto",
+                "proto/local_token.proto",
                 "proto/types.proto",
                 "proto/remote_git.proto",
                 "proto/session_admission.proto",

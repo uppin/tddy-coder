@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package demo_vm;
+
+// The demo VM a session can be shown against.
+//
+// Split out of `connection.ConnectionService` by `#unbundle` node 9 — family O — and served from
+// `tddy-vm`, which already serves `vm.VmService`. The three methods land beside the VM machinery
+// that answers them rather than in a crate of their own.
+
+service DemoVmService {
+  // Demo VM lifecycle — UI-driven QEMU boot/shutdown for the demo goal.
+  rpc StartDemoVm(StartDemoVmRequest) returns (StartDemoVmResponse);
+  rpc StopDemoVm(StopDemoVmRequest) returns (StopDemoVmResponse);
+  rpc GetDemoVmStatus(GetDemoVmStatusRequest) returns (GetDemoVmStatusResponse);
+}
+
+// State of the demo VM for a session.
+enum DemoVmState {
+  DEMO_VM_STATE_UNKNOWN = 0;
+  DEMO_VM_STATE_BOOTING = 1;
+  DEMO_VM_STATE_RUNNING = 2;
+  DEMO_VM_STATE_STOPPED = 3;
+  DEMO_VM_STATE_ERROR   = 4;
+}
+
+message GetDemoVmStatusRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message GetDemoVmStatusResponse {
+  DemoVmState state         = 1;
+  uint32      ssh_host_port = 2;
+  string      message       = 3;
+  // Present when state = RUNNING and an app port is configured (e.g. "http://localhost:8080").
+  string      share_url     = 4;
+}
+
+message StartDemoVmRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message StartDemoVmResponse {
+  DemoVmState state   = 1;
+  string      message = 2;
+}
+
+message StopDemoVmRequest {
+  string session_token = 1;
+  string session_id    = 2;
+}
+
+message StopDemoVmResponse {
+  bool   ok      = 1;
+  string message = 2;
+}

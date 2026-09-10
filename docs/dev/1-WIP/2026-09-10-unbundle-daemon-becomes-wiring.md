@@ -66,8 +66,10 @@ implementing one here collides with the PR that owns it.
 
 What lands in this PR's **second commit**:
 
-- `packages/tddy-service/proto/session.proto` (8 rpcs), `project.proto` (5), `demo_vm.proto` (3) and
-  `local_token.proto` (1), the first importing `types.proto` for all four shared types.
+- `packages/tddy-service/proto/session.proto` (8 rpcs, 25 own messages), `project.proto` (5, 11),
+  `demo_vm.proto` (3, 7) and `local_token.proto` (1, 2). **Measured, not assumed**: families C, D, O
+  and Q share **nothing with each other**, and only family C reaches `types.proto` — all four of its
+  types. So `session.proto` imports it and the other three import nothing.
 - `packages/tddy-session-lifecycle/src/lib.rs` and `packages/tddy-projects/src/lib.rs` declaring each
   crate's entry constructor and trait ports with real signatures, bodies annotated
   `// TODO(daemon-becomes-wiring): implement`.
@@ -343,8 +345,37 @@ Four assertions are new, because they are about *absence* and nothing that exist
 | Gate | Before | After |
 |---|---|---|
 | `./test -p tddy-daemon` | inherited: **1027 passed / 1 failed** | **expected 0 failed** — the `self_arc` subject is deleted |
-| `cargo clippy -p <touched> --all-targets -- -D warnings` | | |
+| `cargo clippy -p tddy-session-lifecycle -p tddy-projects -p tddy-vm -p tddy-daemon-auth -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
+| `cargo check -p tddy-daemon` | ✅ clean with the two new members | |
 | `tddy-daemon` non-blank source lines | ≈21,500 | **< 6,000** |
+
+**26 failing tests** define this node: 2 in `tddy-session-lifecycle`, 3 in `tddy-projects`, 1 in
+`tddy-vm`, 5 in `tddy-daemon-auth`, 11 in `tddy-service` (the inherited ones plus the four services'
+shape, the shared-type imports, and **`connection.proto` still existing**), and 4 in `tddy-daemon`'s
+new `unbundle_endpoint.rs`.
+
+Those last four are the brief expressed as tests rather than claimed in prose: the crate is under
+6,000 non-blank lines; `connection_service.rs` and its directory are gone; `self_arc` and
+`set_self_handle` do not exist; and **every module left is one of the twelve endpoint files** — a
+whitelist rather than a line count, because "under 6,000 lines" would still pass if a session module
+stayed and something else left instead.
+
+## A mistake made and undone during the red phase
+
+Reaching for `tddy-daemon-auth`'s greened version with
+`git checkout origin/feature/unbundle/auth-livekit -- packages/tddy-daemon-auth` pulled **node 4's
+implementation onto this branch** — 17 files, 3,629 lines of a predecessor's work staged into node
+9's diff. The compiler caught it (`unresolved import tddy_daemon_kernel::config`: node 4's greened
+crate expects a kernel symbol that does not exist on this stale red chain), and it was reverted with
+`git reset` + `git clean`.
+
+Worth recording because `git checkout <branch> -- <path>` **stages** what it pulls, so
+`git clean` alone does not remove it and `git checkout HEAD -- <path>` reverts only the *modified*
+files, leaving the *added* ones staged and invisible to a casual `git status` read. This is the
+`pr-stack` model's "never implement a symbol another node owns" hazard arriving through a git
+convenience rather than through typing.
+
+`build_local_token_entry` was then appended to the version this branch actually inherits.
 
 ## Final Checklist
 

@@ -90,3 +90,51 @@ mod tests {
         )
     }
 }
+
+/// The `local_token.LocalTokenService` entry — `#unbundle` node 9, family Q.
+///
+/// **The one transport-restricted method in the whole surface**, and its implementation splits
+/// across two crates deliberately.
+///
+/// `MintLocalToken` is answered from `SO_PEERCRED` on a Unix socket, so only the transport can see
+/// the caller's identity. `local_socket_server.rs` keeps resolving uid to username as it does today
+/// and passes the **resolved** identity in; the minting happens here, in the crate that already
+/// holds the signing secret. A single home would either put credential-reading in a library that
+/// cannot see the socket, or put signing back in the daemon this stack exists to empty.
+///
+/// The `resolved_user` parameter is therefore not a convenience — it is the boundary. **This crate
+/// never reads a socket.**
+pub fn build_local_token_entry() -> tddy_rpc::ServiceEntry {
+    // TODO(daemon-becomes-wiring): implement
+    unimplemented!("build_local_token_entry")
+}
+
+/// Mint a session token for an identity the transport already resolved.
+pub fn mint_local_token(_resolved_user: &str) -> Result<String, AuthError> {
+    // TODO(daemon-becomes-wiring): implement
+    unimplemented!("mint_local_token")
+}
+
+#[cfg(test)]
+mod unbundle_local_token_tests {
+    use super::*;
+
+    #[test]
+    fn names_the_service_family_q_moves_to() {
+        assert_eq!(
+            build_local_token_entry().name,
+            "local_token.LocalTokenService"
+        );
+    }
+
+    /// The mint takes an identity the transport resolved. It never reads a socket, which is the whole
+    /// reason the credential read stays with the transport and only the signing moves here.
+    #[test]
+    fn mints_for_an_identity_the_transport_already_resolved() {
+        // When
+        let token = mint_local_token("alice").expect("a resolved identity mints");
+
+        // Then
+        assert!(!token.is_empty());
+    }
+}

@@ -38,3 +38,20 @@ pub use vm::{
     VmConfig, VmError, VmLogin,
 };
 pub use vm_manifest::{LoginPolicy, RunPolicy, VmManifest};
+
+/// The `demo_vm.DemoVmService` entry — `#unbundle` node 9, family O.
+///
+/// Served from this crate rather than one of its own: it already serves `vm.VmService`, so the demo
+/// VM's three methods land beside the machinery that answers them.
+pub fn build_demo_vm_entry() -> tddy_rpc::ServiceEntry {
+    // TODO(daemon-becomes-wiring): implement
+    unimplemented!("build_demo_vm_entry")
+}
+
+#[cfg(test)]
+mod unbundle_demo_vm_entry_tests {
+    #[test]
+    fn names_the_service_family_o_moves_to() {
+        assert_eq!(super::build_demo_vm_entry().name, "demo_vm.DemoVmService");
+    }
+}
