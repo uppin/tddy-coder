@@ -559,3 +559,69 @@ because anything local was wrong. Both rebases used
 commits from being replayed as this node's own; a plain `git rebase` at that moment would have
 duplicated node 5's entire delta into this PR's diff. Every milestone here re-reads the base tip
 immediately before pushing rather than trusting the tip step 0 saw.
+
+### The test-suite split: 5 of 14 moved
+
+The changeset promised the moved suites would "carry most of the proof" and move with the code.
+Five could; nine could not, each pinned by a symbol that stays in `tddy-daemon`. Moving any of them
+would put `tddy-daemon` back on `tddy-session-files`' dependency path and defeat the extraction —
+the same measurement node 4 made (5 of 18 there).
+
+**Moved**, assertions untouched — the whole content diff is import paths:
+`context_file_frames_unit.rs`, `context_files_acceptance.rs`,
+`pr_stack_child_doc_attachment_acceptance.rs`, `pr_stack_context_docs_acceptance.rs`,
+`staged_attachment_path_validation.rs`.
+
+**Stayed**, with the pinning symbol:
+
+| Suite | Pinned by |
+|---|---|
+| `context_sync_acceptance.rs` | `split_session::build_split_context_dir` |
+| `session_workflow_files_rpc.rs` | `test_util::{test_service, TEST_TOKEN}` |
+| `session_file_upload_rpc.rs` | `connection_service::ConnectionServiceImpl`, `test_util::TEST_TOKEN` |
+| `session_uploads_rpc.rs` | `connection_service::ConnectionServiceImpl`, `test_util::TEST_TOKEN` |
+| `staging_rpc_acceptance.rs` | `connection_service::ConnectionServiceImpl` |
+| `staging_forwarding_acceptance.rs` | `connection_service::ConnectionServiceImpl`, `runtime::spawn_common_room_discovery_task` |
+| `session_attach_staging_scope_acceptance.rs` | `connection_service::ConnectionServiceImpl` |
+| `session_attach_cross_host_acceptance.rs` | `connection_service::ConnectionServiceImpl`, `multi_host::EligibleDaemonSource` |
+| `session_room_acceptance.rs` | `connection_service::ConnectionServiceImpl`, `split_session::prepare_split_agent_wiring` |
+
+All nine pass where they are.
+
+### Peer routing stays in the daemon
+
+`build_session_files_entry` serves all 13 methods, but `daemon_instance_id` peer routing is
+deliberately **not** in the crate: it needs `classify_daemon_route`, `common_room_slot` and the
+per-method `forward_*_via_livekit` clients, which are the daemon's transport layer.
+`connection.ConnectionService` still serves these 13 with their routing intact, so nothing
+regressed — but whoever registers this entry has to wrap it. Recorded in `service.rs`'s module
+header rather than as a `TODO`, because it is a boundary statement, not deferred work in this crate.
+
+### Baseline, measured on both sides
+
+The recorded "1027 passed / 1 failed" is a **fail-fast** number — `cargo test` stops at the first
+failing binary — so it is not comparable to a whole-suite figure, and this node's baseline row was
+misleading rather than merely stale. Measured with `--no-fail-fast` on both sides, over 135 binaries:
+
+| | passed | failed | ignored |
+|---|---:|---:|---:|
+| with this node | 1318 | 37 | 3 |
+| base, the 10 failing binaries only | 36 | 37 | 1 |
+
+The failure set is **byte-identical** to the base's 37, in three pre-existing families: the
+documented sandbox `self_arc called before set_self_handle` group (see the daemon
+`sandbox_behavior_acceptance` note), `Once instance has previously been poisoned` where no LiveKit
+testkit is running, and the sqlx model-registry store in this sandbox. **No regressions.**
+
+One extra failure appeared in a first run (`serves_the_rooms_stream_as_its_own_service`, the
+model-registry store) and passed both in isolation and on re-run — a flake under 135-binary
+parallelism, not this node's.
+
+### File budget: 8 files over 500 lines
+
+`host_documents.rs` 708, `session_context_docs.rs` 639, `context_sync.rs` 634,
+`session_attachments.rs` 613, `lib.rs` 563, `stack_doc_attachments.rs` 517, `service.rs` 517,
+`context_files.rs` 509. Seven arrived over budget. They were **not** split: a split for line count
+alone cuts cohesive units and puts churn on top of a rename, and the diffs are far more reviewable
+while they stay pure renames. `host_documents.rs` is the honest refactor target — it grew by the
+framing function it absorbed.
