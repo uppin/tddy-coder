@@ -12069,6 +12069,7 @@ dependencies = [
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-daemon-auth",
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-demo-runner",
@@ -12117,13 +12118,27 @@ dependencies = [
 name = "tddy-daemon-auth"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "livekit",
+ "livekit-api",
+ "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rstest 0.24.0",
+ "serde",
+ "serde_json",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-github",
+ "tddy-livekit",
  "tddy-rpc",
+ "tddy-service",
  "tempfile",
- "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -12400,7 +12415,7 @@ dependencies = [
  "serial_test",
  "tddy-coder",
  "tddy-core",
- "tddy-daemon",
+ "tddy-daemon-auth",
  "tddy-rpc",
  "tddy-sandbox-runner",
  "tddy-stdio",

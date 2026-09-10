@@ -5,18 +5,23 @@
 //! credential it can use for an operator's PR reads is the one that operator granted at login. It
 //! outlives a daemon restart (the web login does not re-run on restart), so it is persisted — as a
 //! single `0600` JSON file of `login -> access_token`.
+//!
+//! Every write goes through [`tddy_core::atomic_file::write_atomic_with_mode`], which is the one
+//! place in the tree that knows how to replace a file without the old contents ever being at risk.
+//! This store used to stage and rename by hand, with its own `O_TRUNC` open in the middle of it;
+//! `docs/dev/todo/2026-08-16-the-daemon-s-secret-stores-still-truncate-in-place.md` records why a
+//! second implementation of that dance is worse than no second implementation, and the mode-aware
+//! variant exists precisely because a secret's *first* write must not land at the process umask.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
+use tddy_core::atomic_file::write_atomic_with_mode;
 use tddy_github::token_store::GitHubTokenStore;
 
 /// Basename of the token file inside the `auth_storage` directory.
 const TOKENS_FILE: &str = "github-tokens.json";
-
-/// Suffix of the staging file each `put` writes before renaming it into place.
-const TOKENS_TMP_SUFFIX: &str = ".tmp";
 
 /// Basename of the file [`FileGitHubTokenStore::probe_writable`] creates and removes.
 const PROBE_FILE: &str = "github-tokens.probe";
@@ -30,9 +35,7 @@ const PROBE_FILE: &str = "github-tokens.probe";
 static PUT_LOCK: Mutex<()> = Mutex::new(());
 
 /// Owner-only permissions: these are live GitHub credentials.
-#[cfg(unix)]
 const OWNER_ONLY_FILE: u32 = 0o600;
-#[cfg(unix)]
 const OWNER_ONLY_DIR: u32 = 0o700;
 
 /// A `GitHubTokenStore` persisted under one directory (`auth_storage`).
@@ -57,13 +60,6 @@ impl FileGitHubTokenStore {
         &self.tokens_path
     }
 
-    /// The staging file a `put` writes before renaming it over [`Self::tokens_path`].
-    fn staging_path(&self) -> PathBuf {
-        let mut name = self.tokens_path.clone().into_os_string();
-        name.push(TOKENS_TMP_SUFFIX);
-        PathBuf::from(name)
-    }
-
     /// Create the storage directory and prove a file can actually be written in it, removing the
     /// probe afterwards.
     ///
@@ -73,7 +69,8 @@ impl FileGitHubTokenStore {
     pub fn probe_writable(&self) -> Result<(), String> {
         ensure_owner_only_dir(&self.storage_dir)?;
         let probe = self.storage_dir.join(PROBE_FILE);
-        write_owner_only(&probe, b"")?;
+        write_atomic_with_mode(&probe, b"", OWNER_ONLY_FILE)
+            .map_err(|e| format!("writing {}: {e}", probe.display()))?;
         std::fs::remove_file(&probe).map_err(|e| format!("removing {}: {e}", probe.display()))
     }
 
@@ -106,45 +103,26 @@ impl FileGitHubTokenStore {
     }
 }
 
-/// Create `dir` and its parents, restricted to its owner — it holds live GitHub credentials.
+/// Create `dir` and its parents, owner-only from the moment they exist — they hold live GitHub
+/// credentials.
+///
+/// The mode is given to the *creation* rather than applied afterwards, for the same reason
+/// [`tddy_core::atomic_file`] passes it to `open`: a `create_dir_all` followed by `set_permissions`
+/// leaves a window in which the directory is listable at the process umask. A directory that
+/// already exists therefore keeps the mode it carries — the daemon creates the store's home, it
+/// does not re-impose a mode on one an operator has already set.
 fn ensure_owner_only_dir(dir: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(OWNER_ONLY_DIR))
-            .map_err(|e| format!("restricting {} to owner-only: {e}", dir.display()))?;
-    }
-    Ok(())
-}
-
-/// Write `bytes` to `path`, owner-only from the moment the file exists so a token is never briefly
-/// world-readable, and flushed to the medium before the call returns.
-fn write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(OWNER_ONLY_FILE)
-            .open(path)
-            .map_err(|e| format!("opening {}: {e}", path.display()))?;
-        file.write_all(bytes)
-            .map_err(|e| format!("writing {}: {e}", path.display()))?;
-        // `rename` only publishes the directory entry — without this the renamed file could still be
-        // empty after a crash, and an empty map reads as "no operator has a token".
-        file.sync_all()
-            .map_err(|e| format!("flushing {}: {e}", path.display()))?;
-        // `mode` above applies to a *created* file, so a file that already existed keeps its own.
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(OWNER_ONLY_FILE))
-            .map_err(|e| format!("restricting {} to owner-only: {e}", path.display()))?;
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(OWNER_ONLY_DIR)
+            .create(dir)
+            .map_err(|e| format!("creating {}: {e}", dir.display()))
     }
     #[cfg(not(unix))]
-    std::fs::write(path, bytes).map_err(|e| format!("writing {}: {e}", path.display()))?;
-    Ok(())
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))
 }
 
 impl GitHubTokenStore for FileGitHubTokenStore {
@@ -160,25 +138,14 @@ impl GitHubTokenStore for FileGitHubTokenStore {
 
         ensure_owner_only_dir(&self.storage_dir)?;
 
-        // Stage the whole map beside the real file and rename it into place. `rename` within a
-        // directory is atomic, so a crash or a full disk can never leave a half-written token file
-        // behind — and a truncated file parses as an empty map, which would take *every* operator's
-        // token away at once.
-        let staging = self.staging_path();
-        write_owner_only(&staging, json.as_bytes())?;
-        std::fs::rename(&staging, &self.tokens_path).map_err(|e| {
-            // The staging file holds every operator's live `repo`-scoped token. If the rename fails
-            // it is orphaned — nothing else reads or replaces that path on a failure path — so remove
-            // it rather than leave a credential file lying around under a name no reader knows.
-            // Best-effort: the rename error is what the caller must hear about, and a removal that
-            // also fails leaves the file exactly as it already was.
-            let _ = std::fs::remove_file(&staging);
-            format!(
-                "renaming {} onto {}: {e}",
-                staging.display(),
-                self.tokens_path.display()
-            )
-        })
+        // The whole map is staged beside the real file and renamed into place, owner-only from the
+        // moment the staging file exists. Anything that can fail — the allocation, the write, the
+        // `fsync` — fails while only the staging file is at risk, so a crash or a full disk can
+        // never leave a truncated token file behind. That matters more here than almost anywhere:
+        // a truncated file parses as an *empty map*, which would take every operator's token away
+        // at once and read to them as an ordinary "please sign in again".
+        write_atomic_with_mode(&self.tokens_path, json.as_bytes(), OWNER_ONLY_FILE)
+            .map_err(|e| format!("writing {}: {e}", self.tokens_path.display()))
     }
 
     fn get(&self, login: &str) -> Option<String> {

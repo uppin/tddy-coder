@@ -45,7 +45,13 @@ This PR explicitly does **not**:
   (`SPLIT_AGENT_IDENTITY_PREFIX`); **node 1 cut that edge**, and the session subsystem itself belongs
   to nodes 6–8.
 - Take any session family. B, I–N and P–S are nodes 6–8; C, D, O and Q stay in the daemon.
-- Implement `move_module_to_crate`, the kernel's resolver aliases, or any cycle cut — all node 1's.
+- Implement `move_module_to_crate` or the kernel's resolver aliases — both node 1's, both delivered.
+  **The cycle cuts are no longer node 1's**, and this line said they were. Node 1 re-derived the
+  module graph at `ac002643`, found 15 mutual pairs rather than the discovery table's 9, cut six, and
+  assigned the four that genuinely span destination crates to *"the nodes that move those modules"*
+  ([its wrapped changeset](../changesets/2026-09-09-unbundle-host-worktree-services.md) §
+  *The cycle audit*). Two of those four are this node's, and a third is one a pair-based audit could
+  not see. They are listed under `## Scope`.
 - Force every file under 500 lines. `session_room.rs` (2,815), `livekit_peer_discovery.rs` (2,215),
   `auth.rs` (1,058), `common_room_supervisor.rs` (768) and `livekit_rooms_stream.rs` (695) are over
   budget and are split where the seams are cohesive; whatever stays over is recorded in `## Scope`.
@@ -59,7 +65,7 @@ implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | `n1` host-worktree-services | `move_module_to_crate` | every move here is a plan the operation executes | add, extend or fix the operation |
 | `n1` host-worktree-services | `tddy-daemon-kernel` exporting `SessionUserResolver` and `SessionsBaseResolver` | `auth.rs:25` imports the first, and it is the **entire** dependency `auth.rs` has on `connection_service` | define, re-export or re-implement either alias |
-| `n1` host-worktree-services | three cycle cuts this node needs: `config.rs:85 → session_room`, `common_room_supervisor → daemon_config_service → livekit_peer_discovery`, and `livekit_peer_discovery.rs:529 → split_session` | without all three, `tddy-daemon-livekit` cannot compile — a Rust crate cannot depend on a crate that depends on it | cut any cycle here; a newly discovered one is reported upward |
+| `n1` host-worktree-services | **one** cycle cut, `config.rs:85 → session_room` — delivered by moving `config.rs` into the kernel whole and inlining `DEFAULT_SESSION_ROOM_GIT_TIMEOUT` | the wiring layer no longer reaches this crate | re-cut it, or move `config.rs` again |
 | `n1` host-worktree-services | the shared `packages/tddy-service/proto/types.proto` | `livekit.proto` imports it for `SessionEntry` and the room messages, rather than duplicating them | change `types.proto`'s shape; a message it lacks is requested upward |
 | `n1` host-worktree-services | the four host-key modules, already in `tddy-host-service` | nothing — this PR must simply **not** move them again | move `host_keypair`, `host_private_key`, `ssh_agent` or `ssh_agent_add` |
 | **`n2` model-telegram-screen** | **`tddy-telegram`, whose modules reach `session_room`** | this PR **repoints `tddy-telegram`'s dependency** from `tddy-daemon` to `tddy-daemon-livekit`. This is a real edge, not just a branch order: `tddy-telegram` must exist before its dependency can be repointed | change anything else in `tddy-telegram`; the repoint is a one-line manifest and import change |
@@ -172,11 +178,27 @@ here; the entry should be updated with the new location at wrap.
 
 ## Scope
 
-- [ ] **`tddy-daemon-auth`**: crate, 7 modules, its four services, its suites
-- [ ] **⛔ Atomic secret writes**: `github_token_store` routed through `tddy_core::atomic_file::write_atomic`
+- [x] **`tddy-daemon-auth`**: crate, 7 modules, its four services, its suites ✅ — the 7th is
+      `github_pr_credentials.rs`, which the count implied but never named
+- [x] **⛔ Atomic secret writes** ✅ — `github_token_store` routed through
+      `tddy_core::atomic_file::write_atomic_with_mode`. The mode-aware variant, not `write_atomic`:
+      the plain one carries permissions over from an *existing* target, so a **first** write would
+      create the swap file at the process umask and publish a world-readable credential
 - [ ] **`tddy-daemon-livekit`**: crate, 5 modules, 18 test suites
+- [ ] **Three cycle cuts, inherited from node 1's audit** — each spans a crate boundary only because
+      this node moves one end, so each is this node's:
+  - [ ] `livekit_peer_discovery.rs:493 → split_session::SPLIT_AGENT_IDENTITY_PREFIX` — named by node 1
+  - [ ] `host_registry ⇄ livekit_peer_discovery` — named by node 1; `host_registry` left with node 1
+  - [ ] `common_room_supervisor.rs:29 → daemon_config_service.rs:213 → livekit_peer_discovery` — a
+        three-hop loop node 1's pair-based audit could not see. Both ends move here;
+        `daemon_config_service` stays by `## Boundaries`
 - [ ] **Proto**: `livekit.proto` with family T; `connection.proto` loses `StreamLiveKitRooms`
-- [ ] **Repoints**: `tddy-telegram` → `tddy-daemon-livekit`; `tddy-integration-tests` → `tddy-daemon-auth`
+- [x] **Repoint**: `tddy-integration-tests` → `tddy-daemon-auth` ✅ — its `tddy-daemon` dependency is
+      gone entirely, not merely joined
+- [ ] ⏸ **Deferred — `tddy-telegram` → `tddy-daemon-livekit`** (M6). Node 2 (PR #471) is still at its
+      draft contract: `packages/tddy-telegram/src/lib.rs` is a 133-line stub whose `Cargo.toml` has no
+      `tddy-daemon` dependency, so there is nothing to repoint. Picked up by a `/pr-stack-rebase` here
+      once #471 greens. **This node cannot merge with M6 open.**
 - [ ] **Web**: the rooms panel migrated to `livekit.LiveKitService`; the Cypress fake moved
 - [ ] **Docker-dependent suites**: skip behaviour unchanged when `/var/run/docker.sock` is absent
 - [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
@@ -236,12 +258,12 @@ Three cycles blocked this node before node 1: `config.rs:85 → session_room::DE
 
 ## Implementation Milestones
 
-- [ ] M1 — `tddy-daemon-auth` extracted; its four services answer; no `tddy-daemon` on its path
-- [ ] M2 — the secret store writes atomically; a crash mid-write leaves the old value intact
-- [ ] M3 — `tddy-integration-tests` repointed
+- [x] M1 — `tddy-daemon-auth` extracted; its four services answer; no `tddy-daemon` on its path ✅
+- [x] M2 — the secret store writes atomically; a crash mid-write leaves the old value intact ✅
+- [x] M3 — `tddy-integration-tests` repointed ✅
 - [ ] M4 — `livekit.proto` generates; `types.proto` imported rather than duplicated
 - [ ] M5 — `tddy-daemon-livekit` extracted; 18 suites pass; no reach into `split_session` or `daemon_config_service`
-- [ ] M6 — `tddy-telegram` repointed
+- [ ] M6 — ⏸ **deferred**: `tddy-telegram` repointed. Blocked on node 2 greening; see `## Scope`
 - [ ] M7 — web rooms panel migrated; Cypress component suites green
 - [ ] M8 — Docker-skip behaviour verified unchanged; baselines restored; file budget recorded
 
@@ -347,7 +369,10 @@ The known pre-existing failure inherited from node 1's baseline is expected to s
       `session-room.md` to `tddy-daemon-livekit/docs/`
 - [ ] `packages/tddy-daemon/docs/connection-service.md` — remove the `StreamLiveKitRooms` entry
 - [ ] `docs/ft/web/livekit-rooms-panel.md` — the new coordinate
-- [ ] Close `docs/dev/todo/2026-08-16-the-daemon-s-secret-stores-still-truncate-in-place.md`
+- [ ] ⚠ **Do not close** `docs/dev/todo/2026-08-16-the-daemon-s-secret-stores-still-truncate-in-place.md`.
+      It names three stores; this node fixed one. `vnc_vault.rs:153` and `screen_sharing_vault.rs:171`
+      still carry `.truncate(true)` and belong to **node 2** (`tddy-screen-sharing`). Narrow the entry
+      to the two that remain rather than closing it
 - [ ] Update `2026-09-05-…-tauri-desktop-single-process-daemon.md` with the connector's new location
 - [ ] Re-read the two LiveKit-deadline entries now that every call is in one crate
 - [ ] Doc triage: `grep -rn -e 'auth' -e 'session_room' -e 'livekit_peer' -e 'StreamLiveKitRooms' packages/tddy-daemon/README.md packages/tddy-daemon/docs docs/ft/daemon docs/ft/web`
