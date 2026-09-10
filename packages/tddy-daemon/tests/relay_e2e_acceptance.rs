@@ -26,7 +26,7 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, ListEligibleDaemonsRequest, ListExecToolsRequest,
+    ConnectionService as ConnectionServiceTrait, ListExecToolsRequest,
 };
 
 const RELAY_ROOM: &str = "relay-e2e-common-room";
@@ -244,6 +244,14 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
         room_slot.clone(),
     ));
     let sessions_a = tempfile::tempdir().unwrap();
+    // "Who can I see?" is `host.HostService`'s question since `#unbundle` node 1. Built over the
+    // same eligible source A routes on, so discovery readiness and routability are one fact.
+    let hosts_a = tddy_host_service::HostServiceImpl::new(
+        config_a.clone(),
+        sessions_a.path(),
+        valid_user_resolver(),
+    )
+    .with_eligible_daemon_source(Arc::clone(&eligible));
     let service_a = ConnectionServiceImpl::new(
         config_a,
         sessions_resolver(sessions_a.path().to_path_buf()),
@@ -262,14 +270,16 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
     // Wait until A's discovery sees B in the common room.
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let rows = service_a
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
+            let rows = tddy_service::proto::host::HostService::list_eligible_daemons(
+                &hosts_a,
+                Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: "valid-token".to_string(),
-                }))
-                .await
-                .expect("ListEligibleDaemons")
-                .into_inner()
-                .daemons;
+                }),
+            )
+            .await
+            .expect("ListEligibleDaemons")
+            .into_inner()
+            .daemons;
             if rows.iter().any(|d| d.instance_id == RELAY_PEER_ID) {
                 break;
             }

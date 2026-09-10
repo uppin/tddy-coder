@@ -57,3 +57,60 @@ pub fn test_service(sessions_base: PathBuf) -> ConnectionServiceImpl {
         Arc::new(CliSessionManager::new()),
     )
 }
+
+/// Block until `host.HostService` lists `peer_instance_id` among this daemon's eligible peers.
+///
+/// The wait is asked through the RPC, not through the roster behind it: what these suites need to
+/// know before they route anything is that the *call* a client would make answers with the peer, and
+/// a source that holds a row the handler would not report is exactly the failure worth catching.
+///
+/// The host service is built here from `service`'s own [`ConnectionServiceImpl::routing_view`], so
+/// the roster this waits on is the one the connection service will classify the subsequent route
+/// against. Two sources would let this return on a peer the route then cannot find.
+///
+/// Panics with the list that *was* returned rather than a bare timeout: "these three daemons were
+/// visible and yours was not" is a different bug report from "nothing happened".
+pub async fn wait_until_peer_discovered(
+    service: &ConnectionServiceImpl,
+    session_token: &str,
+    peer_instance_id: &str,
+    timeout: std::time::Duration,
+) {
+    use tddy_service::proto::host::HostService as _;
+
+    // The service's *own* config, roster and token resolver — so a token this suite already uses
+    // resolves here exactly as it does on the call being waited for. `tddy_data_dir` is irrelevant:
+    // `ListEligibleDaemons` reads no filesystem, and a path that does not exist is a clearer
+    // statement of that than a tempdir nothing writes to.
+    let (config, eligible, user_resolver) = service.routing_view();
+    let hosts = tddy_host_service::HostServiceImpl::new(
+        config,
+        std::path::Path::new("/nonexistent-list-eligible-daemons-reads-no-files"),
+        user_resolver,
+    )
+    .with_eligible_daemon_source(eligible);
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let daemons = hosts
+            .list_eligible_daemons(tddy_rpc::Request::new(
+                tddy_service::proto::host::ListEligibleDaemonsRequest {
+                    session_token: session_token.to_string(),
+                },
+            ))
+            .await
+            .expect("ListEligibleDaemons")
+            .into_inner()
+            .daemons;
+        if daemons.iter().any(|d| d.instance_id == peer_instance_id) {
+            return;
+        }
+        let visible: Vec<String> = daemons.into_iter().map(|d| d.instance_id).collect();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "daemon {peer_instance_id} never appeared in ListEligibleDaemons within {timeout:?}; \
+             visible instead: {visible:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    }
+}

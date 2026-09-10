@@ -11,9 +11,11 @@ use std::time::{Duration, Instant};
 use hyper_util::rt::TokioIo;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_tonic_adapter::{ConnectionServiceTonicAdapter, UidToUsername};
+use tddy_daemon::host_tonic_adapter::HostServiceTonicAdapter;
 use tddy_daemon::local_socket_server::serve_connection_uds;
 use tddy_daemon::test_util::test_service;
 use tddy_daemon::user_sessions_path::username_for_uid;
+use tddy_daemon::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 use tddy_github::{SessionTokenSigner, TokenKind};
 use tddy_service::proto::connection::MintLocalTokenRequest;
 use tddy_service::tonic_connection::connection_service_client::ConnectionServiceClient;
@@ -48,10 +50,24 @@ fn start_local_socket_server(
     let uid_to_username: UidToUsername = Arc::new(username_for_uid);
     let adapter = ConnectionServiceTonicAdapter::new(
         Arc::new(test_service(sessions_base)),
-        Arc::new(config),
+        Arc::new(config.clone()),
         signer,
         uid_to_username,
     );
+    // The same socket now carries all three services (`#unbundle` node 1). These two answer
+    // nothing this suite asks, but they have to be *mounted* — a socket that served only
+    // `ConnectionService` would pass every assertion here and still have dropped two services on
+    // the transport the tests are about.
+    let host_adapter = HostServiceTonicAdapter::new(Arc::new(
+        tddy_host_service::test_util::test_service(dir.path()),
+    ));
+    let worktree_adapter = WorktreeServiceTonicAdapter::new(Arc::new(
+        tddy_worktree_service::WorktreeServiceImpl::new(
+            config,
+            dir.path().to_path_buf(),
+            tddy_worktree_service::test_util::test_user_resolver(),
+        ),
+    ));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let serve_path = socket_path.clone();
@@ -59,9 +75,15 @@ fn start_local_socket_server(
         let shutdown = async {
             let _ = shutdown_rx.await;
         };
-        serve_connection_uds(&serve_path, adapter, shutdown)
-            .await
-            .expect("serve local socket");
+        serve_connection_uds(
+            &serve_path,
+            adapter,
+            host_adapter,
+            worktree_adapter,
+            shutdown,
+        )
+        .await
+        .expect("serve local socket");
     });
 
     (socket_path, dir, shutdown_tx)

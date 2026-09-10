@@ -1,8 +1,6 @@
 use tddy_rpc::Status;
 
-use crate::{
-    connection_service::agent_roster, livekit_rooms_stream::RoomRoster, spawn_worker, worktrees,
-};
+use crate::{connection_service::agent_roster, livekit_rooms_stream::RoomRoster, spawn_worker};
 
 use std::time::Duration;
 
@@ -12,35 +10,7 @@ use super::ROSTER_KEEPALIVE_INTERVAL;
 
 use super::LIVEKIT_ROOMS_POLL_INTERVAL;
 
-use super::HOST_DISK_INTERVAL;
-
-use super::HOST_CPU_INTERVAL;
-
 use crate::livekit_rooms_stream::room_roster_from_config;
-
-use super::resolve_default_project_dir;
-
-use crate::host_stats::SysinfoHostStats;
-
-use crate::host_stats::HostStats;
-
-use crate::ssh_agent_add::SshAgentKeyAdder;
-
-use crate::host_keypair::HostKeypair;
-
-use crate::host_prompts::HostPromptRegistry;
-
-use crate::host_tooling::SubprocessHostToolingProbe;
-
-use crate::host_tooling::HostToolingProbe;
-
-use crate::host_registry::FileHostRegistry;
-
-use crate::host_registry::HostRegistry;
-
-use crate::worktrees::WorktreeSizeCalculator;
-
-use crate::worktrees::WorktreeStatsCache;
 
 use crate::multi_host::EligibleDaemonSource;
 
@@ -98,41 +68,9 @@ impl ConnectionServiceImpl {
                 None,
             ),
         };
-        let worktree_stats_cache = Arc::new(WorktreeStatsCache::new(
-            worktrees::projects_stats_cache_root(&tddy_data_dir),
-        ));
-        // Daemon-global cap of 2 concurrent size walks; shares the stats cache root so a fresh
-        // calculator serves persisted sizes without re-walking.
-        let worktree_size_calculator = Arc::new(WorktreeSizeCalculator::new(
-            worktrees::projects_stats_cache_root(&tddy_data_dir),
-            2,
-        ));
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
         let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let host_registry: Arc<dyn HostRegistry> = Arc::new(FileHostRegistry::new(
-            crate::host_registry::host_registry_dir(&tddy_data_dir),
-        ));
-        // Given this daemon's own configuration, not a default one: the desktop block's
-        // bridge-availability flag is an existence check on the path `screen_sharing` resolves to,
-        // and an operator who set that path explicitly must have it checked.
-        let host_tooling: Arc<dyn HostToolingProbe> =
-            Arc::new(SubprocessHostToolingProbe::for_config(&config));
-        let host_prompts: Arc<dyn HostPromptRegistry> =
-            Arc::new(crate::host_prompts::InMemoryHostPromptRegistry::new());
-        // Alongside the host registry, and generated on first use rather than here: a host whose
-        // operator never adds a key never pays for an RSA keygen.
-        let host_keypair: Arc<dyn HostKeypair> =
-            Arc::new(crate::host_keypair::FileHostKeypair::new(
-                crate::host_registry::host_registry_dir(&tddy_data_dir),
-            ));
-        let prompt_pumps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder> =
-            Arc::new(crate::ssh_agent_add::WireProtocolAgentKeyAdder);
-        let host_user_files: Arc<dyn crate::host_private_key::HostUserFiles> =
-            Arc::new(crate::host_private_key::SpawnedHostUserFiles);
-        let host_stats: Arc<dyn HostStats> =
-            Arc::new(SysinfoHostStats::new(resolve_default_project_dir(&config)));
         let room_roster = room_roster_from_config(config.livekit.as_ref());
         // Built here rather than inline below because the roster store reads it: an entry's
         // `clone_state` is the state of the checkout serving it, and two stores would let a roster
@@ -161,17 +99,8 @@ impl ConnectionServiceImpl {
             user_resolver,
             spawn_client,
             eligible_daemon_source,
-            host_registry,
-            host_tooling,
-            host_prompts,
-            host_keypair,
-            ssh_agent_key_adder,
-            host_user_files,
-            prompt_pumps,
             common_room_livekit_room,
             telegram,
-            worktree_stats_cache,
-            worktree_size_calculator,
             claude_cli_manager,
             sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
             workspace_sandboxes: Arc::new(
@@ -182,9 +111,6 @@ impl ConnectionServiceImpl {
             ),
             task_registry,
             idle_tracker: None,
-            host_stats,
-            host_cpu_interval: HOST_CPU_INTERVAL,
-            host_disk_interval: HOST_DISK_INTERVAL,
             room_roster,
             room_poll_interval: LIVEKIT_ROOMS_POLL_INTERVAL,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
@@ -387,70 +313,6 @@ impl ConnectionServiceImpl {
         self
     }
 
-    /// How many `StreamHostPrompts` pumps are currently running.
-    ///
-    /// A pump must not outlive its subscriber: the stream is silent by nature, so without the
-    /// `tokio::select!` on `tx.closed()` the task parks forever on a prompt that never comes,
-    /// leaking one per subscription for the life of the daemon.
-    #[must_use]
-    pub fn pending_prompt_pump_count(&self) -> usize {
-        self.prompt_pumps.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    /// Substitute the host prompt registry (builder pattern).
-    ///
-    /// Lets a test hold the same registry the handlers use, so it can see the prompt `AddHostKey`
-    /// raised and answer it — the operator's half of a flow that otherwise has no other end.
-    pub fn with_host_prompts(mut self, host_prompts: Arc<dyn HostPromptRegistry>) -> Self {
-        self.host_prompts = host_prompts;
-        self
-    }
-
-    /// Substitute the host keypair (builder pattern).
-    ///
-    /// A test encrypts its answer against the published half exactly as the browser does, so the
-    /// real RSA-OAEP decrypt runs rather than being stood in for.
-    pub fn with_host_keypair(mut self, host_keypair: Arc<dyn HostKeypair>) -> Self {
-        self.host_keypair = host_keypair;
-        self
-    }
-
-    /// Substitute what an unlocked identity is handed to (builder pattern).
-    ///
-    /// The only seam in the add-key flow that replaces real behaviour: a test must not load a key
-    /// into the agent of whoever is running the suite.
-    pub fn with_ssh_agent_key_adder(mut self, adder: Arc<dyn SshAgentKeyAdder>) -> Self {
-        self.ssh_agent_key_adder = adder;
-        self
-    }
-
-    /// Substitute how an operator's files are reached (builder pattern).
-    ///
-    /// Stands in for impersonating an OS user, which a test cannot do. What it must **not** stand
-    /// in for is the confinement: the home directory it reports is the one the real check runs
-    /// against.
-    pub fn with_host_user_files(
-        mut self,
-        files: Arc<dyn crate::host_private_key::HostUserFiles>,
-    ) -> Self {
-        self.host_user_files = files;
-        self
-    }
-
-    /// Substitute the host tooling probe (builder pattern) — lets tests state what a host has
-    /// installed instead of depending on whatever is installed on the machine running the suite.
-    pub fn with_host_tooling(mut self, host_tooling: Arc<dyn HostToolingProbe>) -> Self {
-        self.host_tooling = host_tooling;
-        self
-    }
-
-    /// Substitute the known-host registry (builder pattern) — lets tests inject a deterministic,
-    /// in-memory registry in place of the file-backed one, and drive `online` from a stub roster.
-    pub fn with_host_registry(mut self, host_registry: Arc<dyn HostRegistry>) -> Self {
-        self.host_registry = host_registry;
-        self
-    }
-
     /// Substitute the eligible-daemon source (builder pattern) — the live roster every host-facing
     /// handler joins against.
     ///
@@ -462,32 +324,6 @@ impl ConnectionServiceImpl {
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     ) -> Self {
         self.eligible_daemon_source = eligible_daemon_source;
-        self
-    }
-
-    /// Substitute the host machine stats provider (builder pattern) — lets tests inject a
-    /// deterministic fake in place of the live `sysinfo`-backed provider.
-    pub fn with_host_stats(mut self, host_stats: Arc<dyn HostStats>) -> Self {
-        self.host_stats = host_stats;
-        self
-    }
-
-    /// Substitute the per-worktree disk-size calculator (builder pattern) — lets tests inject a
-    /// deterministic, instant sizer via [`WorktreeSizeCalculator::with_sizer`] in place of the live
-    /// directory walk.
-    pub fn with_worktree_size_calculator(
-        mut self,
-        calculator: Arc<WorktreeSizeCalculator>,
-    ) -> Self {
-        self.worktree_size_calculator = calculator;
-        self
-    }
-
-    /// Override the `StreamHostStats` sampling cadence (builder pattern) — lets tests inject tiny
-    /// intervals so cadence-driven refresh can be asserted deterministically without real-time waits.
-    pub fn with_host_stats_intervals(mut self, cpu: Duration, disk: Duration) -> Self {
-        self.host_cpu_interval = cpu;
-        self.host_disk_interval = disk;
         self
     }
 
@@ -521,6 +357,30 @@ impl ConnectionServiceImpl {
     pub fn with_roster_keepalive_interval(mut self, interval: Duration) -> Self {
         self.roster_keepalive_interval = interval;
         self
+    }
+
+    /// The three things every routing decision here is made from: the configuration that says which
+    /// instance id is *this* daemon's, the live roster of everyone else, and the resolver that turns
+    /// a session token into the operator asking.
+    ///
+    /// Published together because they are only meaningful together — an instance id means nothing
+    /// without the config, and a roster means nothing to a caller the resolver does not know.
+    /// `runtime.rs` hands the same three to `tddy-host-service`, so "who can I route to" has one
+    /// answer across both services; an acceptance suite waiting for a peer to appear asks the host
+    /// service and must ask it against *this* roster, or it waits on a different one.
+    #[must_use]
+    pub fn routing_view(
+        &self,
+    ) -> (
+        DaemonConfig,
+        Arc<dyn EligibleDaemonSource>,
+        tddy_daemon_kernel::SessionUserResolver,
+    ) {
+        (
+            self.config.clone(),
+            Arc::clone(&self.eligible_daemon_source),
+            Arc::clone(&self.user_resolver),
+        )
     }
 
     /// Record RPC activity in the idle-timeout tracker, if one is attached.

@@ -187,6 +187,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .extern_path(".connection", "crate::proto::connection")
         .compile_protos(&["proto/connection.proto"], &["proto"])?;
 
+    // Host and worktree services over tonic, for the Unix-domain-socket transport the binary host
+    // serves. Same shape as the connection pass above and for the same reason: `.extern_path`
+    // remaps every message back onto the prost pass's structs, so these emit service code only and
+    // a request never crosses a re-encode on its way between the two flavors.
+    for (proto, package) in [
+        ("proto/host.proto", "host"),
+        ("proto/worktree.proto", "worktree"),
+    ] {
+        let dir = format!("{}/tonic_{package}", std::env::var("OUT_DIR")?);
+        std::fs::create_dir_all(&dir)?;
+        tonic_build::configure()
+            .build_server(true)
+            .build_client(true)
+            .out_dir(&dir)
+            .extern_path(format!(".{package}"), format!("crate::proto::{package}"))
+            .compile_protos(&[proto], &["proto"])?;
+    }
+
     // Loopback TCP tunnel over LiveKit (bidi) — desktop proxy → session host 127.0.0.1:port
     prost_build::Config::new()
         .out_dir(std::env::var("OUT_DIR")?)

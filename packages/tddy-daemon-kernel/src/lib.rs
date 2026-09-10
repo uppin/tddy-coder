@@ -45,6 +45,27 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// What `#unbundle` node 1 added, and the granularity rule it follows.
+//
+// Everything below is a **symbol** lift, not a module move — the transitive closure a moving
+// subsystem actually calls, and nothing else. The measurements that set each boundary:
+// `host_tooling`, `ssh_agent` and `host_private_key` reach 3 entry points of `spawner.rs`, whose
+// closure is 179 of its 2,539 lines; `remote_git_service` reaches 5 symbols of `pty_runtime.rs`,
+// 63 of 400; four modules reach 4 resolvers of `user_sessions_path.rs`, 34 of 210. The origin
+// module re-exports every name in each case, so no caller in `tddy-daemon` changed and there is
+// exactly one definition of each.
+//
+// [`config`] is the deliberate exception and the only whole-module move here: `DaemonConfig` is a
+// single ~100-field struct that four moving modules and every handler in both new services take by
+// reference and read disjointly, so the symbol *is* the file. See the changeset's
+// `## Decisions & Trade-offs`.
+pub mod config;
+pub mod daemon_identity;
+pub mod peer_forwarding;
+pub mod privilege_drop;
+pub mod spawn_as_user;
+pub mod user_paths;
+
 /// Resolve a session token to the OS user that owns it.
 ///
 /// The daemon builds exactly one of these — `auth::build_auth_entries` returns it — and every

@@ -35,6 +35,8 @@ members = [
     "packages/tddy-github",
     "packages/tddy-daemon",
     "packages/tddy-daemon-kernel",
+    "packages/tddy-host-service",
+    "packages/tddy-worktree-service",
     "packages/tddy-workflow-recipes",
     "packages/tddy-actions",
     "packages/tddy-task",

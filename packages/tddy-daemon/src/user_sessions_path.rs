@@ -1,34 +1,15 @@
 //! Resolve OS user to their sessions directory path.
 
+/// Where a user's things live, derived in [`tddy_daemon_kernel::user_paths`].
+///
+/// These four are the resolvers a subsystem crate reaches; `username_for_uid` and
+/// `project_path_under_home_from_user_relative` below stayed because nothing that left this crate
+/// names them. Re-exported so every caller here keeps its `crate::user_sessions_path::…` path.
+pub use tddy_daemon_kernel::user_paths::{
+    home_dir_for_user, projects_path_for_user, repos_base_for_user, sessions_base_for_user,
+};
+
 use std::path::{Path, PathBuf};
-
-/// Home directory for an OS user (from passwd).
-#[cfg(unix)]
-pub fn home_dir_for_user(os_user: &str) -> Option<PathBuf> {
-    let mut passwd = std::mem::MaybeUninit::<libc::passwd>::uninit();
-    let mut buf = vec![0u8; 16384];
-    let mut result = std::ptr::null_mut();
-    let ret = unsafe {
-        libc::getpwnam_r(
-            std::ffi::CString::new(os_user).ok()?.as_ptr(),
-            passwd.as_mut_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_char,
-            buf.len(),
-            &mut result,
-        )
-    };
-    if ret != 0 || result.is_null() {
-        return None;
-    }
-    let passwd = unsafe { &*result };
-    let home = unsafe { std::ffi::CStr::from_ptr(passwd.pw_dir) }.to_string_lossy();
-    Some(PathBuf::from(home.as_ref()))
-}
-
-#[cfg(not(unix))]
-pub fn home_dir_for_user(_os_user: &str) -> Option<PathBuf> {
-    None
-}
 
 /// OS username for a uid (from passwd, via the reentrant `getpwuid_r`). Injected into the local
 /// peer-trust path so a SO_PEERCRED peer uid can be matched against a configured `users[]` entry.
@@ -61,31 +42,10 @@ pub fn username_for_uid(_uid: u32) -> Option<String> {
     None
 }
 
-/// Resolve the sessions base path for an OS user.
-///
-/// If `config_dir` is `Some`, it is used directly (config is the single source of truth).
-/// Otherwise falls back to the profile default (`tmp/.tddy` in debug, `$HOME/.tddy` in release).
-///
-/// Callers (e.g. `list_sessions_in_dir`) append `SESSIONS_SUBDIR` ("sessions") to reach
-/// the actual session directories at `~/.tddy/sessions/{session_id}/`.
-#[cfg(unix)]
-pub fn sessions_base_for_user(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
-    if let Some(d) = config_dir {
-        return Some(d.to_path_buf());
-    }
-    tddy_core::output::default_tddy_data_dir()
-        .or_else(|| home_dir_for_user(os_user).map(|h| h.join(".tddy")))
-}
-
 /// Data root (parent of `sessions/`) for a `tddy-coder` child that runs with the same config.
 #[cfg(unix)]
 pub fn tddy_data_root_matching_child(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
     sessions_base_for_user(os_user, config_dir)
-}
-
-#[cfg(not(unix))]
-pub fn sessions_base_for_user(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
-    None
 }
 
 #[cfg(not(unix))]
@@ -94,27 +54,6 @@ pub fn tddy_data_root_matching_child(
     _config_dir: Option<&Path>,
 ) -> Option<PathBuf> {
     None
-}
-
-/// Directory containing `projects.yaml` (`{tddy_data_dir}/projects/`).
-///
-/// When `config_dir` is `Some`, it is used as the data root.
-/// Otherwise falls back to the profile default or `$HOME/.tddy`.
-#[cfg(unix)]
-pub fn projects_path_for_user(os_user: &str, config_dir: Option<&Path>) -> Option<PathBuf> {
-    let base = sessions_base_for_user(os_user, config_dir)?;
-    Some(base.join("projects"))
-}
-
-#[cfg(not(unix))]
-pub fn projects_path_for_user(_os_user: &str, _config_dir: Option<&Path>) -> Option<PathBuf> {
-    None
-}
-
-/// Base directory for cloned repos (~user/{repos_base_path}/).
-#[cfg(unix)]
-pub fn repos_base_for_user(os_user: &str, repos_base_path: &str) -> Option<PathBuf> {
-    Some(home_dir_for_user(os_user)?.join(repos_base_path))
 }
 
 /// Resolve a path under the user's home from a user-relative string (for project clone destination).
@@ -160,11 +99,6 @@ pub fn project_path_under_home_from_user_relative(
         return Err("path escapes home directory".to_string());
     }
     Ok(dest)
-}
-
-#[cfg(not(unix))]
-pub fn repos_base_for_user(_os_user: &str, _repos_base_path: &str) -> Option<PathBuf> {
-    None
 }
 
 #[cfg(not(unix))]

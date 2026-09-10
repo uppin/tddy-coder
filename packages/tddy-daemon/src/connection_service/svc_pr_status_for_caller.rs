@@ -438,7 +438,11 @@ impl ConnectionServiceImpl {
             self.config.spawn_worker_request_timeout(),
             "StartSession: scan sessions by branch",
             move || {
-                crate::branch_owner::find_session_owning_branch(&sessions_base, &branch_for_scan)
+                crate::branch_owner::find_session_owning_branch(
+                    &crate::session_reader::DaemonSessionListing,
+                    &sessions_base,
+                    &branch_for_scan,
+                )
             },
         )
         .await?;

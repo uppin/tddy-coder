@@ -1,0 +1,53 @@
+[package]
+name = "tddy-host-service"
+version = "0.1.0"
+edition = "2021"
+description = "The hosts a daemon knows — the durable registry, each host's tooling probe, its telemetry, the prompts it raises and the ssh keys it can be given — served as host.HostService"
+
+[lib]
+name = "tddy_host_service"
+path = "src/lib.rs"
+
+[dependencies]
+# `test_util` is ungated, as `tddy-daemon`'s is, so the integration suites can reach it.
+tempfile = "3"
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+log = "0.4"
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util"] }
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-pty = { path = "../tddy-pty" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-task = { path = "../tddy-task" }
+tokio-stream = "0.1"
+tddy-service = { path = "../tddy-service" }
+livekit = "0.7"
+# `default = ["agent"]` is the *server* side. The blocking client and the protocol types are ungated.
+ssh-agent-lib = { version = "0.6.0", default-features = false }
+# `encryption` (and ed25519): an OpenSSH private key on disk is passphrase-protected, and unlocking
+# one in process is why this daemon never needs a TTY or `SSH_ASKPASS`.
+ssh-key = { version = "0.6.7", features = ["encryption", "ed25519"] }
+# The host's RSA keypair, and RSA-OAEP(SHA-256) decryption of an answer the browser encrypted with
+# `SubtleCrypto`. Pinned — a patch release changing key generation or padding is not something to
+# pick up silently.
+rsa = "=0.9.10"
+rand = "0.8"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+futures-util = "0.3"
+serial_test = "3"
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+tempfile = "3"

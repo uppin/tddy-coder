@@ -273,6 +273,20 @@ pub mod tonic_connection {
     include!(concat!(env!("OUT_DIR"), "/tonic_connection/connection.rs"));
 }
 
+/// Tonic-generated gRPC server/client for `host.proto`, sharing `proto::host`'s message types via
+/// `extern_path`. Serves the Unix-domain-socket transport; every other transport goes through the
+/// tddy-rpc `HostServiceServer` re-exported above.
+pub mod tonic_host {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_host/host.rs"));
+}
+
+/// Tonic-generated gRPC server/client for `worktree.proto`. See [`tonic_host`].
+pub mod tonic_worktree {
+    #![allow(unused_imports, clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/tonic_worktree/worktree.rs"));
+}
+
 #[cfg(test)]
 mod json_to_proto_value_tests {
     use super::json_to_proto_value;

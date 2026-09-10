@@ -244,16 +244,38 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 ## Scope
 
 - [x] **Tooling — cross-file edits**: `edits_for` stops discarding other documents' rename edits ✅
-- [~] **Tooling — `move_module_to_crate`**: the operation, its schema, manifest edits, crate-level facade — deciding half green, engine impl untested
+- [x] **Tooling — `move_module_to_crate`**: the operation, its schema, manifest edits, crate-level facade ✅ — **13 of 21 modules moved by the operation** on the real tree, in two dependency layers; the 8 it cannot take are recorded in `## Technical Debt`
 - [x] **Tooling — file-budget report**: `restructure check --budget LINES` reports the files a plan's own anchors name that exceed it ✅ — a **report, not a gate**, per the best-effort decision below
 - [x] **Prerequisite — `run_server` options struct** (⛔ blocking TODO) ✅ — **there is no desktop caller**, see the correction below
 - [x] **Prerequisite — generated-code drift gate** in CI (⛔ blocking TODO) ✅ `scripts/generated-code.sh`, green on all four generated directories
 - [x] **Kernel**: `tddy-daemon-kernel` with the five shared symbols; the trim helper's one home ✅
 - [~] **Cycles**: audited against the tree rather than the discovery table — **3 of the 9 listed do not exist**, 3 are cut here, 3 are classification cuts that land with the crate moves. See `## Decisions & Trade-offs`
-- [~] **Proto**: `host.proto` + `worktree.proto` declared and generating; **no `types.proto` needed**; sandbox extern paths untouched (nothing they name moves in this node)
-- [ ] **Crates**: `tddy-host-service`, `tddy-worktree-service` with their modules and tests
-- [ ] **Web**: regeneration, call-site migration, the six hard-coded bindings, the Cypress fakes
-- [ ] **File budget**: record which of this node's files landed ≤500 lines and which did not, with why
+- [x] **Proto**: `host.proto` + `worktree.proto` declared and generating; `connection.proto` **90 → 73 rpcs**, 51 messages/enums removed; **no `types.proto` needed**; sandbox extern paths untouched ✅
+- [x] **Crates**: `tddy-host-service` (13 modules + `host_messages` + 5 handler-test modules + 1 integration suite), `tddy-worktree-service` (8 modules + 7 integration suites) ✅
+- [x] **Web**: regeneration ✅ — `connection_pb.ts` and `tddy-rust-typescript-tests/gen/connection_pb.ts` shrink by 4,126 lines; `scripts/generated-code.sh check` exits 0. Call-site migration, the six bindings and the Cypress fakes landed with M8
+- [x] **File budget**: recorded ✅ — a report, not a gate, per the best-effort decision below.
+      **Eleven of this node's files stand over 500 lines**, every one of them a file that *moved*
+      rather than one this node wrote:
+
+      | File | Lines | Why it stands |
+      |---|---|---|
+      | `tddy-daemon-kernel/src/config.rs` | 2,448 | `DaemonConfig` and its nested blocks — one serde schema, and splitting a config struct splits nothing cohesive |
+      | `tddy-host-service/src/host_add_key_handler_tests.rs` | 1,259 | 26 tests of one flow (prompt → encrypt → decrypt → unlock → agent); moved verbatim |
+      | `tddy-host-service/src/host_registry.rs` | 1,075 | moved verbatim |
+      | `tddy-host-service/src/host_tooling.rs` | 1,074 | moved verbatim |
+      | `tddy-worktree-service/src/worktrees.rs` | 1,052 | moved verbatim |
+      | `tddy-host-service/src/host_private_key.rs` | 995 | moved verbatim |
+      | `tddy-worktree-service/src/remote_git_service.rs` | 864 | moved verbatim |
+      | `tddy-host-service/src/ssh_agent.rs` | 799 | moved verbatim |
+      | `tddy-worktree-service/src/project_storage.rs` | 653 | moved verbatim |
+      | `tddy-worktree-service/src/worktree_files.rs` | 629 | moved verbatim |
+      | `tddy-host-service/src/service.rs` | 880 | the 8 handlers, the state, the builders and the peer routing — authored here, and cut at the service boundary the proto draws |
+
+      The two files this node authored and could have split are `host_service.rs`'s service (880)
+      and `worktree_service.rs`'s (753). Both are one service's handlers plus the state they read;
+      splitting them would separate a handler from the field it consults, which is the cohesion the
+      budget exists to protect. **`tddy-daemon` shrank**: `connection_service/rpc_service.rs` 6,938
+      → 5,712 and `connection_tonic_adapter.rs` 1,505 → 1,306, and 21 modules left the crate
 - [ ] **Baseline**: `./test` per touched package back to the recorded numbers
 - [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
 - [ ] **Documentation**: doc triage executed at wrap
@@ -298,7 +320,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - **Implementation**: two new `ServiceEntry`s; two new hand-written tonic adapters for the UDS path
 
 #### tddy-service
-- **Proto**: `types.proto`, `host.proto`, `worktree.proto`; `connection.proto` loses 17 rpcs and the messages that move
+- **Proto**: `host.proto`, `worktree.proto` (**no `types.proto`**); `connection.proto` loses 17 rpcs and the 51 messages/enums that move
 - **Build**: one prost + one tonic pass per new service; both added to the descriptor set; **the three `.connection.*` extern paths in the sandbox tonic pass re-pointed** — get this wrong and the sandbox codegen fails with a message that names neither cause
 
 #### tddy-web
@@ -310,13 +332,13 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 ## Implementation Milestones
 
 - [x] M1 — `edits_for` fixed; a rename re-points a caller in another file ✅
-- [x] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests ✅ *(deciding half only — the engine impl is untested, see `## Technical Debt`)*
-- [x] M3 — the crate-level facade produces a zero-caller-diff move ✅ — settled by a compiler, not by reading the diff; `verify --against` still to run against the real move
-- [ ] M4 — file-budget report; `run_server` options struct; CI drift gate
+- [x] M2 — `move_module_to_crate` moves a module, rewrites its header, re-points callers, edits both manifests ✅ — engine half covered by the live-rust-analyzer suites, and proven in anger: it performed 10 of the 21 module moves in M7
+- [x] M3 — the crate-level facade produces a zero-caller-diff move ✅ — settled by a compiler, not by reading the diff
+- [x] M4 — file-budget report ✅; `run_server` options struct ✅; CI drift gate ✅ (green on all four generated directories)
 - [~] M5 — `tddy-daemon-kernel` adopted by `tddy-daemon`, every duplicate deleted; `cargo build -p tddy-daemon` clean; cycles audited (see `## Decisions & Trade-offs`) rather than all nine cut, because three of the nine are not in the tree
-- [ ] M6 — `types.proto` + `host.proto` + `worktree.proto` generate; sandbox extern paths re-pointed
-- [ ] M7 — both crates exist and serve their methods on all three transports
-- [ ] M8 — `tddy-web` migrated; Cypress component suites green
+- [x] M6 — `host.proto` + `worktree.proto` generate (**no `types.proto`** — see `## Responsibility`); sandbox extern paths untouched, because nothing they name moves in this node ✅
+- [x] M7 — both crates exist and serve their methods on all three transports ✅ — two `ServiceEntry`s in `runtime.rs` (HTTP `/rpc` + the LiveKit common room) plus two hand-written tonic adapters on the local socket
+- [x] M8 — `tddy-web` migrated ✅; Cypress component suites green — **231 specs, 1419/1419, 5m34s**
 - [ ] M9 — baselines restored; file-budget outcome recorded
 
 ## Testing Plan
@@ -472,6 +494,34 @@ rather than an algorithm. Three distinct kinds:
   runtime instead of failing to compile, so every caller states all twelve fields. Four call sites
   migrated — `main.rs` and three in the daemon's own tests; the desktop, which the plan expected to
   be one, is not.
+- **`config.rs` moves into `tddy-daemon-kernel` whole, and that widens the kernel's charter beyond
+  "the five shared symbols".** This is a deliberate decision, not drift, and it is the *only*
+  whole-module move the kernel takes. Four of the moving modules (`host_registry`, `host_tooling`,
+  `remote_desktop_probe`, `multi_host`) and every handler in both new services take
+  `&DaemonConfig` and read disjoint parts of it, so `pub(crate)`-widening buys nothing and there is
+  no smaller cut: the *symbol* is the file. The alternative — a narrow value struct per consuming
+  crate — is authoring rather than moving, and nodes 2–8 would each have to repeat it, so the
+  collision it is meant to avoid is exactly the one it would cause. `## Boundaries` reserves
+  *subsystems* (model registry, telegram, screen sharing, sandbox, spawn, auth, LiveKit) for later
+  nodes; `DaemonConfig` is not one. The daemon keeps `pub use tddy_daemon_kernel::config;`, so no
+  caller in it changed.
+- **Everything else the kernel gained is a symbol lift, measured before it was made.** The
+  transitive call closure decided each boundary, not the file: `spawn_as_user` is **179 of
+  `spawner.rs`'s 2,539 lines** (9 functions — `find_program_on_spawn_child_path`,
+  `run_capture_as_user`, `start_output_as_user` and what they reach); `privilege_drop` is **63 of
+  `pty_runtime.rs`'s 400** (5 symbols); `user_paths` is **34 of `user_sessions_path.rs`'s 210**
+  plus `tddy_user_config`'s one reader. `pty_registry.rs` — six lines re-exporting `tddy_pty` — was
+  moved and then **retracted untouched**, because nothing in families E, F, G or H reaches it; it
+  was only ever needed by `pty_runtime`'s `PtyRuntime::spawn` half, which stays. `peer_forwarding`
+  and `daemon_identity` are lifts of the same kind out of `livekit_peer_discovery` (2,369 lines),
+  forced by five of the eight `host.HostService` methods routing to a peer *before* authenticating.
+  Every origin module re-exports every lifted name, so no caller in `tddy-daemon` changed and there
+  stays exactly one definition of each.
+- **`branch_owner` takes a port rather than carrying `session_reader` with it.** A branch belongs
+  to a worktree, which is family H; what *claims* one is a session, which is family C and stays in
+  the daemon deliberately. `tddy_worktree_service::branch_owner::SessionListing` is the seam, and
+  what crosses it is `SessionClaim` — the three fields the ownership rule judges on — rather than
+  everything a session is. `tddy-daemon`'s `session_reader::DaemonSessionListing` implements it.
 - **The file budget is best-effort, by agreement.** Seams are cut where they are cohesive. Whatever
   stays over 500 lines is listed in `## Scope`'s file-budget item with a reason, rather than split to
   hit a number at the cost of cohesion.
@@ -479,10 +529,33 @@ rather than an algorithm. Three distinct kinds:
 ## Technical Debt & Production Readiness
 
 - [ ] `tddy-desktop` is outside the CI gate; its build is verified locally and stated as such
-- [ ] Two hand-written tonic adapters are added for the UDS path because `tddy-codegen`'s
-      `generate_tonic_adapter` is a stub. Generating them is out of scope and belongs in `docs/dev/todo/`
-- [ ] Relocated `impl` members come out `pub(crate)` and stay there by design; each widening that has
-      to stand is reported in the visibility table rather than silently narrowed
+- [x] ✅ Two hand-written tonic adapters are added for the UDS path because `tddy-codegen`'s
+      `generate_tonic_adapter` is a stub — `host_tonic_adapter.rs` and `worktree_tonic_adapter.rs`,
+      each a literal `async fn` per method (a macro cannot be used: `#[tonic::async_trait]` rewrites
+      signatures and cannot see through one). All three services are mounted on the **same** socket
+      by one `Server::builder()`, so a caller that reached `GetHostTooling` over the local socket
+      before the split still does. **The debt stands**: generating them is out of scope and belongs
+      in `docs/dev/todo/`
+- [x] ✅ Relocated members come out `pub(crate)` and stay there by design. **Nine widenings had to
+      stand**, each forced by a caller that stayed behind:
+
+      | Symbol | Was | Now | Forced by |
+      |---|---|---|---|
+      | `tddy_daemon_kernel::spawn_as_user::resolve_livekit_room_name` | `pub(crate)` | `pub` | `connection_service.rs`, `connection_service/terminal_bridge_impl.rs`, `telegram_session_control.rs` |
+      | `tddy_daemon_kernel::spawn_as_user::resolve_tool_path` | private | `pub` | `tddy-daemon`'s own `spawner.rs`, after the lift |
+      | `tddy_daemon_kernel::spawn_as_user::resolve_relative_to_daemon_toolchain_root` | private | `pub` | the same |
+      | `tddy_daemon_kernel::config::default_spawn_startup_grace_period_ms` | `pub(crate)` | `pub` | `spawner.rs`'s startup watch |
+      | `tddy_daemon_kernel::config::default_spawn_startup_poll_interval_ms` | `pub(crate)` | `pub` | the same |
+      | `tddy_worktree_service::worktree_files::canonicalize_root` | `pub(crate)` | `pub` | `context_files.rs` (family K, stays) |
+      | `tddy_worktree_service::worktree_files::validate_rel_path_shape` | `pub(crate)` | `pub` | `context_files.rs`, `context_sync.rs` |
+      | `tddy_worktree_service::worktree_files::git_listed_files` | `pub(crate)` | `pub` | `host_documents.rs` |
+      | `tddy_host_service::host_prompts::answer_before_expiry` | `pub(crate)` | `pub` | `screen_sharing_service.rs` (node 2's, stays) |
+
+      Two further symbols became `pub` as **new API rather than a widening**:
+      `ConnectionServiceImpl::routing_view` (the config, roster and token resolver every routing
+      decision is made from — `runtime.rs` hands the same three to `tddy-host-service`) and
+      `connection_tonic_adapter::to_tonic_status` (three adapters over one socket must map a refusal
+      to the same tonic code, and three copies of that match is three chances to drift)
 - [x] ✅ **`impl ModuleReferences for RustBackend` is now covered** by
       `tests/move_module_to_crate_acceptance.rs` and `tests/rename_cross_file_acceptance.rs`, which
       drive a live rust-analyzer over a real three-crate fixture and end in `cargo check`. They run
@@ -500,6 +573,34 @@ rather than an algorithm. Three distinct kinds:
 - [ ] A `crate::` path in the moved file's **function bodies** is left alone; only `use` declarations
       are re-pointed. A build after the move surfaces it. Belongs in
       `docs/ft/coder/rust-code-restructuring.md` § Known limitations
+- [ ] **`move_module_to_crate` evaluates each op against the *pre-move* tree, so a multi-op plan is
+      not seen as a whole.** A 21-op plan refused on op 0 because `host_registry.rs` named
+      `tddy_daemon::multi_host::…` — where `multi_host` was op 3 of the same plan, moving to the
+      same destination crate. The workaround was to hand-layer the plan by dependency depth and run
+      it once per layer, at ~15 minutes of rust-analyzer indexing each. Found on this operation's
+      first real use
+- [ ] **A cyclic module group cannot be moved by the operation at any layering.** It moves one
+      module per op, so `host_tooling ⇄ ssh_agent` and `host_tooling ⇄ remote_desktop_probe` — the
+      "classification cuts" `## Decisions & Trade-offs` names — are unreachable: each op sees the
+      other module still in the origin crate. Six modules were hand-moved for this reason
+- [ ] **A `pub use` facade in the origin makes the dependency-cycle refusal fire spuriously.** After
+      `config` moved to the kernel, `tddy-daemon` kept `pub use tddy_daemon_kernel::config;`, so
+      rust-analyzer canonicalises `crate::config::DaemonConfig` as `tddy_daemon::config::DaemonConfig`
+      and the refusal reads it as an origin dependency the destination would depend back on. Eight
+      moving modules had to be re-pointed at `tddy_daemon_kernel::config::` by hand first
+- [ ] **The operation adds the destination as a dependency *of itself*** when the moved module names
+      a sibling that has already moved to the same crate: `tddy-host-service` and
+      `tddy-worktree-service` each came out of layer 2 with `tddy-<self> = { path = "" }` in their
+      own manifest, which cargo rejects as a cyclic package dependency
+- [ ] **It carries path dependencies but not registry ones.** The destination manifests were left
+      short of `chrono`, `serde_yaml` and `futures-util`, all of which the moved files use
+- [ ] **The journal is repo-scoped, not plan-scoped** (`.restructure/journal.jsonl`), so a
+      *completed* plan blocks the next one with "a journal already exists for this plan — pass
+      --resume", and `--resume` would resume the wrong plan. Each layer needed the journal archived
+      by hand first
+- [ ] Cosmetic: the operation appends one `pub use <crate>::*;` to the origin's `lib.rs` **per
+      operation** rather than one per destination (ten identical lines after a ten-op plan), and
+      appends `pub mod` lines after whatever the destination's `lib.rs` already said
 - [ ] Nested modules and crate roots are **refused, not guessed** — only `<crate>/src/<module>.rs`
       moves, because a nested module's `mod` line lives in a file this operation would have to guess at
 

@@ -16,10 +16,9 @@ use tddy_service::proto::connection::{
     HostDocumentChunk, SessionAttachment, StartSessionEvent,
 };
 use tddy_service::proto::connection::{
-    AgentConversationChunk, HostPromptEvent, ListAgentModelsResponse, ModelInfo,
-    ProjectEntry as ProtoProjectEntry, SessionTerminalInput, SessionTerminalOutput,
-    SplitAgentPlacement, StartSessionResponse, TerminalControlEvent,
-    WorktreeSizeStatus as ProtoWorktreeSizeStatus, WorktreeStatsEvent,
+    AgentConversationChunk, ListAgentModelsResponse, ModelInfo, ProjectEntry as ProtoProjectEntry,
+    SessionTerminalInput, SessionTerminalOutput, SplitAgentPlacement, StartSessionResponse,
+    TerminalControlEvent,
 };
 use uuid::Uuid;
 
@@ -28,31 +27,21 @@ use crate::branch_intent::{
 };
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use crate::host_keypair::HostKeypair;
-use crate::host_prompts::HostPromptRegistry;
-use crate::host_registry::HostRegistry;
-use crate::host_stats::HostStats;
-use crate::host_tooling::HostToolingProbe;
 use crate::livekit_rooms_stream::RoomRoster;
 use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
 use crate::session_room::ActivityDelta;
 use crate::spawn_worker;
 use crate::spawner::{self};
-use crate::ssh_agent_add::SshAgentKeyAdder;
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
-use crate::worktrees::{
-    CleanWorktreeError, RemoveWorktreeError, WorktreeSizeCalculator, WorktreeSizeStatus,
-    WorktreeStatsCache,
-};
 use tddy_service::proto::connection::{
     AcpReplayFrame, AgentActivityDeltaChunk, AgentActivityRecord as ProtoAgentActivityRecord,
-    ExecuteToolChunk, ExecuteToolResponse, HostStatsEvent, LiveKitRoomsEvent,
+    ExecuteToolChunk, ExecuteToolResponse, LiveKitRoomsEvent,
     SessionNotificationEvent as ProtoSessionNotificationEvent,
     SessionNotificationKind as ProtoSessionNotificationKind,
-    SessionNotificationSource as ProtoSessionNotificationSource, WorktreeFileChunk,
+    SessionNotificationSource as ProtoSessionNotificationSource,
 };
 use tddy_task::TaskRegistry;
 
@@ -61,13 +50,10 @@ use tddy_task::TaskRegistry;
 // plain `use` would be an unused import there. `#[cfg(test)]` keeps them out of the lib build
 // entirely rather than trading a resolution error for a lint.
 #[cfg(test)]
-use crate::host_prompts::PromptKind;
 #[cfg(test)]
-use crate::livekit_peer_discovery::{local_instance_id_for_config, LiveKitDiscoveryHandles};
+use crate::livekit_peer_discovery::local_instance_id_for_config;
 #[cfg(test)]
-use futures_util::StreamExt;
 #[cfg(test)]
-use std::sync::Mutex as StdMutex;
 #[cfg(test)]
 use tddy_core::session_lifecycle::unified_session_dir_path;
 #[cfg(test)]
@@ -76,11 +62,9 @@ use tddy_rpc::Request;
 use tddy_service::proto::connection::ConnectionService as ConnectionServiceTrait;
 #[cfg(test)]
 use tddy_service::proto::connection::{
-    AddHostKeyRequest, AddHostKeyResponse, AddPlannedPrRequest, AnswerHostPromptRequest,
-    AnswerHostPromptResponse, ExecuteToolRequest, GetAcpToolCallDetailRequest,
-    GetHostToolingResponse, ListHostKeyCandidatesRequest, ListProjectsRequest,
+    AddPlannedPrRequest, ExecuteToolRequest, GetAcpToolCallDetailRequest, ListProjectsRequest,
     ReportAgentActivityRequest, Signal, SignalSessionRequest, StartSessionRequest,
-    StreamAcpReplayRequest, StreamHostPromptsRequest, StreamMode, StreamSessionActivityRequest,
+    StreamAcpReplayRequest, StreamMode, StreamSessionActivityRequest,
 };
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
@@ -602,11 +586,6 @@ async fn relay_acp_replay_count(
     }
 }
 
-/// Default cadence for refreshing per-core CPU utilization on the host-stats sampling loop.
-const HOST_CPU_INTERVAL: Duration = Duration::from_secs(5);
-/// Default cadence for refreshing project-dir disk figures on the host-stats sampling loop.
-const HOST_DISK_INTERVAL: Duration = Duration::from_secs(60);
-
 /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the LiveKit roster. Presence is
 /// the volatile fact on that panel, hence far shorter than the host-stats disk tick.
 const LIVEKIT_ROOMS_POLL_INTERVAL: Duration = Duration::from_secs(3);
@@ -655,92 +634,6 @@ impl Stream for MpscLiveKitRoomsStream {
     }
 }
 
-/// Stream adapter backed by an mpsc channel for [`HostStatsEvent`] server-streaming.
-#[derive(Debug)]
-pub struct MpscHostStatsStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<HostStatsEvent>,
-}
-
-impl Stream for MpscHostStatsStream {
-    type Item = Result<HostStatsEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscHostStatsStream {}
-
-/// Stream adapter for [`HostPromptEvent`] server-streaming.
-///
-/// ⚠ Unlike `MpscHostStatsStream`, the feed behind this one is **silent almost all the time** — a
-/// host raises a prompt only when an operator starts an add-key flow. Per
-/// `packages/tddy-codegen/docs/server-streaming.md`, a handler whose stream can be silent must
-/// `tokio::select!` on `tx.closed()` as well as breaking on a send error, or its task leaks one per
-/// subscription forever. `stream_host_stats` escapes that only because it emits unconditionally.
-///
-/// Carries `Result` items rather than bare events, unlike `MpscHostStatsStream`: this RPC honours
-/// `daemon_instance_id`, and a feed served by a peer arrives as the frames-or-status channel
-/// [`ConnectionServiceImpl::stream_served_by_peer`] hands back.
-pub struct MpscHostPromptStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<Result<HostPromptEvent, Status>>,
-}
-
-impl Stream for MpscHostPromptStream {
-    type Item = Result<HostPromptEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.rx.poll_recv(cx)
-    }
-}
-
-impl Unpin for MpscHostPromptStream {}
-
-/// Stream adapter backed by an mpsc channel for [`WorktreeStatsEvent`] server-streaming. The first
-/// event carries a full snapshot; each subsequent event carries one worktree's updated size row.
-#[derive(Debug)]
-pub struct MpscWorktreeStatsStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<WorktreeStatsEvent>,
-}
-
-impl Stream for MpscWorktreeStatsStream {
-    type Item = Result<WorktreeStatsEvent, Status>;
-
-    fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.rx.poll_recv(cx) {
-            std::task::Poll::Ready(Some(event)) => std::task::Poll::Ready(Some(Ok(event))),
-            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Unpin for MpscWorktreeStatsStream {}
-
-/// Map the library disk-size lifecycle status to its wire enum.
-fn proto_worktree_size_status(status: WorktreeSizeStatus) -> ProtoWorktreeSizeStatus {
-    match status {
-        WorktreeSizeStatus::None => ProtoWorktreeSizeStatus::None,
-        WorktreeSizeStatus::Calculating => ProtoWorktreeSizeStatus::Calculating,
-        WorktreeSizeStatus::Cached => ProtoWorktreeSizeStatus::Cached,
-    }
-}
-
-mod host_messages;
-
 mod activity_hub;
 
 /// ConnectionService implementation.
@@ -761,10 +654,6 @@ pub struct ConnectionServiceImpl {
     /// When set, LiveKit **Room** handle for forwarding **StartSession** to peer daemons in `common_room`.
     common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     telegram: Option<Arc<TelegramDaemonHooks>>,
-    worktree_stats_cache: Arc<WorktreeStatsCache>,
-    /// Lazy, semaphore-bounded per-worktree disk-size calculator backing `StreamWorktreeStats` and
-    /// `CalculateWorktreeSize`. Shares the stats cache root so persisted sizes survive restarts.
-    worktree_size_calculator: Arc<WorktreeSizeCalculator>,
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
@@ -781,41 +670,6 @@ pub struct ConnectionServiceImpl {
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
     idle_tracker: Option<Arc<crate::relay_idle::IdleTimeoutTracker>>,
-    /// Durable record of every host seen, behind `ListKnownHosts` on the Hosts screen. Distinct from
-    /// `eligible_daemon_source`, which reports only who is reachable right now.
-    host_registry: Arc<dyn HostRegistry>,
-    /// Probes what this host has installed and configured, behind `GetHostTooling`.
-    host_tooling: Arc<dyn HostToolingProbe>,
-    /// Questions this host is waiting on an operator to answer, behind `StreamHostPrompts` and
-    /// `AnswerHostPrompt`. Shared across clones, so the answer arriving on one connection reaches
-    /// the prompt raised on another.
-    host_prompts: Arc<dyn HostPromptRegistry>,
-    /// The keypair a prompt publishes so its answer can be encrypted end to end, and the only thing
-    /// on this host able to read one back.
-    host_keypair: Arc<dyn HostKeypair>,
-    /// What puts an unlocked identity into this host's ssh-agent, behind `AddHostKey`.
-    ///
-    /// Injected because the add is the one step of the flow that touches the operator's real
-    /// agent — everything before it (prompt, encryption, decrypt, unlock) runs for real in a test.
-    ssh_agent_key_adder: Arc<dyn SshAgentKeyAdder>,
-    /// How the private key an operator names is read — as **their** OS user, and only from inside
-    /// that user's home. Injected for the same reason the agent is: impersonating an OS user is
-    /// the one step of the flow a test cannot perform, while the confinement and the parse around
-    /// it are exercised for real. See [`crate::host_private_key`].
-    host_user_files: Arc<dyn crate::host_private_key::HostUserFiles>,
-    /// Live `StreamHostPrompts` pumps.
-    ///
-    /// Exists so a test can observe a **leaked** pump. The prompt stream is silent by design, so a
-    /// pump that outlived its subscriber is indistinguishable from a correctly idle one from the
-    /// outside — see `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`. Incremented when a
-    /// subscription opens and decremented when its task returns.
-    prompt_pumps: Arc<std::sync::atomic::AtomicUsize>,
-    /// Host machine stats provider (per-core CPU + project-dir disk) for the Host Stats Footer.
-    host_stats: Arc<dyn HostStats>,
-    /// Cadence for refreshing CPU on the `StreamHostStats` sampling loop (overridable for tests).
-    host_cpu_interval: Duration,
-    /// Cadence for refreshing disk on the `StreamHostStats` sampling loop (overridable for tests).
-    host_disk_interval: Duration,
     /// Reader for the LiveKit server's rooms and their participants, behind `StreamLiveKitRooms`.
     room_roster: Arc<dyn RoomRoster>,
     /// Cadence at which a `StreamLiveKitRooms` subscription re-reads the roster (overridable for
@@ -2050,36 +1904,6 @@ fn stream_document_frames(
     }
 }
 
-/// Split a worktree file's bytes into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames, stamping
-/// `total_byte_size` on every one.
-///
-/// A zero-byte file still yields exactly **one** (empty) frame, so "the file is empty" stays
-/// distinguishable from "the stream produced nothing" — AC18. The size is repeated on every frame
-/// rather than sent as a header, as `HostDocumentChunk`'s is: a reader knows the total from the
-/// first frame with no header frame to special-case, and a one-frame file is not a different shape
-/// from a hundred-frame one.
-///
-/// The bytes are already in memory by the time this runs, because the reader that produced them is
-/// also the thing that applies the cap: over-cap is refused before any frame exists, so nothing
-/// here can be a partial file.
-pub fn worktree_file_frames(bytes: &[u8]) -> Vec<WorktreeFileChunk> {
-    let total_byte_size = bytes.len() as u64;
-    let mut frames: Vec<WorktreeFileChunk> = bytes
-        .chunks(HOST_DOCUMENT_FRAME_BYTES)
-        .map(|chunk| WorktreeFileChunk {
-            data: chunk.to_vec(),
-            total_byte_size,
-        })
-        .collect();
-    if frames.is_empty() {
-        frames.push(WorktreeFileChunk {
-            data: Vec::new(),
-            total_byte_size,
-        });
-    }
-    frames
-}
-
 /// Split one [`ActivityDelta`]'s patch into ordered [`HOST_DOCUMENT_FRAME_BYTES`] frames.
 ///
 /// Every frame carries the whole description — `seq`, `prev_seq`, `base_commit`,
@@ -2109,20 +1933,6 @@ pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChu
         frames.push(describe(Vec::new()));
     }
     frames
-}
-
-/// Resolve the daemon's default project directory — the filesystem the Host Stats Footer reports
-/// disk capacity for. Uses `$HOME` joined with the configured repos base subdirectory
-/// (`repos_base_path`, default `repos`); when `$HOME` is unset the bare subdirectory is used.
-///
-// TODO(host-stats-footer): `DaemonConfig` currently exposes no explicit project-dir override; if
-// one is added, prefer it here over the `$HOME`/`repos_base_path` derivation.
-fn resolve_default_project_dir(config: &DaemonConfig) -> PathBuf {
-    let repos_base = config.repos_base_path_or_default();
-    match std::env::var_os("HOME") {
-        Some(home) => PathBuf::from(home).join(repos_base),
-        None => PathBuf::from(repos_base),
-    }
 }
 
 /// Guard for any RPC that mutates a `"pr-stack"` orchestrator's `Changeset.stack`: rejects a
@@ -2382,34 +2192,6 @@ fn pr_state_label(
     }
 }
 
-fn map_remove_worktree_error(e: RemoveWorktreeError) -> Status {
-    match e {
-        RemoveWorktreeError::NotListed => {
-            Status::not_found("worktree path is not in git worktree list")
-        }
-        RemoveWorktreeError::CannotRemovePrimary => {
-            Status::failed_precondition("cannot remove primary worktree")
-        }
-        RemoveWorktreeError::GitFailed { message } | RemoveWorktreeError::Io(message) => {
-            Status::internal(message)
-        }
-    }
-}
-
-fn map_clean_worktree_error(e: CleanWorktreeError) -> Status {
-    match e {
-        CleanWorktreeError::NotListed => {
-            Status::not_found("worktree path is not in git worktree list")
-        }
-        CleanWorktreeError::CannotCleanPrimary => {
-            Status::failed_precondition("cannot clean primary worktree")
-        }
-        CleanWorktreeError::GitFailed { message } | CleanWorktreeError::Io(message) => {
-            Status::internal(message)
-        }
-    }
-}
-
 /// TTL for the per-(agent, daemon) model-probe cache. A probe spawns a subprocess and may hit the
 /// network, so results are cached briefly to avoid re-probing on every agent toggle in the UI.
 const AGENT_MODELS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -2476,9 +2258,6 @@ fn parse_agent_models_json(stdout: &str) -> Result<ListAgentModelsResponse, Stat
 
 #[cfg(test)]
 mod signal_session_unit_tests;
-
-#[cfg(test)]
-mod host_stats_handler_unit_tests;
 
 #[cfg(test)]
 mod delete_session_unit_tests;
@@ -2606,30 +2385,3 @@ mod workspace_start_request_unit_tests;
 /// the outside, over the RPC surface.
 #[cfg(test)]
 mod workspace_sandbox_roster_dispatch_unit_tests;
-
-#[cfg(test)]
-mod known_hosts_handler_unit_tests;
-
-#[cfg(test)]
-mod host_tooling_handler_unit_tests;
-
-/// The host tooling handler — what `GetHostTooling` puts on the wire for one host.
-///
-/// The probe itself is a double: what git, `gh` and an ssh-agent report is decided by the tests in
-/// [`crate::host_tooling`] and [`crate::ssh_agent`], and a handler test that depended on the
-/// machine running the suite would answer differently on every developer's laptop.
-#[cfg(test)]
-mod ssh_agent_block_handler_tests;
-
-/// The add-key flow, end to end: `AddHostKey` raises a prompt, `AnswerHostPrompt` carries the
-/// encrypted answer back, and the identity reaches the agent — or, when the passphrase is wrong,
-/// nothing does.
-///
-/// Only the agent is stood in for. The prompt, the RSA-OAEP encryption, the decrypt and the unlock
-/// of a real passphrase-protected OpenSSH key all run for real: a test that handed the handler a
-/// plaintext passphrase and called it encrypted would prove nothing about the path this node
-/// exists to build.
-///
-/// Feature: `docs/ft/web/hosts-screen-add-key.md`
-#[cfg(test)]
-mod host_add_key_handler_tests;

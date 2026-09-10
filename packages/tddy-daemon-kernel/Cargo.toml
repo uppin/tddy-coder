@@ -9,10 +9,30 @@ name = "tddy_daemon_kernel"
 path = "src/lib.rs"
 
 [dependencies]
-tddy-core = { path = "../tddy-core" }
-tokio = { version = "1", features = ["sync"] }
+anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+tddy-core = { path = "../tddy-core" }
+# `DaemonConfig::agent_warmup_options` answers in `tddy_discovery`'s own `WarmupOptions`, so the
+# config block and what consumes it cannot disagree about the shape.
+tddy-discovery = { path = "../tddy-discovery" }
+# `DaemonConfig::sandbox_cgroup_config` returns `tddy_sandbox::CgroupConfig` — the config type is
+# the sandbox crate's, and the daemon's YAML block is a serde mirror of it.
+tddy-sandbox = { path = "../tddy-sandbox" }
+# `peer_forwarding`: one daemon serving another's RPC over the LiveKit common room.
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+livekit = "0.7"
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+tempfile = "3"

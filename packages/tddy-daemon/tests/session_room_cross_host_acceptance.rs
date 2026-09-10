@@ -29,13 +29,14 @@ use tddy_daemon::livekit_peer_discovery::{
     LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
+use tddy_daemon::test_util::wait_until_peer_discovered;
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};
 use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ExecuteToolRequest, ExecuteToolResponse,
-    ListEligibleDaemonsRequest, StartSessionRequest,
+    StartSessionRequest,
 };
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
 use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_env};
@@ -297,27 +298,15 @@ async fn serve_rpc_participant(
     tokio::spawn(async move { participant.run().await })
 }
 
+///
+/// Asked through `host.HostService`, which is where `ListEligibleDaemons` lives since `#unbundle`
+/// node 1, and against this service's own roster — see [`wait_until_peer_discovered`].
 async fn wait_until_discovered(service: &ConnectionServiceImpl, peer_instance_id: &str) {
-    eventually_awaiting(
-        &format!("daemon {peer_instance_id} to be discovered in the common room"),
+    wait_until_peer_discovered(
+        service,
+        a_caller_token(),
+        peer_instance_id,
         DISCOVERY_TIMEOUT,
-        || async {
-            let daemons = service
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: a_caller_token().to_string(),
-                }))
-                .await
-                .map_err(|e| format!("ListEligibleDaemons failed: {e}"))?
-                .into_inner()
-                .daemons;
-            if daemons.iter().any(|d| d.instance_id == peer_instance_id) {
-                return Ok(());
-            }
-            Err(format!(
-                "eligible daemons so far: {:?}",
-                daemons.iter().map(|d| &d.instance_id).collect::<Vec<_>>()
-            ))
-        },
     )
     .await;
 }

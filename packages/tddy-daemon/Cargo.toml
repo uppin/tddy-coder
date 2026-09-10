@@ -109,6 +109,10 @@ ssh-key = { version = "0.6.7", features = ["encryption", "ed25519"] }
 # browser encrypted with `SubtleCrypto`. Pinned — it is a cryptographic implementation, and a patch
 # release changing key generation or padding behaviour is not something to pick up silently.
 rsa = "=0.9.10"
+# The moved host and worktree services. A runtime dependency, not a dev one: `runtime.rs` builds
+# and registers both, and `session_reader` implements the worktree crate's session-listing port.
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-worktree-service = { path = "../tddy-worktree-service" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
