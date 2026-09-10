@@ -16,8 +16,9 @@ one another branch might also be editing.**
   taken, append `-2`.
 - **First line**: `# YYYY-MM-DD — Title`.
 - **Then** `**Category:**` — `Known failing test`, `Future enhancement`, or a named group such as
-  `Deferred from \`optional-livekit\` (#449)`. Add `**Status:** Resolved` when it is done, and
-  `**Source:**` naming the changeset or suite that turned it up.
+  `Deferred from \`optional-livekit\` (#449)`, and `**Source:**` naming the changeset or suite that
+  turned it up. `**Status:** Resolved` is for the narrow case in *An entry leaves by being deleted*
+  below — an item that turned out fixed with no changeset to wrap.
 - **Body**: whatever the item needs. State **why** the work was deferred, not only what remains —
   that reason is what tells the next planner whether it blocks them (see below).
 - **Links are relative to this directory**: `../../ft/coder/pr-stacking.md`, `../guides/ci.md`.
@@ -42,3 +43,53 @@ changeset is written, so an item sitting in the path of new work is found at pla
 than during `/green` — where the only choices left are to work around it, make it worse, or stop.
 
 The two directions are complementary: what one change defers is what the next planner's scan finds.
+
+## An entry leaves by being deleted
+
+Because Step 2b **reads** this directory, an entry that outlives the defect it records is worse than
+no entry: the next planner finds it, believes it, and plans around a problem that is already fixed.
+So an entry has the same lifecycle as a changeset — it is **deleted** when the work closes it, not
+archived and not annotated.
+
+Deletion happens in the wrap, and the changeset drives it:
+
+1. Planning Step 2b records each relevant entry under the changeset's `## Prerequisites`, **with a
+   relative link to its file** — `[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`.
+2. When the work closes an entry, its verdict there becomes **✅ RESOLVED HERE**, naming what closed
+   it. `/update-context-docs` is where that reclassification happens during development.
+3. `/wrap-context-docs` deletes exactly those files, and the changeset entry it writes into
+   [`docs/dev/changesets/`](../changesets/) (or a package's) names the resolved item — that is the
+   audit trail, so nothing is lost by removing the file.
+
+Two consequences:
+
+- **An entry the wrapping changeset does not name is never deleted.** Nobody deletes a backlog entry
+  on inference from a diff; the reference in `## Prerequisites` is the record of a decision.
+- **Partly fixed is not fixed.** Edit the entry down to what actually remains and leave it in place.
+
+`**Status:** Resolved` covers only the case with no changeset to wrap — an item somebody discovers
+was fixed by a change that never recorded it, where the marker preserves the finding for whoever
+looks next. `grep -rL 'Status:\*\* Resolved' docs/dev/todo/` therefore still lists the open items,
+because resolved ones are usually simply gone.
+
+## An entry written during a PR stack is re-read before that stack lands
+
+A stack that defers work into this directory gets **one more chance at it**, deliberately. Before the
+stack is reviewed (`/pr-wrap` on its top node) and again before anything merges (`/merge-pr-stack`
+1e), the entries the stack added or edited down are swept and each gets a verdict: close it in **one
+extra stacked PR**, fold it into a node that is still open, or leave it. See the `pr-stack` skill
+§ *The backlog delta a stack leaves*.
+
+The sweep exists because of when it runs. While the stack is open the surfaces, seams and tests in
+question are the ones that work just built, so the fix costs one more node; once it lands, the same
+fix costs a fresh planning cycle to re-acquire all of it.
+
+Two things this asks of an entry:
+
+- **State why the work was deferred, specifically.** The sweep judges that reason, and the reason
+  worth writing precisely is one a later node might invalidate — "no seam exists for it yet" stops
+  being true the moment some node in the same stack builds the seam, and nobody notices that from the
+  backlog alone.
+- **An entry left after a sweep records that it was left, and why.** This directory is the only thing
+  that survives the stack: the merge plan is gitignored scratch and the changesets are deleted at
+  wrap.

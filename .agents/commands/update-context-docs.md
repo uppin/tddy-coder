@@ -113,6 +113,27 @@ Entry format:
 **Priority**: High
 ```
 
+### 7. Prerequisites — reclassify the backlog entries this work has closed
+
+If the changeset carries a `## Prerequisites` section, revisit its verdicts. An entry recorded
+⚠ DURING or ⛔ BLOCKING that the work has since **fixed** becomes **✅ RESOLVED HERE**, stating what
+closed it, and keeps its relative link to the file in `docs/dev/todo/`:
+
+```markdown
+### ✅ RESOLVED HERE — Sandbox cgroup delegation is never applied — [2026-06-28-tddy-sandbox-cgroups.md](../todo/2026-06-28-tddy-sandbox-cgroups.md)
+
+Closed by the delegation path added here, covered by `sandbox_cgroup_delegation_applies`.
+```
+
+That verdict is what `/wrap-context-docs` acts on: it **deletes** those files at wrap time, so this
+is the step that decides whether the backlog is cleaned up. Do it as the work lands, not at the end —
+by wrap time the changeset is being deleted, and nothing else remembers.
+
+**Partly fixed stays put.** Edit the entry down to what actually remains and leave the verdict at
+⚠ DURING; never promote an entry whose problem still exists in some form. Adding a *new* verdict for
+an entry the change resolved but planning never scanned needs the user's agreement first (CLAUDE.md:
+ask before deleting).
+
 ## Detection Heuristics
 
 To find relevant documentation for the current work:
@@ -181,6 +202,8 @@ cargo test -p client-lib undo_redo
 - [ ] Every "Implemented" claim has file evidence
 - [ ] Test result counts match actual test runs
 - [ ] Known issues have tracking IDs; technical debt items have priority levels
+- [ ] `## Prerequisites` verdicts match reality — every `docs/dev/todo/` entry this work has closed is
+      ✅ RESOLVED HERE with its file link, so the wrap can delete it
 - [ ] Git commit references and file paths are valid
 
 ## Error Handling

@@ -1,6 +1,6 @@
 ---
 name: eval-changeset
-description: Evaluate a landed or in-flight changeset — one PR, or a whole stack squashed into a single integration branch — for complexity, whether that complexity was justified by the expressed intent, how cleanly each stacked PR incremented on its predecessors, whether any PR was too large to review or to go green on its own, how the system's design helped or fought the change, and what redesign would have made it easier. Use when reviewing the cost of a change after the fact, deciding whether a stack was worth its size or split along the right seams, or looking for the design deficiency a painful change exposed.
+description: Evaluate a landed or in-flight changeset — one PR, or a whole stack squashed into a single integration branch — for complexity, whether that complexity was justified by the expressed intent, how cleanly each stacked PR incremented on its predecessors, whether any PR was too large to review or to go green on its own, how the system's design helped or fought the change, what it deferred into the `docs/dev/todo/` backlog instead of doing, and what redesign would have made it easier. Use when reviewing the cost of a change after the fact, deciding whether a stack was worth its size or split along the right seams, asking whether one more stacked PR should close what the stack deferred, or looking for the design deficiency a painful change exposed.
 ---
 
 # eval-changeset — judge a changeset as one unit
@@ -316,6 +316,39 @@ Note that this classifies the **integrated** diff, so intra-stack rework has alr
 it — which is exactly why § 5 is measured separately. A stack can be 90% essential in its final tree
 and still have cost 40% more work than it shows.
 
+### 6a. The backlog delta — what the changeset deferred instead of doing
+
+A changeset's cost includes the work it **pushed into the future**. Measure it, like everything else:
+
+```bash
+git diff --name-status "$BASE"..HEAD -- docs/dev/todo/    # A added, M edited down, D resolved+wrapped
+```
+
+- **`A` — entries the changeset added.** Deferred work, priced at whatever it will cost when somebody
+  plans it cold. Read each one's stated reason; that reason is the finding.
+- **`M` — entries it edited down.** Partly addressed, so the remainder was judged not worth finishing
+  here.
+- **`D` — entries it resolved.** Credit, not cost: the wrap deleted them because a changeset claimed
+  them ✅ RESOLVED HERE. An entry that the tree shows fixed but that no changeset named is a **wrap
+  miss** — report it, since it is still sitting in the backlog telling the next planner a lie.
+
+Then ask the question that only this vantage point can answer: **which of the `A` and `M` entries were
+fixable inside the surface this changeset already owned?** Two answers are findings:
+
+| Finding | What it looks like |
+|---|---|
+| **A missing extra node** | the entry's fix touches only files this stack already changed, needs no new design decision, and would have been self-greenable. One more node would have closed it while the context was loaded; instead the next planner pays to re-acquire all of it. This is a **planning proposal** in § 8 |
+| **Genuinely deferred** | the fix needs a different surface, its own design, or is large enough to bury a reviewable diff. The deferral was correct — say so, and check only that the entry records *why*, since a reason-less entry is what makes the next Step 2b guess |
+
+The highest-value case in a stack: **an entry an early node deferred for want of a seam that a later
+node in the same stack then built.** The entry still states the original reason, which stopped being
+true before the stack even landed. Nobody finds that from the backlog alone — it is visible only from
+here, with the whole changeset in one view.
+
+Report the delta as a count and a table, and keep it out of the § 4 line totals: deferred work is not
+lines this changeset shipped. Authority for the lifecycle and the three verdicts: the
+[`pr-stack`](../pr-stack/SKILL.md) skill § *The backlog delta a stack leaves*.
+
 ### 7. Diagnose — where the design carried the change, and where it fought
 
 **Both lists are required.** Naming only friction produces a report that reads as a complaint and
@@ -345,7 +378,8 @@ evidence, and the incidental lines it caused:
 Also check what the change *avoided* saying: a fallback added without consent, a test-only branch in
 production code, a `TODO`/`FIXME` standing in for the hard half. CLAUDE.md forbids the first two
 outright — finding one flips the justification verdict from "small" to "under-scoped", because the
-change is smaller than the problem.
+change is smaller than the problem. **§ 6a is the same test with a number attached**: a changeset that
+looks lean because it deferred half the problem into `docs/dev/todo/` is under-scoped, not small.
 
 **Optional deep pass**, when the friction is real but you want it quantified beyond line counts —
 these are inputs, and if you skip them the report says so:
@@ -366,11 +400,13 @@ reply, not the whole document.
 Proposals come in **two kinds**, and mixing them wastes the distinction § 5 just established:
 
 - **Planning proposals** — where the stack should have been cut instead: the rework § 5 attributed to
-  planning, and the separable remainder § 5a found in an oversized PR. Concrete: name the PRs, their
-  responsibilities, their order, and what each would have avoided. Every proposed PR must be
-  **self-greenable** — its own tests pass, without its successors — or you have proposed the layer
-  split the boundary contract forbids. Keep the cut **linear**; a branching proposal is not
-  implementable here. These cost nothing to adopt and apply to the *next* stack.
+  planning, the separable remainder § 5a found in an oversized PR, and the **extra node § 6a found
+  missing**. Concrete: name the PRs, their responsibilities, their order, and what each would have
+  avoided. Every proposed PR must be **self-greenable** — its own tests pass, without its successors —
+  or you have proposed the layer split the boundary contract forbids. Keep the cut **linear**; a
+  branching proposal is not implementable here. These cost nothing to adopt and apply to the *next*
+  stack — **except a missing extra node on a stack that has not landed yet**, which is still
+  actionable now: say so, and name it as the node to add rather than as a lesson.
 - **Redesign proposals** — the payload for question 5. Raise one only for a friction site that cost
   real lines, and give each of them all six parts:
 

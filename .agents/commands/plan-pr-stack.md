@@ -91,7 +91,8 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
 2. **Dependencies** — For each node, which *earlier nodes* must have merged before it can? Record
    the real edges, then choose a **linear order that is a valid topological sort of them**. Where the
    logical graph branches, flatten it and say what that costs — the flattened siblings can no longer
-   be worked or landed in parallel.
+   be worked or landed in parallel. Topology leaves the order underdetermined; question 7 is what
+   settles the rest of it, so do not fix the sequence before the waves are grouped.
 3. **Ownership** — Which node owns which API surface / files? Each symbol has exactly one owning
    node, and no node ever implements a symbol another owns.
 4. **Stack size** — How many nodes? Prefer the fewest that keep each independently reviewable and
@@ -103,11 +104,32 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
    it takes a position in the line **before** the first node that needs it. A prerequisite node is a
    legitimate node: a vertical slice (the fix, its tests, its docs), independently mergeable. It is
    *not* the forbidden stubs-only shape, because it delivers behaviour.
-7. **Green waves** — from the real edges recorded in step 2, group the nodes into waves: wave 1 is
-   every node needing no *predecessor behaviour*, wave 2 every node whose only unmet need is wave 1,
-   and so on. This is a different grouping from the branch line and usually far wider: a node sixth
-   in the line can still be wave 1. Present the waves with the sequence, so the user sees what the
-   flattening cost and what it did not.
+7. **Green waves — and the order they impose** — from the real edges recorded in step 2, group the
+   nodes into waves: wave 1 is every node needing no *predecessor behaviour*, wave 2 every node whose
+   only unmet need is wave 1, and so on. This grouping is wider than the branch line: several nodes
+   share a wave, and a node sixth in the line can still be wave 1.
+
+   **Then derive the line from the waves.** This is the step most easily skipped, and skipping it is
+   what leaves a wave in whatever order its nodes happened to be named in. Authority: the `pr-stack`
+   skill § *Order inside a wave*.
+
+   - The line is the **waves concatenated**: all of wave 1, then all of wave 2, and so on.
+   - **Inside a wave, blockers lead.** Sort by what waits on the node — most transitive dependents
+     first, nodes nothing depends on last, remaining ties by the most foundational first.
+   - Every node's predecessors sit in a strictly *earlier* wave, so any intra-wave permutation is
+     still a valid topological sort. Nothing forces this order, which is precisely why it must be
+     chosen rather than inherited from the interview's narration.
+
+   ```
+   edges    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8
+   waves    1: n1     2: n2, n3, n5     3: n4, n6, n7, n8
+
+   ✓ line   n1 · n5, n2, n3 · n4, n6, n7, n8   n5 (3 dependents), n2 (1), n3 (none) — in that order
+   ✗ line   n1 · n3, n2, n5 · n4, n6, n7, n8   n3 blocks nothing, yet six nodes land behind it
+   ```
+
+   Present the waves **with** the derived sequence, name the transitive-dependent count that put each
+   wave-leading node where it is, and say what the flattening cost and what it did not.
 
 **Hold the boundary contract while decomposing.** These pairs are one node, never two:
 
@@ -126,8 +148,9 @@ ones; **do not invent a third**. Anything that seems to need one goes in the nod
 the user to decide.
 
 Present the proposed **sequence** (n₁…nₙ with one-line scope + owned surface each), the real
-dependency edges behind it, the **green waves** those edges imply, and anywhere the order was forced
-by flattening rather than by a real dependency. **Wait for user approval of the decomposition before creating anything.** If the user
+dependency edges behind it, the **green waves** those edges imply, **how the intra-wave order was
+sorted** (blockers first, with each leading node's dependent count), and anywhere the order was
+forced by flattening rather than by a real dependency. **Wait for user approval of the decomposition before creating anything.** If the user
 named a trunk other than the detected one, set `TRUNK` to it.
 
 ### Step 2: Analyze Existing Code
@@ -171,8 +194,14 @@ create it world-readable while the hand-rolled alternative deepens the very debt
 that is blocking.
 
 Carry the verdicts into Step 4b: each node's `## Prerequisites` lists the entries **that node** runs
-into, and a blocking one also earns a line in that node's `## Scope`. Record the ones you decide not
-to fix too — the value is that a reviewer sees the entry was considered rather than missed.
+into — **each with a relative link to its file** — and a blocking one also earns a line in that
+node's `## Scope`. Record the ones you decide not to fix too; the value is that a reviewer sees the
+entry was considered rather than missed.
+
+**Decide which node *claims* each entry it fixes**, and mark it ✅ RESOLVED HERE there only. That
+node's `/wrap-context-docs` deletes the entry's file, so two nodes claiming one entry means the
+second re-deletes a file its base already dropped. When a fix is split across nodes, the **lowest**
+one claims it and the others keep the reference with what their slice covers.
 
 This whole-work file is **temporary**. It is **not** a changeset companion, and wrap of any node must
 not delete it as if it were. **Do not `git add` it onto a stack branch.** When each node's changeset
@@ -193,7 +222,10 @@ in Step 4b, so nothing shared is created here and nothing has to be handed betwe
 
 What this step produces is agreement, not a file. Settle and write down for your own use:
 
-- the **order** — each node's branch and its predecessor's branch, which is the base its PR opens against;
+- the **order** — each node's branch and its predecessor's branch, which is the base its PR opens
+  against. It is the **green waves concatenated, blockers leading each wave** (Step 1 question 7);
+  write down the dependent count that justifies each wave-leading position, because Step 9 reports it
+  and a reviewer can check it;
 - **`TRUNK`**;
 - the **stack slug** — one or two kebab-case words, associative, chosen **once and never changed**.
   It is both the branch namespace `feature/<stack-slug>/<node>` and the PR-title group
@@ -244,10 +276,17 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
 - Follow `.agents/skills/planning/references/planning-phase.md` **Step 4** (PRD) and **Step 5**
   (changeset), scoped to **this node only**. Present each PRD for approval before its changeset.
 - **Add a `## Prerequisites` section** to any node whose Step 2b scan found something — the entries
-  *that node* runs into, each with a verdict, plus a `## Scope` line for anything blocking. Omit the
-  heading on nodes the scan cleared; an empty section is noise. Keep any node list inside it
+  *that node* runs into, each with a verdict **and a relative link to the entry's file**
+  (`[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`), plus a `## Scope` line for anything blocking.
+  Omit the heading on nodes the scan cleared; an empty section is noise. Keep any node list inside it
   **accurate** — "nodes 1, 3 and 6 touch this file" is a claim a reviewer will check, so verify it
   against the diffs rather than writing it from memory.
+
+  The link is not decoration: an entry a node **fixes** is marked `✅ RESOLVED HERE`, and that node's
+  `/wrap-context-docs` **deletes the file** — the section is the only memory the wrapping session has
+  of what the scan found. **Exactly one node claims an entry**, the lowest that fixes it; the others
+  keep it as a reference with their own verdict. Never write a ✅ verdict for an entry a *parent* node
+  claims.
 - **Every changeset MUST carry the five headings** the stack model requires, in every node's
   document:
 
@@ -636,8 +675,11 @@ Present a complete summary:
   confirmation the build passes on the published surface while tests fail for this node's own missing
   implementation.
 - **The green waves** — wave 1 (everything greenable now, concurrently), then each later wave with
-  the behaviour it is waiting on. Say plainly that this grouping is *not* the branch order and is
-  usually much wider. Name the per-node sequencing facts recorded in `## Dependencies`.
+  the behaviour it is waiting on. Say plainly that a wave is *wider* than a position in the line:
+  every node in it can be greened at once. Show that the line **is** the waves concatenated with
+  blockers leading each one, naming each wave-leading node's transitive-dependent count, so the user
+  can see the order was derived rather than guessed. Name the per-node sequencing facts recorded in
+  `## Dependencies`.
 - **What concurrency costs**: every `/green` adds commits, so a wave of N concurrent greens is N
   cascades of `/pr-stack-rebase`, and each concurrent node needs its own worktree (several GB here).
   Offer the smaller-batch trade rather than leaving it to be discovered.
@@ -710,6 +752,13 @@ Step 4b records them per node. The two directions are complementary — what thi
 somebody's Step 2b finds next, so write entries stating **why** the work was deferred, not only what
 remains. That reason is what tells the next planner whether it blocks them.
 
+**And it is read once more before this stack lands.** Every entry written here is re-examined at
+stack close — `/pr-wrap` on the top node and `/merge-pr-stack` 1e ask whether it could be closed by
+one extra node while the context is still loaded (`pr-stack` § *The backlog delta a stack leaves*).
+A stated reason is what that sweep judges, and the reason worth stating precisely is the one a later
+node in this same stack might invalidate: "deferred because there is no seam for it" becomes
+actionable the moment some node builds the seam.
+
 ## Rules
 
 - **Register the stack.** `gh pr create --draft --base <predecessor>` opens each PR; the stack is
@@ -718,10 +767,16 @@ remains. That reason is what tells the next planner whether it blocks them.
 - **Decompose linearly.** `gh stack` models a line, so plan one. Flatten work that branches, and say
   in the report what that cost — siblings become predecessor and successor, and an independent root
   loses its independence.
+- **Order the line from the waves, blockers first.** The line is the green waves concatenated, and
+  inside each wave a node other waves depend on comes ahead of one nothing waits on (most transitive
+  dependents first). Topology permits any intra-wave order; that is why this one must be chosen and
+  justified, not left to the order the nodes were named in.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
 - **Cross-check `docs/dev/todo/` (Step 2b) before decomposing.** Record every relevant item in the
-  affected node's `## Prerequisites` with a verdict; give a blocking one a `## Scope` line; give a
-  large one its own node or its own PR. Never absorb a large refactor into a feature node.
+  affected node's `## Prerequisites` with a verdict **and a link to its file**; give a blocking one a
+  `## Scope` line; give a large one its own node or its own PR. Never absorb a large refactor into a
+  feature node. An entry a node fixes is marked ✅ RESOLVED HERE and **its file is deleted by that
+  node's wrap** — one claiming node per entry, the lowest that fixes it.
 - **The boundary contract governs the decomposition.** Every node is a vertical slice — schema, code,
   tests, in one PR. Splitting by layer is forbidden; a node that ships only surface is not a valid
   node. Split by capability instead. Only the two named exceptions apply, and do not invent a third.
@@ -773,7 +828,9 @@ remains. That reason is what tells the next planner whether it blocks them.
 ```
 /plan-pr-stack
   record ORIGINAL_BRANCH (stop if detached) and TRUNK
-  interview → decompose into a LINEAR sequence of vertical slices → whole-work discovery
+  interview → decompose into vertical slices → real edges → GREEN WAVES
+  → line = waves concatenated, blockers leading each wave (most dependents first)
+  → whole-work discovery
   → cross-check docs/dev/todo/ → size each fix: in-node, prerequisite PR, or its own node
   → settle order, slug, owned surfaces, per-node draft-PR contracts
   → WAVE 1 (per node, in this worktree, in dependency order)

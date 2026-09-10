@@ -12,12 +12,14 @@ Transfer knowledge from changesets and PRDs into permanent documentation, then c
 1. Extract the final state (State B) from the working document
 2. Update the actual permanent docs with that knowledge
 3. Add a changelog or changeset **index** entry (audit trail)—see merge hygiene below
-4. Delete the working document
+4. **Clear the `docs/dev/todo/` entries this change resolved** — see [TODO backlog entries](#wrapping-todo-backlog-entries)
+5. Delete the working document
 
 Wrapping is **NOT** just adding changelog entries. It is a full knowledge transfer. In particular it is **not**:
 - Only adding a changelog/changesets entry
 - Leaving the feature/dev docs unchanged
 - Creating links to the deleted PRD/changeset files
+- Leaving a backlog entry in `docs/dev/todo/` describing a defect this change fixed
 
 **State B, not delta**: the permanent docs must read as cohesive, unified documents with no trace of the change process — no "previously", "now", "changed from", or other temporal language.
 
@@ -121,7 +123,59 @@ For changesets in `docs/dev/1-WIP/`:
 3. **Update change history**:
    - Create **one new file** in each affected `packages/{package}/docs/changesets/`, named `YYYY-MM-DD-<slug>.md`.
    - If the work is cross-package, create **one new file** in `docs/dev/changesets/` too.
-4. **Delete** the changeset file from `docs/dev/1-WIP/` (not archived)
+   - Name every backlog entry this change resolved, by title and date-slug — that entry is about to be
+     deleted, and this is its audit trail.
+4. **Clear the resolved `docs/dev/todo/` entries** the changeset's `## Prerequisites` marks
+   ✅ RESOLVED HERE — see [TODO backlog entries](#wrapping-todo-backlog-entries). Do this **before**
+   deleting the changeset: the changeset is the list
+5. **Delete** the changeset file from `docs/dev/1-WIP/` (not archived)
+
+## Wrapping TODO backlog entries
+
+[`docs/dev/todo/`](../../docs/dev/todo/) holds one file per known defect, deferred item and flagged
+debt. A change that **fixes** one and leaves its file behind turns that file into a lie: the next
+planner's Step 2b scan finds it, reads why the work was deferred, and plans around a problem that no
+longer exists. So the entry leaves the backlog the same way the changeset leaves `1-WIP` — **deleted,
+not archived, not marked** — and the change-history entry written a step earlier is its audit trail.
+
+**The changeset is the instruction, and the only one.** Its `## Prerequisites` section carries each
+scanned entry with a verdict and a **relative link to the entry's file**
+([changeset-doc.mdc](../../.cursor/rules/changeset-doc.mdc) § *Prerequisites*). That link exists for
+this moment: the wrap usually runs in a session that never saw the planning scan.
+
+```bash
+CS=docs/dev/1-WIP/YYYY-MM-DD-<slug>.md
+
+sed -n '/^## Prerequisites/,/^## [^P]/p' "$CS"                    # read the verdicts, in full
+grep -oE '\.\./todo/[0-9]{4}-[0-9]{2}-[0-9]{2}-[^)]+\.md' "$CS"   # every entry it references
+```
+
+| Verdict in `## Prerequisites` | What the wrap does |
+|---|---|
+| ✅ **RESOLVED HERE** | `git rm docs/dev/todo/<entry>.md` — the entry is gone from the backlog |
+| ℹ **ANSWERED** | Edit the entry to record the answer, and keep the file — unless the answer *was* the whole entry, in which case it should have been promoted to ✅ before the wrap |
+| ⚠ **DURING** / ⛔ **BLOCKING** not fixed | Nothing. The entry stays exactly as it is |
+| Not referenced at all | Nothing. **Never** delete an entry the changeset does not name |
+
+Rules, in the order they matter:
+
+- **Re-read every ✅ entry before deleting it.** Confirm what the changeset claims closed it actually
+  landed on this branch. If the entry has open parts the change did not cover, **downgrade it**: edit
+  the entry to state precisely what remains, leave the file in place, and report the downgrade. A
+  deleted entry whose problem still exists is the only failure here that destroys information.
+- **A ✅ verdict in the changeset is the planned deletion, so the wrap performs it** without a
+  separate confirmation, and lists every deleted path in the report. Everything else needs the user:
+  if the work plainly resolved an entry the changeset never recorded, **add the verdict and link to
+  `## Prerequisites` first, with the user's agreement**, then wrap. Deleting a shared backlog entry on
+  inference from a diff is exactly what CLAUDE.md's *ask before deleting* forbids.
+- **No changeset, no deletion.** A branch with no document in `docs/dev/1-WIP/` has no record of what
+  it was answering; write the changeset, then wrap it.
+- **The audit trail is the changeset/changelog entry**, which names the resolved item by title and
+  date-slug. Do **not** leave a `docs/dev/todo/<entry>.md` link in permanent docs — it dangles the
+  moment the entry is deleted, exactly as a `1-WIP` path does.
+- **A `Status: Resolved` marker is not the wrap's tool.** That marker is for an entry that turned out
+  resolved with no changeset to wrap — a flaky test that a since-landed change fixed. When a change
+  wraps, its resolved entries are deleted, not annotated.
 
 ## Wrapping PRDs
 
@@ -170,6 +224,7 @@ because a stacked branch inherits their commits. Only this PR's are wrapped:
 | A **predecessor's** changeset / PRD | `docs/dev/1-WIP/`, inherited through the branch's history | **That PR**, when it is set ready for review. Never wrap or delete one from here — it would show as a deletion in that PR's own diff |
 | This branch's changeset | `docs/dev/1-WIP/YYYY-MM-DD-*.md` | **this PR** — the wrap this command performs |
 | This branch's PRD | `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md` | **this PR** |
+| A `docs/dev/todo/` entry | the shared backlog, present on every branch | **the one PR whose own changeset marks it ✅ RESOLVED HERE** |
 | Permanent docs | `packages/*/docs/`, `docs/ft/<area>/` | reached **only** through a wrap |
 
 Consequences worth stating plainly:
@@ -182,6 +237,17 @@ Consequences worth stating plainly:
   is the only path in, on a stack branch as anywhere else.
 - A predecessor's documents stay untouched by the wrap. They are the boundary contract this PR was
   built against, and that PR owns their lifecycle.
+
+**Backlog entries follow the same ownership rule.** `docs/dev/todo/` is shared, so on a stack branch
+every node can see every entry:
+
+- Delete only the entries **this PR's own changeset** marks ✅ RESOLVED HERE. An entry a *parent's*
+  inherited changeset claims is that PR's to delete; removing it here puts the parent's cleanup in
+  this PR's diff and collides when the parent wraps.
+- If two nodes' changesets both claim the same entry, the **lowest** node deletes it and the others
+  downgrade their verdict to a reference — the same reason wraps run bottom-up.
+- An entry already deleted on the base and still present here is `/pr-stack-rebase`'s to clear, not
+  this wrap's. Do not re-delete it.
 
 ### S2. Wrap only the documents THIS PR owns
 
@@ -239,7 +305,8 @@ draft (its changeset belongs in `1-WIP` where the next session picks it up) and 
 
 The full readiness gate, the PR title correction and `gh pr ready <N>` live in `/pr-wrap` step 8. This
 command's part of it is narrow: report whether the wrap actually cleared **this PR's** documents out of
-`docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, and which inherited documents it deliberately left in place.
+`docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, which `docs/dev/todo/` entries it deleted, and which
+inherited documents and backlog entries it deliberately left in place.
 
 **Nothing hands off.** A wrap touches only the branch it runs on: no cross-branch push, no shared
 manifest, no "action required" notice. The stack-level document (`pr-stack-plan.md`) and the live
@@ -256,9 +323,11 @@ topology (`gh pr list`) needs no committed copy.
      a predecessor's `docs/dev/1-WIP/` documents are never in this set
 2. For each changeset/PRD, check completion status
 3. Apply decision logic (complete vs incomplete)
-4. Execute the wrap: extract -> update docs -> create the changeset/changelog entry files -> delete source
+4. Execute the wrap: extract -> update docs -> create the changeset/changelog entry files -> clear the
+   resolved `docs/dev/todo/` entries -> delete source
 5. For superpowers working docs, verify implementation complete then delete
-6. Report what was wrapped and where knowledge was transferred
+6. Report what was wrapped and where knowledge was transferred, including every backlog entry deleted
+   and every one deliberately kept
 
 ## Output Format
 
@@ -273,6 +342,13 @@ topology (`gh pr list`) needs no committed copy.
 
 ### Deleted Sources
 - `docs/dev/1-WIP/2026-01-22-feature.md`
+
+### Backlog Entries Cleared (`docs/dev/todo/`)
+| Entry | Verdict | Action | What closed it |
+|-------|---------|--------|----------------|
+| `2026-06-28-tddy-sandbox-cgroups.md` | ✅ Resolved here | Deleted | the cgroup delegation this PR ships, covered by `<test>` |
+| `2026-07-01-tddy-core.md` | ℹ Answered | Edited | question answered; the rest of the entry is still open |
+| `2026-08-02-test-hides-every-target.md` | ⚠ During | Kept | touched, not fixed — its own PR per the entry |
 
 ### Left in Place (stack branches only)
 | Document | Why |
@@ -292,6 +368,12 @@ Reason: complete the remaining work before wrapping.
 
 - **WRONG**: only adding a changelog entry without updating the docs
 - **WRONG**: linking to deleted PRD/changeset files
+- **WRONG**: leaving a `docs/dev/todo/` entry in place after this change fixed the defect it records —
+  the next planner's scan reads it as still open
+- **WRONG**: deleting a backlog entry the changeset never marked ✅ RESOLVED HERE, or deleting one
+  whose problem is only partly fixed instead of editing it down to what remains
+- **WRONG**: marking a resolved entry `**Status:** Resolved` instead of deleting it, when there is a
+  changeset wrapping it
 - **WRONG**: leaving delta language ("changed from X to Y") in the final docs
 - **WRONG**: leaving the feature/dev docs unchanged
 - **WRONG** (stack): wrapping or deleting a **parent's** changeset/PRD, or deleting one to shrink this
@@ -306,5 +388,6 @@ Reason: complete the remaining work before wrapping.
 ## Related
 
 - **Rules**: [.cursor/rules/changeset-doc.mdc](../../.cursor/rules/changeset-doc.mdc), [.cursor/rules/prd-doc.mdc](../../.cursor/rules/prd-doc.mdc), [.cursor/rules/dev-doc.mdc](../../.cursor/rules/dev-doc.mdc), [.cursor/rules/feature-doc.mdc](../../.cursor/rules/feature-doc.mdc)
+- **Backlog**: [docs/dev/todo/README.md](../../docs/dev/todo/README.md) — the entry lifecycle this wrap closes
 - **Commands**: `/update-context-docs`, `/pr-wrap`
 - **Stack**: Commands `/pr-stack-rebase`, `/pr-wrap` (step 8: readiness gate, title, `gh pr ready`) · Docs the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`), [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md)

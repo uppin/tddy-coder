@@ -30,8 +30,9 @@ If it is:
 - **Enter only after `/validate-changes` reported no gaps** against this PR's plan.
 - **Step 0 is a hard gate** — `/pr-stack-rebase` for **this branch only**, never a whole-stack cascade
   from a per-PR worktree.
-- **Wrapping covers only what this PR owns** — this PR's own `docs/dev/1-WIP/` pair, never a
-  predecessor's. See `/wrap-context-docs` § Stack Mode.
+- **Wrapping covers only what this PR owns** — this PR's own `docs/dev/1-WIP/` pair, and only the
+  `docs/dev/todo/` entries its own changeset claims; never a predecessor's. See `/wrap-context-docs`
+  § Stack Mode.
 - **Correct the PR title before marking ready** (step 8) — this is the last moment it can be fixed.
 - **Mark ready per-PR and bottom-up** (`gh pr ready <N>`). Never flip a whole stack ready at once:
   dependents further up may still be being implemented.
@@ -139,10 +140,15 @@ cargo test
 **Run Command**: `/wrap-context-docs`
 - Update changeset progress
 - Wrap documentation if all complete
+- **Clears the `docs/dev/todo/` entries this change resolved.** Before handing off, reconcile the
+  changeset's `## Prerequisites` with what the branch actually did: an entry recorded ⚠ DURING or
+  ⛔ BLOCKING that this work **fixed** is promoted to ✅ RESOLVED HERE, with its file link, so the wrap
+  deletes it. Steps 1–5 are the last chance to notice that — after step 7 the changeset is gone
 - Also cleans up `docs/superpowers/specs/` and `docs/superpowers/plans/` working docs once implementation is complete
 - **Stack branch**: it runs in **Stack Mode** (see `/wrap-context-docs` § Stack Mode) — it wraps only the
   documents this PR owns in `docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, never a parent's, and never the
-  `docs/dev/1-WIP/` pair. In a stack, wrap **bottom-up**
+  `docs/dev/1-WIP/` pair, and it deletes only the backlog entries **this PR's own** changeset claims.
+  In a stack, wrap **bottom-up**
 
 ### 8. Stack Only: Correct the Title & Mark Ready for Review
 
@@ -182,6 +188,7 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 |---|---|
 | Own changeset wrapped out of `docs/dev/1-WIP/` | content transferred into package/feature docs, source deleted (step 7) |
 | Own PRD wrapped out of `docs/ft/*/1-WIP/` | same, or deferred with a written reason |
+| Backlog entries this PR resolved are gone from `docs/dev/todo/` | every ✅ RESOLVED HERE entry in this PR's own changeset deleted; every one kept has a stated reason. A parent's claimed entries are **not** this PR's |
 | No unchecked boxes in this PR's changeset | Scope and acceptance criteria all `[x]`, or annotated as deferred |
 | Own temporary markers resolved | `TODO` / `FIXME` **this PR added** are implemented or deferred with a reason in the changeset |
 | `/pr-stack-rebase` ran and the leak check passed | `origin/<base>..HEAD` is this PR's commits only |
@@ -190,6 +197,32 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 
 **Parent-owned code, files and `TODO`/`FIXME` markers are NOT this PR's WIP** — they belong to the PR
 that owns them and stay exactly as they are. Only what this PR added counts against the gate.
+
+#### Top node only (K = N): sweep the stack's backlog delta
+
+The **top** node is the stack's last chance to fix anything cheaply. Below it, every node's own
+`docs/dev/todo/` handling is covered by the gate row above; here the subject is different — the
+entries **the stack as a whole added or edited down**, from planning's out-of-scope ideas, `/green`'s
+deferrals, and every ⚠ DURING verdict that recorded an entry the work touched and left.
+
+```bash
+BASE=$(git merge-base origin/master HEAD)
+git diff --name-status "$BASE"..HEAD -- docs/dev/todo/     # A = added by the stack, M = edited down
+```
+
+For each, ask: *could this be fixed inside the surface this stack already owns, as one more node?*
+The three verdicts and their criteria are in the `pr-stack` skill § *The backlog delta a stack
+leaves*. Look hardest for an entry an early node deferred **for want of something a later node then
+built** — the entry still states the original reason, which stopped being true inside this stack.
+
+- **An *Extra node* verdict is the user's decision**, since it grows the stack: present the entry, the
+  fix you would make and its size, and let them choose. If they take it, `/add-to-pr-stack` on this
+  branch, and this PR is no longer the top — renumber per that command.
+- **This does not block marking the PR ready.** *Leave it* is a normal answer; leaving the question
+  unasked is not.
+- Whatever is left stays in the backlog **with the reason written into the entry** — that is what the
+  next planner's Step 2b reads. `/merge-pr-stack` Wave 1 asks the same question again before anything
+  merges, and `/eval-changeset` reports the delta as part of what the stack cost.
 
 #### Push, then mark this PR ready
 
@@ -284,6 +317,8 @@ Create TODO list and mark each step complete:
 - **Tests**: All passing ✅
 - **Production Ready**: ✅ Yes
 - **Documentation**: ✅ Wrapped
+- **Backlog**: N `docs/dev/todo/` entries deleted, M kept (with reasons)
+- **Backlog delta** (top node only): N entries this stack added/edited — X routed to an extra node, Y left with reasons
 - **Stack** (stack branches only): rebase ✅ · readiness gate ✅ · title `<final title>` · `gh pr ready <N>` ✅ / n/a
 
 ### 🎯 Recommendation
@@ -318,6 +353,8 @@ Merging and repointing belong to `/merge-pr-stack`.
 - Don't proceed with failing tests
 - Don't ignore subagent recommendations
 - Don't use `--no-verify` when committing or pushing
+- Don't leave a `docs/dev/todo/` entry standing for a defect this branch fixed — and don't delete one
+  the changeset never marked ✅ RESOLVED HERE
 - **Stack**: don't delete parent-owned files, code or markers to shrink a stacked diff — extra files mean
   leaked ancestor commits; rebase, do not `git rm`
 - **Stack**: don't split or restructure a file a parent or dependent PR also touches — defer it to a

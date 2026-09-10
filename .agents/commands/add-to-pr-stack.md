@@ -53,6 +53,14 @@ the `pr-stack` skill § *The PR boundary contract*.
 If the work the user described is a layer split, say so and propose the capability cut before creating
 anything.
 
+**Clearing a `docs/dev/todo/` entry the stack itself deferred is a legitimate reason to add a node** —
+usually the highest-value one, because the fix is cheapest while the stack's context is still loaded
+(`pr-stack` § *The backlog delta a stack leaves*; `/merge-pr-stack` 1e and `/pr-wrap` step 8 are where
+the question gets asked). It changes nothing about the contract: such a node is a vertical slice with
+its own PRD, changeset and tests, and its changeset marks the entry **✅ RESOLVED HERE** with a
+relative link, so its own `/wrap-context-docs` deletes the entry's file. **One coherent concern per
+node** — two unrelated backlog entries are two nodes, not one clean-up node.
+
 ## Default parent
 
 Unless the user named a parent, the new PR sits on the **branch checked out here**, and only if that
