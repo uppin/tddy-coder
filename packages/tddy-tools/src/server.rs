@@ -4,6 +4,11 @@ use crate::github_pr::{
     create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
     UpdatePullRequestParams,
 };
+use crate::mcp_primitives::{
+    cancel_remote_conversation, env_non_empty, open_remote_agent_session, schema_object,
+    seed_subagents_or_report, subagent_config_from_env, subagent_error_json, subagent_route,
+    RemoteToolDef,
+};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
@@ -14,10 +19,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::{
-    resolve_replaced_tools_for_defs, CodebaseAccess, PromptOutcome, SubagentConfig,
-    SubagentRegistry, SubagentSession,
+    resolve_replaced_tools_for_defs, PromptOutcome, SubagentRegistry, SubagentSession,
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::{
     github::{PrSearchHit, PrState},
@@ -1490,13 +1493,6 @@ impl rmcp::ServerHandler for PermissionServer {
 
 // --- Remote-codebase mode: dynamic tool catalog helpers ---
 
-/// A tool definition fetched from the relay daemon (or configured statically for testing).
-pub struct RemoteToolDef {
-    pub name: String,
-    pub description: String,
-    pub input_schema_json: String,
-}
-
 /// Returns the names of tools that are always statically registered and never forwarded to a relay.
 pub fn static_tool_names() -> Vec<&'static str> {
     vec!["approval_prompt", "submit"]
@@ -1694,83 +1690,6 @@ fn subagent_tool_names() -> Vec<String> {
         .into_iter()
         .map(|tool| tool.name.to_string())
         .collect()
-}
-
-/// Open a conversation with `entry` on the daemon that runs it, for an agent this process holds no
-/// def for.
-///
-/// A roster entry carries no endpoint or credential — deliberately — so an agent owned by another
-/// daemon, and a local one attached after spawn, are run by asking the facilitating daemon to run
-/// them (docs/ft/daemon/session-agent-roster.md § Invoking an agent). The refusal names the agent
-/// and the daemon its conversations are routed by, so an operator reads which host to go and look
-/// at rather than "this session cannot reach it".
-async fn open_remote_agent_session(
-    entry: &tddy_service::proto::connection::SessionAgentEntry,
-    conversation_id: &str,
-) -> Result<OpenedAgent, String> {
-    let refused = |e: String| {
-        format!(
-            "agent '{}' is routed by daemon '{}': {e}",
-            entry.agent_id, entry.daemon_instance_id
-        )
-    };
-    let link = std::sync::Arc::new(
-        crate::session_agents::AgentConversationLink::connect()
-            .await
-            .map_err(refused)?,
-    );
-    let opened = link
-        .open(&entry.agent_id, conversation_id)
-        .await
-        .map_err(refused)?;
-    Ok(OpenedAgent {
-        agent_id: entry.agent_id.clone(),
-        session: Box::new(link.session(opened.clone(), &entry.model)),
-        remote: Some(link.handle(opened)),
-    })
-}
-
-/// An agent opened for one turn loop: what to prompt, and — when the loop runs on another daemon —
-/// what to close when the conversation ends.
-pub(crate) struct OpenedAgent {
-    pub(crate) agent_id: String,
-    pub(crate) session: Box<dyn SubagentSession>,
-    /// `None` for an agent this process runs itself: there is nothing on another host to close.
-    pub(crate) remote: Option<crate::session_agents::RemoteConversationHandle>,
-}
-
-/// Open a turn loop with the roster agent `agent_id`, for a tool that runs one bounded exchange of
-/// its own instead of handing a conversation to the main agent (`request_action`).
-///
-/// Resolved against the live roster exactly as [`subagent_new_session_tool`] resolves it — same
-/// ids, same refusals, no default for a call that names none — so which agents are addressable does
-/// not depend on which tool is asking, and no tool confers a role on an agent by inspecting what it
-/// `replaces`.
-///
-/// No conversation is registered with the roster: the exchange opens and ends inside the call, so
-/// there is nothing a later `subagent_cancel` or a detach could address.
-pub(crate) async fn open_roster_agent_session(agent_id: &str) -> Result<OpenedAgent, String> {
-    let roster = crate::session_agents::session_agent_roster();
-    let entry = roster.resolve(Some(agent_id)).map_err(|e| e.to_string())?;
-    let Some(def) = roster.local_def_for(&entry) else {
-        // The daemon mints the conversation id here: nothing outside this call can name the
-        // exchange, so there is nothing a caller-chosen id would let it cancel. The caller closes
-        // it through the handle instead.
-        return open_remote_agent_session(&entry, "").await;
-    };
-    let name = def.name.clone();
-    let session = SubagentRegistry::from_defs(vec![def])
-        .create(&name, subagent_config_from_env())
-        .map_err(|e| format!("agent '{}': {e}", entry.agent_id))?;
-    Ok(OpenedAgent {
-        agent_id: entry.agent_id,
-        session,
-        remote: None,
-    })
-}
-
-pub(crate) fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key).ok().filter(|v| !v.trim().is_empty())
 }
 
 /// One open subagent conversation plus the accounting metadata that lives alongside the session
@@ -2016,83 +1935,6 @@ fn blocking_budget(
             )),
         },
     }
-}
-
-/// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
-/// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else `Managed` when a session-tool transport is
-/// configured (mirrors the exec-tool gating above), else `Local`.
-fn subagent_codebase_access_from_env() -> CodebaseAccess {
-    match env_non_empty("TDDY_SUBAGENT_CODEBASE_ACCESS").as_deref() {
-        Some("local") => CodebaseAccess::Local,
-        Some("managed") => managed_codebase_access(),
-        _ => {
-            if crate::session_tool_client::detect_session_tool_transport().is_some() {
-                managed_codebase_access()
-            } else {
-                CodebaseAccess::Local
-            }
-        }
-    }
-}
-
-/// Wrap [`crate::session_tool_client::dispatch_session_tool`] as a `CodebaseAccess::Managed`
-/// dispatch fn — the same proxy transport the exec-tool catalog already uses.
-fn managed_codebase_access() -> CodebaseAccess {
-    CodebaseAccess::managed(|tool_name: String, args: serde_json::Value| {
-        Box::pin(async move {
-            crate::session_tool_client::dispatch_session_tool(&tool_name, args).await
-        })
-    })
-}
-
-/// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
-/// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
-/// process. Empty when the env var is unset or blank: with no def there is no agent, since every
-/// agent this process can address came from a def source someone wrote.
-///
-/// A value that is *set* and does not parse is an error, never an empty seed. `SpecializedAgentDef`
-/// is `deny_unknown_fields`, so a `tddy-tools` older than the daemon that wrote the value parses
-/// exactly this way — and an empty seed means no agent is attached and none of the withdrawn tools
-/// are served by anyone, with nothing naming the variable that caused it.
-///
-/// The message carries serde's position, never the value: a def carries a provider credential.
-pub fn subagents_from_env() -> Result<Vec<SpecializedAgentDef>, String> {
-    let Some(json) = env_non_empty("TDDY_SUBAGENTS_JSON") else {
-        return Ok(Vec::new());
-    };
-    serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).map_err(|e| {
-        format!(
-            "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
-             This is what a tddy-tools older than the daemon that spawned it sees, and treating \
-             it as 'no agents are attached' would silently un-withdraw every tool the session's \
-             agents took over"
-        )
-    })
-}
-
-/// The spawn seed for the two lazy constructions that have no caller to refuse to — the MCP
-/// server's router and the process-wide roster.
-///
-/// `--mcp` already refused to start on an unparseable value (see `run_mcp_server`), so reaching the
-/// error arm means a caller that never passed that gate. It is reported at `error` naming the
-/// variable rather than passed off as a session nobody attached an agent to.
-pub(crate) fn seed_subagents_or_report() -> Vec<SpecializedAgentDef> {
-    subagents_from_env().unwrap_or_else(|e| {
-        log::error!(target: "tddy_tools::server", "{e}");
-        Vec::new()
-    })
-}
-
-/// The only thing a caller supplies that a def cannot: how this process reaches the codebase.
-/// Endpoint, model, credential and turn budget come from the def itself.
-pub(crate) fn subagent_config_from_env() -> SubagentConfig {
-    SubagentConfig {
-        access: subagent_codebase_access_from_env(),
-    }
-}
-
-pub(crate) fn subagent_error_json(message: impl std::fmt::Display) -> String {
-    serde_json::json!({ "error": message.to_string(), "is_error": true }).to_string()
 }
 
 fn prompt_outcome_json(outcome: PromptOutcome) -> String {
@@ -2478,27 +2320,6 @@ async fn report_local_conversation_state(
     }
 }
 
-/// Close a conversation on the daemon running its turn loop, when it runs on one.
-///
-/// Failure is logged rather than returned: the conversation is already gone on this side, so there
-/// is nothing the caller could do differently, and reporting a cancel as failed would tell the main
-/// agent a conversation it can no longer prompt is still open. Logged at `error` because a
-/// conversation left open on the owning daemon is a leak an operator has to be able to find.
-pub(crate) async fn cancel_remote_conversation(
-    remote: Option<crate::session_agents::RemoteConversationHandle>,
-) {
-    let Some(remote) = remote else {
-        return;
-    };
-    if let Err(e) = remote.cancel().await {
-        log::error!(
-            target: "tddy_tools::session_agents",
-            "conversation '{}' was closed here but not on the daemon running it: {e}",
-            remote.conversation_id()
-        );
-    }
-}
-
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
 async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
@@ -2863,36 +2684,6 @@ fn agent_parameter_description(agents: &[crate::session_agents::AddressableAgent
         "Required. One of the agents attached to this session: {}.",
         choices.join("; ")
     )
-}
-
-pub(crate) fn schema_object(
-    json: serde_json::Value,
-) -> std::sync::Arc<serde_json::Map<String, serde_json::Value>> {
-    std::sync::Arc::new(json.as_object().cloned().unwrap_or_default())
-}
-
-/// Wraps a subagent tool handler (`async fn(Value) -> String`) into a `ToolRoute` — the same
-/// success-envelope-with-embedded-error convention `dynamic_tool_router` uses for exec tools.
-pub(crate) fn subagent_route<F>(
-    tool: rmcp::model::Tool,
-    handler: F,
-) -> rmcp::handler::server::router::tool::ToolRoute<PermissionServer>
-where
-    F: Fn(serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>
-        + Send
-        + Sync
-        + 'static,
-{
-    rmcp::handler::server::router::tool::ToolRoute::new_dyn(tool, move |ctx| {
-        let arguments = serde_json::Value::Object(ctx.arguments.clone().unwrap_or_default());
-        let result_future = handler(arguments);
-        Box::pin(async move {
-            let result_string = result_future.await;
-            Ok(rmcp::model::CallToolResult::success(vec![
-                rmcp::model::Content::text(result_string),
-            ]))
-        })
-    })
 }
 
 /// The `subagent_prompt` input schema. Named, like [`subagent_new_session_schema`], so the router

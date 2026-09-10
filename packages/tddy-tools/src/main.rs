@@ -172,7 +172,7 @@ async fn run_mcp_server() -> Result<()> {
     // main agent back every tool the session's agents took over, with no line anywhere naming the
     // cause. A security control that turns itself off on version skew is worse than one that
     // refuses to start.
-    let seed = tddy_tools::server::subagents_from_env().map_err(|e| anyhow::anyhow!(e))?;
+    let seed = tddy_tools::mcp_primitives::subagents_from_env().map_err(|e| anyhow::anyhow!(e))?;
     log::info!(
         target: "tddy_tools::server",
         "spawn seed carries {} specialized agent def(s)",

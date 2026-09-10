@@ -6,7 +6,7 @@
 //! to the owner's `LspExecutor`. The names carry no language prefix — one interface serves
 //! every language.
 
-use crate::server::{env_non_empty, RemoteToolDef};
+use crate::mcp_primitives::{env_non_empty, RemoteToolDef};
 
 /// Env var the owner sets per session when ≥1 language server is available. Its presence
 /// (non-empty) gates whether the LSP tools are exposed to the agent.

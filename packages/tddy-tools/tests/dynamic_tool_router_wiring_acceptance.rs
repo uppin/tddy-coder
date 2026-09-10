@@ -9,7 +9,8 @@
 use std::collections::HashSet;
 
 use serial_test::serial;
-use tddy_tools::server::{dynamic_tool_router, exec_tool_catalog, PermissionServer, RemoteToolDef};
+use tddy_tools::mcp_primitives::RemoteToolDef;
+use tddy_tools::server::{dynamic_tool_router, exec_tool_catalog, PermissionServer};
 
 fn clear_session_tool_transport_env() {
     std::env::remove_var("TDDY_SANDBOX_TOOL_IPC");

@@ -214,7 +214,7 @@ impl RosterMutability {
     /// a session that says nothing about its roster is one whose roster can change, which is the
     /// reading that refuses rather than the one that answers from a stale seed.
     fn declared_by_the_spawn_environment() -> Self {
-        match crate::server::env_non_empty(STATIC_ROSTER_ENV) {
+        match crate::mcp_primitives::env_non_empty(STATIC_ROSTER_ENV) {
             Some(_) => Self::Static,
             None => Self::Live,
         }

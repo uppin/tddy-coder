@@ -73,7 +73,7 @@ pub fn session_agent_roster() -> &'static LiveAgentRoster {
         let transport = detect_session_tool_transport();
         LiveAgentRoster::seeded_from(
             &seed_session_id(transport.as_ref()),
-            crate::server::seed_subagents_or_report(),
+            crate::mcp_primitives::seed_subagents_or_report(),
             &seed_daemon_instance_id(transport.as_ref()),
         )
     })

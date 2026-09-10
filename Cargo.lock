@@ -13074,7 +13074,6 @@ dependencies = [
  "tddy-sandbox-darwin",
  "tddy-sandbox-runner",
  "tddy-service",
- "tddy-tools",
  "tempfile",
  "tokio",
  "tokio-stream",

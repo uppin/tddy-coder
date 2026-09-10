@@ -20,9 +20,9 @@ use tddy_core::session_actions::{
     parse_action_manifest_yaml, validate_authored_manifest, ActionManifest,
 };
 
-use crate::server::{
+use crate::mcp_primitives::{
     cancel_remote_conversation, open_roster_agent_session, schema_object, subagent_error_json,
-    subagent_route, PermissionServer,
+    subagent_route,
 };
 
 /// Bounded correction loop with the author model: initial attempt + this many retries carrying
@@ -194,8 +194,10 @@ async fn invoke_action_tool(args: serde_json::Value) -> String {
 /// Build the `ToolRouter` for the three session-action tools. Merged into
 /// `PermissionServer::new()`'s router whenever a session-tool transport is configured — the host
 /// surface all three round-trip to.
-pub(crate) fn action_tool_router(
-) -> rmcp::handler::server::router::tool::ToolRouter<PermissionServer> {
+pub(crate) fn action_tool_router<S>() -> rmcp::handler::server::router::tool::ToolRouter<S>
+where
+    S: rmcp::service::MaybeSend + 'static,
+{
     use rmcp::handler::server::router::tool::ToolRouter;
 
     let mut router = ToolRouter::new();

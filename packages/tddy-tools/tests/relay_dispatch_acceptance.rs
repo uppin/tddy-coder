@@ -80,7 +80,7 @@ fn is_native_tool_denied_in_remote_mode_covers_write_edit_notebook() {
 #[tokio::test]
 async fn build_dynamic_tool_list_does_not_inject_native_tools() {
     // Given
-    let catalog = vec![tddy_tools::server::RemoteToolDef {
+    let catalog = vec![tddy_tools::mcp_primitives::RemoteToolDef {
         name: "Read".to_string(),
         description: "Remote read".to_string(),
         input_schema_json: r#"{"type":"object"}"#.to_string(),

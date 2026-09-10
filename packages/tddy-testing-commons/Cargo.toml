@@ -10,7 +10,6 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
-tddy-tools = { path = "../tddy-tools" }
 async-trait = "0.1"
 bytes = "1"
 tempfile = "3"

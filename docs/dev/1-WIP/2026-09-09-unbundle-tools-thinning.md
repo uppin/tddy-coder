@@ -224,8 +224,8 @@ package boundary — is answered here by moving the boundary instead of the stri
 
 ## Scope
 
-- [ ] **⛔ Resolve the `tddy-testing-commons` ↔ `tddy-tools` cycle** before any surface moves
-- [ ] **Step zero — `mcp_primitives`**: the eight shared items; all three `server.rs` cycles broken
+- [x] **⛔ Resolve the `tddy-testing-commons` ↔ `tddy-tools` cycle** before any surface moves ✅
+- [x] **Step zero — `mcp_primitives`**: the eight shared items; all three `server.rs` cycles broken ✅
 - [ ] **⛔ Action-tool advertisement**: implemented where advertised, or withdrawn
 - [ ] **`tddy-workflow-recipes`**: seam B, `github_pr`, `schema`, `schema_manifest`; `review_persist` deleted
 - [ ] **`tddy-service`**: `session_tool_client` + 4 `session_agents` modules
@@ -296,8 +296,8 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 
 ## Implementation Milestones
 
-- [ ] M1 — the `tddy-testing-commons` cycle resolved
-- [ ] M2 — `mcp_primitives` extracted; all three `server.rs` cycles broken; `cargo build -p tddy-tools` clean
+- [x] M1 — the `tddy-testing-commons` cycle resolved ✅
+- [x] M2 — `mcp_primitives` extracted; all three `server.rs` cycles broken; `cargo build -p tddy-tools` clean ✅
 - [ ] M3 — the four small dispatch movers (`analyze_cli`, `restructure_cli`, `lsp_tools`, `build_cli`); `cli_vector()` and the duplicate `plugin_registry` deleted
 - [ ] M4 — `schema`, `schema_manifest`, `github_pr`, seam B to `tddy-workflow-recipes`; `review_persist` deleted; `build.rs` deleted
 - [ ] M5 — the six `tddy-core` movers and `cli.rs`'s wire types
@@ -395,6 +395,16 @@ afterwards, verified by grep over the destinations rather than by assumption.
       is the alternative if the build cost proves real
 - [ ] The second `[[bin]]` (`execute-tool-stdio-fixture`) still forces `tddy-rpc`, `tddy-stdio` and
       `async-trait` into `[dependencies]` rather than dev-deps
+- [ ] **Step zero traded three cycles for one, and M7 inherits it.** `open_roster_agent_session`
+      resolves against the live roster, so `mcp_primitives` imports `session_agents` while
+      `session_agents/{seed,stream}` import `seed_subagents_or_report` and `env_non_empty` back out
+      of it. In-crate that compiles; at **M7**, with `session_agents/*` in `tddy-service`, it is the
+      cross-crate cycle step zero exists to prevent. M7 re-homes those two items (the roster seed
+      belongs with the roster) rather than moving the modules as they stand
+- [ ] `lsp_tools`' two `crate::server::PermissionServer::new().tool_names()` calls are `#[cfg(test)]`
+      only, and cannot follow `lsp_tools` to `tddy-lsp-executor` at **M3** — the advertisement they
+      assert is a `tddy-tools` fact. They re-home to a `tddy-tools` integration test, not to the
+      destination crate
 
 ## Baseline
 
