@@ -11,10 +11,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState};
 
-use super::error::ModelRegistryError;
-use super::labels::reported_capabilities_to_labels;
-use super::provider_client::ProviderClient;
-use super::provider_http::{decode, unreachable, ProviderHttp};
+use crate::error::ModelRegistryError;
+use crate::labels::reported_capabilities_to_labels;
+use crate::provider_client::ProviderClient;
+use crate::provider_http::{decode, unreachable, ProviderHttp};
 
 /// The `anthropic-version` every Anthropic API request must carry; the API refuses a request
 /// without one rather than assuming the newest.

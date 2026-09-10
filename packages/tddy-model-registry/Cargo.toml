@@ -9,12 +9,41 @@ name = "tddy_model_registry"
 path = "src/lib.rs"
 
 [dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+# Same version + feature set `tddy-core` already uses for the session catalog store; the model
+# registry follows that precedent (runtime query API, WAL, created on demand).
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tokio-stream = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+# `acp_service.rs`: the daemon-hosted, model-addressed `acp.AcpService`, whose agent is `tddy-acp`'s
+# `ProviderAcpAgent`. The ACP SDK is needed directly to speak its `Agent` trait and to map its
+# session updates onto the protobuf mirror; the version is pinned to `tddy-acp`'s.
+tddy-acp = { path = "../tddy-acp" }
+agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
+# `store.rs` refuses an assistant name that collides with a builtin coding backend's agent id.
+tddy-coder = { path = "../tddy-coder" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-discovery = { path = "../tddy-discovery" }
 tddy-rpc = { path = "../tddy-rpc" }
-tddy-core = { path = "../tddy-core" }
-thiserror = "2"
+tddy-service = { path = "../tddy-service" }
+tddy-task = { path = "../tddy-task" }
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 
 [dev-dependencies]
-rstest = { workspace = true }
-pretty_assertions = { workspace = true }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+# A dev-only edge back to the crate this subsystem left, and the only one:
+# `model_registry_service_acceptance.rs` checks that a created assistant reaches the allowlist rows
+# `ListAgents` renders, which is `tddy_daemon::agent_list_mapping`'s answer over this crate's
+# `list_assistants`. Cargo permits a cycle through `[dev-dependencies]`; the production edge runs
+# one way only, from `tddy-daemon` to here.
+tddy-daemon = { path = "../tddy-daemon" }

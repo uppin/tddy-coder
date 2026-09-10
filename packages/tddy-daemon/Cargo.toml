@@ -34,9 +34,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
-# Same version + feature set `tddy-core` already uses for the session catalog store; the model
-# registry follows that precedent (runtime query API, WAL, created on demand).
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
 subtle = "2.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
 bytes = "1"
@@ -50,11 +47,10 @@ tddy-core = { path = "../tddy-core" }
 # crate because `pub(crate)` does not cross a crate boundary, so a subsystem leaving this crate
 # could not otherwise reach them without depending on `connection_service`.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-# model_registry/acp_service.rs: the daemon-hosted, model-addressed `acp.AcpService`, whose agent is
-# `tddy-acp`'s `ProviderAcpAgent`. The ACP SDK is needed directly to speak its `Agent` trait and to
-# map its session updates onto the protobuf mirror; the version is pinned to `tddy-acp`'s.
-tddy-acp = { path = "../tddy-acp" }
-agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
+# The moved model registry: `runtime.rs` opens the store and registers both of its services, and
+# `connection_service` resolves registry assistants as `--agent` targets. `sqlx`,
+# `agent-client-protocol` and `tddy-acp` left with it.
+tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-demo-runner = { path = "../tddy-demo-runner" }

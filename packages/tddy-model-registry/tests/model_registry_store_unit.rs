@@ -7,13 +7,13 @@
 //!
 //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
 
-use tddy_daemon::model_registry::{
+use tddy_discovery::agent_def::SubagentTool;
+use tddy_model_registry::{
     assistant_to_agent_def, capabilities_to_labels, registry_agent_def_with_credential,
     reported_capabilities_to_labels, truncate_provider_detail, ModelRegistryError,
     ModelRegistryStore, NewAssistant, NewProvider, MAX_PROVIDER_DETAIL_BYTES,
     MAX_SYSTEM_PROMPT_BYTES,
 };
-use tddy_discovery::agent_def::SubagentTool;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState, ProviderEntry, ProviderKind};
 
 // ---------------------------------------------------------------------------

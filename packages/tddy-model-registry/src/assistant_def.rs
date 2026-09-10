@@ -5,8 +5,8 @@
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::models::{AssistantEntry, ProviderEntry};
 
-use super::error::ModelRegistryError;
-use super::store::ModelRegistryStore;
+use crate::error::ModelRegistryError;
+use crate::store::ModelRegistryStore;
 
 /// How many model round trips an assistant's internal tool loop may take before it must answer.
 /// The same default a YAML-defined subagent gets.

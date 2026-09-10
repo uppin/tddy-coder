@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use tddy_daemon::model_registry::{
+use tddy_model_registry::{
     ModelRegistryError, ModelRegistryServiceImpl, ModelRegistryStore, NewProvider, ProviderClient,
     ProviderClientFactory,
 };
@@ -840,7 +840,7 @@ async fn refuses_to_resolve_a_client_for_a_provider_row_with_no_kind() {
     let unspecified = a_provider_row_of_kind(ProviderKind::Unspecified as i32);
 
     // When
-    let result = tddy_daemon::model_registry::DefaultProviderClients
+    let result = tddy_model_registry::DefaultProviderClients
         .client_for(&unspecified, Some("a-real-api-key".to_string()));
 
     // Then — resolving it to "probably OpenAI-compatible" would send this key to an endpoint
@@ -857,7 +857,7 @@ async fn refuses_to_resolve_a_client_for_a_provider_kind_this_build_does_not_kno
     let from_the_future = a_provider_row_of_kind(97);
 
     // When
-    let result = tddy_daemon::model_registry::DefaultProviderClients
+    let result = tddy_model_registry::DefaultProviderClients
         .client_for(&from_the_future, Some("a-real-api-key".to_string()));
 
     // Then
@@ -879,7 +879,7 @@ async fn resolves_every_kind_it_does_know_to_a_client() {
     ] {
         let row = a_provider_row_of_kind(kind as i32);
         assert!(
-            tddy_daemon::model_registry::DefaultProviderClients
+            tddy_model_registry::DefaultProviderClients
                 .client_for(&row, Some("a-real-api-key".to_string()))
                 .is_ok(),
             "{kind:?} must resolve to a client"

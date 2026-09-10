@@ -18,10 +18,10 @@ use tddy_service::proto::models::{
     RefreshProviderModelsResponse, UnloadModelRequest, UnloadModelResponse,
 };
 
-use super::error::ModelRegistryError;
-use super::labels::UNDETERMINABLE_LABEL;
-use super::provider_client::{ProviderClient, ProviderClientFactory};
-use super::store::{ModelRegistryStore, NewAssistant, NewProvider};
+use crate::error::ModelRegistryError;
+use crate::labels::UNDETERMINABLE_LABEL;
+use crate::provider_client::{ProviderClient, ProviderClientFactory};
+use crate::store::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_daemon_kernel::SessionUserResolver;
 
 pub struct ModelRegistryServiceImpl {
@@ -371,14 +371,14 @@ impl ProviderClientFactory for DefaultProviderClients {
             ))
         })?;
         match kind {
-            ProviderKind::Ollama => Ok(Arc::new(super::ollama::OllamaProviderClient::new(
+            ProviderKind::Ollama => Ok(Arc::new(crate::ollama::OllamaProviderClient::new(
                 &provider.base_url,
                 &provider.provider_id,
                 &provider.daemon_instance_id,
                 credential,
             ))),
             ProviderKind::Openai | ProviderKind::Fireworks => Ok(Arc::new(
-                super::openai_compatible::OpenAiCompatibleProviderClient::new(
+                crate::openai_compatible::OpenAiCompatibleProviderClient::new(
                     &provider.base_url,
                     &provider.provider_id,
                     &provider.daemon_instance_id,
@@ -389,12 +389,12 @@ impl ProviderClientFactory for DefaultProviderClients {
             // token is refused with a 401 whose body would then be the provider's whole
             // enumeration error.
             ProviderKind::Anthropic => Ok(Arc::new(
-                super::openai_compatible::OpenAiCompatibleProviderClient::with_credential_style(
+                crate::openai_compatible::OpenAiCompatibleProviderClient::with_credential_style(
                     &provider.base_url,
                     &provider.provider_id,
                     &provider.daemon_instance_id,
                     credential,
-                    super::openai_compatible::CredentialStyle::AnthropicApiKey,
+                    crate::openai_compatible::CredentialStyle::AnthropicApiKey,
                 ),
             )),
             ProviderKind::Unspecified => Err(ModelRegistryError::UnsupportedOperation(format!(

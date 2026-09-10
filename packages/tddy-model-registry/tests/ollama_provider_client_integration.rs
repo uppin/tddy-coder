@@ -7,7 +7,7 @@
 //!
 //! PRD: docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
 
-use tddy_daemon::model_registry::{
+use tddy_model_registry::{
     CredentialStyle, ModelRegistryError, OllamaProviderClient, OpenAiCompatibleProviderClient,
     ProviderClient, ProviderHttp,
 };

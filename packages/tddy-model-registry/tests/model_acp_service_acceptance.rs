@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use tddy_daemon::model_registry::{
+use tddy_model_registry::{
     ChatWorkspaceRoots, ModelAcpService, ModelRegistryStore, NewAssistant, NewProvider,
 };
 use tddy_rpc::{Request, Streaming};
@@ -201,11 +201,9 @@ async fn a_daemon_serving(stub: RoutedStubHttpEndpoint) -> Harness {
     let root = workspace.path().to_path_buf();
     let workspace_roots: ChatWorkspaceRoots = Arc::new(move |token: &str| match token {
         VALID_TOKEN => Ok(vec![root.clone()]),
-        _ => Err(
-            tddy_daemon::model_registry::ModelRegistryError::PermissionDenied(
-                "invalid or expired session token".to_string(),
-            ),
-        ),
+        _ => Err(tddy_model_registry::ModelRegistryError::PermissionDenied(
+            "invalid or expired session token".to_string(),
+        )),
     });
     let service = ModelAcpService::new(
         Arc::clone(&store),
@@ -251,8 +249,8 @@ async fn a_repo_explorer_in(harness: &Harness) -> ModelSessionTarget {
 /// A budget short enough that a hung provider is reported inside a test run, and long enough that
 /// a loaded machine's loopback round trip is never mistaken for one. The production default (30 s
 /// per request) is sized for a real model's thinking time, which no test should sit through.
-fn a_transport_budget_a_test_can_outlast() -> tddy_daemon::model_registry::ProviderHttp {
-    tddy_daemon::model_registry::ProviderHttp {
+fn a_transport_budget_a_test_can_outlast() -> tddy_model_registry::ProviderHttp {
+    tddy_model_registry::ProviderHttp {
         connect_timeout: std::time::Duration::from_secs(2),
         request_timeout: std::time::Duration::from_secs(2),
         ..Default::default()

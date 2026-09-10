@@ -38,11 +38,11 @@ use tddy_service::proto::acp::{
 use tddy_task::TaskRegistry;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::error::ModelRegistryError;
-use super::provider_http::ProviderHttp;
-use super::store::ModelRegistryStore;
-use super::tool_dispatcher::EngineToolDispatcher;
-use super::workspace::{resolve_chat_workspace, ChatWorkspaceRoots};
+use crate::error::ModelRegistryError;
+use crate::provider_http::ProviderHttp;
+use crate::store::ModelRegistryStore;
+use crate::tool_dispatcher::EngineToolDispatcher;
+use crate::workspace::{resolve_chat_workspace, ChatWorkspaceRoots};
 use tddy_daemon_kernel::SessionUserResolver;
 
 /// Outbound frames for one stream. Unbounded because the agent's update sink is a plain `Fn` with
@@ -75,7 +75,7 @@ impl ModelAcpService {
     }
 
     /// Talk to providers under a different transport budget than [`ProviderHttp::default`] — the
-    /// same knob [`super::ollama::OllamaProviderClient::with_http_config`] offers, so a chat and an
+    /// same knob [`crate::ollama::OllamaProviderClient::with_http_config`] offers, so a chat and an
     /// enumeration against the same host are configured the same way.
     pub fn with_http_config(mut self, http_config: ProviderHttp) -> Self {
         self.http_config = http_config;

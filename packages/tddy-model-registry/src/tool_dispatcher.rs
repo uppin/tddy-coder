@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tddy_acp::provider_agent::{ProviderTool, ToolDispatcher, ToolOutcome};
 use tddy_task::TaskRegistry;
 
-use super::error::ModelRegistryError;
+use crate::error::ModelRegistryError;
 
 /// Runs an assistant's assigned tools through the daemon's tool engine, confined to one workspace.
 pub struct EngineToolDispatcher {

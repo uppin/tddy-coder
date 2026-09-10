@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
+use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListSubagentsRequest, StartSessionRequest,

@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use super::error::{truncate_provider_detail, ModelRegistryError};
+use crate::error::{truncate_provider_detail, ModelRegistryError};
 
 /// How long a provider has to accept the connection.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);

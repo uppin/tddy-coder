@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::error::ModelRegistryError;
+use crate::error::ModelRegistryError;
 
 /// The directories one caller's chat tools may run in, resolved from their session token.
 ///

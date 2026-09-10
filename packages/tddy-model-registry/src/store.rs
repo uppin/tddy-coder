@@ -21,7 +21,7 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use tddy_discovery::agent_def::{load_agent_defs, SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::models::{AssistantEntry, ModelEntry, ProviderEntry, ProviderKind};
 
-use super::error::{truncate_provider_detail, ModelRegistryError};
+use crate::error::{truncate_provider_detail, ModelRegistryError};
 
 /// Owner-only permissions: this database holds live provider credentials.
 #[cfg(unix)]
@@ -757,7 +757,7 @@ impl ModelRegistryStore {
 /// `ListAssistants`, travels with the def to every spawned session, and is re-sent to the provider
 /// on every turn of every conversation. A `ListAssistants` response past ~60 KB is chunk-framed
 /// over LiveKit, where one lost frame wedges the call with no error at all (see
-/// [`super::error::MAX_PROVIDER_DETAIL_BYTES`]), so a handful of assistants at this ceiling still
+/// [`crate::error::MAX_PROVIDER_DETAIL_BYTES`]), so a handful of assistants at this ceiling still
 /// fits in one frame. 8 KiB is roughly two thousand tokens of instructions — far more than any
 /// system prompt this screen exists to write.
 pub const MAX_SYSTEM_PROMPT_BYTES: usize = 8 * 1024;

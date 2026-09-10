@@ -29,3 +29,34 @@ what follows is the operational debt behind them.
   against a live server costs a rust-analyzer spawn for a decision made before the server is ever
   consulted, which is why it was not done; it does mean no test asserts the refusal survives a real
   workspace.
+
+## Added by `#unbundle` node 2 ([#471](https://github.com/uppin/tddy-coder/pull/471))
+
+- **A directory-shaped subsystem is entirely out of reach.** `move_module_to_crate` moved **0 of
+  13** `model_registry/` modules. `source_crate_of` (`crate_move.rs:773`) requires the anchor file
+  to be `<crate>/src/<module>.rs`, so every nested path is refused before rust-analyzer is ever
+  spawned:
+
+      $ tddy-tools restructure apply plan.jsonl --dry-run
+      Error: plan is malformed: `packages/tddy-daemon/src/model_registry/error.rs` is not
+      `<crate>/src/error.rs` — `move_module_to_crate` moves a module the crate root itself declares
+
+  This is documented as a known limitation ("Only `<crate>/src/<module>.rs` moves"), but node 1's
+  experience understated its cost: it is not an edge case, it is the *common* shape for a
+  subsystem worth extracting. `model_registry/` was picked as node 2's opening move precisely
+  because it is the cleanest extraction in `tddy-daemon` — already directory-shaped, zero outbound
+  `crate::` edges, zero inline tests — and the operation could not touch a line of it. All 13 were
+  hand-moved.
+
+  What would fix it: take the destination's own module path from the anchor's `path` (already
+  `model_registry::store`, i.e. the operation is *told* the nesting) and locate the parent's `mod`
+  line by walking `<crate>/src/<parent>.rs` then `<crate>/src/<parent>/mod.rs`, rather than
+  guessing. Refusing only when neither exists would keep the refusal honest and admit the shape
+  that matters.
+- **`restructure check` does not catch it.** `check` on the same 13-op plan reported `no findings`;
+  the refusal surfaced only under `apply`. A static preflight that cannot tell you the whole plan
+  will be rejected is not doing the job `check` exists for.
+- **`verify --against` earns its keep.** It found all 91 changed statements repo-wide and made it
+  checkable, line by line, that not one of them was moved *logic* — every one was a stub line being
+  replaced, a `super::`/`crate::model_registry::` re-point, or the wiring collapsing into the two
+  `build_*_entry` calls. Worth saying out loud alongside the defects.

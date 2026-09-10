@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState};
 
-use super::error::ModelRegistryError;
-use super::labels::capabilities_to_labels;
-use super::provider_client::ProviderClient;
-use super::provider_http::{decode, ProviderHttp};
+use crate::error::ModelRegistryError;
+use crate::labels::capabilities_to_labels;
+use crate::provider_client::ProviderClient;
+use crate::provider_http::{decode, ProviderHttp};
 
 /// How long a loaded model stays resident before Ollama evicts it on its own. Sent as
 /// `keep_alive` on the zero-token generate that loads it.
@@ -120,7 +120,7 @@ impl OllamaProviderClient {
     }
 
     fn unreachable(&self, path: &str, error: reqwest::Error) -> ModelRegistryError {
-        super::provider_http::unreachable(&self.url(path), error)
+        crate::provider_http::unreachable(&self.url(path), error)
     }
 }
 

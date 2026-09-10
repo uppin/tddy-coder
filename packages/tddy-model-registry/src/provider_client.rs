@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_service::proto::models::{ModelEntry, ModelLoadState, ProviderEntry};
 
-use super::error::ModelRegistryError;
+use crate::error::ModelRegistryError;
 
 /// One provider endpoint, as the registry uses it.
 ///

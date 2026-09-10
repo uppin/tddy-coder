@@ -1,11 +1,14 @@
 //! The daemon's model registry: provider-backed chat models, registry assistants, and the ACP
 //! bridge that lets one be addressed as an agent.
 //!
+//! The registry is one daemon's own SQLite database; nothing here forwards to a peer. The web fans
+//! out to each common-room daemon and merges, exactly as the sessions drawer does.
+//!
 //! Extracted from `tddy-daemon` by `#unbundle` node 2. It was **the cleanest extraction in that
 //! crate** and was chosen as an early node for exactly that reason: already directory-shaped as
 //! `model_registry/`, **zero** outbound `crate::` edges beyond its own directory, and **zero**
-//! inline `#[cfg(test)]` lines — all 4,618 lines of its tests are integration tests in dedicated
-//! files, so they move with the code rather than being rewritten.
+//! inline `#[cfg(test)]` lines — all of its tests are integration tests in dedicated files, so they
+//! move with the code rather than being rewritten.
 //!
 //! Its two proto services, `models.ModelRegistryService` and `acp.AcpService`, were **already their
 //! own protos**. Nothing about the wire changes here and no client migrates; only the crate the
@@ -13,54 +16,41 @@
 //!
 //! `sqlx`, `agent-client-protocol` and `tddy-acp` are attributable to this subsystem alone and
 //! leave `tddy-daemon` with it.
+//!
+//! See docs/ft/web/1-WIP/PRD-2026-08-16-models-and-assistants.md.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Resolve a session token to the workspace roots a chat may read.
-///
-/// The daemon's wiring layer builds this over its configured user mapping, which is why it is an
-/// alias over a closure rather than a trait.
-pub type ChatWorkspaceRoots = Arc<dyn Fn(&str) -> Vec<PathBuf> + Send + Sync>;
+use tddy_daemon_kernel::SessionUserResolver;
+use tddy_task::TaskRegistry;
 
-/// The registry's durable store — assistants, providers and their credentials.
-///
-/// Opening it is fallible and the failure is not swallowed: a daemon whose registry is unreadable
-/// cannot honestly say what it can attach, and a partial answer reads as "no agents exist" rather
-/// than "one source is broken".
-#[derive(Debug)]
-pub struct ModelRegistryStore {
-    // TODO(model-telegram-screen): implement
-}
+pub mod acp_service;
+pub mod assistant_def;
+pub mod error;
+pub mod labels;
+pub mod ollama;
+pub mod openai_compatible;
+pub mod provider_client;
+pub mod provider_http;
+pub mod service;
+pub mod store;
+pub mod tool_dispatcher;
+pub mod workspace;
 
-impl ModelRegistryStore {
-    /// Open the store at `path`, running any pending migration.
-    pub async fn open(_path: &std::path::Path) -> Result<Self, ModelRegistryError> {
-        // TODO(model-telegram-screen): implement
-        unimplemented!("ModelRegistryStore::open")
-    }
-
-    /// Every assistant this daemon can resolve a name against.
-    pub async fn assistants(&self) -> Result<Vec<AssistantRow>, ModelRegistryError> {
-        // TODO(model-telegram-screen): implement
-        unimplemented!("ModelRegistryStore::assistants")
-    }
-}
-
-/// One registry assistant, as a name resolution sees it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssistantRow {
-    pub name: String,
-    pub label: String,
-    pub model: String,
-}
-
-/// Why the registry could not answer.
-#[derive(Debug, thiserror::Error)]
-pub enum ModelRegistryError {
-    #[error("the model registry at {path} could not be opened: {reason}")]
-    Unreadable { path: String, reason: String },
-}
+pub use acp_service::ModelAcpService;
+pub use assistant_def::{
+    assistant_to_agent_def, registry_agent_def_with_credential, registry_agent_defs,
+};
+pub use error::{truncate_provider_detail, ModelRegistryError, MAX_PROVIDER_DETAIL_BYTES};
+pub use labels::{capabilities_to_labels, reported_capabilities_to_labels, UNDETERMINABLE_LABEL};
+pub use ollama::OllamaProviderClient;
+pub use openai_compatible::{CredentialStyle, OpenAiCompatibleProviderClient};
+pub use provider_client::{ProviderClient, ProviderClientFactory};
+pub use provider_http::ProviderHttp;
+pub use service::{DefaultProviderClients, ModelRegistryServiceImpl};
+pub use store::{ModelRegistryStore, NewAssistant, NewProvider, MAX_SYSTEM_PROMPT_BYTES};
+pub use tool_dispatcher::EngineToolDispatcher;
+pub use workspace::{resolve_chat_workspace, ChatWorkspaceRoots};
 
 /// The `models.ModelRegistryService` entry the daemon's wiring layer registers.
 ///
@@ -68,46 +58,87 @@ pub enum ModelRegistryError {
 /// [`tddy_rpc::ServiceEntry`]; nothing else about the daemon's assembly needs to know this crate
 /// exists.
 pub fn build_model_registry_entry(
-    _store: Arc<ModelRegistryStore>,
-    _workspace_roots: ChatWorkspaceRoots,
+    store: Arc<ModelRegistryStore>,
+    clients: Arc<dyn ProviderClientFactory>,
+    user_resolver: SessionUserResolver,
 ) -> tddy_rpc::ServiceEntry {
-    // TODO(model-telegram-screen): implement
-    unimplemented!("build_model_registry_entry")
+    let server = tddy_service::ModelRegistryServiceServer::new(ModelRegistryServiceImpl::new(
+        store,
+        clients,
+        user_resolver,
+    ));
+    tddy_rpc::ServiceEntry {
+        name: "models.ModelRegistryService",
+        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
+    }
 }
 
-/// The `acp.AcpService` entry — a registry assistant addressed as an ACP agent.
-pub fn build_model_acp_entry(_store: Arc<ModelRegistryStore>) -> tddy_rpc::ServiceEntry {
-    // TODO(model-telegram-screen): implement
-    unimplemented!("build_model_acp_entry")
+/// The `acp.AcpService` entry — a registry model or assistant addressed as an ACP agent.
+///
+/// The *session*-addressed `acp.AcpService` is mounted per session process; this one is the
+/// daemon's own, so the Models & Agents screen can open a chat without a session existing at all.
+pub fn build_model_acp_entry(
+    store: Arc<ModelRegistryStore>,
+    tasks: TaskRegistry,
+    user_resolver: SessionUserResolver,
+    workspace_roots: ChatWorkspaceRoots,
+) -> tddy_rpc::ServiceEntry {
+    let server = tddy_service::AcpServiceServer::new(ModelAcpService::new(
+        store,
+        tasks,
+        user_resolver,
+        workspace_roots,
+    ));
+    tddy_rpc::ServiceEntry {
+        name: tddy_service::AcpServiceServer::<ModelAcpService>::NAME,
+        service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn names_the_service_the_wiring_layer_registers() {
-        // Given a store and the roots a chat may read
-        let store = Arc::new(ModelRegistryStore {});
-        let roots: ChatWorkspaceRoots = Arc::new(|_| Vec::new());
+    /// A store on a scratch database, which is all either entry constructor needs of it.
+    async fn a_store(root: &std::path::Path) -> Arc<ModelRegistryStore> {
+        Arc::new(
+            ModelRegistryStore::open(&root.join("models.db"), "instance-1", &root.join("agents"))
+                .await
+                .expect("open the registry"),
+        )
+    }
+
+    #[tokio::test]
+    async fn names_the_service_the_wiring_layer_registers() {
+        // Given a store, the provider clients it talks through, and the token resolver
+        let root = tempfile::tempdir().unwrap();
+        let store = a_store(root.path()).await;
+        let clients: Arc<dyn ProviderClientFactory> = Arc::new(DefaultProviderClients);
+        let user_resolver: SessionUserResolver = Arc::new(|_| None);
 
         // When
-        let entry = build_model_registry_entry(store, roots);
+        let entry = build_model_registry_entry(store, clients, user_resolver);
 
         // Then
         assert_eq!(entry.name, "models.ModelRegistryService");
     }
 
-    #[test]
-    fn names_the_acp_service_the_wiring_layer_registers() {
+    #[tokio::test]
+    async fn names_the_acp_service_the_wiring_layer_registers() {
         // Given
-        let store = Arc::new(ModelRegistryStore {});
+        let root = tempfile::tempdir().unwrap();
+        let store = a_store(root.path()).await;
+        let user_resolver: SessionUserResolver = Arc::new(|_| None);
+        let workspace_roots: ChatWorkspaceRoots = Arc::new(|_| Ok(Vec::new()));
 
         // When
-        let entry = build_model_acp_entry(store);
+        let entry =
+            build_model_acp_entry(store, TaskRegistry::new(), user_resolver, workspace_roots);
 
-        // Then
-        assert_eq!(entry.name, "acp.AcpService");
+        // Then — the coordinate `tddy/acp/v1/acp.proto` declares, which is what a browser dials.
+        // The changeset writes it as `acp.AcpService`; that is prose shorthand, and the registered
+        // name is the fully-qualified one.
+        assert_eq!(entry.name, "tddy.acp.v1.AcpService");
     }
 
     /// A daemon whose registry is unreadable must say so rather than answer "no assistants": an
@@ -118,11 +149,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
 
         // When
-        let outcome = ModelRegistryStore::open(root.path()).await;
+        let outcome =
+            ModelRegistryStore::open(root.path(), "instance-1", &root.path().join("agents")).await;
 
         // Then
         assert!(
-            matches!(outcome, Err(ModelRegistryError::Unreadable { .. })),
+            matches!(outcome, Err(ModelRegistryError::Storage(_))),
             "an unreadable registry is an error, never an empty answer"
         );
     }

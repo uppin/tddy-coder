@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tddy_daemon::model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
+use tddy_model_registry::{ModelRegistryStore, NewAssistant, NewProvider};
 use tddy_service::proto::models::ProviderKind;
 
 // ---------------------------------------------------------------------------

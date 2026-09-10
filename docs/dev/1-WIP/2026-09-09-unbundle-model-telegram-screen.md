@@ -160,7 +160,11 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
 
 ## Scope
 
-- [~] **`tddy-model-registry`**: crate and surface published; 13 modules and 8 test files still to move
+- [x] **`tddy-model-registry`**: 13 modules and 5 test files moved. The plan said 8 test files; a
+      grep for every registry symbol across `packages/tddy-daemon/tests/` finds **six**, and one of
+      those — `registry_assistant_as_agent_acceptance.rs` — stays behind, because its subject is
+      `ConnectionServiceImpl` resolving an assistant as an `--agent`. `sqlx`,
+      `agent-client-protocol` and `tddy-acp` left with it ✅
 - [~] **`tddy-telegram`**: crate and surface published; 10 modules, 14 test files and `teloxide` still to move
 - [~] **`tddy-screen-sharing`**: crate and surface published; 2 modules and 2 test files still to move
 - [ ] **Delete unreachable VNC**: `vnc_service.rs`, `vnc_vault.rs`, both acceptance suites, the two `lib.rs` entries
@@ -208,7 +212,7 @@ a `build_*_entry(...) -> tddy_rpc::ServiceEntry` plus the trait ports their host
 
 ## Implementation Milestones
 
-- [ ] M1 — `tddy-model-registry` extracted; its 8 test files pass in the new crate
+- [x] M1 — `tddy-model-registry` extracted; its 5 test files pass in the new crate (134 tests: 3 crate-level + 131 across the five moved suites) ✅
 - [ ] M2 — the unreachable VNC service and its suites deleted; nothing references them
 - [ ] M3 — `tddy-screen-sharing` extracted; its 2 suites pass
 - [ ] M4 — `tddy-telegram` extracted; its 14 suites pass; `teloxide` gone from `tddy-daemon`
@@ -278,6 +282,11 @@ daemon's registered service names, so the removal cannot silently regress into a
 - [ ] `tddy-service` depends on `tddy-tui`, so any subsystem crate that needs `tddy-service`'s protos
       pulls the TUI into its build. Not introduced here, but each new crate inherits it
 - [ ] `vnc.proto` is left with no server; the decision to retire it is deferred to `docs/dev/todo/`
+- [ ] Four `log::` calls in the moved registry still name `target: "tddy_daemon::model_registry"`
+      (`error.rs:103`, `service.rs:197`, `acp_service.rs:265,628`). Left verbatim on purpose: a log
+      target is an operator-facing filter, and renaming it is an observable change, not a
+      relocation. Re-point them to `tddy_model_registry` as a deliberate step, with the same done
+      for telegram and screen sharing
 
 ## Baseline
 
