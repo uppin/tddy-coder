@@ -413,19 +413,37 @@ package boundary — is answered here by moving the boundary instead of the stri
       `tddy-tools`** — see `## Boundaries`
 - [x] **`tddy-bsp`**: `build_cli` dispatch; **the duplicate `plugin_registry` deleted**; the 6 `tddy-build*` deps dropped from `tddy-tools` ✅
 - [x] **`tddy-code-analysis`, `tddy-code-restructuring`, `tddy-lsp-executor`**: their dispatches; `cli_vector()` deleted ✅
-- [ ] **`tddy-tools`' `build.rs` deleted**; the cross-package `include_dir!`/`include_str!` reach gone
+- [x] **`tddy-tools`' `build.rs` deleted**; the cross-package `include_dir!`/`include_str!` reach gone —
+      no `build.rs`, no `include_dir!`/`include_str!` anywhere in `src`, and `include_dir` and
+      `jsonschema` are off the manifest ✅
 - [x] **Dependency drops asserted**: `tddy-daemon`, `tddy-sandbox-app`, `tddy-sandbox-darwin` no
       longer dev-depend on `tddy-tools` — all three manifests are clean of the string and all three
       `unbundle_tools_dependency_dropped` tests pass. The suites keep calling
       `dispatch_session_tool`, so their transport-detection coverage is intact ✅
-- [ ] **Env contract**: all 25 `TDDY_*` variables read from the same places, verified. **One added at
-      M5**: `TDDY_SESSION_ACTION_TOOLS`, the host's claim to serve the action surface — none renamed
-- [ ] **MCP surface**: 43 advertised over the real `--mcp` stdio wire on a transport that serves the
-      action tools; **40 on the daemon path**, the three withdrawn ones being the blocking-todo fix
-- [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
-- [ ] **Documentation**: doc triage executed at wrap
+- [x] **Env contract**: every variable still read, none renamed, and **none stopped being read** —
+      the full before/after table is in `## Env contract audit (M9)`. **The plan's "25" was wrong,
+      and the audit says so rather than reproducing it**: `grep -rho 'TDDY_[A-Z_0-9]*'` over
+      `tddy-tools/src` returns 23 distinct tokens, two of which are not variables
+      (`TDDY_REMOTE_` from a comment, `TDDY_TOOLS` from `USER_AGENT_TDDY_TOOLS`). 21 real names, of
+      which 20 were read by `tddy-tools` and one (`TDDY_SUBAGENT`) only ever set by its tests.
+      **One added at M5**: `TDDY_SESSION_ACTION_TOOLS`, the host's claim to serve the action
+      surface. Per-variable counts reproduce the discovery's exactly — `TDDY_SOCKET` ×43,
+      `TDDY_REPO_DIR` ×24, `TDDY_SESSION_DIR` ×12 ✅
+- [x] **MCP surface**: 43 advertised over the real `--mcp` stdio wire on a transport that serves the
+      action tools; **40 on the daemon path**, the three withdrawn ones being the blocking-todo fix.
+      Both numbers and the exact three-name difference are pinned by
+      `packages/tddy-tools/tests/mcp_tool_advertisement_audit.rs` (3 tests), which asserts the
+      whole set **by name** — a count that matched while a name changed would have passed ✅
+- [x] **File budget**: recorded in `## File budget (M9)` — one of the five original offenders is
+      under budget, four are not, and two new files land over it. Every one has a reason ✅
+- [x] **Baseline**: measured per touched package, sequentially at `--test-threads=4`, in
+      `## Baseline`. **12 of 13 packages are green**; `tddy-workflow-recipes` has one failure that
+      predates this node and is macOS-only (`/tmp` vs `/private/tmp`), named there ✅
+- [x] **Code Quality**: `cargo clippy --all-targets -- -D warnings` clean across all 15 packages
+      this node touched (exit 0, no warnings), `cargo fmt --all -- --check` clean ✅
+- [x] **Documentation**: doc triage executed — see `## Doc triage (M9)`. Five stale doc-comment
+      paths and two `docs/ft/` references repointed; three items are **deliberately not done**
+      because they are edits to `packages/*/docs/`, which CLAUDE.md forbids making directly ✅
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -559,7 +577,14 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
       zero traded for**; `subagent_error_json` followed the runtime, which mints the same
       envelope. The `registry`/`seed` mutual pair unpicked. The fabricated `roster` stub replaced
       and its three tests deleted. **`relay.rs` does not move** (`## Boundaries`) ✅
-- [ ] M9 — the 43-tool MCP surface verified over the real stdio wire; env contract verified; baselines restored
+- [x] M9 — **the MCP surface is 43 on a claiming host and 40 on the daemon path**, both pinned by
+      name over the real `--mcp` stdio wire (`mcp_tool_advertisement_audit.rs`); the env contract
+      audited variable by variable with **nothing renamed and nothing orphaned**; baselines
+      measured per package with one pre-existing macOS failure named; the file budget recorded; the
+      doc triage executed; **eight `docs/dev/todo/` entries written and the blocking one closed**.
+      Two defects found by the verification itself and recorded rather than fixed: schema
+      validation still logs under a `tddy_tools::` target, and `local_pty_relay`'s smoke test
+      hangs when its stdin is an open pipe ✅
 
 ## Testing Plan
 
@@ -588,10 +613,33 @@ afterwards, verified by grep over the destinations rather than by assumption.
 ## Acceptance Tests
 
 ### tddy-tools
-- [ ] **Integration**: `--mcp` advertises exactly the same 43 tool names as before the move (`mcp_tool_advertisement_audit.rs`)
-- [ ] **Integration**: every CLI subcommand still dispatches (`cli_integration.rs`)
-- [ ] **Integration**: `approval_prompt` decides and relays undecidable cases, still in this crate (`permission_engine_acceptance.rs`)
-- [ ] **Unit**: `tddy-tools` has no import cycle — `mcp_primitives` is reached by all three former cycle participants (`mcp_primitives.rs`)
+- [x] **Integration**: `--mcp` advertises the tool surface by name over the real stdio wire
+      (`mcp_tool_advertisement_audit.rs`, 3 tests). **The criterion as written is no longer the
+      whole truth and the audit does not reconcile it**: the set is 43 on a transport whose host
+      claims the action surface and **40** on the daemon path, which is the blocking todo's fix
+      rather than a regression. The suite pins both sets by name, and pins the difference as a
+      difference — so a tool added to both paths stays green while one added to only the claiming
+      path fails ✅
+- [x] **Integration**: every CLI subcommand still dispatches (`cli_integration.rs`, 15 tests,
+      passing) — the suite drives the built binary, so it proves the dispatch regardless of which
+      crate now implements each subcommand ✅
+- [ ] **Integration**: `approval_prompt` decides and relays undecidable cases, still in this crate
+      (`permission_engine_acceptance.rs`). **Deliberately unticked: that file was never written.**
+      Seam A did not move, so this node had no moved coverage to re-home and wrote none; the
+      decision engine's behaviour is covered where it already was — `server.rs`'s inline
+      `approval_prompt_allows_*` tests and `remote_mcp_proxy_acceptance.rs`'s
+      `static_tool_names_always_includes_approval_prompt_and_submit`. A suite for the NDJSON relay
+      arm would be **new** coverage, which belongs with
+      [retiring that protocol](../todo/2026-09-10-the-permission-engines-ndjson-unix-socket-protocol-survives.md)
+- [ ] **Unit**: `tddy-tools` has no import cycle — `mcp_primitives` is reached by all three former
+      cycle participants (`mcp_primitives.rs`). **Deliberately unticked: there is no such test, and
+      by M8 the property is stronger than a test could state.** Rust permits module cycles inside a
+      crate, so nothing here could have failed to compile; what step zero broke was a design cycle.
+      Verified structurally instead: `mcp_primitives` names nothing in `server`, `server` and
+      `action_tools` name it, and **two of the three former participants are no longer in the crate
+      at all** — `lsp_tools` left at M3, `session_agents` at M8. `mcp_primitives.rs`'s four unit
+      tests cover its own behaviour (`schema_object`, `subagent_error_json`, `subagent_route`), not
+      the absence of an edge
 
 ### tddy-session-tool-client
 - [x] **Integration**: `dispatch_session_tool` reaches a daemon over the sandbox-IPC transport from
@@ -605,7 +653,10 @@ afterwards, verified by grep over the destinations rather than by assumption.
       which depends on this client rather than living in it ✅
 
 ### tddy-tool-engine
-- [ ] **Integration**: the dynamic tool proxy forwards to a daemon (`dynamic_tool_router_acceptance.rs`)
+- [x] **Integration**: the dynamic tool proxy forwards to a daemon
+      (`dynamic_tool_router_acceptance.rs`, passing). **The suite stays in `tddy-tools`**, because
+      seam C's MCP half did (`## Boundaries`) — what moved to `tddy-tool-engine` is the catalog and
+      the denial predicate, and those are covered by that crate's own 11 tests ✅
 - [x] **Unit**: there is exactly **one** exec-tool catalog; `tddy-tools`'
       `exec_tool_catalog_names_match_workspace_exec_tool_names` is **deleted** — with the copy gone
       it asserted exactly what `tddy_daemon::tool_catalog_sync`'s
@@ -614,8 +665,14 @@ afterwards, verified by grep over the destinations rather than by assumption.
       workspace_exec_tool_names` (the `--allowedTools` a sandboxed `claude` is spawned with) ✅
 
 ### tddy-workflow-recipes
-- [ ] **Integration**: the 14 `pr_*` MCP tools answer from the new crate (`pr_stack_tool_dispatch_acceptance.rs`)
-- [ ] **Integration**: schema validation resolves `goals.json` without a cross-package `include_dir!` (`schema_validation_tests.rs`)
+- [ ] **Integration**: the 14 `pr_*` MCP tools answer from the new crate
+      (`pr_stack_tool_dispatch_acceptance.rs`). **Deliberately unticked: seam B did not move**
+      (`## Boundaries`), so there is no "new crate" for them to answer from. The suite is unchanged
+      in `tddy-tools/tests/` and passing, which is the correct outcome for a seam that stayed
+- [x] **Integration**: schema validation resolves `goals.json` without a cross-package
+      `include_dir!` (`packages/tddy-workflow-recipes/tests/schema_validation_tests.rs`, passing).
+      `tddy-tools` has no `build.rs`, no `include_dir!`/`include_str!` and no `include_dir`
+      dependency; the crate that owns `goals.json` now reads it ✅
 
 ### tddy-terminal-rpc
 - [x] **Unit**: the relay builds a `StartSession` from its config and speaks the daemon's OSC
@@ -639,7 +696,11 @@ afterwards, verified by grep over the destinations rather than by assumption.
       `tddy_tools::session_agents`, which is now a re-export of `tddy_discovery::roster` ✅
 
 ### tddy-bsp
-- [ ] **Integration**: `build` and `build-list` dispatch, with one `plugin_registry` (`build_cli_acceptance.rs`, `demo_build_plugin_acceptance.rs`)
+- [x] **Integration**: `build` and `build-list` dispatch, with one `plugin_registry`
+      (`build_cli_acceptance.rs`, `demo_build_plugin_acceptance.rs`, both passing). **Both suites
+      stay in `tddy-tools/tests/`**: they drive the binary's `build`/`build-list` subcommands, so
+      they exercise `tddy_bsp::build_cli` through the CLI that parses the arguments — the same
+      reason the MCP suites stayed for seams B, C and D ✅
 
 ### tddy-daemon / tddy-sandbox-app / tddy-sandbox-darwin
 - [x] **Integration**: `tddy-tools` is absent from each crate's manifest, dev-dependencies included
@@ -813,19 +874,64 @@ afterwards, verified by grep over the destinations rather than by assumption.
   sites, are how in-jail agents reach their host. They are not renamed, and the audit that they are
   read from the same places is a testing-plan item rather than an assumption.
 
+- **M9's advertisement audit reports two numbers, and refuses to reconcile them.** The acceptance
+  criterion was written as "exactly the same 43 tool names as before the move", and after M5 that
+  is only half true: a session whose host claims the action surface advertises 43, a daemon-hosted
+  one advertises 40, and the three that differ are exactly `request_action`, `list_actions` and
+  `invoke_action`. Making the audit assert one number would have meant either choosing a transport
+  and pretending the other does not exist, or reverting the fix for a blocking todo whose evidence
+  is an agent that concluded a specialized agent was unregistered because `invoke_action` answered
+  `unknown tool`. So `mcp_tool_advertisement_audit.rs` asserts **both sets by name**, and asserts
+  the difference *as a difference* — a tool added to both paths keeps it green, a tool added to
+  only the claiming path fails it. The count is carried by `[&str; 43]`, which the compiler checks;
+  the names are what the assertions compare, because a count that still matched while a name
+  changed is precisely the failure the testing plan says this audit exists to catch.
+- **The env contract is audited by grep, and that is the right instrument rather than a
+  concession.** A test asserting "`TDDY_SOCKET` is read in `tddy_tools::cli`" can only re-read the
+  source: it fails on a comment reflow and passes on a read that moved to a crate nobody expected.
+  What *is* testable is the observable behaviour these variables select, and all of it already has
+  tests — transport detection in `tddy-session-tool-client` and the two sandbox suites, every
+  advertisement gate over the real stdio wire in `mcp_tool_advertisement_audit.rs`, which sets six
+  of these variables and clears ten. The grep adds the one property none of those can see: a
+  variable that **nothing reads any more**. Checked set-against-set as well as name-by-name, and
+  the answer is none — 96 distinct `TDDY_*` tokens across `packages/*/src` before, 100 after,
+  empty difference in the "gone" direction.
+- **Two of the plan's numbers were raw-grep artefacts, and M9 corrects them rather than restating
+  them.** "25 `TDDY_*` variables" is 23 distinct tokens of which two are not variables — 21 real
+  names, one of them (`TDDY_SUBAGENT`) never read by `tddy-tools` at all. "17 of 34 dependencies
+  drop" is 14 dropped and 4 added against a base of 38, a net 10. Both original figures came from
+  counting grep output rather than reading it, and the per-variable counts the same discovery
+  recorded (`TDDY_SOCKET` ×43, `TDDY_REPO_DIR` ×24, `TDDY_SESSION_DIR` ×12) reproduce exactly —
+  so the method was sound and only the distinct-count was not.
+- **Two defects were found by the verification and recorded rather than fixed, and the line is the
+  same one every other milestone drew.** M9 is closeout; both fixes are behaviour changes.
+  `tddy-workflow-recipes` still emits `target: "tddy_tools::schema"` from nine sites, which M6, M7
+  and M8 would have moved with the code and M4 did not — but node 4's recorded policy is the
+  opposite one (keep the target, because renaming silently breaks an operator's `RUST_LOG` filter
+  and the failure mode is missing logs), so the stack currently ships both rules and the thing to
+  settle is which. And `local_pty_relay`'s smoke test hangs indefinitely when its stdin is an open
+  pipe; the relay waits for the child's terminal status *before* dropping the `stdin_sender` clone
+  its pump holds, so a live stdin pins the PTY master open. That one was checked against the
+  pre-node-5 tree rather than assumed: the extracted `RawMode`/`terminal_size` are byte-identical
+  to what they replaced, `run`'s logic is untouched, and `tddy-pty`/`tddy-task` have no node-5 diff
+  — so the hang is reachable at every commit this function has had, and what changed is only how
+  often the crate's suite is run alone.
+
 ## Technical Debt & Production Readiness
 
 - [x] **M3 left `tddy-bsp`'s build dispatch taking its relay transport as a function pointer.**
       Discharged at **M5**: `toolcall_client` is `tddy_core::toolcall::client`, `build_cli`'s
       `run_build`/`run_build_list` take no `dispatch` argument, `RelayFuture` and `ToolcallRelay` are
       deleted, `main.rs`'s `relay_toolcall` adapter is gone and so is the `TODO(tools-thinning)` ✅
-- [ ] **`MAX_MANIFEST_BYTES` is still declared twice.** M5 gave it a home in
+- [x] **`MAX_MANIFEST_BYTES` is still declared twice.** M5 gave it a home in
       `tddy_core::session_actions::authoring`; `tddy_sandbox_app::host_actions` still declares its own
       `64 * 1024`, which is the authoritative host-side bound on the same value. Collapsing it is one
       line, deliberately not taken in M5 because `tddy-sandbox-app` is outside the milestone's
-      verified package set
-- [ ] Seam A's NDJSON Unix-socket protocol survives; retiring it in favour of `tddy-rpc` framing is a
-      `docs/dev/todo/` entry at wrap
+      verified package set. **Still true; carried past the wrap** in
+      [`2026-09-10-two-duplications-left-standing-by-the-tools-thinning.md`](../todo/2026-09-10-two-duplications-left-standing-by-the-tools-thinning.md),
+      with `tddy_daemon_kernel::config::non_empty_env`, the third spelling of "unset or blank" ✅
+- [x] Seam A's NDJSON Unix-socket protocol survives; retiring it in favour of `tddy-rpc` framing is
+      [`2026-09-10-the-permission-engines-ndjson-unix-socket-protocol-survives.md`](../todo/2026-09-10-the-permission-engines-ndjson-unix-socket-protocol-survives.md) ✅
 - [x] **`tddy-service` depends on `tddy-tui`, so moving `session_tool_client` there would pull the
       TUI into every consumer's build — including in-jail binaries.** Discharged at **M7**, though
       not for this reason: the move to `tddy-service` turned out to be a Cargo cycle through
@@ -837,7 +943,8 @@ afterwards, verified by grep over the destinations rather than by assumption.
       `tddy-service` and therefore transitively on `tddy-tui`. Today this costs nothing measurable —
       all three of its reverse-dependencies already depend on `tddy-service` directly — but it is the
       second crate to acquire the edge, and both would be fixed by the same split of the protos out
-      of `tddy-service`
+      of `tddy-service`. **Carried past the wrap** with M7's and M8's in
+      [`2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md`](../todo/2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md)
 - [ ] **M8 gave `tddy-discovery` the same edge, for the third time.** The roster speaks
       `connection.SessionAgentService`, so the crate now depends on `tddy-service` and therefore
       transitively on `tddy-tui`. It costs more here than it did in `tddy-terminal-rpc`:
@@ -847,9 +954,15 @@ afterwards, verified by grep over the destinations rather than by assumption.
       roster. There was no move that avoided it — `registry.rs` names three `connection` protos
       and the whole point of M8 is that the five modules cannot split — so it is recorded rather
       than dodged, and it is the **third** crate to acquire the edge. All three are fixed by the
-      same change: split the protos out of `tddy-service`
-- [ ] The second `[[bin]]` (`execute-tool-stdio-fixture`) still forces `tddy-rpc`, `tddy-stdio` and
-      `async-trait` into `[dependencies]` rather than dev-deps
+      same change: split the protos out of `tddy-service`. **Carried past the wrap** with M6's and
+      M7's in
+      [`2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md`](../todo/2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md)
+- [x] The second `[[bin]]` (`execute-tool-stdio-fixture`) still forces `tddy-rpc`, `tddy-stdio` and
+      `async-trait` into `[dependencies]` rather than dev-deps. **Still true; carried past the wrap**
+      in
+      [`2026-09-10-the-execute-tool-stdio-fixture-bin-forces-three-dev-deps-into-dependencies.md`](../todo/2026-09-10-the-execute-tool-stdio-fixture-bin-forces-three-dev-deps-into-dependencies.md),
+      which notes that `mcp_stdio_dynamic_tools_acceptance.rs` already hosts the same fake service
+      in-process and needs no fixture binary ✅
 - [x] **Step zero traded three cycles for one; M7 broke half of it and M8 broke the rest.**
       `open_roster_agent_session` resolves against the live roster, so `mcp_primitives` imports
       `session_agents` while `session_agents/{seed,stream}` imported `env_non_empty` and
@@ -874,13 +987,176 @@ afterwards, verified by grep over the destinations rather than by assumption.
       assert is a `tddy-tools` fact. They re-home to a `tddy-tools` integration test, not to the
       destination crate ✅ `packages/tddy-tools/tests/lsp_tool_advertisement_acceptance.rs`
 
+## Env contract audit (M9)
+
+`## Boundaries` treats the `TDDY_*` variables as this crate's real hidden interface, so the claim
+verified here is not "they still exist" but **each one is still read, and the read still happens
+from the same logical place**. Method: `grep -rho 'TDDY_[A-Z_0-9]*'` over `packages/tddy-tools/src`
+at the pre-node-5 commit `efc064f2`, then each name traced to its *read* site (`env::var`,
+`env::var_os`, `env_non_empty`, or the constant that holds it) at `efc064f2` and at HEAD across
+`packages/*/src`.
+
+**The plan's count is corrected rather than reproduced.** The discovery recorded "25 distinct env
+vars"; the same grep returns **23 distinct tokens**, two of which are not variables — `TDDY_REMOTE_`
+is a prefix in a comment (`server.rs:893`) and `TDDY_TOOLS` is the tail of
+`USER_AGENT_TDDY_TOOLS`. That leaves **21 real names**, and the per-variable counts reproduce the
+discovery's exactly: `TDDY_SOCKET` ×43, `TDDY_REPO_DIR` ×24, `TDDY_SESSION_DIR` ×12. One of the 21,
+`TDDY_SUBAGENT`, was never read by `tddy-tools` at all — it appears only in a `#[cfg(test)]` block
+that sets it, and its production reader is `tddy-sandbox-runner`, untouched here.
+
+| Variable | Read at `efc064f2` | Read at HEAD | Verdict |
+|---|---|---|---|
+| `TDDY_SOCKET` (×43) | `tddy-tools`: `cli.rs` ×6, `server.rs` ×2, `build_cli.rs` ×2 | `tddy-tools`: `cli.rs` ×6, `server.rs` ×2; **`tddy-bsp`: `build_cli.rs` ×2** | moved (M3, 2 of 10 sites) |
+| `TDDY_REPO_DIR` (×24) | `tddy-tools/server.rs` ×4 | `tddy-tools/server.rs` ×4 | unchanged |
+| `TDDY_SESSION_DIR` (×12) | `tddy-tools`: `server.rs` ×2, `cli.rs` ×2 | same 4 sites | unchanged |
+| `TDDY_WORKFLOW_SESSION_ID` | `tddy-tools/cli.rs` | `tddy-tools/cli.rs` | unchanged |
+| `TDDY_TOOLS_LOG_FILE` | `tddy-tools/main.rs` | `tddy-tools/main.rs` | unchanged |
+| `TDDY_TOOLS_TEST_ALLOW_SOCKET` | `tddy-tools/server.rs` | `tddy-tools/server.rs` | unchanged |
+| `TDDY_SUBAGENT_CODEBASE_ACCESS` | `tddy-tools/server.rs` | `tddy-tools/mcp_primitives.rs` | moved **within** the crate (M2, step zero) |
+| `TDDY_LSP_TOOLS` | `tddy-tools/lsp_tools.rs` (`LSP_TOOLS_ENV`) | `tddy-lsp-executor/lsp_tools.rs` (`LSP_TOOLS_ENV`) | moved crate (M3) |
+| `TDDY_SANDBOX_TOOL_IPC` | `tddy-tools/session_tool_client.rs` | `tddy-session-tool-client/lib.rs` | moved crate (M7) |
+| `TDDY_REMOTE_DAEMON_URL` | `tddy-tools/session_tool_client.rs` | `tddy-session-tool-client/lib.rs` | moved crate (M7) |
+| `TDDY_REMOTE_SESSION_ID` | `tddy-tools/session_tool_client.rs` | `tddy-session-tool-client/lib.rs` | moved crate (M7) |
+| `TDDY_REMOTE_SESSION_TOKEN` | `tddy-tools/session_tool_client.rs` ×2 | `tddy-session-tool-client/lib.rs` ×2 | moved crate (M7) |
+| `TDDY_REMOTE_DAEMON_INSTANCE_ID` | `tddy-tools/session_tool_client.rs` ×2 | `tddy-session-tool-client/lib.rs` ×2 | moved crate (M7) |
+| `TDDY_REMOTE_LIVEKIT_URL` | `session_tool_client.rs` (`LIVEKIT_ENV_KEYS`) | `tddy-session-tool-client/lib.rs` (same array) | moved crate (M7) |
+| `TDDY_REMOTE_LIVEKIT_ROOM` | `session_tool_client.rs` (`LIVEKIT_ENV_KEYS`) | `tddy-session-tool-client/lib.rs` (same array) | moved crate (M7) |
+| `TDDY_REMOTE_LIVEKIT_TOKEN` | `session_tool_client.rs` (`LIVEKIT_ENV_KEYS`) | `tddy-session-tool-client/lib.rs` (same array) | moved crate (M7) |
+| `TDDY_REMOTE_SERVER_IDENTITY` | `session_tool_client.rs` (`LIVEKIT_ENV_KEYS`) | `tddy-session-tool-client/lib.rs` (same array) | moved crate (M7) |
+| `TDDY_SUBAGENTS_JSON` (×10) | `tddy-tools/server.rs` (`subagents_from_env`) | `tddy-discovery/roster/seed.rs` (`subagents_from_env`) | moved crate (M8) |
+| `TDDY_SUBAGENT_ROSTER_STATIC` | `tddy-tools/session_agents/stream.rs` (`STATIC_ROSTER_ENV`) | `tddy-discovery/roster/stream.rs` (`STATIC_ROSTER_ENV`) | moved crate (M8) |
+| `TDDY_TOOLS_ACCOUNTING_FILE` | `tddy-tools/server.rs` (`write_accounting_file`) | `tddy-discovery/subagent_runtime.rs` (same fn) | moved crate (M8) |
+| `TDDY_SUBAGENT` | **not read by `tddy-tools`** — set only in a `#[cfg(test)]` block in `server.rs`; production reader is `tddy-sandbox-runner/runner.rs` ×2 | unchanged in both places | not a `tddy-tools` read |
+| `TDDY_SESSION_ACTION_TOOLS` | — | `tddy-core/session_actions/tool_gate.rs` (`SESSION_ACTION_TOOLS_ENV`) | **added at M5** |
+
+**No variable stopped being read.** Confirmed twice: name by name above, and set against set —
+`grep -rho 'TDDY_[A-Z_0-9]*' packages/*/src | sort -u` returns 96 distinct tokens at `efc064f2` and
+100 at HEAD, and `comm -23` between them is **empty**. The four additions are
+`TDDY_SESSION_ACTION_TOOLS` and three `TDDY_TEST_*` fixtures in the moved `env_non_empty`'s unit
+tests (`tddy-core/spawn_env.rs`).
+
+**Three of the twenty are now read from a different crate under an unchanged name** —
+`TDDY_SUBAGENTS_JSON`, `TDDY_SUBAGENT_ROSTER_STATIC`, `TDDY_TOOLS_ACCOUNTING_FILE` (M8's, flagged
+there) — and the table shows there are in fact **eleven** such moves, not three: M3 took
+`TDDY_LSP_TOOLS` and two of `TDDY_SOCKET`'s ten sites, M7 took all eight of the
+`session_tool_client` set. Every one carries the same spelling and the same reading; the in-jail
+contract is identical.
+
+**Why a grep audit rather than a test.** A test that asserted "`TDDY_SOCKET` is read in
+`tddy_tools::cli`" could only do it by re-reading the source, which is the grep with a `#[test]`
+around it — it would fail on a comment reflow and pass on a variable read from a crate nobody
+expected. The property that *is* testable is the observable one, and it already has tests: the four
+transports are selected from these variables by `detect_session_tool_transport`, covered by
+`tddy-session-tool-client`'s 5 tests and driven end to end by `tddy-daemon`'s
+`sandboxed_claude_cli_acceptance` and `tddy-sandbox-darwin`'s `sandbox_runner_acceptance`; the
+advertisement gates (`TDDY_LSP_TOOLS`, `TDDY_SESSION_ACTION_TOOLS`, `TDDY_SUBAGENT_ROSTER_STATIC`,
+`TDDY_SANDBOX_TOOL_IPC`, `TDDY_SUBAGENTS_JSON`) are all exercised over the real stdio wire by
+`mcp_tool_advertisement_audit.rs`, which sets six of them and clears ten. What the grep adds over
+those is the one thing they cannot see: a variable **nothing** reads any more.
+
+## File budget (M9)
+
+`## Boundaries` refused to force every file under 500 lines and named five offenders. Measured the
+way the plan measured *them* — **non-blank lines**, `grep -cv '^[[:space:]]*$'`, which reproduces
+3,842 / 991 / 927 / 843 / 685 exactly at `efc064f2`. Note that the M8 note's "`server.rs` goes
+3,916 → 3,369" is the **raw** count of the same file, whose non-blank count is 3,121 — the two
+figures agree, they are different units:
+
+| Original offender | Before | After | Under budget? |
+|---|---:|---:|---|
+| `tddy-tools/server.rs` | 3,842 | **3,121** | ✗ — seams A, B and E, which this node keeps on purpose (`## Boundaries`). −721 |
+| `tddy-tools/session_tool_client.rs` | 991 | **1,005** in `tddy-session-tool-client/lib.rs` | ✗ — moved verbatim to its own crate root, +14 for the crate-level module doc. Splitting the four-transport selector is the one thing M7 refused to do |
+| `tddy-tools/cli.rs` | 927 | **833** | ✗ — the wire types and two subcommands' logic left; what remains is twenty-odd clap dispatch arms, and splitting them is a different change |
+| `tddy-tools/pty_relay.rs` | 843 | **193** here **+ 766** in `tddy-terminal-rpc/pty_relay.rs` | ✓ / ✗ — the `tddy-tools` half is the only original offender that landed under budget. The relay itself is still over it in its new crate; the four dispatch modes are not separable, which is why they moved as one |
+| `tddy-tools/session_agents/registry.rs` | 685 | **742** in `tddy-discovery/roster/registry.rs` | ✗ — +57, because it absorbed the two `seed` helpers that made the pair mutual (`## Decisions & Trade-offs`) |
+
+Two more files are over budget that the plan did not name, and both are stated rather than glossed:
+
+| File | Non-blank | Why |
+|---|---:|---|
+| `tddy-discovery/subagent_runtime.rs` | **549** | seam D's runtime, 172 of it tests. It is the table of open conversations plus the turns that outlive their calls; the tool bodies that stayed drive it, so it is one unit |
+| `tddy-tool-engine/lib.rs` | 624 → **703** | already over before this node; +79 from seam C's catalog and the remote-mode denial predicate |
+
+Nothing else in the fifteen packages this node touched crossed 500 because of this node. Everything else on the
+over-500 list (`tddy-code-restructuring/backends/rust.rs` at 6,433, `tddy-workflow-recipes/
+pr_stack/mod.rs` at 3,231, `tddy-core/presenter/presenter_impl.rs` at 2,690 and 40 more) was over it
+before and is untouched here.
+
+## Doc triage (M9)
+
+`grep -rn -e 'tddy_tools' -e 'tddy-tools' packages/*/README.md packages/*/docs docs/ft` returns
+several hundred lines. **Almost all of them are correct**: they name the `tddy-tools` **binary** and
+its CLI surface (`tddy-tools build`, `tddy-tools analyze`, `mcp__tddy-tools__*`), and this node did
+not change one subcommand. The triage is therefore over the **Rust paths**, `grep -rnoh
+'tddy_tools::[A-Za-z0-9_:]*'`, which returns seven:
+
+| Reference | Status | Action |
+|---|---|---|
+| `docs/ft/coder/sandboxed-codebase-mode.md:104` → `tddy_tools::server::subagents_from_env` | stale (M8) | **fixed** → `tddy_discovery::roster::subagents_from_env` |
+| `docs/ft/coder/sandboxed-codebase-mode.md:123` → `tddy_tools::session_agents::decide_roster_subscription` | resolves (re-export) but names the wrong crate | **fixed** → `tddy_discovery::roster::decide_roster_subscription` |
+| `docs/ft/coder/session-actions.md:145` → `tddy_tools::session_actions_cli` (binary wiring) | **accurate** — `session_actions_cli` stayed, and "binary wiring" is exactly what is left of it after M5 split out `session_dir` | none |
+| `packages/tddy-core/docs/architecture.md:96` → `tddy_tools::toolcall_client::dispatch_toolcall` | stale (M5) — it is `tddy_core::toolcall::client::dispatch_toolcall`, in the same crate the doc describes | **not edited** — `packages/*/docs/` is off limits (CLAUDE.md); routed here |
+| `packages/tddy-tools/docs/json-schema.md:5` → "the build script emits `OUT_DIR/goal_registry.rs`" | stale (M4) — there is no build script | **not edited** — same rule; and this file is due to move to `tddy-workflow-recipes/docs/` |
+| `packages/tddy-tools/docs/json-schema.md:35` → log targets `tddy_tools::schema` / `tddy_tools::schema_manifest` | **accurate, and that is the defect** — the code still emits those targets from `tddy-workflow-recipes` | recorded as [a `docs/dev/todo/` entry](../todo/2026-09-10-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md) |
+| `packages/tddy-sandbox-runner/docs/changesets/2026-07-01-….md:5` → `tddy_tools::session_tool_client::dispatch_via_sandbox_ipc` | historical record of PR #253, correct as of that PR | none — a changeset record is history, not a pointer |
+
+Five stale doc-comment paths in `src` — the ones M8 flagged — are **fixed**, and they are comments
+only, so nothing compiled against them:
+`tddy-sandbox-app/src/{host_agent.rs:19, main.rs:712, spawn.rs:113}` (`tddy_tools::server::
+subagents_from_env` → `tddy_discovery::roster::subagents_from_env`), `spawn.rs:132`
+(`tddy_tools::session_agents::STATIC_ROSTER_ENV` → `tddy_discovery::roster::STATIC_ROSTER_ENV`),
+`tddy-sandbox-runner/src/host_relay.rs:206` (`tddy_tools::session_agents` → `tddy_discovery::
+roster`). Two more were found by the same grep and fixed with them:
+`tddy-sandbox-app/src/bridge.rs:285,414` named `tddy_tools::pty_relay::encode_resize_osc`, which
+M6 moved to `tddy_terminal_rpc::pty_relay`. **No `tddy_tools::` path is left in either package's
+`src`**, and `cargo clippy -p tddy-sandbox-app -p tddy-sandbox-runner --all-targets -- -D warnings`
+is clean, so the edits are verified rather than blind.
+
 ## Baseline
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-tools` | 80 lib tests passing before `mcp_primitives` was added | |
-| `cargo clippy -p tddy-tools -p tddy-service -p tddy-tool-engine -p tddy-terminal-rpc -p tddy-discovery --all-targets -- -D warnings` | ✅ exit 0 | |
-| advertised MCP tool count over `--mcp` | **43** | |
+| `./test -p tddy-tools` | 80 lib tests passing before `mcp_primitives` was added | **320 / 0** across 48 targets — 44 lib, 276 integration |
+| `cargo clippy … --all-targets -- -D warnings` | ✅ exit 0 (5 packages) | ✅ exit 0, **15 packages** — every package this node touched, plus `tddy-sandbox-app` and `tddy-sandbox-runner` for M9's comment edits |
+| `cargo fmt --all -- --check` | — | ✅ exit 0 |
+| advertised MCP tool count over `--mcp` | **43** | **43** where the host claims the action surface, **40** on the daemon path (`## Scope`, and pinned by `mcp_tool_advertisement_audit.rs`) |
+
+**Final per-package numbers (M9).** Measured on this tree, sequentially, `cargo test -p <pkg> --
+--test-threads=4`, one package at a time — not optional, this machine exhausted memory and disk
+during M5b.
+
+| Package | Passed | Failed | Ignored | Against the recorded number |
+|---|---:|---:|---:|---|
+| `tddy-tools` | **320** | 0 | 0 | 317 post-M8 **+3**, the new `mcp_tool_advertisement_audit.rs` |
+| `tddy-core` | **589** | 0 | 0 | unchanged from post-M7 |
+| `tddy-discovery` | **109** | 0 | 0 | unchanged from post-M8 |
+| `tddy-service` | **111** | 0 | 0 | unchanged from post-M8 |
+| `tddy-workflow-recipes` | **559** | **1** ⚠ | 0 | the failure is pre-existing and macOS-only — see below |
+| `tddy-code-restructuring` | **294** | 0 | 1 | — |
+| `tddy-testing-commons` | **24** | 0 | 2 | — |
+| `tddy-terminal-rpc` | **24** | 0 | 0 | matches post-M6 exactly |
+| `tddy-code-analysis` | **34** | 0 | 0 | — |
+| `tddy-bsp` | **12** | 0 | 0 | unchanged from post-M5 |
+| `tddy-tool-engine` | **11** | 0 | 0 | unchanged from post-M6 |
+| `tddy-lsp-executor` | **6** | 0 | 0 | — |
+| `tddy-session-tool-client` | **5** | 0 | 0 | unchanged from post-M7 |
+
+⚠ **One failing test, and it is not this node's.**
+`tddy-workflow-recipes`' `pr_stack_artifact_paths_acceptance::
+a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent` expects
+`pr-stack-plan.md: /tmp/nix-shell.…/pr-stack-plan.md` and gets `/private/tmp/nix-shell.…/` —
+macOS canonicalises `/tmp`, Linux does not, so it fails here and passes on CI. Nothing in this node
+touches `pr_stack/hooks.rs`' path handling. **Run `tddy-workflow-recipes` with `--no-fail-fast`**:
+`cargo test` stops after the first failing *target*, so a plain run reports 363 of the 559 tests
+and hides four whole targets.
+
+⚠ **One hang, also not this node's, and it will wedge an unattended run.**
+`tddy-terminal-rpc`'s `local_pty_relay::runs_a_fast_exiting_command_to_completion` never returns
+when the test process' stdin is an open pipe that never delivers EOF — which is exactly what a
+detached shell gives it. It passes in ~0.1s with stdin on `/dev/null`, which is how the 24 above
+were measured. Characterised and recorded in
+[`docs/dev/todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md`](../todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md);
+the relay code is byte-identical to its pre-node-5 form, so the hang predates the move.
 
 **Per-milestone package baselines.** Every drop is accounted for by a named move; a package whose
 number falls without one is a regression, not a milestone.
@@ -941,16 +1217,44 @@ merely unused.
 ## Final Checklist
 
 - [ ] `docs/dev/changesets/2026-09-09-unbundle-tools-thinning.md` — the release-note file, carrying the
-      three dependency drops, the three deleted duplications and the before/after module counts
-- [ ] Move `packages/tddy-tools/docs/json-schema.md` to `tddy-workflow-recipes/docs/`
-- [ ] `packages/tddy-session-tool-client/README.md` — the new crate has none yet
-- [ ] Close `docs/dev/todo/2026-08-23-the-action-tools-are-advertised-where-nothing-implements-them.md`
-- [ ] New `docs/dev/todo/` entries: retire seam A's NDJSON protocol; the forced `[[bin]]`
-      dependencies; **`tddy-tools::relay` has no production caller** — 135 lines and one test
-      file, kept here at M8 because `tddy-discovery` was the wrong home for a `tddy-daemon`
-      relay spawner (`## Boundaries`), so it needs either a real home or retiring; `tddy-livekit`'s dependency on `tddy-service` (two production call sites —
-      `room_roster.rs`'s `LiveKitRoomInfo` mapping and `participant.rs`'s
-      `codex_oauth_from_authorize_url_only`) which is what forced M7's new crate, and would be
-      resolved by splitting the protos out of `tddy-service`. `tddy-service`'s `tddy-tui`
-      dependency is **not** an entry — M7 discharged it
-- [ ] Doc triage: `grep -rn -e 'tddy_tools' -e 'tddy-tools' packages/*/README.md packages/*/docs docs/ft`
+      three dependency drops, the three deleted duplications and the before/after module counts.
+      **Numbers for it, measured at M9**: `tddy-tools` goes 24 → 12 `src` files, 14 → 6 public
+      modules, 11,501 → 5,594 non-blank prod lines, and **38 → 28 `[dependencies]`** (14 dropped —
+      the six `tddy-build*`, `tddy-lsp`, `tddy-task`, `include_dir`, `jsonschema`, `tempfile`,
+      `livekit`, `livekit-api`, `tddy-livekit`; 4 added — `tddy-bsp`, `tddy-lsp-executor`,
+      `tddy-tool-engine`, `tddy-session-tool-client`). *The plan said "17 of 34 drop"; the honest
+      figure is a **net 10** off a base of 38*
+- [ ] Move `packages/tddy-tools/docs/json-schema.md` to `tddy-workflow-recipes/docs/`. **Not done at
+      M9, deliberately**: CLAUDE.md forbids editing `packages/*/docs/` directly, so it is routed
+      here. Two of its lines are stale in a way the move must fix rather than carry — line 5
+      describes a build script that no longer exists, and line 35 documents the
+      `tddy_tools::schema` log targets, which are
+      [a defect of their own](../todo/2026-09-10-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md)
+- [ ] `packages/tddy-session-tool-client/README.md` — the new crate has none yet. **Not done at M9**,
+      same rule: it is a `packages/*/` doc
+- [x] Close `docs/dev/todo/2026-08-23-the-action-tools-are-advertised-where-nothing-implements-them.md`
+      — **closed**, `**Status:** Resolved` plus a "Resolved — withdrawn" section recording that
+      *"a transport that serves them" is not a property of the transport*: `SandboxIpc` is the
+      transport for both the handler that implements all three and the one that implements none.
+      Cites `mcp_tool_advertisement_audit.rs` as the regression test ✅
+- [x] New `docs/dev/todo/` entries — **seven written**, all dated `2026-09-10` ✅
+
+      | Entry | What it carries |
+      |---|---|
+      | [`…-the-permission-engines-ndjson-unix-socket-protocol-survives.md`](../todo/2026-09-10-the-permission-engines-ndjson-unix-socket-protocol-survives.md) | seam A's NDJSON wire, and why keeping seam A here is what preserved it |
+      | [`…-the-execute-tool-stdio-fixture-bin-forces-three-dev-deps-into-dependencies.md`](../todo/2026-09-10-the-execute-tool-stdio-fixture-bin-forces-three-dev-deps-into-dependencies.md) | the forced `[[bin]]` dependencies, now a visible share of the 28 that remain |
+      | [`…-tddy-tools-relay-rs-has-no-production-caller.md`](../todo/2026-09-10-tddy-tools-relay-rs-has-no-production-caller.md) | `relay.rs` — 135 raw / **119** non-blank lines, one test file, zero `src` callers anywhere |
+      | [`…-tddy-livekit-depends-on-tddy-service-for-two-call-sites.md`](../todo/2026-09-10-tddy-livekit-depends-on-tddy-service-for-two-call-sites.md) | the two call sites that forced M7's twelfth crate |
+      | [`…-three-crates-gained-a-transitive-tddy-tui-dependency.md`](../todo/2026-09-10-three-crates-gained-a-transitive-tddy-tui-dependency.md) | M6, M7 **and** M8's `tddy-service` edges, with blast radius, cross-referenced to node 4's root-cause entry |
+      | [`…-two-duplications-left-standing-by-the-tools-thinning.md`](../todo/2026-09-10-two-duplications-left-standing-by-the-tools-thinning.md) | `MAX_MANIFEST_BYTES` ×2 and the third `non_empty_env` |
+      | [`…-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md`](../todo/2026-09-10-schema-validation-still-logs-under-the-tddy-tools-target-after-moving-crates.md) | **found at M9**: M4 left nine `tddy_tools::schema*` log targets behind in `tddy-workflow-recipes`, against M6/M7/M8's practice and node 4's stated policy — the stack ships both rules |
+
+      An eighth was written for a defect the verification itself turned up:
+      [`…-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md`](../todo/2026-09-10-local-pty-relay-never-returns-when-its-stdin-is-an-open-pipe.md).
+      **`tddy-service`'s `tddy-tui` dependency is correctly not an entry** — M7 discharged it — but
+      the three crates that acquired the same edge are, which is a different item.
+- [x] Doc triage: `grep -rn -e 'tddy_tools' -e 'tddy-tools' packages/*/README.md packages/*/docs docs/ft`
+      — executed and recorded in `## Doc triage (M9)`. Seven Rust-path references triaged, two
+      fixed, one accurate, two routed here as `packages/*/docs/` edits, one a defect entry, one
+      historical. Five stale `src` doc comments fixed (plus two more the same grep found), and
+      `packages/*/README.md` has no `tddy_tools::` path at all ✅

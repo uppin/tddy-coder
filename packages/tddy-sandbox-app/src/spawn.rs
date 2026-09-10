@@ -110,7 +110,7 @@ pub(crate) fn specialized_agent_replacement_pairs(
 ///
 /// Which process that is depends on the placement and on nothing else: the jail's, in the modes
 /// that put the agent inside it, and the host one this app configures for `sandboxed`
-/// (`crate::host_agent::host_mcp_env`). `tddy_tools::server::subagents_from_env` reads the same
+/// (`crate::host_agent::host_mcp_env`). `tddy_discovery::roster::subagents_from_env` reads the same
 /// variables either way.
 pub(crate) fn subagent_env_overlay(
     defs: &[tddy_discovery::agent_def::SpecializedAgentDef],
@@ -129,7 +129,7 @@ pub(crate) fn subagent_env_overlay(
         env.insert("TDDY_SUBAGENTS_JSON".to_string(), defs_json);
     }
     // Tell the MCP server that this seed is the session's whole roster, permanently
-    // (`tddy_tools::session_agents::STATIC_ROSTER_ENV`). Without it the server subscribes to
+    // (`tddy_discovery::roster::STATIC_ROSTER_ENV`). Without it the server subscribes to
     // `StreamSessionAgents` — it always sees a session-tool transport, since `TDDY_SANDBOX_TOOL_IPC`
     // is how tool calls are dispatched — and no standalone-app session serves that RPC, so a few
     // seconds in the roster reads as unreachable and every `subagent_*` call is refused.

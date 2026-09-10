@@ -709,7 +709,7 @@ async fn run_macos(args: Args, cfg: config::SandboxAppConfig) -> Result<()> {
 /// leave the caller confining the agent under a flag that promises to confine the code.
 ///
 /// A specialized agent is **not** such a combination, though this once refused one. The roster is
-/// read by `tddy_tools::server::subagents_from_env` in whichever process runs `tddy-tools --mcp`,
+/// read by `tddy_discovery::roster::subagents_from_env` in whichever process runs `tddy-tools --mcp`,
 /// and this mode has one of those — on the host, spawned by the host agent from the MCP config the
 /// app writes ([`host_agent::host_mcp_env`]). What it never had is an *in-jail* one, which the
 /// roster never needed.
