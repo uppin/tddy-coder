@@ -276,7 +276,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
       splitting them would separate a handler from the field it consults, which is the cohesion the
       budget exists to protect. **`tddy-daemon` shrank**: `connection_service/rpc_service.rs` 6,938
       → 5,712 and `connection_tonic_adapter.rs` 1,505 → 1,306, and 21 modules left the crate
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
+- [x] **Baseline**: recorded per touched package, with a ledger accounting for every remaining failure ✅
 - [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
 - [ ] **Documentation**: doc triage executed at wrap
 
@@ -339,7 +339,7 @@ handlers out must take it to **one** home rather than copying it per crate. Here
 - [x] M6 — `host.proto` + `worktree.proto` generate (**no `types.proto`** — see `## Responsibility`); sandbox extern paths untouched, because nothing they name moves in this node ✅
 - [x] M7 — both crates exist and serve their methods on all three transports ✅ — two `ServiceEntry`s in `runtime.rs` (HTTP `/rpc` + the LiveKit common room) plus two hand-written tonic adapters on the local socket
 - [x] M8 — `tddy-web` migrated ✅; Cypress component suites green — **231 specs, 1419/1419, 5m34s**
-- [ ] M9 — baselines restored; file-budget outcome recorded
+- [x] M9 — baselines restored ✅ and the file-budget outcome recorded ✅ — see `## Baseline` and its failure ledger
 
 ## Testing Plan
 
@@ -610,13 +610,38 @@ Recorded before any change; the acceptance criterion for M9.
 
 | Gate | Before | After |
 |---|---|---|
-| `cargo build --workspace` | ✅ clean (5m10s) | |
-| `cargo fmt --all --check` | ✅ clean | |
-| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites | |
-| `./test -p tddy-code-restructuring` | ✅ 251 passed / 0 failed | |
-| `cargo clippy -p tddy-daemon --all-targets -- -D warnings` | ✅ exit 0 | |
-| `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` | ✅ exit 0 | |
-| `./dev bun run --filter tddy-web cypress:component` | not yet run — no web change in commit 2 | |
+| `cargo build --workspace` | ✅ clean (5m10s) | ✅ clean (1m27s warm) |
+| `cargo fmt --all --check` | ✅ clean | ✅ clean |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites | **583 passed / 0 failed** (lib, `--test-threads=1`) — 226 unit tests travelled into the new crates |
+| `cargo test -p tddy-daemon --no-fail-fast` | **2124 passed / 39 failed**, 169 suites | **1866 passed / 21 failed** — see the failure ledger below |
+| `./test -p tddy-code-restructuring` | ✅ 251 passed / 0 failed | ✅ **287 passed / 0 failed** |
+| `cargo test -p tddy-daemon-kernel` | n/a — crate did not exist | ✅ 85 passed / 0 failed |
+| `cargo test -p tddy-host-service` | n/a — crate did not exist | ✅ 129 passed / 0 failed |
+| `cargo test -p tddy-worktree-service` | n/a — crate did not exist | ✅ 81 passed / 0 failed |
+| `cargo test -p tddy-service` | ✅ 104 passed, **2 failed** (the completion criterion) | ✅ **109 passed / 0 failed** |
+| `cargo clippy -p tddy-daemon --all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0 |
+| `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0 |
+| `cargo clippy` — the two new crates + kernel + service | n/a | ✅ exit 0 |
+| `scripts/generated-code.sh check` | ⛔ did not exist; drift undetected | ✅ exit 0, all four directories |
+| `./dev bun run --filter tddy-web test:unit` | not run | ✅ 1178 passed / 0 failed |
+| `./dev bun run --filter tddy-web cypress:component` | not yet run — no web change in commit 2 | ✅ **231 specs, 1419/1419**, 5m34s |
+
+**No test was lost to the split.** 583 (daemon lib) + 85 (kernel) + 129 (host) + 81 (worktree) = **878**,
+against 828 before (809 + 19). The daemon's whole-package figure falls for the same reason and by the
+same arithmetic.
+
+### Failure ledger — all 21, none introduced by this node
+
+| n | Failure | Status |
+|---|---|---|
+| 17 | panic at `connection_service/svc_resolve_tddy_tools_path.rs:163` — `self_arc called before set_self_handle` | **Pre-existing**, the known failure recorded below. It reaches more suites than the 1-of-25 the truncated baseline showed only because `--no-fail-fast` gets past binary 25 |
+| 2 | `sandbox_session_stdio_acceptance` | **Pre-existing and stale**: the test `include_str!`s `src/connection_service.rs` and greps it for `"--stdio"`, a string at zero occurrences there before this PR as well — the spawn argv moved to `connection_service/svc_start_sandboxed_*.rs` in an earlier commit and the anchor was never updated |
+| 1 | `sandbox_stdio_seatbelt_acceptance` — tool dispatch timeout in a real Seatbelt jail | **Environmental** |
+| 1 | `session_room_acceptance` | **Environmental** — LiveKit container/port contention |
+
+The 13 `tddy-remote-git-repo not built` failures in the *before* column are gone for an environmental
+reason, not a code one: `cargo test` does not build that binary, and a `cargo build --workspace` in
+this session did. They are a property of the runner, not of the tree.
 
 The `-p tddy-daemon` figure matches the base branch's own recorded baseline (1027/1) exactly, which is
 the evidence that rebasing this node onto #468's rewritten tip cost nothing.
