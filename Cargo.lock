@@ -12039,13 +12039,11 @@ name = "tddy-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "argon2",
  "assert_cmd",
  "async-trait",
  "axum 0.8.9",
  "base64 0.22.1",
  "bytes",
- "chacha20poly1305",
  "chrono",
  "clap",
  "futures-util",
@@ -12059,7 +12057,6 @@ dependencies = [
  "portable-pty 0.9.0",
  "pretty_assertions",
  "prost 0.13.5",
- "rand 0.8.6",
  "reqwest 0.12.28",
  "rsa 0.9.10",
  "rstest 0.24.0",
@@ -12093,6 +12090,7 @@ dependencies = [
  "tddy-sandbox-qemu",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
+ "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-sync",
@@ -12720,11 +12718,30 @@ dependencies = [
 name = "tddy-screen-sharing"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "argon2",
+ "async-trait",
+ "chacha20poly1305",
+ "libc",
+ "log",
  "pretty_assertions",
+ "rand 0.8.6",
+ "rsa 0.9.10",
  "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.10.9",
  "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-host-service",
+ "tddy-livekit",
  "tddy-rpc",
- "thiserror 2.0.18",
+ "tddy-service",
+ "tddy-testing-commons",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

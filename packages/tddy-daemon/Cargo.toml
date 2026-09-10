@@ -77,9 +77,6 @@ tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
 tokio-util = "0.7"
 tddy-vm = { path = "../tddy-vm" }
-argon2 = "0.5"
-chacha20poly1305 = "0.10"
-rand = "0.8"
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-supervisor = { path = "../tddy-supervisor" }
@@ -106,6 +103,9 @@ rsa = "=0.9.10"
 # and registers both, and `session_reader` implements the worktree crate's session-listing port.
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
+# The moved screen-sharing subsystem: `runtime.rs` builds its service and registers the entry it
+# returns. `argon2`, `chacha20poly1305` and `rand` are the vault's, and left with it.
+tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }

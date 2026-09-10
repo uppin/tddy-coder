@@ -1000,9 +1000,9 @@ pub async fn build(
         // Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so vaults live
         // under the config-only tddy home (config → profile default → `$HOME/.tddy`),
         // matching `sessions_base_resolver` above — not a statically-derived `$HOME/.tddy`.
-        let ss_key_cache: crate::screen_sharing_service::ScreenSharingKeyCache =
+        let ss_key_cache: tddy_screen_sharing::ScreenSharingKeyCache =
             Arc::new(Mutex::new(HashMap::new()));
-        let ss_sessions_base: crate::screen_sharing_service::SessionsBase = {
+        let ss_sessions_base: tddy_screen_sharing::SessionsBase = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
                 crate::user_sessions_path::sessions_base_for_user(user, Some(&dd))
@@ -1022,18 +1022,16 @@ pub async fn build(
             Arc::new(crate::host_keypair::FileHostKeypair::new(
                 crate::host_registry::host_registry_dir(&tddy_data_dir),
             ));
-        let ss_svc = crate::screen_sharing_service::ScreenSharingServiceImpl::new(
+        let ss_svc = tddy_screen_sharing::ScreenSharingServiceImpl::new(
             ss_user_resolver,
             ss_sessions_base,
             Arc::clone(&ss_key_cache),
         )
         .with_config(Arc::clone(&config_arc))
         .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
-        let ss_server = tddy_service::ScreenSharingServiceServer::new(ss_svc);
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "screen_sharing.ScreenSharingService",
-            service: Arc::new(ss_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
+        // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
+        rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));
     }
 
     // The daemon's own settings, read and written by its UI. Registered for every host — a desktop

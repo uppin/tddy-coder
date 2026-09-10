@@ -103,8 +103,4 @@ pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
 pub mod sandbox_session;
-pub mod screen_sharing_service;
-pub mod screen_sharing_vault;
 pub mod test_util;
-pub mod vnc_service;
-pub mod vnc_vault;

@@ -10,7 +10,7 @@
 //!   5. Returns generalized `screenshare:`-prefixed coordinates from `StartStream`.
 //!
 //! All tests reference `tddy_service::proto::screen_sharing` and
-//! `tddy_daemon::screen_sharing_service` which do not yet exist — they will
+//! `tddy_screen_sharing::screen_sharing_service` which do not yet exist — they will
 //! fail to compile until the green phase implements the renamed modules.
 
 use std::collections::HashMap;
@@ -19,8 +19,10 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use tddy_daemon::screen_sharing_service::{ScreenSharingKeyCache, ScreenSharingServiceImpl};
 use tddy_rpc::{Code, Request};
+use tddy_screen_sharing::screen_sharing_service::{
+    ScreenSharingKeyCache, ScreenSharingServiceImpl,
+};
 use tddy_service::proto::screen_sharing::{
     AddTargetRequest, ListTargetsRequest, Protocol, ScreenSharingService, StartStreamRequest,
     UnlockVaultRequest,

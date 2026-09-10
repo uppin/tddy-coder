@@ -166,10 +166,16 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
       `ConnectionServiceImpl` resolving an assistant as an `--agent`. `sqlx`,
       `agent-client-protocol` and `tddy-acp` left with it ✅
 - [~] **`tddy-telegram`**: crate and surface published; 10 modules, 14 test files and `teloxide` still to move
-- [~] **`tddy-screen-sharing`**: crate and surface published; 2 modules and 2 test files still to move
-- [ ] **Delete unreachable VNC**: `vnc_service.rs`, `vnc_vault.rs`, both acceptance suites, the two `lib.rs` entries
-- [ ] **Wiring**: three `ServiceEntry` registrations move behind `build_*_entry` calls in `runtime.rs`
-- [ ] **File budget**: record which of this node's over-500-line files landed under budget and which did not, with why
+- [x] **`tddy-screen-sharing`**: 2 modules and 2 test files moved. `argon2`, `chacha20poly1305` and
+      `rand` — the vault's Argon2id/ChaCha20-Poly1305 primitives — left `tddy-daemon` with it.
+      `tddy-screenshare` did **not**: this plan said it was screen sharing's alone, and it is, but
+      `tddy-daemon` never depended on it — `packages/tddy-vnc` and `packages/tddy-rdp`, the bridge
+      binaries the service *spawns*, are its only consumers. There was nothing to move ✅
+- [x] **Delete unreachable VNC**: `vnc_service.rs`, `vnc_vault.rs`, both acceptance suites, the two `lib.rs` entries ✅
+- [~] **Wiring**: `models.ModelRegistryService`, `tddy.acp.v1.AcpService` and
+      `screen_sharing.ScreenSharingService` now register through `build_*_entry`; telegram's
+      inbound task is M4's
+- [~] **File budget**: `screen_sharing_service.rs` stayed whole at 2,171 lines — see below
 - [ ] **Baseline**: `./test -p tddy-daemon -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing` back to the recorded numbers
 - [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
 - [ ] **Documentation**: doc triage executed at wrap
@@ -184,11 +190,20 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
 |---|---:|---:|---:|---|
 | `model_registry/` | 13 | 3,035 | **0** | **none beyond its own directory** |
 | telegram | 10 | 6,835 | 1,201 | SESSIONS (6 modules), LIVEKIT (`session_room`), GIT (2), SPAWN (4), MISC (1), CORE (`config`) |
-| screen sharing | 2 | 2,299 | 0 | AUTH (`screen_sharing_vault`), CORE (`config`) — **no `connection_service` edge** |
+| screen sharing | 2 | 1,367 | **1,209** | AUTH (`screen_sharing_vault`), CORE (`config`), HOSTS (`host_desktop_targets`, `host_keypair`, `host_prompts`, `host_registry`) — **no `connection_service` edge** |
 | vnc | 2 | 563 | 0 | **unreachable — registered nowhere** |
 
 `teloxide` is used by the telegram subsystem alone; `sqlx`, `agent-client-protocol` and `tddy-acp` by
-`model_registry/` alone; `tddy-screenshare` by screen sharing alone.
+`model_registry/` alone; `argon2`, `chacha20poly1305` and `rand` by screen sharing alone.
+
+The screen-sharing row above was corrected against the code at M3; its totals had been read off
+the file sizes without splitting production from tests. `screen_sharing_service.rs` is 2,171 lines,
+of which **1,209 are a `#[cfg(all(test, unix))]` module** — the `#hosts-screen` host-scope suite — so the
+subsystem is 1,367 production lines, not 2,299, and its inline-test count is 1,209, not 0. Its
+outbound edges were understated too: it reaches four `host_*` modules as well as `config`. All four
+had already left `tddy-daemon` on node 1, so the extraction was still one-way — but that is node 1's
+doing, not an absence in the subsystem. `tddy-screenshare` was never a `tddy-daemon` dependency;
+see `## Scope`.
 
 ### State B
 
@@ -204,17 +219,50 @@ a `build_*_entry(...) -> tddy_rpc::ServiceEntry` plus the trait ports their host
 - **Implementation**: `runtime.rs`'s `models.ModelRegistryService`, `AcpService`,
   `screen_sharing.ScreenSharingService` registrations and the telegram inbound task move behind the
   new crates' constructors
-- **Dependencies**: `teloxide`, `sqlx`, `agent-client-protocol`, `tddy-acp`, `tddy-screenshare` leave
+- **Dependencies**: `teloxide`, `sqlx`, `agent-client-protocol`, `tddy-acp`, `argon2`,
+  `chacha20poly1305`, `rand` leave. Not `tddy-screenshare` — it was never a dependency of this crate
 
 #### tddy-model-registry, tddy-telegram, tddy-screen-sharing
 - **Architecture**: new crates, each a workspace member
 - **API**: one entry constructor plus the existing trait ports, unchanged in shape
 
+### The published surface vs. the code, at M3
+
+`tddy-screen-sharing/src/lib.rs` was published before the subsystem was read, per the draft-PR
+contract, and contradicted it in four places. The code is the truth and the surface was corrected to
+it — never the reverse.
+
+| Published stub | The code | Resolution |
+|---|---|---|
+| `build_screen_sharing_entry(SessionsBase, Arc<ScreenSharingVault>)` | the vault is **per session, on disk**, opened inside a call from the session's own directory — it is never injected, and one process holds many | takes the assembled `ScreenSharingServiceImpl`. `with_config` and `with_host_scope` are genuinely optional, and flattening the builder would make two optional collaborators required |
+| `ScreenSharingVault { seal(session_id, key), unseal(session_id) -> Option<Vec<u8>> }` | an Argon2id-keyed **credential** vault: `create`/`unlock` a `.screen-sharing.yaml`, `add_target`, `list_targets`, `remove_target`, `decrypt_password` | the real vault, re-exported. The three vault tests keep their names and their intent, restated against it |
+| `ScreenSharingError::Unsealable { .. }` | no such type. The vault returns `anyhow::Result`; the service returns `tddy_rpc::Status` | deleted. Inventing an error type with no raiser would have been new behaviour in a relocation |
+| `pub type SessionsBase` declared afresh | `screen_sharing_service::SessionsBase`, character-for-character the same alias | re-exported rather than duplicated |
+
+The one thing the stub got right is the one that mattered most on M1: the registered name.
+`screen_sharing.proto` declares `package screen_sharing;` over `service ScreenSharingService`, so
+the wire coordinate **is** `screen_sharing.ScreenSharingService` and `runtime.rs` was already
+registering it correctly. Unlike `acp.AcpService` on M1, nothing moved.
+
+### File budget
+
+`screen_sharing_service.rs` landed at **2,171 lines — over budget, unsplit**, and this node does not
+split it. 1,209 of those lines are the `#[cfg(all(test, unix))]` host-scope suite and 962 are
+production, so the production file is already inside two budgets' worth of the limit while the
+*file* is not. Splitting it would mean either cutting the seam between session-scoped and
+host-scoped calls — which is a design change, and `#hosts-screen 8/8` deliberately put both on one
+implementation so the bridge and the LiveKit republishing are shared rather than duplicated — or
+lifting the inline suite into `tests/`, which would cost it access to the private helpers it
+asserts on. Recorded, not forced.
+
 ## Implementation Milestones
 
 - [x] M1 — `tddy-model-registry` extracted; its 5 test files pass in the new crate (134 tests: 3 crate-level + 131 across the five moved suites) ✅
-- [ ] M2 — the unreachable VNC service and its suites deleted; nothing references them
-- [ ] M3 — `tddy-screen-sharing` extracted; its 2 suites pass
+- [x] M2 — the unreachable VNC service and its suites deleted; nothing references them. The
+      inverse assertion lives in `tddy-screen-sharing/tests/dead_vnc_service_removed.rs` (3 tests) ✅
+- [x] M3 — `tddy-screen-sharing` extracted; its 2 suites pass (39 tests: 21 crate-level — 4
+      surface + 17 inline host-scope — plus 3 VNC-absence, 6 service acceptance, 9 vault
+      acceptance) ✅
 - [ ] M4 — `tddy-telegram` extracted; its 14 suites pass; `teloxide` gone from `tddy-daemon`
 - [ ] M5 — `runtime.rs` registers all three through their constructors; baselines restored
 - [ ] M6 — file-budget outcome recorded

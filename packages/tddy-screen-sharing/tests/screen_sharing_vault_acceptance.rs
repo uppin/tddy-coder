@@ -11,10 +11,10 @@
 //!   6. The vault file is written with restrictive permissions (mode 0600 on Unix).
 //!   7. A missing vault returns `false` from `is_passphrase_valid`.
 //!
-//! All tests reference `tddy_daemon::screen_sharing_vault` which does not yet exist —
+//! All tests reference `tddy_screen_sharing::screen_sharing_vault` which does not yet exist —
 //! they will fail to compile until the green phase renames the vault module.
 
-use tddy_daemon::screen_sharing_vault::{vault_path, ScreenSharingVault};
+use tddy_screen_sharing::screen_sharing_vault::{vault_path, ScreenSharingVault};
 use tddy_service::proto::screen_sharing::Protocol;
 
 const PASSPHRASE: &str = "correct-horse-battery-staple";

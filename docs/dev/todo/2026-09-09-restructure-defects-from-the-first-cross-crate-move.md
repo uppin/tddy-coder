@@ -60,3 +60,37 @@ what follows is the operational debt behind them.
   checkable, line by line, that not one of them was moved *logic* — every one was a stub line being
   replaced, a `super::`/`crate::model_registry::` re-point, or the wiring collapsing into the two
   `build_*_entry` calls. Worth saying out loud alongside the defects.
+
+### The facade-cycle refusal, seen a second time (`#unbundle` node 2, M3)
+
+`screen_sharing_service.rs` is exactly the shape `move_module_to_crate` supports —
+`packages/tddy-daemon/src/screen_sharing_service.rs`, declared by the crate root, no nesting — so it
+got past `source_crate_of`. It was then refused for the *other* reason already recorded above, the
+`pub use` facade:
+
+    Error: plan is malformed: `packages/tddy-daemon/src/screen_sharing_service.rs` still names
+    `tddy-daemon` (tddy_daemon::config::{resolve_rdp_binary_path, resolve_vnc_binary_path,
+    DaemonConfig}, tddy_daemon::host_desktop_targets::{HostDesktopTarget, HostDesktopTargetStore},
+    tddy_daemon::host_keypair::HostKeypair, tddy_daemon::host_prompts::{answer_before_expiry,
+    HostPromptRegistry, PromptKind}, tddy_daemon::screen_sharing_vault::{), so the destination would
+    depend on the crate it left while that crate goes on naming the module it lost
+
+Four of the five paths are node 1's own facades — `pub use tddy_daemon_kernel::config;` and
+`pub use tddy_host_service::{host_desktop_targets, host_keypair, host_prompts, …}` — so
+rust-analyzer canonicalises `crate::config::DaemonConfig` as `tddy_daemon::config::DaemonConfig` and
+the check reads a re-export as an origin dependency. The fifth,
+`tddy_daemon::screen_sharing_vault::`, is worse in kind: that module had **already moved to the
+destination crate** in the same milestone, so the path the operation objects to is one that resolves
+*into the crate it is being asked to move the caller to*.
+
+What this costs, concretely: the module has to be hand-re-pointed at the real crates before the
+operation will look at it — and once it has been, the operation's remaining value is the `git mv`
+and two manifest edits, which is why it was hand-moved instead. Two suggestions on top of the fix
+already recorded above:
+
+- **Resolve a re-export to its defining crate before deciding.** rust-analyzer knows
+  `tddy_daemon::config` is `tddy_daemon_kernel::config`; the refusal should be raised against the
+  definition site, not the canonical path through the facade.
+- **Exempt paths that resolve into the destination.** A module naming a sibling that has already
+  landed in the destination is the *normal* mid-plan state of a multi-module extraction, not a
+  cycle.

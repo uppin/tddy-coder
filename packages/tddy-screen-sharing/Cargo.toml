@@ -9,10 +9,43 @@ name = "tddy_screen_sharing"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "process", "io-util"] }
+# The credential vault: Argon2id(passphrase, salt) -> 32-byte key, ChaCha20-Poly1305 AEAD per item,
+# random salts and nonces. Attributable to this subsystem alone and left `tddy-daemon` with it.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+rand = "0.8"
+uuid = { version = "1", features = ["v4", "v7"] }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-core = { path = "../tddy-core" }
-thiserror = "2"
+tddy-service = { path = "../tddy-service" }
+# `config::{DaemonConfig, resolve_vnc_binary_path, resolve_rdp_binary_path}` — the bridge binary
+# paths and the LiveKit settings a stream is published under.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `#hosts-screen`'s host-scoped desktops: the target store, the keypair a browser encrypts a
+# password to, and the prompt channel that password is asked for on. Reused rather than
+# reimplemented — one key per host, and one decryption path for everything the browser encrypts.
+tddy-host-service = { path = "../tddy-host-service" }
+# The LiveKit access token a bridge process joins the room with.
+tddy-livekit = { path = "../tddy-livekit" }
+
+[target.'cfg(unix)'.dependencies]
+# `SIGTERM` to a bridge process — the daemon's own stop path.
+libc = "0.2"
 
 [dev-dependencies]
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+tempfile = "3"
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The inline suite encrypts a desktop password to the host's public key exactly as the browser's
+# `SubtleCrypto` does — RSA-OAEP(SHA-256). Pinned to match `tddy-host-service`, which owns the
+# keypair being encrypted to.
+rsa = "=0.9.10"
+sha2 = "0.10"
