@@ -45,7 +45,7 @@ retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
 #     Fails on an unprivileged runner with "tool ipc server exited before bind"
 #     even with tddy-sandbox-runner built — confirmed on CI, survived two
 #     retries. The other two tests in this binary pass, so only this one is
-#     skipped. Tracked in docs/dev/TODO.md; the intended fix is a VM-backed job
+#     skipped. Tracked in docs/dev/todo/2026-08-15-echoes-a-message-over-sandbox-service-served-over-stdio-is-skipped-in.md; the intended fix is a VM-backed job
 #     with a fully controlled environment rather than a permanent exclusion.
 #
 #   tddy-sandbox-recipes cursor_agent_prerequisite_reads_include_install_dir_and_share_root

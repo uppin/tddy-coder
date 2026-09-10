@@ -37,5 +37,3 @@ tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-discovery = { path = "../tddy-discovery" }
 tempfile = "3"
 serial_test = "3"
-rstest = { workspace = true }
-pretty_assertions = { workspace = true }

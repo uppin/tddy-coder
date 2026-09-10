@@ -72,7 +72,6 @@ tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
-tokio-util = "0.7"
 tddy-vm = { path = "../tddy-vm" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }

@@ -9,7 +9,6 @@ name = "tddy_semantic_index"
 path = "src/lib.rs"
 
 [dependencies]
-tddy-rpc = { path = "../tddy-rpc" }
 anyhow = "1"
 async-trait = "0.1"
 tddy-task = { path = "../tddy-task" }

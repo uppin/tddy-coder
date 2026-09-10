@@ -53,6 +53,3 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "proce
 # The exec-tool server the jailed runner relays to, mounted directly by
 # `sandbox_stdio_seatbelt_acceptance.rs`.
 tddy-tools = { path = "../tddy-tools" }
-
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
