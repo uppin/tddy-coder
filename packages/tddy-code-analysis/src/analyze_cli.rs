@@ -1,12 +1,16 @@
 //! `analyze` subcommands: coverage capture, CRAP report, duplicate-tests.
+//!
+//! Moved here from `tddy-tools` by `#unbundle` node 5. The dispatch is a thin shell over
+//! [`crate::coverage`] and [`crate::report`], so it belongs with them; `tddy-tools` keeps only
+//! the `main.rs` line that routes the subcommand here.
 
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::coverage::CaptureProgress;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tddy_code_analysis::coverage::CaptureProgress;
 
 #[derive(Parser)]
 #[command(name = "analyze")]
@@ -80,7 +84,7 @@ fn run_coverage(args: AnalyzeCoverageArgs) -> Result<()> {
         .coverage_dir
         .unwrap_or_else(|| PathBuf::from("coverage"));
     let mut renderer = ProgressRenderer::new();
-    tddy_code_analysis::coverage::capture_coverage(&args.path, &coverage_dir, &mut |event| {
+    crate::coverage::capture_coverage(&args.path, &coverage_dir, &mut |event| {
         renderer.render(&event)
     })
     .context("coverage capture failed")?;
@@ -192,7 +196,7 @@ fn human(elapsed: Duration) -> String {
 }
 
 fn run_report(args: AnalyzeReportArgs) -> Result<()> {
-    tddy_code_analysis::report::generate_report(&args.coverage_dir, &args.path)
+    crate::report::generate_report(&args.coverage_dir, &args.path)
         .context("report generation failed")?;
     Ok(())
 }
@@ -201,7 +205,7 @@ fn run_duplicate_tests(args: AnalyzeDuplicateTestsArgs) -> Result<()> {
     let out = args
         .out
         .unwrap_or_else(|| args.coverage_dir.join("duplicate-tests"));
-    tddy_code_analysis::report::generate_duplicate_tests_report(
+    crate::report::generate_duplicate_tests_report(
         &args.coverage_dir,
         &out,
         args.min_signature,

@@ -11758,8 +11758,11 @@ dependencies = [
 name = "tddy-bsp"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
+ "clap",
  "prost 0.13.5",
+ "serde",
  "serde_json",
  "tddy-build",
  "tddy-build-buildroot",
@@ -11875,6 +11878,7 @@ name = "tddy-code-analysis"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "md5",
  "pretty_assertions",
  "proc-macro2",
@@ -11892,6 +11896,8 @@ dependencies = [
 name = "tddy-code-restructuring"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "clap",
  "pretty_assertions",
  "rstest 0.24.0",
  "serde",
@@ -12537,6 +12543,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "serde_json",
+ "serial_test",
  "tddy-build",
  "tddy-core",
  "tddy-lsp",
@@ -13122,23 +13129,17 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "tddy-build",
- "tddy-build-buildroot",
- "tddy-build-docker",
- "tddy-build-qemu",
- "tddy-build-rust",
- "tddy-build-typescript",
+ "tddy-bsp",
  "tddy-code-analysis",
  "tddy-code-restructuring",
  "tddy-core",
  "tddy-discovery",
  "tddy-livekit",
- "tddy-lsp",
+ "tddy-lsp-executor",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
  "tddy-stdio",
- "tddy-task",
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-workflow-recipes",

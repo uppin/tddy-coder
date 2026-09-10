@@ -34,16 +34,13 @@ tddy-core = { path = "../tddy-core" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 uuid = { version = "1", features = ["v4"] }
-tddy-build = { path = "../tddy-build" }
-tddy-build-rust = { path = "../tddy-build-rust" }
-tddy-build-typescript = { path = "../tddy-build-typescript" }
-tddy-build-docker = { path = "../tddy-build-docker" }
-tddy-build-buildroot = { path = "../tddy-build-buildroot" }
-tddy-build-qemu = { path = "../tddy-build-qemu" }
+# The `build`/`build-list` dispatch lives in tddy-bsp, which owns the one plugin registry — so the
+# six `tddy-build*` crates are its dependencies, not this one's.
+tddy-bsp = { path = "../tddy-bsp" }
 tddy-code-analysis = { path = "../tddy-code-analysis" }
 tddy-code-restructuring = { path = "../tddy-code-restructuring" }
-tddy-lsp = { path = "../tddy-lsp" }
-tddy-task = { path = "../tddy-task" }
+# The `Lsp*` MCP tool catalog: owned by the crate that answers the calls.
+tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 log = "0.4"
 env_logger = "0.11"

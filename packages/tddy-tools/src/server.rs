@@ -330,8 +330,8 @@ impl PermissionServer {
         // LSP tools: the single language-agnostic `Lsp*` set is exposed only when the owner
         // signalled (via `TDDY_LSP_TOOLS`) that a language server is available for the repo.
         // They forward over the same session-tool transport as the exec tools.
-        if crate::lsp_tools::lsp_tools_enabled() {
-            tool_router.merge(dynamic_tool_router(&crate::lsp_tools::lsp_tool_catalog()));
+        if tddy_lsp_executor::lsp_tools::lsp_tools_enabled() {
+            tool_router.merge(dynamic_tool_router(&lsp_tool_defs()));
         }
         Self {
             tool_router,
@@ -1630,6 +1630,23 @@ pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
             input_schema_json: r#"{"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"}}}"#.to_string(),
         },
     ]
+}
+
+/// The five language-agnostic LSP operations as MCP tool defs.
+///
+/// `tddy-lsp-executor` owns the operations, their descriptions and their argument schemas — it is
+/// what answers the calls. The MCP shape they are advertised in belongs here, which is the same
+/// split `mcp_primitives` documents: what leaves this crate is a tool's implementation, not the
+/// shape of an MCP tool.
+fn lsp_tool_defs() -> Vec<RemoteToolDef> {
+    tddy_lsp_executor::lsp_tools::lsp_tool_catalog()
+        .into_iter()
+        .map(|tool| RemoteToolDef {
+            name: tool.name.to_string(),
+            description: tool.description.to_string(),
+            input_schema_json: tool.input_schema_json.to_string(),
+        })
+        .collect()
 }
 
 /// Build a live `ToolRouter<PermissionServer>` from an arbitrary catalog of [`RemoteToolDef`]s.

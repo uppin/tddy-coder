@@ -9,11 +9,14 @@
 //!   catalog.
 //! - [`plugins::plugin_registry`] — the build-plugin set (`tddy-build` knows no target types; this
 //!   crate chooses them), used both for source/output derivation and compile/test/run execution.
+//! - [`build_cli`] — the `tddy-tools build` / `build-list` dispatch, which used to carry a second,
+//!   verbatim copy of that registry.
 //!
 //! `tddy-coder` and the daemon depend on this crate, register the provider on worktree-open, and mount
 //! the service. Feature: `docs/ft/coder/bsp-build-server.md`.
 
 pub mod bsp_service;
+pub mod build_cli;
 pub mod plugins;
 pub mod provider;
 pub mod service;

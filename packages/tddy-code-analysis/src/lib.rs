@@ -1,5 +1,6 @@
 //! Rust code analysis: cyclomatic complexity, CRAP scoring, coverage capture, reports.
 
+pub mod analyze_cli;
 pub mod complexity;
 pub mod coverage;
 pub mod crap;

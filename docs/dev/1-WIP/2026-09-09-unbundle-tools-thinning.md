@@ -233,8 +233,8 @@ package boundary — is answered here by moving the boundary instead of the stri
 - [ ] **`tddy-tool-engine`**: seam C; **the hand-copied catalog collapsed to one**
 - [ ] **`tddy-terminal-rpc`**: `pty_relay`
 - [ ] **`tddy-core`**: the six movers and `cli.rs`'s wire types
-- [ ] **`tddy-bsp`**: `build_cli` dispatch; **the duplicate `plugin_registry` deleted**; the 6 `tddy-build*` deps dropped from `tddy-tools`
-- [ ] **`tddy-code-analysis`, `tddy-code-restructuring`, `tddy-lsp-executor`**: their dispatches; `cli_vector()` deleted
+- [x] **`tddy-bsp`**: `build_cli` dispatch; **the duplicate `plugin_registry` deleted**; the 6 `tddy-build*` deps dropped from `tddy-tools` ✅
+- [x] **`tddy-code-analysis`, `tddy-code-restructuring`, `tddy-lsp-executor`**: their dispatches; `cli_vector()` deleted ✅
 - [ ] **`tddy-tools`' `build.rs` deleted**; the cross-package `include_dir!`/`include_str!` reach gone
 - [ ] **Dependency drops asserted**: `tddy-daemon`, `tddy-sandbox-app`, `tddy-sandbox-darwin` no longer dev-depend on `tddy-tools`
 - [ ] **Env contract**: all 25 `TDDY_*` variables read from the same places, verified
@@ -298,7 +298,7 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 
 - [x] M1 — the `tddy-testing-commons` cycle resolved ✅
 - [x] M2 — `mcp_primitives` extracted; all three `server.rs` cycles broken; `cargo build -p tddy-tools` clean ✅
-- [ ] M3 — the four small dispatch movers (`analyze_cli`, `restructure_cli`, `lsp_tools`, `build_cli`); `cli_vector()` and the duplicate `plugin_registry` deleted
+- [x] M3 — the four small dispatch movers (`analyze_cli`, `restructure_cli`, `lsp_tools`, `build_cli`); `cli_vector()` and the duplicate `plugin_registry` deleted ✅
 - [ ] M4 — `schema`, `schema_manifest`, `github_pr`, seam B to `tddy-workflow-recipes`; `review_persist` deleted; `build.rs` deleted
 - [ ] M5 — the six `tddy-core` movers and `cli.rs`'s wire types
 - [ ] M6 — `pty_relay` to `tddy-terminal-rpc`; seam C to `tddy-tool-engine` with one catalog
@@ -388,6 +388,11 @@ afterwards, verified by grep over the destinations rather than by assumption.
 
 ## Technical Debt & Production Readiness
 
+- [ ] **M3 left `tddy-bsp`'s build dispatch taking its relay transport as a function pointer.**
+      `toolcall_client` is still in `tddy-tools`, and `tddy-bsp` is one of that binary's dependencies,
+      so the relay could not be called directly. **M5** moves `toolcall_client` to `tddy-core`, which
+      `tddy-bsp` already depends on; the `ToolcallRelay` parameter goes then. Marked `TODO(tools-thinning)`
+      at `packages/tddy-bsp/src/build_cli.rs`
 - [ ] Seam A's NDJSON Unix-socket protocol survives; retiring it in favour of `tddy-rpc` framing is a
       `docs/dev/todo/` entry at wrap
 - [ ] `tddy-service` depends on `tddy-tui`, so moving `session_tool_client` there pulls the TUI into
@@ -401,10 +406,10 @@ afterwards, verified by grep over the destinations rather than by assumption.
       of it. In-crate that compiles; at **M7**, with `session_agents/*` in `tddy-service`, it is the
       cross-crate cycle step zero exists to prevent. M7 re-homes those two items (the roster seed
       belongs with the roster) rather than moving the modules as they stand
-- [ ] `lsp_tools`' two `crate::server::PermissionServer::new().tool_names()` calls are `#[cfg(test)]`
+- [x] `lsp_tools`' two `crate::server::PermissionServer::new().tool_names()` calls are `#[cfg(test)]`
       only, and cannot follow `lsp_tools` to `tddy-lsp-executor` at **M3** — the advertisement they
       assert is a `tddy-tools` fact. They re-home to a `tddy-tools` integration test, not to the
-      destination crate
+      destination crate ✅ `packages/tddy-tools/tests/lsp_tool_advertisement_acceptance.rs`
 
 ## Baseline
 

@@ -128,7 +128,7 @@ The agent's demo step detects the running VM (via daemon state or by querying th
 
 `BuildrootPlugin` and `QemuPlugin` (from `tddy-build-buildroot` and `tddy-build-qemu`) must be registered
 in the production plugin registries:
-- `packages/tddy-tools/src/build_cli.rs` `plugin_registry()`
+- `packages/tddy-bsp/src/plugins.rs` `plugin_registry()` — the one registry the `build` CLI uses
 - `packages/tddy-coder/src/build_executor.rs` `plugin_registry()`
 
 This unblocks `tddy-tools build --target <demo-vm:qcow2>`.
