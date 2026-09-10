@@ -18,6 +18,40 @@
 
 **Nix** provides the development environment (rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node).
 
+### Verification: scope it locally, run it in full on CI
+
+**Never run a full-repo build or test locally.** A workspace-wide `cargo build`, a bare `./test`, a
+workspace-wide `cargo clippy` or a full Cypress run costs tens of minutes to hours on a dev machine,
+competes with other worktrees for `target/`, and reports **pre-existing failures from packages you
+did not touch** — noise that is routinely misread as damage from the current change.
+
+**Locally: scope every gate to the packages you actually touched, and say that you scoped it.**
+
+| Gate | Local (scoped) | Never locally |
+|------|----------------|---------------|
+| Test | `./test -p <pkg>` (repeat `-p` per package), `./test -- <test_name>` | bare `./test` |
+| Build | `cargo build -p <pkg>` | `cargo build` / `--workspace` |
+| Lint | `cargo clippy -p <pkg> -- -D warnings` | `cargo clippy -- -D warnings` |
+| Web | the single spec or story under change | full `cypress:e2e` (~50 min, 207 specs) |
+
+**For full-repo verification, push and read the PR checks — do not reproduce CI locally.** CI is the
+authority on whole-workspace health, and it runs in parallel on clean machines:
+
+```bash
+git push origin "$(git branch --show-current)"
+scripts/ci-status.sh --watch        # block until the run finishes
+scripts/ci-status.sh --failures     # failing test names, files, assertion messages, log tails
+```
+
+`scripts/ci-status.sh` reports per-check state plus **pass/fail test counts** for the current
+branch's PR; a bare number targets that PR (`scripts/ci-status.sh <PR>`). See
+[docs/dev/guides/ci.md](docs/dev/guides/ci.md) for what each check covers and what the gate
+deliberately skips.
+
+**When claiming a change is green**: quote the scoped local run for the packages you touched, and
+the CI result for everything else. Never claim whole-workspace green from a local run, and never
+report a full-repo run you did not actually complete.
+
 ### Setup (one-time)
 
 ```bash
@@ -35,9 +69,9 @@ With **direnv**: `direnv allow` once; the shell loads automatically when you `cd
 | `./release` | Build optimized production binaries (`tddy-coder`, `tddy-tools`, `tddy-daemon`, `tddy-supervisor`, `tddy-remote-git-repo`, `tddy-session-sync`, `tddy-sandbox-runner`). Output: `target/release/...`. |
 | `./install` | Install **`tddy-supervisor`**, **`tddy-daemon`**, **`tddy-coder`**, **`tddy-tools`**, **`tddy-remote-git-repo`** (git's `GIT_SSH_COMMAND` shim), **`tddy-session-sync`** (mirrors a session's worktree) and **`tddy-sandbox-runner`** (runs *inside* every jail the daemon spawns, so it must land beside `tddy-daemon` — the daemon resolves it as a sibling of its own executable) — the first two are clients, shipped so they are on `PATH`: `sudo ./install --systemd` (optional `--build` runs `./release`). **System mode** installs one unit, **`tddy-supervisor.service`** (root), which starts `tddy-daemon` as an unprivileged child declared in `supervisor.yaml` — so no `tddy-daemon.service` is written, and an inherited one is masked. **`--user`** installs a per-user `tddy-daemon.service` via `systemctl --user` and **no supervisor**: rootless, it could neither setuid nor delegate cgroups, so it would broker nothing. `--headless` installs without requiring/shipping **`packages/tddy-web/dist`** (daemon serves `/rpc` + `/api/config`, no UI). Path overrides: `INSTALL_PREFIX`, `INSTALL_BIN_DIR`, `INSTALL_CONFIG_DIR`, `INSTALL_SYSTEMD_DIR`, `INSTALL_WEB_BUNDLE_DIR`, `INSTALL_DAEMON_LOG_DIR`, `INSTALL_AUTH_STORAGE_DIR`, `INSTALL_SUPERVISOR_SOCKET_PATH`, `INSTALL_DAEMON_SOCKET_PATH`; test harness: `INSTALL_NO_SYSTEMCTL=1` skips the root check and `systemctl` (it does not redirect paths — override the four dirs too). |
 | `./publish.sh` | Package the release binaries + web bundle as a `.deb` and upload it to an apt repo: `./publish.sh <repo-path> [--build]` (`<repo-path>` is rsync-style, local or `host:dir`). Installs to `/usr/bin` (`tddy-daemon`, `tddy-coder`, `tddy-tools`, `tddy-remote-git-repo`, `tddy-session-sync`, `tddy-sandbox-runner`, `codex-acp`), `/usr/share/tddy/web`, `/etc/tddy/daemon.yaml` (conffile), `/lib/systemd/system`. Overrides: `PUBLISH_PKG_NAME`, `PUBLISH_VERSION`, `PUBLISH_ARCH`, `PUBLISH_MAINTAINER`, `PUBLISH_DEPENDS`, `PUBLISH_INCOMING`, `PUBLISH_GPG_KEY_ID`. Refresh repo metadata afterwards (e.g. `reprepro processincoming default`). **Does not yet ship `tddy-supervisor` or its unit** — see `docs/dev/todo/`. |
-| `./test` | Build tddy-coder + tddy-tools, run all tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test` — all tests; `./test -p tddy-core` — one package; `./test -- test_name` — specific test. |
+| `./test` | Build tddy-coder + tddy-tools, then run tests. Writes output to `.verify-result.txt` (agent workaround for Cursor terminal capture). Usage: `./test -p tddy-core` — one package; `./test -- test_name` — specific test; `./test` — **everything, which is a CI job, not a local one** (see [Verification](#verification-scope-it-locally-run-it-in-full-on-ci)). |
 | `./clean` | Remove stale Cargo build fingerprints, deps, incremental. Keeps newest per crate in `target/debug` and `target/release`. Frees disk space without full `cargo clean`. |
-| `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. |
+| `./verify` | Run `cargo test` and write output to `.verify-result.txt`. Use when agent terminal capture fails; read that file for verification evidence. Unscoped, so it runs the whole workspace — prefer `./test -p <pkg>`, which writes the same file, and leave the full run to CI. |
 | `scripts/ci-status.sh` | Report GitHub Actions status for the current branch's PR: per-check state plus **pass/fail test counts**. `--failures` adds failing test names, files, assertion messages and failing-step log tails; `--watch` blocks until the run finishes; a bare number targets that PR. See [docs/dev/guides/ci.md](docs/dev/guides/ci.md). |
 | `./web-dev` | Start **`tddy-daemon`** (see **`DAEMON_CONFIG`** / **`dev.daemon.yaml`**) and the **`tddy-web`** Vite dev server with **`/rpc`** proxy. See [docs/ft/web/local-web-dev.md](docs/ft/web/local-web-dev.md). |
 | `./vm-tests` | Run the **VM-backed production tests** — the ones that boot a real QEMU guest. Deliberately **not** part of `./test`: every one is `#[ignore]`d, so a default run reports them as ignored and boots nothing. `./vm-tests` — all suites; `./vm-tests <substring>` — matching tests only; `./vm-tests --list` — show the suites. Requires **`TDDY_CLOUDINIT_BASE_IMAGE`** (exported or in `.env`); nothing is downloaded. Warm the cache with `./run-vm-testkit` first so the bakes are a one-time cost. Each suite runs `--test-threads=1` — not optional, since these bind fixed host ports and QEMU derives its monitor socket path from the port alone. |
@@ -50,11 +84,11 @@ All `./` scripts use nix dev shell via `--profile ./.nix-profile` for a consiste
 | Action | Command |
 |--------|---------|
 | Dev shell | `./dev` — enter nix dev shell with a GC-rooted profile. With args, runs the command inside the shell (e.g. `./dev cargo clippy`) |
-| Build | `cargo build` or `cargo build -p tddy-core` / `-p tddy-coder` |
+| Build | `cargo build -p <pkg>` — **scope it**, see [Verification](#verification-scope-it-locally-run-it-in-full-on-ci). Full-workspace builds belong on CI |
 | Release | `./release` — optimized production build (output: `target/release/tddy-coder`, `target/release/tddy-tools`, `target/release/tddy-daemon`, `target/release/tddy-supervisor`, `target/release/tddy-remote-git-repo`, `target/release/tddy-session-sync`, `target/release/tddy-sandbox-runner`) |
-| Test | `./test` — builds tddy-coder + tddy-tools, then runs all tests (output also written to `.verify-result.txt`). Supports args: `./test -p tddy-core` or `./test -- test_name` |
+| Test | `./test -p <pkg>` or `./test -- test_name` — **scope it to the packages you touched**, see [Verification](#verification-scope-it-locally-run-it-in-full-on-ci). A bare `./test` runs everything and is a CI job, not a local one. Output is also written to `.verify-result.txt` |
 | Clean | `./clean` — removes stale Cargo build fingerprints from `target/debug/build` and `target/release/build`, keeping only the newest per crate |
-| Lint | `cargo clippy -- -D warnings` |
+| Lint | `cargo clippy -p <pkg> -- -D warnings` — scoped; the workspace-wide run is CI's |
 | Format | `cargo fmt` |
 | Run CLI | `cargo run -p tddy-coder -- --goal plan` (reads feature from stdin) |
 | Web install | `./dev bun install` — workspace JS deps (includes **`@zed-industries/codex-acp`** for **`./install`**) |
@@ -151,7 +185,7 @@ Without the env var, tests start a fresh container via testcontainers (default).
 1. **Legacy Terminal:** Cursor Settings → search "Legacy Terminal" → enable, then test in a new chat.
 2. **Verify script:** Run `./verify` — writes `cargo test` output to `.verify-result.txt`. Agent can read that file for verification evidence.
 
-**When claiming tests pass:** Run `./verify` (or have the user run it), then read `.verify-result.txt` to confirm. Do not claim success based on exit code alone when output is not visible.
+**When claiming tests pass:** Run the **scoped** gate for the packages you touched — `./test -p <pkg>`, which also writes `.verify-result.txt` — then read that file to confirm. Do not claim success based on exit code alone when output is not visible, and do not claim whole-workspace green from a local run: that answer comes from CI via `scripts/ci-status.sh` (see [Verification](#verification-scope-it-locally-run-it-in-full-on-ci)).
 
 ## Demo Plans (tddy-coder)
 
