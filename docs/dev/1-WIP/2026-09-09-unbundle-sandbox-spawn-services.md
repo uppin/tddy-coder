@@ -309,6 +309,17 @@ survives in `tddy-daemon`'s `[dev-dependencies]`, and M2's *"`tddy-supervisor` g
 `tddy-daemon`"* is met structurally but not literally. Splitting that suite's fail-closed half is a
 clean follow-up.
 
+**Deferred work recorded in `docs/dev/todo/`**, so it outlives this changeset's wrap:
+
+- [`2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md`](../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md)
+  — `spawner.rs` (2,152) and `spawn_worker.rs` (568) moved unsplit, with the three seams a later
+  refactor should cut along, and why splitting during a relocation would have destroyed the
+  rename-similarity evidence.
+- [`2026-09-10-supervisor-spawn-delegation-keeps-tddy-supervisor-in-the-daemon.md`](../todo/2026-09-10-supervisor-spawn-delegation-keeps-tddy-supervisor-in-the-daemon.md)
+  — the nine-plus-two test split that would let `tddy-supervisor` leave `[dev-dependencies]`.
+- [`2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md`](../todo/2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md)
+  — the two tooling defects, reported upward to node 1 rather than fixed here.
+
 **One visibility widening**, the only one in the move: `spawner::resolve_livekit_room_name`
 `pub(crate)` → `pub`, because three daemon call sites
 (`telegram_session_control.rs:3170`, `connection_service.rs`, `terminal_bridge_impl.rs`) name the
