@@ -114,6 +114,32 @@ fn is_zero(rev: &u64) -> bool {
     *rev == 0
 }
 
+/// The agent daemon and the session on it whose agent works in *this* session's worktree, or `None`
+/// when no agent elsewhere does.
+///
+/// The mirror of `tddy_daemon::split_session::split_pairing`, read on the `workspace` half, and
+/// subject to the same rule for the same reason: half a pairing names a host but nothing on it that
+/// works in the checkout, so it is read as none rather than acted on.
+///
+/// Only a split placement records it. A standalone workspace session and an agent clone's checkout
+/// both leave it absent — which is what lets the daemon tell "the codebase half of a split session"
+/// apart from "a `workspace` session" at all, a distinction tool withdrawal depends on
+/// (`tddy_daemon::connection_service` § refuse_unenforceable_withdrawal).
+///
+/// Lives beside [`SessionMetadata`] rather than in the daemon's `split_session` module because two
+/// unrelated readers need it — the split-placement logic and the session-file readers — and a
+/// session-file reader reaching into `split_session` for it made the two mutually dependent.
+#[must_use]
+pub fn paired_agent(meta: &SessionMetadata) -> Option<(&str, &str)> {
+    fn non_blank(field: &Option<String>) -> Option<&str> {
+        field.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+    Some((
+        non_blank(&meta.agent_daemon_instance_id)?,
+        non_blank(&meta.agent_session_id)?,
+    ))
+}
+
 pub const SESSION_METADATA_FILENAME: &str = ".session.yaml";
 
 /// Options for [`write_initial_tool_session_metadata`] (CLI, gRPC daemon, LiveKit, TUI).
@@ -625,6 +651,85 @@ status: active
         );
 
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// A `.session.yaml` for a `workspace` session with no split placement recorded. Built by
+    /// deserialization because [`SessionMetadata`] is `deny_unknown_fields`: a fixture that parses
+    /// is one the daemon would also accept off disk.
+    fn a_workspace_session() -> SessionMetadata {
+        serde_yaml::from_str(
+            r#"session_id: 018f1234-5678-7abc-8def-123456789abc
+project_id: proj-split
+created_at: "2026-05-01T12:00:00Z"
+updated_at: "2026-05-01T12:00:00Z"
+status: active
+session_type: workspace
+"#,
+        )
+        .expect("the fixture must be a .session.yaml SessionMetadata accepts")
+    }
+
+    fn a_workspace_session_paired_with(
+        agent_daemon_instance_id: Option<&str>,
+        agent_session_id: Option<&str>,
+    ) -> SessionMetadata {
+        SessionMetadata {
+            agent_daemon_instance_id: agent_daemon_instance_id.map(str::to_string),
+            agent_session_id: agent_session_id.map(str::to_string),
+            ..a_workspace_session()
+        }
+    }
+
+    #[test]
+    fn reads_the_paired_agent_when_both_halves_are_recorded() {
+        // Given
+        let meta = a_workspace_session_paired_with(Some("daemon-7"), Some("session-9"));
+
+        // When
+        let pairing = paired_agent(&meta);
+
+        // Then
+        assert_eq!(pairing, Some(("daemon-7", "session-9")));
+    }
+
+    /// Half a pairing names a host but nothing on it that works in the checkout, so it is read as
+    /// none rather than acted on.
+    #[test]
+    fn reads_a_pairing_missing_its_session_id_as_no_paired_agent() {
+        // Given
+        let meta = a_workspace_session_paired_with(Some("daemon-7"), None);
+
+        // When
+        let pairing = paired_agent(&meta);
+
+        // Then
+        assert_eq!(pairing, None);
+    }
+
+    /// A present-but-blank field is the same non-answer as an absent one: it names no session to
+    /// route a withdrawal to.
+    #[test]
+    fn reads_a_blank_session_id_as_no_paired_agent() {
+        // Given
+        let meta = a_workspace_session_paired_with(Some("daemon-7"), Some("   "));
+
+        // When
+        let pairing = paired_agent(&meta);
+
+        // Then
+        assert_eq!(pairing, None);
+    }
+
+    #[test]
+    fn reads_no_paired_agent_for_a_standalone_workspace_session() {
+        // Given
+        let meta = a_workspace_session();
+
+        // When
+        let pairing = paired_agent(&meta);
+
+        // Then
+        assert_eq!(pairing, None);
     }
 
     /// **chain_child_metadata_records_previous_session_id** — `.session.yaml` must allow optional

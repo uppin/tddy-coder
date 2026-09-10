@@ -9,12 +9,15 @@ name = "tddy_session_files"
 path = "src/lib.rs"
 
 [dependencies]
-tddy-core = { path = "../tddy-core" }
+# `HOST_DOCUMENT_FRAME_BYTES` and `SessionsBaseResolver` — node 1's kernel.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `Status` and `ServiceEntry`: every method here answers an RPC, so `Status` is the error type
+# rather than something converted to one at the edge.
 tddy-rpc = { path = "../tddy-rpc" }
-thiserror = "2"
-
-[dev-dependencies]
-rstest = { workspace = true }
-pretty_assertions = { workspace = true }
-tokio = { version = "1", features = ["macros", "rt"] }
+# `ContextManifest`, the shape both context-sync halves diff.
+tddy-sandbox = { path = "../tddy-sandbox" }
+# `proto::types::HostDocumentScope`, re-exported rather than mirrored in Rust.
+tddy-service = { path = "../tddy-service" }
+# `worktree_files::validate_rel_path_shape` — the one filesystem-independent relative-path guard,
+# reused rather than restated. Same direction as `tddy-daemon`'s own edge to this crate.
+tddy-worktree-service = { path = "../tddy-worktree-service" }

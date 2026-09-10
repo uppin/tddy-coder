@@ -324,11 +324,11 @@ pub(crate) fn refuse_unenforceable_withdrawal(
 /// neither has an agent anywhere whose tools could be taken away, so accepting a withdrawal on one
 /// would report an enforcement no process performs, which is the exact failure this refusal exists
 /// to prevent. Only a split placement records the back-pointer
-/// ([`crate::split_session::paired_agent`]), so only the half that has an agent qualifies.
+/// ([`tddy_core::paired_agent`]), so only the half that has an agent qualifies.
 pub(crate) fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -> bool {
     meta.sandbox == Some(true)
         || crate::split_session::split_pairing(meta).is_some()
-        || crate::split_session::paired_agent(meta).is_some()
+        || tddy_core::paired_agent(meta).is_some()
 }
 
 /// The qualified ids a persisted roster holds, for the resume paths that re-resolve each agent

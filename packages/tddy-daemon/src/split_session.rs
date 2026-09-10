@@ -92,26 +92,17 @@ pub fn split_pairing(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> 
     ))
 }
 
-/// The agent daemon and the session on it whose agent works in *this* session's worktree, or `None`
-/// when no agent elsewhere does.
+/// The mirror of [`split_pairing`], read on the `workspace` half — now `tddy_core`'s, beside the
+/// [`tddy_core::SessionMetadata`] fields it reads.
 ///
-/// The mirror of [`split_pairing`], read on the `workspace` half, and subject to the same rule for
-/// the same reason: half a pairing names a host but nothing on it that works in the checkout, so it
-/// is read as none rather than acted on.
+/// It moved because `crate::context_files` needs it too, and that module is bound for
+/// `tddy-session-files` while this one stays here: a session-file reader calling back into
+/// `split_session` made the two mutually dependent, and neither could be extracted. Being a pure
+/// accessor over two optional metadata fields, it had no reason to live in the split-placement
+/// module in the first place.
 ///
-/// Only a split placement records it. A standalone workspace session and an agent clone's checkout
-/// both leave it absent — which is what lets the daemon tell "the codebase half of a split session"
-/// apart from "a `workspace` session" at all, a distinction tool withdrawal depends on
-/// (`crate::connection_service` § refuse_unenforceable_withdrawal).
-pub fn paired_agent(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> {
-    fn non_blank(field: &Option<String>) -> Option<&str> {
-        field.as_deref().map(str::trim).filter(|s| !s.is_empty())
-    }
-    Some((
-        non_blank(&meta.agent_daemon_instance_id)?,
-        non_blank(&meta.agent_session_id)?,
-    ))
-}
+/// Re-exported so every caller's path is unchanged, and so there stays exactly one definition.
+pub use tddy_core::paired_agent;
 
 /// Where a split session's context directory lives: inside the session directory, so it is removed
 /// with the session and needs no separate lifetime.

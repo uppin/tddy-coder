@@ -1584,7 +1584,7 @@ fn peer_has_no_such_session(status: &Status) -> bool {
 /// *for*, and a checkout cannot be both a clone's mirror and a split session's working tree.
 ///
 /// Both halves of the placement are required. A daemon named with no session on it names a host but
-/// nothing that works in the checkout — see [`crate::split_session::paired_agent`], which reads back
+/// nothing that works in the checkout — see [`tddy_core::paired_agent`], which reads back
 /// what this writes and applies the same rule.
 fn resolve_split_agent_placement(
     split_agent: Option<&SplitAgentPlacement>,

@@ -102,7 +102,7 @@ pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
 /// 1. **A paired agent means the split path.** The codebase half of a split placement is persisted
 ///    as a `workspace` session — it runs no agent of its own — while the agent it stands in for
 ///    lives on another daemon, whose `.session.yaml` this host cannot read. What *is* recorded here
-///    is the back-pointer to that agent ([`crate::split_session::paired_agent`], written with the
+///    is the back-pointer to that agent ([`tddy_core::paired_agent`], written with the
 ///    session precisely so it cannot be stamped on later), and split placement is `claude-cli` only
 ///    (PRD `remote-managed-worktree.md` § Why claude-cli only). So a paired workspace session
 ///    serves Claude's row. Deriving it from the pairing rather than from `req.agent` keeps the
@@ -110,7 +110,7 @@ pub fn context_agent_for_session_type(session_type: &str) -> &'static str {
 /// 2. **Otherwise the session's own type**, through [`context_agent_for_session_type`] — a
 ///    `workspace` session nobody is paired with runs no agent and gets the shared base.
 pub fn context_agent_for_session(meta: &tddy_core::SessionMetadata) -> &'static str {
-    if crate::split_session::paired_agent(meta).is_some() {
+    if tddy_core::paired_agent(meta).is_some() {
         return context_agent_for_session_type("claude-cli");
     }
     context_agent_for_session_type(meta.session_type.as_deref().unwrap_or_default())
