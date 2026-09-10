@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use prost::Message;
 use tddy_service::proto::connection::{SessionAgentRoster, StreamSessionAgentsRequest};
 
-use crate::session_tool_client::{
+use tddy_session_tool_client::{
     detect_session_tool_transport, SessionToolEnvelope, SessionToolTransport,
 };
 
@@ -241,14 +241,14 @@ pub fn decide_roster_subscription(
     let Some(transport) = transport else {
         // Nothing to dispatch a tool call through, let alone a roster stream.
         log::debug!(
-            target: "tddy_tools::session_agents",
+            target: "tddy_discovery::roster",
             "no session-tool transport is configured; the spawn seed is this session's whole roster"
         );
         return None;
     };
     if mutability == RosterMutability::Static {
         log::debug!(
-            target: "tddy_tools::session_agents",
+            target: "tddy_discovery::roster",
             "{STATIC_ROSTER_ENV} declares this session's roster fixed for its lifetime, so the \
              spawn seed is the whole roster and no StreamSessionAgents subscription is opened"
         );
@@ -267,7 +267,7 @@ pub fn decide_roster_subscription(
         // `ListSessionAgents` poll) so a daemon-HTTP session can address agents at all.
         SessionToolTransport::DaemonHttp { .. } => {
             let reason = "the roster stream has no client for the daemon-HTTP transport";
-            log::error!(target: "tddy_tools::session_agents", "{reason}; subagent calls are refused");
+            log::error!(target: "tddy_discovery::roster", "{reason}; subagent calls are refused");
             roster.mark_unavailable(reason);
             None
         }
@@ -276,7 +276,7 @@ pub fn decide_roster_subscription(
                 "a LiveKit environment is set but {} is empty or unset",
                 missing.join(", ")
             );
-            log::error!(target: "tddy_tools::session_agents", "{reason}; subagent calls are refused");
+            log::error!(target: "tddy_discovery::roster", "{reason}; subagent calls are refused");
             roster.mark_unavailable(&reason);
             None
         }
@@ -314,13 +314,13 @@ async fn follow_roster(
         let backoff = pacing.record(&pass, opened_at.elapsed());
         if pass.counts_as_a_failure() {
             log::warn!(
-                target: "tddy_tools::session_agents",
+                target: "tddy_discovery::roster",
                 "roster stream for session {}: {last_failure}",
                 roster.session_id()
             );
         } else {
             log::warn!(
-                target: "tddy_tools::session_agents",
+                target: "tddy_discovery::roster",
                 "roster stream for session {} ended after {} snapshot(s) ({last_failure}); \
                  reconnecting in {backoff:?}",
                 roster.session_id(),
@@ -336,7 +336,7 @@ async fn follow_roster(
                 pacing.unserved()
             );
             log::error!(
-                target: "tddy_tools::session_agents",
+                target: "tddy_discovery::roster",
                 "{reason}; every subagent call for session {} is refused until it recovers",
                 roster.session_id()
             );
@@ -349,7 +349,7 @@ async fn follow_roster(
                  throttled to {backoff:?} ({last_failure})"
             );
             log::error!(
-                target: "tddy_tools::session_agents",
+                target: "tddy_discovery::roster",
                 "{reason}; every subagent call for session {} is refused until a frame arrives",
                 roster.session_id()
             );
@@ -431,7 +431,7 @@ async fn stream_roster_once(
         // reconnect's opening frame — does not make the main agent re-list for nothing.
         if roster.tool_list_change_count() != announced_before {
             log::debug!(
-                target: "tddy_tools::session_agents",
+                target: "tddy_discovery::roster",
                 "roster rev {rev} applied for session {}",
                 roster.session_id()
             );

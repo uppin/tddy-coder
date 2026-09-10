@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use crate::session_tool_client::{SessionToolEnvelope, SessionToolTransport};
+use tddy_session_tool_client::{SessionToolEnvelope, SessionToolTransport};
 
 /// Connect to the facilitating daemon over `transport`.
 ///
@@ -24,7 +24,7 @@ pub(crate) async fn connect_facilitating_daemon(
 ) -> Result<(Arc<dyn tddy_rpc::RpcClientTransport>, SessionToolEnvelope), String> {
     match transport {
         SessionToolTransport::SandboxIpc { socket_path } => {
-            let client = crate::session_tool_client::connect_sandbox_ipc(socket_path).await?;
+            let client = tddy_session_tool_client::connect_sandbox_ipc(socket_path).await?;
             // The socket identifies the session to the sandbox-runner, as it does for every tool
             // call over it, so the envelope stays empty.
             Ok((client, SessionToolEnvelope::default()))
@@ -39,13 +39,13 @@ pub(crate) async fn connect_facilitating_daemon(
             session_token,
             daemon_instance_id,
         } => {
-            let key = crate::session_tool_client::LiveKitRoomKey {
+            let key = tddy_session_tool_client::LiveKitRoomKey {
                 url: url.clone(),
                 room: room.clone(),
                 token: token.clone(),
                 server_identity: server_identity.clone(),
             };
-            let session = crate::session_tool_client::livekit_session(&key).await?;
+            let session = tddy_session_tool_client::livekit_session(&key).await?;
             if !session.peer_present() {
                 return Err(format!(
                     "daemon \"{server_identity}\" is not in room \"{room}\""

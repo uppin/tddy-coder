@@ -16,56 +16,20 @@
 //! `tddy-core`, so a route type that named this crate's `ServerHandler` would turn today's
 //! in-crate cycle into a cross-crate one — the error step zero exists to prevent.
 //!
-//! One of the eight has since left: `env_non_empty` is `tddy_core::spawn_env::env_non_empty`. It
-//! was the item `session_agents/stream` reached *back* for, and it is a rule about environment
-//! variables rather than about MCP, so it went to the crate both sides already depend on instead
-//! of staying an edge out of here. `seed_subagents_or_report` is the other half of that same
-//! return edge and follows the roster to `tddy-discovery`, where the seed belongs with the
-//! registry it seeds.
+//! Three of the eight have since left, and with them the last edge that pointed back out of here.
+//! `env_non_empty` is `tddy_core::spawn_env::env_non_empty` — a rule about environment variables
+//! rather than about MCP, so it went to the crate both sides already depend on.
+//! `seed_subagents_or_report` and the `subagents_from_env` it reads followed the roster to
+//! `tddy_discovery::roster`, where the seed belongs with the registry it seeds; and
+//! `subagent_error_json` followed the conversation runtime to
+//! `tddy_discovery::subagent_runtime`, which mints the same envelope for a turn that fails.
+//! What is left points one way: `tddy-tools` depends on `tddy-discovery`, and nothing in
+//! `tddy-discovery` names this crate.
 
 use tddy_core::spawn_env::env_non_empty;
-use tddy_discovery::agent_def::SpecializedAgentDef;
 use tddy_discovery::subagent::{CodebaseAccess, SubagentConfig, SubagentRegistry, SubagentSession};
 
 // --- The spawn environment ---
-
-/// Parse `TDDY_SUBAGENTS_JSON` (a JSON array of [`SpecializedAgentDef`] — see
-/// docs/ft/coder/specialized-subagents.md) into the resolved specialized-agent defs for this
-/// process. Empty when the env var is unset or blank: with no def there is no agent, since every
-/// agent this process can address came from a def source someone wrote.
-///
-/// A value that is *set* and does not parse is an error, never an empty seed. `SpecializedAgentDef`
-/// is `deny_unknown_fields`, so a `tddy-tools` older than the daemon that wrote the value parses
-/// exactly this way — and an empty seed means no agent is attached and none of the withdrawn tools
-/// are served by anyone, with nothing naming the variable that caused it.
-///
-/// The message carries serde's position, never the value: a def carries a provider credential.
-pub fn subagents_from_env() -> Result<Vec<SpecializedAgentDef>, String> {
-    let Some(json) = env_non_empty("TDDY_SUBAGENTS_JSON") else {
-        return Ok(Vec::new());
-    };
-    serde_json::from_str::<Vec<SpecializedAgentDef>>(&json).map_err(|e| {
-        format!(
-            "TDDY_SUBAGENTS_JSON is set but does not parse as an array of agent defs: {e}. \
-             This is what a tddy-tools older than the daemon that spawned it sees, and treating \
-             it as 'no agents are attached' would silently un-withdraw every tool the session's \
-             agents took over"
-        )
-    })
-}
-
-/// The spawn seed for the two lazy constructions that have no caller to refuse to — the MCP
-/// server's router and the process-wide roster.
-///
-/// `--mcp` already refused to start on an unparseable value (see `run_mcp_server`), so reaching the
-/// error arm means a caller that never passed that gate. It is reported at `error` naming the
-/// variable rather than passed off as a session nobody attached an agent to.
-pub(crate) fn seed_subagents_or_report() -> Vec<SpecializedAgentDef> {
-    subagents_from_env().unwrap_or_else(|e| {
-        log::error!(target: "tddy_tools::server", "{e}");
-        Vec::new()
-    })
-}
 
 /// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
 /// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else `Managed` when a session-tool transport is
@@ -149,12 +113,6 @@ where
             ]))
         })
     })
-}
-
-/// The error envelope a subagent tool returns, so a failure is a *result* an agent can read rather
-/// than a transport error it never sees.
-pub(crate) fn subagent_error_json(message: impl std::fmt::Display) -> String {
-    serde_json::json!({ "error": message.to_string(), "is_error": true }).to_string()
 }
 
 // --- Opening and closing a turn loop with an attached agent ---
@@ -257,6 +215,7 @@ pub(crate) async fn cancel_remote_conversation(
 mod tests {
     use super::*;
     use serde_json::json;
+    use tddy_discovery::subagent_runtime::subagent_error_json;
 
     /// The server type a caller outside this module supplies to [`subagent_route`]. It is a bare
     /// marker on purpose: what the route needs of `S` is a type parameter, nothing more.

@@ -20,18 +20,16 @@
 
 use std::sync::Arc;
 
+use crate::openai::TokenUsage;
+use crate::subagent::{ContentBlock, PromptOutcome, StopReason, SubagentError, SubagentSession};
 use prost::Message;
-use tddy_discovery::openai::TokenUsage;
-use tddy_discovery::subagent::{
-    ContentBlock, PromptOutcome, StopReason, SubagentError, SubagentSession,
-};
 use tddy_service::proto::connection::{
     AgentConversationChunk, CancelAgentConversationRequest, OpenAgentConversationRequest,
     OpenAgentConversationResponse, PromptAgentConversationRequest,
     ReportAgentConversationStateRequest, SessionAgentStatus,
 };
 
-use crate::session_tool_client::SessionToolEnvelope;
+use tddy_session_tool_client::SessionToolEnvelope;
 
 const CONNECTION_SERVICE: &str = "connection.ConnectionService";
 
@@ -55,7 +53,7 @@ impl AgentConversationLink {
 
     /// Connect to the facilitating daemon over whichever transport this session was spawned with.
     pub async fn connect() -> Result<Self, String> {
-        let transport = crate::session_tool_client::detect_session_tool_transport()
+        let transport = tddy_session_tool_client::detect_session_tool_transport()
             .ok_or_else(|| NO_TRANSPORT.to_string())?;
         let (client, envelope) = super::link::connect_facilitating_daemon(&transport).await?;
         Ok(Self::new(client, envelope))

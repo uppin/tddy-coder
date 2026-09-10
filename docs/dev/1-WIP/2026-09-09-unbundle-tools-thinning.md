@@ -30,7 +30,7 @@ its domain.
 |---|---|---:|
 | `tddy-workflow-recipes` | `github_pr.rs`, `schema.rs`, `schema_manifest.rs`, `review_persist.rs` | ~940 |
 | **`tddy-session-tool-client`** (new) | `session_tool_client.rs` | ~1,060 |
-| `tddy-discovery` | `server.rs` seam D (the subagent conversation runtime), **all five `session_agents` modules**, `relay.rs` | ~3,020 |
+| `tddy-discovery` | `server.rs` seam D's runtime, **all five `session_agents` modules** (`relay.rs` stays — `## Boundaries`) | ~2,230 |
 | `tddy-tool-engine` | `server.rs` seam C (the dynamic tool proxy and `exec_tool_catalog`) | ~190 |
 | `tddy-terminal-rpc` | `pty_relay.rs` | 843 |
 | `tddy-core` | `toolcall_client.rs`, `session_context.rs`, `cli.rs`'s wire types and relay pairs, and the non-CLI half of `action_tools.rs`, `list_models.rs` and `session_actions_cli.rs` (`session_hook.rs` cannot move — cycle) | ~700 |
@@ -121,6 +121,16 @@ This PR explicitly does **not**:
     workspace-session host links. `dispatch_dynamic_tool` is M7's — it resolves the call against
     the live agent roster. What moved is what needed nothing: the catalog and
     `is_native_tool_denied_in_remote_mode`.
+- Move `relay.rs` to `tddy-discovery`. **Changed during green at M8 — the plan's destination table
+  put it there.** The match was a name collision, not a domain one: `tddy-discovery` is the
+  *codebase-exploration* agent, and `relay.rs` is 135 lines that find or spawn a **`tddy-daemon`
+  relay process** — TCP probe, `daemon.json`, `--relay`. Its only reader anywhere in the
+  workspace is its own `tddy-tools/tests/relay_ensure_acceptance.rs`; no `src` file in any crate
+  calls `ensure_relay_daemon`. Moving it would also have to put `anyhow` into `tddy-discovery`,
+  which has none — the same question M5b answered for `tddy-core`, but without M5b's payoff,
+  because there no module was blocked on it here and the destination was wrong to begin with. So
+  it stays in `tddy-tools`, and finding it a real home (or retiring it) is a `docs/dev/todo/`
+  entry at wrap rather than a move made because a table said so.
 - Put `session_tool_client` in `tddy-service`, or split `session_agents` across two crates.
   **Both changed during green at M7 — the plan said `tddy-service` took the client and four of the
   five `session_agents` modules, leaving `registry.rs` for `tddy-discovery`.** Neither is
@@ -150,6 +160,11 @@ This PR explicitly does **not**:
 - Force every file under 500 lines. `server.rs` (3,842), `session_tool_client.rs` (991), `cli.rs`
   (927), `pty_relay.rs` (843) and `session_agents/registry.rs` (685) are over budget; the seams above
   bring most of them under it as a side effect, and whatever stays over is recorded in `## Scope`.
+  **Three are still over after M8, and none of them by accident**: `tddy-tools`' `server.rs`
+  (3,369 — seams A, B and E, which this node keeps on purpose), `tddy_discovery::roster::registry`
+  (780, up 47 because it absorbed the two `seed` helpers that made the pair mutual — see
+  `## Decisions & Trade-offs`) and the new `tddy_discovery::subagent_runtime` (602, of which 172
+  are its tests). Splitting any of the three is a different change from moving it.
 
 ## Dependencies
 
@@ -220,7 +235,46 @@ because **nodes 6, 7 and 8 all compile against it**:
   `RelayMode` enum, a `RelayError` and `run_pty_relay(RelayMode)`.** None of the three existed;
   the modes are not disjoint at the CLI (`--sandbox`, `--model` and `--daemon-url` are read by
   more than one), so an enum would have had to repeat their fields per variant.
-- In `tddy-discovery`: the subagent conversation runtime's public surface and `LiveAgentRoster`.
+- In `tddy-discovery`: the live agent roster and the subagent conversation runtime. **Node 7
+  compiles against `tddy_discovery::roster::LiveAgentRoster`**, so the shape is fixed here — and
+  **the first push's `roster` stub was invented, every declaration of it wrong** (corrected at
+  M8):
+
+  | The first push declared | What actually exists |
+  |---|---|
+  | `pub enum RosterCurrency { Current, Stale }` | a **private** enum with **four** states — `Seeded`, `Current{rev}`, `Stale{rev,reason}`, `Unreachable{reason}` — and it stays private (see below) |
+  | `enum CatalogVisibility { HostTools, TakenOverBy{agent_id} }` | a **struct**: `{ addressable_agents: Vec<AddressableAgent>, withdrawn_exec_tools: WithdrawnExecTools }`, plus `has_an_agent_to_address()` |
+  | `struct LiveAgentRoster {}` with `currency()` and `addressable()` | a stateful type behind a `Mutex` + a `watch` channel; **neither method exists** |
+  | a fresh roster reads as `Current` | a fresh roster is `Seeded`, and the distinction is load-bearing — only one of the two may still enforce a tool withdrawal (`enforces_withdrawal`) |
+
+  The module is `tddy_discovery::roster` — the five former `session_agents` modules moved whole —
+  and its surface, exactly: `LiveAgentRoster` (`seeded_from`, `session_id`, `apply_snapshot`,
+  `mark_unavailable`, `is_empty`, `resolve`, `open_conversation`, `open_conversation_as`,
+  `conversation_state`, `close_conversation`, `tool_list_change_count`, `withdrawn_exec_tools`,
+  `catalog_visibility`, `status_report`, `subscribe_to_snapshots`, `check_tool_available`,
+  `local_def_for`), `AddressableAgent`, `AgentStatus`, `CatalogVisibility`, `ConversationState`,
+  `ConversationSummary`, `RosterError`, `RosterStatusReport`, `Takeover`, `WithdrawnExecTools`,
+  `AgentConversationLink`, `RemoteAgentSession`, `RemoteConversationHandle`, `NO_TRANSPORT`,
+  `session_agent_roster`, `subagents_from_env`, `seed_subagents_or_report`,
+  `decide_roster_subscription`, `follow_session_agent_roster`, `ReconnectPacing`,
+  `RosterMutability`, `RosterStreamOutcome`, `STATIC_ROSTER_ENV` and a re-exported
+  `PASS_LONG_ENOUGH_TO_BE_SERVICE`.
+
+  **`RosterCurrency` stays private**, and that is a decision rather than an omission. It is a
+  state machine `LiveAgentRoster` runs, and everything outside already reads the *answers* it
+  produces — `RosterStatusReport::{applied_rev, refusal}` and the refusals from `resolve` and
+  `check_tool_available`. Publishing four internal states to match a fabrication would make them
+  contract; the stub's own deleted test shows what that invites, since it asserted `Current` for
+  a roster the real design calls `Seeded`.
+
+  In `tddy_discovery::subagent_runtime`, the conversation runtime seam D moved:
+  `subagent_sessions`, `SubagentSessionTable`, `SubagentConversations` (`open`, `pending`,
+  `retire`), `SubagentConversation` (`opened`, `agent`, `session`, `remote`), `PendingTurns`
+  (`start`, `watch`, `resolve`, `cancel_conversation`, `forget`), `TurnState`, `wait_for_turn`,
+  `DeferredTurn`, `run_turn`, `conversation_records`, `write_accounting_file`,
+  `prompt_outcome_json`, `report_local_conversation_state` and `subagent_error_json`.
+  `tddy-tools` re-exports the roster as `tddy_tools::session_agents`, the path it was reached by
+  while it lived there.
 - Every destination's `Cargo.toml` change, so `cargo build --workspace` sees the new surfaces.
 - The failing acceptance tests, including the three dependency-drop assertions.
 
@@ -345,8 +399,11 @@ package boundary — is answered here by moving the boundary instead of the stri
 - [x] **`tddy-session-tool-client`**: `session_tool_client` moved verbatim to a **new crate**, not
       to `tddy-service` — that edge is a Cargo cycle through `tddy-livekit` (`## Boundaries`). It
       discharges the `tddy-service`/`tddy-tui` debt item in the same move ✅
-- [ ] **`tddy-discovery`**: seam D, **all five** `session_agents` modules, `relay.rs` — they move
-      together or not at all (`## Boundaries`)
+- [x] **`tddy-discovery`**: seam D's runtime and **all five** `session_agents` modules, moved
+      together as `tddy_discovery::roster` + `tddy_discovery::subagent_runtime`; the crate gains
+      `tddy-service`. **`relay.rs` stays in `tddy-tools`** — wrong domain, and it would have cost
+      `anyhow` (`## Boundaries`). The fabricated `roster` stub is replaced and its three tests
+      deleted ✅
 - [x] **`tddy-tool-engine`**: seam C's movable half; **the hand-copied catalog collapsed to one** —
       `exec_tool_catalog()` is now eight lines mapping `tddy_tool_engine::tool_catalog()` into the
       MCP shape, and the advertised set is byte-identical over the real `--mcp` wire ✅
@@ -420,6 +477,20 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
   pacing from here**
 - **Dependencies**: unchanged — deliberately. It is *below* the tool client, not above it
 
+#### tddy-discovery
+- **API**: gains `roster` — the whole live agent roster, its stream and the conversation RPCs
+  that reach an agent this process holds no def for — and `subagent_runtime`, the table of open
+  conversations plus the turns that outlived the calls that started them. **Node 7 compiles
+  against `roster::LiveAgentRoster`**
+- **Dependencies**: `+tddy-service` (the roster protos), `+tddy-session-tool-client` (how a jail
+  reaches its facilitating daemon), `+tddy-rpc`, `+prost`, `+uuid`, and `tokio`'s `sync`/`time`.
+  A new **non-default** `livekit` feature forwards to the tool client's, following M6 and M7: a
+  jail that reaches its daemon over the in-jail socket links no SDK to follow the roster, and
+  `tddy-tools`' own default-on `livekit` turns it on
+- **Cost, stated rather than glossed**: the `tddy-service` edge is the same one M6 gave
+  `tddy-terminal-rpc`, and `tddy-service` depends on `tddy-tui` — so `tddy-discovery`'s eight
+  reverse-dependencies now build the TUI transitively. It is recorded below with the other two
+
 #### tddy-tool-engine
 - **API**: gains `dynamic_proxy::is_native_tool_denied_in_remote_mode`; **one catalog instead of
   two** — `tddy-tools` maps `tool_catalog()` into the MCP shape at one place, as it already does
@@ -480,8 +551,14 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
       `tddy_core::spawn_env`, collapsing a third copy; `tddy-tools`' three LiveKit optionals
       dropped and its `livekit` feature now pure forwarding; **the three dev-deps dropped and
       asserted**. **`session_agents` does not move** (`## Boundaries`) ✅
-- [ ] M8 — seam D + **all five `session_agents` modules** + `relay.rs` to `tddy-discovery`, which
-      gains `tddy-service`; `seed_subagents_or_report` re-homes to `seed.rs` with them
+- [x] M8 — the five `session_agents` modules moved whole to **`tddy_discovery::roster`** (1,802
+      lines) and seam D's runtime to **`tddy_discovery::subagent_runtime`** (430 prod lines);
+      `tddy-discovery` gains `tddy-service`, `tddy-session-tool-client`, `tddy-rpc`, `prost`,
+      `uuid` and a forwarding `livekit` feature. `seed_subagents_or_report` and the
+      `subagents_from_env` it reads re-homed to `seed.rs`, **closing the last return edge step
+      zero traded for**; `subagent_error_json` followed the runtime, which mints the same
+      envelope. The `registry`/`seed` mutual pair unpicked. The fabricated `roster` stub replaced
+      and its three tests deleted. **`relay.rs` does not move** (`## Boundaries`) ✅
 - [ ] M9 — the 43-tool MCP surface verified over the real stdio wire; env contract verified; baselines restored
 
 ## Testing Plan
@@ -522,8 +599,10 @@ afterwards, verified by grep over the destinations rather than by assumption.
       `sandboxed_claude_cli_acceptance` and `tddy-sandbox-darwin`'s `sandbox_runner_acceptance` —
       the suites whose dependency drop this move exists for, kept on `dispatch_session_tool`
       rather than lowered to `dispatch_via_sandbox_ipc` ✅
-- [ ] **Integration**: the roster subscription reconnects with the documented backoff
-      (`session_agent_roster_client_acceptance.rs`) — **M8's**, with `session_agents`
+- [x] **Integration**: the roster subscription reconnects with the documented backoff
+      (`session_agent_roster_client_acceptance.rs`, 48 tests). **Landed at M8 against
+      `tddy-discovery`, not this crate**: `session_agents` moved to `tddy_discovery::roster`,
+      which depends on this client rather than living in it ✅
 
 ### tddy-tool-engine
 - [ ] **Integration**: the dynamic tool proxy forwards to a daemon (`dynamic_tool_router_acceptance.rs`)
@@ -546,7 +625,18 @@ afterwards, verified by grep over the destinations rather than by assumption.
       needs
 
 ### tddy-discovery
-- [ ] **Integration**: a subagent conversation opens, prompts, awaits and cancels (`subagent_async_response_acceptance.rs`)
+- [x] **Integration**: a subagent conversation opens, prompts, awaits and cancels. **The suite
+      stays in `tddy-tools`** — `subagent_async_response_acceptance.rs` (13 tests) drives the
+      real `--mcp` stdio wire with `assert_cmd`, so it proves the runtime works *wherever* it is
+      implemented, which is precisely the property the testing plan says moves with the seam
+      rather than being rewritten. Moving it would have rebuilt it around a library call and
+      thrown that away. Its six `PendingTurns` unit tests **did** move, with the table they
+      exercise ✅
+- [x] **Integration**: the roster subscription and the conversation RPCs answer from the new
+      crate, driven by `tddy-tools`' `session_agent_roster_client_acceptance.rs` (48),
+      `session_agent_conversation_client_acceptance.rs` (13), `subagent_status_wait_acceptance.rs`
+      (14) and `subagent_tool_advertisement_acceptance.rs` (8) — all through
+      `tddy_tools::session_agents`, which is now a re-export of `tddy_discovery::roster` ✅
 
 ### tddy-bsp
 - [ ] **Integration**: `build` and `build-list` dispatch, with one `plugin_registry` (`build_cli_acceptance.rs`, `demo_build_plugin_acceptance.rs`)
@@ -645,6 +735,13 @@ afterwards, verified by grep over the destinations rather than by assumption.
   `tddy_livekit::` path is left anywhere in `tddy-tools`' `src` or `tests`. Its `livekit` feature
   is now pure forwarding — `["tddy-terminal-rpc/livekit", "tddy-session-tool-client/livekit"]` —
   which is what a crate that assembles a router rather than opening a connection should have.
+- **The roster's and the runtime's log targets moved with them at M8**, on M7's precedent below:
+  `tddy_tools::session_agents` is now `tddy_discovery::roster` (12 sites) and
+  `tddy_discovery::subagent_runtime` (2), so `target:` keeps naming where the code is. Same
+  caveat as M7's — errors are emitted at `error` and pass the default `warn` filter whatever the
+  target, but an operator watching the roster stream with `RUST_LOG=tddy_tools=debug` now wants
+  `RUST_LOG=tddy_discovery=debug`. `main.rs`'s own two sites keep `tddy_tools::session_agents`,
+  which still resolves: `tddy-tools` re-exports the module under that name.
 - **The client's log target moved with it**, from `tddy_tools::session_tool_client` to
   `tddy_session_tool_client`, so `target:` keeps naming where the code is. Errors are unaffected —
   they are emitted at `error` and pass `tddy-tools`' default `warn` filter whatever the target —
@@ -660,6 +757,46 @@ afterwards, verified by grep over the destinations rather than by assumption.
   `SESSION_AGENTS_TOPIC` — and `tddy-service` owns the `StreamSessionAgents` messages it paces.
   `tddy-tools` re-exports it, so `tddy_tools::session_agents::PASS_LONG_ENOUGH_TO_BE_SERVICE`
   still resolves and `stream.rs` reads one duration rather than restating it.
+- **The five `session_agents` modules moved whole, and the seam D line is "who owns the types".**
+  M7 proved they cannot split: `registry.rs` needs `tddy-service`'s roster protos, `seed.rs` and
+  `stream.rs` need `registry::LiveAgentRoster`, and `conversation.rs` implements
+  `tddy_discovery::subagent::SubagentSession`. Only a crate above both `tddy-service` and
+  `tddy-discovery`'s own types can hold all five, and that crate is `tddy-discovery` itself. Seam
+  D then split on the same rule that decided seams A, B, C and E: **430 prod lines of runtime**
+  — the conversation table, the turns that outlived their calls, the token accounting, the
+  status report to the facilitating daemon — are logic over `SubagentSession`, `PromptOutcome`,
+  `TokenUsage` and `StopReason`, and they moved; **779 lines of MCP surface** stayed, because
+  they are what `rmcp` sees: `subagent_tool_router()` returning a `ToolRouter<PermissionServer>`,
+  the three input schemas, `subagent_new_session_schema`'s roster-derived `enum`, the six
+  `subagent_*_tool` bodies and the JSON shapes they answer in. `server.rs` goes 3,916 → 3,369.
+  The cost of the line is stated rather than hidden: the runtime's table and its `PendingTurns`
+  are `pub` in `tddy-discovery` because the tool bodies that stayed drive them, which is what
+  `## Draft PR contract` means by "the runtime's public surface".
+- **The `registry`/`seed` mutual import was unpicked rather than carried across.** `registry.rs`
+  imported `super::seed::{seed_agent_id, seed_entry}` while `seed.rs` imported
+  `registry::LiveAgentRoster` — legal inside one crate, and it would have stayed legal inside
+  the new one, so this was not forced. It was taken because the pair had exactly one caller
+  between them: neither helper is used anywhere in `seed.rs`, and both are used only by
+  `LiveAgentRoster::seeded_from`. They are now private functions in `registry.rs`, `seed.rs`
+  imports `registry` and `registry` imports nothing back, and the two modules keep the property
+  the module doc claims for them — "what the environment claimed" is one file, "what the roster
+  says" is another. The move cost `registry.rs` 47 lines and `AgentId`/`SessionAgentStatus` on
+  its import list.
+- **`subagent_error_json` moved too, and that was forced rather than chosen.** It was one of step
+  zero's eight, and it reads as MCP plumbing — but the runtime mints the envelope itself, in two
+  places that had to move: a turn that fails (`TurnEnd::from`) and a conversation cancelled
+  underneath its awaiters (`PendingTurns::cancel_conversation`). Leaving it in `mcp_primitives`
+  would have been a fresh `tddy-discovery → tddy-tools` edge, and copying it would have been the
+  one thing this node refuses to do to a cycle. It is in `subagent_runtime`, and `tddy-tools`'
+  `server` and `action_tools` name it there — one definition, one spelling.
+- **`RosterCurrency` was left private, against a stub that published it.** The red phase declared
+  a two-state public `RosterCurrency`; the real one has four and is module-private. Making it
+  public to match would have promoted an internal state machine to contract for a crate node 7
+  compiles against — and the stub's own test shows the first thing that goes wrong, asserting
+  `Current` for a fresh roster the real design calls `Seeded`, which is exactly the conflation
+  the four states exist to prevent. Callers read the answers instead:
+  `RosterStatusReport::{applied_rev, refusal}` and the refusals from `resolve` and
+  `check_tool_available`.
 - **Breaking the three cycles is step zero, in the same PR.** It is ~8 items in one new module and it
   gates every other move here. Making it a separate node would produce a PR whose only deliverable is
   a module nobody imports yet — the stubs-only shape the boundary contract forbids.
@@ -701,9 +838,19 @@ afterwards, verified by grep over the destinations rather than by assumption.
       all three of its reverse-dependencies already depend on `tddy-service` directly — but it is the
       second crate to acquire the edge, and both would be fixed by the same split of the protos out
       of `tddy-service`
+- [ ] **M8 gave `tddy-discovery` the same edge, for the third time.** The roster speaks
+      `connection.SessionAgentService`, so the crate now depends on `tddy-service` and therefore
+      transitively on `tddy-tui`. It costs more here than it did in `tddy-terminal-rpc`:
+      `tddy-discovery` has **eight** reverse-dependencies (`tddy-acp`, `tddy-coder`,
+      `tddy-daemon`, `tddy-daemon-kernel`, `tddy-model-registry`, `tddy-sandbox-app`,
+      `tddy-sandbox-runner`, `tddy-spawn`), and the in-jail ones now build the TUI to follow a
+      roster. There was no move that avoided it — `registry.rs` names three `connection` protos
+      and the whole point of M8 is that the five modules cannot split — so it is recorded rather
+      than dodged, and it is the **third** crate to acquire the edge. All three are fixed by the
+      same change: split the protos out of `tddy-service`
 - [ ] The second `[[bin]]` (`execute-tool-stdio-fixture`) still forces `tddy-rpc`, `tddy-stdio` and
       `async-trait` into `[dependencies]` rather than dev-deps
-- [~] **Step zero traded three cycles for one; M7 broke half of it and M8 breaks the rest.**
+- [x] **Step zero traded three cycles for one; M7 broke half of it and M8 broke the rest.**
       `open_roster_agent_session` resolves against the live roster, so `mcp_primitives` imports
       `session_agents` while `session_agents/{seed,stream}` imported `env_non_empty` and
       `seed_subagents_or_report` back out of it. The return edge is what would fail to compile once
@@ -714,7 +861,14 @@ afterwards, verified by grep over the destinations rather than by assumption.
       its destination is now settled rather than open — it goes to `seed.rs` with the roster it
       seeds. `open_roster_agent_session` and `cancel_remote_conversation` **stay in
       `mcp_primitives`**: they are the MCP surface's way of opening and closing a turn loop, and
-      the forward edge they represent is legal in both directions of travel
+      the forward edge they represent is legal in both directions of travel. **Discharged at
+      M8**: `seed_subagents_or_report` and the `subagents_from_env` it reads are
+      `tddy_discovery::roster::seed`, and `subagent_error_json` — which the runtime mints for a
+      failed turn and a cancelled conversation, so it could not stay behind either — is
+      `tddy_discovery::subagent_runtime`. Every remaining edge between the two crates points one
+      way, `tddy-tools → tddy-discovery`: `mcp_primitives` names `roster` and `subagent_runtime`,
+      `server` names both, `action_tools` names `subagent_runtime`, `main` names `roster`. No
+      file under `packages/tddy-discovery/` contains the string `tddy_tools` ✅
 - [x] `lsp_tools`' two `crate::server::PermissionServer::new().tool_names()` calls are `#[cfg(test)]`
       only, and cannot follow `lsp_tools` to `tddy-lsp-executor` at **M3** — the advertisement they
       assert is a `tddy-tools` fact. They re-home to a `tddy-tools` integration test, not to the
@@ -750,14 +904,30 @@ number falls without one is a regression, not a milestone.
 | `tddy-core` | 586 | **589** | +3 `spawn_env`. *(The 583 recorded post-M5 was already 3 short of what M7 measured before touching the crate — a bookkeeping drift from an earlier milestone, not a change here.)* |
 | `tddy-service` | 106 (+1 failing) | **104** | −3 fabricated stub tests deleted, one of them the failure. `tests/unbundle_service_split.rs`'s `connection_service_no_longer_declares_the_rooms_stream` still fails — **node 4's** red test (commit `96ef3df8`), not this node's |
 
+| Package | Pre-M8 | Post-M8 | Accounted for |
+|---|---:|---:|---|
+| `tddy-tools` | 323 | **317** | −6 `PendingTurns` tests moved with the runtime they exercise |
+| `tddy-discovery` | 31 (+2 failing) | **109** | lib 33 → 36: −3 fabricated stub tests deleted, +6 moved from `server.rs`. Integration 73, unchanged. Both stub failures are gone |
+| `tddy-service` | 111 | **111** | unchanged — it gained a *reverse* dependency, not a change |
+
 **16 failing tests** define this node: 5 in `tddy-tools`' `mcp_primitives` (step zero — the module
 that breaks all three `server.rs` cycles), 1 in `tddy-service`'s `session_tool_client`, 2 in
 `tddy-tool-engine`'s `dynamic_proxy`, 1 in `tddy-terminal-rpc`'s `pty_relay`, 2 in
 `tddy-discovery`'s `roster`, and **3 dependency-drop assertions** — one each in `tddy-daemon`,
 `tddy-sandbox-app` and `tddy-sandbox-darwin`.
 
-**Three of those sixteen were deleted at M6 rather than made to pass**, because they asserted
-designs the code does not have. `dynamic_proxy`'s `stops_advertising_a_tool_an_agent_has_taken_over`
+**Six of those sixteen were deleted rather than made to pass** — three at M6, three at M8 —
+because they asserted designs the code does not have. M8's three are `tddy-discovery`'s whole
+`roster` stub: `a_fresh_roster_is_current_rather_than_stale` required a fresh roster to read as
+`Current`, which is exactly the conflation the real four-state `RosterCurrency` exists to
+prevent (a `Seeded` roster may not enforce a withdrawal; a `Current` one may);
+`has_no_addressable_agent_before_one_attaches` called an `addressable()` that does not exist,
+and `a_takeover_names_the_agent_that_owns_the_tool` asserted a `CatalogVisibility` enum that is
+really a struct. What replaces them is the moved code and the 61 `tddy-tools` integration tests
+that already drive it (`session_agent_roster_client_acceptance` alone is 48).
+
+**M6's three were deleted for the same reason**, and they asserted designs the code does not
+have. `dynamic_proxy`'s `stops_advertising_a_tool_an_agent_has_taken_over`
 required advertisement to be filtered by the roster; it is not, and must not be — `--allowedTools`
 is fixed when `claude` spawns, so a takeover can only be enforced at dispatch. Its sibling
 `advertises_this_crates_own_catalog_when_the_host_adds_nothing` and `pty_relay`'s two both called
@@ -776,7 +946,9 @@ merely unused.
 - [ ] `packages/tddy-session-tool-client/README.md` — the new crate has none yet
 - [ ] Close `docs/dev/todo/2026-08-23-the-action-tools-are-advertised-where-nothing-implements-them.md`
 - [ ] New `docs/dev/todo/` entries: retire seam A's NDJSON protocol; the forced `[[bin]]`
-      dependencies; `tddy-livekit`'s dependency on `tddy-service` (two production call sites —
+      dependencies; **`tddy-tools::relay` has no production caller** — 135 lines and one test
+      file, kept here at M8 because `tddy-discovery` was the wrong home for a `tddy-daemon`
+      relay spawner (`## Boundaries`), so it needs either a real home or retiring; `tddy-livekit`'s dependency on `tddy-service` (two production call sites —
       `room_roster.rs`'s `LiveKitRoomInfo` mapping and `participant.rs`'s
       `codex_oauth_from_authorize_url_only`) which is what forced M7's new crate, and would be
       resolved by splitting the protos out of `tddy-service`. `tddy-service`'s `tddy-tui`

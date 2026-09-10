@@ -13,8 +13,29 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # agent_def.rs: <tddyhome>/agents/*.yaml specialized-subagent definitions.
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+# `sync` for the roster's watch channel and the conversation table's mutex, `time` for the
+# deadlines a deferred turn and a roster reconnect are bounded by.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
 tddy-core = { path = "../tddy-core" }
+# roster: `connection.SessionAgentService`'s messages — the roster frames this crate follows and
+# the conversation RPCs it opens. `#unbundle` node 5 moved the roster here because it is a
+# stateful layer over this crate's own subagent traits; the protos it speaks are tddy-service's.
+tddy-service = { path = "../tddy-service" }
+# roster: how a jail reaches its facilitating daemon at all — the transport `session_agents` was
+# already detecting when it lived in `tddy-tools`.
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }
+# roster/link: the `RpcClientTransport` a roster stream and a conversation RPC share.
+tddy-rpc = { path = "../tddy-rpc" }
+prost = "0.13"
+# roster/registry: the conversation id minted for a call that named none.
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+# Off by default, forwarding to the tool client's own: a jail that reaches its daemon over the
+# in-jail socket links no LiveKit SDK to follow the roster. `tddy-tools` turns it on through its
+# own default-on `livekit`.
+default = []
+livekit = ["tddy-session-tool-client/livekit"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

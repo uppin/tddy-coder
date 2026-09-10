@@ -10,11 +10,60 @@ use std::sync::Mutex;
 
 use tokio::sync::watch;
 
-use tddy_discovery::agent_def::SpecializedAgentDef;
-use tddy_discovery::subagent::normalize_replaced_tools;
-use tddy_service::proto::connection::{AgentCloneState, SessionAgentEntry, SessionAgentRoster};
+use tddy_core::session_agent::AgentId;
+use tddy_service::proto::connection::{
+    AgentCloneState, SessionAgentEntry, SessionAgentRoster, SessionAgentStatus,
+};
 
-use super::seed::{seed_agent_id, seed_entry};
+use crate::agent_def::SpecializedAgentDef;
+use crate::subagent::normalize_replaced_tools;
+
+/// The id a seeded def is addressed by: qualified when the daemon that resolved it is known, bare
+/// when it is not (see [`LiveAgentRoster::seeded_from`]). `None` for a name that cannot produce an
+/// id parsing back to itself.
+fn seed_agent_id(name: &str, local_daemon_instance_id: &str) -> Option<String> {
+    if local_daemon_instance_id.is_empty() {
+        return (!name.is_empty()).then(|| name.to_string());
+    }
+    AgentId {
+        name: name.to_string(),
+        daemon_instance_id: local_daemon_instance_id.to_string(),
+    }
+    .try_qualified()
+    .ok()
+}
+
+/// A seeded def as the roster entry it stands in for.
+///
+/// `clone_state` is `LOCAL`: the seed came from the facilitating daemon's own def sources, so there
+/// is no clone and nothing to wait for.
+fn seed_entry(
+    agent_id: &str,
+    local_daemon_instance_id: &str,
+    def: &SpecializedAgentDef,
+) -> SessionAgentEntry {
+    SessionAgentEntry {
+        agent_id: agent_id.to_string(),
+        name: def.name.clone(),
+        daemon_instance_id: local_daemon_instance_id.to_string(),
+        label: def.label.clone().unwrap_or_default(),
+        model: def.model.clone(),
+        replaces: def.replaces.clone(),
+        tools: def
+            .tools
+            .iter()
+            .map(|tool| tool.catalog_name().to_string())
+            .collect(),
+        codebase_session_id: String::new(),
+        clone_state: AgentCloneState::Local as i32,
+        clone_error: String::new(),
+        // A seed says what the session was *started* with, not what any of it is doing: the status
+        // is the facilitating daemon's to fill in from a live conversation, and a seed claiming
+        // IDLE would have the registry show a reachable agent before anything had reached it.
+        status: SessionAgentStatus::Unspecified as i32,
+        last_activity: None,
+    }
+}
 
 /// Whether a conversation opened with a roster agent may still be prompted.
 ///
@@ -95,6 +144,16 @@ struct Conversation {
 /// whether a withdrawal may still be enforced: a roster that **was** current and went stale lists
 /// agents that demonstrably existed, while one that never received a frame lists only what the
 /// spawn env claimed and can address none of it.
+///
+/// Private, and deliberately still private after `#unbundle` node 5 moved this module into a
+/// library crate. It is a state machine [`LiveAgentRoster`] runs, not a value a caller decides
+/// anything from: everything outside reads the *answers* it produces —
+/// [`RosterStatusReport::applied_rev`], [`RosterStatusReport::refusal`], and the refusals from
+/// [`LiveAgentRoster::resolve`] and [`LiveAgentRoster::check_tool_available`]. Publishing the
+/// four states would make an internal distinction part of the crate's contract, and the very
+/// first thing an outside caller would get wrong is the one this enum exists to draw: `Seeded` is
+/// not `Current`, because only one of them may still enforce a withdrawal
+/// ([`Self::enforces_withdrawal`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RosterCurrency {
     /// Only the spawn seed is in force: no frame has arrived yet, and the stream has not given up.
@@ -315,7 +374,7 @@ impl LiveAgentRoster {
         for def in seed_defs {
             let Some(agent_id) = seed_agent_id(&def.name, local_daemon_instance_id) else {
                 log::warn!(
-                    target: "tddy_tools::session_agents",
+                    target: "tddy_discovery::roster",
                     "seeded agent def '{}' has no addressable id and is not attached",
                     def.name
                 );
@@ -386,7 +445,7 @@ impl LiveAgentRoster {
         if let Some(applied) = state.currency.applied_rev() {
             if roster.rev < applied {
                 log::warn!(
-                    target: "tddy_tools::session_agents",
+                    target: "tddy_discovery::roster",
                     "roster rev {} for session {} is older than the rev {applied} already in \
                      force; keeping {applied}",
                     roster.rev,

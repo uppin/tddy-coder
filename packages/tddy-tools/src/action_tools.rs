@@ -25,9 +25,10 @@ use tddy_core::session_actions::{
     author_prompt, extract_manifest_yaml, prevalidate_manifest_yaml, MAX_AUTHOR_ATTEMPTS,
 };
 
+use tddy_discovery::subagent_runtime::subagent_error_json;
+
 use crate::mcp_primitives::{
-    cancel_remote_conversation, open_roster_agent_session, schema_object, subagent_error_json,
-    subagent_route,
+    cancel_remote_conversation, open_roster_agent_session, schema_object, subagent_route,
 };
 
 /// `request_action`: describe a needed command; the agent the call names writes the manifest; on

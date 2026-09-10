@@ -1,5 +1,12 @@
 //! The in-jail registry that follows the session's live agent roster.
 //!
+//! Moved here from `tddy-tools` by `#unbundle` node 5, and this crate is the right home because it
+//! already owns every type the registry manipulates — [`crate::subagent`]'s session traits,
+//! [`crate::agent_def::SpecializedAgentDef`] and [`crate::openai::TokenUsage`]. What lived in
+//! `tddy-tools` was a *stateful layer over this crate's traits* that happened to be compiled into
+//! a binary. `tddy-tools` reaches it as `tddy_tools::session_agents`, the path it was reached by
+//! while it lived there.
+//!
 //! See docs/ft/daemon/session-agent-roster.md § Invoking an agent and § The roster stream.
 //!
 //! `tddy-tools --mcp` used to build its subagent registry from `TDDY_SUBAGENTS_JSON` — an env var
@@ -39,7 +46,7 @@ pub use registry::{
     AddressableAgent, AgentStatus, CatalogVisibility, ConversationState, ConversationSummary,
     LiveAgentRoster, RosterError, RosterStatusReport, Takeover, WithdrawnExecTools,
 };
-pub use seed::session_agent_roster;
+pub use seed::{seed_subagents_or_report, session_agent_roster, subagents_from_env};
 pub use stream::{
     decide_roster_subscription, follow_session_agent_roster, ReconnectPacing, RosterMutability,
     RosterStreamOutcome, PASS_LONG_ENOUGH_TO_BE_SERVICE, STATIC_ROSTER_ENV,

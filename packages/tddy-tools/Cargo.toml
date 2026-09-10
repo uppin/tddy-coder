@@ -66,9 +66,16 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # that only ever talks stdio (in-jail) can drop it with --no-default-features.
 default = ["livekit"]
 # No `dep:` entries left: this crate names no LiveKit type of its own since `pty_relay`'s relay
-# moved to tddy-terminal-rpc and `session_tool_client` to tddy-session-tool-client. What the
-# feature does now is turn the SDK on in the two crates that do the connecting.
-livekit = ["tddy-terminal-rpc/livekit", "tddy-session-tool-client/livekit"]
+# moved to tddy-terminal-rpc, `session_tool_client` to tddy-session-tool-client and the roster to
+# tddy-discovery. What the feature does now is turn the SDK on in the three crates that do the
+# connecting — `tddy-discovery`'s roster reaches the facilitating daemon over the same LiveKit
+# room the tool client does, so leaving it out would serve a split session a roster it cannot
+# follow.
+livekit = [
+    "tddy-terminal-rpc/livekit",
+    "tddy-session-tool-client/livekit",
+    "tddy-discovery/livekit",
+]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
