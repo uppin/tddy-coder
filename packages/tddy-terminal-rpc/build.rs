@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/terminal_session.proto"], &["proto"])?;
 

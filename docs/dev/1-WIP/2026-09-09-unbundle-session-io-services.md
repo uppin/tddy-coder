@@ -445,3 +445,117 @@ release-note file records why the prediction did not hold.
 - [ ] Close the two terminal-surface TODO entries
 - [ ] New `docs/dev/todo/` entry: make `tddy-coder`'s session participant a real trait implementation
 - [ ] Doc triage: `grep -rn -e 'StreamTerminalOutput' -e 'GetTerminalHistory' -e 'StreamContextManifest' -e 'ReadHostDocument' packages/*/README.md packages/*/docs docs/ft`
+
+## Green-phase corrections
+
+Every `## Dependencies` row was re-verified against the tree before implementation, per the pattern
+that caught plan-vs-tree drift on nodes 3, 4 and 5. **The dependency gate passed**: node 1's
+`types.proto`, its `tddy-daemon-kernel::HOST_DOCUMENT_FRAME_BYTES` and `move_module_to_crate`, and
+node 5's `pty_relay` + terminal bridge in `tddy-terminal-rpc` are all present with the shapes this
+node was promised. The corrections below are to **this node's own** plan and red phase.
+
+### The proto claims hold; the Rust surface claims did not
+
+Unlike nodes 3 and 5, this node's proto work is accurate: `session_files.proto` declares all 13
+rpcs, its single cross-file reference (`types.HostDocumentScope`) resolves, and `types.proto` holds
+exactly one declaration as the test pins. `terminal_session.proto`'s 9 rpcs match family K name for
+name, and all 17 terminal messages are field-for-field identical. What was wrong was the Rust:
+
+| Claim | Reality |
+|---|---|
+| Converters at `connection_service.rs:439-457` | They are at **:206** (`to_bridge_terminal_input`) and **:226** (`to_connection_output`); 439-457 is an unrelated notification relay |
+| "Both hand converters" — two | **Six.** Two named in the daemon (4 call sites in `rpc_service.rs`) plus **four anonymous inline** in `tddy-coder/src/session_participant/mod.rs:360-372, 392-405, 428-440, 456-462` |
+| `tddy-coder` dispatches on `("connection.ConnectionService", method)` | It matches on `method` alone and **discards** the service name (`mod.rs:165`). Splitting the coordinate needs **two `RpcService` impls**, not a renamed string; the name is bound at `mod.rs:108` and `:157` |
+| `tddy-coder` serves family K | It serves **7 of 9**. `StreamSessionTerminalIO` and `WatchTerminalControl` fall through to `unimplemented` |
+| 3 PTY modules move | **2 of 3.** `pty_runtime.rs` has zero real internal coupling (both its `crate::` paths are shims onto `tddy-pty`/`tddy-daemon-kernel`) and `pty_registry.rs` is a 6-line re-export. `terminal_session_adapter.rs` names `crate::cli_session_manager::{CliSessionManager, PtyHandle}`, and `## Boundaries` pins `cli_session_manager` in the daemon |
+| `session_files.proto:12` — the four families share `SessionAttachment`, `StagedAttachmentRef`, `HostDocumentRef` | None of the three is defined in or referenced by this proto; all three are `connection.proto`'s, reached by `StartSession`, which stays. The wire contract is fine; the justification is not |
+| File line counts | Stale by 40-90 lines each: `host_documents.rs` 645 (not 595), `context_sync.rs` 634 (595), `session_context_docs.rs` 639 (558), `session_attachments.rs` 663 (570) |
+| "8 failing tests define this node" | Node 6 added **6** tests to `unbundle_service_split.rs`, of which **2** fail; `tddy-session-files` has **3** real failures plus 2 tautological ones (one asserts `48*1024 == 48*1024`, the other asserts on the test's own stub) |
+
+### The red phase's `tddy-session-files` surface contradicts the code it is a home for
+
+`ContextSource` as declared (`scope` + framed `Vec<Vec<u8>>` + `SessionFilesError`) collides with the
+**real** trait of the same name at `context_sync.rs:33-39`, which is `manifest() -> Result<ContextManifest, Status>`
+plus `read(&str) -> Result<Vec<u8>, Status>` — no scope, no framing, `Status` errors, and a `manifest`
+method the declaration omits. `DocumentScope` duplicates the generated proto enum while dropping its
+`_UNSPECIFIED = 0` variant, and `SessionFilesError` is not the moved code's error type: 9 of the 10
+modules return `tddy_rpc::Status`, and `types.proto` pins `FAILED_PRECONDITION` for the
+incomplete-upload refusal. `build_session_files_entry`'s two parameters are also insufficient — the
+real handlers additionally need a staging base dir, an OS-user resolver, a `project_storage`
+main-repo lookup and `max_attachment_bytes`. Per the decision taken on nodes 3 and 5, the green
+phase **mirrors the real code** rather than implementing the invented shapes.
+
+### Four decisions taken at green
+
+1. **The `context_files` ↔ `context_sync` ↔ `split_session` cycle is cut here.** `context_files.rs:113`
+   calls `split_session::paired_agent`, and `split_session.rs` (which stays) calls back into
+   `context_sync`'s `ContextSource`/`ContextSyncer`/`LocalWorktreeSource` at four sites. The cut is
+   small because `paired_agent` is a **pure accessor over `tddy_core::SessionMetadata`** — two trimmed
+   optional fields, no other coupling — so it moves to `tddy-core`, beside the type it reads. That
+   inverts the edge: `split_session` then depends on the new crate, which is the correct direction,
+   and all 10 modules move. Only two real callers exist (`context_files.rs:113`,
+   `agent_roster.rs:331`).
+2. **`generate_tonic_adapter` gains a tonic-trait-path config field, and `to_tonic_status` moves to
+   `tddy-service`.** `generate_tonic_adapter: true` is *already* set for `echo_service.proto`
+   (`build.rs:71`) and `token.proto` (`:133`), whose `*TonicAdapter` types are publicly re-exported —
+   yet neither proto has a tonic pass, so there is no trait to implement. Absent the new field the
+   generator keeps today's struct-and-`new()` shape, so those two builds and their re-exports survive.
+   `to_tonic_status` had to move because generated adapters land in `tddy-service`'s and
+   `tddy-terminal-rpc`'s `OUT_DIR` and neither depends on `tddy-daemon`; `tddy-rpc`'s own conversion
+   pins **tonic 0.11** against everything else's **0.12**, which is why the hand-written one exists.
+   Re-pointing the three adapters' imports is a one-line edit each and is **not** the retro-fit
+   `## Boundaries` forbids.
+3. **Parity is asserted over the 7 methods both servers actually serve**, with the 2 the coder never
+   served recorded as a `docs/dev/todo/` entry. Adding a bidirectional `StreamSessionTerminalIO` to
+   the session participant is net-new behaviour, not the relocation of family K.
+4. **The web migration stays in this PR.** The cross-package proto generation is *not* unsolved:
+   `scripts/generated-code.manifest` already supports several proto roots per package, and
+   `packages/tddy-livekit-web` proves it (`../tddy-service/proto --path …/terminal.proto` produces its
+   `terminal_pb.ts`). `session_files_pb.ts` and `types_pb.ts` need no new plumbing at all — both
+   protos are already in the root `tddy-web` generates from — and `terminal_session_pb.ts` needs one
+   manifest line for `../tddy-terminal-rpc/proto`.
+
+### Two hazards the plan does not mention
+
+- **`unbundle_service_split.rs:139` pins `ConnectionService` at exactly 73 rpcs and passes today.**
+  Removing 22 takes it to 51, so that literal must move or the test flips red *because* this node
+  succeeded. Worse, 73 is only correct because node 4's `StreamLiveKitRooms` removal never happened —
+  `connection_service_no_longer_declares_the_rooms_stream` (node 4's criterion) is **failing on
+  arrival** at `connection.proto:283`, and `tddy-web/src/gen` has no `livekit_pb.ts`. The count is
+  computed from the proto rather than hand-bumped, and node 4's inherited red is reported, not fixed
+  here.
+- **The converter-absence sweep is satisfiable by deleting a doc comment.** It greps one needle
+  (`connection::SessionTerminalInput`) under `packages/tddy-daemon/src` only, so it misses the second
+  converter entirely and every one of the coder's four inline copies. The green phase widens it to
+  both message names and both packages, so it enforces what it claims.
+
+### Two inherited reds arrive on this branch from predecessors
+
+Both are **outside this node's `## Responsibility`** and are reported rather than fixed here, since
+implementing a predecessor's owned symbol is the duplicate-development failure `## Dependencies`
+exists to prevent. They will nonetheless show in this PR's CI, so they are recorded to stop them
+being read as node 6 damage:
+
+1. **Node 4 (#473)** — `connection_service_no_longer_declares_the_rooms_stream`, node 4's own
+   completion criterion, fails on arrival: `StreamLiveKitRooms` is still declared at
+   `connection.proto:283`, and `packages/tddy-web/src/gen` has no `livekit_pb.ts`. This is also what
+   makes the `73` literal at `unbundle_service_split.rs:139` arithmetically correct today — when node
+   4 finishes, the pre-node-6 count is 72.
+2. **Node 5 (#474)** — *resolved while this node was in green.* At the first rebase,
+   `session_tool_client::tests::refuses_a_call_on_a_session_with_no_transport` panicked with
+   `not implemented: dispatch_session_tool` at `packages/tddy-service/src/session_tool_client.rs:79`,
+   node 5's owned surface. Node 5 then force-pushed a rewritten history ending in `4baa3514`
+   ("a crate for the session tool client, and the three dependency drops"), which implements it:
+   `cargo test -p tddy-service --lib` is now **104 passed / 0 failed**. Recorded because it is the
+   concrete case for the rule below — the base moved twice during one green phase.
+
+
+### The base moved twice during this green phase
+
+Node 5 force-pushed a rewritten history *while milestone 1 was building*, so the branch went stale
+between the step-0 rebase and the first milestone push — the push was rejected non-fast-forward, not
+because anything local was wrong. Both rebases used
+`git rebase --onto <new base> <recorded pre-rebase tip>`, which is what keeps a predecessor's old
+commits from being replayed as this node's own; a plain `git rebase` at that moment would have
+duplicated node 5's entire delta into this PR's diff. Every milestone here re-reads the base tip
+immediately before pushing rather than trusting the tip step 0 saw.

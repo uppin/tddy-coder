@@ -20,6 +20,7 @@ pub mod session_activity;
 pub mod session_agents;
 pub mod terminal_service;
 pub mod token_service;
+pub mod tonic_status;
 pub mod worktree_activity;
 
 pub use codex_oauth_scan::{
@@ -61,6 +62,7 @@ pub use terminal_service::{
 pub use token_service::{
     SessionTokenAuthenticator, TokenProvider, TokenServiceImpl, RESERVED_DAEMON_IDENTITY_PREFIX,
 };
+pub use tonic_status::{to_rpc_status, to_tonic_status};
 
 pub mod gen {
     tonic::include_proto!("tddy.v1");

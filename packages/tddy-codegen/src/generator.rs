@@ -38,7 +38,15 @@ impl ServiceGenerator for TddyServiceGenerator {
         }
 
         if self.generate_tonic_adapter {
-            generate_tonic_adapter(&service, buf, rpc);
+            match self.tonic_trait_path.as_deref() {
+                Some(trait_module) => {
+                    // The impl reaches the trait through tonic-build's `<service>_server` module,
+                    // whose name is the path's final segment.
+                    import_once(buf, &format!("use {trait_module};"));
+                    generate_tonic_adapter(&service, buf, rpc);
+                }
+                None => generate_tonic_adapter_struct(&service, buf),
+            }
         }
     }
 
@@ -867,11 +875,83 @@ fn to_pascal_case(s: &str) -> String {
     result
 }
 
-/// Generate tonic adapter struct (feature-gated).
-/// Wraps a service impl for use with tonic gRPC server.
-/// TODO: Full impl of tonic server trait requires consumer to compile proto with tonic-build.
-#[cfg(feature = "tonic")]
-fn generate_tonic_adapter(service: &Service, buf: &mut String, _rpc: &str) {
+/// Where the `Status` conversions every tonic adapter needs are published.
+///
+/// Emitted adapters land in the `OUT_DIR` of `tddy-service` and its dependents, and convert a
+/// refusal through the same pair as the hand-written adapters in `tddy-daemon`, so a given refusal
+/// cannot reach two transports as two different gRPC codes. Not configurable: there is one such
+/// pair in the workspace, and an adapter that used a second one would be the drift this avoids.
+const TONIC_STATUS_PATH: &str = "tddy_service";
+
+/// Emit the adapter wrapper struct alone: a `.proto` with no tonic-build pass has no server trait
+/// to implement, so there is nothing to delegate to.
+fn generate_tonic_adapter_struct(service: &Service, buf: &mut String) {
+    write_tonic_adapter_wrapper(service, buf, false);
+}
+
+/// Emit the adapter: the wrapper struct plus a full impl of the tonic server trait, every method
+/// delegating to the wrapped tddy-rpc implementation.
+///
+/// The trait is reached through tonic-build's own `<service>_server` module, which the caller must
+/// bring into scope (see [`TddyServiceGenerator::tonic_trait_path`]) — the trait itself cannot be
+/// imported unqualified, because it shares its name with the tddy-rpc flavor generated above.
+fn generate_tonic_adapter(service: &Service, buf: &mut String, rpc: &str) {
+    let adapter_name = format!("{}TonicAdapter", service.name);
+    let server_module = format!("{}_server", to_snake_case(&service.name));
+
+    let needs_stream_ext = service
+        .methods
+        .iter()
+        .any(|m| m.client_streaming || m.server_streaming);
+    if needs_stream_ext {
+        import_once(buf, "use futures_util::StreamExt;");
+    }
+    import_once(buf, &format!("use {TONIC_STATUS_PATH}::to_tonic_status;"));
+    if service.methods.iter().any(|m| m.client_streaming) {
+        import_once(buf, &format!("use {TONIC_STATUS_PATH}::to_rpc_status;"));
+    }
+
+    write_tonic_adapter_wrapper(service, buf, true);
+
+    writeln!(buf, "#[tonic::async_trait]").unwrap();
+    writeln!(
+        buf,
+        "impl<T> {}::{} for {}<T>",
+        server_module, service.name, adapter_name
+    )
+    .unwrap();
+    writeln!(buf, "where").unwrap();
+    writeln!(buf, "    T: {},", service.name).unwrap();
+    // The tddy-rpc trait bounds its stream associated types `Send + Unpin` but not `'static`, which
+    // boxing them into the tonic trait's `Pin<Box<dyn Stream + Send>>` requires.
+    for method in &service.methods {
+        if method.server_streaming {
+            writeln!(
+                buf,
+                "    T::{}Stream: 'static,",
+                to_pascal_case(&method.name)
+            )
+            .unwrap();
+        }
+    }
+    writeln!(buf, "{{").unwrap();
+
+    for (i, method) in service.methods.iter().enumerate() {
+        if i > 0 {
+            writeln!(buf).unwrap();
+        }
+        generate_tonic_adapter_method(service, method, buf, rpc);
+    }
+
+    writeln!(buf, "}}").unwrap();
+}
+
+/// Emit the wrapper struct and its constructor, shared by both adapter flavors.
+///
+/// `T` is unbounded so the struct can be named without the service trait in scope; the trait bound
+/// rides on the impl instead. `inner` is an `Arc` so one implementation instance can be served over
+/// more than one transport at once (gRPC and LiveKit, say) rather than being moved into the adapter.
+fn write_tonic_adapter_wrapper(service: &Service, buf: &mut String, has_trait_impl: bool) {
     let adapter_name = format!("{}TonicAdapter", service.name);
 
     writeln!(buf).unwrap();
@@ -881,27 +961,149 @@ fn generate_tonic_adapter(service: &Service, buf: &mut String, _rpc: &str) {
         service.name
     )
     .unwrap();
-    writeln!(
-        buf,
-        "/// Requires tddy-rpc with `tonic` feature for type conversions.",
-    )
-    .unwrap();
-    writeln!(buf, "#[allow(dead_code)]").unwrap();
-    writeln!(buf, "pub struct {}<T: {}> {{", adapter_name, service.name).unwrap();
+    if !has_trait_impl {
+        // Nothing reads `inner` without a trait impl to delegate through.
+        writeln!(buf, "#[allow(dead_code)]").unwrap();
+    }
+    writeln!(buf, "pub struct {}<T> {{", adapter_name).unwrap();
     writeln!(buf, "    inner: std::sync::Arc<T>,").unwrap();
     writeln!(buf, "}}").unwrap();
     writeln!(buf).unwrap();
-    writeln!(buf, "impl<T: {}> {}<T> {{", service.name, adapter_name).unwrap();
-    writeln!(buf, "    pub fn new(inner: T) -> Self {{",).unwrap();
-    writeln!(buf, "        Self {{ inner: std::sync::Arc::new(inner) }}",).unwrap();
+
+    writeln!(buf, "impl<T> {}<T> {{", adapter_name).unwrap();
+    writeln!(buf, "    pub fn new(inner: std::sync::Arc<T>) -> Self {{").unwrap();
+    writeln!(buf, "        Self {{ inner }}").unwrap();
     writeln!(buf, "    }}").unwrap();
     writeln!(buf, "}}").unwrap();
+    if has_trait_impl {
+        writeln!(buf).unwrap();
+    }
 }
 
-#[cfg(not(feature = "tonic"))]
-fn generate_tonic_adapter(_service: &Service, _buf: &mut String, _rpc: &str) {}
+/// Emit one tonic trait method — and, for a server-streaming rpc, the associated stream type the
+/// tonic trait declares alongside it.
+///
+/// The method's own name and associated type come from the *proto* name, because that is what
+/// tonic-build derives its trait from: `StreamSessionTerminalIO` yields
+/// `stream_session_terminal_io` and `StreamSessionTerminalIOStream`. The delegation target is named
+/// the tddy-rpc way instead, matching the trait emitted above it.
+fn generate_tonic_adapter_method(service: &Service, method: &Method, buf: &mut String, rpc: &str) {
+    let tonic_method = tonic_method_name(method);
+    let rpc_method = to_snake_case(&method.name);
+    let stream_assoc = format!("{}Stream", method_proto_name(method));
+    let input = &method.input_type;
+    let output = &method.output_type;
+    let svc = &service.name;
 
-#[cfg(all(test, feature = "tonic"))]
+    if method.server_streaming {
+        writeln!(
+            buf,
+            "    type {} = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<{}, tonic::Status>> + Send>>;",
+            stream_assoc, output
+        )
+        .unwrap();
+        writeln!(buf).unwrap();
+        // A tonic `Status` is large enough to trip `result_large_err`, and the size is tonic's
+        // choice, not this signature's: the trait being implemented dictates the return type.
+        writeln!(buf, "    #[allow(clippy::result_large_err)]").unwrap();
+    }
+
+    let request_type = if method.client_streaming {
+        format!("tonic::Streaming<{}>", input)
+    } else {
+        input.to_string()
+    };
+    let response_type = if method.server_streaming {
+        format!("Self::{}", stream_assoc)
+    } else {
+        output.to_string()
+    };
+
+    writeln!(buf, "    async fn {}(", tonic_method).unwrap();
+    writeln!(buf, "        &self,").unwrap();
+    writeln!(buf, "        request: tonic::Request<{}>,", request_type).unwrap();
+    writeln!(
+        buf,
+        "    ) -> Result<tonic::Response<{}>, tonic::Status> {{",
+        response_type
+    )
+    .unwrap();
+
+    if method.client_streaming {
+        writeln!(
+            buf,
+            "        let inbound = request.into_inner().map(|item| item.map_err(to_rpc_status));"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "        let rpc_request = {}::Request::new({}::Streaming::new(inbound));",
+            rpc, rpc
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "        let resp = {}::{}(&*self.inner, rpc_request)",
+            svc, rpc_method
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            buf,
+            "        let resp = {}::{}(&*self.inner, {}::Request::new(request.into_inner()))",
+            svc, rpc_method, rpc
+        )
+        .unwrap();
+    }
+    writeln!(buf, "            .await").unwrap();
+    writeln!(buf, "            .map_err(to_tonic_status)?;").unwrap();
+
+    if method.server_streaming {
+        writeln!(
+            buf,
+            "        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));"
+        )
+        .unwrap();
+        writeln!(buf, "        Ok(tonic::Response::new(Box::pin(outbound)))").unwrap();
+    } else {
+        writeln!(buf, "        Ok(tonic::Response::new(resp.into_inner()))").unwrap();
+    }
+    writeln!(buf, "    }}").unwrap();
+}
+
+/// The method name tonic-build gives an rpc: prost's snake_case of the proto name, which collapses
+/// an acronym run instead of splitting it (`StreamSessionTerminalIO` -> `stream_session_terminal_io`,
+/// not `stream_session_terminal_i_o`).
+fn tonic_method_name(method: &Method) -> String {
+    to_prost_snake_case(&method_proto_name(method))
+}
+
+/// prost-build's own PascalCase-to-snake_case rule: an underscore goes before an uppercase letter
+/// that starts a word, which is either one following a lowercase letter or digit, or the last of an
+/// acronym run (the one followed by a lowercase letter).
+fn to_prost_snake_case(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch == '_' {
+            result.push('_');
+            continue;
+        }
+        if ch.is_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let starts_word = prev.is_lowercase()
+                || prev.is_numeric()
+                || chars.get(i + 1).is_some_and(|next| next.is_lowercase());
+            if starts_word && prev != '_' {
+                result.push('_');
+            }
+        }
+        result.extend(ch.to_lowercase());
+    }
+    result
+}
+
+#[cfg(test)]
 mod tonic_adapter_tests {
     use super::*;
 

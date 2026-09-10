@@ -47,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/tddy/v1/remote.proto"], &["proto"])?;
 
@@ -60,6 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/tddy/acp/v1/acp.proto"], &["proto"])?;
 
@@ -70,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: true,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/test/echo_service.proto"], &["proto"])?;
 
@@ -80,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/terminal.proto"], &["proto"])?;
 
@@ -108,6 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/remote_git.proto"], &["proto"])?;
 
@@ -122,6 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/session_admission.proto"], &["proto"])?;
 
@@ -132,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: true,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/token.proto"], &["proto"])?;
 
@@ -142,6 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/auth.proto"], &["proto"])?;
 
@@ -152,6 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/connection.proto"], &["proto"])?;
 
@@ -178,6 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 generate_rpc_server: true,
                 generate_tonic_adapter: false,
                 rpc_crate_path: "tddy_rpc".to_string(),
+                ..Default::default()
             }))
             .compile_protos(&[proto], &["proto"])?;
     }
@@ -221,6 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/loopback_tunnel.proto"], &["proto"])?;
 
@@ -231,6 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/vm.proto"], &["proto"])?;
 
@@ -241,6 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/tasks.proto"], &["proto"])?;
 
@@ -251,6 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/models.proto"], &["proto"])?;
 
@@ -261,6 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/actions.proto"], &["proto"])?;
 
@@ -271,6 +286,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/bsp.proto"], &["proto"])?;
 
@@ -281,6 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/vnc.proto"], &["proto"])?;
 
@@ -291,6 +308,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/vnc_input.proto"], &["proto"])?;
 
@@ -301,6 +319,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/screen_sharing.proto"], &["proto"])?;
 
@@ -311,6 +330,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/screen_sharing_input.proto"], &["proto"])?;
 
@@ -321,6 +341,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/sandbox.proto"], &["proto"])?;
 
@@ -400,6 +421,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/daemon_config.proto"], &["proto"])?;
 
@@ -461,6 +483,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             generate_rpc_server: true,
             generate_tonic_adapter: false,
             rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
         }))
         .compile_protos(&["proto/grpc/reflection/v1/reflection.proto"], &["proto"])?;
 
