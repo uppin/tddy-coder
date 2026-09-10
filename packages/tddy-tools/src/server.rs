@@ -1546,14 +1546,6 @@ pub async fn build_dynamic_tool_list(
     Ok(tools)
 }
 
-/// Returns true if `tool_name` is a native mutation tool that must be hard-denied
-/// when the agent is running in remote mode (TDDY_REMOTE_SESSION_ID is set).
-///
-/// In remote mode the working dir is read-only; native write tools would corrupt it.
-pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
-    matches!(tool_name, "Write" | "Edit" | "NotebookEdit")
-}
-
 /// Dispatch a call to a dynamic (non-static) tool via the session daemon.
 ///
 /// Uses [`crate::session_tool_client::dispatch_session_tool`] — sandbox IPC when
@@ -1573,68 +1565,27 @@ pub async fn dispatch_dynamic_tool(tool_name: &str, args: serde_json::Value) -> 
     crate::session_tool_client::dispatch_session_tool(tool_name, args).await
 }
 
-/// Static catalog of the "cursor" exec tools forwarded to Claude Code when a session-tool
-/// transport (sandbox IPC or daemon HTTP) is configured. Names/descriptions/schemas mirror
-/// `tddy_daemon::tool_catalog::tool_catalog()` verbatim (adapted from `ToolDef` to
-/// `RemoteToolDef`) — the two must never drift; `exec_tool_catalog_names_match_workspace_exec_tool_names`
-/// and `tddy_daemon`'s own `workspace_exec_tool_names_match_tool_catalog` test both guard this.
+/// The exec tools forwarded to Claude Code when a session-tool transport (sandbox IPC or daemon
+/// HTTP) is configured, in the MCP shape.
 ///
-/// TODO: both transport variants currently use this same static catalog rather than live-fetching
-/// the catalog from the daemon over the transport (there is no such message type over
-/// SandboxIpc, and it was deliberately scoped out for DaemonHttp too for now).
+/// There is one catalog and it is [`tddy_tool_engine::tool_catalog`] — the crate that executes
+/// these tools also defines them. This function is the single place their `ToolDef` is mapped to
+/// the `RemoteToolDef` the MCP router advertises, exactly as [`lsp_tool_defs`] maps
+/// `tddy_lsp_executor`'s. Until `#unbundle` node 5 the ten entries were hand-copied here and kept
+/// in step by a guard test on each side; the copy is gone, so the names cannot drift.
+///
+/// TODO: both transport variants still advertise this static catalog rather than live-fetching the
+/// remote host's over the transport — there is no such message type over SandboxIpc, and it was
+/// deliberately scoped out for DaemonHttp too for now.
 pub fn exec_tool_catalog() -> Vec<RemoteToolDef> {
-    vec![
-        RemoteToolDef {
-            name: "Read".to_string(),
-            description: "Read file contents from the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"},"offset":{"type":"integer"},"limit":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Write".to_string(),
-            description: "Write file contents to the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path","contents"],"properties":{"path":{"type":"string"},"contents":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "StrReplace".to_string(),
-            description: "Replace a string in a file.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path","old_string","new_string"],"properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Delete".to_string(),
-            description: "Delete a file from the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Grep".to_string(),
-            description: "Search for a pattern in files.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Glob".to_string(),
-            description: "Find files matching a glob pattern.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Shell".to_string(),
-            description: "Run a shell command in the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["command"],"properties":{"command":{"type":"string"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "Await".to_string(),
-            description: "Wait for a background shell job to complete.".to_string(),
-            input_schema_json: r#"{"type":"object","properties":{"job_id":{"type":"string"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer"},"block_until_ms":{"type":"integer"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "ReadLints".to_string(),
-            description: "Read linting diagnostics for the workspace.".to_string(),
-            input_schema_json: r#"{"type":"object","properties":{"path":{"type":"string"}}}"#.to_string(),
-        },
-        RemoteToolDef {
-            name: "SemanticSearch".to_string(),
-            description: "Search the codebase semantically.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["query"],"properties":{"query":{"type":"string"},"path":{"type":"string"}}}"#.to_string(),
-        },
-    ]
+    tddy_tool_engine::tool_catalog()
+        .into_iter()
+        .map(|tool| RemoteToolDef {
+            name: tool.name,
+            description: tool.description,
+            input_schema_json: tool.input_schema_json,
+        })
+        .collect()
 }
 
 /// The five language-agnostic LSP operations as MCP tool defs.

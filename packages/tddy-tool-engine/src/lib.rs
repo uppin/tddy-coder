@@ -688,86 +688,85 @@ async fn tool_semantic_search(
     ToolOutcome::err("SemanticSearch: index query not yet wired")
 }
 
-/// The MCP→daemon dynamic tool proxy, moved here from `tddy-tools` by `#unbundle` node 5.
+/// The dependency-free half of the MCP→daemon dynamic tool proxy, moved here from `tddy-tools`'
+/// `server.rs` by `#unbundle` node 5.
 ///
 /// # This is where a duplication ends
 ///
-/// `tddy-tools`' `server::exec_tool_catalog()` was a hand-copied `RemoteToolDef` clone of this
-/// crate's [`catalog::tool_catalog`], kept in step by **matched guard tests in both crates** plus a
-/// third that lived in the daemon as `tool_catalog_sync.rs`. The codebase already knew about the
-/// duplication and was paying to maintain it.
+/// `tddy-tools`' `server::exec_tool_catalog()` was a hand-copied clone of this crate's
+/// [`catalog::tool_catalog`] — same ten tools, same descriptions, same schema strings, in a struct
+/// with the same three fields under a different name. It was kept in step by a guard test in
+/// `tddy-tools` and a matching one in the daemon's `tool_catalog_sync.rs`; the codebase already
+/// knew about the duplication and was paying to maintain it.
 ///
-/// With the proxy here, there is one catalog: this crate defines the ten tools, executes them, and —
-/// after node 8 — serves them. Node 8 deletes the guard tests as vacuous, because a test whose
-/// failure is impossible reads as coverage without being any.
+/// There is now one catalog. `tddy-tools` derives its `RemoteToolDef`s from
+/// [`catalog::tool_catalog`] at the single point that needs the MCP shape, the same way it already
+/// derives the `Lsp*` tools from `tddy_lsp_executor`. The `tddy-tools`-side guard test went with
+/// the copy it guarded; the daemon's stayed, because it guards a different pair — this catalog
+/// against `tddy_sandbox::workspace_exec_tool_names`, the allowlist a sandboxed `claude` is
+/// spawned with — and that pair has not collapsed.
+///
+/// # What node 8 builds against
+///
+/// [`catalog::tool_catalog`] for the tool set, [`crate::execute_tool`] to run one, and
+/// [`dynamic_proxy::is_native_tool_denied_in_remote_mode`] for the remote-mode refusal.
+///
+/// # What is deliberately not here
+///
+/// The MCP shape of these tools — `RemoteToolDef`, `build_dynamic_tool_list`,
+/// `dynamic_tool_router` and `dispatch_dynamic_tool` — stays in `tddy-tools`, which is the crate
+/// that speaks MCP. Putting it here would mean `rmcp` in a crate every workspace-session host
+/// links, and `dispatch_dynamic_tool` additionally resolves the call against the session's live
+/// agent roster, which is a `tddy-service` concern. Advertisement is not filtered by that roster:
+/// a tool an agent has taken over is still advertised and refused at dispatch, because
+/// `--allowedTools` is fixed when `claude` spawns and an agent attaching at minute forty can only
+/// take a tool over by having the call refused where it is made
+/// (docs/ft/daemon/session-agent-roster.md § Enforced at two layers).
 pub mod dynamic_proxy {
-    /// One tool a remote host advertises, as the proxy forwards rather than executes it.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct RemoteToolDef {
-        pub name: String,
-        pub description: String,
-        pub input_schema: String,
-    }
-
-    /// The tools to advertise for a session: this crate's own catalog, plus whatever the host adds,
-    /// minus anything a roster agent has taken over.
-    pub fn build_dynamic_tool_list(
-        _host_tools: &[RemoteToolDef],
-        _withdrawn: &[String],
-    ) -> Vec<RemoteToolDef> {
-        // TODO(tools-thinning): implement
-        unimplemented!("dynamic_proxy::build_dynamic_tool_list")
-    }
-
-    /// Whether a native tool is denied because the session is in remote-codebase mode.
+    /// Whether `tool_name` is a native mutation tool that must be hard-denied when the agent is
+    /// running against a remote codebase (`TDDY_REMOTE_SESSION_ID` set).
     ///
-    /// A denial rather than an absence: the tool exists, and an agent that asks for it needs to know
-    /// it was refused and why, not that it was never there.
-    pub fn is_native_tool_denied_in_remote_mode(_name: &str) -> bool {
-        // TODO(tools-thinning): implement
-        unimplemented!("dynamic_proxy::is_native_tool_denied_in_remote_mode")
+    /// A denial rather than an absence: in remote mode the local working directory is not the
+    /// worktree the agent is editing, so a native write would corrupt it silently. The agent needs
+    /// to be told it was refused, not that the tool was never there — the replacement is this
+    /// crate's own `Write`, dispatched against the real worktree.
+    pub fn is_native_tool_denied_in_remote_mode(tool_name: &str) -> bool {
+        matches!(tool_name, "Write" | "Edit" | "NotebookEdit")
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
 
-        /// The catalog this crate defines is the one advertised — not a second copy that has to be
-        /// kept in step with it.
+        /// The three tools a remote-mode agent must not reach are the three that write to disk.
         #[test]
-        fn advertises_this_crates_own_catalog_when_the_host_adds_nothing() {
-            // Given a host advertising no extra tools
-            // When
-            let advertised = build_dynamic_tool_list(&[], &[]);
-
-            // Then
-            let names: Vec<&str> = advertised.iter().map(|t| t.name.as_str()).collect();
-            for expected in crate::catalog::tool_catalog()
-                .iter()
-                .map(|t| t.name.as_str())
-            {
+        fn denies_every_native_tool_that_writes_to_the_local_disk() {
+            // Given / When / Then
+            for tool in ["Write", "Edit", "NotebookEdit"] {
                 assert!(
-                    names.contains(&expected),
-                    "{expected} is in this crate's catalog but was not advertised"
+                    is_native_tool_denied_in_remote_mode(tool),
+                    "{tool} writes to disk and must be denied in remote mode"
                 );
             }
         }
 
-        /// A tool a roster agent has taken over must stop being advertised, or two things claim to
-        /// serve it and the agent's own tool wins or loses by ordering.
+        /// The denial is a list, not a default: refusing a read or the approval prompt would take
+        /// the agent's ability to ask for anything.
         #[test]
-        fn stops_advertising_a_tool_an_agent_has_taken_over() {
-            // Given
-            let withdrawn = vec!["Read".to_string()];
-
-            // When
-            let advertised = build_dynamic_tool_list(&[], &withdrawn);
-
-            // Then
-            assert!(
-                !advertised.iter().any(|t| t.name == "Read"),
-                "a withdrawn tool must not still be advertised"
-            );
+        fn leaves_reads_and_the_approval_prompt_alone() {
+            // Given / When / Then
+            for tool in [
+                "Read",
+                "Grep",
+                "approval_prompt",
+                "submit",
+                "AskUserQuestion",
+            ] {
+                assert!(
+                    !is_native_tool_denied_in_remote_mode(tool),
+                    "{tool} does not write to the local disk and must not be denied"
+                );
+            }
         }
     }
 }

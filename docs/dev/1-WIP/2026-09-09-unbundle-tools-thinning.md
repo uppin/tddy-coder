@@ -106,6 +106,20 @@ This PR explicitly does **not**:
 
   The rule throughout is seam B's, one level down: the shape of a CLI subcommand belongs to the
   crate that parses arguments. Earns a `## Scope` line and a milestone note.
+- Move `pty_relay`'s clap surface, or seam C's MCP surface, out of `tddy-tools`.
+  **Changed during green at M6 — the plan said both moved whole.** Same rule, twice more:
+  - **`PtyRelayArgs` stays.** It is a `#[derive(Args)]` struct with twenty `#[arg]`s and their
+    default values, and `tddy-terminal-rpc` has no `clap`. The relay itself — all four dispatch
+    modes, 698 non-blank lines — moved; `tddy-tools` keeps 142 that parse arguments and build a
+    `PtyRelayConfig`. **PR #475 (node 6) compiles against `tddy_terminal_rpc::pty_relay`**, and it
+    is the relay it needs, not the flags.
+  - **Seam C's MCP half stays.** `build_dynamic_tool_list` returns `Vec<rmcp::model::Tool>` and
+    `dynamic_tool_router` returns an `rmcp` `ToolRouter`; `static_tool_names` names the MCP
+    server's own two always-registered tools, `approval_prompt` and `submit`, which are seams A
+    and E. Moving any of them would put `rmcp` into `tddy-tool-engine`, a crate every
+    workspace-session host links. `dispatch_dynamic_tool` is M7's — it resolves the call against
+    the live agent roster. What moved is what needed nothing: the catalog and
+    `is_native_tool_denied_in_remote_mode`.
 - Retire that NDJSON protocol. Recorded in `docs/dev/todo/` at wrap.
 - Move any `tddy-daemon` module. Nodes 1–4 did the daemon; nodes 6–8 do the rest.
 - Change the 25 `TDDY_*` environment variables that are `tddy-tools`' real hidden interface
@@ -142,9 +156,22 @@ because **nodes 6, 7 and 8 all compile against it**:
   `dispatch_session_tool`, `dispatch_via_sandbox_ipc`, `LiveKitRoomCache`,
   `PASS_LONG_ENOUGH_TO_BE_SERVICE` — with real signatures. **Node 7 serves the roster and conversation
   families through these**, so their shape is fixed here.
-- In `tddy-tool-engine`: `RemoteToolDef`, `build_dynamic_tool_list`, `dispatch_dynamic_tool` and the
-  single `tool_catalog()`. **Node 8 serves families A and L from this crate**, so its surface is fixed here.
-- In `tddy-terminal-rpc`: `pty_relay`'s four dispatch modes. **Node 6 serves family K from this crate.**
+- In `tddy-tool-engine`: the single `tool_catalog()` and `dynamic_proxy::
+  is_native_tool_denied_in_remote_mode`. **Node 8 serves families A and L from this crate**, so its
+  surface is fixed here. **Corrected at M6 — the first push declared `RemoteToolDef`,
+  `build_dynamic_tool_list(host_tools, withdrawn)` and `dispatch_dynamic_tool` here.** The first
+  was a fourth copy of `ToolDef`'s three fields (and named its schema field `input_schema`, not
+  `input_schema_json`); the second returns `Vec<rmcp::model::Tool>` and never had a `withdrawn`
+  parameter — withdrawal is enforced at dispatch against the live roster, not by filtering the
+  advertisement; the third is M7's, because that roster is a `tddy-service` concern. Node 8 builds
+  against `tool_catalog()`, `execute_tool` and the denial predicate; the MCP shape stays in
+  `tddy-tools`.
+- In `tddy-terminal-rpc`: `pty_relay::{PtyRelayConfig, run_pty_relay}` — one plain config struct,
+  one `async fn … -> anyhow::Result<()>`, four dispatch modes selected by which fields are set.
+  **Node 6 serves family K from this crate.** **Corrected at M6 — the first push declared a
+  `RelayMode` enum, a `RelayError` and `run_pty_relay(RelayMode)`.** None of the three existed;
+  the modes are not disjoint at the CLI (`--sandbox`, `--model` and `--daemon-url` are read by
+  more than one), so an enum would have had to repeat their fields per variant.
 - In `tddy-discovery`: the subagent conversation runtime's public surface and `LiveAgentRoster`.
 - Every destination's `Cargo.toml` change, so `cargo build --workspace` sees the new surfaces.
 - The failing acceptance tests, including the three dependency-drop assertions.
@@ -264,8 +291,10 @@ package boundary — is answered here by moving the boundary instead of the stri
 - [x] **`tddy-workflow-recipes`**: `github_pr`, `schema`, `schema_manifest`; `review_persist` deleted ✅ (seam B stays — see `## Boundaries`)
 - [ ] **`tddy-service`**: `session_tool_client` + 4 `session_agents` modules
 - [ ] **`tddy-discovery`**: seam D, `registry.rs`, `relay.rs`
-- [ ] **`tddy-tool-engine`**: seam C; **the hand-copied catalog collapsed to one**
-- [ ] **`tddy-terminal-rpc`**: `pty_relay`
+- [x] **`tddy-tool-engine`**: seam C's movable half; **the hand-copied catalog collapsed to one** —
+      `exec_tool_catalog()` is now eight lines mapping `tddy_tool_engine::tool_catalog()` into the
+      MCP shape, and the advertised set is byte-identical over the real `--mcp` wire ✅
+- [x] **`tddy-terminal-rpc`**: `pty_relay`'s four dispatch modes; the clap struct stays behind ✅
 - [~] **`tddy-core`**: `toolcall_client`, `cli.rs`'s wire types and relay pairs, and `action_tools`'
       manifest rules. **Four of the six movers stay in `tddy-tools`** — see `## Boundaries`
 - [x] **`tddy-bsp`**: `build_cli` dispatch; **the duplicate `plugin_registry` deleted**; the 6 `tddy-build*` deps dropped from `tddy-tools` ✅
@@ -323,10 +352,17 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 - **API**: gains `SessionToolTransport` and the roster/conversation client. **Node 7 compiles against this**
 
 #### tddy-tool-engine
-- **API**: gains the dynamic tool proxy; **one catalog instead of two**. **Node 8 compiles against this**
+- **API**: gains `dynamic_proxy::is_native_tool_denied_in_remote_mode`; **one catalog instead of
+  two** — `tddy-tools` maps `tool_catalog()` into the MCP shape at one place, as it already does
+  for `tddy_lsp_executor`'s. **Node 8 compiles against this**
+- **Dependencies**: unchanged. No `rmcp`, no `anyhow`
 
 #### tddy-terminal-rpc
-- **API**: gains `pty_relay`'s four dispatch modes. **Node 6 compiles against this**
+- **API**: gains `pty_relay::{PtyRelayConfig, run_pty_relay}` — four dispatch modes — and an
+  internal `local_terminal` that both relays share instead of a `RawMode` each.
+  **Node 6 compiles against this**
+- **Dependencies**: `+tddy-service` and `+reqwest` (the three daemon-facing modes), and
+  `+tddy-livekit` behind a new **non-default** `livekit` feature. No `clap`
 
 #### tddy-bsp
 - **API**: gains the build dispatch; **`plugin_registry` exists once**; `run_build`/`run_build_list`
@@ -352,7 +388,12 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 - [~] M5 — `toolcall_client`, `cli.rs`'s wire types/relay pairs and `action_tools`' manifest rules to
       `tddy-core`; the action-tool advertisement withdrawn; `tddy-bsp`'s `ToolcallRelay` parameter gone.
       **`session_hook`, `list_models`, `session_actions_cli`, `session_context` do not move** (`## Boundaries`)
-- [ ] M6 — `pty_relay` to `tddy-terminal-rpc`; seam C to `tddy-tool-engine` with one catalog
+- [x] M6 — `pty_relay` to `tddy-terminal-rpc` (780 non-blank prod lines → **142** here, the doc,
+      the clap struct and the hand-off; **698** there, plus a 55-line `local_terminal` that ends a
+      fourth duplication);
+      seam C's catalog collapsed to one; `is_native_tool_denied_in_remote_mode` to
+      `tddy_tool_engine::dynamic_proxy`. **`build_dynamic_tool_list`, `dynamic_tool_router` and
+      `static_tool_names` stay in `tddy-tools`** (`## Boundaries`) ✅
 - [ ] M7 — `session_tool_client` + `session_agents/*` to `tddy-service`; the three dev-deps dropped and asserted
 - [ ] M8 — seam D + `registry.rs` + `relay.rs` to `tddy-discovery`
 - [ ] M9 — the 43-tool MCP surface verified over the real stdio wire; env contract verified; baselines restored
@@ -395,14 +436,23 @@ afterwards, verified by grep over the destinations rather than by assumption.
 
 ### tddy-tool-engine
 - [ ] **Integration**: the dynamic tool proxy forwards to a daemon (`dynamic_tool_router_acceptance.rs`)
-- [ ] **Unit**: there is exactly **one** exec-tool catalog, and the former guard test now compares it to itself trivially or is deleted (`catalog.rs`)
+- [x] **Unit**: there is exactly **one** exec-tool catalog; `tddy-tools`'
+      `exec_tool_catalog_names_match_workspace_exec_tool_names` is **deleted** — with the copy gone
+      it asserted exactly what `tddy_daemon::tool_catalog_sync`'s
+      `workspace_exec_tool_names_match_tool_catalog` already asserts. **The daemon's is kept**: it
+      guards a pair that has *not* collapsed, this catalog against `tddy_sandbox::
+      workspace_exec_tool_names` (the `--allowedTools` a sandboxed `claude` is spawned with) ✅
 
 ### tddy-workflow-recipes
 - [ ] **Integration**: the 14 `pr_*` MCP tools answer from the new crate (`pr_stack_tool_dispatch_acceptance.rs`)
 - [ ] **Integration**: schema validation resolves `goals.json` without a cross-package `include_dir!` (`schema_validation_tests.rs`)
 
 ### tddy-terminal-rpc
-- [ ] **Integration**: all four `pty_relay` dispatch modes connect (`pty_relay_acceptance.rs`)
+- [x] **Unit**: the relay builds a `StartSession` from its config and speaks the daemon's OSC
+      resize format (`pty_relay.rs`). The four modes' *connection* behaviour is still only covered
+      by the mode-selection branch in `run_pty_relay`; a `pty_relay_acceptance.rs` against a fake
+      daemon would be new coverage, not moved coverage, and is left to node 6 with the server it
+      needs
 
 ### tddy-discovery
 - [ ] **Integration**: a subagent conversation opens, prompts, awaits and cancels (`subagent_async_response_acceptance.rs`)
@@ -455,6 +505,27 @@ afterwards, verified by grep over the destinations rather than by assumption.
   everywhere else in the workspace, so it adds no new third-party code to the tree — only a new
   edge from the base library. It unblocked `session_context` outright and the non-CLI halves of
   `list_models` and `session_actions_cli`; it did **not** unblock `session_hook`, which is a cycle.
+- **`tddy-terminal-rpc` gained `reqwest` and `tddy-service`, and that is the price of the
+  `pty_relay` move.** Three of the four dispatch modes talk to the daemon: two POST
+  connect-protocol frames at `connection.ConnectionService` and `auth.AuthService` over HTTP, and
+  one reads an envelope-framed streaming response. The protos are `tddy-service`'s and the client
+  is `reqwest`; there is no version of the move that leaves either behind. The alternative was to
+  rewrite the transport onto `tddy-rpc`, which the crate already has — rejected for the same
+  reason M5 rejected rewriting error handling into `tddy-core`'s style: it turns a
+  behaviour-preserving move into a rewrite of the thing being moved, in the node whose whole claim
+  is that nothing changed. The cost is bounded and measured: `tddy-terminal-rpc`'s only
+  reverse-dependencies are `tddy-daemon`, `tddy-coder` and `tddy-tools`, and **all three already
+  depend on `reqwest` and `tddy-service` directly**, so the workspace builds no crate it did not
+  build before. `tddy-livekit` came with the LiveKit mode as an **optional** dependency behind a
+  new `livekit` feature, off by default and enabled through `tddy-tools`' own — so a
+  `--no-default-features` in-jail build still carries no SDK. Verified by building `tddy-tools`
+  both ways.
+- **A fourth duplication is deleted, found by the move rather than by the plan.**
+  `pty_relay.rs` and `tddy-terminal-rpc`'s `local_pty_relay.rs` each declared a byte-identical
+  `RawMode` termios guard and terminal-size probe — the same `24 × 220` fallback, the same
+  `cfmakeraw`. Two of them in one crate would have been absurd, so they became
+  `tddy_terminal_rpc::local_terminal`, used by both relays. This is the pattern the other three
+  duplications followed: each existed *because* one copy was locked in a binary crate.
 - **Breaking the three cycles is step zero, in the same PR.** It is ~8 items in one new module and it
   gates every other move here. Making it a separate node would produce a PR whose only deliverable is
   a module nobody imports yet — the stubs-only shape the boundary contract forbids.
@@ -487,6 +558,12 @@ afterwards, verified by grep over the destinations rather than by assumption.
 - [ ] `tddy-service` depends on `tddy-tui`, so moving `session_tool_client` there pulls the TUI into
       every consumer's build — including in-jail binaries. Recorded; a `tddy-session-tool-client` crate
       is the alternative if the build cost proves real
+- [ ] **M6 gave `tddy-terminal-rpc` the same edge, for the same reason.** `pty_relay` encodes
+      `connection.ConnectionService` and `auth.AuthService` messages, so the crate now depends on
+      `tddy-service` and therefore transitively on `tddy-tui`. Today this costs nothing measurable —
+      all three of its reverse-dependencies already depend on `tddy-service` directly — but it is the
+      second crate to acquire the edge, and both would be fixed by the same split of the protos out
+      of `tddy-service`
 - [ ] The second `[[bin]]` (`execute-tool-stdio-fixture`) still forces `tddy-rpc`, `tddy-stdio` and
       `async-trait` into `[dependencies]` rather than dev-deps
 - [ ] **Step zero traded three cycles for one, and M7 inherits it.** `open_roster_agent_session`
@@ -517,11 +594,27 @@ number falls without one is a regression, not a milestone.
 | `tddy-core` | 563 | **583** | +9 manifest tests, +1 for the now-public `author_prompt`, +4 moved relay-acceptance files, +3 `client_wire`, +3 `tool_gate` |
 | `tddy-bsp` | 12 | **12** | unchanged — the `ToolcallRelay` parameter had no test of its own |
 
+| Package | Pre-M6 | Post-M6 | Accounted for |
+|---|---:|---:|---|
+| `tddy-tools` | 334 | **331** | −3 `pty_relay` tests moved, −1 `is_native_tool_denied_in_remote_mode` moved, −1 vacuous guard test deleted, +2 new arg-hand-off tests |
+| `tddy-terminal-rpc` | 23 (+1 failing) | **24** / 25 with `--features livekit` | −2 fabricated stub tests deleted, +3 moved from `pty_relay` (one of them LiveKit-gated) |
+| `tddy-tool-engine` | 9 (+2 failing) | **11** | −2 fabricated stub tests deleted, +2 for the moved remote-mode denial |
+
 **16 failing tests** define this node: 5 in `tddy-tools`' `mcp_primitives` (step zero — the module
 that breaks all three `server.rs` cycles), 1 in `tddy-service`'s `session_tool_client`, 2 in
 `tddy-tool-engine`'s `dynamic_proxy`, 1 in `tddy-terminal-rpc`'s `pty_relay`, 2 in
 `tddy-discovery`'s `roster`, and **3 dependency-drop assertions** — one each in `tddy-daemon`,
-`tddy-sandbox-app` and `tddy-sandbox-darwin`. Those three are asserted against the manifest rather
+`tddy-sandbox-app` and `tddy-sandbox-darwin`.
+
+**Three of those sixteen were deleted at M6 rather than made to pass**, because they asserted
+designs the code does not have. `dynamic_proxy`'s `stops_advertising_a_tool_an_agent_has_taken_over`
+required advertisement to be filtered by the roster; it is not, and must not be — `--allowedTools`
+is fixed when `claude` spawns, so a takeover can only be enforced at dispatch. Its sibling
+`advertises_this_crates_own_catalog_when_the_host_adds_nothing` and `pty_relay`'s two both called
+signatures that never existed (`build_dynamic_tool_list(host_tools, withdrawn)`,
+`run_pty_relay(RelayMode) -> Result<(), RelayError>`). They are replaced by four tests over the
+surfaces that do exist. **Nodes 6 and 8 compile against the corrected shapes**, listed in
+`## Draft PR contract`. Those three are asserted against the manifest rather
 than described, because a **dev**-dependency survives invisibly: nothing fails to compile when it is
 merely unused.
 

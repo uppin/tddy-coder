@@ -18,11 +18,22 @@ log = "0.4"
 prost = "0.13"
 tddy-pty = { path = "../tddy-pty" }
 tddy-rpc = { path = "../tddy-rpc" }
+# `pty_relay` speaks `connection.ConnectionService` and `auth.AuthService` to attach a session's
+# terminal from outside the daemon; the protos it encodes live in tddy-service.
+tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
+# LiveKit dispatch mode (`pty-relay --server-identity` / `--daemon-identity`). Off by default so an
+# in-jail build that only ever talks gRPC does not carry the SDK.
+tddy-livekit = { path = "../tddy-livekit", optional = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "io-util", "io-std", "signal"] }
 tokio-stream = "0.1"
 tonic = "0.12"
 portable-pty = "0.9"
+# `pty_relay`'s connectrpc client: unary POSTs plus one envelope-framed streaming read.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[features]
+livekit = ["dep:tddy-livekit"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

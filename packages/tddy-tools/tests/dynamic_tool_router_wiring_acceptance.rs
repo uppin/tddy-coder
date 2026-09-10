@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use serial_test::serial;
 use tddy_tools::mcp_primitives::RemoteToolDef;
-use tddy_tools::server::{dynamic_tool_router, exec_tool_catalog, PermissionServer};
+use tddy_tools::server::{dynamic_tool_router, PermissionServer};
 
 fn clear_session_tool_transport_env() {
     std::env::remove_var("TDDY_SANDBOX_TOOL_IPC");
@@ -122,29 +122,6 @@ fn permission_server_still_exposes_static_tools_when_sandbox_ipc_configured() {
             names
         );
     }
-}
-
-/// Guards against `exec_tool_catalog()` (the tddy-tools-side schema catalog) drifting from
-/// `workspace_exec_tool_names()` (the canonical name list already used to build the
-/// sandboxed Claude CLI's `--allowedTools`) — mirrors the equivalent sync check in
-/// `tddy_daemon::tool_catalog`.
-#[test]
-fn exec_tool_catalog_names_match_workspace_exec_tool_names() {
-    // Given / When
-    let catalog_names: HashSet<String> = exec_tool_catalog()
-        .into_iter()
-        .map(|def| def.name)
-        .collect();
-    let sandbox_names: HashSet<String> = tddy_sandbox::workspace_exec_tool_names()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
-    // Then
-    assert_eq!(
-        catalog_names, sandbox_names,
-        "exec_tool_catalog() must stay in sync with workspace_exec_tool_names()"
-    );
 }
 
 /// AC16: the router built from a catalog contains exactly the given entries — renaming a
