@@ -1,8 +1,9 @@
 //! JSON Schema validation for structured agent output.
 //!
-//! Goal ↔ schema file mapping is generated from `tddy-workflow-recipes/goals.json` (`build.rs` → `OUT_DIR/goal_registry.rs`).
-//! Embedded files come from `tddy-workflow-recipes/generated/` (see that crate's `build.rs`).
-//! All schema interaction is via tddy-tools; no schema files are written to disk by tddy-core.
+//! Goal ↔ schema file mapping is generated from this crate's `goals.json`
+//! (`build.rs` → `generated/goal_registry.rs`), and the embedded schema files come from the
+//! `generated/` directory the same build script validates.
+//! All schema interaction is via this module; no schema files are written to disk by tddy-core.
 
 use include_dir::{include_dir, Dir};
 use jsonschema::Resource;
@@ -11,10 +12,12 @@ use serde_json::Value;
 use std::path::Path;
 use std::sync::OnceLock;
 
-static SCHEMAS_DIR: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/../tddy-workflow-recipes/generated");
+static SCHEMAS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/generated");
 
-include!(concat!(env!("OUT_DIR"), "/goal_registry.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/generated/goal_registry.rs"
+));
 
 /// Common schema files (under `tdd/common/` subdir) with their `$id` URIs.
 const COMMON_SCHEMAS: &[(&str, &str)] = &[

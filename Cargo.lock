@@ -13113,8 +13113,6 @@ dependencies = [
  "bytes",
  "clap",
  "env_logger",
- "include_dir",
- "jsonschema 0.44.1",
  "libc",
  "livekit",
  "livekit-api",
@@ -13280,6 +13278,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "include_dir",
+ "jsonschema 0.44.1",
  "log",
  "pretty_assertions",
  "rstest 0.24.0",

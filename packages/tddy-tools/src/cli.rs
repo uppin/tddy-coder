@@ -2,7 +2,7 @@
 //! `set-session-context`, `persist-changeset-workflow`.
 //!
 //! Workflow goal names and schema filenames are defined in `packages/tddy-workflow-recipes/goals.json`
-//! (see [`tddy_tools::schema`] and [`tddy_tools::schema_manifest`]).
+//! (see [`tddy_workflow_recipes::schema`] and [`tddy_workflow_recipes::schema_manifest`]).
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -12,11 +12,10 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 
 use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
-use tddy_tools::review_persist;
-use tddy_tools::schema;
-use tddy_tools::schema_manifest;
 use tddy_tools::session_actions_cli;
 use tddy_tools::session_context;
+use tddy_workflow_recipes::review::persist_review_md_to_session_dir;
+use tddy_workflow_recipes::{schema, schema_manifest};
 
 /// Maximum bytes read from stdin or accepted inline `--data` for `submit` / `ask` (DoS guard).
 const MAX_CLI_INPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -256,10 +255,9 @@ pub async fn run_submit(args: SubmitArgs) -> Result<()> {
     } else {
         if goal == "branch-review" {
             if let Ok(session_dir) = std::env::var("TDDY_SESSION_DIR") {
-                if let Err(e) = review_persist::persist_review_md_from_branch_review_json(
-                    std::path::Path::new(&session_dir),
-                    &json_str,
-                ) {
+                if let Err(e) =
+                    persist_review_md_to_session_dir(std::path::Path::new(&session_dir), &json_str)
+                {
                     output_error(&e, 1);
                 }
             }

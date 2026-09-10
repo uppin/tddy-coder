@@ -5,12 +5,10 @@ use std::fs;
 use std::process::Command;
 
 use serde_json::{json, Value};
-pub use tddy_workflow_recipes::{
+
+use crate::github_rest_common::{
     github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_TDDY_TOOLS,
 };
-
-/// User-Agent for GitHub API requests from **tddy-tools** (alias of [`USER_AGENT_TDDY_TOOLS`]).
-pub const GITHUB_USER_AGENT: &str = USER_AGENT_TDDY_TOOLS;
 
 /// Stable MCP tool names for GitHub PR operations (must match MCP registration).
 pub const GITHUB_CREATE_PULL_REQUEST_MCP_NAME: &str = "github_create_pull_request";
@@ -87,7 +85,7 @@ pub fn github_rest_headers(token: &str) -> BTreeMap<String, String> {
     let mut h = BTreeMap::new();
     h.insert("Authorization".into(), format!("Bearer {}", token.trim()));
     h.insert("Accept".into(), GITHUB_ACCEPT.into());
-    h.insert("User-Agent".into(), GITHUB_USER_AGENT.into());
+    h.insert("User-Agent".into(), USER_AGENT_TDDY_TOOLS.into());
     h.insert("X-GitHub-Api-Version".into(), GITHUB_API_VERSION.into());
     h
 }
@@ -322,7 +320,7 @@ fn curl_github_json(
         .arg("-H")
         .arg("Content-Type: application/json")
         .arg("-H")
-        .arg(format!("User-Agent: {GITHUB_USER_AGENT}"))
+        .arg(format!("User-Agent: {USER_AGENT_TDDY_TOOLS}"))
         .arg("-H")
         .arg(format!("X-GitHub-Api-Version: {GITHUB_API_VERSION}"))
         .arg("--data-binary")

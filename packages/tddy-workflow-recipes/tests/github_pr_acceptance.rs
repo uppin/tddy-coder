@@ -2,11 +2,12 @@
 
 use serde_json::json;
 use serial_test::serial;
-use tddy_tools::github_pr::{
-    create_pull_request, github_token_from_env, registered_github_pr_mcp_tool_names,
-    update_pull_request, CreatePullRequestParams, MockGithubTransport, UpdatePullRequestParams,
+use tddy_workflow_recipes::github_pr::{
+    create_pull_request, registered_github_pr_mcp_tool_names, update_pull_request,
+    CreatePullRequestParams, MockGithubTransport, UpdatePullRequestParams,
     GITHUB_CREATE_PULL_REQUEST_MCP_NAME, GITHUB_UPDATE_PULL_REQUEST_MCP_NAME,
 };
+use tddy_workflow_recipes::github_rest_common::github_token_from_env;
 
 struct EnvUnsetGithubTokens {
     had_gh: bool,

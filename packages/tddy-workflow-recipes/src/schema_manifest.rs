@@ -3,17 +3,17 @@
 
 use log::{debug, info};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// Embedded manifest produced by `tddy-workflow-recipes/build.rs` (from `goals.json`).
-const SCHEMA_MANIFEST_JSON: &str =
-    include_str!("../../tddy-workflow-recipes/generated/schema-manifest.json");
+use crate::schema_pipeline::generated_manifest_path;
+
+/// Embedded manifest produced by this crate's `build.rs` (from `goals.json`).
+const SCHEMA_MANIFEST_JSON: &str = include_str!("../generated/schema-manifest.json");
 
 /// Path to the generated manifest (`schema-manifest.json`) produced by the workflow-recipes build.
 pub fn schema_manifest_path() -> PathBuf {
     debug!(target: "tddy_tools::schema_manifest", "schema_manifest_path");
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../tddy-workflow-recipes/generated/schema-manifest.json")
+    generated_manifest_path()
 }
 
 #[derive(Debug)]

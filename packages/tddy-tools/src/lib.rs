@@ -1,19 +1,13 @@
-//! tddy-tools library: schema validation and CLI utilities.
+//! tddy-tools library: the MCP server and the CLI's supporting surface.
 //!
-//! The binary is the primary interface; the library exposes schema validation
-//! for testing and programmatic use.
-//!
-//! - [`schema`] — embedded JSON Schemas, [`validate_output`], `get-schema` payload.
-//! - [`schema_manifest`] — goal registry from `schema-manifest.json` (`list-schemas`).
+//! The binary is the primary interface. JSON Schema validation and the goal registry it serves
+//! `get-schema` / `list-schemas` from live in `tddy_workflow_recipes::{schema, schema_manifest}`,
+//! next to the `goals.json` they are generated from.
 
 pub mod action_tools;
-pub mod github_pr;
 pub mod list_models;
 pub mod mcp_primitives;
 pub mod relay;
-pub mod review_persist;
-pub mod schema;
-pub mod schema_manifest;
 pub mod server;
 pub mod session_actions_cli;
 pub mod session_agents;

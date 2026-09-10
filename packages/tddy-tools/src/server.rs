@@ -1,9 +1,5 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
-use crate::github_pr::{
-    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
-    UpdatePullRequestParams,
-};
 use crate::mcp_primitives::{
     cancel_remote_conversation, env_non_empty, open_remote_agent_session, schema_object,
     seed_subagents_or_report, subagent_config_from_env, subagent_error_json, subagent_route,
@@ -21,6 +17,10 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, PromptOutcome, SubagentRegistry, SubagentSession,
+};
+use tddy_workflow_recipes::github_pr::{
+    create_pull_request_via_rest_api, update_pull_request_via_rest_api, CreatePullRequestParams,
+    UpdatePullRequestParams,
 };
 use tddy_workflow_recipes::orchestrate_pr_stack::{
     github::{PrSearchHit, PrState},
