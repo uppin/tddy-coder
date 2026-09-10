@@ -498,9 +498,15 @@ One assertion is new rather than moved: that `tddy-sandbox-app` reaches the sand
       `sandbox_app_dependency_reverses.rs`, not the planned `daemon_sandbox_dependency_acceptance.rs`
 
 ### tddy-daemon
-- [🔲] **Integration**: the registered service names still include all four leaf services —
-      **`service_registration_acceptance.rs` was never written by the red phase and does not exist.**
-      Only `bsp_service` moved, so the premise ("all four") no longer holds either
+- [~] **Integration**: the registered service names still include all four leaf services — the premise
+      no longer holds (only `bsp_service` moved), and the red phase never wrote the planned
+      `service_registration_acceptance.rs`. **Node 2 has since created that file**
+      (`a9102cf0`, "wrap node 2, and pin the service roster with a test"), asserting against the real
+      registry via `DaemonRuntime::service_names()`. It covers node 2's own services and passes
+      unchanged against this node's roster (4/4, verified after rebase). Adding a `bsp.BspService`
+      case to it is the natural follow-up, deliberately **not** done here: the file is node 2's and
+      that node is still active, so editing it would conflict on every further push. `tddy-bsp`'s own
+      `build_bsp_service_entry` test covers the entry's name meanwhile
 
 ## Decisions & Trade-offs
 
