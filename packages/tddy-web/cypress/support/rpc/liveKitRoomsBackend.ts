@@ -1,5 +1,5 @@
 /**
- * Test helpers for the **LiveKit rooms feed** (`ConnectionService.StreamLiveKitRooms`) that backs the
+ * Test helpers for the **LiveKit rooms feed** (`LiveKitService.StreamLiveKitRooms`) that backs the
  * rooms panel on `#/livekit`.
  *
  * The daemon's contract is snapshot-then-changes: the first message on a stream is always a full
@@ -15,15 +15,15 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
-  ConnectionService,
   LiveKitParticipantInfoSchema,
   LiveKitRoomInfoSchema,
   LiveKitRoomsChangeSchema,
   LiveKitRoomsEventSchema,
+  LiveKitService,
   type LiveKitParticipantInfo,
   type LiveKitRoomInfo,
   type LiveKitRoomsChange,
-} from "../../../src/gen/connection_pb";
+} from "../../../src/gen/livekit_pb";
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -161,7 +161,7 @@ export function aLiveKitRoomsBackend(scenario: LiveKitRoomsScenario): LiveKitRoo
   const callSignals: AbortSignal[] = [];
   const live = aChangeTail();
 
-  const backend = anInMemoryRpcBackend().implement(ConnectionService, {
+  const backend = anInMemoryRpcBackend().implement(LiveKitService, {
     async *streamLiveKitRooms(_req, context) {
       callSignals.push(context.signal);
       if (scenario.failBeforeSnapshot !== undefined) {

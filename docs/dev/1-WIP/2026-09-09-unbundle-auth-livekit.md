@@ -253,12 +253,13 @@ here; the entry should be updated with the new location at wrap.
       so it belongs to a **successor of nodes 4 and 6–8**, not to node 2. This node therefore does
       **not** wait on node 2, and `tddy-telegram` needs no manifest change — it has no `tddy-daemon`
       dependency to repoint and will not gain one at node 2's position.
-- [ ] **Web** (M7, not this task): the rooms panel migrated to `livekit.LiveKitService`; the Cypress
-      fake moved. ⚠ **Currently broken and must land before merge.** M4 regenerated `src/gen/`, so
-      the twelve rooms messages now live in `livekit_pb.ts` and are gone from `connection_pb.ts`.
-      Three files still import them from the old module and will not typecheck or run:
-      `src/rpc/useLiveKitRooms.ts:16`, `src/lib/liveKitRoomsState.ts:16` and
-      `cypress/support/rpc/liveKitRoomsBackend.ts:26`
+- [x] **Web** (M7) ✅: the rooms panel migrated to `livekit.LiveKitService`; the Cypress fake moved
+      with it. Five files: `useLiveKitRooms.ts` (now `useDaemonClient(LiveKitService)`),
+      `liveKitRoomsState.ts` + its test, `liveKitRoomsBackend.ts`, and the spec's header comment.
+      The round-trip is proven rather than merely compiled: the fake registers its handler **only**
+      on `LiveKitService`, and the testkit router answers any unregistered method with
+      `Code.Unimplemented` — so a client still asking `ConnectionService` would render the error
+      branch and fail the suite. `LiveKitRoomsPanelAcceptance.cy.tsx`: **26/26**.
 - [x] **Docker-dependent suites**: behaviour unchanged ✅ — and the premise needs correcting.
       **Nothing skips.** `LiveKitTestkit::start()` returns `Err` without Docker and every caller
       `.expect(...)`s it, so an absent `/var/run/docker.sock` makes these suites *fail*, loudly,
@@ -344,7 +345,7 @@ Three cycles blocked this node before node 1: `config.rs:85 → session_room::DE
 - [x] M5 — `tddy-daemon-livekit` extracted ✅; 5 moved suites plus 3 new ones pass; no reach into
       `split_session`, `daemon_config_service`, `session_attachments` or `tddy-daemon-auth`
 - [x] M6 — the `session_room` consumer repointed ✅ — in `tddy-daemon`, not `tddy-telegram`; see `## Scope`
-- [ ] M7 — web rooms panel migrated; Cypress component suites green
+- [x] M7 — web rooms panel migrated; Cypress component suites green ✅ (26/26)
 - [x] M8 — Docker behaviour verified unchanged; file budget recorded ✅
 
 ## Testing Plan
