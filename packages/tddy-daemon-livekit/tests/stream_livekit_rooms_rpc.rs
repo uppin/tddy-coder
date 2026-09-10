@@ -1,32 +1,38 @@
-//! Integration tests for the `StreamLiveKitRooms` RPC.
+//! Integration tests for `livekit.LiveKitService.StreamLiveKitRooms`.
 //!
 //! The feed's emit logic — snapshot content and one-change-per-delta — is pinned as pure functions in
-//! `tddy_daemon::livekit_rooms_stream::diff_rosters`, which is where the arithmetic lives. What only
-//! an integration test can pin is the handler's contract with the transport: it authenticates before
+//! `livekit_rooms_stream::diff_rosters`, which is where the arithmetic lives. What only an
+//! integration test can pin is the handler's contract with the transport: it authenticates before
 //! it opens a stream, it turns a *sequence* of roster readings into a snapshot followed by changes,
 //! silence, or an error, and it stops reading LiveKit once its subscriber is gone.
 //!
+//! The method left `connection.ConnectionService` in `#unbundle` node 4, so the subject here is
+//! `LiveKitServiceImpl` rather than the daemon's god object, and the only thing the suite needs
+//! from outside this crate is a resolver that says yes to one token.
+//!
 //! Feature: `docs/ft/web/livekit-rooms-panel.md`
-//! Reference: `packages/tddy-daemon/docs/connection-service.md` § LiveKit rooms
 
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::livekit_rooms_stream::{RoomRoster, RosterError};
-use tddy_daemon::test_util::{test_service, TEST_TOKEN};
+use tddy_daemon_kernel::SessionUserResolver;
+use tddy_daemon_livekit::livekit_rooms_stream::{RoomRoster, RosterError};
+use tddy_daemon_livekit::livekit_service::LiveKitServiceImpl;
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::connection::{
-    live_kit_rooms_change::Change, live_kit_rooms_event::Event,
-    ConnectionService as ConnectionServiceTrait, LiveKitParticipantInfo, LiveKitRoomInfo,
-    LiveKitRoomsEvent, StreamLiveKitRoomsRequest,
+use tddy_service::proto::livekit::{
+    live_kit_rooms_change::Change, live_kit_rooms_event::Event, LiveKitParticipantInfo,
+    LiveKitRoomInfo, LiveKitRoomsEvent, LiveKitService as LiveKitServiceTrait,
+    StreamLiveKitRoomsRequest,
 };
 use tddy_testing_commons::wait::eventually;
-use tempfile::TempDir;
 
 const COMMON_ROOM: &str = "livekit.common_room";
+
+/// The one token the resolver below admits. Named here rather than taken from the daemon's
+/// `test_util`, which this crate deliberately cannot reach.
+const TEST_TOKEN: &str = "valid-token";
 
 /// Poll cadence for the tests: short enough that a tick lands inside the test's read timeout, far
 /// below the production three seconds.
@@ -119,24 +125,23 @@ fn a_roster() -> ScriptedRoster {
     ScriptedRoster::new()
 }
 
-/// A daemon whose rooms feed reads a scripted roster on a cadence short enough to observe, holding
-/// on to the temp dir its sessions live in — dropping that guard would delete the directory out from
-/// under the test.
+/// Resolves [`TEST_TOKEN`] to a user and refuses everything else.
+fn a_resolver() -> SessionUserResolver {
+    Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()))
+}
+
+/// A daemon whose rooms feed reads a scripted roster on a cadence short enough to observe.
 struct WatchingDaemon {
-    service: ConnectionServiceImpl,
+    service: LiveKitServiceImpl,
     roster: Arc<ScriptedRoster>,
-    _sessions_dir: TempDir,
 }
 
 fn a_service_watching(roster: ScriptedRoster) -> WatchingDaemon {
-    let sessions_dir = tempfile::tempdir().expect("temp dir");
     let roster = Arc::new(roster);
     WatchingDaemon {
-        service: test_service(sessions_dir.path().to_path_buf())
-            .with_room_roster(Arc::clone(&roster) as Arc<dyn RoomRoster>)
-            .with_room_poll_interval(TEST_POLL_INTERVAL),
+        service: LiveKitServiceImpl::new(Arc::clone(&roster) as Arc<dyn RoomRoster>, a_resolver())
+            .with_poll_interval(TEST_POLL_INTERVAL),
         roster,
-        _sessions_dir: sessions_dir,
     }
 }
 
@@ -212,8 +217,7 @@ fn change(event: Result<LiveKitRoomsEvent, Status>) -> Change {
 #[tokio::test]
 async fn stream_livekit_rooms_rejects_an_invalid_session_token() {
     // Given a daemon and a token it never issued
-    let temp = tempfile::tempdir().unwrap();
-    let service = test_service(temp.path().to_path_buf());
+    let service = LiveKitServiceImpl::new(Arc::new(a_roster().reporting(vec![])), a_resolver());
 
     // When a caller subscribes with it
     let result = service

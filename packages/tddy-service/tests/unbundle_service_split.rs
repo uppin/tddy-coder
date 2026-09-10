@@ -136,8 +136,8 @@ fn connection_service_keeps_exactly_the_methods_node_one_leaves_behind() {
 
     // Then
     assert_eq!(
-        declared, 73,
-        "node 1 moves 17 of 90; later nodes take it to 21"
+        declared, 72,
+        "node 1 moved 17 of 90 and node 4 moves StreamLiveKitRooms; later nodes take it to 21"
     );
 }
 

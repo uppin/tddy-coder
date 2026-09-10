@@ -12071,6 +12071,7 @@ dependencies = [
  "tddy-core",
  "tddy-daemon-auth",
  "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
  "tddy-demo-runner",
  "tddy-discovery",
@@ -12169,12 +12170,29 @@ dependencies = [
 name = "tddy-daemon-livekit"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "livekit",
+ "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-host-service",
+ "tddy-livekit",
+ "tddy-livekit-testkit",
  "tddy-rpc",
- "thiserror 2.0.18",
+ "tddy-service",
+ "tddy-testing-commons",
+ "tddy-workflow",
+ "tddy-worktree-service",
+ "tempfile",
  "tokio",
 ]
 

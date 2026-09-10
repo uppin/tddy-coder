@@ -307,9 +307,9 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     );
 
     // Daemon B's discovery participant: bare instance id, publishes the advertisement A discovers.
-    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+    tddy_daemon::runtime::spawn_common_room_discovery_task(
         Arc::new(config_b),
-        Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new()),
         Arc::new(tokio::sync::RwLock::new(None)),
     );
 
@@ -337,15 +337,16 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     let base_a = sessions_a.path().to_path_buf();
     let resolver_a: SessionsBaseResolver = Arc::new(move |_| Some(base_a.clone()));
     let config_arc = Arc::new(config_a.clone());
-    let registry = Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+    let registry =
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+    tddy_daemon::runtime::spawn_common_room_discovery_task(
         config_arc.clone(),
         registry.clone(),
         room_slot.clone(),
     );
     let eligible: Arc<dyn tddy_daemon::multi_host::EligibleDaemonSource> = Arc::new(
-        tddy_daemon::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
+        tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
             registry,
             room_slot.clone(),
@@ -367,7 +368,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
         user_resolver,
         None,
         Some(
-            tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles {
+            tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
                 eligible_daemon_source: eligible,
                 common_room_livekit_room: room_slot,
             },

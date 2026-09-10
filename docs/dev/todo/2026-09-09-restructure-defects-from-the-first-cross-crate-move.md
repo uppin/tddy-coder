@@ -122,3 +122,63 @@ Worth considering for the operation, in rough order of value:
 - **Report the seam rather than the refusal.** When a module cannot move because *k* of its items
   reach the origin crate, the useful output is which items those are — because the complement is
   the movable seam. `telegram_notifier.rs` was 3 of its ~30 items away from moving whole.
+## Added by `#unbundle` node 4 ([#473](https://github.com/uppin/tddy-coder/pull/473))
+
+Five modules to one destination. The operation moved **4 of 5**, and only after the plan was
+layered by hand.
+
+- **A plan cannot carry two modules that name each other, even though it moves both.** The
+  five-op plan was refused before a single edit:
+
+      Error: plan is malformed: `packages/tddy-daemon/src/session_room.rs` still names
+      `tddy-daemon` (tddy_daemon::livekit_peer_discovery::daemon_rpc_identity), so the destination
+      would depend on the crate it left while that crate goes on naming the module it lost
+
+  `livekit_peer_discovery` is **op 1 of the same plan**. The refusal is evaluated against the
+  snapshot, so it cannot see that the path it objects to will not exist by the time op 0 runs —
+  the preflight form of node 1's "adds the destination as a dependency of itself". This is the
+  common shape: a subsystem worth extracting is a subsystem whose modules call each other. The
+  workaround is to topologically layer the plan by inter-module reference, run one plan per layer,
+  archive `.restructure/` between them, and hand-re-point each layer's references at
+  `<dest_crate>::` before the next — which is most of what the operation exists to do.
+
+  What would fix it: evaluate the refusal against the plan's *end state* — a module the same plan
+  moves to the same destination is not an origin dependency.
+
+- **`git mv` means an uncommitted file cannot move at all.** Op 1 of layer 2 died on a file
+  authored earlier in the same PR:
+
+      Error: plan is malformed: git mv packages/tddy-daemon/src/livekit_service.rs
+      packages/tddy-daemon-livekit/src/livekit_service.rs failed: fatal: not under version control
+
+  It had already appended `pub mod livekit_service;` to the destination's `lib.rs`, so the failure
+  left the tree inconsistent. `git add` first is the whole workaround, but nothing says so:
+  authoring a module and then moving it is an ordinary sequence, and the check that would catch it
+  is one `git ls-files` in the preflight.
+
+- **The `pub(crate)` widening a crate boundary forces is not reported.**
+  `livekit_common_room_connect_strings` was `pub(crate)`, and its callers stayed behind in
+  `tddy-daemon`; the move succeeded and the widening surfaced as four `E0603`s at the next build.
+  The operation already reports visibility widenings for `extract_module` — a cross-crate move is
+  where the question actually bites.
+
+- **The self-dependency defect is still live**, and fired again on layer 2:
+  `tddy-daemon-livekit = { path = "" }` in its own manifest, `cargo` refusing the whole workspace
+  with *"cyclic package dependency"*. Node 1 recorded it; recorded again because it was hit by the
+  next node to use the operation, which is the evidence that it is worth fixing rather than
+  documenting.
+
+- **Callers are re-pointed inconsistently, and one re-point was malformed.** Of the ~50 `crate::`
+  references in `tddy-daemon` to the moved modules, some were rewritten to `tddy_daemon_livekit::`
+  and most were left; a `pub use` facade in the origin (node 1's own pattern) covers the remainder,
+  so this is survivable. What is not is the rewrite inside a grouped import:
+
+      use crate::{connection_service::agent_roster, tddy_daemon_livekit::livekit_rooms_stream::RoomRoster, spawn_worker};
+
+  — a `tddy_daemon_livekit::` path spliced inside a `crate::{…}` group, which never resolves.
+
+- **Indexing this workspace costs ~20 minutes per plan**, and the default `--indexing-budget` of
+  600 s is not enough to reach the first operation: the run reports *"rust-analyzer had not
+  finished indexing after 600s"* and exits **0**. A budget overrun exiting zero is worth fixing on
+  its own — a script cannot tell it from success. With layering at one index per layer, the
+  budget is the dominant cost of using the operation at all.

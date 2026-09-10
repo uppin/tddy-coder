@@ -29,7 +29,6 @@ pub use tddy_worktree_service::{
 };
 pub mod claude_cli_session;
 pub mod cli_session_manager;
-pub mod common_room_supervisor;
 pub use tddy_daemon_kernel::config;
 pub mod connection_service;
 pub mod connection_tonic_adapter;
@@ -53,8 +52,15 @@ pub use tddy_host_service::{
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
 pub mod host_documents;
-pub mod livekit_peer_discovery;
-pub mod livekit_rooms_stream;
+/// The five LiveKit modules, which now live in `tddy-daemon-livekit`.
+///
+/// Named one by one for the reason the worktree and host facades above give: every module keeps
+/// its own name in the crate it moved to, so `crate::session_room::X` goes on resolving here and
+/// no caller in this crate changed.
+pub use tddy_daemon_livekit::{
+    common_room_supervisor, livekit_peer_discovery, livekit_rooms_stream, livekit_service,
+    session_room,
+};
 pub mod local_socket_server;
 pub mod presenter_intent_client;
 pub mod pty_registry;
@@ -76,7 +82,6 @@ pub mod session_list_enrichment;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
 pub mod session_reader;
-pub mod session_room;
 pub mod session_toolcall;
 pub mod session_uploads;
 pub mod session_workflow_files;

@@ -49,22 +49,21 @@ use tddy_service::proto::connection::{
     ListSessionAgentsRequest, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
     ListSessionWorkflowFilesRequest, ListSessionWorkflowFilesResponse, ListSessionsRequest,
     ListSessionsResponse, ListSubagentsRequest, ListSubagentsResponse, ListTerminalSessionsRequest,
-    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse, LiveKitRoomsEvent,
-    MintLocalTokenRequest, MintLocalTokenResponse, OpenAgentConversationRequest,
-    OpenAgentConversationResponse, PromptAgentConversationRequest, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
-    ReadContextFileBatchRequest, ReadContextFileRequest, ReadSessionWorkflowFileRequest,
-    ReadSessionWorkflowFileResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
-    RepointPlannedPrRequest, RepointPlannedPrResponse, ReportAgentActivityRequest,
-    ReportAgentActivityResponse, ReportSessionStatusRequest, ReportSessionStatusResponse,
-    ResolveStackBaseRequest, ResolveStackBaseResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SendTerminalInputResponse, SessionAgentRoster, SessionNotificationEvent, SessionTerminalInput,
-    SessionTerminalOutput, SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
-    SignalSessionRequest, SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse,
-    StartSessionRequest, StartSessionResponse, StartTerminalSessionRequest,
-    StartTerminalSessionResponse, StopDemoVmRequest, StopDemoVmResponse,
-    StopTerminalSessionRequest, StopTerminalSessionResponse, StreamAcpReplayRequest,
-    StreamLiveKitRoomsRequest, StreamSessionActivityRequest, StreamSessionAgentsRequest,
+    ListTerminalSessionsResponse, ListToolsRequest, ListToolsResponse, MintLocalTokenRequest,
+    MintLocalTokenResponse, OpenAgentConversationRequest, OpenAgentConversationResponse,
+    PromptAgentConversationRequest, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReadContextFileBatchRequest, ReadContextFileRequest,
+    ReadSessionWorkflowFileRequest, ReadSessionWorkflowFileResponse, ReorderPlannedPrRequest,
+    ReorderPlannedPrResponse, RepointPlannedPrRequest, RepointPlannedPrResponse,
+    ReportAgentActivityRequest, ReportAgentActivityResponse, ReportSessionStatusRequest,
+    ReportSessionStatusResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SendTerminalInputResponse, SessionAgentRoster,
+    SessionNotificationEvent, SessionTerminalInput, SessionTerminalOutput,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse, SignalSessionRequest,
+    SignalSessionResponse, StartDemoVmRequest, StartDemoVmResponse, StartSessionRequest,
+    StartSessionResponse, StartTerminalSessionRequest, StartTerminalSessionResponse,
+    StopDemoVmRequest, StopDemoVmResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
+    StreamAcpReplayRequest, StreamSessionActivityRequest, StreamSessionAgentsRequest,
     StreamSessionNotificationsRequest, StreamTerminalOutputRequest, TerminalControlEvent,
     TerminalHistoryChunk, UploadSessionFileChunkRequest, UploadSessionFileChunkResponse,
     WatchTerminalControlRequest,
@@ -1150,26 +1149,6 @@ where
         Ok(tonic::Response::new(MintLocalTokenResponse {
             session_token,
         }))
-    }
-
-    /// Server streaming: LiveKit rooms and their participants (snapshot, then one change per delta).
-    type StreamLiveKitRoomsStream =
-        Pin<Box<dyn Stream<Item = Result<LiveKitRoomsEvent, tonic::Status>> + Send>>;
-
-    // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.
-    #[allow(clippy::result_large_err)]
-    async fn stream_live_kit_rooms(
-        &self,
-        request: tonic::Request<StreamLiveKitRoomsRequest>,
-    ) -> Result<tonic::Response<Self::StreamLiveKitRoomsStream>, tonic::Status> {
-        let resp = RpcConnectionService::stream_live_kit_rooms(
-            &*self.inner,
-            tddy_rpc::Request::new(request.into_inner()),
-        )
-        .await
-        .map_err(to_tonic_status)?;
-        let outbound = resp.into_inner().map(|item| item.map_err(to_tonic_status));
-        Ok(tonic::Response::new(Box::pin(outbound)))
     }
 
     // `result_large_err`: see `stream_session_terminal_io` — `tonic::Status` is fixed by the trait.

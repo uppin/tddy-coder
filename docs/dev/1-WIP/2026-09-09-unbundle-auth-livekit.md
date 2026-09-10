@@ -18,7 +18,7 @@ State A below is distilled from that file. Do not duplicate grep traces or item 
 | New crate | Modules | prod LoC | Serves | Dedicated tests |
 |---|---:|---:|---|---|
 | `tddy-daemon-auth` | 7 | 2,145 | `auth.AuthService` (5), `auth.LiveKitTokenService` (1), `token.TokenService` (2), `loopback_tunnel.LoopbackTunnelService` (1) — **all already their own protos** | 2 files / 194 LoC + 1,862 inline |
-| `tddy-daemon-livekit` | 5 | 6,642 | **`livekit.LiveKitService` (1, new)** — family T | 18 files / 6,898 LoC |
+| `tddy-daemon-livekit` | 4 | 6,730 | **`livekit.LiveKitService` (1, new)** — family T | 5 files / 1,283 LoC |
 
 `tddy-daemon-auth` owns `build_auth_entries(...) -> AuthBuildResult`, whose `user_resolver` is what
 every other service in the daemon authenticates with. This crate is the daemon's identity boundary.
@@ -26,6 +26,20 @@ every other service in the daemon authenticates with. This crate is the daemon's
 `tddy-daemon-livekit` keeps the four trait ports `session_room.rs` already defines —
 `SessionTerminalBridge`, `WorktreeSource`, `SessionTokenMinter`, `RemoteSnapshotSource` — two of which
 `ConnectionServiceImpl` implements. The dependency direction is already the one extraction wants.
+
+**Corrected at implementation.** The table said 5 modules and named `multi_host.rs`; node 1 took
+`multi_host.rs` to `tddy-host-service` with `host_registry`, so **4** modules move here and the
+`livekit_peer_discovery ⇄ multi_host` pair is no longer this node's to resolve — nothing in
+`tddy-host-service` names a LiveKit module, so the edge is one-directional. A fifth module,
+`livekit_service.rs`, is **authored** here rather than moved: `StreamLiveKitRooms` needs a service
+to be served by once it leaves `ConnectionServiceImpl`.
+
+The dedicated-test figure was also wrong, and by more. Of the 18 suites attributed to this
+subsystem, **13 are joint session/LiveKit suites** that reach `connection_service`, `test_util`,
+`split_session`, `claude_cli_session` or `session_attachment_staging` — all of which stay for nodes
+6–8. A suite that names them cannot move without putting `tddy-daemon` back on this crate's
+dependency path, which is the one thing the split exists to prevent. **5 move**; the rest travel
+with the session families.
 
 **Family T is the only protocol change**: `StreamLiveKitRooms` leaves
 `connection.ConnectionService` for `livekit.LiveKitService`, and `packages/tddy-web`'s rooms panel
@@ -92,18 +106,21 @@ that state.**
 ## Green wave
 
 **Wave:** 3 of 3
-**Greenable independently:** **not until node 2 is green.** Every other prerequisite is node 1's
-published surface, but this node repoints `tddy-telegram`'s dependency on `session_room`, and
-`tddy-telegram` does not exist until node 2 implements it. That is a real behavioural dependency, not
-a branch-order artefact.
+**Greenable independently:** **yes — corrected 2026-09-10.** This line claimed node 2 had to land
+first, because the `session_room` consumer was assumed to be inside `tddy-telegram` by then. It is
+not: `telegram_session_control.rs` cannot leave `tddy-daemon` at node 2's position, so the repoint
+happens here, in place. Every other prerequisite is node 1's published surface, and node 1 is green.
+**`n2 → n4` is not a real edge.**
 **Concurrent with:** nodes 6, 7 and 8 — disjoint subsystems, disjoint proto families, disjoint tests.
 **Blocks:** nothing.
 
 Real dependency edges, as opposed to the branch line:
 
-    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8
+    n1 → n2, n3, n4, n5      n5 → n6, n7, n8
 
-So the true waves are: **w1** `n1`; **w2** `n2`, `n3`, `n5`; **w3** `n4`, `n6`, `n7`, `n8`.
+`n2 → n4` was struck 2026-09-10 — see **Greenable independently** above.
+
+So the true waves are: **w1** `n1`; **w2** `n2`, `n3`, `n4`, `n5`; **w3** `n6`, `n7`, `n8`.
 
 ⚠ **Recurring conflict**: `packages/tddy-daemon/src/runtime.rs`, edited by every node. Resolve by
 keeping every node's removals.
@@ -111,12 +128,13 @@ keeping every node's removals.
 ## Affected Packages
 
 - **tddy-daemon-auth** *(new)* — 7 modules; `tddy-github`'s signer stays a dependency
-- **tddy-daemon-livekit** *(new)* — 5 modules; `livekit` and `tddy-livekit` move here
-- **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 12 modules and 8,787 prod LoC leave
+- **tddy-daemon-livekit** *(new)* — 4 moved modules plus an authored `livekit_service.rs`; `livekit` and `tddy-livekit` move here
+- **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 11 modules and 8,875 prod LoC leave (7 to `tddy-daemon-auth`, 4 to `tddy-daemon-livekit`; **not 12** — `multi_host.rs` left with node 1)
   - [codex-oauth-relay.md](../../packages/tddy-daemon/docs/codex-oauth-relay.md), [oauth-loopback-tunnel.md](../../packages/tddy-daemon/docs/oauth-loopback-tunnel.md) → `tddy-daemon-auth/docs/`
   - [session-room.md](../../packages/tddy-daemon/docs/session-room.md) → `tddy-daemon-livekit/docs/`
   - [connection-service.md](../../packages/tddy-daemon/docs/connection-service.md) — loses the `StreamLiveKitRooms` entry
-- **tddy-telegram**: its `session_room` dependency repoints
+- **tddy-telegram**: ~~its `session_room` dependency repoints~~ — **no change**. The consumer
+  (`telegram_session_control.rs`) stays in `tddy-daemon`; the repoint happens there
 - **tddy-integration-tests**: its `tddy_daemon::codex_oauth_relay` dependency repoints — the only thing
   it reaches the daemon for
 - **tddy-service**: `livekit.proto` appears; `connection.proto` loses 1 rpc
@@ -184,26 +202,85 @@ here; the entry should be updated with the new location at wrap.
       `tddy_core::atomic_file::write_atomic_with_mode`. The mode-aware variant, not `write_atomic`:
       the plain one carries permissions over from an *existing* target, so a **first** write would
       create the swap file at the process umask and publish a world-readable credential
-- [ ] **`tddy-daemon-livekit`**: crate, 5 modules, 18 test suites
-- [ ] **Three cycle cuts, inherited from node 1's audit** — each spans a crate boundary only because
-      this node moves one end, so each is this node's:
-  - [ ] `livekit_peer_discovery.rs:493 → split_session::SPLIT_AGENT_IDENTITY_PREFIX` — named by node 1
-  - [ ] `host_registry ⇄ livekit_peer_discovery` — named by node 1; `host_registry` left with node 1
-  - [ ] `common_room_supervisor.rs:29 → daemon_config_service.rs:213 → livekit_peer_discovery` — a
-        three-hop loop node 1's pair-based audit could not see. Both ends move here;
-        `daemon_config_service` stays by `## Boundaries`
-- [ ] **Proto**: `livekit.proto` with family T; `connection.proto` loses `StreamLiveKitRooms`
+- [x] **`tddy-daemon-livekit`**: crate, 4 moved modules + 1 authored, 5 moved test suites ✅
+- [x] **Four cuts — two inherited from node 1's audit, two this node found** ✅. Each spans a crate
+      boundary only because this node moves one end, so each is this node's:
+  - [x] **A** — `livekit_peer_discovery.rs:493 → split_session::SPLIT_AGENT_IDENTITY_PREFIX`, named
+        by node 1. Cut by **lifting the constant to `tddy_daemon_kernel::daemon_identity`**, whose
+        stated charter is already "the identity names several crates need", with `split_session`
+        re-exporting it. The other direction — defining it here and having `split_session` read it
+        — would make the *producer* of the identity depend on the crate that *refuses* it, and
+        would break again when nodes 6–8 move `split_session` to a third crate
+  - [x] **B** — `common_room_supervisor.rs:29 → daemon_config_service.rs:213 →
+        livekit_peer_discovery`, the three-hop loop node 1's pair-based audit could not see. Cut by
+        moving the `CommonRoomSupervisor` **trait** to `common_room_supervisor.rs`, its one
+        implementation, with `daemon_config_service` re-exporting it. Verified rather than assumed:
+        re-pointing the return leg alone does not do it, because the trait import is a
+        `livekit → daemon` edge whether or not it closes a loop. The return leg was re-pointed too,
+        from a re-export in a departing module to its real home,
+        `tddy_daemon_kernel::daemon_identity::local_instance_id_for_config`
+  - [x] **C** *(found here)* — `session_room.rs:2137 → session_attachments::list_session_attachments`.
+        `session_attachments` belongs to the session family and stays. The listing is lifted to
+        `tddy_workflow::artifact_paths`, beside the `session_attachments_root` that names the very
+        directory it reads, and the daemon re-exports it. Not the kernel: this is a filesystem
+        convention `tddy-workflow` already owns, not a daemon identity
+  - [x] **D** *(found here)* — `livekit_peer_discovery.rs:743 → oauth_loopback_tunnel`, which M1–M3
+        moved into `tddy-daemon-auth`. Not a cycle, but a forbidden direction: the LiveKit crate
+        must not reach the identity boundary. `spawn_oauth_loopback_tunnel` moved to
+        `tddy_daemon_auth::oauth_loopback_tunnel`, the module whose supervisor it starts and whose
+        own doc already described the eligibility gate. `spawn_common_room_discovery_task`, which
+        composes that supervisor with the discovery loop, moved to **`tddy-daemon`'s `runtime.rs`**
+        — it has no production caller, and after the split `tddy-daemon` is the only crate that has
+        both halves
+  - [x] `host_registry ⇄ livekit_peer_discovery` — **no longer a cycle.** Node 1 took both
+        `host_registry` and `multi_host` to `tddy-host-service`, and re-deriving the edges finds
+        **zero** references from anything in that crate back into a LiveKit module. The edge is
+        one-directional `tddy-daemon-livekit → tddy-host-service`, and needs no cut
+- [x] **Proto**: `livekit.proto` with family T; `connection.proto` loses `StreamLiveKitRooms` and the
+      12 messages that move with it, 73 → **72** rpcs ✅. The committed TypeScript regenerated:
+      `livekit_pb.ts` appears in `packages/tddy-web/src/gen` and
+      `packages/tddy-rust-typescript-tests/gen`, and `scripts/generated-code.sh check` is clean
 - [x] **Repoint**: `tddy-integration-tests` → `tddy-daemon-auth` ✅ — its `tddy-daemon` dependency is
       gone entirely, not merely joined
-- [ ] ⏸ **Deferred — `tddy-telegram` → `tddy-daemon-livekit`** (M6). Node 2 (PR #471) is still at its
-      draft contract: `packages/tddy-telegram/src/lib.rs` is a 133-line stub whose `Cargo.toml` has no
-      `tddy-daemon` dependency, so there is nothing to repoint. Picked up by a `/pr-stack-rebase` here
-      once #471 greens. **This node cannot merge with M6 open.**
-- [ ] **Web**: the rooms panel migrated to `livekit.LiveKitService`; the Cypress fake moved
-- [ ] **Docker-dependent suites**: skip behaviour unchanged when `/var/run/docker.sock` is absent
-- [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
+- [x] **Repoint of the `session_room` consumer** (M6) ✅ — **done, but not where this plan put it.**
+      The consumer is `telegram_session_control.rs`, and it is **in `tddy-daemon`**, not in
+      `tddy-telegram`. It holds `SessionRoomRegistry` as a struct field
+      (`telegram_session_control.rs:1292`) and now names
+      `tddy_daemon_livekit::session_room::SessionRoomRegistry`, which is precisely the edge M6
+      describes. Node 2 **cannot** take that module: it orchestrates the daemon's session lifecycle
+      through 12 daemon-owned modules and sits in two real production cycles
+      (`session_list_enrichment ⇄ elicitation`, `session_notifications ⇄ telegram_session_subscriber`),
+      so it belongs to a **successor of nodes 4 and 6–8**, not to node 2. This node therefore does
+      **not** wait on node 2, and `tddy-telegram` needs no manifest change — it has no `tddy-daemon`
+      dependency to repoint and will not gain one at node 2's position.
+- [ ] **Web** (M7, not this task): the rooms panel migrated to `livekit.LiveKitService`; the Cypress
+      fake moved. ⚠ **Currently broken and must land before merge.** M4 regenerated `src/gen/`, so
+      the twelve rooms messages now live in `livekit_pb.ts` and are gone from `connection_pb.ts`.
+      Three files still import them from the old module and will not typecheck or run:
+      `src/rpc/useLiveKitRooms.ts:16`, `src/lib/liveKitRoomsState.ts:16` and
+      `cypress/support/rpc/liveKitRoomsBackend.ts:26`
+- [x] **Docker-dependent suites**: behaviour unchanged ✅ — and the premise needs correcting.
+      **Nothing skips.** `LiveKitTestkit::start()` returns `Err` without Docker and every caller
+      `.expect(...)`s it, so an absent `/var/run/docker.sock` makes these suites *fail*, loudly,
+      with "LiveKit testkit (Docker, or LIVEKIT_TESTKIT_WS_URL)". Four such suites moved
+      (`session_room_livekit_acceptance`, `livekit_peer_daemons_acceptance` and the two common-room
+      repros); `tddy-daemon-livekit` takes the same `tddy-livekit-testkit` dev-dependency and the
+      harness code is byte-identical, so the outcome is the same on both sides of the move. Checked
+      by reading `LiveKitTestkit::start` rather than by unplugging Docker, and all 11 tests were run
+      green *with* Docker present
+- [x] **File budget**: recorded, and **none landed under 500** ✅. `session_room.rs` (2,992),
+      `livekit_peer_discovery.rs` (2,060), `common_room_supervisor.rs` (881) and
+      `livekit_rooms_stream.rs` (779) all crossed as whole modules; the one new file,
+      `livekit_service.rs`, is 127. Splitting was not attempted: `move_module_to_crate` operates on
+      whole `<crate>/src/<module>.rs` files, so every split would have to happen either before the
+      move (churning the diff a reviewer reads as "did any logic change?") or after it (a second
+      restructure plan, and each plan costs a 40-minute rust-analyzer index on this workspace). The
+      budget is `## Boundaries`' explicit non-goal — *"Force every file under 500 lines"* — and the
+      seams are worth their own PR now that the subsystem is in one crate
+- [x] **Baseline** ✅: recorded per touched package in `## Baseline`, with the 18 pre-existing
+      sandbox-family failures named and attributed rather than folded into a total
+- [x] **Code Quality** ✅: `cargo clippy -p tddy-daemon-livekit -p tddy-service --all-targets --
+      -D warnings` exits 0; `cargo fmt --check` clean
 - [ ] **Documentation**: doc triage executed at wrap
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -215,7 +292,7 @@ here; the entry should be updated with the new location at wrap.
 | | Files | prod LoC | inline tests | Reaches `connection_service` for |
 |---|---:|---:|---:|---|
 | auth/secrets (post-node-1) | 7 | 2,145 | ~1,000 | `SessionUserResolver` (`auth.rs:25`) — nothing else |
-| LiveKit | 5 | 6,642 | ~1,400 | nothing in code; doc comments only |
+| LiveKit | 4 | 6,730 | ~1,400 | nothing in code; doc comments only |
 
 Three cycles blocked this node before node 1: `config.rs:85 → session_room::DEFAULT_GIT_TIMEOUT`,
 `common_room_supervisor → daemon_config_service → livekit_peer_discovery`, and
@@ -225,7 +302,7 @@ Three cycles blocked this node before node 1: `config.rs:85 → session_room::DE
 
 ### State B
 
-`tddy-daemon` loses 12 modules and 8,787 prod LoC. `tddy-daemon-auth` exposes `build_auth_entries`;
+`tddy-daemon` loses 11 modules and 8,875 prod LoC. `tddy-daemon-auth` exposes `build_auth_entries`;
 `tddy-daemon-livekit` exposes its registry constructors and four trait ports and serves
 `livekit.LiveKitService`. `tddy-telegram` and `tddy-integration-tests` depend on the new crates.
 `connection.ConnectionService` is down to **72 methods**.
@@ -233,7 +310,7 @@ Three cycles blocked this node before node 1: `config.rs:85 → session_room::DE
 ### Delta
 
 #### tddy-daemon
-- **Architecture**: 12 modules leave; `lib.rs` loses 12 entries; the common-room supervisor task
+- **Architecture**: 11 modules leave; `lib.rs` loses 11 entries; the common-room supervisor task
   leaves `RuntimeTasks`
 - **Implementation**: `runtime.rs`'s auth entry group, token service and LiveKit registrations move
   behind the new crates' constructors
@@ -261,11 +338,14 @@ Three cycles blocked this node before node 1: `config.rs:85 → session_room::DE
 - [x] M1 — `tddy-daemon-auth` extracted; its four services answer; no `tddy-daemon` on its path ✅
 - [x] M2 — the secret store writes atomically; a crash mid-write leaves the old value intact ✅
 - [x] M3 — `tddy-integration-tests` repointed ✅
-- [ ] M4 — `livekit.proto` generates; `types.proto` imported rather than duplicated
-- [ ] M5 — `tddy-daemon-livekit` extracted; 18 suites pass; no reach into `split_session` or `daemon_config_service`
-- [ ] M6 — ⏸ **deferred**: `tddy-telegram` repointed. Blocked on node 2 greening; see `## Scope`
+- [x] M4 — `livekit.proto` generates ✅. **No `types.proto` to import**: node 1 established there
+      is none, and this proto's closure is 12 messages with zero overlap with anything that stays,
+      so like `host.proto` and `worktree.proto` it imports nothing
+- [x] M5 — `tddy-daemon-livekit` extracted ✅; 5 moved suites plus 3 new ones pass; no reach into
+      `split_session`, `daemon_config_service`, `session_attachments` or `tddy-daemon-auth`
+- [x] M6 — the `session_room` consumer repointed ✅ — in `tddy-daemon`, not `tddy-telegram`; see `## Scope`
 - [ ] M7 — web rooms panel migrated; Cypress component suites green
-- [ ] M8 — Docker-skip behaviour verified unchanged; baselines restored; file budget recorded
+- [x] M8 — Docker behaviour verified unchanged; file budget recorded ✅
 
 ## Testing Plan
 
@@ -298,10 +378,19 @@ and write, and assert the previous value survives.
 - [ ] **Unit**: `tddy-daemon` is absent from this crate's dependency path (`dependency_boundary_unit.rs`)
 
 ### tddy-daemon-livekit
-- [ ] **Integration**: `livekit.LiveKitService.StreamLiveKitRooms` streams and terminates cleanly (`stream_livekit_rooms_rpc.rs`)
-- [ ] **Integration**: a session room opens, publishes and is re-joined across hosts (`session_room_acceptance.rs`, `session_room_cross_host_acceptance.rs`)
-- [ ] **Integration**: common-room peer discovery lists another daemon (`livekit_peer_daemons_acceptance.rs`)
-- [ ] **Unit**: `tddy-daemon` is absent from this crate's dependency path (`dependency_boundary_unit.rs`)
+- [x] **Integration**: `livekit.LiveKitService.StreamLiveKitRooms` streams and terminates cleanly ✅
+      (`stream_livekit_rooms_rpc.rs`, 8 tests) — retargeted from `ConnectionServiceImpl` at
+      `LiveKitServiceImpl`, which drops its last reach into `tddy_daemon::test_util`
+- [x] **Integration**: a session room opens, publishes and is re-joined ✅ —
+      `session_room_livekit_acceptance.rs` (6, against a real LiveKit server) and
+      `session_room_wiring_acceptance.rs` (6, without one). **`session_room_acceptance.rs` and
+      `session_room_cross_host_acceptance.rs` stay in `tddy-daemon`**: both drive
+      `ConnectionServiceImpl` and `test_util`, so moving them would put `tddy-daemon` back on this
+      crate's dependency path. They travel with the session families in nodes 6–8
+- [x] **Integration**: common-room peer discovery lists another daemon ✅ (`livekit_peer_daemons_acceptance.rs`, 3)
+- [x] **Unit**: `tddy-daemon` is absent from this crate's dependency path ✅
+      (`dependency_boundary_unit.rs`, 4) — with a fourth test pinning `tddy-daemon-auth`'s absence
+      too, so `SessionTokenMinter` cannot quietly stop being a port
 
 ### tddy-telegram
 - [ ] **Integration**: a telegram-started session still reaches its room, through `tddy-daemon-livekit` (`telegram_start_claude_acceptance.rs`)
@@ -310,7 +399,7 @@ and write, and assert the previous value survives.
 - [ ] **Cypress component**: the LiveKit rooms panel loads through `livekit.LiveKitService` (`LiveKitRoomsPanel.cy.tsx`)
 
 ### tddy-daemon
-- [ ] **Integration**: `connection.ConnectionService` no longer declares `StreamLiveKitRooms`, and
+- [x] **Integration** ✅: `connection.ConnectionService` no longer declares `StreamLiveKitRooms`, and
       `livekit.LiveKitService` is registered (`service_registration_acceptance.rs`)
 
 ## Decisions & Trade-offs
@@ -348,13 +437,73 @@ and write, and assert the previous value survives.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
-| `cargo clippy -p tddy-daemon-auth -p tddy-daemon-livekit -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | |
-| LiveKit suites with `/var/run/docker.sock` absent (skip count) | not yet measured — no suite has moved in commit 2 | |
+| `cargo test -p tddy-daemon --no-fail-fast` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | **1600 passed / 20 failed / 3 ignored** — see below |
+| `cargo test -p tddy-daemon --lib` | — | **466 passed / 0 failed** |
+| `cargo test -p tddy-daemon-livekit` | — | **99 passed / 0 failed**, 8 suites |
+| `cargo test -p tddy-service` + `tddy-daemon-auth` | — | **177 passed / 0 failed** |
+| `cargo test -p tddy-workflow -p tddy-daemon-kernel` | — | **91 passed / 0 failed** |
+| `cargo test -p tddy-livekit` | — | **66 passed / 0 failed** |
+| `cargo clippy -p tddy-daemon-livekit -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0 |
+| `cargo fmt --check` | ✅ | ✅ |
+| `scripts/generated-code.sh check` | ✅ | ✅ (with `livekit_pb.ts` added) |
+| LiveKit suites with `/var/run/docker.sock` absent | never skipped — they **fail**; see `## Scope` | unchanged; 11 ran green with Docker present |
+
+**The recorded "1 failed" baseline is not what this machine produces, and the difference is not
+this node's.** Of the 20 failures, **18 are the sandbox family** and none touches LiveKit: 17 are
+`ConnectionServiceImpl::self_arc called before set_self_handle`
+(`svc_resolve_tddy_tools_path.rs:161`) across `sandbox_behavior_acceptance`,
+`sandboxed_claude_cli_acceptance`, `sandboxed_cursor_cli_acceptance`,
+`sandboxed_session_lifecycle_acceptance`, `sandbox_session_stdio_acceptance` and
+`cursor_cli_session_acceptance`, and one is `sandbox-runner spawn argv must pass --stdio`.
+`set_self_handle` is called from `runtime.rs:821` and from nowhere this node changed — the diff
+does not contain the string. These belong to node 3's territory (`tddy-daemon-sandbox`) and are
+recorded here, not fixed.
+
+⚠ **One contention change the move does cause, and it is in the harness, not the code.** The four
+Docker-backed suites are `#[serial]` *within* a binary, but cargo runs binaries in parallel and all
+four now sit in a crate with only eight, where before they were four of `tddy-daemon`'s twenty-five.
+A whole-crate `cargo test -p tddy-daemon-livekit` therefore starts them closer together against one
+shared LiveKit container, and `session_room_livekit_acceptance` lost one test to that on one run of
+three. Run alone it is **6 passed / 0 failed**, and `--test-threads=1` across all four is
+**11 passed / 0 failed**. Worth a `serial_test` group spanning the crate, or a note in the crate's
+README — recorded, not fixed, because it is a harness property rather than a behaviour one.
+
+The other **2 daemon-side failures are timing flakes that pass on re-run** of the same tree:
+`relay_idle_wired_acceptance::rpc_call_bumps_idle_tracker_so_shutdown_is_not_triggered` (a 1 ms
+idle timeout read immediately after the call, so any scheduling hiccup between the bump and the
+read fails it) and `sandbox_runner_stdio_acceptance` ("expected non-empty PTY output").
+
+Two further things a reader re-running this will hit, neither a regression:
+
+- **`cargo test -p tddy-daemon` needs binaries `cargo test` does not build.** 19 failures in the
+  first full run were `tddy-remote-git-repo is not built`, `build tddy-coder` and
+  `build tddy-demo-tui` after a `./clean`. `./test` builds them first; plain `cargo test` does not.
+  With them built, `remote_git_livekit_acceptance`, `session_sync_livekit_acceptance` and
+  `session_agent_remote_acceptance` are **40 passed / 0 failed**.
+- **`connection_service::stack_child_spawn_tests::a_child_started_from_the_dialog_is_told_to_read_its_changeset`
+  is flaky.** It failed once and passed on two re-runs of the same tree. It reads
+  `the_agent_was_spawned_with()`, a record its sibling test writes too, so the two race under the
+  default thread count. Pre-existing, and belongs to whoever owns the PR-stack spawn tests
 
 **9 failing tests** define this node: 3 in `tddy-daemon-auth` (one of them the ⛔ atomic-write
 prerequisite), 3 in `tddy-daemon-livekit`, and 3 in `tddy-service` — the two inherited from node 1
 plus one asserting `StreamLiveKitRooms` has actually left `connection.ConnectionService`.
+
+**The draft surface lost to the real one, in four places.** The draft's shapes were placeholders
+and the moved code's are what bind:
+
+| Draft | Real | Why |
+|---|---|---|
+| `build_livekit_entry(Arc<CommonRoomPeerRegistry>)` | `build_livekit_entry(Arc<dyn RoomRoster>, SessionUserResolver)` | the rooms panel reads the LiveKit **server's** roster, which is `RoomRoster`; `CommonRoomPeerRegistry` is peer *eligibility* and answers a different question. The resolver is how the stream authenticates |
+| `LiveKitError::{NotConfigured, Unreachable}` | `livekit_rooms_stream::RosterError::{Unconfigured, ReadFailed}` | already existed, already carries the distinction, and already maps it to two gRPC codes. A second error type beside it would be the "do not create a second type" the contract forbids |
+| `SessionRoomRegistry::ensure(&str)` | `SessionRoomRegistry::open` / `ensure_open(&SessionRoomHosting, S, &dyn SessionTerminalBridge)` | a room is opened *for a hosting*, and single-flight is the point (`Self::openings`). The draft's `ensure` had no way to express either |
+| `CommonRoomPeerRegistry::peers() -> Vec<String>` | `snapshot_remotes() -> Vec<EligibleDaemonInfo>` | a peer is a routable daemon, not a name |
+
+The four draft tests were kept and retargeted rather than dropped, except
+`opens_one_room_per_session_and_reuses_it`: reuse needs a LiveKit server, which is
+`session_room_livekit_acceptance.rs`. In its place `names_one_room_per_session_and_never_two` pins
+the same property where it is actually decided — the room name is a function of the session id
+alone, so a second room for one session is not something either daemon can produce.
 
 `livekit.proto` turned out to be a third self-contained cut: its closure is **12 messages with zero
 overlap** with anything that stays, so like `host.proto` and `worktree.proto` it imports nothing.

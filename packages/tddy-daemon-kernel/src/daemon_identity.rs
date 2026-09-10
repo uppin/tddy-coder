@@ -97,3 +97,17 @@ pub fn process_startup_unix_ms_suffix() -> &'static str {
         })
         .as_str()
 }
+
+/// Identity prefix reserved for split sessions' agent participants.
+///
+/// Reserved, not merely conventional: peer eligibility is decided from self-declared participant
+/// metadata, so this prefix is what
+/// `livekit_peer_discovery::eligible_daemon_from_participant_fields` matches on to refuse an agent
+/// advertising itself as a daemon. A daemon whose `daemon_instance_id` began with it would not be
+/// discoverable — which is the intended trade, since the agent holds a token it can publish
+/// metadata with and the daemon's instance id is an operator's free choice.
+///
+/// It lives here with the two daemon ids rather than in `split_session`, which mints identities
+/// from it, because the module that *refuses* them is now in another crate. `split_session`
+/// re-exports it, so no caller's path changed and there stays exactly one definition.
+pub const SPLIT_AGENT_IDENTITY_PREFIX: &str = "split-agent-";

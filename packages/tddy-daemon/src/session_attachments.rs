@@ -19,63 +19,13 @@ use tddy_workflow::{session_artifacts_root, session_attachments_root};
 
 use crate::session_file_upload::{contained_canonical_dir, validate_segment};
 
-/// One attachment file on disk under `artifacts/attachments/`: its `basename`, absolute `path`, and
-/// size in bytes as reported by the filesystem.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionAttachmentFile {
-    pub basename: String,
-    pub path: PathBuf,
-    pub size_bytes: u64,
-}
-
-/// Lists the session's attachments, sorted by basename so a listing is deterministic across
-/// filesystems. Regular files only — subdirectories and other non-regular entries are skipped. A
-/// session with no attachments directory (the common case) yields an empty list, not an error.
-pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile> {
-    let attachments_dir = session_attachments_root(session_dir);
-    let Ok(entries) = std::fs::read_dir(&attachments_dir) else {
-        log::debug!(
-            "list_session_attachments: no attachments directory at {} — empty listing",
-            attachments_dir.display()
-        );
-        return Vec::new();
-    };
-
-    let mut files: Vec<SessionAttachmentFile> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            log::warn!(
-                "list_session_attachments: metadata unavailable for {} — skipping",
-                path.display()
-            );
-            continue;
-        };
-        if !metadata.is_file() {
-            log::debug!(
-                "list_session_attachments: skipping non-regular entry {}",
-                path.display()
-            );
-            continue;
-        }
-        let Some(basename) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-            continue;
-        };
-        files.push(SessionAttachmentFile {
-            basename,
-            path,
-            size_bytes: metadata.len(),
-        });
-    }
-    files.sort_by(|a, b| a.basename.cmp(&b.basename));
-
-    log::debug!(
-        "list_session_attachments: {} attachment(s) under {}",
-        files.len(),
-        attachments_dir.display()
-    );
-    files
-}
+/// The attachment listing, derived in [`tddy_workflow::artifact_paths`].
+///
+/// It moved beside `session_attachments_root` — the function that defines the very directory it
+/// reads — because `session_room`, now in `tddy-daemon-livekit`, publishes the basenames in a
+/// room's metadata and cannot reach back into this crate for them. Re-exported so every caller's
+/// path is unchanged, and so there stays exactly one listing.
+pub use tddy_workflow::artifact_paths::{list_session_attachments, SessionAttachmentFile};
 
 /// Validates an attachment basename as a single safe path segment.
 ///

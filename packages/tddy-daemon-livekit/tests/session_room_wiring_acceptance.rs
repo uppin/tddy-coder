@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::Command;
 
 use pretty_assertions::assert_eq;
-use tddy_daemon::session_room::{
+use tddy_daemon_livekit::session_room::{
     delete_wip_ref, ActivityDelta, DeltaLookupError, SessionDeltaStore, SessionRoomRegistry,
     SESSION_DELTA_RING_BYTES, SESSION_DELTA_RING_TICKS,
 };

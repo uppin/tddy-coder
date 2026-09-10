@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use livekit::prelude::{Room, RoomOptions};
 use serial_test::serial;
-use tddy_daemon::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit_testkit::LiveKitTestkit;
 
 const COMMON_ROOM: &str = "repro-metadata-handshake-room";
@@ -52,9 +52,16 @@ fn spawn_common_room_discovery(
     config: DaemonConfig,
 ) -> Arc<tokio::sync::RwLock<Option<Arc<Room>>>> {
     let config_arc = Arc::new(config);
-    let registry = Arc::new(tddy_daemon::livekit_peer_discovery::CommonRoomPeerRegistry::new());
+    let registry =
+        Arc::new(tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry::new());
     let room_slot = Arc::new(tokio::sync::RwLock::new(None));
-    tddy_daemon::livekit_peer_discovery::spawn_common_room_discovery_task(
+    // The discovery loop alone. It used to be reached through `spawn_common_room_discovery_task`,
+    // which also started the OAuth loopback tunnel supervisor — a co-tenant of the room slot with
+    // nothing to do with peer discovery, and one that now lives in `tddy-daemon-auth`, which this
+    // crate deliberately cannot reach. The supervisor acts only on participants publishing pending
+    // `codex_oauth` metadata, and nothing here publishes any, so what this suite observes is
+    // unchanged.
+    tddy_daemon_livekit::livekit_peer_discovery::spawn_common_room_discovery_loop(
         config_arc,
         registry,
         room_slot.clone(),

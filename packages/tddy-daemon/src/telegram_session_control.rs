@@ -1289,7 +1289,7 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// the daemon's registry (every test fixture) has no rooms to close, and the call still happens
     /// on one code path rather than on a branch. `main` injects the daemon's own with
     /// [`Self::with_session_rooms`].
-    session_rooms: Arc<crate::session_room::SessionRoomRegistry>,
+    session_rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -1388,7 +1388,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             elicitation_replay_bridge: Arc::new(Mutex::new(
                 TelegramElicitationReplayBridge::default(),
             )),
-            session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
+            session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
         }
     }
 
@@ -1396,7 +1396,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// session it deletes instead of leaving it polling a checkout that is being removed.
     pub fn with_session_rooms(
         mut self,
-        rooms: Arc<crate::session_room::SessionRoomRegistry>,
+        rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     ) -> Self {
         self.session_rooms = rooms;
         self

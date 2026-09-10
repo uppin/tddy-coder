@@ -17,6 +17,7 @@ use tokio::task::JoinHandle;
 use crate::codex_oauth_participant_metadata::{
     parse_codex_oauth_metadata, resolved_codex_oauth_callback_port, CodexOAuthParticipantInfo,
 };
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit::RpcClient;
 use tddy_service::proto::loopback_tunnel::TunnelChunk;
 
@@ -372,4 +373,30 @@ mod tests {
         };
         assert_eq!(a, b);
     }
+}
+
+/// The OAuth loopback TCP proxy, when this daemon is eligible to run one.
+///
+/// It follows `room_slot` rather than any one room connection, so it outlives a reconnect and is
+/// started once per process — rebinding its callback ports on every common-room change would race
+/// with itself for them.
+///
+/// The eligibility gate lives here with the supervisor it gates rather than with the common-room
+/// discovery loop it used to sit beside: peer discovery moved to `tddy-daemon-livekit`, and this
+/// crate is the identity boundary, so a LiveKit crate reaching in here to start an OAuth proxy
+/// would be the boundary running backwards.
+pub fn spawn_oauth_loopback_tunnel(
+    config: &DaemonConfig,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !config.codex_oauth_loopback_proxy_eligible {
+        log::info!(
+            target: LOG,
+            "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
+        );
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        run_oauth_tunnel_supervisor_follow_room_slot(room_slot).await;
+    }))
 }

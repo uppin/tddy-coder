@@ -25,9 +25,9 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
 use tddy_daemon::livekit_peer_discovery::{
-    spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
-    LiveKitEligibleDaemonSource,
+    CommonRoomPeerRegistry, LiveKitDiscoveryHandles, LiveKitEligibleDaemonSource,
 };
+use tddy_daemon::runtime::spawn_common_room_discovery_task;
 use tddy_daemon::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
 use tddy_daemon::test_util::wait_until_peer_discovered;
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};

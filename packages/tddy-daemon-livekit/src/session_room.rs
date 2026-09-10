@@ -25,9 +25,9 @@ use tddy_livekit::{
 };
 use tddy_rpc::Status;
 
-use crate::config::{DaemonConfig, DEFAULT_SESSION_ROOM_GIT_TIMEOUT};
-use crate::livekit_peer_discovery::daemon_rpc_identity;
-use crate::worktrees::{parse_git_diff_numstat, WorktreeNumstat};
+use tddy_daemon_kernel::config::{DaemonConfig, DEFAULT_SESSION_ROOM_GIT_TIMEOUT};
+use tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity;
+use tddy_worktree_service::worktrees::{parse_git_diff_numstat, WorktreeNumstat};
 
 /// The data-channel topic worktree activity is broadcast on, re-exported from where its payload's
 /// schema lives: `tddy-tools` receives on the same topic and reaches `tddy-service`
@@ -979,7 +979,7 @@ pub fn changed_paths_between(
         .collect())
 }
 
-/// The working tree's diff against HEAD, run and parsed exactly as [`crate::worktrees`] does it for
+/// The working tree's diff against HEAD, run and parsed exactly as [`tddy_worktree_service::worktrees`] does it for
 /// the Worktrees screen — only under this module's deadline.
 fn numstat_within(worktree_root: &Path, deadline: Instant) -> WorktreeNumstat {
     parse_git_diff_numstat(&git_stdout(
@@ -2134,7 +2134,7 @@ impl WorktreeSource for LocalCheckout {
 /// The basenames of what the session shares, so a joining agent discovers them from the room's
 /// metadata instead of asking for a listing it would first have to know to request.
 fn attachment_basenames(session_dir: &Path) -> Vec<String> {
-    crate::session_attachments::list_session_attachments(session_dir)
+    tddy_workflow::list_session_attachments(session_dir)
         .into_iter()
         .map(|attachment| attachment.basename)
         .collect()

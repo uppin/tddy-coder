@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::connection_service::ConnectionServiceImpl;
-use tddy_daemon::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_daemon::multi_host::{EligibleDaemonSource, StubEligibleDaemonSource};
 use tddy_daemon::test_util::TEST_TOKEN;
 use tddy_daemon::{project_storage, user_sessions_path};
+use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ListProjectsRequest,

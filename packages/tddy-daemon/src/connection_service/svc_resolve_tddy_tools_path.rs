@@ -1,6 +1,7 @@
 use tddy_rpc::Status;
 
-use crate::{connection_service::agent_roster, livekit_rooms_stream::RoomRoster};
+use crate::connection_service::agent_roster;
+use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_spawn::spawn_worker;
 
 use std::time::Duration;
@@ -9,9 +10,7 @@ use tddy_task::TaskRegistry;
 
 use super::ROSTER_KEEPALIVE_INTERVAL;
 
-use super::LIVEKIT_ROOMS_POLL_INTERVAL;
-
-use crate::livekit_rooms_stream::room_roster_from_config;
+use tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config;
 
 use crate::multi_host::EligibleDaemonSource;
 
@@ -23,7 +22,7 @@ use crate::telegram_session_subscriber::TelegramDaemonHooks;
 
 use std::sync::Arc;
 
-use crate::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 
 use crate::config::DaemonConfig;
 
@@ -115,7 +114,6 @@ impl ConnectionServiceImpl {
             task_registry,
             idle_tracker: None,
             room_roster,
-            room_poll_interval: LIVEKIT_ROOMS_POLL_INTERVAL,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
             session_stdio,
@@ -125,7 +123,7 @@ impl ConnectionServiceImpl {
             ),
             github_token_store: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
-            session_rooms: Arc::new(crate::session_room::SessionRoomRegistry::new()),
+            session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
             model_registry: None,
             session_agent_rosters: Arc::new(
                 crate::session_agent_roster::SessionAgentRosterStore::new(
@@ -196,7 +194,7 @@ impl ConnectionServiceImpl {
     /// The shared session-room registry — so a test fixture wiring `SessionAdmissionService`
     /// against this daemon can build the `session_exists` checker `main.rs` builds over the same
     /// registry the connection service updates when it opens and closes a session room.
-    pub fn session_rooms(&self) -> Arc<crate::session_room::SessionRoomRegistry> {
+    pub fn session_rooms(&self) -> Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry> {
         Arc::clone(&self.session_rooms)
     }
 
@@ -217,7 +215,7 @@ impl ConnectionServiceImpl {
             daemon_rpc_identity, livekit_common_room_connect_strings,
         };
         use crate::session_admission_service::ADMISSION_TOKEN_TTL;
-        use crate::session_room::session_room_name;
+        use tddy_daemon_livekit::session_room::session_room_name;
         use tddy_livekit::TokenGenerator;
 
         let (_common_room, url, api_key, api_secret) =
@@ -249,7 +247,7 @@ impl ConnectionServiceImpl {
     /// for a daemon, where a room opened here has to be closable from there.
     pub fn with_session_rooms(
         mut self,
-        rooms: Arc<crate::session_room::SessionRoomRegistry>,
+        rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
     ) -> Self {
         self.session_rooms = rooms;
         self
@@ -347,13 +345,6 @@ impl ConnectionServiceImpl {
     /// sequence in place of a live LiveKit server.
     pub fn with_room_roster(mut self, room_roster: Arc<dyn RoomRoster>) -> Self {
         self.room_roster = room_roster;
-        self
-    }
-
-    /// Override the `StreamLiveKitRooms` poll cadence (builder pattern) — lets tests observe a
-    /// change event without waiting the production three seconds for it.
-    pub fn with_room_poll_interval(mut self, interval: Duration) -> Self {
-        self.room_poll_interval = interval;
         self
     }
 
