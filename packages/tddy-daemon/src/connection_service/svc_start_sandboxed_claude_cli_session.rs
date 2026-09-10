@@ -358,15 +358,16 @@ impl ConnectionServiceImpl {
                 replaced: refs,
             })
             .collect();
-        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+        let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
             &worktree_path,
             &replacements,
             crate::context_files::context_globs_for_session_type("claude-cli"),
         )
         .map_err(Status::internal)?;
-        crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
+        tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
+            .map_err(Status::internal)?;
 
-        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+        let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
             self.config
                 .claude_cli
                 .as_ref()
@@ -420,7 +421,7 @@ impl ConnectionServiceImpl {
         };
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
         let sandbox_runner_path =
-            canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
+            canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
         // Resolve the real `claude` to an absolute path (skipping wrapper shims). Overridable via
         // TDDY_CLAUDE_BINARY or `claude_cli.binary_path`. A bare name would give binary_exec_reads
         // an empty parent → `(subpath "")` → macOS sandbox-exec rejects the profile.
@@ -430,8 +431,10 @@ impl ConnectionServiceImpl {
         // Persistent daemon-wide jail $HOME: reused across sessions and mounted read-write below, so
         // refreshed OAuth tokens, session history, and settings survive. Seeded non-clobbering.
         let claude_home_dir = crate::config::resolve_claude_home_dir(&self.config);
-        let scratch_home =
-            crate::sandbox_session::prepare_persistent_claude_home(&claude_home_dir, claude_binary);
+        let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home(
+            &claude_home_dir,
+            claude_binary,
+        );
 
         // The tool-IPC AF_UNIX socket must fit within SUN_LEN (104 bytes on macOS); the
         // canonical session dir is far too deep, so use a short out-of-tree path that the
@@ -446,8 +449,8 @@ impl ConnectionServiceImpl {
             permission_mode.trim()
         };
 
-        let egress_shim_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
+            .map_err(Status::internal)?;
         let loopback_allow_ports = vec![egress_shim_port];
 
         let mut runner_argv = vec![
@@ -516,7 +519,7 @@ impl ConnectionServiceImpl {
             );
         }
 
-        let mut env = crate::sandbox_session::build_sandbox_runner_env(
+        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
@@ -530,8 +533,8 @@ impl ConnectionServiceImpl {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
-        let mut handle = crate::sandbox_session::spawn_sandbox_runner(
-            crate::sandbox_session::SandboxRunnerSpawn {
+        let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
+            tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
                 scratch_dir: scratch_dir.clone(),
                 egress_dir: egress_dir.clone(),
@@ -550,12 +553,12 @@ impl ConnectionServiceImpl {
         )
         .map_err(|e| {
             let logs = tddy_sandbox::format_egress_logs(&egress_dir);
-            let mut status = crate::sandbox_session::sandbox_error_to_status(e);
+            let mut status = tddy_daemon_sandbox::sandbox_session::sandbox_error_to_status(e);
             status.message = format!("{}\n{logs}", status.message);
             status
         })?;
 
-        crate::sandbox_session::wait_for_sandbox_ready(
+        tddy_daemon_sandbox::sandbox_session::wait_for_sandbox_ready(
             &mut handle,
             &ready_marker,
             std::time::Duration::from_secs(120),
@@ -568,7 +571,7 @@ impl ConnectionServiceImpl {
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        crate::sandbox_session::dial_and_bridge(
+        tddy_daemon_sandbox::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.clone(),
             &mut handle,
@@ -587,18 +590,23 @@ impl ConnectionServiceImpl {
         .map_err(Status::internal)?;
 
         let pid = handle.pid();
-        let state = Arc::new(crate::sandbox_session::SandboxSessionState::new(
-            crate::sandbox_session::SandboxSessionStateInit {
-                pid,
-                worktree_path: worktree_path.clone(),
-                stdout_tx,
-                capture,
-                stdin_tx,
-                ready_marker: ready_marker.clone(),
-                handle,
-                managed_workflow: managed,
-            },
-        ));
+        let state = Arc::new(
+            tddy_daemon_sandbox::sandbox_session::SandboxSessionState::new(
+                tddy_daemon_sandbox::sandbox_session::SandboxSessionStateInit {
+                    pid,
+                    worktree_path: worktree_path.clone(),
+                    stdout_tx,
+                    capture,
+                    stdin_tx,
+                    ready_marker: ready_marker.clone(),
+                    handle,
+                    managed_workflow: managed.map(|w| {
+                        Box::new(w)
+                            as Box<dyn tddy_daemon_sandbox::sandbox_session::SessionScopedResource>
+                    }),
+                },
+            ),
+        );
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;

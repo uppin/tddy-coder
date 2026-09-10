@@ -103,12 +103,14 @@ impl ConnectionServiceImpl {
             common_room_livekit_room,
             telegram,
             claude_cli_manager,
-            sandbox_manager: Arc::new(crate::sandbox_session::SandboxSessionManager::new()),
+            sandbox_manager: Arc::new(
+                tddy_daemon_sandbox::sandbox_session::SandboxSessionManager::new(),
+            ),
             workspace_sandboxes: Arc::new(
-                crate::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
+                tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry::new(),
             ),
             workspace_sandbox_provisioner: Arc::new(
-                crate::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
+                tddy_daemon_sandbox::workspace_tool_sandbox::JailedWorkspaceSandboxProvisioner,
             ),
             task_registry,
             idle_tracker: None,
@@ -333,7 +335,9 @@ impl ConnectionServiceImpl {
     /// kernel sandbox on the machine running it.
     pub fn with_workspace_sandbox_provisioner(
         mut self,
-        provisioner: Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
+        provisioner: Arc<
+            dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner,
+        >,
     ) -> Self {
         self.workspace_sandbox_provisioner = provisioner;
         self

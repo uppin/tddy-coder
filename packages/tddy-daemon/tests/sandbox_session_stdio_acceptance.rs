@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use tddy_daemon::sandbox_session::{
+use tddy_daemon_sandbox::sandbox_session::{
     build_sandbox_runner_env, dial_and_bridge, pick_free_loopback_port, spawn_sandbox_runner,
     SandboxRunnerSpawn,
 };

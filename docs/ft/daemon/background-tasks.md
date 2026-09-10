@@ -34,8 +34,8 @@ Existing `tasks.TaskService` is unchanged. PTY and action tasks appear in `ListT
 
 ### Sandbox action execution
 
-When `ActionSpec.sandbox` is set and the host supports the platform backend, `tddy-daemon`
-`sandbox_plan_builder` assembles a `SandboxPlan` from `tddy-sandbox-recipes` and runs the action
+When `ActionSpec.sandbox` is set and the host supports the platform backend,
+`tddy-daemon-sandbox`'s `sandbox_plan_builder` assembles a `SandboxPlan` from `tddy-sandbox-recipes` and runs the action
 inside the jail — no unconfined fallback on unsupported hosts (`failed_precondition`).
 
 | Channel kind | Path |
@@ -185,13 +185,16 @@ packages/tddy-service
 packages/tddy-daemon
 ├── src/task_service.rs    — TaskServiceImpl (auth + per-method handlers)
 ├── src/action_service.rs  — ActionServiceImpl (ListActionKinds/StartAction/GetAction)
-├── src/sandbox_plan_builder.rs — ActionSpec → SandboxPlan assembly
-├── src/sandbox_action.rs  — confined process + runner-PTY action execution
 ├── src/pty_runtime.rs     — PtyRuntime bridge to TaskRegistry + PtyRegistry
 ├── src/tool_engine.rs     — every execute_tool call wraps in a Task (via TaskRegistry)
 ├── src/connection_service.rs — task_registry field replaces shell_jobs
 ├── src/main.rs            — TaskServiceServer + ActionServiceServer registered
 └── src/shell_job_registry.rs — DELETED
+
+packages/tddy-daemon-sandbox
+├── src/sandbox_plan_builder.rs — ActionSpec → SandboxPlan assembly
+├── src/sandbox_action.rs  — confined process + runner-PTY action execution
+└── src/sandbox_runtime.rs — the SandboxRuntime port ActionServiceImpl calls through
 
 packages/tddy-actions (leaf crate)
 ├── src/spec.rs            — ActionSpec, SandboxRequest, channel kinds

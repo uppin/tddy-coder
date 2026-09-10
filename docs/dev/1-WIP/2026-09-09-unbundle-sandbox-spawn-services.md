@@ -203,15 +203,17 @@ Open items in the spawn/supervisor path. They move unchanged; recorded so a revi
 
 ## Scope
 
-- [ ] **`tddy-daemon-sandbox`**: crate, 5 modules, 16 test suites, the 6 `tddy-sandbox*` deps
+- [x] **`tddy-daemon-sandbox`**: crate, 5 modules, **5** of 16 test suites, **2** of the 6
+      `tddy-sandbox*` deps — ⚠ not the counts the plan assumed, see M3 below
 - [x] **`tddy-spawn`**: crate, 4 modules, 4 suites moved, `tddy-supervisor` out of `[dependencies]`
       — ⚠ it remains a **`[dev-dependencies]`** entry, see M2 below
 - [x] **Leaf services**: `bsp_service` → `tddy-bsp` ✅. `action_service` and `task_service` **stay in
       `tddy-daemon`** (cycle, see above); the `semantic_index` service entry was dropped as a false
       premise, though the module itself moved
-- [ ] **`tool_catalog_sync.rs`** relocated to `tddy-daemon-sandbox/tests/`; `lib.rs:93` removed
-- [ ] **`tddy-sandbox-app` reversal**: depends on `tddy-daemon-sandbox`, not `tddy-daemon`
-- [ ] **⚠ nextest exclusions**: every `[profile.ci]` path whose file moved is updated in the same commit
+- [x] **`tool_catalog_sync.rs`** relocated to `tddy-daemon-sandbox/tests/`; the `lib.rs` declaration removed
+- [x] **`tddy-sandbox-app` reversal**: depends on `tddy-daemon-sandbox`, not `tddy-daemon`
+- [x] **⚠ nextest exclusions**: one of the five in-scope predicates changed package and was repointed;
+      the excluded set is identical in content
 - [ ] **Desktop**: `spawn_worker`/`supervisor_client` callers migrated; built locally
 - [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
 - [ ] **Baseline**: `./test` per touched package back to the recorded numbers
@@ -324,11 +326,113 @@ clean follow-up.
 `pub(crate)` → `pub`, because three daemon call sites
 (`telegram_session_control.rs:3170`, `connection_service.rs`, `terminal_bridge_impl.rs`) name the
 same room the spawn does, and `pub(crate)` does not cross a crate boundary.
-- [ ] M3 — `tddy-daemon-sandbox` extracted; 16 suites pass; the 6 `tddy-sandbox*` deps moved
-- [ ] M4 — `tool_catalog_sync.rs` is a test file in the sandbox crate
-- [ ] M5 — `tddy-sandbox-app` depends on `tddy-daemon-sandbox`; asserted, not just described
-- [ ] M6 — nextest `[profile.ci]` exclusion paths updated; the excluded set is unchanged in content
+- [x] M3 — `tddy-daemon-sandbox` extracted; 27 tests pass in the new crate. ⚠ **Not literally
+      complete**: 5 suites moved, not 16, and 2 sandbox deps left the daemon, not 6 — see below
+- [x] M4 — `tool_catalog_sync.rs` is a test file in the sandbox crate
+- [x] M5 — `tddy-sandbox-app` depends on `tddy-daemon-sandbox`; asserted, not just described
+- [x] M6 — nextest `[profile.ci]` exclusion paths updated; the excluded set is unchanged in content
 - [ ] M7 — desktop built locally; baselines restored; file-budget outcome recorded
+
+### M3–M6 outcome — four corrections to the plan
+
+**1. Five of the sixteen sandbox suites moved, not sixteen.** The plan counted suites by subject
+matter; the crate graph counts them by what they *mount*. Eight of the sixteen build a
+`ConnectionServiceImpl` (`sandbox_behavior_acceptance`, `sandboxed_claude_cli_acceptance`,
+`sandboxed_cursor_cli_acceptance`, `sandboxed_session_lifecycle_acceptance`,
+`workspace_sandbox_resume_acceptance`, `workspace_tool_sandbox_acceptance`,
+`workspace_tool_sandbox_seatbelt_acceptance`) or the two leaf services the `tddy-core → tddy-task`
+cycle stranded in the daemon (`action_sandbox_acceptance` mounts `ActionServiceImpl` and
+`TaskServiceImpl`). Moving any of them would make `tddy-daemon` a **dev-dependency of
+`tddy-daemon-sandbox`** — the exact dev-graph cycle M2 refused for `supervisor_spawn_delegation.rs`,
+and it would rebuild the whole daemon on `cargo test -p tddy-daemon-sandbox`.
+
+One more stayed for a subtler reason: `sandbox_session_stdio_acceptance.rs`'s
+`sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags` does
+`include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/connection_service.rs"))` — a **compile-time**
+read of a daemon source file. Its other tests are pure sandbox, but the suite cannot leave the crate
+that owns the file it greps. Splitting it is the same clean follow-up shape as M2's.
+
+So the five that moved are the ones with no daemon surface at all: `sandbox_runner_inspect`,
+`sandbox_runner_spawn_smoke`, `sandbox_runner_stdio_acceptance`, `sandbox_stdio_seatbelt_acceptance`
+and `workspace_tool_sandbox_plan_unit`. They moved **unrewritten** — only `crate::`/`tddy_daemon::`
+import prefixes changed, no assertion did. The `../../target/debug` fallbacks they use to find
+`tddy-sandbox-runner` and `tddy-tools` resolve identically from the new manifest directory.
+
+**2. Two `tddy-sandbox*` crates left the daemon, not six.** `tddy-sandbox-qemu` and
+`tddy-sandbox-darwin` are now unreferenced anywhere in `tddy-daemon` and were deleted from its
+manifest; `tddy-sandbox-cgroups` is referenced only by the four suites that stayed, so it moved from
+`[target.'cfg(target_os = "linux")'.dependencies]` to the matching `dev-dependencies`. The other three
+never belonged to the sandbox subsystem alone: `tddy-sandbox` is used by `split_session.rs` (8 files
+in `src/`), `tddy-sandbox-recipes` by `split_session.rs`, and `tddy-sandbox-runner` by
+`daemon_rpc_handler.rs` and `rpc_service.rs`. State A's "6 `tddy-sandbox*` dependencies move here"
+counted the crates the subsystem *uses*, not the ones only it uses.
+
+**3. The one real coupling was a drop-carrier, and is type-erased rather than moved.**
+`SandboxSessionState` held `crate::session_toolcall::ManagedWorkflow`, which `## Boundaries` keeps in
+`tddy-daemon` for node 8 — so importing it would have been a cycle. No method was ever called on it:
+the field is `_managed_workflow`, and its own doc says it is "kept here so its lifetime is tied to
+the session and its socket is cleaned up on drop". It is now
+`Option<Box<dyn sandbox_session::SessionScopedResource>>`, a `Send + Sync` marker trait the daemon
+implements for `ManagedWorkflow` in one line beside the struct. **Drop semantics are unchanged**:
+dropping a `Box<dyn Trait>` runs the concrete type's drop glue through the vtable, so
+`ManagedWorkflow`'s fields still drop in declaration order and `SessionToolcallListener::drop` still
+aborts the accept task and unlinks the socket. `ManagedWorkflow` was not re-declared, re-implemented
+or moved.
+
+**4. The red-phase surface in `tddy-daemon-sandbox/src/lib.rs` was mis-specified and is deleted.**
+Same shape as M2's correction 2. It invented a `SandboxSessionManager::new(Arc<AgentActivityHub>)`
+with an `async start()` — but the real `SandboxSessionManager` is a registry of live sessions keyed
+by `session_id` whose `new()` takes no arguments, called that way at
+`connection_service/svc_resolve_tddy_tools_path.rs:106`; and it invented a `SandboxError` enum while
+`tddy_sandbox::SandboxError` is the one all five modules already use. Its two tests asserted the
+invented shape. Keeping either would have meant two `SandboxSessionManager`s and two `SandboxError`s
+in one crate. `WorkspaceSandbox` and `WorkspaceSandboxProvisioner` were re-specifications of the real
+traits in `workspace_tool_sandbox.rs`, which arrived intact with the move. `lib.rs` is now the crate
+doc plus five `pub mod` lines.
+
+**Also corrected:** `move_module_to_crate` was not attempted — the five modules are mutually
+entangled exactly as M2's four were, and
+[`2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md`](../todo/2026-09-10-move-module-to-crate-cannot-move-an-entangled-cluster.md)
+already records why the operation cannot express that. Moved by hand with `git mv`, history
+preserved.
+
+**The nextest exclusion audit (M6).** Five `[profile.ci]` entries were in scope. Exactly one suite
+changed package, and its predicate was repointed in the same change:
+
+| Excluded entry | Suite lands in | Predicate |
+|---|---|---|
+| `sandboxed_cursor_cli_acceptance` | `tddy-daemon` | unchanged |
+| `sandboxed_claude_cli_acceptance` | `tddy-daemon` | unchanged |
+| `action_sandbox_acceptance::sandboxed_bash_action_writes_to_output_dir` | `tddy-daemon` | unchanged |
+| `cursor_cli_session_acceptance::cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available` | `tddy-daemon` | unchanged |
+| `sandbox_runner_stdio_acceptance::echoes_a_message_over_sandbox_service_served_over_stdio` | **`tddy-daemon-sandbox`** | `package(tddy-daemon)` → `package(tddy-daemon-sandbox)` |
+
+The excluded set is **identical in content**, differing only in the package half of one predicate.
+`docs/dev/guides/ci.md`'s fixture-binary table (which named `tddy-daemon` as the crate exec'ing
+`target/debug/tddy-sandbox-runner`) and
+[`2026-08-15-echoes-a-message-over-sandbox-service-served-over-stdio-is-skipped-in.md`](../todo/2026-08-15-echoes-a-message-over-sandbox-service-served-over-stdio-is-skipped-in.md)
+were updated to the new path.
+
+**No visibility widening was needed.** The five modules contain no `pub(crate)` items — every symbol
+the daemon reaches was already `pub`, because they were `pub mod` in a `pub` lib.
+
+**A second pre-existing `tddy-daemon` failure surfaced.** The plan's baseline records one
+(`cursor_cli_session_acceptance::…self_arc called before set_self_handle`). Verifying the suite that
+had to stay behind turned up another:
+`sandbox_session_stdio_acceptance::sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags`
+`include_str!`s `connection_service.rs` and asserts it contains `"--stdio"`. PR #468 moved that argv
+into three `svc_*` submodules, so the literal has been absent from the parent file since #468 landed
+on `master` — confirmed against `master`, not this branch. Recorded in
+[`2026-09-10-sandboxed-session-spawn-argv-greps-a-file-the-connection-service-split-emptied.md`](../todo/2026-09-10-sandboxed-session-spawn-argv-greps-a-file-the-connection-service-split-emptied.md);
+not fixed here, because repointing a test's subject is not a relocation. It is also the single reason
+that suite could not move.
+
+**File budget:** `sandbox_session.rs` is **1,115** lines (1,100 before; +15 for the
+`SessionScopedResource` trait and its doc). Over the 500-line budget, unsplit, for the same reason
+M2 left `spawner.rs` unsplit — splitting during a relocation destroys the rename-similarity evidence
+that proves the move was faithful. `workspace_tool_sandbox.rs` (521) is marginally over; the other
+three are under.
+
 
 ## Testing Plan
 

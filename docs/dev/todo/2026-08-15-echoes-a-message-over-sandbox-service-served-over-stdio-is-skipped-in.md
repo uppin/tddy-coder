@@ -3,7 +3,7 @@
 **Category:** Known failing test
 **Source:** ci-setup, 2026-08-15
 
-- `packages/tddy-daemon/tests/sandbox_runner_stdio_acceptance.rs` — fails on a GitHub Actions runner
+- `packages/tddy-daemon-sandbox/tests/sandbox_runner_stdio_acceptance.rs` — fails on a GitHub Actions runner
   with `tool ipc server exited before bind`, **with `tddy-sandbox-runner` built and on disk**. It
   survived two nextest retries, so it is a permission failure rather than a flake. The other two
   tests in the same binary pass once the runner binary is staged, so only this one is skipped.

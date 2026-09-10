@@ -9,12 +9,50 @@ name = "tddy_daemon_sandbox"
 path = "src/lib.rs"
 
 [dependencies]
+async-trait = "0.1"
+bytes = "1"
+futures-util = "0.3"
+log = "0.4"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+tddy-actions = { path = "../tddy-actions" }
 tddy-core = { path = "../tddy-core" }
+# `AgentActivityHub` and `now_unix_ms` — the only two symbols this subsystem ever reached
+# `connection_service` for, and the whole reason it can live outside `tddy-daemon`.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
-thiserror = "2"
+# The six sandbox crates that came with the subsystem: the plan types and the per-OS backends that
+# execute them, the recipe builders, and the in-jail runner's host relay.
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-qemu = { path = "../tddy-sandbox-qemu" }
+tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
+tddy-service = { path = "../tddy-service" }
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-task = { path = "../tddy-task" }
+# Depended on directly rather than through `tddy_daemon::tool_engine`, which was only a re-export.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
-rstest = { workspace = true }
-pretty_assertions = { workspace = true }
-tokio = { version = "1", features = ["macros", "rt"] }
+prost = "0.13"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util"] }
+# The exec-tool server the jailed runner relays to, mounted directly by
+# `sandbox_stdio_seatbelt_acceptance.rs`.
+tddy-tools = { path = "../tddy-tools" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }

@@ -70,7 +70,7 @@ impl ConnectionServiceImpl {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
             let resume_goal = Self::managed_resume_goal(&session_dir, &recipe);
-            let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+            let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
                 self.config
                     .claude_cli
                     .as_ref()

@@ -16,8 +16,8 @@ use tddy_service::proto::actions::{
 };
 use tddy_task::{TaskRegistry, TaskStatus};
 
-use crate::sandbox_runtime::{attach_sandbox_request, SandboxRuntime};
 use tddy_daemon_kernel::SessionUserResolver;
+use tddy_daemon_sandbox::sandbox_runtime::{attach_sandbox_request, SandboxRuntime};
 
 /// Implementation of the `actions.ActionService` RPC service.
 pub struct ActionServiceImpl {

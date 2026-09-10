@@ -57,7 +57,7 @@ not (
     or (package(tddy-daemon) and binary(sandboxed_claude_cli_acceptance))
     or (package(tddy-daemon) and binary(action_sandbox_acceptance) and test(=sandboxed_bash_action_writes_to_output_dir))
     or (package(tddy-daemon) and binary(cursor_cli_session_acceptance) and test(=cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available))
-    or (package(tddy-daemon) and binary(sandbox_runner_stdio_acceptance) and test(=echoes_a_message_over_sandbox_service_served_over_stdio))
+    or (package(tddy-daemon-sandbox) and binary(sandbox_runner_stdio_acceptance) and test(=echoes_a_message_over_sandbox_service_served_over_stdio))
     or (package(tddy-sandbox-recipes) and test(=cursor_cli::tests::cursor_agent_prerequisite_reads_include_install_dir_and_share_root))
 )
 """

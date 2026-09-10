@@ -16,99 +16,27 @@
 //!
 //! # What this move proves
 //!
-//! `tddy-sandbox-app` consumes `tddy_daemon::{sandbox_session, claude_cli_session, tool_engine}`
-//! today. After this node it depends on **this** crate and not on `tddy-daemon` for the sandbox
-//! path — a dependency **reversal**, and the node's most checkable outcome. It is asserted, not
-//! described.
+//! `tddy-sandbox-app` consumed `tddy_daemon::{sandbox_session, tool_engine}` before this node. It
+//! now depends on **this** crate and not on `tddy-daemon` at all — a dependency **reversal**, and
+//! the node's most checkable outcome. It is asserted in
+//! `tests/sandbox_app_dependency_reverses.rs`, not merely described.
 //!
 //! The two symbols this subsystem reached the 23,099-line god module for —
 //! [`tddy_daemon_kernel::AgentActivityHub`] and [`tddy_daemon_kernel::now_unix_ms`] — are node 1's,
 //! and they are the whole reason this can leave.
+//!
+//! # The one edge that could not simply move
+//!
+//! [`sandbox_session::SandboxSessionState`] carried a
+//! `tddy_daemon::session_toolcall::ManagedWorkflow`, which stays in `tddy-daemon` for node 8 — so
+//! importing it here would be a cycle. It was never *called*: the field is a drop-carrier, held only
+//! so the workflow's socket is cleaned up when the session ends. It is therefore held as
+//! [`sandbox_session::SessionScopedResource`], a `Send + Sync` marker the daemon hands its concrete
+//! value to. `Box<dyn Trait>` drops through the vtable, so the destructor that runs is still
+//! `ManagedWorkflow`'s.
 
-use std::sync::Arc;
-
-use tddy_daemon_kernel::AgentActivityHub;
-
-/// A provisioned workspace sandbox a session's tool calls execute inside.
-pub trait WorkspaceSandbox: Send + Sync {
-    /// The path the sandbox confines execution to.
-    fn root(&self) -> &std::path::Path;
-}
-
-/// Provisions a [`WorkspaceSandbox`] for a session, or explains why it cannot.
-pub trait WorkspaceSandboxProvisioner: Send + Sync {
-    /// Provision a sandbox for `session_id`.
-    fn provision(&self, session_id: &str) -> Result<Arc<dyn WorkspaceSandbox>, SandboxError>;
-}
-
-/// Why a sandbox could not be provisioned or started.
-///
-/// `Unavailable` is distinct from `Refused` on purpose: a backend that is absent on this host is a
-/// configuration fact an operator can act on, and one that refused a specific plan is a defect in
-/// the plan. Collapsing them is how "sandboxing is off" gets misread as "your request was wrong".
-#[derive(Debug, thiserror::Error)]
-pub enum SandboxError {
-    #[error("no sandbox backend is available on this host")]
-    Unavailable,
-    #[error("the sandbox backend refused the plan: {reason}")]
-    Refused { reason: String },
-}
-
-/// Jailed session lifecycle — start, bridge tool IPC, and reap.
-pub struct SandboxSessionManager {
-    // TODO(sandbox-spawn-services): implement
-    _activity: Arc<AgentActivityHub>,
-}
-
-impl SandboxSessionManager {
-    /// Build a manager that publishes activity into the shared hub.
-    pub fn new(_activity: Arc<AgentActivityHub>) -> Self {
-        // TODO(sandbox-spawn-services): implement
-        unimplemented!("SandboxSessionManager::new")
-    }
-
-    /// Start a jailed session, returning once its tool-IPC bridge is serving.
-    pub async fn start(&self, _session_id: &str) -> Result<(), SandboxError> {
-        // TODO(sandbox-spawn-services): implement
-        unimplemented!("SandboxSessionManager::start")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tells_an_absent_backend_apart_from_a_refused_plan() {
-        // Given the two failures a caller must distinguish
-        let absent = SandboxError::Unavailable;
-        let refused = SandboxError::Refused {
-            reason: "the plan named a path outside the workspace".to_string(),
-        };
-
-        // Then — an operator reading these must be able to tell whose problem it is
-        assert!(absent.to_string().contains("no sandbox backend"));
-        assert!(refused.to_string().contains("refused the plan"));
-        assert_ne!(absent.to_string(), refused.to_string());
-    }
-
-    #[tokio::test]
-    async fn publishes_a_started_session_into_the_shared_activity_hub() {
-        // Given
-        let hub = Arc::new(AgentActivityHub::default());
-        let manager = SandboxSessionManager::new(Arc::clone(&hub));
-        let mut listener = hub.subscribe("session-a");
-
-        // When
-        manager
-            .start("session-a")
-            .await
-            .expect("the session starts");
-
-        // Then
-        assert!(
-            listener.try_recv().is_ok(),
-            "a started jailed session is observable on the hub the daemon shares"
-        );
-    }
-}
+pub mod sandbox_action;
+pub mod sandbox_plan_builder;
+pub mod sandbox_runtime;
+pub mod sandbox_session;
+pub mod workspace_tool_sandbox;

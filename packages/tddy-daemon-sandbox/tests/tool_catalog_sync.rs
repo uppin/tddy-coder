@@ -2,7 +2,7 @@
 //! catalog exposed via `ListExecTools` / `ExecuteTool`.
 //!
 //! The catalog itself lives in the `tddy-tool-engine` crate (shared with `tddy-coder`); this test
-//! guards the daemon-specific invariant that `tddy-sandbox`'s allowlist covers every tool the
+//! guards the invariant that `tddy-sandbox`'s allowlist covers every tool the
 //! engine dispatches.
 
 #[cfg(test)]
@@ -12,7 +12,7 @@ mod tests {
     #[test]
     fn workspace_exec_tool_names_match_tool_catalog() {
         // Given
-        let catalog: HashSet<String> = crate::tool_engine::tool_catalog()
+        let catalog: HashSet<String> = tddy_tool_engine::tool_catalog()
             .into_iter()
             .map(|t| t.name)
             .collect();

@@ -72,7 +72,7 @@ pub trait WorkspaceSandboxProvisioner: Send + Sync {
 
 /// Where a workspace jail keeps its artifacts, rooted at `<session_dir>/sandbox`.
 ///
-/// The same shape [`crate::connection_service`] lays out for a sandboxed `claude-cli` session, with
+/// The same shape `tddy-daemon`'s `connection_service` lays out for a sandboxed `claude-cli` session, with
 /// one difference: the egress directory is inside the sandbox root rather than beside it, so the
 /// jail's whole writable tree is the one directory the session owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,7 +298,7 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
         )?;
 
         log::info!(
-            target: "tddy_daemon::workspace_tool_sandbox",
+            target: "tddy_daemon_sandbox::workspace_tool_sandbox",
             "workspace session {} runs its tools in a jail (pid {}) holding {}",
             spec.session_id,
             pid,
@@ -434,7 +434,7 @@ impl WorkspaceSandbox for JailedWorkspaceSandbox {
                      to run it on the host worktree instead",
                     self.session_id
                 );
-                log::warn!(target: "tddy_daemon::workspace_tool_sandbox", "{message}");
+                log::warn!(target: "tddy_daemon_sandbox::workspace_tool_sandbox", "{message}");
                 ExecuteToolResponse {
                     is_error: true,
                     error_message: message,

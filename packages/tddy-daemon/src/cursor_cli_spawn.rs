@@ -33,7 +33,7 @@ pub fn install_cursor_hooks_in_worktree(
     session_id: &str,
     os_user: &str,
 ) -> String {
-    let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         crate::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
     );
 
