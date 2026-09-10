@@ -125,9 +125,11 @@ origin/master
 - PRs **land bottom-up**. A PR may merge only once everything below it has merged, which is the same
   as saying only once its base has become `master`.
 - The order must be a valid **topological sort of the real dependencies**: if PR 4 consumes something
-  PR 2 delivers, PR 2 must be below it. Beyond that constraint the order is yours to choose.
-- Work that depends on nothing still occupies a position. Put such a PR wherever it costs least —
-  usually low, so it can land early, unless keeping numbering and documents stable matters more.
+  PR 2 delivers, PR 2 must be below it. Beyond that constraint the order is yours to choose — and
+  **choose it**, per *Order inside a wave*: blockers ahead of leaves inside each green wave.
+- Work that depends on nothing still occupies a position. It goes at the **back of its wave**, behind
+  everything that other waves are waiting on — unless keeping numbering and documents stable matters
+  more than throughput.
 
 ### Why linear, and what to do with work that genuinely branches
 
@@ -147,6 +149,53 @@ Two consequences worth stating, because they are easy to get wrong:
   only its history grows.
 - **An independent root loses its independence.** A PR that could have merged against `master` on its
   own now waits for everything beneath it. If that matters, put it at the bottom.
+
+### Order inside a wave — blockers to the front
+
+Topological order leaves the line **underdetermined**: for most positions in it, several nodes are
+eligible. Resolve that deliberately — group the nodes into **green waves** (see `## Green wave` below), then
+sort *inside* each wave so that **a node other waves depend on goes ahead of a node nothing waits
+on**. Leaving the intra-wave order to the sequence the nodes happened to be named in is the default
+mistake, and it costs the stack throughput for nothing.
+
+1. **Group into waves.** Wave 1 is every node that needs no predecessor *behaviour*; wave *k* is
+   every node whose unmet needs are all met by the waves before it.
+2. **Concatenate the waves** — all of wave 1, then all of wave 2, and so on. That much is forced by
+   the real edges.
+3. **Sort inside each wave by what waits on the node**: most transitive dependents first, nodes
+   nothing depends on last. Break a remaining tie with the reading order you would have chosen
+   anyway — usually the most foundational node first.
+
+Step 3 is free. Every node's predecessors sit in a **strictly earlier** wave, so *any* permutation
+inside a wave is still a valid topological sort — which is exactly why nothing forces the order and
+why it has to be chosen.
+
+```
+edges    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8
+
+waves    1: n1     2: n2, n3, n5     3: n4, n6, n7, n8
+                      (n4 waits on n2; n6–n8 wait on n5)
+
+                        · marks a wave boundary; bottom of the stack is on the left
+
+✓ line   n1 · n5, n2, n3 · n4, n6, n7, n8
+         wave 2 led by its blockers — n5 (three dependents), then n2 (one), then n3 (none)
+
+✗ line   n1 · n3, n2, n5 · n4, n6, n7, n8
+         n3 blocks nothing, yet six nodes now land behind it
+```
+
+Three reasons, all consequences of the stack landing bottom-up:
+
+- **A blocker's position is how long everything above it waits.** n5 at the foot of its wave holds
+  n6–n8 behind two unrelated merges; at the head of it, it clears first and its subtree follows.
+- **A dependent's ancestor set stays honest.** Every node below a dependent is in its history, so a
+  leaf sorted low puts its commits in the history of nodes that consume nothing from it.
+- **The PR that can merge first should be the one most work is queued behind** — not the one that
+  happens to be smallest or was described first in the interview.
+
+The `K/N` group in the PR titles is this order, so settling it at planning time is also what avoids
+renumbering the whole stack later.
 
 ### Branch naming
 
@@ -384,6 +433,10 @@ tests mount its *own* component and inject doubles for everything else is greena
 sitting sixth in the line. A node whose test asserts "the key is now held by the agent" needs the
 node that talks to the agent to be green first.
 
+The waves are also what **fixes the branch order**: the line is the waves concatenated, and inside
+each wave the nodes other waves depend on come first — see *Order inside a wave*. So a node's
+`**Wave:**` and its `K/N` are two views of one decision, not two independent facts.
+
 ```markdown
 ## Green wave
 
@@ -425,6 +478,24 @@ rule it out:
 **A PR's document states its own row and nothing else.** Never record a sibling's status — that is
 the stale-copy problem returning. Nothing hands off at wrap: `/wrap-context-docs` transfers this PR's
 own changeset and PRD and deletes them, and there is no third document.
+
+### `docs/dev/todo/` entries a node resolves
+
+A node's changeset also carries `## Prerequisites` when the planning scan found backlog entries in
+its path, each with a verdict and **a relative link to the entry's file**. An entry the node actually
+fixes is marked **✅ RESOLVED HERE**, and its wrap **deletes that file** — the entry has the same
+lifecycle as the changeset (see `/wrap-context-docs` § *Wrapping TODO backlog entries*).
+
+The backlog is shared and visible from every branch, so ownership works exactly like the documents':
+
+- **Only the node whose own changeset claims an entry deletes it.** A parent's claim is inherited in
+  this tree and is that PR's to act on; deleting it from here puts a parent's cleanup in this node's
+  diff and collides when the parent wraps.
+- **If two nodes fix parts of one entry, the lowest one claims it** — it wraps first, and the others
+  keep the reference with what their slice covered. Splitting one entry's deletion across two nodes
+  guarantees one of them re-deletes a file the base already dropped.
+- An entry deleted on the base but still present here is `/pr-stack-rebase`'s to clear, like any
+  other inherited deletion.
 
 ### Where the whole-stack views come from
 

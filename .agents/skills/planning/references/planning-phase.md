@@ -77,8 +77,15 @@ that reason is usually what tells you whether it blocks you.
 |---|---|---|
 | ⛔ **Blocking** | The change cannot be implemented *correctly* without it | `## Prerequisites`, and an item in `## Scope` — it is work, not a note |
 | ⚠ **During** | The change touches it, makes it worse, or must avoid re-introducing it | `## Prerequisites`, as a constraint on how the work is done |
-| ℹ **Answered** | Planning or discovery resolved an open question the entry asks | `## Prerequisites`, stating the answer — and update the entry itself when wrapping |
+| ℹ **Answered** | Planning or discovery resolved an open question the entry asks | `## Prerequisites`, stating the answer; promote to ✅ when the answer closes the whole entry |
+| ✅ **Resolved here** | This change **fixes** the entry — planned now, or reclassified once the work closes it. Also the verdict for an entry the tree shows already fixed, whose wrap missed it | `## Prerequisites`, saying what closed it. `/wrap-context-docs` **deletes the entry's file** |
 | — **Unrelated** | Same area, different concern | Nothing. Do not pad the document |
+
+**Every recorded verdict names the entry's file, as a relative link** — from `docs/dev/1-WIP/` that
+is `[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`. The wrap happens much
+later, usually in a session that never saw this scan, and `## Prerequisites` is the only memory it
+has of which entries this change was answering. A quoted title is not something it can act on; a path
+is. See [changeset-doc.mdc](../../../../.cursor/rules/changeset-doc.mdc) § *Prerequisites*.
 
 **"Blocking" means correctness, not convenience.** An entry is blocking when every route around it is
 wrong — for example a store that must write a new secret at rest, where the existing helper would

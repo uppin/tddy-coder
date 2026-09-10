@@ -16,8 +16,9 @@ one another branch might also be editing.**
   taken, append `-2`.
 - **First line**: `# YYYY-MM-DD — Title`.
 - **Then** `**Category:**` — `Known failing test`, `Future enhancement`, or a named group such as
-  `Deferred from \`optional-livekit\` (#449)`. Add `**Status:** Resolved` when it is done, and
-  `**Source:**` naming the changeset or suite that turned it up.
+  `Deferred from \`optional-livekit\` (#449)`, and `**Source:**` naming the changeset or suite that
+  turned it up. `**Status:** Resolved` is for the narrow case in *An entry leaves by being deleted*
+  below — an item that turned out fixed with no changeset to wrap.
 - **Body**: whatever the item needs. State **why** the work was deferred, not only what remains —
   that reason is what tells the next planner whether it blocks them (see below).
 - **Links are relative to this directory**: `../../ft/coder/pr-stacking.md`, `../guides/ci.md`.
@@ -42,3 +43,31 @@ changeset is written, so an item sitting in the path of new work is found at pla
 than during `/green` — where the only choices left are to work around it, make it worse, or stop.
 
 The two directions are complementary: what one change defers is what the next planner's scan finds.
+
+## An entry leaves by being deleted
+
+Because Step 2b **reads** this directory, an entry that outlives the defect it records is worse than
+no entry: the next planner finds it, believes it, and plans around a problem that is already fixed.
+So an entry has the same lifecycle as a changeset — it is **deleted** when the work closes it, not
+archived and not annotated.
+
+Deletion happens in the wrap, and the changeset drives it:
+
+1. Planning Step 2b records each relevant entry under the changeset's `## Prerequisites`, **with a
+   relative link to its file** — `[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`.
+2. When the work closes an entry, its verdict there becomes **✅ RESOLVED HERE**, naming what closed
+   it. `/update-context-docs` is where that reclassification happens during development.
+3. `/wrap-context-docs` deletes exactly those files, and the changeset entry it writes into
+   [`docs/dev/changesets/`](../changesets/) (or a package's) names the resolved item — that is the
+   audit trail, so nothing is lost by removing the file.
+
+Two consequences:
+
+- **An entry the wrapping changeset does not name is never deleted.** Nobody deletes a backlog entry
+  on inference from a diff; the reference in `## Prerequisites` is the record of a decision.
+- **Partly fixed is not fixed.** Edit the entry down to what actually remains and leave it in place.
+
+`**Status:** Resolved` covers only the case with no changeset to wrap — an item somebody discovers
+was fixed by a change that never recorded it, where the marker preserves the finding for whoever
+looks next. `grep -rL 'Status:\*\* Resolved' docs/dev/todo/` therefore still lists the open items,
+because resolved ones are usually simply gone.

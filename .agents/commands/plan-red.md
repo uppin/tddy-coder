@@ -16,10 +16,16 @@ Combines planning and test-first development into a single flow: gather requirem
 Follow the planning phase from `.agents/skills/planning/references/planning-phase.md` — Steps 1 through 5 (interview → code analysis → **TODO cross-check** → product area → PRD → changeset).
 
 **Step 2b is not optional.** After the code analysis, scan `docs/dev/todo/` for items sitting in
-this change's path and classify each — blocking / during / answered / unrelated. Anything blocking or
-constraining goes in the changeset's `## Prerequisites`, and a **blocking** item also earns a line in
-`## Scope`, because it is work rather than a note. Discovering it during `/green` is late: the choice
-by then is to work around it, silently make it worse, or stop.
+this change's path and classify each — blocking / during / answered / resolved-here / unrelated.
+Anything blocking or constraining goes in the changeset's `## Prerequisites`, and a **blocking** item
+also earns a line in `## Scope`, because it is work rather than a note. Discovering it during
+`/green` is late: the choice by then is to work around it, silently make it worse, or stop.
+
+**Record each item with a relative link to its file** —
+`[2026-08-02-slug.md](../todo/2026-08-02-slug.md)`. An item this change **fixes** is marked
+`✅ RESOLVED HERE`, and `/wrap-context-docs` **deletes that file** when the changeset wraps, so the
+backlog does not keep describing a defect that is gone. The links are the wrapping session's only
+memory of this scan.
 
 If the fix is small and lives in this change's own files, do it here. If it is small but in shared
 code, it is a prerequisite PR that lands first. If it is large, it gets its own PR — never absorb a
@@ -84,7 +90,8 @@ reason is what tells the next planner whether it blocks them.
 
 - Each step is discrete and actionable
 - Cross-check `docs/dev/todo/` before writing the changeset; record every relevant item in
-  `## Prerequisites` with a verdict, including the ones you decide not to fix
+  `## Prerequisites` with a verdict **and a link to its file**, including the ones you decide not to
+  fix — the ones marked ✅ RESOLVED HERE are what the wrap deletes from the backlog
 - Never skip user review after acceptance tests
 - Never assume user approval without explicit confirmation
 - Take extra time on testing strategy — don't rush

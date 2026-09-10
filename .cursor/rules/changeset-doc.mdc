@@ -106,7 +106,8 @@ Why these technical changes are needed.
 #### 6. Prerequisites (when the TODO scan finds something)
 
 **Optional — include only when `docs/dev/todo/` holds items this change runs into.** An empty
-heading is noise; omit it entirely when the scan came back clear.
+heading is noise; omit it entirely when the scan came back clear. It stops being optional the moment
+this change **resolves** an entry: the wrap has no other way to learn which entries to clean up.
 
 Produced by planning Step 2b (`.agents/skills/planning/references/planning-phase.md`). Each entry
 gets a verdict, so a reviewer can see it was considered rather than missed:
@@ -116,21 +117,44 @@ gets a verdict, so a reviewer can see it was considered rather than missed:
 
 Open items in [`docs/dev/todo/`](../todo/) this change runs into.
 
-### ⛔ BLOCKING — {item title, quoted from its file in docs/dev/todo/}
+### ⛔ BLOCKING — {item title} — [`2026-08-02-slug.md`](../todo/2026-08-02-slug.md)
 
 Why every route around it is wrong, not merely inconvenient. What must land first, and where.
 A blocking entry ALSO earns a line in `## Scope` — it is work, not a note.
 
-### ⚠ DURING — {entry heading}
+### ⚠ DURING — {entry heading} — [`2026-07-22-slug.md`](../todo/2026-07-22-slug.md)
 
 How this change touches it, makes it worse, or must avoid re-introducing it. Say plainly when the
 verdict is "recorded, not fixed here", and why (e.g. the TODO itself says the fix needs its own PR).
 
-### ℹ ANSWERED — {entry heading}
+### ℹ ANSWERED — {entry heading} — [`2026-07-01-slug.md`](../todo/2026-07-01-slug.md)
 
-An open question the entry asks that planning or discovery resolved. State the answer, and update
-the TODO entry itself when wrapping.
+An open question the entry asks that planning or discovery resolved. State the answer. If that
+answer is the whole of the entry, promote it to ✅ RESOLVED HERE; if the entry has other open parts,
+edit them and say here what stays open.
+
+### ✅ RESOLVED HERE — {entry heading} — [`2026-06-28-slug.md`](../todo/2026-06-28-slug.md)
+
+An entry this change actually **fixes**. Say what closed it and where — the commit's code, the test
+that now covers it, the doc that answers it. `/wrap-context-docs` **deletes this file** when the
+change wraps.
 ```
+
+**Name the file, every time.** Each entry's heading carries a **relative link to its file** in
+`docs/dev/todo/`. A quoted title alone is not a reference: the wrap is performed later, often by an
+agent that never saw the scan, and a path is the only thing it can act on. This section is that
+agent's memory of which entries this change was answering.
+
+**The wrap deletes exactly the ✅ RESOLVED HERE files, and nothing else.** So the verdict is a
+commitment, not a label:
+
+- **Move an entry into ✅ RESOLVED HERE the moment the work closes it**, not at planning time — a
+  `⚠ DURING` item you end up fixing, or a `⛔ BLOCKING` one whose `## Scope` line is now `[x]`.
+  `/update-context-docs` is where that move happens as development proceeds.
+- **Leave it where it is if the fix is partial.** Partly-addressed is not resolved: edit the entry to
+  state what remains and keep the verdict at ⚠ DURING. A deleted entry whose problem still exists is
+  the one failure mode here that loses information.
+- An entry **not** listed in this section is never deleted by a wrap, however resolved it looks.
 
 **Sizing the fix** — small and in this change's own files: do it here. Small but in shared code: a
 prerequisite PR that lands first. Large: its own PR, or its own node in a stack. Never absorb a
