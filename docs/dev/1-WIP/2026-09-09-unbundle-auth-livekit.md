@@ -1,7 +1,7 @@
 # Changeset: the auth and LiveKit subsystems in their own crates
 
 **Date**: 2026-09-09
-**Status**: 🚧 In Progress
+**Status**: ✅ Green — M1–M8 complete and pushed. Ready for `/validate-changes`
 **Type**: Architecture Change
 **Stack**: `#unbundle` node **4 of 8**. PR [#473](https://github.com/uppin/tddy-coder/pull/473).
 Base: `feature/unbundle/sandbox-spawn-services` (node 3, PR #472)
@@ -401,7 +401,12 @@ and write, and assert the previous value survives.
 
 ### tddy-daemon
 - [x] **Integration** ✅: `connection.ConnectionService` no longer declares `StreamLiveKitRooms`, and
-      `livekit.LiveKitService` is registered (`service_registration_acceptance.rs`)
+      `livekit.LiveKitService` is registered — in **`livekit_service_registration_acceptance.rs`**,
+      not the planned `service_registration_acceptance.rs`: node 2 created a file of that name
+      first, for the model-registry/screen-sharing/VNC roster, and two unrelated subjects in one
+      file would re-conflict on every rebase. Asserts by **dispatching**, not by reading a name
+      list — `livekit.LiveKitService` answers `Unauthenticated` (handler reached, token judged)
+      while `connection.ConnectionService` answers `NotFound` (handler gone, not merely refused)
 
 ## Decisions & Trade-offs
 
