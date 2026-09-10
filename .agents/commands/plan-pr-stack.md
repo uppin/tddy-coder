@@ -752,6 +752,13 @@ Step 4b records them per node. The two directions are complementary — what thi
 somebody's Step 2b finds next, so write entries stating **why** the work was deferred, not only what
 remains. That reason is what tells the next planner whether it blocks them.
 
+**And it is read once more before this stack lands.** Every entry written here is re-examined at
+stack close — `/pr-wrap` on the top node and `/merge-pr-stack` 1e ask whether it could be closed by
+one extra node while the context is still loaded (`pr-stack` § *The backlog delta a stack leaves*).
+A stated reason is what that sweep judges, and the reason worth stating precisely is the one a later
+node in this same stack might invalidate: "deferred because there is no seam for it" becomes
+actionable the moment some node builds the seam.
+
 ## Rules
 
 - **Register the stack.** `gh pr create --draft --base <predecessor>` opens each PR; the stack is

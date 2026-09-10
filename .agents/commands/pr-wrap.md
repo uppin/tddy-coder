@@ -198,6 +198,32 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 **Parent-owned code, files and `TODO`/`FIXME` markers are NOT this PR's WIP** — they belong to the PR
 that owns them and stay exactly as they are. Only what this PR added counts against the gate.
 
+#### Top node only (K = N): sweep the stack's backlog delta
+
+The **top** node is the stack's last chance to fix anything cheaply. Below it, every node's own
+`docs/dev/todo/` handling is covered by the gate row above; here the subject is different — the
+entries **the stack as a whole added or edited down**, from planning's out-of-scope ideas, `/green`'s
+deferrals, and every ⚠ DURING verdict that recorded an entry the work touched and left.
+
+```bash
+BASE=$(git merge-base origin/master HEAD)
+git diff --name-status "$BASE"..HEAD -- docs/dev/todo/     # A = added by the stack, M = edited down
+```
+
+For each, ask: *could this be fixed inside the surface this stack already owns, as one more node?*
+The three verdicts and their criteria are in the `pr-stack` skill § *The backlog delta a stack
+leaves*. Look hardest for an entry an early node deferred **for want of something a later node then
+built** — the entry still states the original reason, which stopped being true inside this stack.
+
+- **An *Extra node* verdict is the user's decision**, since it grows the stack: present the entry, the
+  fix you would make and its size, and let them choose. If they take it, `/add-to-pr-stack` on this
+  branch, and this PR is no longer the top — renumber per that command.
+- **This does not block marking the PR ready.** *Leave it* is a normal answer; leaving the question
+  unasked is not.
+- Whatever is left stays in the backlog **with the reason written into the entry** — that is what the
+  next planner's Step 2b reads. `/merge-pr-stack` Wave 1 asks the same question again before anything
+  merges, and `/eval-changeset` reports the delta as part of what the stack cost.
+
 #### Push, then mark this PR ready
 
 ```bash
@@ -292,6 +318,7 @@ Create TODO list and mark each step complete:
 - **Production Ready**: ✅ Yes
 - **Documentation**: ✅ Wrapped
 - **Backlog**: N `docs/dev/todo/` entries deleted, M kept (with reasons)
+- **Backlog delta** (top node only): N entries this stack added/edited — X routed to an extra node, Y left with reasons
 - **Stack** (stack branches only): rebase ✅ · readiness gate ✅ · title `<final title>` · `gh pr ready <N>` ✅ / n/a
 
 ### 🎯 Recommendation

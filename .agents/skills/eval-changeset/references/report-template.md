@@ -136,6 +136,23 @@ its successor, a document missing one of the five required headings, or a chain 
 **Incidental:** <file> — <the tax, and which friction site in § 7 imposed it>
 **Opportunistic:** <file> — <unrelated cleanup that rode along>
 
+## 5a. Backlog delta (`docs/dev/todo/`)
+
+<What the changeset deferred instead of doing, from `git diff --name-status "$BASE"..HEAD --
+docs/dev/todo/`. Kept out of the § 2 line totals: deferred work is not lines this changeset shipped.>
+
+| Entry | Δ | Written by | Fixable in this changeset's own surface? | Finding |
+|---|---|---|---|---|
+| `<date>-<slug>.md` | added | PR <k>/N | yes — `<file>` this stack already changed, ≈<n> lines | **missing extra node** → § 8 |
+| `<date>-<slug>.md` | edited down | PR <k>/N | no — needs `<the other surface / its own design>` | correctly deferred |
+| `<date>-<slug>.md` | resolved (deleted) | PR <k>/N | — | credit: claimed ✅ RESOLVED HERE and wrapped |
+
+**Wrap misses:** <entries the tree shows fixed that no changeset named, so they are still in the
+backlog telling the next planner a lie — or "none">
+
+**Deferred for a reason that this changeset then invalidated:** <an entry an early node deferred for
+want of a seam a later node built — the entry still states the original reason. Or "none found">
+
 ## 6. Justification
 
 <Whether the size and complexity above are warranted by the intent in § 1. Cite the essential share,
@@ -147,7 +164,8 @@ layers. A layer split is a boundary-contract violation, not a style preference.>
 
 <If the change is smaller than the problem — a fallback added without consent, a test-only branch in
 production code, a TODO standing in for the hard half — that is under-scoped, and belongs here, not
-in a footnote. CLAUDE.md forbids the first two outright.>
+in a footnote. CLAUDE.md forbids the first two outright. § 5a is the quantified form of the same test:
+a changeset that looks lean because it deferred half the problem into the backlog is under-scoped.>
 
 ## 7. How the design served the change
 
@@ -174,6 +192,9 @@ each would have avoided. Costs nothing to adopt; applies to the next stack.>
   one cannot be registered as a stack.>
 - **Split PR <k>/N (<n> files) into `<a: the separable remainder>` → `<b: the atomic core>`** — each
   self-greenable, <n> and <m> files. <Which order, and why that one.>
+- **Add node <N+1>: `<what it does>`**, closing `<date>-<slug>.md` from § 5a — ≈<n> lines in `<file>`
+  the stack already owns. <If the stack has NOT landed, say so: this one is still actionable now, via
+  `/add-to-pr-stack` on the top node.>
 
 ### Redesign — ranked by (lines saved next time × recurrence) ÷ migration cost
 

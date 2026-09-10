@@ -71,3 +71,25 @@ Two consequences:
 was fixed by a change that never recorded it, where the marker preserves the finding for whoever
 looks next. `grep -rL 'Status:\*\* Resolved' docs/dev/todo/` therefore still lists the open items,
 because resolved ones are usually simply gone.
+
+## An entry written during a PR stack is re-read before that stack lands
+
+A stack that defers work into this directory gets **one more chance at it**, deliberately. Before the
+stack is reviewed (`/pr-wrap` on its top node) and again before anything merges (`/merge-pr-stack`
+1e), the entries the stack added or edited down are swept and each gets a verdict: close it in **one
+extra stacked PR**, fold it into a node that is still open, or leave it. See the `pr-stack` skill
+§ *The backlog delta a stack leaves*.
+
+The sweep exists because of when it runs. While the stack is open the surfaces, seams and tests in
+question are the ones that work just built, so the fix costs one more node; once it lands, the same
+fix costs a fresh planning cycle to re-acquire all of it.
+
+Two things this asks of an entry:
+
+- **State why the work was deferred, specifically.** The sweep judges that reason, and the reason
+  worth writing precisely is one a later node might invalidate — "no seam exists for it yet" stops
+  being true the moment some node in the same stack builds the seam, and nobody notices that from the
+  backlog alone.
+- **An entry left after a sweep records that it was left, and why.** This directory is the only thing
+  that survives the stack: the merge plan is gitignored scratch and the changesets are deleted at
+  wrap.

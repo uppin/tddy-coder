@@ -497,6 +497,53 @@ The backlog is shared and visible from every branch, so ownership works exactly 
 - An entry deleted on the base but still present here is `/pr-stack-rebase`'s to clear, like any
   other inherited deletion.
 
+### The backlog delta a stack leaves — sweep it before the stack lands
+
+A stack does not only *resolve* backlog entries, it **writes** them: planning's out-of-scope ideas,
+deferrals made during implementation, and every ⚠ DURING verdict that recorded an entry the work touched and left. By
+the time the top node is ready the stack has a **backlog delta** — the entries it added, plus the ones
+it edited down to what remained.
+
+Judge that delta **while the stack is still open**, because that is the only moment the cheap fix
+exists:
+
+- the context is loaded — the surfaces, seams and tests in question are the ones this work just built;
+- the top node is still a valid base, so one more node costs `/add-to-pr-stack` and nothing else;
+- an entry an early node deferred **for want of something a later node then built** is often trivial
+  now. The entry still states the original reason, and that reason stopped being true inside this same
+  stack — nobody reading the backlog months later will notice.
+
+Once the stack lands, the same fix costs a fresh planning cycle to re-acquire what this session
+already holds.
+
+**The question, per entry in the delta:** *could this be fixed inside the surface this stack already
+owns, as one more node?*
+
+| Verdict | When | What happens |
+|---|---|---|
+| **Extra node** | the fix touches only surfaces this stack's nodes own, needs no new design decision, and is self-greenable as a vertical slice | `/add-to-pr-stack` on the current top node; its changeset marks the entry ✅ RESOLVED HERE, and its wrap deletes the file |
+| **Fold into an open node** | the entry belongs to a node still open, and the fix is a few lines inside that node's own diff | fix it there and promote that node's verdict to ✅ RESOLVED HERE |
+| **Leave it** | different surface, needs its own design, or large enough to bury a reviewable diff under a mechanical one | the entry stays — **with the reason it stays recorded in it**, since that is what the next planner's Step 2b reads |
+
+**"Leave it" is a normal answer**, and the sweep is not a licence to grow the stack: an extra node is
+another review, another CI run and another `gh stack link` registration, and a stack that keeps
+appending nodes never lands. What the sweep forbids is *not deciding* — letting an entry outlive the
+stack because nobody asked the question while the answer was cheap.
+
+Two invariants:
+
+- **The sweep never deletes an entry itself.** It only routes. Either some node's changeset claims the
+  entry ✅ RESOLVED HERE and that node's wrap deletes it, or the entry stays; there is no path where a
+  file leaves `docs/dev/todo/` without a changeset naming it.
+- **An extra node is a whole node.** The boundary contract does not relax for it — own documents, own
+  tests, own `K/N` title, independently reviewable and mergeable. It is not a bin for odd jobs: two
+  unrelated entries are two nodes, or one node and one *Leave it*.
+
+Where the sweep runs: `/pr-wrap` on the **top** node (the stack's last chance before review),
+`/merge-pr-stack` **Wave 1** (before anything merges, recorded in the merge plan), and
+`/eval-changeset`, which reports the delta as part of what the changeset cost — including the extra
+node that should have been added and was not.
+
 ### Where the whole-stack views come from
 
 | You want | Read |
