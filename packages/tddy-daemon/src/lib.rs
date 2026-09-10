@@ -19,7 +19,6 @@ pub use tddy_worktree_service::{
     base_sync_cache, branch_intent, branch_owner, project_provision, project_storage,
     remote_git_service, worktree_files, worktrees,
 };
-pub mod bsp_service;
 pub mod claude_cli_session;
 pub mod cli_session_manager;
 mod codex_oauth_participant_metadata;
@@ -59,7 +58,6 @@ pub mod pty_registry;
 pub mod pty_runtime;
 pub mod relay_idle;
 pub mod runtime;
-pub mod semantic_index;
 pub mod server;
 pub mod session_admission_service;
 pub mod session_agent_clone;

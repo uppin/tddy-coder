@@ -212,7 +212,7 @@ impl ConnectionServiceImpl {
                     "semantic index requested but no embedder is available: {e}"
                 ))
             })?;
-        crate::semantic_index::run_semantic_index_blocking(
+        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
             &worktree_path,
             &session_dir,
             embedder,

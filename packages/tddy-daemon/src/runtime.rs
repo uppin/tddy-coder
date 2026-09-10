@@ -602,7 +602,7 @@ pub async fn build(
         // Session-addressed BSP resolver: reproduce the ExecuteTool preamble (token → os_user →
         // sessions_base → `.session.yaml` repo_path) to yield a session's worktree + catalog dir.
         // Built here, before the resolvers are moved into ConnectionServiceImpl below.
-        let bsp_session_resolver: crate::bsp_service::SessionPathsResolver = {
+        let bsp_session_resolver: tddy_bsp::bsp_service::SessionPathsResolver = {
             let user_resolver = user_resolver.clone();
             let config = config.clone();
             let sessions_base_resolver = sessions_base_resolver.clone();
@@ -956,13 +956,10 @@ pub async fn build(
         // BSP build server — session-addressed: each request's token/session_id resolves to that
         // session's worktree + catalog.db (`bsp_service`), so daemon-managed claude-cli/cursor
         // sessions expose build targets over the same surface as ConnectionService.
-        let bsp_server = tddy_service::BspServiceServer::new(
-            crate::bsp_service::DaemonBspService::new(bsp_session_resolver, tddy_data_dir.clone()),
-        );
-        rpc_entries.push(tddy_rpc::ServiceEntry {
-            name: "bsp.BspService",
-            service: Arc::new(bsp_server) as Arc<dyn tddy_rpc::RpcService>,
-        });
+        rpc_entries.push(tddy_bsp::build_bsp_service_entry(
+            bsp_session_resolver,
+            tddy_data_dir.clone(),
+        ));
 
         // VM lifecycle service — gated on auth being configured (same as ConnectionService).
         // Per-VM manifest files under the VM & Image Library are the source of truth

@@ -351,7 +351,7 @@ impl ConnectionServiceImpl {
                         "semantic index requested but no embedder is available: {e}"
                     ))
                 })?;
-            crate::semantic_index::run_semantic_index_blocking(
+            tddy_semantic_index::semantic_index::run_semantic_index_blocking(
                 &worktree_path,
                 &session_dir,
                 embedder,
@@ -360,7 +360,9 @@ impl ConnectionServiceImpl {
             )
             .await
             .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-            semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
+            semantic_index_env_pair = Some(
+                tddy_semantic_index::semantic_index::semantic_index_env(&session_dir),
+            );
         }
 
         let mut env = crate::sandbox_session::build_sandboxed_cursor_runner_env(

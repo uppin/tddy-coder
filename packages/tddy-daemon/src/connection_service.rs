@@ -1021,7 +1021,7 @@ async fn spawn_claude_cli_session_inner(
                 "semantic index requested but no embedder is available: {e}"
             ))
         })?;
-        crate::semantic_index::run_semantic_index_blocking(
+        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
             &worktree_path,
             &session_dir,
             embedder,
@@ -1030,7 +1030,7 @@ async fn spawn_claude_cli_session_inner(
         )
         .await
         .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-        let (key, value) = crate::semantic_index::semantic_index_env(&session_dir);
+        let (key, value) = tddy_semantic_index::semantic_index::semantic_index_env(&session_dir);
         env_extra.push((key, value));
     }
 
