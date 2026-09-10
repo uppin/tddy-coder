@@ -26,6 +26,22 @@ The last 16 methods this stack moves leave `connection.ConnectionService`, takin
 **This node adds no new crates.** All three services are served from crates that already own their
 domains after node 5. It is the node that finishes the job rather than one that creates more structure.
 
+### The local socket keeps its surface
+
+Per the policy node 7 set: every family that was reachable on the local Unix socket as part of
+`connection.ConnectionService` **stays reachable there after it moves**. Dropping one is a silent
+capability removal on a privileged interface, and the failure mode is a caller that used to work
+receiving `unimplemented` with no announcement.
+
+So all three of this node's services go on the socket: `catalog.CatalogService` (4),
+`exec_tools.ExecToolService` (4) and `pr_stack.PrStackService` (8) = **16 adapter methods**,
+**generated** by node 6's `generate_tonic_adapter`.
+
+`exec_tools.ExecToolService` matters most of the three: `ExecuteTool` is the method
+`tddy-sandbox-runner`'s relay allowlist gates at `runner.rs:69` and `tddy-sandbox-app`'s mirror guard
+names — so it is reached from inside a jail, and a family that silently left the socket would fail
+there rather than anywhere a developer is looking.
+
 Three things end here:
 
 1. **The exec-tool catalog duplication closes completely.** `tddy-tool-engine` already defines and
@@ -51,6 +67,8 @@ This PR explicitly does **not**:
 - Move `session_list_enrichment.rs`, `split_session.rs`, `cli_session_manager.rs`,
   `workspace_session.rs`, `session_deletion.rs`, `session_reader.rs`, `project_storage.rs` or
   `project_provision.rs`. All belong to families C and D and stay.
+- **Hand-write a tonic adapter.** A gap in node 6's generator is reported upward, not worked around
+  with 16 `async fn`s — hand-writing them is the cost the generator exists to remove.
 - Change what the sandbox relay allowlist *permits*. Identical operation set; only the service name
   each condition carries changes.
 - Widen `tddy-discovery`'s dependencies to take a `DaemonConfig`. `main.rs` already extracts rows with
@@ -72,7 +90,8 @@ implementing one here collides with the PR that owns it.
 | **`n5` tools-thinning** | **the single exec-tool catalog and the dynamic tool proxy in `tddy-tool-engine`; the PR-stack MCP tools and `github_pr` in `tddy-workflow-recipes`; the subagent roster in `tddy-discovery`** | each of the three services is served from the crate node 5 made the owner of its domain. Its `Draft PR contract` fixed `tddy-tool-engine`'s surface for exactly this | re-introduce a second catalog, or move any of those surfaces again |
 | `n3` sandbox-spawn-services | the relocated `tool_catalog_sync.rs` guard test | this PR deletes it, because with one catalog it compares a thing to itself | delete it before node 5 has collapsed the catalog — the guard is what proves the collapse was correct |
 | `n7` session-agent-services | the family-B tuples in `packages/tddy-sandbox-runner/src/runner.rs:89-94` | this PR edits the **same file** at `:69` for family L | change node 7's family-B tuples |
-| `n2`, `n4`, `n6` | nothing this PR consumes | — | — |
+| **`n6` session-io-services** | **a working `generate_tonic_adapter`** in `tddy-codegen` | all three of this node's services go on the local socket per the policy, and their 16 adapter methods are generated. A dependency on node 6's **behaviour**, not its published surface — which is what puts this node in wave 4 | implement or extend the generator, or hand-write an adapter; a gap is reported to node 6 |
+| `n2`, `n4` | nothing this PR consumes | — | — |
 
 ## Draft PR contract
 
@@ -93,17 +112,27 @@ that state.**
 
 ## Green wave
 
-**Wave:** 3 of 3
-**Greenable independently:** **not until node 5 is green.** All three services are served from crates
-node 5 makes the owners of their domains, and `tddy-tool-engine`'s surface in particular was fixed by
-node 5's draft contract for this node to compile against.
-**Concurrent with:** nodes 4, 6 and 7 — disjoint proto families, with the three shared-file conflicts
-noted below.
-**Blocks:** nothing. It is the top of the stack.
+**Wave:** **4 of 5** — moved from 3 by the local-socket policy.
+**Greenable independently:** **not until node 6 is green.** Two reasons. All three services are served
+from crates node 5 makes the owners of their domains, and `tddy-tool-engine`'s surface was fixed by
+node 5's draft contract for this node to compile against — that was always true. And under the
+reachability policy this node's 16 adapter methods are **generated** by node 6's
+`generate_tonic_adapter`, which is a dependency on a predecessor's *behaviour*: the generator has to
+actually work.
+**Concurrent with:** node 7, which depends on node 6 for the same reason and shares this wave.
+**Blocks:** node 9, which is wave 5. This node is no longer the top of the stack.
 
 Real dependency edges, as opposed to the branch line:
 
-    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8
+    n1 → n2, n3, n4, n5      n2 → n4      n5 → n6, n7, n8      n6 → n7, n8      n7, n8 → n9
+
+    w1  n1
+    w2  n2, n3, n5
+    w3  n4, n6
+    w4  n7, n8        ← this node
+    w5  n9
+
+The local-socket policy is what deepened the graph from four waves to five.
 
 ⚠ **Three recurring conflicts**: `packages/tddy-daemon/src/runtime.rs` (every node),
 `packages/tddy-coder/src/session_participant/mod.rs` (nodes 6, 7, 8), and
@@ -207,6 +236,8 @@ becomes unambiguous — the crate that owns the recipe also owns the RPC. Update
 - [ ] **`tddy-discovery` serves family A**; gains `agent_list_mapping.rs`; **the hand-built URL replaced
       by a generated client call**, with its 4 wiremock assertions updated
 - [ ] **`tddy-workflow-recipes` serves family P**
+- [ ] **Local socket**: all three services adapted and `add_service`d; 16 methods, **generated** by
+      node 6's `generate_tonic_adapter`, not hand-written
 - [ ] **⛔ Sandbox relay allowlist**: `runner.rs:69` and `sandboxed_session.rs:708` re-pointed; permitted set unchanged
 - [ ] **⛔ `tddy-coder` lockstep**: family L moved in this PR
 - [ ] **⛔ Action-tool advertisement**: verified closed from node 5
@@ -322,12 +353,23 @@ Three further proofs:
 - [ ] **Cypress component**: the session inspector lists tools and tool calls at the new coordinate (`SessionInspectorDrawer.cy.tsx`)
 - [ ] **Cypress component**: the PR-stack screen adds, repoints and reorders a planned PR (`PrStackScreen.cy.tsx`)
 
+### tddy-daemon (the local socket)
+- [ ] **Integration**: all three services answer over the **local Unix socket**, not only over
+      Connect-HTTP (`local_socket_reachability_acceptance.rs`)
+- [ ] **Integration**: an in-jail `ExecuteTool` reaches the daemon over the socket at the new
+      coordinate (`in_jail_exec_tool_acceptance.rs`)
+- [ ] **Unit**: no hand-written adapter is added by this node (`local_socket_reachability_acceptance.rs`)
+
 ### tddy-service
 - [ ] **Unit**: `connection.ConnectionService` declares exactly 17 methods, and they are families C, D, O and Q (`connection_final_shape_unit.rs`)
 - [ ] **Unit**: no source file composes an RPC path from a service-name string literal (`no_handbuilt_urls_unit.rs`)
 
 ## Decisions & Trade-offs
 
+- **The local socket keeps its surface, so the generator is a hard dependency.** This node adds no
+  crate but does add 16 adapter methods to the socket, and they are generated rather than
+  hand-written. That is what moved this node out of wave 3 — a cost the eight-node plan never
+  accounted for because it never set a policy on socket reachability at all.
 - **No new crates.** Family P could have had a `tddy-pr-stack-service`, and family A a
   `tddy-catalog`. Both would split a domain that node 5 had just finished consolidating —
   `tddy-workflow-recipes` owns the PR-stack recipes *and* its MCP tools, `tddy-discovery` owns the
