@@ -33,7 +33,7 @@ its domain.
 | `tddy-discovery` | `server.rs` seam D (the subagent conversation runtime), `session_agents/registry.rs`, `relay.rs` | ~2,180 |
 | `tddy-tool-engine` | `server.rs` seam C (the dynamic tool proxy and `exec_tool_catalog`) | ~190 |
 | `tddy-terminal-rpc` | `pty_relay.rs` | 843 |
-| `tddy-core` | `toolcall_client.rs`, `session_context.rs`, `session_actions_cli.rs`, `session_hook.rs`, `list_models.rs`, `action_tools.rs`, and `cli.rs`'s wire types and relay pairs | ~1,200 |
+| `tddy-core` | `toolcall_client.rs`, `session_context.rs`, `cli.rs`'s wire types and relay pairs, and the non-CLI half of `action_tools.rs`, `list_models.rs` and `session_actions_cli.rs` (`session_hook.rs` cannot move — cycle) | ~700 |
 | `tddy-bsp` | `build_cli.rs`'s dispatch | 194 |
 | `tddy-code-analysis` | `analyze_cli.rs`'s dispatch | 86 |
 | `tddy-code-restructuring` | `restructure_cli.rs`'s dispatch | 147 |
@@ -86,17 +86,26 @@ This PR explicitly does **not**:
   The same rule that keeps seams A and E here keeps seam B: the shape of an MCP tool belongs to the
   crate that speaks MCP. M3 already applied it when `lsp_tool_catalog()` kept returning `LspToolDef`
   rather than `RemoteToolDef`.
-- Move `session_hook`, `list_models`, `session_actions_cli` or `session_context` into `tddy-core`.
-  **Changed during green — the plan said all six moved.** `tddy-core` has no `anyhow`, no `clap`,
-  no `prost` and no `reqwest`, deliberately: it is the base library every crate in the workspace
-  builds, and its error type is `thiserror`. All four of these modules are CLI dispatch — clap arg
-  structs, `println!` of a JSON contract, `anyhow::Result` plumbing, `std::process::exit` with a
-  classified code — and `session_hook` additionally imports `tddy_service::proto::connection`,
-  while `tddy-service` depends on `tddy-core`: moving it is a dependency **cycle**, not a cost.
-  What moved instead is the part of each that is not CLI: nothing in `session_context` or
-  `session_actions_cli` beyond their `anyhow` shells, and `action_tools`' manifest rules. The rule
-  is seam B's, one level down: the shape of a CLI subcommand belongs to the crate that parses
-  arguments. Earns a `## Scope` line and a milestone note.
+- Move `session_hook` into `tddy-core`, or move `list_models` / `session_actions_cli` there whole.
+  **Changed during green — the plan said all six moved.** Three distinct outcomes, not one:
+  - **`session_hook` cannot move at all.** It imports `tddy_service::proto::connection`, and
+    `tddy-service` depends on `tddy-core`. That is a dependency **cycle**, not a cost, and no
+    dependency addition fixes it. It stays in `tddy-tools` whole.
+  - **`session_context` moved.** Its only blocker was `anyhow`, which `tddy-core` did not have.
+    Adding it was a deliberate, developer-authorised decision (see `## Decisions & Trade-offs`);
+    the module then moved verbatim, 66 lines.
+  - **`list_models` and `session_actions_cli` are split, not moved.** `anyhow` alone did not
+    unblock them: both parse clap arguments, both `println!` a JSON contract, and
+    `session_actions_cli` exits with a classified code. `tddy-core` is a library the TUI depends
+    on, and CLAUDE.md forbids direct stdout in any path that runs under the TUI — moving those
+    functions into it would put that hazard somewhere far more dangerous than a binary crate. So
+    the logic moved and the surface stayed: `list_models` 172 → 52 with the catalogue assembly and
+    its JSON contract in `tddy_core::backend::model_catalog` (159), beside the backends it
+    enumerates; `session_actions_cli` 136 → 66 with the session-directory resolution in
+    `tddy_core::session_actions::session_dir` (105).
+
+  The rule throughout is seam B's, one level down: the shape of a CLI subcommand belongs to the
+  crate that parses arguments. Earns a `## Scope` line and a milestone note.
 - Retire that NDJSON protocol. Recorded in `docs/dev/todo/` at wrap.
 - Move any `tddy-daemon` module. Nodes 1–4 did the daemon; nodes 6–8 do the rest.
 - Change the 25 `TDDY_*` environment variables that are `tddy-tools`' real hidden interface
@@ -437,6 +446,15 @@ afterwards, verified by grep over the destinations rather than by assumption.
   **43** with the claim and **40** without, differing in exactly `request_action`, `list_actions`,
   `invoke_action` and nothing else. The three that go are the three that answered
   `{"error":"unknown tool: ListActions","is_error":true}` to every call.
+- **`anyhow` was added to `tddy-core`, on an explicit developer decision.** The crate was
+  deliberately `thiserror`-only — zero `anyhow` and zero `clap` hits across its whole `src` tree —
+  and three of M5's movers were blocked on that alone. The two ways out were to add the dependency
+  or to rewrite each moved body into `tddy-core`'s error style. The rewrite was rejected: it breaks
+  the verbatim-move property this node's behaviour-preserving claim rests on, turning a restructure
+  into a rewrite of four modules' error handling. `anyhow` is one widely-used crate already
+  everywhere else in the workspace, so it adds no new third-party code to the tree — only a new
+  edge from the base library. It unblocked `session_context` outright and the non-CLI halves of
+  `list_models` and `session_actions_cli`; it did **not** unblock `session_hook`, which is a cycle.
 - **Breaking the three cycles is step zero, in the same PR.** It is ~8 items in one new module and it
   gates every other move here. Making it a separate node would produce a PR whose only deliverable is
   a module nobody imports yet — the stubs-only shape the boundary contract forbids.

@@ -12008,6 +12008,7 @@ name = "tddy-core"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "anyhow",
  "async-trait",
  "chrono",
  "dashmap 6.2.1",

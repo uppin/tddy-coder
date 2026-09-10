@@ -1,7 +1,7 @@
 //! Lower-level Red tests for `session_context::apply_session_context_merge` (library API).
 
 use serde_json::json;
-use tddy_tools::session_context::apply_session_context_merge;
+use tddy_core::session_context::apply_session_context_merge;
 use tempfile::tempdir;
 
 #[test]

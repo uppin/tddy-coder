@@ -17,7 +17,6 @@ use tddy_core::toolcall::{
 };
 use tddy_core::{read_changeset, write_changeset, ChangesetWorkflow};
 use tddy_tools::session_actions_cli;
-use tddy_tools::session_context;
 use tddy_workflow_recipes::review::persist_review_md_to_session_dir;
 use tddy_workflow_recipes::{schema, schema_manifest};
 
@@ -733,7 +732,7 @@ pub fn run_set_session_context(args: SetSessionContextArgs) -> Result<()> {
         anyhow::anyhow!("TDDY_WORKFLOW_SESSION_ID is required for set-session-context")
     })?;
     let workflow_dir = PathBuf::from(session_dir).join(".workflow");
-    session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
+    tddy_core::session_context::apply_session_context_merge(&workflow_dir, &session_id, &patch)
 }
 
 pub async fn run_list_actions(args: ListActionsArgs) -> Result<()> {

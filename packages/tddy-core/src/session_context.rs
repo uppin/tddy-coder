@@ -1,9 +1,9 @@
 //! Merge JSON into workflow session files for the `set-session-context` CLI.
 
+use crate::workflow::session::Session;
 use anyhow::{bail, Context as AnyhowContext, Result};
 use std::fs;
 use std::path::Path;
-use tddy_core::workflow::session::Session;
 
 /// Maximum length for a single context key string (aligned with safe identifier storage).
 const MAX_CONTEXT_KEY_BYTES: usize = 256;
@@ -29,7 +29,7 @@ pub fn apply_session_context_merge(
     patch: &serde_json::Value,
 ) -> Result<()> {
     log::info!(
-        target: "tddy_tools::session_context",
+        target: "tddy_core::session_context",
         "apply_session_context_merge: session_id={} dir={}",
         session_id,
         workflow_storage_dir.display()
@@ -48,17 +48,17 @@ pub fn apply_session_context_merge(
         .with_context(|| format!("parse session JSON {}", path.display()))?;
 
     log::debug!(
-        target: "tddy_tools::session_context",
+        target: "tddy_core::session_context",
         "merging {} key(s) into session context",
         obj.len()
     );
     session.context.merge_json_object_sync(obj);
 
     let out = serde_json::to_string_pretty(&session)?;
-    tddy_core::atomic_file::write_atomic(&path, out)
+    crate::atomic_file::write_atomic(&path, out)
         .with_context(|| format!("write session file {}", path.display()))?;
     log::info!(
-        target: "tddy_tools::session_context",
+        target: "tddy_core::session_context",
         "apply_session_context_merge: wrote {}",
         path.display()
     );

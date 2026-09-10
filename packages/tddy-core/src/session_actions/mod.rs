@@ -1,6 +1,6 @@
 //! Declarative **session actions**: YAML manifests under `<session>/actions`, validation, invocation contracts.
 //!
-//! See **[session-actions.md](../../../../docs/ft/coder/session-actions.md)**. CLI wiring lives in **tddy-tools** (`session_actions_cli`).
+//! See **[session-actions.md](../../../../docs/ft/coder/session-actions.md)**. CLI wiring — argument parsing, stdout and exit codes — lives in **tddy-tools** (`session_actions_cli`).
 
 mod arch;
 mod authoring;
@@ -10,6 +10,7 @@ mod list;
 mod manifest;
 mod paths;
 pub(crate) mod runtime;
+mod session_dir;
 mod summary;
 mod tool_gate;
 mod validate;
@@ -28,6 +29,9 @@ pub use paths::{
 };
 pub use runtime::action_manifest_to_spec;
 pub use runtime::run_manifest_blocking;
+pub use session_dir::{
+    invoke_action_in_session_dir, list_actions_in_session_dir, ListActionsResponse,
+};
 pub use summary::{
     invocation_record_summary_value, parse_test_summary_from_process_output, TestSummary,
 };
