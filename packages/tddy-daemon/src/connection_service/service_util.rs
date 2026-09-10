@@ -1,10 +1,7 @@
+use tddy_daemon_kernel::trim_to_option;
 use tddy_task::TerminalCapture;
 
 use crate::cli_session_manager::MAIN_TERMINAL_ID;
-
-use std::path::PathBuf;
-
-use std::sync::Arc;
 
 use std::path::Path;
 
@@ -121,12 +118,6 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
     .await
 }
 
-/// Resolves session token to GitHub user login.
-pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-/// Resolves OS user to sessions base path.
-pub type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
-
 /// Resolve a request's `terminal_id`, defaulting an empty value to the reserved main terminal so
 /// existing single-terminal clients keep working.
 pub(crate) fn resolved_terminal_id(raw: &str) -> &str {
@@ -182,12 +173,8 @@ pub(crate) fn sandbox_replay_frames(
 pub(crate) fn resume_agent_and_recipe(
     metadata: &tddy_core::SessionMetadata,
 ) -> (Option<String>, Option<String>) {
-    fn non_blank(value: &Option<String>) -> Option<String> {
-        value
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    }
-    (non_blank(&metadata.agent), non_blank(&metadata.recipe))
+    (
+        metadata.agent.as_deref().and_then(trim_to_option),
+        metadata.recipe.as_deref().and_then(trim_to_option),
+    )
 }

@@ -18,22 +18,21 @@ use tddy_service::proto::connection::{
     DeleteStagedAttachmentRequest, DeleteStagedAttachmentResponse, GetAcpReplayPageRequest,
     GetAcpReplayPageResponse, GetAcpToolCallDetailRequest, GetAcpToolCallDetailResponse,
     GetPrStatusRequest, GetPrStatusResponse, GetWorktreeSnapshotRequest,
-    GetWorktreeSnapshotResponse, HostCpuStats, HostDiskStats, HostDocumentChunk, HostDocumentScope,
-    HostLoadStats, HostMemoryStats, HostStatsEvent, LinkStackNodeRequest, LinkStackNodeResponse,
-    ListSessionUploadsRequest, ListSessionUploadsResponse, ListStagedAttachmentsRequest,
-    ListStagedAttachmentsResponse, LiveKitRoomsEvent, MintLocalTokenRequest,
-    MintLocalTokenResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest, ReadHostDocumentResponse,
-    ReorderPlannedPrRequest, ReorderPlannedPrResponse, RepointPlannedPrRequest,
-    RepointPlannedPrResponse, ResolveStackBaseRequest, ResolveStackBaseResponse,
-    SessionNotificationEvent as ProtoSessionNotificationEvent, SessionUploadEntry,
-    StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest, StreamHostStatsRequest,
+    GetWorktreeSnapshotResponse, HostDocumentChunk, HostDocumentScope, LinkStackNodeRequest,
+    LinkStackNodeResponse, ListSessionUploadsRequest, ListSessionUploadsResponse,
+    ListStagedAttachmentsRequest, ListStagedAttachmentsResponse, LiveKitRoomsEvent,
+    MintLocalTokenRequest, MintLocalTokenResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReadHostDocumentRequest,
+    ReadHostDocumentResponse, ReorderPlannedPrRequest, ReorderPlannedPrResponse,
+    RepointPlannedPrRequest, RepointPlannedPrResponse, ResolveStackBaseRequest,
+    ResolveStackBaseResponse, SessionNotificationEvent as ProtoSessionNotificationEvent,
+    SessionUploadEntry, StagedAttachmentEntry, StartSessionEvent, StreamAcpReplayRequest,
     StreamLiveKitRoomsRequest, TerminalControlEvent, UploadSessionFileChunkRequest,
     UploadSessionFileChunkResponse, UploadStagedAttachmentChunkRequest,
     UploadStagedAttachmentChunkResponse, WatchTerminalControlRequest,
 };
 use tddy_service::proto::connection::{
-    AddHostKeyOutcome, AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest,
+    AgentActivityDeltaChunk, AgentActivityDeltaRequest, ExecuteToolRequest,
     ProjectEntry as ProtoProjectEntry,
 };
 use tddy_service::proto::connection::{
@@ -54,29 +53,13 @@ use tddy_service::proto::connection::{
 
 use super::file_mtime_ms;
 
-use tddy_service::proto::connection::CalculateWorktreeSizeResponse;
-
-use tddy_service::proto::connection::CalculateWorktreeSizeRequest;
-
-use tddy_service::proto::connection::WorktreeStatsEvent;
-
 use crate::{
     connection_service::{
-        activity_hub, agent_roster, hooks_and_urls, host_messages, seed_codebase,
-        seeded_clone_guard, service_util,
+        activity_hub, agent_roster, hooks_and_urls, seed_codebase, seeded_clone_guard, service_util,
     },
     project_storage, session_deletion, session_list_enrichment, session_reader, spawn_worker,
     spawner,
-    worktrees::{self, WorktreeDiffRow},
 };
-
-use tddy_service::proto::connection::StreamWorktreeStatsRequest;
-
-use super::MpscWorktreeStatsStream;
-
-use crate::host_stats::HostStats;
-
-use super::MpscHostStatsStream;
 
 use crate::livekit_rooms_stream::pump_rooms;
 
@@ -122,22 +105,6 @@ use tddy_service::proto::connection::ListProjectBranchesResponse;
 
 use tddy_service::proto::connection::ListProjectBranchesRequest;
 
-use tddy_service::proto::connection::RestoreSessionWorktreeResponse;
-
-use tddy_service::proto::connection::RestoreSessionWorktreeRequest;
-
-use super::map_clean_worktree_error;
-
-use tddy_service::proto::connection::CleanWorktreeResponse;
-
-use tddy_service::proto::connection::CleanWorktreeRequest;
-
-use super::map_remove_worktree_error;
-
-use tddy_service::proto::connection::RemoveWorktreeResponse;
-
-use tddy_service::proto::connection::RemoveWorktreeRequest;
-
 use tddy_service::proto::connection::StartTerminalSessionRequest;
 
 use tddy_service::proto::connection::GetTerminalHistoryRequest;
@@ -164,16 +131,6 @@ use tddy_rpc::Streaming;
 
 use super::MpscTerminalOutputStream;
 
-use super::proto_worktree_size_status;
-
-use crate::worktrees::WorktreeSizeStatus;
-
-use tddy_service::proto::connection::WorktreeRow;
-
-use tddy_service::proto::connection::ListWorktreesForProjectResponse;
-
-use tddy_service::proto::connection::ListWorktreesForProjectRequest;
-
 use super::activity_delta_frames;
 
 use crate::session_room::DeltaLookupError;
@@ -192,20 +149,6 @@ use tddy_service::proto::connection::ContextManifestRequest;
 
 use tddy_service::proto::connection::ContextManifestEntry;
 
-use super::worktree_file_frames;
-
-use tddy_service::proto::connection::WorktreeFileChunk;
-
-use tddy_service::proto::connection::ReadWorktreeFileResponse;
-
-use tddy_service::proto::connection::ReadWorktreeFileRequest;
-
-use tddy_service::proto::connection::WorktreeDirEntry;
-
-use tddy_service::proto::connection::ListWorktreeDirectoryResponse;
-
-use tddy_service::proto::connection::ListWorktreeDirectoryRequest;
-
 use tddy_service::proto::connection::ReadSessionWorkflowFileResponse;
 
 use tddy_service::proto::connection::ReadSessionWorkflowFileRequest;
@@ -215,46 +158,6 @@ use tddy_service::proto::connection::WorkflowFileEntry;
 use tddy_service::proto::connection::ListSessionWorkflowFilesResponse;
 
 use tddy_service::proto::connection::ListSessionWorkflowFilesRequest;
-
-use tddy_service::proto::connection::HostKeyCandidate;
-
-use tddy_service::proto::connection::ListHostKeyCandidatesResponse;
-
-use tddy_service::proto::connection::ListHostKeyCandidatesRequest;
-
-use crate::host_prompts::answer_before_expiry;
-
-use crate::host_prompts::PromptKind;
-
-use tddy_service::proto::connection::AddHostKeyResponse;
-
-use tddy_service::proto::connection::AddHostKeyRequest;
-
-use tddy_service::proto::connection::AnswerHostPromptResponse;
-
-use tddy_service::proto::connection::AnswerHostPromptRequest;
-
-use tddy_service::proto::connection::HostPromptEvent;
-
-use tddy_service::proto::connection::StreamHostPromptsRequest;
-
-use super::MpscHostPromptStream;
-
-use tddy_service::proto::connection::GetHostToolingResponse;
-
-use tddy_service::proto::connection::GetHostToolingRequest;
-
-use tddy_service::proto::connection::KnownHostEntry;
-
-use tddy_service::proto::connection::ListKnownHostsResponse;
-
-use tddy_service::proto::connection::ListKnownHostsRequest;
-
-use tddy_service::proto::connection::EligibleDaemonEntry;
-
-use tddy_service::proto::connection::ListEligibleDaemonsResponse;
-
-use tddy_service::proto::connection::ListEligibleDaemonsRequest;
 
 use tddy_service::proto::connection::DeleteSessionResponse;
 
@@ -411,9 +314,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 let label = t
                     .label
                     .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
+                    .and_then(tddy_daemon_kernel::trim_to_option)
                     .unwrap_or_else(|| t.path.clone());
                 ToolInfo {
                     path: t.path.clone(),
@@ -2367,404 +2268,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
 
-    async fn list_eligible_daemons(
-        &self,
-        request: Request<ListEligibleDaemonsRequest>,
-    ) -> Result<Response<ListEligibleDaemonsResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let daemons: Vec<EligibleDaemonEntry> = self
-            .eligible_daemon_source
-            .list_eligible_daemons()
-            .into_iter()
-            .map(|entry| EligibleDaemonEntry {
-                instance_id: entry.instance_id.0.clone(),
-                label: entry.label,
-                is_local: entry.instance_id.0 == local_id,
-            })
-            .collect();
-
-        Ok(Response::new(ListEligibleDaemonsResponse { daemons }))
-    }
-
-    /// Every host this daemon has a record of, live or not.
-    ///
-    /// `ListEligibleDaemons` answers "who can I route to now" and forgets a host the moment it
-    /// leaves the room. This answers "what machines does tddy know about", which is what an operator
-    /// staring at an unreachable host needs. Liveness is resolved per call, by intersecting the
-    /// durable registry with the live roster — never read from disk.
-    ///
-    /// The join itself belongs to [`crate::host_registry::HostRegistry::known_hosts`], including
-    /// the guarantee that the serving daemon always has a row: doing half of it here as well would
-    /// leave the invariant provable only against a double that behaves like neither store.
-    async fn list_known_hosts(
-        &self,
-        request: Request<ListKnownHostsRequest>,
-    ) -> Result<Response<ListKnownHostsResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let _os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // The durable roster, not the routing one: the registry files a machine under the id that
-        // survives its restarts, and intersecting those two id spaces would report the daemon
-        // serving this very call as an offline stranger, next to a second row for itself.
-        let live_roster = self.eligible_daemon_source.live_known_hosts();
-        let local = crate::host_registry::local_host_sighting(&self.config);
-        let now_unix_ms = crate::host_registry::now_unix_ms();
-        let hosts: Vec<KnownHostEntry> = self
-            .host_registry
-            .known_hosts(&live_roster, &local, now_unix_ms)
-            .into_iter()
-            .map(|view| KnownHostEntry {
-                instance_id: view.host.instance_id,
-                label: view.host.label,
-                online: view.online,
-                first_seen_unix_ms: view.host.first_seen_unix_ms,
-                last_seen_unix_ms: view.host.last_seen_unix_ms,
-                repos_base_path: view.host.repos_base_path,
-                max_attachment_bytes: view.host.max_attachment_bytes,
-                is_local: view.is_local,
-            })
-            .collect();
-
-        Ok(Response::new(ListKnownHostsResponse { hosts }))
-    }
-
-    /// What a host has installed and configured.
-    ///
-    /// Addressed by `daemon_instance_id`; the existing peer routing relays it so the probes run on
-    /// that host, as that host's OS user. Both facts are per-user — `git config` reads
-    /// `$HOME/.gitconfig`, `gh auth status` reads `$HOME/.config/gh/hosts.yml` — so running them as
-    /// the daemon's own user would answer for the wrong account.
-    ///
-    /// Routed **before** the caller is authenticated, like the roster RPCs and
-    /// [`Self::resolve_stack_base`]: the token is verified by the daemon that serves the call, and
-    /// a peer's user mapping is not this one's to judge. Authenticating first would refuse an
-    /// operator whose GitHub user maps to an OS user on the host being probed but not on whichever
-    /// host their browser happens to be talking to.
-    async fn get_host_tooling(
-        &self,
-        request: Request<GetHostToolingRequest>,
-    ) -> Result<Response<GetHostToolingResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Route before probing. Answered locally, a question about another host would come back
-        // with this daemon's own git identity under that host's name — a wrong answer that reads
-        // exactly like a right one.
-        if let Some(answered) = self
-            .rpc_served_by_peer("GetHostTooling", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        // Both probes shell out and wait, so they run on the blocking pool rather than parking a
-        // runtime worker for however long `gh` takes to reach the network.
-        let probe = Arc::clone(&self.host_tooling);
-        let probed_user = os_user.to_string();
-        let tooling = tokio::task::spawn_blocking(move || probe.probe(&probed_user))
-            .await
-            .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
-
-        Ok(Response::new(GetHostToolingResponse {
-            daemon_instance_id: local_instance_id_for_config(&self.config),
-            git: Some(host_messages::git_identity_message(&tooling.git)),
-            github_cli: Some(host_messages::github_cli_message(&tooling.github_cli)),
-            ssh_agent: Some(host_messages::ssh_agent_message(&tooling.ssh_agent)),
-            remote_desktop: tooling
-                .remote_desktop
-                .iter()
-                .map(host_messages::host_remote_desktop_message)
-                .collect(),
-        }))
-    }
-
-    type StreamHostPromptsStream = MpscHostPromptStream;
-
-    /// Questions this host is waiting on an operator to answer.
-    ///
-    /// ⚠ The stream is silent almost all the time, so the sampling task **must** select on
-    /// `tx.closed()` as well as breaking on a send error — see [`MpscHostPromptStream`]. The
-    /// regression test for it is `packages/tddy-daemon/tests/stream_host_prompts_rpc.rs`.
-    async fn stream_host_prompts(
-        &self,
-        request: Request<StreamHostPromptsRequest>,
-    ) -> Result<Response<Self::StreamHostPromptsStream>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Routed before anything else, as `GetHostTooling` routes: a prompt is raised by, and
-        // answerable on, exactly one host, and a browser that asked one host what it is waiting on
-        // would take this daemon's own questions for that host's.
-        if let Some(rx) = self
-            .stream_served_by_peer("StreamHostPrompts", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(MpscHostPromptStream { rx }));
-        }
-
-        // Kept, not discarded: this is the identity the feed is filtered by. A prompt names a
-        // private-key path one operator typed, and it is theirs alone to see and to answer.
-        let subscriber = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<HostPromptEvent, Status>>();
-        let prompts = Arc::clone(&self.host_prompts);
-        let keypair = Arc::clone(&self.host_keypair);
-        let daemon_instance_id = local_instance_id_for_config(&self.config);
-        let counted = crate::host_prompt_stream::PumpCount::running(Arc::clone(&self.prompt_pumps));
-
-        tokio::spawn(async move {
-            // Moved into the task rather than dropped at the end of it, so the count falls when the
-            // pump actually stops — including if it panics.
-            let _counted = counted;
-            crate::host_prompt_stream::pump_host_prompts(
-                prompts,
-                keypair,
-                daemon_instance_id,
-                subscriber,
-                tx,
-            )
-            .await;
-        });
-
-        Ok(Response::new(MpscHostPromptStream { rx }))
-    }
-
-    /// Submit the encrypted answer to a pending prompt.
-    ///
-    /// The request carries ciphertext only; the plaintext exists in this process for the duration of
-    /// the unlock and is never persisted or logged.
-    async fn answer_host_prompt(
-        &self,
-        request: Request<AnswerHostPromptRequest>,
-    ) -> Result<Response<AnswerHostPromptResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Routed before the prompt is looked up, and before the caller is authenticated — the same
-        // order `GetHostTooling` uses, and for the same reason: the prompt this answers exists on
-        // the host that raised it, and resolved here it belongs to nothing. Answered locally, an
-        // operator's passphrase would be spent on a refusal from the wrong machine.
-        if let Some(answered) = self
-            .rpc_served_by_peer("AnswerHostPrompt", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        let answered_by = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-
-        // A refusal is a `false` on the response, not a `Status` error: an expired or replayed
-        // prompt is an ordinary outcome of an operator taking their time, and the browser has to
-        // tell the operator which of the three it was.
-        //
-        // Accepting the ciphertext is what hands it over: the registry passes it straight down the
-        // handoff `AddHostKey` is waiting on, which decrypts it, unlocks the key, adds the identity
-        // and drops the plaintext. An answer nobody is waiting for is still recorded as this
-        // prompt's one answer, and its ciphertext is dropped rather than kept.
-        //
-        // Nothing about the payload is logged here at any level, deliberately: a passphrase must
-        // never reach a log, and the cheapest way to keep that true is for this handler to have
-        // nothing to say about what it was given.
-        //
-        // The answering session's own identity decides which prompt it may answer: a prompt raised
-        // by somebody else is refused exactly as an id that was never issued is, and is left
-        // unspent for the operator it belongs to.
-        let answered = self.host_prompts.answer(
-            &req.prompt_id,
-            &answered_by,
-            req.encrypted_answer,
-            crate::host_registry::now_unix_ms(),
-        );
-        Ok(Response::new(match answered {
-            Ok(()) => AnswerHostPromptResponse {
-                accepted: true,
-                rejection_reason: String::new(),
-            },
-            Err(rejection) => AnswerHostPromptResponse {
-                accepted: false,
-                rejection_reason: host_messages::rejection_reason(&rejection),
-            },
-        }))
-    }
-
-    /// Load a private key into this host's ssh-agent.
-    ///
-    /// This is the call that raises a passphrase prompt: it issues one, waits for the answer to
-    /// arrive on `AnswerHostPrompt`, decrypts it with this host's private key, unlocks the key at
-    /// `subject`, hands the identity to the agent and drops the plaintext. It returns only once the
-    /// add has succeeded or failed, so the browser learns the outcome from the call it started.
-    ///
-    /// Nothing about the answer — decrypted or not — is logged here at any level.
-    async fn add_host_key(
-        &self,
-        request: Request<AddHostKeyRequest>,
-    ) -> Result<Response<AddHostKeyResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Routed before the prompt is raised. `daemon_instance_id` names the host whose agent the
-        // key is loaded into, and answered locally this call loads it into the agent of whichever
-        // daemon the browser happened to be talking to — a private key in the wrong machine's
-        // agent, which no later request can take back.
-        if let Some(answered) = self
-            .rpc_served_by_peer("AddHostKey", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        // The agent the key lands in is the one belonging to this host's OS user, resolved exactly
-        // as `GetHostTooling` resolves the user whose agent it *reads*: a session that may look at
-        // an agent's keys is the session that may add one to it.
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
-            .to_string();
-
-        // Stamped with the GitHub user that raised it, which is what makes it *this* operator's
-        // question: nobody else is shown it, and nobody else can spend its one answer.
-        let prompt = self.host_prompts.issue(
-            &github_user,
-            PromptKind::SshKeyPassphrase,
-            &req.subject,
-            crate::host_registry::now_unix_ms(),
-        );
-        // Claimed immediately after issuing, because issuing is what puts the prompt on the feed:
-        // an operator whose browser answers at once must find a handoff already waiting for them.
-        let waiting = self.host_prompts.awaited_answer(&prompt.prompt_id);
-        let answer = match waiting {
-            Some(handoff) => answer_before_expiry(handoff, &prompt).await,
-            // The registry forgot the prompt between issuing it and being asked for its handoff,
-            // which for the operator is indistinguishable from one that ran out of time.
-            None => None,
-        };
-        let Some(encrypted_answer) = answer else {
-            return Ok(Response::new(host_messages::add_key_failed(
-                AddHostKeyOutcome::PromptExpired,
-                "nobody answered the passphrase prompt before it expired".to_string(),
-            )));
-        };
-
-        // Everything that follows blocks — an RSA decrypt, a bcrypt-pbkdf unlock and a socket
-        // conversation with the agent — so it runs on the blocking pool rather than parking a
-        // runtime worker. It also puts the whole life of the plaintext inside one closure, which
-        // ends when the closure returns.
-        let keypair = Arc::clone(&self.host_keypair);
-        let adder = Arc::clone(&self.ssh_agent_key_adder);
-        let files = Arc::clone(&self.host_user_files);
-        let subject = req.subject.clone();
-        let added = tokio::task::spawn_blocking(move || {
-            host_messages::unlock_and_add(
-                keypair.as_ref(),
-                adder.as_ref(),
-                files.as_ref(),
-                &os_user,
-                &subject,
-                &encrypted_answer,
-            )
-        })
-        .await
-        // The panic's own message is deliberately not repeated: a panic raised inside the unlock is
-        // the one string in this flow that could carry key material with it.
-        .map_err(|_| Status::internal("adding this key to the agent did not complete"))?;
-
-        // The outcome only — never the reason, and never anything derived from the answer.
-        log::debug!(
-            "AddHostKey: {} -> {}",
-            req.subject,
-            AddHostKeyOutcome::try_from(added.outcome)
-                .unwrap_or(AddHostKeyOutcome::Unspecified)
-                .as_str_name()
-        );
-        Ok(Response::new(added))
-    }
-
-    /// The private keys this host's operator could load into their agent.
-    ///
-    /// What makes the key field on the Hosts row a picker instead of a typed path. Every path it
-    /// offers is a path [`add_host_key`](Self::add_host_key) will accept: the same OS user, the
-    /// same home, the same confinement — a listing whose choices the add then refused would be
-    /// worse than no listing.
-    ///
-    /// Routed like the add for the same reason: the keys are files on one machine.
-    ///
-    /// Says nothing about what is on disk beyond the keys themselves — see
-    /// [`crate::host_private_key::list_key_candidates`] for why an absent `~/.ssh`, an unreadable
-    /// one and an empty one are one answer.
-    async fn list_host_key_candidates(
-        &self,
-        request: Request<ListHostKeyCandidatesRequest>,
-    ) -> Result<Response<ListHostKeyCandidatesResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-
-        // Routed first, for the reason the add is: these paths are files on one machine, and a
-        // listing answered locally shows the browser this daemon's keys as though they were the
-        // addressed host's — after which the path it picks names nothing over there.
-        if let Some(answered) = self
-            .rpc_served_by_peer("ListHostKeyCandidates", &req.daemon_instance_id, &req)
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        // The same mapping `add_host_key` resolves the read through, so what an operator is offered
-        // and what they may then add are the keys of one OS user — their own.
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?
-            .to_string();
-
-        // Off the runtime worker: the listing runs a child process per user-privileged step, the
-        // way every other per-user read in this daemon does.
-        let files = Arc::clone(&self.host_user_files);
-        let candidates = tokio::task::spawn_blocking(move || {
-            crate::host_private_key::list_key_candidates(files.as_ref(), &os_user)
-        })
-        .await
-        .map_err(|_| Status::internal("listing the keys on this host did not complete"))?;
-
-        log::debug!("ListHostKeyCandidates: {} offered", candidates.len());
-        Ok(Response::new(ListHostKeyCandidatesResponse {
-            candidates: candidates
-                .into_iter()
-                .map(|candidate| HostKeyCandidate {
-                    path: candidate.path.display().to_string(),
-                    key_type: candidate.key_type,
-                    fingerprint: candidate.fingerprint,
-                })
-                .collect(),
-        }))
-    }
-
     async fn list_session_workflow_files(
         &self,
         request: Request<ListSessionWorkflowFilesRequest>,
@@ -2840,129 +2343,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ReadSessionWorkflowFileResponse {
             content_utf8,
         }))
-    }
-
-    async fn list_worktree_directory(
-        &self,
-        request: Request<ListWorktreeDirectoryRequest>,
-    ) -> Result<Response<ListWorktreeDirectoryResponse>, Status> {
-        let req = request.into_inner();
-        let worktree_root =
-            self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
-
-        let rel_path = req.rel_path.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let join = tokio::task::spawn_blocking(move || {
-            crate::worktree_files::list_worktree_directory_entries(&worktree_root, &rel_path)
-        });
-
-        let entries = match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(entries))) => entries,
-            Ok(Ok(Err(status))) => return Err(status),
-            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => {
-                return Err(Status::deadline_exceeded(format!(
-                "ListWorktreeDirectory: timed out after {}s (spawn_worker_request_timeout_secs)",
-                timeout.as_secs()
-            )))
-            }
-        };
-
-        let entries = entries
-            .into_iter()
-            .map(|e| WorktreeDirEntry {
-                name: e.name,
-                is_dir: e.is_dir,
-                size_bytes: e.size_bytes,
-            })
-            .collect();
-        Ok(Response::new(ListWorktreeDirectoryResponse { entries }))
-    }
-
-    async fn read_worktree_file(
-        &self,
-        request: Request<ReadWorktreeFileRequest>,
-    ) -> Result<Response<ReadWorktreeFileResponse>, Status> {
-        let req = request.into_inner();
-        let worktree_root =
-            self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
-
-        let rel_path = req.rel_path.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let join = tokio::task::spawn_blocking(move || {
-            crate::worktree_files::read_worktree_file_utf8(&worktree_root, &rel_path)
-        });
-
-        let content = match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(content))) => content,
-            Ok(Ok(Err(status))) => return Err(status),
-            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => {
-                return Err(Status::deadline_exceeded(format!(
-                    "ReadWorktreeFile: timed out after {}s (spawn_worker_request_timeout_secs)",
-                    timeout.as_secs()
-                )))
-            }
-        };
-
-        Ok(Response::new(ReadWorktreeFileResponse {
-            content_utf8: content.content_utf8,
-            truncated: content.truncated,
-            byte_size: content.byte_size,
-        }))
-    }
-
-    type StreamReadWorktreeFileStream = MpscResultStream<WorktreeFileChunk>;
-
-    /// The byte-exact streaming read — AC15-AC20 of `docs/ft/daemon/session-worktree-sync.md`.
-    ///
-    /// Same request message, same addressing and the same `resolve_listed_worktree` gate as the
-    /// unary `read_worktree_file`; what differs is what comes back. No UTF-8 decoding
-    /// exists on this path to fail, and the 1 MiB truncation the unary read applies is gone — the
-    /// bound is `max_attachment_bytes` and an over-cap file is **refused before the first frame**
-    /// rather than shortened, because a caller cannot tell a truncated file from a whole one once
-    /// the frames have started.
-    async fn stream_read_worktree_file(
-        &self,
-        request: Request<ReadWorktreeFileRequest>,
-    ) -> Result<Response<Self::StreamReadWorktreeFileStream>, Status> {
-        let req = request.into_inner();
-        let worktree_root =
-            self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
-
-        let rel_path = req.rel_path.clone();
-        let max_bytes = self.config.max_attachment_bytes;
-        let timeout = self.config.spawn_worker_request_timeout();
-        // The listing gate, the size refusal and the read are all filesystem and git work, so they
-        // run off the async runtime exactly as the unary read's do. Every one of them can fail the
-        // call outright, which is why they happen here rather than inside the stream: a refusal
-        // that arrived as a stream item would have to be told apart from a mid-stream read error.
-        let join = tokio::task::spawn_blocking(move || {
-            crate::worktree_files::read_worktree_file_bytes(&worktree_root, &rel_path, max_bytes)
-        });
-
-        let bytes = match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(bytes))) => bytes,
-            Ok(Ok(Err(status))) => return Err(status),
-            Ok(Err(join_err)) => return Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => {
-                return Err(Status::deadline_exceeded(format!(
-                "StreamReadWorktreeFile: timed out after {}s (spawn_worker_request_timeout_secs)",
-                timeout.as_secs()
-            )))
-            }
-        };
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<WorktreeFileChunk, Status>>();
-        for frame in worktree_file_frames(&bytes) {
-            // The whole file is already in memory and the channel is unbounded, so this cannot
-            // block; a send only fails once the client has gone, and then there is nothing left to
-            // send it to.
-            if tx.send(Ok(frame)).is_err() {
-                break;
-            }
-        }
-        Ok(Response::new(MpscResultStream { rx }))
     }
 
     type StreamContextManifestStream = MpscResultStream<ContextManifestEntry>;
@@ -3270,88 +2650,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             }
         }
         Ok(Response::new(MpscResultStream { rx }))
-    }
-
-    async fn list_worktrees_for_project(
-        &self,
-        request: Request<ListWorktreesForProjectRequest>,
-    ) -> Result<Response<ListWorktreesForProjectResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let cache = Arc::clone(&self.worktree_stats_cache);
-        let pid = project_id.to_string();
-        let repo = main_repo.clone();
-        let refresh = req.refresh;
-        let timeout = self.config.spawn_worker_request_timeout();
-
-        let snapshots = service_util::spawn_blocking_with_timeout(
-            timeout,
-            "ListWorktreesForProject: cache read/refresh",
-            move || {
-                if refresh {
-                    cache.refresh_stats_for_project(&pid, &repo);
-                }
-                Ok(cache.list_cached_stats(&pid))
-            },
-        )
-        .await?;
-
-        let worktrees: Vec<WorktreeRow> = snapshots
-            .into_iter()
-            .map(|s| {
-                // Overlay the lazy calculator's view of this worktree's size: report its status and
-                // (when Cached) prefer its byte count/timestamp over the stats cache's eager walk.
-                let size = self.worktree_size_calculator.state(project_id, &s.path);
-                let disk_bytes = match size.status {
-                    WorktreeSizeStatus::Cached => size.disk_bytes.unwrap_or(s.disk_bytes),
-                    _ => s.disk_bytes,
-                };
-                WorktreeRow {
-                    path: s.path.to_string_lossy().to_string(),
-                    branch_label: s.branch_label,
-                    disk_bytes,
-                    changed_files: s.changed_files,
-                    lines_added: s.lines_added,
-                    lines_removed: s.lines_removed,
-                    updated_at_unix_ms: s.updated_at_unix_ms,
-                    stale: s.stale,
-                    size_status: proto_worktree_size_status(size.status) as i32,
-                    size_calculated_at_unix_ms: size.calculated_at_unix_ms.unwrap_or(0),
-                }
-            })
-            .collect();
-
-        Ok(Response::new(ListWorktreesForProjectResponse { worktrees }))
     }
 
     /// Associated output stream type for [`stream_session_terminal_io`].
@@ -3885,224 +3183,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         Ok(Response::new(ListTerminalSessionsResponse { terminals }))
     }
 
-    async fn remove_worktree(
-        &self,
-        request: Request<RemoveWorktreeRequest>,
-    ) -> Result<Response<RemoveWorktreeResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let worktree_path_raw = req.worktree_path.trim();
-        if worktree_path_raw.is_empty() {
-            return Err(Status::invalid_argument("worktree_path is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let worktree_path = PathBuf::from(worktree_path_raw);
-
-        // Before the checkout goes, not after: a session room measures its directory on an
-        // interval, so one still hosted for this path would shell out to git in a directory that no
-        // longer exists — warning at the poll rate for the life of the daemon. This RPC removes a
-        // checkout by path and never learns a session id, so the registry is asked by path.
-        self.session_rooms.close_for_worktree(&worktree_path);
-
-        let repo_blocking = main_repo.clone();
-        let wt_blocking = worktree_path.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let join = tokio::task::spawn_blocking(move || {
-            worktrees::remove_worktree_under_repo(&repo_blocking, &wt_blocking)
-        });
-
-        match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(()))) => {
-                self.worktree_stats_cache.invalidate_project(project_id);
-                Ok(Response::new(RemoveWorktreeResponse {
-                    ok: true,
-                    message: String::new(),
-                }))
-            }
-            Ok(Ok(Err(e))) => Err(map_remove_worktree_error(e)),
-            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
-                "RemoveWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
-                timeout.as_secs()
-            ))),
-        }
-    }
-
-    async fn clean_worktree(
-        &self,
-        request: Request<CleanWorktreeRequest>,
-    ) -> Result<Response<CleanWorktreeResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let worktree_path_raw = req.worktree_path.trim();
-        if worktree_path_raw.is_empty() {
-            return Err(Status::invalid_argument("worktree_path is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let worktree_path = PathBuf::from(worktree_path_raw);
-
-        let repo_blocking = main_repo.clone();
-        let wt_blocking = worktree_path.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let join = tokio::task::spawn_blocking(move || {
-            worktrees::clean_worktree_under_repo(&repo_blocking, &wt_blocking)
-        });
-
-        match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(()))) => {
-                self.worktree_stats_cache.invalidate_project(project_id);
-                Ok(Response::new(CleanWorktreeResponse {
-                    ok: true,
-                    message: String::new(),
-                }))
-            }
-            Ok(Ok(Err(e))) => Err(map_clean_worktree_error(e)),
-            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
-                "CleanWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
-                timeout.as_secs()
-            ))),
-        }
-    }
-
-    async fn restore_session_worktree(
-        &self,
-        request: Request<RestoreSessionWorktreeRequest>,
-    ) -> Result<Response<RestoreSessionWorktreeResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let session_id = req.session_id.trim();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id is required"));
-        }
-        validate_session_id_segment(session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
-        let session_dir = unified_session_dir_path(&sessions_base, session_id);
-
-        let repo_blocking = main_repo.clone();
-        let session_dir_blocking = session_dir.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let join = tokio::task::spawn_blocking(move || {
-            let base_ref = tddy_core::resolve_persisted_worktree_integration_base_for_session(
-                &session_dir_blocking,
-                &repo_blocking,
-            )?;
-            tddy_core::setup_worktree_for_session_with_integration_base(
-                &repo_blocking,
-                &session_dir_blocking,
-                &base_ref,
-            )
-        });
-
-        match tokio::time::timeout(timeout, join).await {
-            Ok(Ok(Ok(path))) => {
-                self.worktree_stats_cache.invalidate_project(project_id);
-                Ok(Response::new(RestoreSessionWorktreeResponse {
-                    ok: true,
-                    message: String::new(),
-                    worktree_path: path.to_string_lossy().into_owned(),
-                }))
-            }
-            Ok(Ok(Err(e))) => Err(Status::internal(e)),
-            Ok(Err(join_err)) => Err(Status::internal(join_err.to_string())),
-            Err(_elapsed) => Err(Status::deadline_exceeded(format!(
-                "RestoreSessionWorktree: timed out after {}s (spawn_worker_request_timeout_secs)",
-                timeout.as_secs()
-            ))),
-        }
-    }
-
     async fn list_project_branches(
         &self,
         request: Request<ListProjectBranchesRequest>,
@@ -4508,7 +3588,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &req.os_user,
                     &label,
                     &req.status,
-                    host_messages::now_unix_ms(),
+                    tddy_daemon_kernel::now_unix_ms(),
                 )
             {
                 bus.publish(notification).await;
@@ -4580,7 +3660,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
                     result: serde_json::Value::Null,
                     error_message: String::new(),
-                    started_unix_ms: host_messages::now_unix_ms(),
+                    started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     completed_unix_ms: 0,
                     source: "claude-cli".to_string(),
                     head_commit,
@@ -4610,7 +3690,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     result: tddy_core::agent_activity::parse_activity_json(&req.result_json),
                     error_message: req.error_message,
                     started_unix_ms: 0,
-                    completed_unix_ms: host_messages::now_unix_ms(),
+                    completed_unix_ms: tddy_daemon_kernel::now_unix_ms(),
                     source: "claude-cli".to_string(),
                     head_commit,
                     // As on the `running` row: the covering tick is the poll loop's to attribute.
@@ -4648,7 +3728,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                     &req.os_user,
                     &label,
                     &record.tool_name,
-                    host_messages::now_unix_ms(),
+                    tddy_daemon_kernel::now_unix_ms(),
                 ),
             )
             .await;
@@ -5636,6 +4716,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             "QueryBranch: scan sessions by branch",
             move || {
                 crate::branch_owner::find_session_owning_branch(
+                    &crate::session_reader::DaemonSessionListing,
                     &sessions_base_for_scan,
                     &branch_for_scan,
                 )
@@ -6144,6 +5225,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
             "PullBaseIntoBranch: re-read the branch",
             move || {
                 let session = match crate::branch_owner::find_session_owning_branch(
+                    &crate::session_reader::DaemonSessionListing,
                     &resolution_sessions_base,
                     &resolution_branch,
                 )
@@ -6260,316 +5342,6 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         ));
 
         Ok(Response::new(MpscLiveKitRoomsStream { rx }))
-    }
-
-    type StreamHostStatsStream = MpscHostStatsStream;
-
-    /// Stream host telemetry for the selected daemon. Authenticates `session_token`, then spawns a
-    /// sampling task that emits one `HostStatsEvent` immediately (both CPU and disk), then refreshes
-    /// CPU and disk on two independent cadences, pushing an event carrying the latest CPU and disk
-    /// snapshot on each tick. The task ends when the receiver is dropped (client unsubscribe).
-    async fn stream_host_stats(
-        &self,
-        request: Request<StreamHostStatsRequest>,
-    ) -> Result<Response<Self::StreamHostStatsStream>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let _github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HostStatsEvent>();
-        let host_stats = Arc::clone(&self.host_stats);
-        let cpu_interval = self.host_cpu_interval;
-        let disk_interval = self.host_disk_interval;
-
-        tokio::spawn(async move {
-            let read_cpu = |hs: &Arc<dyn HostStats>| HostCpuStats {
-                per_core_percent: hs.cpu_per_core_percent(),
-                logical_cores: hs.logical_cores(),
-            };
-            // Memory and load ride the fast tick with CPU: they move on the same timescale, and a
-            // third timer would cost a builder parameter for no user-visible gain.
-            let read_memory = |hs: &Arc<dyn HostStats>| {
-                let usage = hs.memory();
-                HostMemoryStats {
-                    available_bytes: usage.available_bytes,
-                    total_bytes: usage.total_bytes,
-                }
-            };
-            // `None` stays `None` all the way to the wire — a host that cannot report a load average
-            // must not be indistinguishable from an idle one.
-            let read_load = |hs: &Arc<dyn HostStats>| {
-                hs.load_average().map(|avg| HostLoadStats {
-                    one_minute: avg.one_minute,
-                    five_minutes: avg.five_minutes,
-                    fifteen_minutes: avg.fifteen_minutes,
-                })
-            };
-            let read_disk = |hs: &Arc<dyn HostStats>| {
-                let usage = hs.disk_for_project_dir();
-                HostDiskStats {
-                    available_bytes: usage.available_bytes,
-                    total_bytes: usage.total_bytes,
-                    project_dir: usage.project_dir,
-                }
-            };
-
-            // Immediate emit: read both snapshots once so the footer populates on connect.
-            let mut cpu = read_cpu(&host_stats);
-            let mut disk = read_disk(&host_stats);
-            let mut memory = read_memory(&host_stats);
-            let mut load = read_load(&host_stats);
-            if tx
-                .send(HostStatsEvent {
-                    cpu: Some(cpu.clone()),
-                    disk: Some(disk.clone()),
-                    memory: Some(memory),
-                    load,
-                })
-                .is_err()
-            {
-                return;
-            }
-
-            // Two independent timers: the first tick of each fires after one full period (not
-            // immediately), so a tick provably reflects a fresh read of only that metric.
-            let now = tokio::time::Instant::now();
-            let mut cpu_tick = tokio::time::interval_at(now + cpu_interval, cpu_interval);
-            let mut disk_tick = tokio::time::interval_at(now + disk_interval, disk_interval);
-
-            loop {
-                tokio::select! {
-                    _ = cpu_tick.tick() => {
-                        cpu = read_cpu(&host_stats);
-                        memory = read_memory(&host_stats);
-                        load = read_load(&host_stats);
-                    }
-                    _ = disk_tick.tick() => {
-                        disk = read_disk(&host_stats);
-                    }
-                }
-                if tx
-                    .send(HostStatsEvent {
-                        cpu: Some(cpu.clone()),
-                        disk: Some(disk.clone()),
-                        memory: Some(memory),
-                        load,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
-        Ok(Response::new(MpscHostStatsStream { rx }))
-    }
-
-    type StreamWorktreeStatsStream = MpscWorktreeStatsStream;
-
-    /// Stream per-worktree disk-size status for a project. Authenticates `session_token`, resolves
-    /// the project's main repo, then discovers its worktrees (with branch/diff, but **not** the
-    /// expensive size walk). Emits one snapshot event carrying every worktree's current size state,
-    /// then lazily enqueues size calculations (all worktrees when `recalculate_all`, otherwise only
-    /// those never sized) and forwards each `Calculating` -> `Cached` transition as a single-row
-    /// `updated` event. The forwarding task ends when the client drops the stream.
-    async fn stream_worktree_stats(
-        &self,
-        request: Request<StreamWorktreeStatsRequest>,
-    ) -> Result<Response<Self::StreamWorktreeStatsStream>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        // Discover worktrees + branch/diff off the async runtime, without the size walk.
-        let repo = main_repo.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let diff_rows = service_util::spawn_blocking_with_timeout(
-            timeout,
-            "StreamWorktreeStats: git worktree list + diff",
-            move || Ok(worktrees::list_worktree_diff_rows(&repo)),
-        )
-        .await?;
-
-        // Branch/diff lookup keyed by path, so each later size update rebuilds a full row.
-        let diff_by_path: std::collections::HashMap<PathBuf, WorktreeDiffRow> = diff_rows
-            .iter()
-            .map(|r| (r.path.clone(), r.clone()))
-            .collect();
-
-        let calculator = Arc::clone(&self.worktree_size_calculator);
-
-        // Subscribe before enqueuing so no Calculating/Cached transition is missed.
-        let mut updates = calculator.subscribe(project_id);
-
-        // Snapshot: current size state per worktree (before any enqueue triggered below).
-        let snapshot: Vec<WorktreeRow> = diff_rows
-            .iter()
-            .map(|r| {
-                let state = calculator.state(project_id, &r.path);
-                host_messages::worktree_row_from_diff(
-                    r,
-                    state.status,
-                    state.disk_bytes,
-                    state.calculated_at_unix_ms,
-                )
-            })
-            .collect();
-
-        // Lazily enqueue: all worktrees on recalculate_all, otherwise only the never-sized ones.
-        for r in &diff_rows {
-            let status = calculator.state(project_id, &r.path).status;
-            if req.recalculate_all || status == WorktreeSizeStatus::None {
-                calculator.enqueue(project_id, &r.path).await;
-            }
-        }
-
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<WorktreeStatsEvent>();
-        if tx
-            .send(WorktreeStatsEvent {
-                snapshot,
-                updated: None,
-            })
-            .is_err()
-        {
-            return Ok(Response::new(MpscWorktreeStatsStream { rx }));
-        }
-
-        tokio::spawn(async move {
-            use tokio::sync::broadcast::error::RecvError;
-            loop {
-                match updates.recv().await {
-                    Ok(update) => {
-                        // Only forward worktrees present in the snapshot; a worktree created after
-                        // this subscribe is picked up by a fresh StreamWorktreeStats call.
-                        let Some(diff) = diff_by_path.get(&update.path) else {
-                            continue;
-                        };
-                        let row = host_messages::worktree_row_from_diff(
-                            diff,
-                            update.status,
-                            update.disk_bytes,
-                            update.calculated_at_unix_ms,
-                        );
-                        if tx
-                            .send(WorktreeStatsEvent {
-                                snapshot: Vec::new(),
-                                updated: Some(row),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(RecvError::Lagged(_)) => {}
-                    Err(RecvError::Closed) => break,
-                }
-            }
-        });
-
-        Ok(Response::new(MpscWorktreeStatsStream { rx }))
-    }
-
-    /// (Re)trigger the on-disk size calculation for a single worktree. Authenticates
-    /// `session_token`, resolves the project's main repo, and requires `worktree_path` to appear in
-    /// `git worktree list` (membership-gated, mirroring `RemoveWorktree`), then enqueues the walk.
-    /// The result surfaces on any `StreamWorktreeStats` subscriber and in `ListWorktreesForProject`.
-    async fn calculate_worktree_size(
-        &self,
-        request: Request<CalculateWorktreeSizeRequest>,
-    ) -> Result<Response<CalculateWorktreeSizeResponse>, Status> {
-        self.record_rpc_activity();
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
-            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
-        let os_user = self
-            .config
-            .os_user_for_github(&github_user)
-            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-
-        let project_id = req.project_id.trim();
-        if project_id.is_empty() {
-            return Err(Status::invalid_argument("project_id is required"));
-        }
-        let worktree_path_raw = req.worktree_path.trim();
-        if worktree_path_raw.is_empty() {
-            return Err(Status::invalid_argument("worktree_path is required"));
-        }
-
-        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        project_storage::find_project(&projects_dir, project_id)
-            .map_err(|e| Status::internal(e.to_string()))?
-            .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let local_id = local_instance_id_for_config(&self.config);
-        let main_repo_str =
-            project_storage::main_repo_path_for_host(&projects_dir, project_id, local_id.as_str())
-                .map_err(|e| Status::internal(e.to_string()))?
-                .ok_or_else(|| Status::not_found("project not found"))?;
-
-        let main_repo = PathBuf::from(&main_repo_str);
-        if !main_repo.exists() {
-            return Err(Status::invalid_argument(
-                "project main repo path does not exist",
-            ));
-        }
-
-        let worktree_path = PathBuf::from(worktree_path_raw);
-
-        // Membership-gate on git's own worktree list (mirrors RemoveWorktree::NotListed -> NotFound).
-        let repo_check = main_repo.clone();
-        let wt_check = worktree_path.clone();
-        let timeout = self.config.spawn_worker_request_timeout();
-        let listed = service_util::spawn_blocking_with_timeout(
-            timeout,
-            "CalculateWorktreeSize: worktree membership check",
-            move || Ok(worktrees::worktree_path_is_listed(&repo_check, &wt_check)),
-        )
-        .await?;
-        if !listed {
-            return Err(Status::not_found(
-                "worktree path is not in git worktree list",
-            ));
-        }
-
-        self.worktree_size_calculator
-            .enqueue(project_id, &worktree_path)
-            .await;
-
-        Ok(Response::new(CalculateWorktreeSizeResponse {
-            ok: true,
-            message: String::new(),
-        }))
     }
 
     async fn upload_session_file_chunk(

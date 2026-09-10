@@ -1,8 +1,7 @@
 //! TaskServiceImpl — maps the `tasks.TaskService` RPC trait to the shared `TaskRegistry`.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
+use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::tasks::{
     task_list_event, CancelTaskRequest, CancelTaskResponse, GetTaskRequest, GetTaskResponse,
@@ -12,10 +11,6 @@ use tddy_service::proto::tasks::{
 };
 use tddy_task::TaskRegistry;
 use tokio_stream::wrappers::ReceiverStream;
-
-/// Resolver that maps a session token to the authenticated GitHub login.
-/// Matches the pattern used by `VmServiceImpl` to avoid a circular dep.
-pub type SessionUserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// Implementation of the `tasks.TaskService` RPC service.
 pub struct TaskServiceImpl {

@@ -45,7 +45,7 @@ lower layer knows about LiveKit.
 
 `snapshot_worktree_within` runs `git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`,
 `git diff --numstat HEAD` and `git status --porcelain` under a single deadline, killing any child
-that overruns it. The numstat is parsed by `worktrees::parse_git_diff_numstat` — the same parser the
+that overruns it. The numstat is parsed by `tddy_worktree_service::worktrees::parse_git_diff_numstat` — the same parser the
 Worktrees screen reads — so a room and that screen can never quote different totals for one checkout.
 
 A checkout git cannot read snapshots as empty rather than failing: this feeds a periodic poll whose
@@ -186,6 +186,6 @@ clamp would turn `poll_interval_ms: 0` into a 1 ms loop spawning git subprocesse
 
 - [Session rooms (product)](../../../docs/ft/daemon/session-room.md)
 - [Connection service](connection-service.md) — `GetWorktreeSnapshot` and the peer routing it reuses
-- [Worktrees module](worktrees.md) — the shared numstat parser
+- [Worktrees module](../../tddy-worktree-service/docs/worktrees.md) — the shared numstat parser
 - [Session worktree sync (product)](../../../docs/ft/daemon/session-worktree-sync.md) — what the WIP ref and the delta ring are for
 - [`tddy-session-sync`](../../tddy-session-sync/docs/mirroring.md) — the client that consumes them

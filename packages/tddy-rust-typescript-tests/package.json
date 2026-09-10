@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate": "npx buf generate ../tddy-service/proto",
+    "generate": "../../scripts/generated-code.sh write packages/tddy-rust-typescript-tests",
     "test": "bun test",
     "test:verbose": "bun test --verbose"
   },

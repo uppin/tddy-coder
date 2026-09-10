@@ -21,12 +21,12 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import {
   AddHostKeyOutcome,
-  ConnectionService,
+  HostService,
   HostSshAgentSchema,
   ProbeOutcome,
   SshAgentKeySchema,
   type HostSshAgent,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/host_pb";
 import { HostAddKeyAction } from "../../src/components/hosts/HostAddKeyAction";
 import { HostRowSshAgent } from "../../src/components/hosts/HostRowSshAgent";
 import { mountWithRpc } from "../support/rpc/inMemory";
@@ -87,7 +87,7 @@ function noAgent(): HostSshAgent {
  * completed round trip is what the real call looks like from the browser.
  */
 function aBackendThatAdds(feed: HostPromptFeed): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...feed.handlers,
     addHostKey: async () => ({
       added: true,
@@ -103,7 +103,7 @@ function aBackendThatAdds(feed: HostPromptFeed): InMemoryRpcBackend {
  * actually looking at while the dialog is up.
  */
 function aBackendAwaitingAnAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...feed.handlers,
     // Never settles: the host is waiting on the passphrase, which is the whole point of the prompt.
     addHostKey: () => new Promise(() => undefined),
@@ -261,7 +261,7 @@ describe("Hosts screen add key", () => {
     // Then the daemon is asked for that key, on that host. Without the subject the daemon would be
     // guessing which key the operator meant, and the dialog would name a key nobody chose.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const calls = b.callsTo(ConnectionService.method.addHostKey);
+      const calls = b.callsTo(HostService.method.addHostKey);
       expect(calls).to.have.length(1);
       expect(calls[0].subject).to.equal(KEY_PATH);
       expect(calls[0].daemonInstanceId).to.equal(HOST);
@@ -436,7 +436,7 @@ describe("Hosts screen add key — accepting a rotated host key", () => {
 
 /** A daemon that takes the answer and refuses it, the way an expired prompt is refused. */
 function aBackendRefusingTheAnswer(feed: HostPromptFeed, rejectionReason: string) {
-  return anInMemoryRpcBackend().implement(ConnectionService, {
+  return anInMemoryRpcBackend().implement(HostService, {
     ...feed.handlers,
     addHostKey: () => new Promise(() => undefined),
     answerHostPrompt: async () => ({ accepted: false, rejectionReason }),

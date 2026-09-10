@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 import { useSessionWorktreeStats } from "../../rpc/useSessionWorktreeStats";
 import { formatDiskBytes } from "./worktreeStatsFormat";
 import { formatLastCalculated } from "../../lib/worktreeSize";
 import { Button } from "../ui/button";
 
 export interface SessionWorktreeTabProps {
-  client: Client<typeof ConnectionService> | null;
+  client: Client<typeof WorktreeService> | null;
   sessionToken: string;
   projectId: string;
   sessionId: string;

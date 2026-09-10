@@ -19,5 +19,16 @@ tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
 tempfile = "3"
+# `rt-multi-thread` is what the live-rust-analyzer acceptance suites need and the library does not:
+# the restructure backend is synchronous and reaches the shared LSP client through
+# `Handle::current().block_on`, which only makes progress from a blocking thread while another
+# thread drives the runtime. `tddy-lsp` carries the same dev-dependency for the same reason.
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }

@@ -8,7 +8,8 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::SessionMetadata;
 use tddy_daemon::claude_cli_session::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{ConnectionServiceImpl, SessionUserResolver};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, ReportSessionStatusRequest,

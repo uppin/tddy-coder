@@ -29,11 +29,9 @@ use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon::cli_session_manager::CliSessionManager;
 use tddy_daemon::config::DaemonConfig;
-use tddy_daemon::connection_service::{
-    validate_stack_seed_base_session, ConnectionServiceImpl, SessionUserResolver,
-    SessionsBaseResolver,
-};
+use tddy_daemon::connection_service::{validate_stack_seed_base_session, ConnectionServiceImpl};
 use tddy_daemon::spawner::pr_stack_spawn_args;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     ConnectionService as ConnectionServiceTrait, StartSessionRequest,

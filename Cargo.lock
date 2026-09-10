@@ -12071,19 +12071,18 @@ dependencies = [
  "serial_test",
  "sha2 0.10.9",
  "sqlx",
- "ssh-agent-lib",
- "ssh-key",
  "subtle",
- "sysinfo",
  "tddy-acp",
  "tddy-actions",
  "tddy-bsp",
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-daemon-kernel",
  "tddy-demo-runner",
  "tddy-discovery",
  "tddy-github",
+ "tddy-host-service",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-lsp",
@@ -12109,6 +12108,7 @@ dependencies = [
  "tddy-vm",
  "tddy-workflow",
  "tddy-workflow-recipes",
+ "tddy-worktree-service",
  "teloxide",
  "tempfile",
  "tokio",
@@ -12118,6 +12118,30 @@ dependencies = [
  "tower 0.5.3",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "tddy-daemon-kernel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "libc",
+ "livekit",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-core",
+ "tddy-discovery",
+ "tddy-livekit",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-service",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -12266,6 +12290,40 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-host-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "futures-util",
+ "libc",
+ "livekit",
+ "log",
+ "pretty_assertions",
+ "prost 0.13.5",
+ "rand 0.8.6",
+ "rsa 0.9.10",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2 0.10.9",
+ "ssh-agent-lib",
+ "ssh-key",
+ "sysinfo",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-task",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
@@ -13039,6 +13097,32 @@ dependencies = [
  "tddy-workflow",
  "tempfile",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-worktree-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "libc",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-task",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
  "uuid",
 ]
 

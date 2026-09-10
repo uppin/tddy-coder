@@ -93,6 +93,30 @@ pub fn list_sessions_in_dir(sessions_base: &Path) -> anyhow::Result<Vec<SessionE
     Ok(result)
 }
 
+/// This daemon's own answer to `tddy-worktree-service`'s question about sessions.
+///
+/// The branch-ownership rule lives with worktrees; what claims a branch is a session, which is this
+/// crate's. Implementing the port here rather than moving the reader is what keeps that boundary a
+/// boundary — see [`tddy_worktree_service::branch_owner`].
+pub struct DaemonSessionListing;
+
+impl tddy_worktree_service::branch_owner::SessionListing for DaemonSessionListing {
+    fn sessions_under(
+        &self,
+        sessions_base: &std::path::Path,
+    ) -> anyhow::Result<Vec<tddy_worktree_service::branch_owner::SessionClaim>> {
+        Ok(list_sessions_in_dir(sessions_base)?
+            .into_iter()
+            .map(|s| tddy_worktree_service::branch_owner::SessionClaim {
+                session_id: s.session_id,
+                is_active: s.is_active,
+                status: s.status,
+                updated_at: s.updated_at,
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

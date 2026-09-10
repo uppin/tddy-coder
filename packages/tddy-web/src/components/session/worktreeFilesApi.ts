@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { ConnectionService } from "../../gen/connection_pb";
+import type { WorktreeService } from "../../gen/worktree_pb";
 
 /**
  * A single directory entry in the worktree tree. `sizeBytes` is the entry's on-disk size (`0` for a
@@ -16,7 +16,7 @@ export type WorktreeFileContent = {
 };
 
 /**
- * Thin data-access adapter over the `ConnectionService` worktree RPCs. Keeps all RPC wiring
+ * Thin data-access adapter over the `WorktreeService` RPCs. Keeps all RPC wiring
  * (session token, project id, worktree path plumbing) out of the tree/preview components — they
  * only speak `listDir(relPath)` / `readFile(relPath)` in terms of worktree-relative paths.
  */
@@ -34,7 +34,7 @@ export type WorktreeFilesApiConfig = {
 };
 
 export function createWorktreeFilesApi(
-  client: Client<typeof ConnectionService>,
+  client: Client<typeof WorktreeService>,
   { sessionToken, projectId, worktreePath }: WorktreeFilesApiConfig,
 ): WorktreeFilesApi {
   return {

@@ -13,11 +13,11 @@ import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AuthService } from "../../src/gen/auth_pb";
 import {
-  ConnectionService,
   HostPromptKind,
   HostRemoteDesktopSchema,
+  HostService,
   ProbeOutcome,
-} from "../../src/gen/connection_pb";
+} from "../../src/gen/host_pb";
 import { ScreenSharingService } from "../../src/gen/screen_sharing_pb";
 import { HostRowRemoteDesktop } from "../../src/components/hosts/HostRowRemoteDesktop";
 import { HostRowTooling } from "../../src/components/hosts/HostRowTooling";
@@ -257,7 +257,7 @@ function aKeyPassphraseQuestion(): HostPromptFrame {
  */
 function aDaemonAwaitingADesktopPassword(feed: HostPromptFeed): InMemoryRpcBackend {
   return anInMemoryRpcBackend()
-    .implement(ConnectionService, {
+    .implement(HostService, {
       ...feed.handlers,
       answerHostPrompt: async () => ({ accepted: true, rejectionReason: "" }),
     })
@@ -274,7 +274,7 @@ function aDaemonAwaitingADesktopPassword(feed: HostPromptFeed): InMemoryRpcBacke
 /** Everything the browser sent this host, as one string to search for a leaked secret in. */
 function everythingSentTo(backend: InMemoryRpcBackend): string {
   const sent = [
-    ...backend.callsTo(ConnectionService.method.answerHostPrompt),
+    ...backend.callsTo(HostService.method.answerHostPrompt),
     ...backend.callsTo(ScreenSharingService.method.startHostStream),
     ...backend.callsTo(ScreenSharingService.method.addHostTarget),
   ];
@@ -304,12 +304,12 @@ function theAnswerTheHostCanRead(backend: InMemoryRpcBackend): Cypress.Chainable
     .wrap(backend)
     .should((b: InMemoryRpcBackend) =>
       expect(
-        b.callsTo(ConnectionService.method.answerHostPrompt),
+        b.callsTo(HostService.method.answerHostPrompt),
         "exactly one answer must reach the host that raised the prompt",
       ).to.have.length(1),
     )
     .then((b: InMemoryRpcBackend) =>
-      hostKey.decrypt(b.callsTo(ConnectionService.method.answerHostPrompt)[0].encryptedAnswer),
+      hostKey.decrypt(b.callsTo(HostService.method.answerHostPrompt)[0].encryptedAnswer),
     );
 }
 
@@ -349,7 +349,7 @@ describe("Host desktop password", () => {
     // absence: a password that never left is trivially not in a request and not in storage, and an
     // assertion that holds for the wrong reason reports the property as verified for ever.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const answers = b.callsTo(ConnectionService.method.answerHostPrompt);
+      const answers = b.callsTo(HostService.method.answerHostPrompt);
       expect(answers, "the answer must reach the host that raised the prompt").to.have.length(1);
       expect(answers[0].promptId).to.equal(A_PROMPT);
       expect(answers[0].daemonInstanceId).to.equal(HOST);
@@ -419,7 +419,7 @@ function aDesktopReleasedByTheAnswer(feed: HostPromptFeed): InMemoryRpcBackend {
     theAnswerArrived = resolve;
   });
   return anInMemoryRpcBackend()
-    .implement(ConnectionService, {
+    .implement(HostService, {
       ...feed.handlers,
       answerHostPrompt: async () => {
         theAnswerArrived();
@@ -475,7 +475,7 @@ describe("Host desktop without a password", () => {
     // still a password, and a dialog that shortcut the encryption for it would be sending plaintext
     // on the one call this node exists to keep secret.
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const answers = b.callsTo(ConnectionService.method.answerHostPrompt);
+      const answers = b.callsTo(HostService.method.answerHostPrompt);
       expect(answers, "the empty answer must reach the host that raised the prompt").to.have.length(
         1,
       );
@@ -739,7 +739,7 @@ describe("Host desktop password among the hosts other questions", () => {
     // …and it is still answerable, against the prompt the desktop is blocked on.
     hostPassphraseDialogPage.submit().click();
     cy.wrap(backend).should((b: InMemoryRpcBackend) => {
-      const answers = b.callsTo(ConnectionService.method.answerHostPrompt);
+      const answers = b.callsTo(HostService.method.answerHostPrompt);
       expect(answers, "the desktop question must still be answerable").to.have.length(1);
       expect(answers[0].promptId).to.equal(A_PROMPT);
     });

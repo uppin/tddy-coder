@@ -1,10 +1,16 @@
-//! Serve the daemon's `ConnectionService` over a local Unix-domain socket with tonic gRPC.
+//! Serve the daemon's local-socket services over a Unix-domain socket with tonic gRPC.
 //!
 //! The local socket is the peer-trust transport: tonic populates each request's `UdsConnectInfo`
 //! with the caller's SO_PEERCRED credentials, which the [`ConnectionServiceTonicAdapter`] reads in
 //! `MintLocalToken`. This is spawned as an independent task alongside the HTTP server; it shares
-//! the same `ConnectionServiceImpl` instance (via `Arc`) so sessions started over the socket are
-//! visible over every other transport.
+//! the same service instances (via `Arc`) so work started over the socket is visible over every
+//! other transport.
+//!
+//! **Three services, one socket.** `#unbundle` node 1 split hosts and worktrees out of
+//! `connection.ConnectionService`, and a caller that reached them over this socket must go on
+//! reaching them over it. One `Server::builder()` with three `add_service` calls is what keeps that
+//! true — a second socket would be a second address to configure, and a service left off this
+//! builder would answer on every transport except the local one.
 
 use std::future::Future;
 use std::os::unix::io::{FromRawFd, RawFd};
@@ -15,9 +21,15 @@ use tokio_stream::wrappers::UnixListenerStream;
 use tonic::transport::Server;
 
 use tddy_service::proto::connection::ConnectionService as RpcConnectionService;
+use tddy_service::proto::host::HostService as RpcHostService;
+use tddy_service::proto::worktree::WorktreeService as RpcWorktreeService;
 use tddy_service::tonic_connection::connection_service_server::ConnectionServiceServer;
+use tddy_service::tonic_host::host_service_server::HostServiceServer;
+use tddy_service::tonic_worktree::worktree_service_server::WorktreeServiceServer;
 
 use crate::connection_tonic_adapter::ConnectionServiceTonicAdapter;
+use crate::host_tonic_adapter::HostServiceTonicAdapter;
+use crate::worktree_tonic_adapter::WorktreeServiceTonicAdapter;
 
 /// First file descriptor systemd passes for socket activation (see `sd_listen_fds(3)`).
 pub const SD_LISTEN_FDS_START: RawFd = 3;
@@ -60,23 +72,31 @@ pub fn resolve_socket_source(
     SocketSource::Activated(SD_LISTEN_FDS_START)
 }
 
-/// Bind `socket_path` and serve `adapter`'s `ConnectionService` until `shutdown` resolves.
+/// Bind `socket_path` and serve the three local-socket services until `shutdown` resolves.
 ///
 /// When launched via systemd socket activation (`LISTEN_PID`/`LISTEN_FDS` addressed to this
 /// process), the inherited listener is adopted instead — systemd owns the socket node and its
 /// permissions, so no directory is created, no stale file is unlinked, and no chmod is applied.
 /// Otherwise a stale socket left by a previous run is unlinked first so the bind does not fail
 /// with `EADDRINUSE`, and the parent directory is created if missing.
-pub async fn serve_connection_uds<T>(
+pub async fn serve_connection_uds<C, H, W>(
     socket_path: &Path,
-    adapter: ConnectionServiceTonicAdapter<T>,
+    adapter: ConnectionServiceTonicAdapter<C>,
+    host_adapter: HostServiceTonicAdapter<H>,
+    worktree_adapter: WorktreeServiceTonicAdapter<W>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()>
 where
-    T: RpcConnectionService,
-    T::StreamSessionTerminalIoStream: 'static,
-    T::StreamTerminalOutputStream: 'static,
-    T::WatchTerminalControlStream: 'static,
+    C: RpcConnectionService,
+    C::StreamSessionTerminalIoStream: 'static,
+    C::StreamTerminalOutputStream: 'static,
+    C::WatchTerminalControlStream: 'static,
+    H: RpcHostService,
+    H::StreamHostPromptsStream: 'static,
+    H::StreamHostStatsStream: 'static,
+    W: RpcWorktreeService,
+    W::StreamWorktreeStatsStream: 'static,
+    W::StreamReadWorktreeFileStream: 'static,
 {
     let listen_pid = std::env::var("LISTEN_PID").ok();
     let listen_fds = std::env::var("LISTEN_FDS").ok();
@@ -105,7 +125,7 @@ where
                 .context("adopt systemd activation socket")?;
             log::info!(
                 target: "tddy_daemon::local_socket_server",
-                "ConnectionService adopted systemd activation fd {fd} (socket label {})",
+                "local-socket services adopted systemd activation fd {fd} (socket label {})",
                 socket_path.display()
             );
             listener
@@ -120,7 +140,7 @@ where
                 .with_context(|| format!("bind local socket {}", path.display()))?;
             log::info!(
                 target: "tddy_daemon::local_socket_server",
-                "ConnectionService listening on local socket {}",
+                "local-socket services listening on {}",
                 path.display()
             );
             listener
@@ -129,9 +149,11 @@ where
 
     Server::builder()
         .add_service(ConnectionServiceServer::new(adapter))
+        .add_service(HostServiceServer::new(host_adapter))
+        .add_service(WorktreeServiceServer::new(worktree_adapter))
         .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
         .await
-        .context("serve ConnectionService over local socket")?;
+        .context("serve the local-socket services")?;
     Ok(())
 }
 

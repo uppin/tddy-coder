@@ -22,14 +22,14 @@ use tddy_daemon::livekit_peer_discovery::{
     spawn_common_room_discovery_task, CommonRoomPeerRegistry, LiveKitDiscoveryHandles,
     LiveKitEligibleDaemonSource,
 };
-use tddy_daemon::test_util::TEST_TOKEN;
+use tddy_daemon::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     session_attachment::Source as AttachmentSource, ConnectionService as ConnectionServiceTrait,
-    HostDocumentRef, HostDocumentScope, ListEligibleDaemonsRequest, SessionAttachment,
-    StartSessionRequest, UploadStagedAttachmentChunkRequest,
+    HostDocumentRef, HostDocumentScope, SessionAttachment, StartSessionRequest,
+    UploadStagedAttachmentChunkRequest,
 };
 
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
@@ -230,25 +230,14 @@ async fn two_daemons() -> TwoDaemons {
     )
     .with_staging_base_dir(staging_a.path().to_path_buf());
 
-    // Wait until A discovers B.
-    tokio::time::timeout(Duration::from_secs(45), async {
-        loop {
-            let daemons = service_a
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
-                    session_token: TEST_TOKEN.to_string(),
-                }))
-                .await
-                .expect("ListEligibleDaemons")
-                .into_inner()
-                .daemons;
-            if daemons.iter().any(|d| d.instance_id == PEER_INSTANCE_ID) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(400)).await;
-        }
-    })
-    .await
-    .expect("timeout waiting for peer daemon in eligible list");
+    // Wait until A discovers B, asked through `host.HostService` against A's own roster.
+    wait_until_peer_discovered(
+        &service_a,
+        TEST_TOKEN,
+        PEER_INSTANCE_ID,
+        Duration::from_secs(45),
+    )
+    .await;
 
     let base_a = sessions_a.path().to_path_buf();
     let peer_base = sessions_b.path().to_path_buf();

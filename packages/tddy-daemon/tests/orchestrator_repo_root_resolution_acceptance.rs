@@ -20,9 +20,8 @@ use std::sync::Arc;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_daemon::cli_session_manager::CliSessionManager;
-use tddy_daemon::connection_service::{
-    ConnectionServiceImpl, SessionUserResolver, SessionsBaseResolver,
-};
+use tddy_daemon::connection_service::ConnectionServiceImpl;
+use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_rpc::Request;
 use tddy_service::proto::connection::{
     BranchResolution, ConnectionService as ConnectionServiceTrait, GetPrStatusRequest,

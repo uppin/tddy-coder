@@ -207,7 +207,7 @@ need touching at all.
 - [hosts-screen.md](./hosts-screen.md) — the screen and its rows
 - [projects-screen-multi-host.md](./projects-screen-multi-host.md) — the common-room trust model this
   feature's crypto is answering
-- Daemon: [`packages/tddy-daemon/docs/host-add-key.md`](../../../packages/tddy-daemon/docs/host-add-key.md),
-  [`connection-service.md`](../../../packages/tddy-daemon/docs/connection-service.md#host-add-key)
+- Daemon: [`packages/tddy-host-service/docs/host-add-key.md`](../../../packages/tddy-host-service/docs/host-add-key.md),
+  [`host-service.md`](../../../packages/tddy-host-service/docs/host-service.md#addhostkey-and-the-prompt-channel)
 - Web: [`packages/tddy-web/docs/hosts-screen.md`](../../../packages/tddy-web/docs/hosts-screen.md),
   [`insecure-origin-constraints.md`](../../../packages/tddy-web/docs/insecure-origin-constraints.md)

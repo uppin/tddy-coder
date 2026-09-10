@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  ConnectionService,
-  type EligibleDaemonEntry,
-  type ProjectEntry,
-} from "../../gen/connection_pb";
+import { ConnectionService, type ProjectEntry } from "../../gen/connection_pb";
+import { HostService, type EligibleDaemonEntry } from "../../gen/host_pb";
+import { WorktreeService } from "../../gen/worktree_pb";
 import { GitHubLoginButton } from "../GitHubLoginButton";
 import { AppShell } from "../shell/AppShell";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -33,7 +31,7 @@ function toScreenRow(row: WorktreeStatsRow, nowMs: number): WorktreesScreenMockR
 
 /**
  * Full-page Worktrees view: lists worktrees for a selected project via the local daemon
- * (ConnectionService worktree RPCs are not routed to remote hosts yet). Disk sizes stream in lazily
+ * (WorktreeService RPCs are not routed to remote hosts yet). Disk sizes stream in lazily
  * via `StreamWorktreeStats` — each worktree shows its size lifecycle (None / Calculating / Cached),
  * a per-row Calculate control, and a project-wide Recalculate-all.
  *
@@ -47,7 +45,12 @@ export function WorktreesAppPage({
   onNavigate: (path: string) => void;
 }) {
   const { isAuthenticated, login, sessionToken } = useAuthContext();
+  // Three services, one daemon: the project registry stayed on `ConnectionService`, the daemon
+  // roster moved to `host.HostService`, and the worktree reads and writes to
+  // `worktree.WorktreeService`.
   const client = useDaemonClient(ConnectionService);
+  const hostClient = useDaemonClient(HostService);
+  const worktreeClient = useDaemonClient(WorktreeService);
 
   const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [daemons, setDaemons] = useState<EligibleDaemonEntry[]>([]);
@@ -67,16 +70,16 @@ export function WorktreesAppPage({
   const { rows, recalculateAll, refresh, calculate } = useWorktreeStatsStream(projectId);
 
   const loadProjectsAndDaemons = useCallback(() => {
-    if (!sessionToken || !client) return;
+    if (!sessionToken) return;
     client
-      .listProjects({ sessionToken })
+      ?.listProjects({ sessionToken })
       .then((res) => setProjects(res.projects))
       .catch(() => setProjects([]));
-    client
-      .listEligibleDaemons({ sessionToken })
+    hostClient
+      ?.listEligibleDaemons({ sessionToken })
       .then((res) => setDaemons(res.daemons))
       .catch(() => setDaemons([]));
-  }, [client, sessionToken]);
+  }, [client, hostClient, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken || !isAuthenticated) return;
@@ -107,10 +110,10 @@ export function WorktreesAppPage({
   }, [daemons]);
 
   const handleDelete = async (path: string) => {
-    if (!sessionToken || !projectId.trim() || !client) return;
+    if (!sessionToken || !projectId.trim() || !worktreeClient) return;
     setError(null);
     try {
-      await client.removeWorktree({
+      await worktreeClient.removeWorktree({
         sessionToken,
         projectId: projectId.trim(),
         worktreePath: path,

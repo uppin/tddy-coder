@@ -12,12 +12,12 @@ use tddy_core::agent_activity::{
     append_agent_activity, AgentActivityRecord, STATUS_COMPLETED, STATUS_RUNNING,
 };
 use tddy_core::session_activity::SessionActivityStatus;
-use tddy_daemon::connection_service::AgentActivityHub;
 use tddy_daemon::session_agent_inference::{
     activity_from_frame, activity_from_record, inferred_activity, session_agent_status,
     SessionAgentInferenceStore,
 };
 use tddy_daemon::session_agent_status::{AgentActivity, ManagedAgentState};
+use tddy_daemon_kernel::AgentActivityHub;
 use tddy_service::acp_replay::{agent_text_frame, append_acp_frame, tool_use_frame};
 use tddy_service::proto::acp::{AcpAgentMessage, ToolCallStatus};
 use tddy_service::proto::connection::SessionAgentStatus;

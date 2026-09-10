@@ -17,8 +17,8 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::connection::{
-    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListEligibleDaemonsRequest,
-    ListSessionsRequest, StartSessionRequest,
+    ConnectionService as ConnectionServiceTrait, DeleteSessionRequest, ListSessionsRequest,
+    StartSessionRequest,
 };
 use tddy_testing_commons::a_session_metadata;
 
@@ -351,6 +351,15 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
             room_slot.clone(),
         ),
     );
+    // The readiness probe below asks *which peers are visible*, which is `host.HostService`'s
+    // question since `#unbundle` node 1. Built over the same eligible source the connection service
+    // routes on, so "the peer is discoverable" and "StartSession can reach it" are one fact.
+    let hosts_a = tddy_host_service::HostServiceImpl::new(
+        config_a.clone(),
+        sessions_a.path(),
+        Arc::clone(&user_resolver),
+    )
+    .with_eligible_daemon_source(Arc::clone(&eligible));
     let service_a = ConnectionServiceImpl::new(
         config_a,
         resolver_a,
@@ -369,14 +378,16 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
 
     tokio::time::timeout(Duration::from_secs(45), async {
         loop {
-            let daemons = service_a
-                .list_eligible_daemons(Request::new(ListEligibleDaemonsRequest {
+            let daemons = tddy_service::proto::host::HostService::list_eligible_daemons(
+                &hosts_a,
+                Request::new(tddy_service::proto::host::ListEligibleDaemonsRequest {
                     session_token: TEST_TOKEN.to_string(),
-                }))
-                .await
-                .expect("ListEligibleDaemons")
-                .into_inner()
-                .daemons;
+                }),
+            )
+            .await
+            .expect("ListEligibleDaemons")
+            .into_inner()
+            .daemons;
             if daemons
                 .iter()
                 .any(|d| d.instance_id == REMOTE_PEER_INSTANCE_ID)

@@ -17,4 +17,4 @@ Until a peer publishes `host_id`, it is filed under its routing id and a peer ru
 `daemon_instance_id_append_startup_timestamp` leaves one permanent offline row per restart, since the
 registry never deletes.
 
-Technical: [`host-registry.md`](../../../packages/tddy-daemon/docs/host-registry.md) § `host_id` on the wire.
+Technical: [`host-registry.md`](../../../packages/tddy-host-service/docs/host-registry.md) § `host_id` on the wire.

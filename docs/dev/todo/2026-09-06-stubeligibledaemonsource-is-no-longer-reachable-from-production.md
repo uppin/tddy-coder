@@ -16,4 +16,4 @@ durable identity.
 Switch those three callers to `LocalOnlyEligibleDaemonSource::for_config` and delete the type. Left
 out of #453 because `packages/tddy-daemon/tests/` is outside that node's boundary.
 
-Technical: [`host-registry.md`](../../../packages/tddy-daemon/docs/host-registry.md).
+Technical: [`host-registry.md`](../../../packages/tddy-host-service/docs/host-registry.md).

@@ -12,6 +12,11 @@
  * Fluent-tests preference: an in-memory fake (this file) over wire-level `cy.intercept` — the
  * previous `connectionRpcs.ts` intercept helpers cannot observe LiveKit-transport RPC at all.
  * Field defaults mirror the (still-used-elsewhere) `cy.intercept`-based factories in `./responses.ts`.
+ *
+ * The host and worktree RPCs are no longer this service's: they are `host.HostService` and
+ * `worktree.WorktreeService`, and their fakes live in `./hostServiceBackend` and
+ * `./worktreeServiceBackend`. This builder composes all three onto one backend so a screen that
+ * spans them keeps one scenario object and one set of recorders.
  */
 
 import { create } from "@bufbuild/protobuf";
@@ -23,7 +28,6 @@ import {
   AgentInfoSchema,
   ConnectionService,
   ConnectSessionResponseSchema,
-  EligibleDaemonEntrySchema,
   ProjectEntrySchema,
   ResumeSessionResponseSchema,
   SessionEntrySchema,
@@ -31,11 +35,6 @@ import {
   ToolInfoSchema,
   ClaimTerminalControlResponseSchema,
   ExecuteToolResponseSchema,
-  HostStatsEventSchema,
-  HostCpuStatsSchema,
-  HostLoadStatsSchema,
-  HostMemoryStatsSchema,
-  HostDiskStatsSchema,
   ListExecToolsResponseSchema,
   ListSessionToolCallsResponseSchema,
   ListTerminalSessionsResponseSchema,
@@ -45,23 +44,28 @@ import {
   TerminalHistoryChunkSchema,
   TerminalSessionInfoSchema,
   ToolDefSchema,
-  WorktreeRowSchema,
-  WorktreeStatsEventSchema,
-  WorktreeSizeStatus,
-  CalculateWorktreeSizeResponseSchema,
-  ListWorktreesForProjectResponseSchema,
-  RemoveWorktreeResponseSchema,
-  CleanWorktreeResponseSchema,
-  RestoreSessionWorktreeResponseSchema,
   type AgentInfo,
-  type WorktreeRow,
   type ConnectSessionResponse,
-  type EligibleDaemonEntry,
   type ProjectEntry,
   type ResumeSessionResponse,
   type SessionEntry,
   type StartSessionResponse,
 } from "../../../src/gen/connection_pb";
+import { HostService } from "../../../src/gen/host_pb";
+import { WorktreeService } from "../../../src/gen/worktree_pb";
+import {
+  aHostServiceFake,
+  DAEMON_LOCAL,
+  DAEMON_PEER,
+  type DaemonEntry,
+  type HostServiceControls,
+  type HostServiceScenario,
+} from "./hostServiceBackend";
+import {
+  aWorktreeServiceFake,
+  type WorktreeServiceControls,
+  type WorktreeServiceScenario,
+} from "./worktreeServiceBackend";
 import {
   aGitHubUser,
   DEFAULT_AGENTS,
@@ -77,28 +81,14 @@ import {
 } from "./agentConversationBackend";
 import { type SessionNotificationFeed } from "./sessionNotificationFeed";
 
+// The daemon-roster fixtures and the worktree row input moved with the RPCs that serve them;
+// re-exported here so the specs that already read them off this module keep their import.
+export { DAEMON_LOCAL, DAEMON_PEER, type DaemonEntry } from "./hostServiceBackend";
+export { type WorktreeStatsRowInput } from "./worktreeServiceBackend";
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-export interface DaemonEntry {
-  instanceId: string;
-  label: string;
-  isLocal: boolean;
-}
-
-/** Canonical daemon pair for multi-host tests (same values as the retired `connectionRpcs.ts`). */
-export const DAEMON_LOCAL: DaemonEntry = {
-  instanceId: "workstation-1",
-  label: "workstation-1 (this daemon)",
-  isLocal: true,
-};
-
-export const DAEMON_PEER: DaemonEntry = {
-  instanceId: "server-2",
-  label: "server-2",
-  isLocal: false,
-};
 
 /** The projectId used in collision tests — same project ID across two daemons. */
 export const COLLISION_PROJECT_ID = "cccccccc-dddd-4eee-8fff-999999999999";
@@ -133,56 +123,15 @@ function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
   return create(AgentInfoSchema, { id: "claude", label: "Claude (opus)", ...overrides });
 }
 
-function anEligibleDaemonEntry(overrides: Partial<EligibleDaemonEntry>): EligibleDaemonEntry {
-  return create(EligibleDaemonEntrySchema, {
-    instanceId: "local",
-    label: "local (this daemon)",
-    isLocal: true,
-    ...overrides,
-  });
-}
-
-/** One worktree row as fed into a `StreamWorktreeStats` snapshot/update frame. */
-export interface WorktreeStatsRowInput {
-  path: string;
-  branchLabel?: string;
-  /** On-disk size in bytes; meaningful once `sizeStatus` is `CACHED`. */
-  diskBytes?: bigint;
-  /** Lazy size lifecycle state (drives the Worktrees screen's Status cell). */
-  sizeStatus: WorktreeSizeStatus;
-  /** Unix epoch (ms) of the last size calculation; `0n`/omitted means "never". */
-  sizeCalculatedAtUnixMs?: bigint;
-  changedFiles?: number;
-  linesAdded?: bigint;
-  linesRemoved?: bigint;
-  stale?: boolean;
-}
-
-function aWorktreeRow(input: WorktreeStatsRowInput): WorktreeRow {
-  return create(WorktreeRowSchema, {
-    path: input.path,
-    branchLabel: input.branchLabel ?? "",
-    diskBytes: input.diskBytes ?? 0n,
-    changedFiles: input.changedFiles ?? 0,
-    linesAdded: input.linesAdded ?? 0n,
-    linesRemoved: input.linesRemoved ?? 0n,
-    stale: input.stale ?? false,
-    sizeStatus: input.sizeStatus,
-    sizeCalculatedAtUnixMs: input.sizeCalculatedAtUnixMs ?? 0n,
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Scenario options
 // ---------------------------------------------------------------------------
 
-export interface ConnectionServiceScenario {
+export interface ConnectionServiceScenario extends HostServiceScenario, WorktreeServiceScenario {
   /** Static ListSessions response. Ignored when `listSessionsFactory` is given. */
   sessions?: Partial<SessionEntry>[];
   /** Dynamic ListSessions response, re-evaluated on every call (poll-driven tests). */
   listSessionsFactory?: () => Partial<SessionEntry>[];
-  /** ListEligibleDaemons response. Defaults to a single local daemon. */
-  daemons?: DaemonEntry[];
   /** ListAgents response. Defaults to `DEFAULT_AGENTS` (the dev.daemon.yaml set). */
   agents?: Array<{ id: string; label: string }>;
   /** ListTools response. Defaults to one `tddy-coder` tool row. */
@@ -210,36 +159,6 @@ export interface ConnectionServiceScenario {
   terminals?: Array<{ terminalId: string; kind?: string; pid?: number }>;
   /** The `terminal_id` handed out by the Nth (0-based) `StartTerminalSession`. Default `bash-<n+1>`. */
   newTerminalId?: (index: number) => string;
-  /** First `StreamHostStats` event — per-logical-core utilization percentages (0..100). Default empty. */
-  hostCpuPerCore?: number[];
-  /** Every `StreamHostStats` event — free/total bytes for the daemon's default project directory. */
-  hostDisk?: { availableBytes: bigint; totalBytes: bigint; projectDir: string };
-  /** When set, `StreamHostStats` emits a second event carrying these per-core percentages after the
-   *  first — lets a test assert the footer applies fresh readings streamed by the server. */
-  hostCpuPerCoreUpdate?: number[];
-  /** When true, `StreamHostStats` opens and then emits nothing — a host that is subscribed but has
-   *  not reported yet, which is what a caller must render as pending rather than as zeroes. */
-  hostStatsSilent?: boolean;
-  /** Total/available memory the fake host reports. Omitted means it reports none. */
-  hostMemoryBytes?: { availableBytes: bigint; totalBytes: bigint };
-  /** 1/5/15-minute load averages. **Omitted models a platform that has no load average** — the
-   *  case the UI must render as "no reading" rather than as 0.00. */
-  hostLoadAverage?: { oneMinute: number; fiveMinutes: number; fifteenMinutes: number };
-  /** Rows returned by `ListWorktreesForProject` (Session Worktree tab). Default: none. */
-  worktrees?: Array<{
-    path: string;
-    branchLabel?: string;
-    diskBytes?: bigint;
-    changedFiles?: number;
-    linesAdded?: bigint;
-    linesRemoved?: bigint;
-    updatedAtUnixMs?: bigint;
-    stale?: boolean;
-  }>;
-  /** First `StreamWorktreeStats` frame — the full snapshot of the project's worktrees. Default: none. */
-  worktreeStatsSnapshot?: WorktreeStatsRowInput[];
-  /** Optional second `StreamWorktreeStats` frame — one worktree whose size finished (Calculating → Cached). */
-  worktreeStatsUpdate?: WorktreeStatsRowInput;
   /** Absolute `endOffset` carried by the initial `StreamTerminalOutput` replay frame — the anchor
    *  for lazy scroll-up history. When set (> 0n), the backend's `streamTerminalOutput` emits its
    *  identifying frame tagged with this offset (and `atOldest`), mirroring the daemon's lazy
@@ -274,7 +193,9 @@ export interface ConnectionServiceScenario {
 
 export interface ConnectionServiceBackend
   extends InMemoryRpcBackend,
-    AgentConversationControls {
+    AgentConversationControls,
+    HostServiceControls,
+    WorktreeServiceControls {
   /** Qualified `agent_id`s passed to `AttachSessionAgent`, in call order. Empty unless the scenario
    *  declared a `sessionAgents` roster. */
   readonly attachedAgentIds: () => string[];
@@ -303,23 +224,6 @@ export interface ConnectionServiceBackend
   readonly streamedTerminals: { sessionId: string; terminalId: string }[];
   /** Every `{ sessionId, terminalId, beforeOffset }` passed to `GetTerminalHistory`, in call order. */
   readonly getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[];
-  /** Number of times `StreamHostStats` was subscribed — lets a test assert the footer opens the
-   *  single host-stats stream exactly once. */
-  readonly hostStatsStreamCount: () => number;
-  /** Number of `ListWorktreesForProject` calls with `refresh: true` — asserts the 10-min cadence. */
-  readonly listWorktreesRefreshCount: () => number;
-  /** Every `worktree_path` passed to `CleanWorktree`, in call order. */
-  readonly cleanedWorktreePaths: string[];
-  /** Every `worktree_path` passed to `RemoveWorktree`, in call order. */
-  readonly removedWorktreePaths: string[];
-  /** Every `session_id` passed to `RestoreSessionWorktree`, in call order. */
-  readonly restoredSessionIds: string[];
-  /** Number of times `StreamWorktreeStats` was subscribed (each open re-runs the async generator). */
-  readonly worktreeStatsStreamCount: () => number;
-  /** The `recalculate_all` flag of every `StreamWorktreeStats` subscription, in call order. */
-  readonly worktreeStatsRecalculateAllFlags: boolean[];
-  /** Every `worktree_path` passed to `CalculateWorktreeSize`, in call order. */
-  readonly calculatedWorktreePaths: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -344,14 +248,6 @@ export function aConnectionServiceBackend(
   const sentTerminalInput: { sessionId: string; terminalId: string; data: Uint8Array }[] = [];
   const streamedTerminals: { sessionId: string; terminalId: string }[] = [];
   const getTerminalHistoryCalls: { sessionId: string; terminalId: string; beforeOffset: bigint }[] = [];
-  let hostStatsStreamOpens = 0;
-  let listWorktreesRefreshCalls = 0;
-  const cleanedWorktreePaths: string[] = [];
-  const removedWorktreePaths: string[] = [];
-  const restoredSessionIds: string[] = [];
-  let worktreeStatsStreamOpens = 0;
-  const worktreeStatsRecalculateAllFlags: boolean[] = [];
-  const calculatedWorktreePaths: string[] = [];
 
   // Live bash-terminal list — mutated by Start/Stop so ListTerminalSessions stays consistent.
   const liveTerminals: { terminalId: string; kind: string; pid: number }[] = (
@@ -371,11 +267,17 @@ export function aConnectionServiceBackend(
   // Built once and kept, not inlined into the spread below: these fakes carry the call recorders a
   // spec asserts on, and building them twice would record into a copy nothing can read.
   const rosterFake = scenario.sessionAgents ? aSessionAgentRosterFake(scenario.sessionAgents) : null;
+  // The host and worktree halves of the scenario, each served by its own service. Built here for
+  // the same reason as the fakes above: they carry the recorders a spec asserts on.
+  const { handlers: hostHandlers, ...hostControls } = aHostServiceFake(scenario);
+  const { handlers: worktreeHandlers, ...worktreeControls } = aWorktreeServiceFake(scenario);
   const conversationFake = scenario.agentConversations
     ? anAgentConversationFake(scenario.agentConversations)
     : null;
 
   const backend = anInMemoryRpcBackend()
+    .implement(HostService, hostHandlers)
+    .implement(WorktreeService, worktreeHandlers)
     .implement(AuthService, {
       getAuthStatus: async () => ({ authenticated: true, user: aGitHubUser() }),
     })
@@ -397,9 +299,6 @@ export function aConnectionServiceBackend(
       listAgentModels: async () => ({
         models: DEFAULT_CLAUDE_CLI_MODELS,
         defaultModel: DEFAULT_CLAUDE_CLI_MODEL,
-      }),
-      listEligibleDaemons: async () => ({
-        daemons: daemons.map((d) => anEligibleDaemonEntry(d)),
       }),
       listSessions: async () => ({
         sessions: (scenario.listSessionsFactory ? scenario.listSessionsFactory() : (scenario.sessions ?? [])).map(
@@ -528,104 +427,6 @@ export function aConnectionServiceBackend(
         });
         return {};
       },
-      // --- Session Worktree tab: cache-backed list + clear/delete/restore ---
-      listWorktreesForProject: async (req) => {
-        if (req.refresh) listWorktreesRefreshCalls += 1;
-        return create(ListWorktreesForProjectResponseSchema, {
-          worktrees: (scenario.worktrees ?? []).map((w) => create(WorktreeRowSchema, w)),
-        });
-      },
-      removeWorktree: async (req) => {
-        removedWorktreePaths.push(req.worktreePath);
-        return create(RemoveWorktreeResponseSchema, { ok: true, message: "" });
-      },
-      cleanWorktree: async (req) => {
-        cleanedWorktreePaths.push(req.worktreePath);
-        return create(CleanWorktreeResponseSchema, { ok: true, message: "" });
-      },
-      restoreSessionWorktree: async (req) => {
-        restoredSessionIds.push(req.sessionId);
-        return create(RestoreSessionWorktreeResponseSchema, {
-          ok: true,
-          message: "",
-          worktreePath: `/restored/${req.sessionId}`,
-        });
-      },
-      // --- Worktrees screen: lazy, streamed disk usage ---
-      // Emits a first snapshot frame of every worktree, optionally one "updated" frame for a worktree
-      // whose size flipped Calculating → Cached, then stays open (mirrors StreamHostStats — a
-      // completed stream would read like the daemon dropping the feed).
-      streamWorktreeStats: async function* (req) {
-        worktreeStatsStreamOpens += 1;
-        worktreeStatsRecalculateAllFlags.push(req.recalculateAll);
-        yield create(WorktreeStatsEventSchema, {
-          snapshot: (scenario.worktreeStatsSnapshot ?? []).map(aWorktreeRow),
-        });
-        if (scenario.worktreeStatsUpdate) {
-          yield create(WorktreeStatsEventSchema, {
-            updated: aWorktreeRow(scenario.worktreeStatsUpdate),
-          });
-        }
-        await new Promise<never>(() => undefined);
-      },
-      calculateWorktreeSize: async (req) => {
-        calculatedWorktreePaths.push(req.worktreePath);
-        return create(CalculateWorktreeSizeResponseSchema, { ok: true, message: "" });
-      },
-      // --- Host stats footer: single server-streaming RPC ---
-      // Emits one event carrying both CPU and disk immediately (the server's on-subscribe snapshot),
-      // optionally a second event with updated CPU, then stays open — a completed stream would look
-      // like the daemon dropping the feed.
-      streamHostStats: async function* () {
-        hostStatsStreamOpens += 1;
-        // A silent feed stays open without ever reporting — the state a caller must render as
-        // pending rather than as zeroes.
-        if (scenario.hostStatsSilent) {
-          await new Promise<never>(() => undefined);
-        }
-        const disk = create(HostDiskStatsSchema, {
-          availableBytes: scenario.hostDisk?.availableBytes ?? 0n,
-          totalBytes: scenario.hostDisk?.totalBytes ?? 0n,
-          projectDir: scenario.hostDisk?.projectDir ?? "",
-        });
-        const memory = scenario.hostMemoryBytes
-          ? create(HostMemoryStatsSchema, {
-              availableBytes: scenario.hostMemoryBytes.availableBytes,
-              totalBytes: scenario.hostMemoryBytes.totalBytes,
-            })
-          : undefined;
-        // Left `undefined` when the scenario names no load average, so the fake reproduces a host
-        // whose platform has none — the case the UI must not render as 0.00.
-        const load = scenario.hostLoadAverage
-          ? create(HostLoadStatsSchema, {
-              oneMinute: scenario.hostLoadAverage.oneMinute,
-              fiveMinutes: scenario.hostLoadAverage.fiveMinutes,
-              fifteenMinutes: scenario.hostLoadAverage.fifteenMinutes,
-            })
-          : undefined;
-        const cores = (scenario.hostCpuPerCore ?? []).length;
-        yield create(HostStatsEventSchema, {
-          cpu: create(HostCpuStatsSchema, {
-            perCorePercent: scenario.hostCpuPerCore ?? [],
-            logicalCores: cores,
-          }),
-          disk,
-          memory,
-          load,
-        });
-        if (scenario.hostCpuPerCoreUpdate) {
-          yield create(HostStatsEventSchema, {
-            cpu: create(HostCpuStatsSchema, {
-              perCorePercent: scenario.hostCpuPerCoreUpdate,
-              logicalCores: scenario.hostCpuPerCoreUpdate.length,
-            }),
-            disk,
-            memory,
-            load,
-          });
-        }
-        await new Promise<never>(() => undefined);
-      },
       // Server-streaming output — record the opened stream, emit one identifying frame, then stay
       // open (a terminal stream that *completes* would signal disconnect and evict the runtime).
       // When `scenario.terminalReplayEndOffset` is set, the frame is tagged with the absolute
@@ -675,14 +476,8 @@ export function aConnectionServiceBackend(
     sentTerminalInput,
     streamedTerminals,
     getTerminalHistoryCalls,
-    hostStatsStreamCount: () => hostStatsStreamOpens,
-    listWorktreesRefreshCount: () => listWorktreesRefreshCalls,
-    cleanedWorktreePaths,
-    removedWorktreePaths,
-    restoredSessionIds,
-    worktreeStatsStreamCount: () => worktreeStatsStreamOpens,
-    worktreeStatsRecalculateAllFlags,
-    calculatedWorktreePaths,
+    ...hostControls,
+    ...worktreeControls,
     // A scenario that declared no roster / no conversations still answers these, with nothing —
     // a spec asserting "never attached" must not have to know whether a fake was built.
     attachedAgentIds: () => (rosterFake ? rosterFake.attachedAgentIds() : []),
