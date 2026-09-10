@@ -22,10 +22,30 @@ domain. No proto changes; no client migrates.
 |---|---|---:|---|
 | `tddy-daemon-sandbox` *(new)* | `sandbox_session.rs`, `workspace_tool_sandbox.rs`, `sandbox_action.rs`, `sandbox_plan_builder.rs`, `sandbox_runtime.rs` | 2,202 | 16 files / 5,494 LoC |
 | `tddy-spawn` *(new)* | `spawner.rs`, `spawn_worker.rs`, `supervisor_spawn.rs`, `supervisor_client.rs` | 3,236 | 5 files / 728 LoC |
-| `tddy-actions` *(exists)* | `action_service.rs` | 329 | `action_service_acceptance.rs` |
-| `tddy-task` *(exists)* | `task_service.rs` | 322 | `task_service_acceptance.rs` (877 LoC) |
 | `tddy-bsp` *(exists)* | `bsp_service.rs` | 177 | its BSP suites |
-| `tddy-semantic-index` *(exists)* | `semantic_index.rs` | 68 | `semantic_index_wiring.rs` |
+| `tddy-semantic-index` *(exists)* | `semantic_index.rs` (helpers only, **no service**) | 68 | `semantic_index_wiring.rs` |
+| ~~`tddy-actions`~~ | ~~`action_service.rs`~~ — **blocked, stays in `tddy-daemon`** | 329 | suite stays |
+| ~~`tddy-task`~~ | ~~`task_service.rs`~~ — **blocked, stays in `tddy-daemon`** | 322 | suite stays |
+
+### ⚠ Three of the four leaf services are not movable — corrected during implementation
+
+The plan assumed the four leaf services were symmetric. They are not, and only `bsp_service`
+could move. The blocking edge is **`tddy-service` → `tddy-core` → `tddy-task`**: any crate that
+must import `tddy_service::proto::*` and is also an ancestor of `tddy-task` cannot exist.
+
+| Planned move | Outcome | Why |
+|---|---|---|
+| `bsp_service` → `tddy-bsp` | ✅ done | `tddy-bsp` is a leaf — only `tddy-coder` and `tddy-daemon` depend on it — so it may depend on `tddy-service` |
+| `task_service` → `tddy-task` | ❌ blocked | needs `tddy_service::proto::tasks::*`; cargo reports `cyclic package dependency: tddy-core depends on itself` |
+| `action_service` → `tddy-actions` | ❌ blocked | `tddy-actions` → `tddy-task`, the same cycle; **and** it needs `crate::sandbox_runtime`, which does not leave `tddy-daemon` until M3 |
+| `semantic_index` service entry | ❌ never existed | `semantic_index.rs` is three helpers (`semantic_index_db_path`, `semantic_index_env`, `run_semantic_index_blocking`). There is no `semantic_index.SemanticIndexService` in the proto and no server type. The module still moved; only the invented entry is dropped |
+
+Cutting `tddy-core → tddy-task` would restructure `tddy-core`'s `session_actions` and
+`session_catalog` (5 call sites) and is ruled out by `## Boundaries` below, which assigns every
+cycle cut to node 1. Node 1's own cycle-cut commit records that four cross-crate cycles remain and
+"belong to later nodes" — so **which node owns this edge is unresolved**, and it is recorded here
+rather than decided unilaterally. The three `build_*_entry` stubs and the tests asserting them were
+removed: they specified a shape the crate graph forbids.
 
 **`tool_catalog_sync.rs` stops being a source file.** Its entire body is one `#[cfg(test)] mod tests`
 with a single test (`workspace_exec_tool_names_match_tool_catalog`) — a test file that has been living
@@ -185,7 +205,9 @@ Open items in the spawn/supervisor path. They move unchanged; recorded so a revi
 
 - [ ] **`tddy-daemon-sandbox`**: crate, 5 modules, 16 test suites, the 6 `tddy-sandbox*` deps
 - [ ] **`tddy-spawn`**: crate, 4 modules, 5 test suites, the `tddy-supervisor` dep
-- [ ] **Leaf services**: `action_service`, `task_service`, `bsp_service`, `semantic_index` into their owners
+- [x] **Leaf services**: `bsp_service` → `tddy-bsp` ✅. `action_service` and `task_service` **stay in
+      `tddy-daemon`** (cycle, see above); the `semantic_index` service entry was dropped as a false
+      premise, though the module itself moved
 - [ ] **`tool_catalog_sync.rs`** relocated to `tddy-daemon-sandbox/tests/`; `lib.rs:93` removed
 - [ ] **`tddy-sandbox-app` reversal**: depends on `tddy-daemon-sandbox`, not `tddy-daemon`
 - [ ] **⚠ nextest exclusions**: every `[profile.ci]` path whose file moved is updated in the same commit
@@ -241,7 +263,9 @@ supervisor_client}`; `spawn_worker → spawner`.
 
 ## Implementation Milestones
 
-- [ ] M1 — the four leaf services move to their owner crates; their suites pass there
+- [~] M1 — **rescoped**: `bsp_service` moved to `tddy-bsp` and its suites pass there;
+      `semantic_index.rs` moved to `tddy-semantic-index`. `action_service` and `task_service` are
+      blocked by the `tddy-core → tddy-task` cycle and stay in `tddy-daemon`
 - [ ] M2 — `tddy-spawn` extracted; 5 suites pass; `tddy-supervisor` gone from `tddy-daemon`
 - [ ] M3 — `tddy-daemon-sandbox` extracted; 16 suites pass; the 6 `tddy-sandbox*` deps moved
 - [ ] M4 — `tool_catalog_sync.rs` is a test file in the sandbox crate
