@@ -8,7 +8,7 @@ package host;
 // Split out of `connection.ConnectionService` by `#unbundle` node 1. These eight methods and their
 // 30 messages were **fully self-contained** — no message they reach is referenced by any method that
 // stayed behind — so the cut needed no shared types file. See
-// `docs/dev/1-WIP/2026-09-09-unbundle-host-worktree-services.md`.
+// `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`.
 
 service HostService {
   rpc ListEligibleDaemons(ListEligibleDaemonsRequest) returns (ListEligibleDaemonsResponse);

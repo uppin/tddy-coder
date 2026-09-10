@@ -1,4 +1,4 @@
-# Host registry (tddy-daemon)
+# Host registry (tddy-host-service)
 
 Which machines tddy knows about, as opposed to which ones are answering right now.
 
@@ -245,7 +245,7 @@ already recorded, and `Some(0)` remains available to mean a genuine zero.
 
 ## `ListKnownHosts`
 
-The unary handler on `ConnectionService`. It authenticates `session_token` → GitHub user → OS user
+The unary handler on `host.HostService`. It authenticates `session_token` → GitHub user → OS user
 like every other method, then joins:
 
 ```text
@@ -269,7 +269,7 @@ every implementation rather than only for whichever double a test injects:
   a first boot or an unwritable registry still shows the machine the operator is talking to, filled
   in from this daemon's own configuration.
 
-`ConnectionServiceImpl::with_host_registry` substitutes the store, and `with_eligible_daemon_source`
+`HostServiceImpl::with_host_registry` substitutes the store, and `with_eligible_daemon_source`
 the roster, so tests drive both halves of the join deterministically.
 
 The lookup is a linear scan of the roster per entry. That is right at the scale this screen exists
@@ -277,7 +277,7 @@ for — a handful of machines; a deployment with hundreds would want a map.
 
 ## See also
 
-- RPC surface: [connection-service.md](connection-service.md)
+- RPC surface: [host-service.md](host-service.md)
 - Desktop reachability on the same row: [host-tooling-probe.md](host-tooling-probe.md#remote-desktop)
 - Feature: [docs/ft/web/screen-sharing-sessions.md](../../../docs/ft/web/screen-sharing-sessions.md)
   — both scopes of the remote-desktop feature

@@ -1,4 +1,4 @@
-# Host tooling probe (tddy-daemon)
+# Host tooling probe (tddy-host-service)
 
 What a host has installed and configured, as opposed to how busy it is.
 
@@ -7,7 +7,7 @@ will actually succeed: the git identity its commits would carry, whether the Git
 authenticated, whether an ssh-agent is holding a key its remotes would accept, and whether a desktop
 on it can be reached — and bridged. It backs the web's Hosts rows
 ([docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)) through the
-`GetHostTooling` RPC ([connection-service.md](./connection-service.md)).
+`GetHostTooling` RPC ([host-service.md](./host-service.md)).
 
 This is the first *capability probe* in the daemon — the first place tddy asks a machine what is on
 it rather than reporting something the daemon already holds.
@@ -21,7 +21,7 @@ pub trait HostToolingProbe: Send + Sync {
 ```
 
 One method, taking the OS user to answer for. `SubprocessHostToolingProbe` is the live
-implementation; `ConnectionServiceImpl::with_host_tooling` substitutes a deterministic double, the
+implementation; `HostServiceImpl::with_host_tooling` substitutes a deterministic double, the
 same shape as `with_host_stats` and for the same reason: **a test must never depend on what happens
 to be installed on the machine running it**, and asserting against the developer's own git identity
 is the anti-pattern [the testing guide](../../../docs/dev/guides/testing.md) names. A test-only
@@ -426,7 +426,7 @@ travels with every reading rather than being inferred from the flags, and it is 
 
 ### The bridge check is the cheaper win
 
-`resolve_vnc_binary_path` / `resolve_rdp_binary_path` (`crate::config`) resolve a path by *guessing*
+`resolve_vnc_binary_path` / `resolve_rdp_binary_path` (`tddy_daemon_kernel::config`) resolve a path by *guessing*
 — explicit config, then a sibling of `current_exe()`, then a bare name on `PATH` — with **no
 existence check anywhere**. A missing binary surfaces only as a spawn error in
 `screen_sharing_service`, i.e. after an operator has already asked for a stream. Checking it up front
@@ -455,7 +455,7 @@ because an existence check is worth no more than the path it checks. An operator
 
 The configuration therefore reaches it by construction, not by lookup:
 `SubprocessHostToolingProbe::for_config(&config)` builds the probe from the daemon's own
-configuration, and `connection_service.rs` hands it the live `config` it already has in scope — the
+configuration, and `tddy-daemon`'s `runtime.rs` hands it the live `config` it already has in scope — the
 same value `LocalOnlyEligibleDaemonSource::for_config` is built from a few lines earlier. `Default` still
 resolves against `DaemonConfig::default()`, which is exactly what a daemon with no `screen_sharing:`
 block spawns.
@@ -541,7 +541,7 @@ a Unix host can never honestly give for them.
 | Unit | `ssh_agent.rs` `#[cfg(test)]` | the protocol exchange, the four outcomes, fingerprint derivation |
 | Unit | `remote_desktop_probe.rs` `#[cfg(test)]` | a real socket's behaviour: reachable, refused, no bytes written, and the bridge check against a configured path |
 | Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
-| Integration | `connection_service/host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
+| Integration | `host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole |
 | Component | `packages/tddy-web/cypress/component/HostsScreenToolingAcceptance.cy.tsx`, `HostsScreenSshAgentAcceptance.cy.tsx`, `HostsScreenRemoteDesktopAcceptance.cy.tsx` | the states rendering distinguishably |
 
 Shelling out to the real `git` / `gh` was rejected: CI has an arbitrary `gh` state, and a suite that
@@ -595,13 +595,13 @@ parse. Nothing branches on the text.
 
 ## See also
 
-- [connection-service.md](./connection-service.md) — the `GetHostTooling` RPC and its routing
+- [host-service.md](./host-service.md) — the `GetHostTooling` RPC and its routing
 - [host-add-key.md](./host-add-key.md) — the agent's **write** side: loading a key into it, and the
   socket resolution this module owns being called rather than reimplemented
-- [`docs/dev/TODO.md`](../../../docs/dev/TODO.md) § *Host tooling probe* — the open deployment
+- [`docs/dev/todo/`](../../../docs/dev/todo/) — the open deployment
   questions this probe surfaced
 - `host_stats.rs` — the other per-host reader, documented in
-  [connection-service.md § Host stats](./connection-service.md#host-stats); this module copies its
+  [host-service.md § Host stats](./host-service.md#host-stats); this module copies its
   injectable-trait shape
 - Feature: [docs/ft/web/hosts-screen-tooling.md](../../../docs/ft/web/hosts-screen-tooling.md)
 - Web: [packages/tddy-web/docs/hosts-screen.md](../../tddy-web/docs/hosts-screen.md)

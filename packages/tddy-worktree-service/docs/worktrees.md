@@ -1,4 +1,4 @@
-# Worktrees module (`tddy_daemon::worktrees`)
+# Worktrees module (`tddy_worktree_service::worktrees`)
 
 ## Role
 
@@ -34,7 +34,7 @@ The expensive directory-size walk is computed **lazily, per worktree, and centra
 - **`subscribe(project)`** returns a `tokio::sync::broadcast::Receiver<WorktreeSizeUpdate>`; **`snapshot(project)`** returns every known worktree's state (the stream's first frame). **`state`** reads memory, lazily falling back to the persisted file so a fresh calculator reports `Cached` without re-walking.
 - The `git diff` summary (changed files, ±lines) is unchanged — only the size walk is lazy/status-tracked.
 
-`ConnectionService` wires an `Arc<WorktreeSizeCalculator>` and exposes it over the streaming `StreamWorktreeStats` (snapshot + per-worktree `Calculating→Cached` increments, via `MpscWorktreeStatsStream`) and the membership-gated unary `CalculateWorktreeSize`; `ListWorktreesForProject` overlays the size status/timestamp while retaining its eager `disk_bytes` walk as a cache fallback.
+`WorktreeServiceImpl` wires an `Arc<WorktreeSizeCalculator>` and exposes it over the streaming `StreamWorktreeStats` (snapshot + per-worktree `Calculating→Cached` increments, via `MpscWorktreeStatsStream`) and the membership-gated unary `CalculateWorktreeSize`; `ListWorktreesForProject` overlays the size status/timestamp while retaining its eager `disk_bytes` walk as a cache fallback.
 
 ## Persistence layout
 

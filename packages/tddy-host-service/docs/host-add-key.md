@@ -1,4 +1,4 @@
-# Host add-key (tddy-daemon)
+# Host add-key (tddy-host-service)
 
 Loading a private key into a host user's ssh-agent, with the passphrase carried from the browser
 **encrypted end to end**. The read side of the agent — what it holds, and whether it answered at all
@@ -26,7 +26,7 @@ successful add.
 | `host_prompt_stream.rs` | the `StreamHostPrompts` pump, and its teardown |
 | `host_private_key.rs` | reading the key an operator named — as that operator, out of their own home — and listing the keys they could pick from |
 | `ssh_agent_add.rs` | handing an unlocked identity to that user's agent over the wire protocol |
-| `connection_service.rs` | the four handlers, their routing and their auth |
+| `service.rs` | the four handlers, their routing and their auth |
 
 ## The prompt registry
 
@@ -243,7 +243,7 @@ which has **no fixed release upstream**. The mitigations are recorded with the a
 | Unit | `host_prompts.rs` | expiry, single use, unknown id, ownership |
 | Unit | `host_keypair.rs` | fingerprint stability, decrypt of an independently produced ciphertext, refusal of one addressed elsewhere |
 | Unit | `host_private_key.rs` | the confinement, the single refusal, and 13 listing behaviours |
-| Integration | `connection_service/host_add_key_handler_tests.rs` | the whole flow — real prompt, real RSA-OAEP, real OpenSSH key unlock — with only the agent stood in for |
+| Integration | `host_add_key_handler_tests.rs` | the whole flow — real prompt, real RSA-OAEP, real OpenSSH key unlock — with only the agent stood in for |
 | Wire-level | `tests/stream_host_prompts_rpc.rs` | the pump's teardown and its idle liveness |
 
 **Only the agent is a double.** A test that handed the handler a plaintext passphrase and called it
@@ -284,7 +284,7 @@ address: it has no TLS at all. See
 
 ## See also
 
-- [connection-service.md § Host add-key](connection-service.md#host-add-key) — the four RPCs, their
+- [host-service.md § Host add-key](host-service.md#host-add-key) — the four RPCs, their
   routing and their auth
 - [host-tooling-probe.md § The ssh-agent](host-tooling-probe.md#the-ssh-agent) — the read side, and
   socket resolution

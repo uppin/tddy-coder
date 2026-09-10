@@ -1,4 +1,4 @@
-# Remote git service module (`tddy_daemon::remote_git_service`)
+# Remote git service module (`tddy_worktree_service::remote_git_service`)
 
 ## Role
 

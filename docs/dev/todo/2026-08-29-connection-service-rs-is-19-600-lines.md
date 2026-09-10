@@ -1,7 +1,20 @@
-# 2026-08-29 — `connection_service.rs` is 19,600 lines
+# 2026-08-29 — `connection_service.rs` is 19,600 lines — resolved 2026-09-09
 
 **Category:** Future enhancement
+**Status:** Resolved
 **Source:** subagent-conversation-inference changeset, 2026-08-29
+
+**Resolved 2026-09-09** by the `#unbundle` stack's root node, [#470](https://github.com/uppin/tddy-coder/pull/470). Two cuts, in order: PR #468 turned
+the file into a 2,416-line facade over 60 modules, and #470 took the first group *out of the crate
+entirely* — 17 of `ConnectionService`'s 90 methods became `host.HostService` and
+`worktree.WorktreeService`, in `packages/tddy-host-service` and `packages/tddy-worktree-service`.
+
+The prediction below was right and had to be sharpened: **`pub(crate)` does not cross a crate
+boundary**, so each subsystem's state moved behind an owned struct (`HostServiceImpl`,
+`WorktreeServiceImpl`) with `with_*` builders, which the 30 existing `pub trait` ports made
+affordable. Nine widenings still had to stand, each forced by a caller that stayed behind; they are
+listed in [the changeset](../changesets/2026-09-09-unbundle-host-worktree-services.md).
+
 
 - Pre-existing, and long past any sane module limit. Flagged here rather than acted on: this
   changeset adds 44 lines to it, and a split would bury a reviewable feature under a 19,000-line

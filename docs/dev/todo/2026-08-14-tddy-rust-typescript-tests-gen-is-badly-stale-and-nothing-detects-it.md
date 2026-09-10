@@ -1,7 +1,22 @@
-# 2026-08-14 — `tddy-rust-typescript-tests/gen/` is badly stale and nothing detects it
+# 2026-08-14 — `tddy-rust-typescript-tests/gen/` is badly stale and nothing detects it — resolved 2026-09-09
 
 **Category:** Future enhancement
+**Status:** Resolved
 **Source:** remote-managed-worktree changeset, 2026-08-14
+
+**Resolved 2026-09-09** by [#470](https://github.com/uppin/tddy-coder/pull/470), which took the third of the three options below — a CI drift check —
+and then had to take the first as well, because the gate was red the day it was added on drift no PR
+introduced.
+
+`scripts/generated-code.sh` regenerates and diffs all four generated directories; `check` exits
+non-zero on any difference, `write` regenerates in place. Rather than exclude a directory to get a
+green check, the stale directories were regenerated through the script's own `write` mode and the two
+`codex_oauth_pb.ts` orphans — no generating `.proto`, no TypeScript importer — were deleted. The
+gate's first run then found a genuine one: `tddy-web/src/gen/sandbox_pb.ts` predated
+`sandbox.proto`'s `in_jail_tool_request` / `in_jail_tool_response`. The gate itself is covered by
+`scripts/generated-code.test.ts`, which fails it on a deliberately stale `*_pb.ts` and passes it on a
+fresh one.
+
 
 Running `bun run generate` in that package produces **12 files that were never checked in**
 (`actions_pb`, `bsp_pb`, `tasks_pb`, `vm_pb`, `vnc_pb`, `sandbox_pb`, the `grpc/reflection` and

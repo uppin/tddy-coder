@@ -8,7 +8,7 @@
  * a table. Reading only the rendered rows would not distinguish the two — a fixture served under
  * either coordinate produces the same table — which is why the recorded call is asserted too.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-09-unbundle-host-worktree-services.md`
+ * Changeset: `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

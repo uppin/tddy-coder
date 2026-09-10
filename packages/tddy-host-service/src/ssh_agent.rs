@@ -166,7 +166,7 @@ impl AgentStatus {
 /// declared managed service is started with `EnvironmentBase::Inherited`), but because `./install`
 /// runs the daemon as an unprivileged service account and `/run/user/<uid>` is `0700`. The honest
 /// report there is the permission error, never a fabricated empty key list. See
-/// `packages/tddy-daemon/docs/host-tooling-probe.md` § *Reaching the socket on a supervised host*.
+/// `packages/tddy-host-service/docs/host-tooling-probe.md` § *Reaching the socket on a supervised host*.
 pub trait AgentSocketResolver: Send + Sync {
     /// The agent socket for `os_user`, or `Ok(None)` when the lookup succeeded and named none.
     ///
@@ -438,7 +438,7 @@ impl<S: std::io::Write> std::io::Write for UntilDeadline<S> {
 /// is only reachable by that user and by root, and the daemon installed by `./install` runs as an
 /// unprivileged service account — so on a supervised host this resolves sockets it cannot connect
 /// to, and the probe reports "could not check" with the permission error rather than a fabricated
-/// empty key list. See `packages/tddy-daemon/docs/host-tooling-probe.md` § *Reaching the socket on
+/// empty key list. See `packages/tddy-host-service/docs/host-tooling-probe.md` § *Reaching the socket on
 /// a supervised host*.
 #[cfg(unix)]
 pub struct WellKnownAgentSockets;

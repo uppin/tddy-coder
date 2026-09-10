@@ -8,7 +8,7 @@
  * `host.HostService`, and the project registry only under `connection.ConnectionService`. A screen
  * that asked any of them of the wrong service gets `Unimplemented` and shows nothing.
  *
- * Changeset: `docs/dev/1-WIP/2026-09-09-unbundle-host-worktree-services.md`
+ * Changeset: `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`
  */
 
 import { create } from "@bufbuild/protobuf";
