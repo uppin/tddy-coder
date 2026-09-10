@@ -19,11 +19,32 @@
 
 ## Summary
 
+**Two deliverables.** The families, and the codegen that stops their adapters being hand-written.
+
+
+
 22 of `ConnectionService`'s remaining 72 methods leave: the terminal family (K, 9 methods), agent
 context sync (J, 3), session workflow files (I, 2), session uploads (R, 3) and staged attachments plus
 host documents (S, 5). Terminals go to **`terminal_session.TerminalSessionService`, a service that
 already exists, is a byte-for-byte duplicate of family K, and is served nowhere.** The other 13
 methods become `session_files.SessionFilesService`, served by a new `tddy-session-files` crate.
+
+### `tddy-codegen`'s `generate_tonic_adapter` is implemented here
+
+Every service kept reachable on the local UDS socket needs a tonic adapter, and the generator that
+should write them is a stub — it emits an adapter struct and a `new()`, and nothing else. Node 1
+therefore hand-wrote two adapters, 17 `async fn`s. Node 6, keeping its two services reachable on the
+same precedent, would hand-write **22**.
+
+Two facts make this the node to fix it in rather than a later one:
+
+- It is the **largest** hand-writing cost of any node.
+- `StreamSessionTerminalIO` is the **only bidirectional method in the whole 90-method surface** —
+  69 unary, 20 server-streaming, 1 bidi. A generator built anywhere else would handle two of the
+  three shapes and be found incomplete later; here it cannot be.
+
+A declarative macro is not an option: `#[tonic::async_trait]` rewrites the signatures of the trait it
+is applied to, and a macro cannot see through that rewrite to generate the bodies.
 
 ## Background
 
@@ -116,6 +137,12 @@ cannot open a terminal, sync context, or upload a file.
 6. `tddy-web` migrated; the Cypress terminal and file fakes split.
 
 ## Acceptance Criteria
+
+- [ ] `generate_tonic_adapter` emits a working tonic trait impl for **unary**, **server-streaming**
+      (including the associated `…Stream` type) and **bidirectional** methods
+- [ ] the generated body calls the shared status conversion rather than constructing its own
+- [ ] this node's two services reach the UDS socket through **generated** adapters
+- [ ] a generated adapter answers identically to a hand-written one for the same service
 
 - [ ] `terminal_session.TerminalSessionService` serves all 9 family-K methods over Connect-HTTP,
       LiveKit and the local UDS socket

@@ -900,3 +900,145 @@ fn generate_tonic_adapter(service: &Service, buf: &mut String, _rpc: &str) {
 
 #[cfg(not(feature = "tonic"))]
 fn generate_tonic_adapter(_service: &Service, _buf: &mut String, _rpc: &str) {}
+
+#[cfg(all(test, feature = "tonic"))]
+mod tonic_adapter_tests {
+    use super::*;
+
+    /// A method as `prost-build` hands it to a generator.
+    fn a_method(name: &str, client_streaming: bool, server_streaming: bool) -> Method {
+        Method {
+            name: to_snake_case(name),
+            proto_name: name.to_string(),
+            comments: Default::default(),
+            input_type: format!("{name}Request"),
+            output_type: format!("{name}Response"),
+            input_proto_type: format!(".session_files.{name}Request"),
+            output_proto_type: format!(".session_files.{name}Response"),
+            options: Default::default(),
+            client_streaming,
+            server_streaming,
+        }
+    }
+
+    fn a_service_with(methods: Vec<Method>) -> Service {
+        Service {
+            name: "SessionFilesService".to_string(),
+            proto_name: "SessionFilesService".to_string(),
+            package: "session_files".to_string(),
+            comments: Default::default(),
+            methods,
+            options: Default::default(),
+        }
+    }
+
+    fn generated_for(methods: Vec<Method>) -> String {
+        let mut buf = String::new();
+        generate_tonic_adapter(&a_service_with(methods), &mut buf, "tddy_rpc");
+        buf
+    }
+
+    /// The whole point of the generator: a delegating body, not just a struct.
+    ///
+    /// The stub emitted an adapter struct and a `new()` and stopped, which is why node 1 hand-wrote
+    /// 17 `async fn`s and node 6 would have written 22.
+    #[test]
+    fn generates_a_delegating_body_for_a_unary_method() {
+        // Given
+        let generated = generated_for(vec![a_method("ReadHostDocument", false, false)]);
+
+        // Then
+        assert!(
+            generated.contains("async fn read_host_document"),
+            "the adapter must implement the method, not merely declare a struct:\n{generated}"
+        );
+        assert!(
+            generated.contains("self.inner"),
+            "the body must delegate to the wrapped Connect-RPC impl:\n{generated}"
+        );
+    }
+
+    /// A server-streaming method needs the associated stream type as well as the method, because the
+    /// tonic trait declares one per streaming rpc.
+    #[test]
+    fn generates_the_associated_stream_type_for_a_server_streaming_method() {
+        // Given
+        let generated = generated_for(vec![a_method("StreamReadHostDocument", false, true)]);
+
+        // Then
+        assert!(
+            generated.contains("type StreamReadHostDocumentStream"),
+            "a server-streaming rpc needs its associated Stream type:\n{generated}"
+        );
+        assert!(
+            generated.contains("async fn stream_read_host_document"),
+            "and its method:\n{generated}"
+        );
+    }
+
+    /// **The case only family K has.** `StreamSessionTerminalIO` is the one bidirectional method in
+    /// the entire 90-method surface, so a generator built in any other node would have handled unary
+    /// and server-streaming and been found incomplete here.
+    ///
+    /// A bidi method takes `tonic::Streaming<In>` rather than `tonic::Request<In>` and answers with a
+    /// stream, so both halves differ from every other shape.
+    #[test]
+    fn generates_both_halves_of_a_bidirectional_method() {
+        // Given
+        let generated = generated_for(vec![a_method("StreamSessionTerminalIO", true, true)]);
+
+        // Then
+        assert!(
+            generated.contains("Streaming"),
+            "a bidi rpc's request is a Streaming, not a Request:\n{generated}"
+        );
+        assert!(
+            generated.contains("type StreamSessionTerminalIOStream"),
+            "and its response is still a stream:\n{generated}"
+        );
+    }
+
+    /// Three hand-written adapters already share `to_tonic_status` so they cannot drift on how a
+    /// refusal maps to a tonic code. A generator that built its own `tonic::Status` would reintroduce
+    /// exactly that drift — between generated and hand-written adapters.
+    #[test]
+    fn delegates_status_conversion_rather_than_constructing_its_own() {
+        // Given
+        let generated = generated_for(vec![a_method("ReadHostDocument", false, false)]);
+
+        // Then
+        assert!(
+            generated.contains("to_tonic_status"),
+            "the generated body must call the shared conversion:\n{generated}"
+        );
+        assert!(
+            !generated.contains("tonic::Status::internal")
+                && !generated.contains("tonic::Status::unknown"),
+            "it must not construct a status itself, or generated and hand-written adapters drift:\n{generated}"
+        );
+    }
+
+    /// A service with every shape at once generates one impl block carrying all of them — the shape
+    /// node 6 actually needs, since `terminal_session.TerminalSessionService` mixes all three.
+    #[test]
+    fn generates_one_impl_carrying_every_method_shape() {
+        // Given
+        let generated = generated_for(vec![
+            a_method("SendTerminalInput", false, false),
+            a_method("StreamTerminalOutput", false, true),
+            a_method("StreamSessionTerminalIO", true, true),
+        ]);
+
+        // Then
+        for expected in [
+            "async fn send_terminal_input",
+            "async fn stream_terminal_output",
+            "async fn stream_session_terminal_io",
+        ] {
+            assert!(
+                generated.contains(expected),
+                "missing {expected}:\n{generated}"
+            );
+        }
+    }
+}

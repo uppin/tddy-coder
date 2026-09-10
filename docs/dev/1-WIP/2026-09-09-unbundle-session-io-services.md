@@ -31,6 +31,25 @@ hits**. What is shared is the *bridge* — `serve_stream_terminal_output_with`,
 `connection.SessionTerminalInput` → `terminal_session.SessionTerminalInput` at
 `connection_service.rs:439-457`. This node serves the coordinate and **deletes both converters**.
 
+**It also implements `tddy-codegen`'s `generate_tonic_adapter`.** That is a second deliverable in one
+node, and the justification is arithmetic plus a capability nobody else can supply:
+
+- **Cost.** `generate_tonic_adapter` is a stub, so every service kept reachable on the local UDS
+  socket needs an adapter written by hand — a literal `async fn` per method unwrapping a
+  `tonic::Request`, calling the Connect-RPC impl, and mapping the result back. Node 1 wrote two
+  (17 methods). Following node 1's precedent of preserving UDS reachability, node 6 would write
+  **22** — `session_files.SessionFilesService` (13) plus `terminal_session.TerminalSessionService`
+  (9). More than node 1, and the most of any node.
+- **Capability.** `StreamSessionTerminalIO` is the **only bidirectional method in the entire
+  90-method surface** — 69 unary, 20 server-streaming, 1 bidi, and the bidi one is family K's. A
+  generator built in any other node would handle unary and server-streaming and be discovered
+  incomplete the first time it met a bidi method. Node 6 is the only node that forces it to be
+  complete.
+
+A macro cannot substitute: `#[tonic::async_trait]` rewrites the signatures of the trait it is applied
+to, and a declarative macro cannot see through that rewrite to generate the bodies. It is a codegen
+job or it is hand-written.
+
 Source that moves: the context/documents subsystem (`host_documents.rs`, `context_sync.rs`,
 `session_context_docs.rs`, `context_files.rs`, `stack_doc_attachments.rs`,
 `session_workflow_files.rs` — 2,197 prod LoC), the attachment and upload modules
@@ -53,6 +72,13 @@ This PR explicitly does **not**:
   same web migration.
 - Change the terminal control mutex's semantics. `ClaimTerminalControl` / `WatchTerminalControl` move
   verbatim.
+- **Retro-fit the generator over node 1's two hand-written adapters, or the connection adapter.**
+  The generator is used for the services *this* node adds. Regenerating `host_tonic_adapter.rs` and
+  `worktree_tonic_adapter.rs` would put a rewrite of a predecessor's files in this node's diff, and
+  `connection_tonic_adapter.rs` is deleted by node 9 anyway. Replacing the two survivors is a
+  follow-up whose whole diff is a deletion, recorded in `docs/dev/todo/`.
+- **Generate anything but the tonic adapter.** `generate_rpc_server` and the trait emission are
+  untouched; this node fills in one stub.
 - Force every file under 500 lines. `host_documents.rs` (595), `context_sync.rs` (595),
   `session_context_docs.rs` (558), `session_attachments.rs` (570) and `worktree_files.rs`-adjacent
   seams are over budget; split where cohesive, and whatever stays over is recorded in `## Scope`.
@@ -106,6 +132,7 @@ Real dependency edges, as opposed to the branch line:
 
 ## Affected Packages
 
+- **tddy-codegen** — `generate_tonic_adapter` implemented: unary, server-streaming and bidirectional
 - **tddy-session-files** *(new)* — the 10 context, attachment and upload modules
 - **tddy-terminal-rpc** — serves `terminal_session.TerminalSessionService`; gains the 3 PTY modules
 - **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 13 modules and 3,842 prod LoC leave;
@@ -181,6 +208,11 @@ so it is the first real exercise of that gate. Confirm at wrap that the gate cau
 ## Scope
 
 - [ ] **Proto**: `session_files.proto` (13 methods); `connection.proto` loses 22 rpcs; vacated field numbers `reserved`
+- [ ] **Tonic adapter generator**: `tddy-codegen`'s `generate_tonic_adapter` implemented — unary,
+      server-streaming (with the associated `…Stream` type) and **bidirectional**; emits calls to the
+      shared status conversion rather than inlining its own
+- [ ] **Generated adapters used**: this node's two services reach the UDS socket through generated
+      adapters, not hand-written ones
 - [ ] **⛔ Terminal surface unified**: `terminal_session.TerminalSessionService` served; **both hand converters deleted**
 - [ ] **`tddy-session-files`**: crate, 10 modules, its suites
 - [ ] **`tddy-terminal-rpc`**: serves family K; gains the 3 PTY modules
@@ -277,6 +309,13 @@ Three further proofs:
 - [ ] **Integration**: the same session answers identically through the daemon's server and through
       `tddy-coder`'s session participant — history offsets, stream mode, control claim (`two_server_parity_acceptance.rs`)
 
+### tddy-codegen
+- [ ] **Unit**: a unary method generates an `async fn` that unwraps `tonic::Request`, delegates, and maps the result (`generator.rs`)
+- [ ] **Unit**: a server-streaming method generates the associated `…Stream` type as well as the method (`generator.rs`)
+- [ ] **Unit**: **a bidirectional method generates a `Streaming` request and a stream response** — the case only family K has (`generator.rs`)
+- [ ] **Unit**: the generated body calls the shared status conversion rather than constructing a `tonic::Status` itself (`generator.rs`)
+- [ ] **Integration**: a generated adapter serves the same responses as the hand-written one it replaces, for one service (`generated_adapter_parity_acceptance.rs`)
+
 ### tddy-session-files
 - [ ] **Integration**: all 13 `session_files.SessionFilesService` methods answer (`session_files_service_acceptance.rs`)
 - [ ] **Integration**: context manifest and batched context reads stream identically to the old coordinate (`context_sync_acceptance.rs`)
@@ -296,6 +335,18 @@ Three further proofs:
 
 ## Decisions & Trade-offs
 
+- **The generator lands here rather than on its own schedule, and I argued against that first.**
+  Sized as "3-5 days of codegen to avoid ~9 hand-written methods", it was a clear loss — that
+  estimate counted only the methods a *production* tonic client dials (`start_session` and
+  `mint_local_token`, both node 9's). It ignored the precedent node 1 set: families that were on
+  `ConnectionService` were reachable over UDS, and node 1 kept its two families reachable rather than
+  silently dropping that. Node 6 following the same precedent is 22 hand-written methods, not 9. The
+  arithmetic flips, and the bidi requirement means this node is also the only one that can produce a
+  *complete* generator.
+- **`to_tonic_status` stays shared, and the generator emits calls to it.** Three hand-written
+  adapters already share it so they cannot drift on how a refusal maps to a tonic code. A generator
+  that inlined its own conversion would reintroduce exactly that drift, between generated and
+  hand-written adapters.
 - **`terminal_session.proto`'s messages become canonical, not `connection.proto`'s.** They already
   exist and already have a `build.rs` pass; adopting them costs one extern-path re-point, while the
   reverse would mean deleting a proto the repo deliberately wrote. This is not a judgement that they
@@ -319,6 +370,8 @@ Three further proofs:
 
 ## Technical Debt & Production Readiness
 
+- [ ] Node 1's `host_tonic_adapter.rs` and `worktree_tonic_adapter.rs` remain hand-written; replacing
+      them with generated ones is a follow-up whose whole diff is a deletion
 - [ ] The split-agent attachment route (`2026-08-14-…`) is still missing; the move preserves the scope
       parameter it will need
 - [ ] `tddy-coder`'s session participant remains a string dispatch rather than a generated trait impl;
@@ -354,10 +407,37 @@ that change in a red-phase commit.
 
 The known pre-existing failure inherited from node 1's baseline is expected to stay at exactly one.
 
+## Correction to node 1's backlog entry
+
+`docs/dev/todo/2026-09-09-tonic-adapters-are-hand-written-per-service.md` (node 1) predicts:
+
+> The cost is linear in the `#unbundle` stack: every remaining node that splits a service out of
+> `connection.ConnectionService` writes another one.
+
+**That is wrong, and it is the sentence that nearly got the generator dropped.** An adapter is needed
+only for a service kept reachable on the local UDS socket; everything else is served through
+`ServiceEntry` on Connect-HTTP, LiveKit or stdio and needs none. Nodes 2, 3, 4 and 5 wrote **zero**
+adapters — their subsystems' services were already separate protos and were never on that socket.
+Measured over production callers alone, only two methods are dialled there at all
+(`tddy-sandbox-app/src/daemon_client.rs`: `start_session` and `mint_local_token`, both node 9's),
+which sizes the whole remaining debt at ~9 methods and makes a generator a clear loss.
+
+What that measurement missed is the **precedent**: families that were on `ConnectionService` *were*
+UDS-reachable, and node 1 kept its two reachable rather than silently dropping that. A node following
+the same precedent pays per method of its own families, not per production caller — which is 22 for
+node 6.
+
+So the entry's conclusion (do it) is right and its reasoning (linear per node) is wrong, in a way
+that would mis-size the work for whoever picked it up. Node 6 **closes** the entry, and the
+release-note file records why the prediction did not hold.
+
 ## Final Checklist
 
 - [ ] `docs/dev/changesets/2026-09-09-unbundle-session-io-services.md` — the release-note file,
-      carrying the 22 moved coordinates and the deleted converters
+      carrying the 22 moved coordinates, the deleted converters, and the generator with why the
+      "linear per node" prediction did not hold
+- [ ] **Close** `docs/dev/todo/2026-09-09-tonic-adapters-are-hand-written-per-service.md`
+- [ ] New `docs/dev/todo/` entry: replace node 1's two hand-written adapters with generated ones
 - [ ] Move `packages/tddy-daemon/docs/` context and attachment docs to `tddy-session-files/docs/`
 - [ ] `packages/tddy-daemon/docs/connection-service.md` — remove 22 endpoint entries
 - [ ] `docs/ft/daemon/terminal-sessions.md`, `agent-context-sync.md`, `docs/ft/coder/session-attachments.md`,
