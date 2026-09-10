@@ -139,7 +139,91 @@ keeping every node's removals.
   it reaches the daemon for
 - **tddy-service**: `livekit.proto` appears; `connection.proto` loses 1 rpc
 - **tddy-web**: `src/rpc/useLiveKitRooms.ts`, the rooms panel, and `cypress/support/rpc/liveKitRoomsBackend.ts`
+- **tddy-daemon-kernel**: **+17 lines**, unplanned. `SPLIT_AGENT_IDENTITY_PREFIX` lands in
+  `daemon_identity.rs` as cycle **cut A**; `split_session` re-exports it, so no caller path changed
+  and there stays one definition. Node 1's own precedent for a one-symbol cross-crate edge
+- **tddy-workflow**: **+57 lines**, unplanned. `SessionAttachmentFile` and
+  `list_session_attachments` land in `artifact_paths.rs` as cycle **cut C**, beside the
+  `session_attachments_root` that names the directory they read — a filesystem convention this crate
+  already owns, which is why they are here and not in the kernel
+- **tddy-livekit**: two call sites repoint to `proto::livekit` after family T moved
+- **tddy-rust-typescript-tests**: `gen/livekit_pb.ts`, from the same regeneration as `tddy-web`'s
 - **tddy-desktop**: no change expected. **Outside the CI gate**; verified locally and stated
+
+Four packages above were **not** in this list when the node was planned. All four are consequences of
+the cycle cuts node 1 reassigned to the moving nodes — see `## Boundaries`.
+
+## Validation Results
+
+`/validate-changes`, run 2026-09-10 on the rebased tree (base
+`feature/unbundle/sandbox-spawn-services` @ `a6364d45`).
+
+### Stack gate
+
+| Check | Result |
+|---|---|
+| Stack branch | Yes — planned, base `feature/unbundle/sandbox-spawn-services` |
+| `/pr-stack-rebase` | ✅ Rebased (base extended by node 3's wrap commit) |
+| Leak check — `origin/<base>..HEAD` is this PR only | ✅ Clean, 6 commits |
+
+### Stack boundary
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ All — M1–M8 |
+| `## Responsibility` delivered | ✅ No stubs in either owned crate |
+| `## Dependencies` not implemented here | ✅ `move_module_to_crate` untouched; the kernel gained a const for an assigned cut, not one of node 1's aliases |
+| `## Boundaries` respected | ✅ `daemon_settings`, `daemon_config_service`, `split_session` all still in `tddy-daemon`; host-key modules untouched in `tddy-host-service` |
+| No dependent's behaviour | ✅ |
+| Diff contains only this PR's files | ✅ — four packages beyond the plan, all cycle-cut consequences, now listed above |
+| Parent-owned files intact | ✅ **Zero deletions in the whole diff** |
+
+### Build — every touched package
+
+`tddy-daemon-auth`, `tddy-daemon-livekit`, `tddy-daemon`, `tddy-service`, `tddy-workflow`,
+`tddy-daemon-kernel`, `tddy-integration-tests`, `tddy-livekit` — **8/8 ✅**.
+
+### Risk scan
+
+| Check | Result |
+|---|---|
+| Hardcoded secrets | ✅ None. Every match is a test fixture (`devkey`, `some-other-deployments-secret`) or doc prose |
+| `println!` / `eprintln!` added | ✅ None |
+| New `unwrap`/`expect` in production paths | ✅ **None.** Net +9 against the same modules at base, all inside `#[cfg(test)]`; the authored `livekit_service.rs` has zero |
+| Temporary markers this PR added | ✅ None. The two `TODO(session-room)` in `session_room.rs` are **pre-existing** — 2 at base, moved verbatim, and named as inherited defects in `## Prerequisites` |
+| Test-environment branches / fallbacks | ✅ None |
+
+### Clean-code metrics (`/analyze-clean-code`, step 4)
+
+**Everything authored in this node is under budget.** `livekit_service.rs` 127,
+`tddy-daemon-livekit/src/lib.rs` 137, `tddy-daemon-auth/src/lib.rs` 153,
+`daemon_identity.rs` 113 (+17 here), `artifact_paths.rs` 373 (+57 here).
+
+**Five files are over 500 lines, and every one of them is relocated code, not new code:**
+
+| File | Lines | |
+|---|---:|---|
+| `tddy-daemon-livekit/src/session_room.rs` | 2,992 | moved |
+| `tddy-daemon-livekit/src/livekit_peer_discovery.rs` | 2,060 | moved |
+| `tddy-daemon-auth/src/auth.rs` | 1,200 | moved |
+| `tddy-daemon-livekit/src/common_room_supervisor.rs` | 881 | moved |
+| `tddy-daemon-livekit/src/livekit_rooms_stream.rs` | 779 | moved |
+
+**Splitting them is deferred to a follow-up branch after the stack lands**, on two independent
+grounds. `/pr-wrap` step 4 forbids restructuring a file that another PR in the stack also touches —
+`session_room.rs` is reached by the session subsystem that nodes 6–8 move, and a rename cascade
+through their diffs turns each into a conflict. And `## Boundaries` already names the file budget a
+non-goal for this node. Splitting also costs a second 40-minute rust-analyzer index per file, since
+`move_module_to_crate` only handles a whole `<crate>/src/<module>.rs`.
+
+### Findings
+
+- **[INFO]** `packages/tddy-daemon-kernel/src/daemon_identity.rs` and
+  `packages/tddy-workflow/src/artifact_paths.rs` are additions to crates this node did not plan to
+  touch. Both are cycle cuts, both add rather than modify, and both are recorded above. A reviewer
+  should still see them called out, because a kernel change inside a LiveKit PR is surprising.
+- **[INFO]** `docs/dev/todo/2026-08-16-…-truncate-in-place.md` stays open by design: it names three
+  stores and this node fixed one. The other two are node 2's.
 
 ## Related Feature Documentation
 
@@ -280,8 +364,13 @@ here; the entry should be updated with the new location at wrap.
       seams are worth their own PR now that the subsystem is in one crate
 - [x] **Baseline** ✅: recorded per touched package in `## Baseline`, with the 18 pre-existing
       sandbox-family failures named and attributed rather than folded into a total
-- [x] **Code Quality** ✅: `cargo clippy -p tddy-daemon-livekit -p tddy-service --all-targets --
-      -D warnings` exits 0; `cargo fmt --check` clean
+- [x] **Code Quality** ✅ — **and the first version of this line is why a CI blocker was missed.**
+      It read `-p tddy-daemon-livekit -p tddy-service`, omitting `tddy-daemon-auth`, so
+      `items_after_test_module` in `oauth_loopback_tunnel.rs` went unseen until `/pr-wrap`. CI runs
+      `--workspace --all-targets` (`.github/workflows/ci.yml:69`), so a scoped local gate must name
+      **every** crate the node touches:
+      `cargo clippy -p tddy-daemon-auth -p tddy-daemon-livekit -p tddy-service -p tddy-daemon-kernel -p tddy-workflow -p tddy-daemon --all-targets -- -D warnings`.
+      `cargo fmt --check` clean
 - [ ] **Documentation**: doc triage executed at wrap
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -372,11 +461,26 @@ and write, and assert the previous value survives.
 ## Acceptance Tests
 
 ### tddy-daemon-auth
-- [ ] **Integration**: all 5 `auth.AuthService` methods answer from the new crate (`auth_service_acceptance.rs`)
-- [ ] **Integration**: `MintLiveKitToken` and `token.TokenService` mint against `config.livekit.api_secret` (`token_service_acceptance.rs`)
-- [ ] **Integration**: a token signed by this crate authenticates a call to a service in another crate (`cross_crate_session_token_acceptance.rs`)
-- [ ] **Unit**: a failure between truncate and write leaves the previous secret intact (`github_token_store.rs`)
-- [ ] **Unit**: `tddy-daemon` is absent from this crate's dependency path (`dependency_boundary_unit.rs`)
+- [x] **Integration**: all 5 `auth.AuthService` methods answer from the new crate ✅
+      (`auth_service_acceptance.rs`, 6 — the five methods plus a foreign-secret refusal)
+- [x] **Integration**: `MintLiveKitToken` and `token.TokenService` mint against
+      `config.livekit.api_secret` ✅ (`token_service_acceptance.rs`) — each verified with
+      `livekit_api::access_token::TokenVerifier`, plus a test that a server holding a *different*
+      secret refuses the same JWT, without which the positive two assert nothing
+- [x] **Integration**: a token signed by this crate authenticates a call to a service in another
+      crate ✅ (`cross_crate_session_token_acceptance.rs`, 2). The far side is `tddy-service`
+      deliberately, not one of the daemon's own services — this crate cannot reach those, which is
+      the property `dependency_boundary_unit.rs` pins
+- [x] **Unit**: a failure part-way through a write leaves the previous secret intact ✅
+      (`github_token_store.rs`). ⚠ **It does not discriminate this PR's change.** The base
+      implementation already staged to `<tokens>.tmp` and renamed, and that staged create also
+      fails in a `0o555` directory — so reverting the `write_atomic_with_mode` refactor would leave
+      this test green. It is an honest guard against a *future* truncate-in-place, not evidence for
+      the ⛔ prerequisite, and the PR description should say so
+- [x] **Unit**: `tddy-daemon` is absent from this crate's dependency path ✅
+      (`dependency_boundary_unit.rs`, 3) — walks the transitive manifest closure, with a third test
+      asserting the walk actually reaches `tddy-daemon-kernel`, so a walk that silently found
+      nothing cannot pass as a clean result
 
 ### tddy-daemon-livekit
 - [x] **Integration**: `livekit.LiveKitService.StreamLiveKitRooms` streams and terminates cleanly ✅
@@ -394,10 +498,18 @@ and write, and assert the previous value survives.
       too, so `SessionTokenMinter` cannot quietly stop being a port
 
 ### tddy-telegram
-- [ ] **Integration**: a telegram-started session still reaches its room, through `tddy-daemon-livekit` (`telegram_start_claude_acceptance.rs`)
+- [x] **N/A — the premise was wrong** ✅. This row assumed `tddy-telegram` would hold the
+      `session_room` consumer by now. It does not and will not at node 2's position: the consumer is
+      `telegram_session_control.rs`, which stays in `tddy-daemon`. Its repoint is covered by
+      `tddy-daemon` building and its own suites passing
 
 ### tddy-web
-- [ ] **Cypress component**: the LiveKit rooms panel loads through `livekit.LiveKitService` (`LiveKitRoomsPanel.cy.tsx`)
+- [x] **Cypress component**: the LiveKit rooms panel loads through `livekit.LiveKitService` ✅ —
+      `LiveKitRoomsPanelAcceptance.cy.tsx`, **26/26** (the spec is named `…Acceptance.cy.tsx`, not
+      the planned `LiveKitRoomsPanel.cy.tsx`). The fake registers its handler **only** on
+      `LiveKitService` and the testkit router answers anything unregistered with
+      `Code.Unimplemented`, so a client still asking `ConnectionService` would fail the suite rather
+      than quietly pass
 
 ### tddy-daemon
 - [x] **Integration** ✅: `connection.ConnectionService` no longer declares `StreamLiveKitRooms`, and
@@ -438,6 +550,35 @@ and write, and assert the previous value survives.
       a single policy becomes expressible. Recorded, not fixed
 - [ ] The Docker-dependent suites still leave the real LiveKit join path unexercised
 - [ ] `tddy-service` depends on `tddy-tui`, so `tddy-daemon-livekit` inherits the TUI in its build
+- [ ] **`ensure_owner_only_dir` changed behaviour twice, and only one half was deliberate.**
+      `github_token_store.rs` now builds the directory with `DirBuilder::recursive(true).mode(0o700)`
+      instead of `create_dir_all` + an unconditional `set_permissions(0o700)`:
+      1. *Intended* — an **existing** storage directory no longer has `0o700` re-imposed on every
+         write, so the daemon stops overruling an operator's deliberate `chmod`. The cost is that an
+         `auth_storage` that is currently group- or world-readable **stays that way after upgrade**,
+         where before every `put` re-tightened it. That deserves a decision, not a silent accept.
+      2. *Unintended* — the mode now applies to **every** directory the call creates, not just the
+         leaf. With `auth_storage = /var/lib/tddy/auth` and no `/var/lib/tddy`, that parent is now
+         `0700` and owned by the daemon user; previously parents took the process umask.
+- [ ] **Log targets still name the crate the code left** — `tddy_daemon::auth`,
+      `tddy_daemon::codex_oauth`, `tddy_daemon::github_token_store`, `tddy_daemon::oauth_tunnel`,
+      `tddy_daemon::common_room`, `tddy_daemon::livekit_peer_discovery::peer_metadata`. **Kept
+      deliberately**: renaming them would silently break every operator's `RUST_LOG` filter, and node
+      1 set the same precedent (`tddy-host-service` still logs `tddy_daemon::host_private_key`). A
+      fleet-wide rename is its own change with its own release note
+- [ ] **The dependency-boundary harness is duplicated** — ~100 identical lines in
+      `tddy-daemon-auth/tests/dependency_boundary_unit.rs` and its `tddy-daemon-livekit` twin, and
+      nodes 5–8 will each add another copy. Lift into `tddy-testing-commons`. It also has two latent
+      blind spots, both harmless against today's tree: a table-form dependency
+      (`[dependencies.tddy-daemon]` with `path` on its own line) is skipped, and a workspace-inherited
+      path dep (`{ workspace = true }`) is never followed
+- [ ] **The four Docker-backed LiveKit suites now contend.** They are `#[serial]` *within* a binary,
+      but cargo parallelises binaries, and they are now 4 of 8 in a small crate rather than 4 of 25 in
+      `tddy-daemon`. One whole-crate run lost a test to container contention; `--test-threads=1`
+      across all four is 11/0. Wants a crate-spanning `serial_test` group
+- [ ] **`packages/tddy-web/src/buildId.ts` is a committed build artifact** that regenerates on every
+      build, so it is diff noise on every PR in this stack and a guaranteed conflict on every cascade
+      rebase
 
 ## Baseline
 
@@ -449,7 +590,7 @@ and write, and assert the previous value survives.
 | `cargo test -p tddy-service` + `tddy-daemon-auth` | — | **177 passed / 0 failed** |
 | `cargo test -p tddy-workflow -p tddy-daemon-kernel` | — | **91 passed / 0 failed** |
 | `cargo test -p tddy-livekit` | — | **66 passed / 0 failed** |
-| `cargo clippy -p tddy-daemon-livekit -p tddy-service --all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0 |
+| `cargo clippy` over **all six touched crates** `--all-targets -- -D warnings` | ✅ exit 0 | ✅ exit 0 — after fixing `items_after_test_module`; the original two-crate command never covered `tddy-daemon-auth` |
 | `cargo fmt --check` | ✅ | ✅ |
 | `scripts/generated-code.sh check` | ✅ | ✅ (with `livekit_pb.ts` added) |
 | LiveKit suites with `/var/run/docker.sock` absent | never skipped — they **fail**; see `## Scope` | unchanged; 11 ran green with Docker present |

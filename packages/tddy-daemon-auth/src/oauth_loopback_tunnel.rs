@@ -320,6 +320,32 @@ pub async fn run_oauth_tunnel_supervisor(room: Arc<Room>) {
     }
 }
 
+/// The OAuth loopback TCP proxy, when this daemon is eligible to run one.
+///
+/// It follows `room_slot` rather than any one room connection, so it outlives a reconnect and is
+/// started once per process — rebinding its callback ports on every common-room change would race
+/// with itself for them.
+///
+/// The eligibility gate lives here with the supervisor it gates rather than with the common-room
+/// discovery loop it used to sit beside: peer discovery moved to `tddy-daemon-livekit`, and this
+/// crate is the identity boundary, so a LiveKit crate reaching in here to start an OAuth proxy
+/// would be the boundary running backwards.
+pub fn spawn_oauth_loopback_tunnel(
+    config: &DaemonConfig,
+    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !config.codex_oauth_loopback_proxy_eligible {
+        log::info!(
+            target: LOG,
+            "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
+        );
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        run_oauth_tunnel_supervisor_follow_room_slot(room_slot).await;
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,30 +399,52 @@ mod tests {
         };
         assert_eq!(a, b);
     }
-}
 
-/// The OAuth loopback TCP proxy, when this daemon is eligible to run one.
-///
-/// It follows `room_slot` rather than any one room connection, so it outlives a reconnect and is
-/// started once per process — rebinding its callback ports on every common-room change would race
-/// with itself for them.
-///
-/// The eligibility gate lives here with the supervisor it gates rather than with the common-room
-/// discovery loop it used to sit beside: peer discovery moved to `tddy-daemon-livekit`, and this
-/// crate is the identity boundary, so a LiveKit crate reaching in here to start an OAuth proxy
-/// would be the boundary running backwards.
-pub fn spawn_oauth_loopback_tunnel(
-    config: &DaemonConfig,
-    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-) -> Option<tokio::task::JoinHandle<()>> {
-    if !config.codex_oauth_loopback_proxy_eligible {
-        log::info!(
-            target: LOG,
-            "OAuth loopback TCP proxy disabled (codex_oauth_loopback_proxy_eligible=false); no bind on 127.0.0.1 callback ports from this process"
+    /// The gate that decides whether *this* process binds `127.0.0.1` callback ports at all. An
+    /// operator sets it false when something else on the machine already owns port 1455, so a
+    /// regression here is a port conflict rather than a quiet feature loss.
+    #[tokio::test]
+    async fn binds_no_loopback_callback_port_when_this_daemon_is_not_eligible() {
+        // Given a daemon whose operator switched the loopback proxy off
+        let config = a_daemon_with_loopback_proxy_eligibility(false);
+
+        // When the tunnel is asked to start
+        let supervisor = spawn_oauth_loopback_tunnel(&config, an_unconnected_room_slot());
+
+        // Then nothing is spawned, so no callback port is ever bound from this process
+        assert!(
+            supervisor.is_none(),
+            "an ineligible daemon must not start the supervisor that binds 127.0.0.1 callback ports"
         );
-        return None;
     }
-    Some(tokio::spawn(async move {
-        run_oauth_tunnel_supervisor_follow_room_slot(room_slot).await;
-    }))
+
+    #[tokio::test]
+    async fn follows_the_room_slot_when_this_daemon_is_eligible() {
+        // Given a daemon left eligible to run the loopback proxy
+        let config = a_daemon_with_loopback_proxy_eligibility(true);
+
+        // When the tunnel is asked to start
+        let supervisor = spawn_oauth_loopback_tunnel(&config, an_unconnected_room_slot());
+
+        // Then a supervisor is following the room slot, waiting for the common room to connect.
+        // It is left running: the test runtime ends with the test and takes the task with it.
+        assert!(
+            supervisor.is_some(),
+            "an eligible daemon must run the supervisor that serves the OAuth callback"
+        );
+    }
+
+    /// A daemon whose only setting that matters here is the operator's eligibility switch.
+    fn a_daemon_with_loopback_proxy_eligibility(eligible: bool) -> DaemonConfig {
+        DaemonConfig {
+            codex_oauth_loopback_proxy_eligible: eligible,
+            ..DaemonConfig::default()
+        }
+    }
+
+    /// The slot the daemon publishes its common-room handle into. Empty here, because the
+    /// eligibility gate is decided before any room connects.
+    fn an_unconnected_room_slot() -> Arc<tokio::sync::RwLock<Option<Arc<Room>>>> {
+        Arc::new(tokio::sync::RwLock::new(None))
+    }
 }

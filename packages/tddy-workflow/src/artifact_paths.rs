@@ -122,6 +122,64 @@ pub fn read_session_artifact_utf8_or_placeholder(session_dir: &Path, basename: &
         .unwrap_or_else(|| SESSION_ARTIFACT_READ_PLACEHOLDER.to_string())
 }
 
+/// One attachment file on disk under `artifacts/attachments/`: its `basename`, absolute `path`, and
+/// size in bytes as reported by the filesystem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionAttachmentFile {
+    pub basename: String,
+    pub path: PathBuf,
+    pub size_bytes: u64,
+}
+
+/// Lists the session's attachments, sorted by basename so a listing is deterministic across
+/// filesystems. Regular files only — subdirectories and other non-regular entries are skipped. A
+/// session with no attachments directory (the common case) yields an empty list, not an error.
+pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile> {
+    let attachments_dir = session_attachments_root(session_dir);
+    let Ok(entries) = std::fs::read_dir(&attachments_dir) else {
+        log::debug!(
+            "list_session_attachments: no attachments directory at {} — empty listing",
+            attachments_dir.display()
+        );
+        return Vec::new();
+    };
+
+    let mut files: Vec<SessionAttachmentFile> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata() else {
+            log::warn!(
+                "list_session_attachments: metadata unavailable for {} — skipping",
+                path.display()
+            );
+            continue;
+        };
+        if !metadata.is_file() {
+            log::debug!(
+                "list_session_attachments: skipping non-regular entry {}",
+                path.display()
+            );
+            continue;
+        }
+        let Some(basename) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        files.push(SessionAttachmentFile {
+            basename,
+            path,
+            size_bytes: metadata.len(),
+        });
+    }
+    files.sort_by(|a, b| a.basename.cmp(&b.basename));
+
+    log::debug!(
+        "list_session_attachments: {} attachment(s) under {}",
+        files.len(),
+        attachments_dir.display()
+    );
+    files
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,61 +371,4 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&dir);
     }
-}
-/// One attachment file on disk under `artifacts/attachments/`: its `basename`, absolute `path`, and
-/// size in bytes as reported by the filesystem.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionAttachmentFile {
-    pub basename: String,
-    pub path: PathBuf,
-    pub size_bytes: u64,
-}
-
-/// Lists the session's attachments, sorted by basename so a listing is deterministic across
-/// filesystems. Regular files only — subdirectories and other non-regular entries are skipped. A
-/// session with no attachments directory (the common case) yields an empty list, not an error.
-pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile> {
-    let attachments_dir = session_attachments_root(session_dir);
-    let Ok(entries) = std::fs::read_dir(&attachments_dir) else {
-        log::debug!(
-            "list_session_attachments: no attachments directory at {} — empty listing",
-            attachments_dir.display()
-        );
-        return Vec::new();
-    };
-
-    let mut files: Vec<SessionAttachmentFile> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            log::warn!(
-                "list_session_attachments: metadata unavailable for {} — skipping",
-                path.display()
-            );
-            continue;
-        };
-        if !metadata.is_file() {
-            log::debug!(
-                "list_session_attachments: skipping non-regular entry {}",
-                path.display()
-            );
-            continue;
-        }
-        let Some(basename) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-            continue;
-        };
-        files.push(SessionAttachmentFile {
-            basename,
-            path,
-            size_bytes: metadata.len(),
-        });
-    }
-    files.sort_by(|a, b| a.basename.cmp(&b.basename));
-
-    log::debug!(
-        "list_session_attachments: {} attachment(s) under {}",
-        files.len(),
-        attachments_dir.display()
-    );
-    files
 }

@@ -36,6 +36,4 @@ base64 = "0.22"
 # matching `AccessToken` — so `token_service_acceptance.rs` checks the signature the way a LiveKit
 # server would rather than by re-reading the fields the daemon just wrote.
 livekit-api = "0.5"
-pretty_assertions = { workspace = true }
-rstest = { workspace = true }
 tempfile = "3"

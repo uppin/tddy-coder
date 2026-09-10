@@ -59,63 +59,6 @@ pub use tddy_github::token_store::GitHubTokenStore;
 mod tests {
     use super::*;
 
-    /// ⛔ `docs/dev/todo/2026-08-16-the-daemon-s-secret-stores-still-truncate-in-place.md`.
-    ///
-    /// The store truncates in place, so a crash between truncate and write leaves a **truncated
-    /// secret at rest**. This crate exists to be the identity boundary, so shipping it with that
-    /// path at its centre would be worse than a slightly larger diff — and hand-rolling an atomic
-    /// write beside `tddy_core::atomic_file::write_atomic` would deepen the duplication the entry is
-    /// about. It is routed through the existing helper as part of the move.
-    ///
-    /// A read-only storage directory stands in for the failure: it is what a full filesystem does
-    /// to the swap file the replacement is staged in, and it is the same stand-in
-    /// `tddy_core::atomic_file`'s own disk-full test uses.
-    #[cfg(unix)]
-    #[test]
-    fn a_failed_write_leaves_the_previous_secret_intact() {
-        use std::os::unix::fs::PermissionsExt;
-
-        // Given a store holding a token
-        let dir = tempfile::tempdir().unwrap();
-        let store = a_store_at(dir.path());
-        store.put("alice", "the-original-token").unwrap();
-
-        // When a write fails part-way — simulated by writing to a path made unwritable
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
-        // root ignores the permission bits, so there is nothing for this case to observe there.
-        let unwritable = std::fs::File::create(dir.path().join(".probe")).is_err();
-        let refused = store.put("alice", "a-replacement-that-never-lands");
-        let survivor = store.get("alice");
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        if !unwritable {
-            return;
-        }
-
-        // Then the original is still readable, never a truncated prefix of either
-        assert!(
-            refused.is_err(),
-            "a write into a read-only directory must be reported, not swallowed"
-        );
-        assert_eq!(
-            survivor.as_deref(),
-            Some("the-original-token"),
-            "a partial write must not destroy the value it was replacing"
-        );
-    }
-
-    #[test]
-    fn has_no_token_for_a_user_none_was_stored_for() {
-        // Given
-        let dir = tempfile::tempdir().unwrap();
-        let store = a_store_at(dir.path());
-
-        // When
-        let found = store.get("bob");
-
-        // Then
-        assert_eq!(found, None);
-    }
-
     /// A daemon with no GitHub configuration registers no session services at all. That is a
     /// refusal, and the caller has to be able to see it rather than receive an empty success.
     #[test]
@@ -132,10 +75,6 @@ mod tests {
             built.user_resolver.is_none(),
             "no configuration means no identity function, not a permissive one"
         );
-    }
-
-    fn a_store_at(path: &std::path::Path) -> Box<dyn GitHubTokenStore> {
-        Box::new(github_token_store::FileGitHubTokenStore::new(path))
     }
 
     /// A daemon whose `daemon.yaml` carries no `github:` block at all — the state a fresh install

@@ -15,7 +15,9 @@ use tddy_daemon_auth::auth::{
     build_auth_entries, build_token_service_entry, LiveKitTokenServiceImpl,
 };
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_rpc::{MultiRpcService, Request, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry};
+use tddy_rpc::{
+    Code, MultiRpcService, Request, RequestMetadata, RpcBridge, RpcMessage, ServiceEntry,
+};
 use tddy_service::proto::auth::{LiveKitTokenService as _, MintLiveKitTokenRequest};
 use tddy_service::proto::token::{GenerateTokenRequest, GenerateTokenResponse};
 
@@ -93,6 +95,28 @@ async fn mints_nothing_a_server_holding_a_different_secret_would_admit() {
     assert!(
         verified.is_err(),
         "a JWT signed with this fleet's secret must not verify under another's"
+    );
+}
+
+#[tokio::test]
+async fn mints_no_room_jwt_for_a_caller_whose_session_token_cannot_be_resolved() {
+    // Given a daemon serving a common room, and a session token it can resolve to nobody
+    let (config, _dir) = a_daemon_serving_a_common_room();
+    let mint = the_room_mint(&config);
+
+    // When admission to the room is asked for with it
+    let refusal = mint
+        .mint_live_kit_token(Request::new(MintLiveKitTokenRequest {
+            session_token: "not-a-token-any-signer-produced".to_string(),
+        }))
+        .await;
+
+    // Then nothing is minted — this is the mint that hands out LiveKit admission, so an
+    // unresolvable caller must be turned away rather than admitted under some default identity
+    assert_eq!(
+        refusal.map(|_| ()).map_err(|status| status.code),
+        Err(Code::Unauthenticated),
+        "an unresolvable session token must never be admitted to the common room"
     );
 }
 
