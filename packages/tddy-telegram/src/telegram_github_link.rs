@@ -1,6 +1,7 @@
 //! Telegram user ↔ GitHub login binding for OAuth and workflow OS-user resolution.
 //!
-//! Acceptance tests in `tests/telegram_github_link.rs` exercise this module.
+//! Acceptance tests in `packages/tddy-daemon/tests/telegram_github_link.rs` exercise this module
+//! through the daemon's facade re-export; they stay there until the rest of the subsystem follows.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_github::GitHubOAuthProvider;
 
 type HmacSha256 = Hmac<Sha256>;

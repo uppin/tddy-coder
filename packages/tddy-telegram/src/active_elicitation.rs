@@ -1,7 +1,7 @@
 //! Per-chat **active elicitation lease** / ordered queue (PRD: single visible question per Telegram chat).
 //!
-//! Outbound [`crate::telegram_notifier::TelegramSessionWatcher`] and inbound
-//! [`crate::telegram_session_control::TelegramSessionControlHarness`] share one
+//! Outbound `tddy_daemon::telegram_notifier::TelegramSessionWatcher` and inbound
+//! `tddy_daemon::telegram_session_control::TelegramSessionControlHarness` share one
 //! [`ActiveElicitationCoordinator`] per process (see `main.rs` wiring).
 
 use std::collections::HashMap;
@@ -129,7 +129,7 @@ impl ActiveElicitationCoordinator {
     /// After `completed_session_id` **fully** leaves presenter elicitation, remove every consecutive
     /// queued surface token for that session from the front (see [`Self::register_elicitation_surface_request`]).
     ///
-    /// Used when [`crate::telegram_notifier::TelegramSessionWatcher`] observes `was_eliciting &&
+    /// Used when `tddy_daemon::telegram_notifier::TelegramSessionWatcher` observes `was_eliciting &&
     /// !now_eliciting` so all tokens for a multi-step clarification clear in one transition.
     pub fn drain_elicitation_completion_for_session(
         &mut self,

@@ -21,7 +21,7 @@ proto services**, so no RPC coordinate moves and no client migrates:
 | New crate | Modules | prod LoC | Serves | Dedicated tests |
 |---|---:|---:|---|---|
 | `tddy-model-registry` | 13 (`model_registry/`) | 3,035 | `models.ModelRegistryService` (12), `acp.AcpService` (1) | 8 files / 4,618 LoC |
-| `tddy-telegram` | 10 | 6,835 | nothing — `PresenterObserver` / `PresenterIntent` are `tddy-service`'s | 14 files / 4,529 LoC |
+| `tddy-telegram` | 9 (planned) / **4 modules + 1 seam moved** | 7,237 | nothing — `PresenterObserver` / `PresenterIntent` are `tddy-service`'s | 12 files / 4,892 LoC (none moved) |
 | `tddy-screen-sharing` | 2 | 2,299 | `screen_sharing.ScreenSharingService` (10), `screen_sharing_input` (1) | 2 files / 624 LoC |
 
 It also **deletes 1,008 lines of unreachable code**: `vnc_service.rs` (204), `vnc_vault.rs` (359) and
@@ -46,9 +46,10 @@ This PR explicitly does **not**:
   telegram because that is where their behaviour lives, but `session_list_enrichment.rs` and
   `session_notifications.rs` reach them and stay behind this node; they consume the new crate.
 - Implement `move_module_to_crate`. That is node 1's, and this node is its second real user.
-- Force every file under 500 lines. `telegram_session_control.rs` (4,158), `telegram_notifier.rs`
-  (1,846), `screen_sharing_service.rs` (1,953), `model_registry/store.rs` (1,075), `telegram_bot.rs`
-  (737) and `model_registry/acp_service.rs` (617) are all over budget and are split where the seams
+- Force every file under 500 lines. `telegram_session_control.rs` (4,472 measured, not 4,158),
+  `telegram_notifier.rs` (1,948 measured, not 1,846), `screen_sharing_service.rs` (1,953),
+  `model_registry/store.rs` (1,075), `telegram_bot.rs` (788 measured, not 737)
+  and `model_registry/acp_service.rs` (617) are all over budget and are split where the seams
   are cohesive; whatever stays over is recorded in `## Scope`.
 
 ## Dependencies
@@ -82,22 +83,33 @@ that state.**
 ## Green wave
 
 **Wave:** 2 of 3
-**Greenable independently:** yes — once node 1 is green. Every test here mounts its own crate's
-service or injects a double; none exercises a sibling node's behaviour.
-**Concurrent with:** nodes 3, 4 and 5. All four touch disjoint subsystems, disjoint protos and
-disjoint test files, and the only shared file is `packages/tddy-daemon/src/runtime.rs` — where each
-node removes its own registrations. That is a recurring conflict, not a dependency: expect a
-`runtime.rs` conflict on every cascade and resolve it by keeping both removals.
+**Greenable independently:** **only two of the three crates.** `tddy-model-registry` and
+`tddy-screen-sharing` are independent as planned — every test mounts its own crate's service or
+injects a double. **`tddy-telegram` is not.** Measurement (below, *The telegram cycle*) shows its
+centre — `telegram_session_control` — is an orchestrator of the daemon's session lifecycle, so the
+subsystem cannot finish leaving until the session machinery does. That machinery belongs to **nodes
+4 and 6-8**, which makes telegram a *successor* of them, not a peer of nodes 3-5. What this node
+can green independently is the part with no edge back into the daemon: the transport seam and four
+leaf modules. The rest is out of reach on this branch at any effort.
+**Concurrent with:** nodes 3 and 5 for the registry and screen-sharing halves. All touch disjoint
+subsystems, disjoint protos and disjoint test files, and the only shared file is
+`packages/tddy-daemon/src/runtime.rs` — where each node removes its own registrations. That is a
+recurring conflict, not a dependency: expect a `runtime.rs` conflict on every cascade and resolve it
+by keeping both removals. **Node 4 is no longer a peer for the telegram half** — it is a
+prerequisite of it.
 **Blocks:** nothing. No node consumes anything this one delivers.
 
-Real dependency edges, as opposed to the branch line:
+Real dependency edges, as opposed to the branch line — the telegram edge is the one the plan missed:
 
     n1 → n2, n3, n4, n5      n5 → n6, n7, n8
+
+    n4, n6, n7, n8 → n2's telegram remainder   (discovered on M4, not planned)
 
 ## Affected Packages
 
 - **tddy-model-registry** *(new)* — the 13 `model_registry/` modules and their two services
-- **tddy-telegram** *(new)* — the 10 telegram and elicitation modules
+- **tddy-telegram** *(new)* — 4 of the 9 telegram and elicitation modules, plus the transport
+  seam of a 5th; the other 5 are deferred to nodes 4 and 6-8
 - **tddy-screen-sharing** *(new)* — `screen_sharing_service.rs`, `screen_sharing_vault.rs`
 - **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 27 modules leave, 2 are deleted
   - [model-registry.md](../../packages/tddy-daemon/docs/model-registry.md) → `tddy-model-registry/docs/`
@@ -165,7 +177,42 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
       those — `registry_assistant_as_agent_acceptance.rs` — stays behind, because its subject is
       `ConnectionServiceImpl` resolving an assistant as an `--agent`. `sqlx`,
       `agent-client-protocol` and `tddy-acp` left with it ✅
-- [~] **`tddy-telegram`**: crate and surface published; 10 modules, 14 test files and `teloxide` still to move
+- [~] **`tddy-telegram`**: **partially blocked, and this is the node's one real finding.**
+
+      **Moved (5):** the *transport seam* of `telegram_notifier.rs` — the `TelegramSender` port,
+      `TeloxideSender`, `InMemoryTelegramSender`, `send_telegram_via_teloxide`,
+      `send_telegram_with_inline_keyboard` and `send_daemon_lifecycle_message`, 204 lines,
+      byte-identical — plus four whole leaf modules with no production edge back into the daemon:
+      **`active_elicitation.rs`** (241), **`elicitation.rs`** (208),
+      **`telegram_tracked_session.rs`** (316) and **`telegram_github_link.rs`** (330). Across those
+      four, **7 lines differ** from the originals and every one is an import path or a doc
+      reference: `telegram_github_link.rs:16` `crate::config::DaemonConfig` →
+      `tddy_daemon_kernel::config::DaemonConfig` (node 1's relocation), 4 doc links to
+      `telegram_notifier` / `telegram_session_control` demoted to plain code spans because this
+      crate cannot name them, and the acceptance-test path in `telegram_github_link.rs:3` made
+      absolute. `telegram_tracked_session.rs` is **100% identical**. Their 17 inline tests moved
+      with them. `hmac`, `sha2` and `subtle` left `tddy-daemon` with the OAuth-state signer;
+      `base64` stayed, because `auth.rs` uses it too.
+
+      **Not moved (5):** `telegram_session_control.rs`, `telegram_bot.rs`,
+      `telegram_session_subscriber.rs` and `telegram_notifier.rs`'s policy half
+      (`TelegramSessionWatcher` and the two elicitation caches) cannot leave without inverting the
+      dependency — see **The telegram cycle** below. They go to the nodes that own what they reach:
+      **node 4** (the `connection.ConnectionService` families) and **nodes 6-8** (the session,
+      spawn and git machinery). `telegram_multi_select_shortcuts.rs` (82) is the one that came
+      *unblocked* on this milestone rather than being blocked — its single edge was
+      `telegram_notifier::InlineKeyboardRows`, which is now `tddy_telegram::sender`'s — but it was
+      outside this step's scope and is the next module to follow.
+
+      `teloxide` did **not** leave `tddy-daemon`: unlike `tddy-screenshare` on M3 it genuinely was
+      a dependency (4 telegram modules plus `runtime.rs`), and every module that keeps it there is
+      one of the five that stayed. No dedicated test file moved either: all **6** suites that exercise the
+      moved modules also touch deferred modules or daemon types, so they stay in `tddy-daemon` and
+      keep resolving unchanged through the facade. The 17 inline tests that live *inside* the four
+      moved files did move, and run under `cargo test -p tddy-telegram`.
+      The plan's counts were wrong on every axis: **9** modules, not 10;
+      **7,237** production lines, not 6,835; **1,297** inline test lines, not 1,201;
+      **12** dedicated test files totalling **4,892** lines, not 14 files / 4,529
 - [x] **`tddy-screen-sharing`**: 2 modules and 2 test files moved. `argon2`, `chacha20poly1305` and
       `rand` — the vault's Argon2id/ChaCha20-Poly1305 primitives — left `tddy-daemon` with it.
       `tddy-screenshare` did **not**: this plan said it was screen sharing's alone, and it is, but
@@ -189,7 +236,7 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
 | | Files | prod LoC | inline tests | outbound `crate::` edges |
 |---|---:|---:|---:|---|
 | `model_registry/` | 13 | 3,035 | **0** | **none beyond its own directory** |
-| telegram | 10 | 6,835 | 1,201 | SESSIONS (6 modules), LIVEKIT (`session_room`), GIT (2), SPAWN (4), MISC (1), CORE (`config`) |
+| telegram | 9 | 7,237 | 1,297 | SESSIONS (6 modules), LIVEKIT (`session_room`), GIT (2), SPAWN (4), MISC (1), CORE (`config`) — **14 of these are still `tddy-daemon`'s own**, which is what blocks the move |
 | screen sharing | 2 | 1,367 | **1,209** | AUTH (`screen_sharing_vault`), CORE (`config`), HOSTS (`host_desktop_targets`, `host_keypair`, `host_prompts`, `host_registry`) — **no `connection_service` edge** |
 | vnc | 2 | 563 | 0 | **unreachable — registered nowhere** |
 
@@ -244,6 +291,113 @@ The one thing the stub got right is the one that mattered most on M1: the regist
 the wire coordinate **is** `screen_sharing.ScreenSharingService` and `runtime.rs` was already
 registering it correctly. Unlike `acp.AcpService` on M1, nothing moved.
 
+### The telegram cycle — why M4 is 1,299 lines instead of 7,237
+
+The plan assumed telegram was extractable because it "reached the god module for exactly one
+symbol", `now_unix_ms`. That is true and irrelevant. The blocker was never `connection_service`;
+it is the daemon's **session machinery**, which the plan listed in State A (`SESSIONS (6 modules),
+LIVEKIT, GIT (2), SPAWN (4), MISC (1)`) and then did not check the ownership of. On M3 the
+equivalent list turned out to have already left for `tddy-host-service`. Here it has not: 14 of
+the 16 targets are still `tddy-daemon`'s own modules, and they belong to nodes 4 and 6–8.
+
+Measured against the code, non-doc production edges only — `crate::` references inside `///`
+comments were counted as edges by the initial discovery and are not:
+
+| Module | prod LoC | Real outbound production edges | Outcome |
+|---|---:|---|---|
+| `active_elicitation` | 155 | **none** (all four were doc links) | ✅ moved |
+| `elicitation` | 180 | **none** (doc link only) | ✅ moved |
+| `telegram_tracked_session` | 210 | **none** (doc link only) | ✅ moved, byte-identical |
+| `telegram_github_link` | 275 | `config` — node 1's kernel re-export | ✅ moved, 2 lines re-pointed |
+| `telegram_notifier` | 1,442 | `active_elicitation`, `elicitation`, `telegram_multi_select_shortcuts`, `telegram_tracked_session`, `config`, **`telegram_session_control`** | ⚠ transport seam only; watcher → nodes 4, 6-8 |
+| `telegram_multi_select_shortcuts` | 82 | `telegram_notifier` — and only for `InlineKeyboardRows`, which is now `tddy_telegram::sender`'s | ⚠ **now unblocked**, out of this step's scope |
+| `telegram_session_subscriber` | 129 | `config`, `telegram_notifier`, **`session_notifications`** | ❌ → nodes 6-8 |
+| `telegram_bot` | 788 | `telegram_notifier`, `telegram_tracked_session`, **`telegram_session_control`** | ❌ → follows `telegram_session_control` |
+| `telegram_session_control` | 3,976 | **12 daemon-owned modules** plus `branch_owner`/`project_storage` (node 1's) | ❌ → nodes 4 and 6-8 |
+
+The prod-LoC column is the initial discovery's count of non-comment production lines; the four
+moved files are 241, 208, 316 and 330 lines on disk including doc comments and inline tests.
+
+`telegram_session_control.rs` is not a chat adapter that happens to be large. It is an orchestrator
+of the daemon's session lifecycle: it holds `cli_session_manager::CliSessionManager` and
+`session_room::SessionRoomRegistry` as struct fields, dispatches through `supervisor_client` /
+`supervisor_spawn` / `spawn_worker` / `spawner`, reads through `session_reader`, deletes through
+`session_deletion`, and renders through `session_list_enrichment`. It cannot precede the session
+subsystem out of the crate; it has to follow it.
+
+Two of those edges close a **cycle**, so they would not be fixed even by moving the whole telegram
+subsystem at once. Both are real production `use`/call sites, verified at `file:line` and not doc
+links:
+
+    session_list_enrichment.rs:305       → crate::elicitation::pending_elicitation_for_session_dir
+                                                                     (daemon → telegram)
+    telegram_session_control.rs:33,673   → crate::session_list_enrichment::{SessionListStatusDisplay,
+                                             session_list_status_from_session_dir}
+                                                                     (telegram → daemon)
+
+    session_notifications.rs:366         → crate::elicitation::mode_changed_requires_telegram_elicitation
+                                                                     (daemon → telegram)
+    telegram_session_subscriber.rs:14    → crate::session_notifications::{...}
+                                                                     (telegram → daemon)
+
+The plan's `## Decisions & Trade-offs` states "the session modules consume `tddy-telegram` rather
+than the reverse — so this creates no cycle". The first half is right and the second does not
+follow: the reverse edges exist too, and Cargo cannot express a mutual pair across crates.
+
+**How the four moves stay cycle-free anyway.** The cut is not between telegram and the daemon; it
+runs *through* the telegram subsystem. `elicitation` moved and its two daemon callers stayed, so the
+forward edge became `tddy-daemon` → `tddy_telegram::elicitation` — one-way, and exactly the direction
+every other facade in `lib.rs` already points. The two modules holding the reverse edges,
+`telegram_session_control` and `telegram_session_subscriber`, stayed *with* those callers, so their
+edges back are intra-daemon and Cargo never sees them. Splitting the subsystem at that line is what
+made four of nine modules movable at all; moving all nine, as planned, is the one arrangement that
+cannot compile.
+
+**What did move.** `telegram_notifier.rs` splits cleanly at the line between *transport* (how to
+put bytes on the Bot API) and *policy* (`TelegramSessionWatcher`: when to). The transport half
+depends only on `teloxide`, `async_trait` and `DaemonConfig`; it does not touch
+`chunk_telegram_text` or `CB_ENTER`, the two `telegram_session_control` imports, which are the
+watcher's. That made it liftable, and it is a seam the file budget wanted split anyway. The four
+leaf modules then followed it, for a total of 1,299 lines in `tddy-telegram`.
+
+**The facade is what keeps the caller diff at zero.** `packages/tddy-daemon/src/lib.rs` trades each
+`pub mod <m>;` for `pub use tddy_telegram::<m>;`, so `crate::active_elicitation::X` inside the daemon
+and `tddy_daemon::telegram_tracked_session::Y` in its acceptance suites both go on resolving. **6
+daemon source files and 6 daemon test files reference the four moved modules, and not one of them
+changed** — `runtime.rs`, `session_list_enrichment.rs`, `session_notifications.rs`,
+`telegram_bot.rs`, `telegram_notifier.rs`, `telegram_session_control.rs`; and
+`session_notifications_acceptance.rs`, `telegram_branch_conflict_acceptance.rs`,
+`telegram_claude_cli_activity_alert_acceptance.rs`, `telegram_github_link.rs`,
+`telegram_notification_subscriber_unit.rs`, `telegram_tracked_session_acceptance.rs`.
+`cargo build -p tddy-daemon` is clean. This is the same mechanism node 1 used for
+`config` (`lib.rs:23`) and the eight worktree modules (`lib.rs:13`).
+
+**What this still costs the node.** `teloxide` stays in `tddy-daemon`, no dedicated test file moves,
+and `runtime.rs`'s telegram inbound task stays where it is — there is no constructor to move it
+behind while `TelegramSessionControlHarness` is still a daemon type. The telegram remainder should be
+re-planned as a *successor* of nodes 4 and 6–8 rather than a peer of nodes 3–5.
+
+### The published surface vs. the code, at M4
+
+`tddy-telegram/src/lib.rs` was published before the subsystem was read, and four of its five
+declarations were fiction.
+
+| Published stub | The code | Resolution |
+|---|---|---|
+| `trait TelegramSender { fn send(&self, text) -> Result<(), TelegramError> }` | `#[async_trait] trait TelegramSender { async fn send_message(&self, chat_id: i64, text: &str) -> anyhow::Result<()>; async fn send_message_with_keyboard(&self, chat_id, text, InlineKeyboardRows) }` — async, two methods, addressed per chat, `anyhow` | the real trait, moved. A one-method sync `send` would have dropped the keyboard surface every elicitation depends on |
+| `enum TelegramError { NotConfigured, Rejected }` | **no such type anywhere.** Every telegram path returns `anyhow::Result`; "not configured" is not an error at all but an early `Ok(())` | deleted, and `thiserror` with it. Same call as `ScreenSharingError::Unsealable` on M3: an error type with no raiser is new behaviour, not a relocation |
+| `enum LifecycleEvent { Started, Stopped }` | the real function takes `text: &str`. The wording is the **caller's**: `server.rs:68` composes `format!("tddy-daemon started ({instance_id})")`, and the shutdown path passes the literal `"tddy-daemon stopped"` | deleted. The instance id in the real message has nowhere to live in a two-variant enum |
+| `send_daemon_lifecycle_message(&dyn TelegramSender, LifecycleEvent)` | `send_daemon_lifecycle_message<S: TelegramSender + ?Sized>(config: &DaemonConfig, sender: &S, text: &str)` — reads `config.telegram`, returns `Ok(())` when absent or `!enabled`, and otherwise **fans out to every `chat_ids` entry** | the real signature. The stub had no config parameter, so it could express neither the gate nor the fan-out — the two things this function exists for |
+| `TelegramDaemonHooks::new(Option<Arc<dyn TelegramSender>>)` | a 3-field struct `{ config, sender, watcher }` in `telegram_session_subscriber` with a **required** sender and **no constructor**; optionality lives at the call site as `Option<Arc<TelegramDaemonHooks>>`, produced by `runtime.rs`'s `build_telegram` | not published — the module is on the blocked side of the cycle. The stub also inverted the design: "unconfigured" is the *absence of the whole hooks value*, never a hooks value holding `None` |
+
+The two failing tests were restated against the real behaviour, keeping their intent:
+
+| Test | Change | Why |
+|---|---|---|
+| `announces_that_the_daemon_started` | kept its name; now supplies a `DaemonConfig` with `telegram.enabled` and one chat id, passes the announcement text `server.rs` really composes, and additionally asserts it reached the configured chat | the stub called a two-argument function that does not exist. The "started" assertion is unchanged |
+| `builds_hooks_that_carry_no_sender_when_telegram_is_unconfigured` → `delivers_nothing_when_telegram_is_unconfigured` | renamed, because `TelegramDaemonHooks::new` is fiction and the type cannot move. Its stated intent — "not an error the daemon should fail to start over, but not a silent success either" — is asserted verbatim against `send_daemon_lifecycle_message` with no `telegram:` block: `Ok(())`, nothing delivered | the intent survives; only the subject that could carry it changed |
+| *(added)* `delivers_nothing_when_telegram_is_configured_but_disabled` | new | `enabled: false` is a third state the real function branches on separately, and it is how an operator mutes the bot without deleting the token. The stub surface had no way to express it |
+
 ### File budget
 
 `screen_sharing_service.rs` landed at **2,171 lines — over budget, unsplit**, and this node does not
@@ -263,7 +417,10 @@ asserts on. Recorded, not forced.
 - [x] M3 — `tddy-screen-sharing` extracted; its 2 suites pass (39 tests: 21 crate-level — 4
       surface + 17 inline host-scope — plus 3 VNC-absence, 6 service acceptance, 9 vault
       acceptance) ✅
-- [ ] M4 — `tddy-telegram` extracted; its 14 suites pass; `teloxide` gone from `tddy-daemon`
+- [~] M4 — **partially achievable only.** The transport seam plus 4 leaf modules extracted
+      (**20 tests pass** in `tddy-telegram`: 3 crate-level surface + 17 inline moved with the
+      modules, up from 3). The remaining 5 modules and `teloxide` are blocked on a production
+      cycle and deferred to nodes 4 and 6-8 ⚠
 - [ ] M5 — `runtime.rs` registers all three through their constructors; baselines restored
 - [ ] M6 — file-budget outcome recorded
 
@@ -322,8 +479,24 @@ daemon's registered service names, so the removal cannot silently regress into a
   Recorded in `docs/dev/todo/` at wrap.
 - **The elicitation modules go with telegram, and their callers stay.** `active_elicitation.rs` and
   `elicitation.rs` are telegram's behaviour, but `session_list_enrichment.rs` and
-  `session_notifications.rs` reach them and belong to later nodes. The direction is correct — the
-  session modules consume `tddy-telegram` rather than the reverse — so this creates no cycle.
+  `session_notifications.rs` reach them and belong to later nodes. **The first half of this held and
+  the conclusion did not.** The forward direction is correct, and both those callers now do consume
+  `tddy_telegram::elicitation` with no caller diff at all. But the plan concluded from that "so this
+  creates no cycle", and the *reverse* edges exist too — measured, at `file:line`:
+
+      session_list_enrichment.rs:305       → crate::elicitation::pending_elicitation_for_session_dir
+      telegram_session_control.rs:33,673   → crate::session_list_enrichment::{SessionListStatusDisplay,
+                                              session_list_status_from_session_dir}
+
+      session_notifications.rs:366         → crate::elicitation::mode_changed_requires_telegram_elicitation
+      telegram_session_subscriber.rs:14    → crate::session_notifications::{...}
+
+  Cargo cannot express a mutual pair across two crates, so the cycle is only cut by keeping *both*
+  reverse-edge modules inside `tddy-daemon` — which is what happened. `elicitation` moved and its two
+  daemon callers stayed, giving a one-way `tddy-daemon` → `tddy-telegram` edge;
+  `telegram_session_control` and `telegram_session_subscriber` stayed with them, so their edges back
+  are intra-daemon and invisible to Cargo. Moving the whole subsystem at once, as the plan intended,
+  would have been the one arrangement that *cannot* compile.
 
 ## Technical Debt & Production Readiness
 
@@ -335,6 +508,15 @@ daemon's registered service names, so the removal cannot silently regress into a
       target is an operator-facing filter, and renaming it is an observable change, not a
       relocation. Re-point them to `tddy_model_registry` as a deliberate step, with the same done
       for telegram and screen sharing
+- [ ] Same call in `tddy-telegram`: **40** `log::` calls across the five moved files still name
+      `tddy_daemon::…` — `tddy_daemon::active_elicitation` (6), `tddy_daemon::elicitation` (9),
+      `tddy_daemon::telegram` (8), `tddy_daemon::telegram_github_link` (13) and 4 in `sender.rs`.
+      One is not a call at all but a **public constant**,
+      `telegram_tracked_session::TELEGRAM_INBOUND_MESSAGE_BODY_LOG_TARGET =
+      "tddy_daemon::telegram_bot::message-body"`, which operators match on in `daemon.yaml` `log:`
+      policies and one of the moved inline tests asserts the suffix of. Renaming any of them
+      silently breaks a deployed log filter, so all 40 stay verbatim until it is a deliberate step
+      with a migration note
 
 ## Baseline
 
@@ -342,8 +524,9 @@ Recorded before any change.
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | |
-| `cargo clippy -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing --all-targets -- -D warnings` | ✅ exit 0 | |
+| `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | not re-run locally — a whole-package daemon run is CI's; `cargo build -p tddy-daemon` is clean |
+| `cargo test -p tddy-telegram` | 2 failing / 0 passing (the published stubs) | **20 passed / 0 failed** — 3 crate-level surface + 17 inline, moved with the four modules |
+| `cargo clippy -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing --all-targets -- -D warnings` | ✅ exit 0 | `-p tddy-telegram --all-targets` ✅ exit 0; `cargo fmt --check` ✅ exit 0 |
 
 **12 failing tests** define this node: 3 in `tddy-model-registry`, 2 in `tddy-telegram`, 4 in
 `tddy-screen-sharing`, and 3 asserting the unreachable VNC service's four files are gone. That last

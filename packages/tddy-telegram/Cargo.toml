@@ -9,12 +9,34 @@ name = "tddy_telegram"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
+# `telegram_github_link`'s OAuth `state`: HMAC-SHA256 over a 9-byte payload, url-safe base64, and a
+# constant-time tag comparison. Same versions as `tddy-daemon`'s, which is where they came from.
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `complete_telegram_link_via_stub_exchange` drives the async GitHub exchange from a synchronous
+# caller on a current-thread runtime, so `rt` is a runtime dependency and not only a dev one.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "io-util"] }
+# The Telegram Bot API client. Attributable to this subsystem alone; it cannot yet *leave*
+# `tddy-daemon`, because the three modules that keep it there could not move — see the crate docs.
+teloxide = { version = "0.17.0", features = ["macros", "rustls"], default-features = false }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-core = { path = "../tddy-core" }
+# `elicitation` classifies presenter `ModeChanged` / `AppModeProto` events, both of which are
+# `tddy-service`'s generated types.
+tddy-service = { path = "../tddy-service" }
+# `telegram_github_link` exchanges an OAuth code through `GitHubOAuthProvider`.
+tddy-github = { path = "../tddy-github" }
+# `config::DaemonConfig` — the `telegram:` block that says whether to send and to which chats.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-thiserror = "2"
 
 [dev-dependencies]
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
-tokio = { version = "1", features = ["macros", "rt"] }
+tempfile = "3"

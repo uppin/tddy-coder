@@ -94,3 +94,31 @@ already recorded above:
 - **Exempt paths that resolve into the destination.** A module naming a sibling that has already
   landed in the destination is the *normal* mid-plan state of a multi-module extraction, not a
   cycle.
+
+### No vocabulary for a seam split (`#unbundle` node 2, M4)
+
+M4 set out to move the nine telegram modules and moved **part of one**: the transport half of
+`telegram_notifier.rs` became `tddy-telegram/src/sender.rs`. `move_module_to_crate` was not
+invoked, and the reason is structural rather than a bug — recording it here because it is the
+shape the *remaining* daemon extractions will keep hitting.
+
+The operation's unit is a whole module: an anchor `<crate>/src/<module>.rs`, moved entire. But when
+a subsystem's centre cannot leave — and telegram's centre cannot; see the changeset — the only
+extraction available is a **seam**: a contiguous run of items inside a module, lifted out while the
+rest stays and re-exports it. The plan schema has no way to say "lines 78–99 and 111–291 of this
+module", so there was nothing to hand the operation.
+
+Had it been handed `telegram_notifier.rs` whole it would also have been refused on the
+already-recorded facade-cycle check — it names `crate::config` (node 1's `pub use`),
+`crate::telegram_session_control`, `crate::active_elicitation` and `crate::telegram_tracked_session`
+— but that refusal would have been beside the point, because moving the module whole was never
+the operation wanted.
+
+Worth considering for the operation, in rough order of value:
+
+- **An item-list anchor.** `move_items_to_crate { from: <module>, items: [...] }`, leaving a
+  `pub use` in the source module so callers do not move. That is exactly what M4 did by hand, and
+  it is mechanical: resolve the items, carry their imports, emit the re-export.
+- **Report the seam rather than the refusal.** When a module cannot move because *k* of its items
+  reach the origin crate, the useful output is which items those are — because the complement is
+  the movable seam. `telegram_notifier.rs` was 3 of its ~30 items away from moving whole.

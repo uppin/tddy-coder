@@ -1,7 +1,12 @@
 //! tddy-daemon library — shared by binary and tests.
 
 pub mod action_service;
-pub mod active_elicitation;
+/// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
+///
+/// Re-exported under its own name so `crate::active_elicitation::X` — and
+/// `tddy_daemon::active_elicitation::X` in the four acceptance suites that stay here — goes on
+/// resolving unchanged. No caller moved with it.
+pub use tddy_telegram::active_elicitation;
 pub mod agent_list_mapping;
 pub mod auth;
 /// The eight git/worktree modules, which now live in `tddy-worktree-service`.
@@ -28,7 +33,11 @@ pub mod context_sync;
 pub mod cursor_cli_spawn;
 pub mod daemon_config_service;
 pub mod daemon_settings;
-pub mod elicitation;
+/// Presenter-gate classification, which now lives in `tddy-telegram`.
+///
+/// `session_list_enrichment` and `session_notifications` are its callers and stay here; that edge
+/// is `tddy-daemon` → `tddy-telegram`, the same direction as every other facade in this file.
+pub use tddy_telegram::elicitation;
 pub mod github_pr_credentials;
 pub mod github_token_store;
 pub mod host_tonic_adapter;
@@ -80,12 +89,12 @@ pub mod supervisor_spawn;
 pub mod task_service;
 pub mod tddy_user_config;
 pub mod telegram_bot;
-pub mod telegram_github_link;
+pub use tddy_telegram::telegram_github_link;
 pub mod telegram_multi_select_shortcuts;
 pub mod telegram_notifier;
 pub mod telegram_session_control;
 pub mod telegram_session_subscriber;
-pub mod telegram_tracked_session;
+pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
 pub mod token_provider;
 pub mod tool_call_log;

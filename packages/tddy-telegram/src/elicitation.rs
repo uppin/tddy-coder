@@ -17,7 +17,7 @@ use tddy_service::gen::ModeChanged;
 /// Whether [`ModeChanged`] represents a presenter gate that [`telegram_elicitation_line_for_mode_changed`] would surface on Telegram.
 ///
 /// Used to detect transitions **out** of elicitation (e.g. user answered on web/LiveKit) so the daemon
-/// can rotate the per-chat elicitation FIFO — see [`crate::telegram_notifier::TelegramSessionWatcher`].
+/// can rotate the per-chat elicitation FIFO — see `tddy_daemon::telegram_notifier::TelegramSessionWatcher`.
 pub fn mode_changed_requires_telegram_elicitation(mc: &ModeChanged) -> bool {
     // Session label is only interpolated into message text; elicitation detection is independent.
     telegram_elicitation_line_for_mode_changed("_", mc).is_some()

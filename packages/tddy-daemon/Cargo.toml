@@ -28,13 +28,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1"
 axum = "0.8"
 clap = { version = "4", features = ["derive", "env"] }
-hmac = "0.12"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-sha2 = "0.10"
-subtle = "2.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
 bytes = "1"
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
@@ -106,6 +103,11 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 # The moved screen-sharing subsystem: `runtime.rs` builds its service and registers the entry it
 # returns. `argon2`, `chacha20poly1305` and `rand` are the vault's, and left with it.
 tddy-screen-sharing = { path = "../tddy-screen-sharing" }
+# The moved telegram transport plus `active_elicitation`, `elicitation`,
+# `telegram_tracked_session` and `telegram_github_link`. `hmac`, `sha2` and `subtle` are the
+# OAuth-state signer's and left with it; `base64` stays, because `auth.rs` uses it too. `teloxide`
+# also stays — the four modules that keep it here are on the blocked side of the cycle.
+tddy-telegram = { path = "../tddy-telegram" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tddy-sandbox-darwin = { path = "../tddy-sandbox-darwin" }
