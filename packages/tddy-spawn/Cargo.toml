@@ -9,9 +9,33 @@ name = "tddy_spawn"
 path = "src/lib.rs"
 
 [dependencies]
+anyhow = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
 tddy-core = { path = "../tddy-core" }
-thiserror = "2"
+# `DaemonConfig` and `spawn_as_user`'s privilege-drop primitives live in the kernel, which is where
+# every daemon subsystem reaches for the symbols it shares. Depending on it here is what lets the
+# spawn subsystem leave `tddy-daemon` without either crate importing the other.
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# The privileged spawn backend. `tddy-supervisor` depends on neither `tddy-core` nor `tddy-daemon`,
+# so it can be reached from here without a cycle.
+tddy-supervisor = { path = "../tddy-supervisor" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
+# `coder_log_config_yaml`'s round-trip test parses the child config with the child's own type, so
+# the daemon and `tddy-coder` cannot disagree about its shape. A dev dependency only — no
+# production path here links the CLI.
+tddy-coder = { path = "../tddy-coder" }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+tddy-discovery = { path = "../tddy-discovery" }
+tempfile = "3"
+serial_test = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }

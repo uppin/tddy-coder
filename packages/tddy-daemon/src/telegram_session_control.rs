@@ -31,8 +31,6 @@ use crate::project_storage::{
     ProjectData,
 };
 use crate::session_list_enrichment::SessionListStatusDisplay;
-use crate::spawn_worker;
-use crate::spawner::{self, SpawnOptions};
 use crate::telegram_github_link::TelegramGithubMappingStore;
 use crate::telegram_multi_select_shortcuts::{CHOOSE_NONE_CB_PREFIX, CHOOSE_RECOMMENDED_CB_PREFIX};
 use crate::telegram_notifier::{
@@ -44,6 +42,8 @@ use crate::telegram_tracked_session::{
     SharedTelegramTrackedSessionCoordinator, TelegramTrackedSessionCoordinator,
 };
 use crate::user_sessions_path::projects_path_for_user;
+use tddy_spawn::spawn_worker;
+use tddy_spawn::spawner::{self, SpawnOptions};
 
 // ---------------------------------------------------------------------------
 // Public types (contract under test)
@@ -1179,8 +1179,8 @@ impl TelegramWorkflowSpawn {
         new_session_id: &str,
     ) -> anyhow::Result<spawner::SpawnResult> {
         let timeout = self.config.spawn_worker_request_timeout();
-        match crate::supervisor_client::spawn_backend_choice(&self.config) {
-            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let inputs = self.resolve_spawn_inputs(project_id, agent, recipe)?;
                 let req = spawn_worker::build_spawn_request(
                     &self.os_user,
@@ -1195,7 +1195,7 @@ impl TelegramWorkflowSpawn {
                 );
                 match tokio::time::timeout(
                     timeout,
-                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &req),
+                    tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &req),
                 )
                 .await
                 {
@@ -1205,7 +1205,7 @@ impl TelegramWorkflowSpawn {
                     }
                 }
             }
-            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 let deps = self.clone();
                 let project_id = project_id.to_string();
                 let agent = agent.map(str::to_string);
@@ -3164,11 +3164,13 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         // when the asking *is* the message. What is deferred elsewhere is LiveKit work on a local
         // operation; a Telegram start's last act is a LiveKit announcement.
         let (lk_room, _lk_url, lk_server_identity) = if let Some(lk) =
-            crate::spawner::livekit_creds_from_config(&deps.config)
+            tddy_spawn::spawner::livekit_creds_from_config(&deps.config)
         {
-            let room_name =
-                crate::spawner::resolve_livekit_room_name(lk.common_room.as_deref(), session_id);
-            let server_identity = crate::spawner::livekit_server_identity_for_session(
+            let room_name = tddy_spawn::spawner::resolve_livekit_room_name(
+                lk.common_room.as_deref(),
+                session_id,
+            );
+            let server_identity = tddy_spawn::spawner::livekit_server_identity_for_session(
                 lk.daemon_instance_id.as_deref(),
                 session_id,
             );

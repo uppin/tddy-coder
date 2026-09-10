@@ -31,8 +31,6 @@ use crate::livekit_rooms_stream::RoomRoster;
 use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
 use crate::session_room::ActivityDelta;
-use crate::spawn_worker;
-use crate::spawner::{self};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
@@ -43,6 +41,8 @@ use tddy_service::proto::connection::{
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
 };
+use tddy_spawn::spawn_worker;
+use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
 
 // Bound for the extracted test modules, which reach the code under test through `use super::*`.

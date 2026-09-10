@@ -57,9 +57,9 @@ use crate::{
     connection_service::{
         activity_hub, agent_roster, hooks_and_urls, seed_codebase, seeded_clone_guard, service_util,
     },
-    project_storage, session_deletion, session_list_enrichment, session_reader, spawn_worker,
-    spawner,
+    project_storage, session_deletion, session_list_enrichment, session_reader,
 };
+use tddy_spawn::{spawn_worker, spawner};
 
 use crate::livekit_rooms_stream::pump_rooms;
 
@@ -167,7 +167,7 @@ use tddy_service::proto::connection::SignalSessionResponse;
 
 use tddy_service::proto::connection::SignalSessionRequest;
 
-use crate::spawner::SpawnOptions;
+use tddy_spawn::spawner::SpawnOptions;
 
 use tddy_service::proto::connection::ResumeSessionResponse;
 
@@ -1432,12 +1432,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match crate::supervisor_client::spawn_backend_choice(&self.config) {
-            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 service_util::await_supervised_with_timeout(
                     timeout,
                     "create_project: clone via tddy-supervisor",
-                    crate::supervisor_spawn::clone_repo_via_supervisor(
+                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
                         &socket_path,
                         &os_user_owned,
                         &git_url_owned,
@@ -1446,7 +1446,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 )
                 .await?
             }
-            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 service_util::spawn_blocking_with_timeout(
                     timeout,
                     "create_project: clone_repo",
@@ -1607,12 +1607,12 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let dest_path = destination.clone();
         let timeout = self.config.spawn_worker_request_timeout();
 
-        match crate::supervisor_client::spawn_backend_choice(&self.config) {
-            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 service_util::await_supervised_with_timeout(
                     timeout,
                     "add_project_to_host: clone via tddy-supervisor",
-                    crate::supervisor_spawn::clone_repo_via_supervisor(
+                    tddy_spawn::supervisor_spawn::clone_repo_via_supervisor(
                         &socket_path,
                         &os_user_owned,
                         &git_url_owned,
@@ -1621,7 +1621,7 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 )
                 .await?
             }
-            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 service_util::spawn_blocking_with_timeout(
                     timeout,
                     "add_project_to_host: clone_repo",
@@ -1979,8 +1979,8 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
         let daemon_log = self.config.log.clone();
         let startup_watch = spawner::StartupWatch::from_config(&self.config);
         let coder_config_path = self.config.coder_config_path.clone();
-        let result = match crate::supervisor_client::spawn_backend_choice(&self.config) {
-            crate::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
+        let result = match tddy_spawn::supervisor_client::spawn_backend_choice(&self.config) {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
                 let coder_log_yaml = spawner::coder_log_config_yaml(coder_config_path.as_deref());
                 let spawn_req = spawn_worker::build_spawn_request(
                     &os_user,
@@ -2012,11 +2012,14 @@ impl ConnectionServiceTrait for ConnectionServiceImpl {
                 service_util::await_supervised_with_timeout(
                     timeout,
                     "ResumeSession: spawn via tddy-supervisor",
-                    crate::supervisor_spawn::spawn_session_via_supervisor(&socket_path, &spawn_req),
+                    tddy_spawn::supervisor_spawn::spawn_session_via_supervisor(
+                        &socket_path,
+                        &spawn_req,
+                    ),
                 )
                 .await?
             }
-            crate::supervisor_client::SpawnBackendChoice::ForkedWorker => {
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
                 service_util::spawn_blocking_with_timeout(
                     timeout,
                     "ResumeSession: spawn",

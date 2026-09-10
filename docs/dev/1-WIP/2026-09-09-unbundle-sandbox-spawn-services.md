@@ -204,7 +204,8 @@ Open items in the spawn/supervisor path. They move unchanged; recorded so a revi
 ## Scope
 
 - [ ] **`tddy-daemon-sandbox`**: crate, 5 modules, 16 test suites, the 6 `tddy-sandbox*` deps
-- [ ] **`tddy-spawn`**: crate, 4 modules, 5 test suites, the `tddy-supervisor` dep
+- [x] **`tddy-spawn`**: crate, 4 modules, 4 suites moved, `tddy-supervisor` out of `[dependencies]`
+      — ⚠ it remains a **`[dev-dependencies]`** entry, see M2 below
 - [x] **Leaf services**: `bsp_service` → `tddy-bsp` ✅. `action_service` and `task_service` **stay in
       `tddy-daemon`** (cycle, see above); the `semantic_index` service entry was dropped as a false
       premise, though the module itself moved
@@ -266,7 +267,52 @@ supervisor_client}`; `spawn_worker → spawner`.
 - [~] M1 — **rescoped**: `bsp_service` moved to `tddy-bsp` and its suites pass there;
       `semantic_index.rs` moved to `tddy-semantic-index`. `action_service` and `task_service` are
       blocked by the `tddy-core → tddy-task` cycle and stay in `tddy-daemon`
-- [ ] M2 — `tddy-spawn` extracted; 5 suites pass; `tddy-supervisor` gone from `tddy-daemon`
+- [x] M2 — `tddy-spawn` extracted; 45 tests pass in the new crate; `tddy-supervisor` out of
+      `tddy-daemon`'s `[dependencies]`. ⚠ **Not literally complete**: see below
+
+### M2 outcome — three corrections to the plan
+
+**1. `DaemonConfig` never needed decoupling.** The extraction was expected to cost a signature
+change at 7 `spawn_backend_choice(&DaemonConfig)` call sites, on the assumption that `DaemonConfig`
+was daemon-owned. It is not: it is defined at `packages/tddy-daemon-kernel/src/config.rs:244` and
+merely re-exported by `packages/tddy-daemon/src/lib.rs:22`. `tddy-spawn` already depends on the
+kernel for `spawn_as_user`, so it reads the type directly. Likewise `tddy_user_config.rs` is only a
+re-export shim over `tddy_daemon_kernel::user_paths` and stays put, untouched, as `## Boundaries`
+requires. **No signature changed and no suite was rewritten** — which is what let
+`supervisor_routing.rs` move with its `spawn_backend_choice(&config)` calls intact.
+
+**2. The red-phase surface in `tddy-spawn/src/lib.rs` was mis-specified and is deleted.** It invented
+`SpawnBackend`/`SpawnClient`/`SpawnError` and three tests. One of them,
+`refuses_to_fall_back_when_a_configured_supervisor_is_unreachable`, demanded
+`spawn_worker_for(Supervisor)` return `Err` — the direct opposite of
+`supervisor_spawn_delegation.rs:337`, an existing passing suite that asserts *"deciding not to fork
+cannot fail"*. `Ok(None)` is correct: a supervised daemon forks nothing because the supervisor
+spawns, and reachability is `connect_supervisor`'s job, which already fails hard. Implementing it
+would have made every supervised daemon fail to start. Its enum also dropped the `socket_path` all 7
+call sites need. The real `SpawnBackendChoice` / `spawn_backend_choice` / `spawn_worker_for` arrived
+with `supervisor_client.rs` instead. Same precedent as the three M1 stubs dropped above.
+
+**3. `move_module_to_crate` cannot express this move.** `restructure check` passed on a 4-op plan,
+but the operation (a) re-points `crate::` at the *source* crate, so `crate::config` becomes
+`tddy_daemon::config` — a `tddy-spawn → tddy-daemon` cycle; and (b) moves one module at a time, so
+moving `spawner` first rewrites its three siblings' `crate::spawner` to `tddy_spawn::spawner` before
+they themselves have moved. The four modules are mutually entangled and must land together. Moved by
+hand with `git mv`, history preserved. Separately, `restructure apply --indexing-budget 900`
+**did not honour the budget** — it failed with *"rust-analyzer had not finished indexing after 46s"*.
+Both are node 1's surface; reported upward, not fixed here.
+
+**What is not done:** `supervisor_spawn_delegation.rs` stays in `tddy-daemon`. Nine of its 11 tests
+are spawn-side, but two mount `ConnectionServiceImpl`, `multi_host`, `livekit_peer_discovery` and
+`claude_cli_session`. Moving it whole would make `tddy-daemon` a dev-dependency of `tddy-spawn` — a
+dev-graph cycle that rebuilds the entire daemon on `cargo test -p tddy-spawn`. So `tddy-supervisor`
+survives in `tddy-daemon`'s `[dev-dependencies]`, and M2's *"`tddy-supervisor` gone from
+`tddy-daemon`"* is met structurally but not literally. Splitting that suite's fail-closed half is a
+clean follow-up.
+
+**One visibility widening**, the only one in the move: `spawner::resolve_livekit_room_name`
+`pub(crate)` → `pub`, because three daemon call sites
+(`telegram_session_control.rs:3170`, `connection_service.rs`, `terminal_bridge_impl.rs`) name the
+same room the spawn does, and `pub(crate)` does not cross a crate boundary.
 - [ ] M3 — `tddy-daemon-sandbox` extracted; 16 suites pass; the 6 `tddy-sandbox*` deps moved
 - [ ] M4 — `tool_catalog_sync.rs` is a test file in the sandbox crate
 - [ ] M5 — `tddy-sandbox-app` depends on `tddy-daemon-sandbox`; asserted, not just described

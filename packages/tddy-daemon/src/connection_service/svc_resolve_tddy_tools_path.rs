@@ -1,6 +1,7 @@
 use tddy_rpc::Status;
 
-use crate::{connection_service::agent_roster, livekit_rooms_stream::RoomRoster, spawn_worker};
+use crate::{connection_service::agent_roster, livekit_rooms_stream::RoomRoster};
+use tddy_spawn::spawn_worker;
 
 use std::time::Duration;
 

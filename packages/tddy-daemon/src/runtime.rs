@@ -56,9 +56,9 @@ pub struct RuntimeOptions {
     ///
     /// It cannot be forked here: `fork` from a multi-threaded process can deadlock, and [`build`]
     /// already runs on the host's async runtime. `None` means this daemon spawns nothing itself —
-    /// either because `tddy-supervisor` does it (see [`crate::supervisor_client`]) or because the
+    /// either because `tddy-supervisor` does it (see [`tddy_spawn::supervisor_client`]) or because the
     /// host has no worker to offer.
-    pub spawn_client: Option<(crate::spawn_worker::SpawnClient, i32)>,
+    pub spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
     /// The YAML file this daemon was loaded from, which `daemon_config.DaemonConfigService` writes
     /// an accepted update back to. `None` — a host that configured the daemon in code — makes every
     /// update a refusal, because there is nowhere to persist one.
@@ -128,7 +128,7 @@ impl RuntimeOptions {
     /// Hand over the spawn worker this host forked before its runtime started.
     pub fn with_spawn_worker(
         mut self,
-        spawn_client: Option<(crate::spawn_worker::SpawnClient, i32)>,
+        spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
     ) -> Self {
         self.spawn_client = spawn_client;
         self
@@ -1143,7 +1143,7 @@ fn build_telegram(
         .as_ref()
         .map(|(c, _)| Arc::new(c.clone()));
     #[cfg(not(unix))]
-    let spawn_for_tg: Option<Arc<crate::spawn_worker::SpawnClient>> = {
+    let spawn_for_tg: Option<Arc<tddy_spawn::spawn_worker::SpawnClient>> = {
         let _ = options;
         None
     };

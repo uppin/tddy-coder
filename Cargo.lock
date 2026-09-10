@@ -12092,6 +12092,7 @@ dependencies = [
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-spawn",
  "tddy-stdio",
  "tddy-supervisor",
  "tddy-task",
@@ -12202,6 +12203,7 @@ dependencies = [
  "tddy-core",
  "tddy-daemon",
  "tddy-rpc",
+ "tddy-spawn",
  "tddy-tauri-rpc",
  "tokio",
 ]
@@ -12854,10 +12856,24 @@ dependencies = [
 name = "tddy-spawn"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "libc",
+ "log",
  "pretty_assertions",
  "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-coder",
  "tddy-core",
- "thiserror 2.0.18",
+ "tddy-daemon-kernel",
+ "tddy-discovery",
+ "tddy-supervisor",
+ "tddy-testing-commons",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
