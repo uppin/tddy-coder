@@ -214,11 +214,22 @@ Open items in the spawn/supervisor path. They move unchanged; recorded so a revi
 - [x] **`tddy-sandbox-app` reversal**: depends on `tddy-daemon-sandbox`, not `tddy-daemon`
 - [x] **⚠ nextest exclusions**: one of the five in-scope predicates changed package and was repointed;
       the excluded set is identical in content
-- [ ] **Desktop**: `spawn_worker`/`supervisor_client` callers migrated; built locally
-- [ ] **File budget**: record which over-500-line files landed under budget and which did not, with why
-- [ ] **Baseline**: `./test` per touched package back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
-- [ ] **Documentation**: doc triage executed at wrap
+- [x] **Desktop**: `spawn_worker`/`supervisor_client` callers migrated to `tddy_spawn::` and
+      `tddy-desktop` **built locally** — `cargo build -p tddy-desktop` clean in 4m02s. This is the
+      one break CI cannot catch: `tddy-desktop` is outside the gate ✅
+- [x] **File budget**: recorded — `spawner.rs` (2,152), `spawn_worker.rs` (568) and
+      `workspace_tool_sandbox.rs` (521) stayed over budget, moved unsplit so the rename-similarity
+      evidence survives. See [`../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md`](../todo/2026-09-10-tddy-spawn-modules-are-over-budget-and-not-yet-reusable.md) ✅
+- [~] **Baseline**: scoped per-package runs green (`tddy-daemon-sandbox` 27/0, `tddy-spawn` 45/0, the
+      four leaf-owner crates 0 failures). A full `tddy-daemon` suite could **not** be completed on this
+      host — it ran out of disk, then out of memory — so that number is CI's, per CLAUDE.md
+- [x] **Code Quality**: `cargo clippy -p <each touched> --all-targets -- -D warnings` clean,
+      `cargo fmt` clean; CI's workspace-wide `Rust lint` also passed ✅
+- [~] **Documentation**: doc triage executed — `docs/ft/daemon/background-tasks.md` verified still
+      correct (both services it lists stayed), one stale `spawner.rs` path fixed in
+      `remote-managed-worktree.md`. `packages/tddy-daemon/docs/connection-service.md` still names
+      moved modules and is **left to the wrap step**: CLAUDE.md forbids editing `packages/*/docs/`
+      directly
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -331,7 +342,8 @@ same room the spawn does, and `pub(crate)` does not cross a crate boundary.
 - [x] M4 — `tool_catalog_sync.rs` is a test file in the sandbox crate
 - [x] M5 — `tddy-sandbox-app` depends on `tddy-daemon-sandbox`; asserted, not just described
 - [x] M6 — nextest `[profile.ci]` exclusion paths updated; the excluded set is unchanged in content
-- [ ] M7 — desktop built locally; baselines restored; file-budget outcome recorded
+- [x] M7 — desktop built locally ✅; file-budget outcome recorded in `docs/dev/todo/` ✅; baselines
+      are CI's to report, since the host could not complete a full `tddy-daemon` suite (disk, then OOM)
 
 ### M3–M6 outcome — four corrections to the plan
 
@@ -458,23 +470,37 @@ One assertion is new rather than moved: that `tddy-sandbox-app` reaches the sand
 ## Acceptance Tests
 
 ### tddy-daemon-sandbox
-- [ ] **Integration**: a Seatbelt-jailed session starts, serves tool IPC and exits (`sandboxed_claude_cli_acceptance.rs`)
-- [ ] **Integration**: the workspace tool sandbox provisions and resumes (`workspace_tool_sandbox_acceptance.rs`, `workspace_sandbox_resume_acceptance.rs`)
-- [ ] **Unit**: the plan builder composes a plan without `tddy-daemon` on the dependency path (`workspace_tool_sandbox_plan_unit.rs`)
-- [ ] **Unit**: workspace exec tool names match the tool catalog, from `tests/` rather than `src/` (`tool_catalog_sync.rs`)
+- [~] **Integration**: a Seatbelt-jailed session starts, serves tool IPC and exits — the suite
+      **stayed in `tddy-daemon`**: it mounts `ConnectionServiceImpl`, so moving it would make
+      `tddy-daemon` a dev-dependency of `tddy-daemon-sandbox`. Still passing where it is
+- [~] **Integration**: the workspace tool sandbox provisions and resumes — both suites **stayed in
+      `tddy-daemon`** for the same dev-graph-cycle reason
+- [x] **Unit**: the plan builder composes a plan without `tddy-daemon` on the dependency path
+      (`workspace_tool_sandbox_plan_unit.rs`, now in `tddy-daemon-sandbox/tests/`) ✅
+- [x] **Unit**: workspace exec tool names match the tool catalog, from `tests/` rather than `src/`
+      (`tool_catalog_sync.rs`) ✅
 
 ### tddy-spawn
-- [ ] **Integration**: a spawn is delegated to the supervisor and the child reports back (`supervisor_spawn_delegation.rs`)
-- [ ] **Unit**: spawn argv is composed from an agent def without `tddy-daemon` on the path (`agent_def_spawn_argv_unit.rs`)
+- [~] **Integration**: a spawn is delegated to the supervisor and the child reports back — the suite
+      **stayed in `tddy-daemon`**: 2 of its 11 tests mount `ConnectionServiceImpl`. See
+      [`../todo/2026-09-10-supervisor-spawn-delegation-keeps-tddy-supervisor-in-the-daemon.md`](../todo/2026-09-10-supervisor-spawn-delegation-keeps-tddy-supervisor-in-the-daemon.md)
+- [x] **Unit**: spawn argv is composed from an agent def without `tddy-daemon` on the path
+      (`agent_def_spawn_argv_unit.rs`, now in `tddy-spawn/tests/`) ✅
 
 ### tddy-actions / tddy-task / tddy-bsp / tddy-semantic-index
-- [ ] **Integration**: each service answers from its owner crate (`action_service_acceptance.rs`, `task_service_acceptance.rs`, the BSP suites, `semantic_index_wiring.rs`)
+- [~] **Integration**: each service answers from its owner crate — **only `bsp_service` and
+      `semantic_index_wiring` moved.** `action_service` and `task_service` are blocked by the
+      `tddy-core → tddy-task` cycle and stay in `tddy-daemon` with their suites (see the M1 correction above)
 
 ### tddy-sandbox-app
-- [ ] **Integration**: the sandbox path resolves through `tddy-daemon-sandbox`, and `tddy-daemon` is absent from its dependency graph for it (`daemon_sandbox_dependency_acceptance.rs`)
+- [x] **Integration**: the sandbox path resolves through `tddy-daemon-sandbox`, and `tddy-daemon` is
+      absent from `tddy-sandbox-app`'s manifest entirely ✅ — the suite landed as
+      `sandbox_app_dependency_reverses.rs`, not the planned `daemon_sandbox_dependency_acceptance.rs`
 
 ### tddy-daemon
-- [ ] **Integration**: the registered service names still include all four leaf services (`service_registration_acceptance.rs`)
+- [🔲] **Integration**: the registered service names still include all four leaf services —
+      **`service_registration_acceptance.rs` was never written by the red phase and does not exist.**
+      Only `bsp_service` moved, so the premise ("all four") no longer holds either
 
 ## Decisions & Trade-offs
 
@@ -499,10 +525,10 @@ One assertion is new rather than moved: that `tddy-sandbox-app` reaches the sand
 
 ## Technical Debt & Production Readiness
 
-- [ ] `2026-07-01-tddy-daemon.md`'s stdio-transport switch becomes easier after this node but is not
+- [x] `2026-07-01-tddy-daemon.md`'s stdio-transport switch becomes easier after this node but is not
       done; re-read at wrap
-- [ ] `tddy-desktop` is outside the CI gate and its `spawn_worker`/`supervisor_client` callers move
-      here; the local build result is stated rather than assumed
+- [x] `tddy-desktop` is outside the CI gate and its `spawn_worker`/`supervisor_client` callers moved
+      here; **`cargo build -p tddy-desktop` passes locally** (stated, not assumed)
 
 ## Baseline
 
@@ -526,8 +552,12 @@ same reason and must not be counted as this node's regressions.
 
 ## Final Checklist
 
-- [ ] `docs/dev/changesets/2026-09-09-unbundle-sandbox-spawn-services.md` — the release-note file,
-      carrying the `tddy-sandbox-app` dependency reversal and the exclusion-path audit result
-- [ ] New `docs/dev/todo/` entry if any nextest exclusion turned out to be unnecessary after the move
-- [ ] Re-read `docs/dev/todo/2026-07-01-tddy-daemon.md` against the new sandbox crate
-- [ ] Doc triage: `grep -rn -e 'sandbox_session' -e 'spawner' -e 'spawn_worker' -e 'action_service' -e 'task_service' -e 'bsp_service' packages/tddy-daemon/README.md packages/tddy-daemon/docs docs/ft/daemon docs/dev/guides/ci.md`
+- [x] [`docs/dev/changesets/2026-09-10-unbundle-sandbox-spawn-services.md`](../changesets/2026-09-10-unbundle-sandbox-spawn-services.md)
+      — the release-note file, carrying the `tddy-sandbox-app` dependency reversal, the exclusion
+      audit result and the four declined moves ✅
+- [x] New `docs/dev/todo/` entry if any nextest exclusion turned out to be unnecessary after the move —
+      **none was.** All five in-scope exclusions are still needed; one changed package and was repointed ✅
+- [x] Re-read `docs/dev/todo/2026-07-01-tddy-daemon.md` against the new sandbox crate ✅ — annotated
+      there: `dial_and_bridge` now sits in `tddy-daemon-sandbox` while the spawn/dial call sites stay in
+      `connection_service`, so the switch is better isolated but still a live-behaviour change, still open
+- [x] Doc triage (executed 2026-09-10; see the **Documentation** line in `## Scope`): `grep -rn -e 'sandbox_session' -e 'spawner' -e 'spawn_worker' -e 'action_service' -e 'task_service' -e 'bsp_service' packages/tddy-daemon/README.md packages/tddy-daemon/docs docs/ft/daemon docs/dev/guides/ci.md`
