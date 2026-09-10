@@ -30,6 +30,7 @@ tddy-core provides the core library for the tddy-coder TDD workflow orchestrator
 - **ClarificationQuestion**: Structured question type from AskUserQuestion tool events or `<clarification-questions>` text block (header, question, options, multi_select).
 - **workflow_recipe_selection_question / recipe_cli_name_from_selection_label**: Single-select labels `TDD` → `tdd`, `Bugfix` → `bugfix` for presenter recipe switching after `/recipe` from the feature slash flow.
 - **ClaudeInvokeConfig**: Claude-specific config (permission_mode, allowed_tools, permission_prompt_tool, mcp_config_path) derived from goal internally.
+- **model_catalog**: Assembles the models an agent supports and the JSON contract that reports them — querying the underlying agent command where it can (cursor `--list-models`, ACP `available_models`) and falling back to a curated list. It sits beside the backends it enumerates; `tddy-tools list-models` is the clap surface over it and owns the `println!` and the exit code, because this crate is linked by the TUI and must not write to stdout.
 
 ### Worktree (`worktree.rs`)
 
@@ -93,7 +94,8 @@ How a branch stands against its base — behind/ahead counts and whether taking 
 - **store_submit_result / take_submit_result_for_goal**: Shared storage for submit results. Presenter writes via tool executor; workflow reads. Key: goal name; Value: JSON string.
 - **ToolCallRequest / ToolCallResponse**: IPC types. **SubmitActivity** (goal, data) notifies the presenter for activity-log lines only—the relay has already acknowledged `submit` on the wire. **Ask** (questions, response_tx) and **Approve** (tool_name, input, response_tx) block until `Presenter::poll_tool_calls` completes the oneshot. Responses: SubmitOk, SubmitError, AskAnswer, ApproveResult, Error.
 - **start_toolcall_listener**: Unix domain socket listener. Each accepted connection is served by a **`ToolcallRpcService`** (`toolcall/listener.rs`) hosted over `tddy-rpc`/`tddy-stdio` framing (`StdioEndpoint::from_duplex`) — not a raw JSON line — dispatching by RPC method name (`Submit`/`Ask`/`Approve`/`ListActions`/`InvokeAction`/`Build`/`BuildList`). The wire *payloads* are the same JSON shapes the original newline-delimited protocol used (the `*Wire` structs, `ToolCallResponse::to_json_line()`); only the framing changed. For **`Submit`**: persists via `store_submit_result`, returns **`SubmitOk` immediately**, then `try_send`s `SubmitActivity` to the presenter queue (full queue or disconnect skips activity notification but does not affect the client). For **`Ask`** / **`Approve`**: forwards to the presenter with a oneshot and waits for the response before returning it. `ListActions`/`InvokeAction` are handled directly in the listener (no presenter involved); `Build`/`BuildList` dispatch to the registered `BuildExecutor`.
-- **`tddy_tools::toolcall_client::dispatch_toolcall`**: the client-side counterpart in `tddy-tools` — connects to `TDDY_SOCKET`, wraps the stream via `StdioEndpoint::from_duplex`, and calls the RPC method matching the wire request's `"type"` field.
+- **`toolcall::client::dispatch_toolcall`**: the client-side counterpart, in this crate beside the listener it speaks to — connects to `TDDY_SOCKET`, wraps the stream via `StdioEndpoint::from_duplex`, and calls the RPC method matching the wire request's `"type"` field. `tddy-tools` calls it; both ends of one wire are defined together, so a change to the framing cannot be made to one and not the other.
+- **`toolcall::client_wire`**: the CLI's request/response shapes, beside their `*RequestWire` counterparts. `AskQuestionItem` re-exports **`backend::QuestionOption`** rather than declaring a second copy of it.
 - **TDDY_SOCKET**: Env var set by tddy-coder when spawning agent; tddy-tools connects to this path.
 
 ### Stream (`stream/`)
@@ -160,6 +162,11 @@ Still truncating in place, and worth converting separately: the daemon's secret 
 (`github_token_store.rs`, `vnc_vault.rs`, `screen_sharing_vault.rs`). They are correct about mode
 `0600` on creation, so converting them needs a mode-aware variant of `write_atomic`.
 
+### Spawn environment (`spawn_env.rs`)
+
+- **env_non_empty**: Reads an environment variable, returning `None` when it is unset **or blank** — whitespace included. Every `TDDY_*` variable in the workspace is exported by an outer process (a daemon spawning a jail, a shell wrapper, a systemd unit), and all three can export one empty without meaning to: a blank `TDDY_SOCKET` is not a socket path and a blank join token is not a token, so "set to nothing" and "unset" are the same claim and must read as the same value.
+- **One spelling, deliberately**: the workspace had grown three of this rule, and two of them disagreed — one trimmed before testing for empty and one did not, so a LiveKit variable exported as `" "` configured a transport whose URL was one space. Callers that read a spawn variable use this function rather than declaring a fourth reading.
+
 ### Stdio safety (`stdio_safety.rs`)
 
 Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--stdio` (RPC over stdin/stdout via `tddy-stdio`), which has zero tolerance for stray bytes.
@@ -218,6 +225,9 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 - **parse_test_summary_from_process_output** / **`TestSummary`**: Parses cargo-style **`test result:`** totals from combined stdout/stderr when **`result_kind`** is **`test_summary`**.
 - **run_manifest_command**: Spawns **`command[0]`** with argv capture via **`std::process::Command`**; UTF-8 decode uses replacement for invalid bytes. When **`result_kind`** is **`test_summary`**, the returned JSON includes a merged **`summary`** object (**`finalize_invocation_record`**).
 - **resolve_action_manifest_path**: Resolves **`actions/<action_id>.{yaml,yml}`** under **`--session-dir`**; mismatches surface as **`UnknownActionId`** for callers that map errors to tool exit semantics.
+- **`authoring`**: The rules a subagent-*authored* manifest must satisfy, and the retry guidance returned when it does not — including **`MAX_MANIFEST_BYTES`**. Here rather than in the crate that advertises `request_action` (`tddy-tools`) or the one that establishes it (`tddy-sandbox-app`), so the two can never drift.
+- **`session_dir`**: Resolves the session directory a session-action subcommand operates on, and logs under **`tddy_core::session_actions::session_dir`**.
+- **`tool_gate`** (**`SESSION_ACTION_TOOLS_ENV`** = `TDDY_SESSION_ACTION_TOOLS`, **`session_action_tools_enabled`**): Whether this session's host actually serves the three session-action tools. `request_action` / `list_actions` / `invoke_action` are host round-trips against a session directory that exists only on the host, and **the transport cannot answer whether they are served**: the in-jail socket carries both `tddy-sandbox-app`'s handler, which implements all three, and `tddy-daemon`'s, which implements none and answered `{"error":"unknown tool: ListActions","is_error":true}` to every call. So the **host declares it**, exactly as it declares an available language server with `TDDY_LSP_TOOLS`. Only a host that routes the three somewhere that answers them sets the variable; every other placement stays silent and the tools are not advertised. The gate lives here — the crate that owns session actions — because it is the only one both the advertiser and the implementer already name.
 - **Tests**: **`session_actions_red`**.
 
 ### Session action jobs (`session_action_jobs/`)
@@ -237,9 +247,9 @@ Guarantees fd 1 (stdout) carries only RPC frames when a process runs with `--std
 - **Dependencies**: **`glob`**, **`jsonschema`**, **`serde_json`**, **`log`**.
 - **Tests**: **`session_action_resolve_unit`** (tddy-core), **`session_action_pipeline_integration`** (tddy-tools).
 
-### Schema (tddy-tools)
+### Schema (tddy-workflow-recipes)
 
-- **JSON Schema validation**: All schema logic lives in tddy-tools. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder. `tddy-tools get-schema <goal>` outputs the schema for inspection. On validation failure, tddy-tools returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks.
+- **JSON Schema validation**: All schema logic lives in **`tddy_workflow_recipes::{schema, schema_manifest}`**, next to the `goals.json` and `generated/` tree it is generated from. Schemas are embedded via `include_dir`; no schema files are written to disk. `tddy-tools submit --goal <goal>` validates JSON against the embedded schema before relaying to tddy-coder, and `tddy-tools get-schema <goal>` outputs the schema for inspection — the binary parses the arguments and owns the exit codes, the library answers about schemas. On validation failure, `tddy-tools` returns errors with a tip to run `get-schema`. The `red` schema defines an optional `source_file` on each `markers[]` item (file path where the marker was placed); `packages/tddy-core/schemas/red.schema.json` matches the embedded schema for tests and parity checks. See [json-schema.md](../../tddy-workflow-recipes/docs/json-schema.md).
 - **ProcessToolExecutor**: Invokes `tddy-tools submit --goal <goal> --data '<json>'` with TDDY_SOCKET set. tddy-core has no schema module.
 
 ### Output (`output/`)

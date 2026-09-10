@@ -19,6 +19,29 @@ long-running background jobs (e.g. `Shell` with `block_until_ms = 0`).
   callers map it to their RPC type at the boundary.
 - `ToolOutcome` — the execution result; for background jobs it carries `job_id` and
   `job_running`.
+- `dynamic_proxy::is_native_tool_denied_in_remote_mode(tool_name) -> bool` — whether a native
+  mutation tool (`Write` / `Edit` / `NotebookEdit`) must be hard-**denied** while the agent runs
+  against a remote codebase, where the local working directory is not the worktree being edited. A
+  denial rather than an absence: the agent needs to be told it was refused, and the replacement is
+  this crate's own `Write` against the real worktree.
+
+## One catalog
+
+`tool_catalog()` is the only exec-tool catalog in the workspace. `tddy-tools` used to hold a
+hand-copied clone of it in its MCP shape, with matched guard tests in both crates paying to keep the
+two in step; it now derives its `RemoteToolDef`s from this function at the single point that needs
+that shape, the same way it derives the `Lsp*` tools from `tddy_lsp_executor`.
+
+The MCP shape itself — `RemoteToolDef`, `build_dynamic_tool_list`, `dynamic_tool_router`,
+`dispatch_dynamic_tool` — stays in `tddy-tools`, which is the crate that speaks MCP. Putting it here
+would mean `rmcp` in a crate every workspace-session host links, and `dispatch_dynamic_tool`
+additionally resolves the call against the session's live agent roster, which is a `tddy-service`
+concern. Advertisement is **not** filtered by that roster: a tool an agent has taken over is still
+advertised and refused at dispatch, because `--allowedTools` is fixed when `claude` spawns.
+
+`tddy-daemon`'s `tool_catalog_sync` guard test stays, because it guards a pair that has *not*
+collapsed — this catalog against `tddy_sandbox::workspace_exec_tool_names`, the allowlist a
+sandboxed `claude` is spawned with.
 
 ## Tools
 
