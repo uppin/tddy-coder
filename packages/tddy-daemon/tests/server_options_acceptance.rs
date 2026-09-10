@@ -2,7 +2,8 @@
 //! the surface it served as twelve positional arguments — the bundle, the SPA fallback,
 //! `/api/config` and the ConnectRPC route.
 //!
-//! See `docs/dev/todo/2026-09-06-server-rs-run-server-takes-12-positional-arguments.md`.
+//! The `docs/dev/todo/` entry that asked for this is closed and removed; the reasoning lives in
+//! `docs/dev/changesets/2026-09-09-unbundle-host-worktree-services.md`.
 
 use std::path::Path;
 use std::time::Duration;

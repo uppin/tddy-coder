@@ -208,8 +208,8 @@ Recorded in `docs/dev/todo/`:
 [the cross-crate move's own defects](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md).
 
 Closed by this change:
-[`connection_service.rs` is 19,600 lines](../todo/2026-08-29-connection-service-rs-is-19-600-lines.md),
-[22,800 lines](../todo/2026-09-06-connection-service-rs-is-22800-lines.md),
-[`run_server` takes 12 positional arguments](../todo/2026-09-06-server-rs-run-server-takes-12-positional-arguments.md),
-[the stale generated TypeScript](../todo/2026-08-14-tddy-rust-typescript-tests-gen-is-badly-stale-and-nothing-detects-it.md),
-[`daemon_config_pb.ts` regenerated without `buf`](../todo/2026-09-06-packages-tddy-web-src-gen-daemon-config-pb-ts-was-regenerated-without.md).
+`connection_service.rs` is 19,600 lines,
+22,800 lines,
+`run_server` takes 12 positional arguments,
+the stale generated TypeScript,
+`daemon_config_pb.ts` regenerated without `buf`.
