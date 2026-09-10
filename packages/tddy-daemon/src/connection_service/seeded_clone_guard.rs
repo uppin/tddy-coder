@@ -164,7 +164,7 @@ pub(crate) enum ExecToolRoute {
     HostWorktree,
     /// The session's own jail on this host: a sandboxed `workspace` session
     /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
-    Jail(Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandbox>),
+    Jail(Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandbox>),
     /// Neither, and the call is answered with this as its error. A session recorded as sandboxed
     /// whose jail this daemon does not hold is refused rather than served from the bare host: a
     /// tool that ran unconfined on a session that asked to be confined is the one failure nobody

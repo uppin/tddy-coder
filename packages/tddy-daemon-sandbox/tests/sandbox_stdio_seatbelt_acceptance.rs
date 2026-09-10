@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use prost::Message;
-use tddy_daemon::sandbox_session::{
+use tddy_daemon_sandbox::sandbox_session::{
     bridge_sandbox_stdio, build_sandbox_runner_env, pick_free_loopback_port, spawn_sandbox_runner,
     SandboxRunnerSpawn,
 };

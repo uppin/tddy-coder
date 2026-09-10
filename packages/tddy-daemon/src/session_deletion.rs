@@ -113,7 +113,7 @@ fn teardown_workspace_sandbox(session_dir: &Path, metadata: &tddy_core::SessionM
     }
     let pid_path = session_dir
         .join("sandbox")
-        .join(crate::workspace_tool_sandbox::RUNNER_PID_FILE);
+        .join(tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE);
     let Ok(contents) = std::fs::read_to_string(&pid_path) else {
         return;
     };
@@ -606,7 +606,7 @@ mod tests {
         let child = Command::new("sleep").arg("120").spawn().unwrap();
         let pid = child.id();
         std::fs::write(
-            sandbox_dir.join(crate::workspace_tool_sandbox::RUNNER_PID_FILE),
+            sandbox_dir.join(tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE),
             pid.to_string(),
         )
         .unwrap();

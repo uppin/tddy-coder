@@ -30,7 +30,10 @@ futures-util = "0.3"
 bytes = "1"
 uuid = { version = "1", features = ["v7"] }
 tddy-core = { path = "../tddy-core" }
-tddy-daemon = { path = "../tddy-daemon" }
+# The sandbox subsystem only. `tddy-daemon` itself left this manifest with `#unbundle`
+# node 3: the Linux path talks to a running daemon over gRPC and never linked it, and the
+# macOS path needed `sandbox_session`, which is now its own crate.
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
@@ -39,6 +42,8 @@ tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-task = { path = "../tddy-task" }
+# Reached directly; `tddy_daemon::tool_engine` was only a re-export of this crate.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 
 # macOS spawns the Seatbelt jail in-process via this crate; the Linux path talks to a running

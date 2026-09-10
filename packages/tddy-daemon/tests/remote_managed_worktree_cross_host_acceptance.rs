@@ -38,7 +38,7 @@ use tddy_daemon::livekit_peer_discovery::{
     LiveKitEligibleDaemonSource,
 };
 use tddy_daemon::test_util::wait_until_peer_discovered;
-use tddy_daemon::workspace_tool_sandbox::{
+use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxSpec,
 };
 use tddy_github::{GitHubUser, SessionTokenSigner, TokenKind};

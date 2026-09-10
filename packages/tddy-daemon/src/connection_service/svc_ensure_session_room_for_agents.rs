@@ -212,7 +212,7 @@ impl ConnectionServiceImpl {
                     "semantic index requested but no embedder is available: {e}"
                 ))
             })?;
-        crate::semantic_index::run_semantic_index_blocking(
+        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
             &worktree_path,
             &session_dir,
             embedder,
@@ -239,7 +239,7 @@ impl ConnectionServiceImpl {
         sessions_base: &Path,
         session_id: &str,
     ) -> Result<(), Status> {
-        let spec = crate::workspace_tool_sandbox::WorkspaceSandboxSpec {
+        let spec = tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxSpec {
             session_id: session_id.to_string(),
             session_dir: unified_session_dir_path(sessions_base, session_id),
             worktree_path: workspace_session::resolve_worktree_root_for_session(
@@ -251,7 +251,7 @@ impl ConnectionServiceImpl {
             .workspace_sandbox_provisioner
             .provision(&spec)
             .await
-            .map_err(crate::sandbox_session::sandbox_error_to_status)?;
+            .map_err(tddy_daemon_sandbox::sandbox_session::sandbox_error_to_status)?;
         self.workspace_sandboxes
             .insert(session_id.to_string(), jail)
             .await;

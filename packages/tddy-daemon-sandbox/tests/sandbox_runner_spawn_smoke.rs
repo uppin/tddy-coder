@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tddy_daemon::sandbox_session::{
+use tddy_daemon_sandbox::sandbox_session::{
     pick_free_loopback_port, spawn_sandbox_runner, SandboxRunnerSpawn,
 };
 use tddy_sandbox::format_sandbox_diagnostics;
@@ -85,7 +85,7 @@ async fn sandbox_runner_writes_ready_marker_inside_seatbelt() {
         shim_port.to_string(),
     ];
 
-    let mut env = tddy_daemon::sandbox_session::build_sandbox_runner_env(
+    let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
         &scratch.join("home"),
         &scratch.join("tmp"),
         "spawn-smoke",
@@ -186,7 +186,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
         "--pty-command=30".into(),
     ];
 
-    let mut env = tddy_daemon::sandbox_session::build_sandbox_runner_env(
+    let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
         &scratch.join("home"),
         &scratch.join("tmp"),
         "generic-pty-smoke",
@@ -237,7 +237,7 @@ async fn generic_pty_runner_writes_ready_marker_inside_seatbelt() {
 #[tokio::test]
 async fn generic_pty_host_relay_streams_command_output() {
     use bytes::Bytes;
-    use tddy_daemon::sandbox_session::connect_sandbox_session_client;
+    use tddy_daemon_sandbox::sandbox_session::connect_sandbox_session_client;
     use tddy_sandbox_runner::{run_host_relay, HostRelayConfig, NullToolHandler};
     use tokio::sync::mpsc;
 
@@ -285,7 +285,7 @@ async fn generic_pty_host_relay_streams_command_output() {
         "--pty-command=printf pty_ok".into(),
     ];
 
-    let mut env = tddy_daemon::sandbox_session::build_sandbox_runner_env(
+    let mut env = tddy_daemon_sandbox::sandbox_session::build_sandbox_runner_env(
         &scratch.join("home"),
         &scratch.join("tmp"),
         "generic-pty-relay",

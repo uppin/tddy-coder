@@ -31,8 +31,6 @@ use crate::livekit_rooms_stream::RoomRoster;
 use crate::multi_host::EligibleDaemonSource;
 use crate::project_storage::{self};
 use crate::session_room::ActivityDelta;
-use crate::spawn_worker;
-use crate::spawner::{self};
 use crate::telegram_session_subscriber::TelegramDaemonHooks;
 use crate::user_sessions_path::projects_path_for_user;
 use crate::workspace_session;
@@ -43,6 +41,8 @@ use tddy_service::proto::connection::{
     SessionNotificationKind as ProtoSessionNotificationKind,
     SessionNotificationSource as ProtoSessionNotificationSource,
 };
+use tddy_spawn::spawn_worker;
+use tddy_spawn::spawner::{self};
 use tddy_task::TaskRegistry;
 
 // Bound for the extracted test modules, which reach the code under test through `use super::*`.
@@ -656,16 +656,16 @@ pub struct ConnectionServiceImpl {
     telegram: Option<Arc<TelegramDaemonHooks>>,
     claude_cli_manager: Arc<CliSessionManager>,
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
-    sandbox_manager: Arc<crate::sandbox_session::SandboxSessionManager>,
+    sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     /// The per-session jails sandboxed `workspace` sessions dispatch their tools through
     /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox). Keyed by session id, and
     /// shared across clones so the jail a start provisioned is the one the next handler's
     /// `ExecuteTool` finds.
-    workspace_sandboxes: Arc<crate::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
+    workspace_sandboxes: Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
     /// What builds those jails. Injected the way `host_stats` and `room_roster` are, so the
     /// dispatch, refusal and ordering contracts are testable without booting one.
     workspace_sandbox_provisioner:
-        Arc<dyn crate::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
+        Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
     /// Registry for Tasks created by tool invocations (every ExecuteTool call).
     task_registry: TaskRegistry,
     /// Optional idle-timeout tracker for relay mode — bumped on every RPC call.
@@ -936,7 +936,7 @@ async fn spawn_claude_cli_session_inner(
         .link_spawned_branch_without_failing_the_spawn(&sessions_base, &spawned_branch, session_id)
         .await;
 
-    let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         config
             .claude_cli
             .as_ref()
@@ -1021,7 +1021,7 @@ async fn spawn_claude_cli_session_inner(
                 "semantic index requested but no embedder is available: {e}"
             ))
         })?;
-        crate::semantic_index::run_semantic_index_blocking(
+        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
             &worktree_path,
             &session_dir,
             embedder,
@@ -1030,7 +1030,7 @@ async fn spawn_claude_cli_session_inner(
         )
         .await
         .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-        let (key, value) = crate::semantic_index::semantic_index_env(&session_dir);
+        let (key, value) = tddy_semantic_index::semantic_index::semantic_index_env(&session_dir);
         env_extra.push((key, value));
     }
 

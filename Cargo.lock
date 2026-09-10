@@ -12070,6 +12070,7 @@ dependencies = [
  "tddy-connectrpc",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-daemon-sandbox",
  "tddy-demo-runner",
  "tddy-discovery",
  "tddy-github",
@@ -12083,14 +12084,13 @@ dependencies = [
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-cgroups",
- "tddy-sandbox-darwin",
- "tddy-sandbox-qemu",
  "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
  "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-spawn",
  "tddy-stdio",
  "tddy-supervisor",
  "tddy-task",
@@ -12107,7 +12107,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "tokio-util",
  "tonic 0.12.3",
  "tower 0.5.3",
  "url",
@@ -12136,6 +12135,40 @@ dependencies = [
  "tddy-service",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "tddy-daemon-sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "libc",
+ "log",
+ "prost 0.13.5",
+ "serde_json",
+ "tddy-actions",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-cgroups",
+ "tddy-sandbox-darwin",
+ "tddy-sandbox-qemu",
+ "tddy-sandbox-recipes",
+ "tddy-sandbox-runner",
+ "tddy-service",
+ "tddy-stdio",
+ "tddy-task",
+ "tddy-tool-engine",
+ "tddy-tools",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic 0.12.3",
+ "uuid",
 ]
 
 [[package]]
@@ -12188,6 +12221,7 @@ dependencies = [
  "tddy-core",
  "tddy-daemon",
  "tddy-rpc",
+ "tddy-spawn",
  "tddy-tauri-rpc",
  "tokio",
 ]
@@ -12587,7 +12621,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-core",
- "tddy-daemon",
+ "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-lsp",
  "tddy-lsp-executor",
@@ -12600,6 +12634,7 @@ dependencies = [
  "tddy-stdio",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-tool-engine",
  "tddy-tools",
  "tempfile",
  "tokio",
@@ -12833,6 +12868,28 @@ dependencies = [
  "tddy-service",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "tddy-spawn"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "serial_test",
+ "tddy-coder",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-discovery",
+ "tddy-supervisor",
+ "tddy-testing-commons",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

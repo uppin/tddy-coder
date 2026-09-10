@@ -168,7 +168,7 @@ fn start_session_targets_selected_daemon_identity() {
     let expected = format!("daemon-{selected}-{session_id}");
 
     // When
-    let got = tddy_daemon::spawner::livekit_server_identity_for_session(Some(selected), session_id);
+    let got = tddy_spawn::spawner::livekit_server_identity_for_session(Some(selected), session_id);
 
     // Then
     assert_eq!(
@@ -431,7 +431,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     // Then
     let inner = response.into_inner();
     assert!(!inner.session_id.is_empty());
-    let expected_identity = tddy_daemon::spawner::livekit_server_identity_for_session(
+    let expected_identity = tddy_spawn::spawner::livekit_server_identity_for_session(
         Some(REMOTE_PEER_INSTANCE_ID),
         &inner.session_id,
     );

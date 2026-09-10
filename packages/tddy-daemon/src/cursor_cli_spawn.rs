@@ -33,7 +33,7 @@ pub fn install_cursor_hooks_in_worktree(
     session_id: &str,
     os_user: &str,
 ) -> String {
-    let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
         crate::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
     );
 
@@ -355,7 +355,7 @@ pub async fn spawn_cursor_cli_session_inner(
                 "semantic index requested but no embedder is available: {e}"
             ))
         })?;
-        crate::semantic_index::run_semantic_index_blocking(
+        tddy_semantic_index::semantic_index::run_semantic_index_blocking(
             &worktree_path,
             &session_dir,
             embedder,
@@ -364,7 +364,9 @@ pub async fn spawn_cursor_cli_session_inner(
         )
         .await
         .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-        session_env.push(crate::semantic_index::semantic_index_env(&session_dir));
+        session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
+            &session_dir,
+        ));
     }
 
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in

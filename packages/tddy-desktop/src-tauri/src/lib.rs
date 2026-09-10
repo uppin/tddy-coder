@@ -60,8 +60,8 @@ pub fn run() -> anyhow::Result<()> {
     // Fork the spawn worker before anything starts a runtime: `fork` from a multi-threaded process
     // can deadlock, and every line below this one may touch Tauri's. Skipped on a supervised host,
     // where `tddy-supervisor` spawns sessions instead.
-    let spawn_backend = tddy_daemon::supervisor_client::spawn_backend_choice(&config);
-    let spawn_client = tddy_daemon::supervisor_client::spawn_worker_for(&spawn_backend)?;
+    let spawn_backend = tddy_spawn::supervisor_client::spawn_backend_choice(&config);
+    let spawn_client = tddy_spawn::supervisor_client::spawn_worker_for(&spawn_backend)?;
     #[cfg(unix)]
     if let Some((_, worker_pid)) = spawn_client.as_ref() {
         log::info!("[tddy-desktop] spawn worker pid={worker_pid}");
@@ -220,7 +220,7 @@ fn start_daemon(
     app: &tauri::App,
     config: tddy_daemon::config::DaemonConfig,
     config_path: PathBuf,
-    spawn_client: Option<(tddy_daemon::spawn_worker::SpawnClient, i32)>,
+    spawn_client: Option<(tddy_spawn::spawn_worker::SpawnClient, i32)>,
 ) -> anyhow::Result<()> {
     let handle = app.handle().clone();
     // Loopback only, and served by this process: an address configured for a *served* daemon (a LAN

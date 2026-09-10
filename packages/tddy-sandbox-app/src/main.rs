@@ -183,7 +183,7 @@ struct Args {
 const VERBOSE_RUST_LOG: &str = "\
     info,\
     tddy_sandbox_app=debug,\
-    tddy_daemon::sandbox_session=debug,\
+    tddy_daemon_sandbox::sandbox_session=debug,\
     tddy_sandbox_darwin=debug,\
     hyper=warn,\
     hyper_util=warn,\
@@ -828,8 +828,9 @@ async fn run_sandboxed_codebase(run: SandboxedCodebaseRun) -> Result<()> {
     // Resolved once, for both ends: the jail is told which `tddy-tools` it holds, and the agent's
     // MCP server on this host runs that same one. A session pointed at a specific build must not
     // get it on one side of the boundary and the default sibling on the other.
-    let tddy_tools_path =
-        tddy_daemon::sandbox_session::resolve_tddy_tools_path(run.tddy_tools_path.as_deref());
+    let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
+        run.tddy_tools_path.as_deref(),
+    );
 
     // The build home is keyed on the *canonical* checkout, so a repo reached by two spellings —
     // a symlink, a trailing slash — is one repository with one home rather than two.

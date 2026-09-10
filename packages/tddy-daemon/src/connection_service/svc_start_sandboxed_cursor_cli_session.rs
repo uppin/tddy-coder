@@ -241,15 +241,16 @@ impl ConnectionServiceImpl {
                 replaced: refs,
             })
             .collect();
-        let ctx = crate::sandbox_session::prepare_context_dir_with_subagent(
+        let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
             &worktree_path,
             &replacements,
             crate::context_files::context_globs_for_session_type("cursor-cli"),
         )
         .map_err(Status::internal)?;
-        crate::sandbox_session::copy_dir_all(ctx.path(), &context_dir).map_err(Status::internal)?;
+        tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
+            .map_err(Status::internal)?;
 
-        let tddy_tools_path = crate::sandbox_session::resolve_tddy_tools_path(
+        let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
             crate::config::resolve_cursor_cli_tddy_tools_path(&self.config).as_deref(),
         );
 
@@ -286,11 +287,11 @@ impl ConnectionServiceImpl {
         };
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
         let sandbox_runner_path =
-            canonicalize_exec(&crate::sandbox_session::resolve_sandbox_runner_path());
+            canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
         let cursor_binary =
             canonicalize_exec(&crate::config::resolve_cursor_binary_path(&self.config));
         let cursor_home_dir = crate::config::resolve_cursor_home_dir(&self.config);
-        let scratch_home = crate::sandbox_session::prepare_persistent_cursor_home(
+        let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_cursor_home(
             &cursor_home_dir,
             &cursor_binary,
         );
@@ -299,8 +300,8 @@ impl ConnectionServiceImpl {
         let ready_marker = sandbox_root.join("sandbox.ready");
         let profile_path = sandbox_root.join("sandbox.sb");
 
-        let egress_shim_port =
-            crate::sandbox_session::pick_free_loopback_port().map_err(Status::internal)?;
+        let egress_shim_port = tddy_daemon_sandbox::sandbox_session::pick_free_loopback_port()
+            .map_err(Status::internal)?;
         let loopback_allow_ports = vec![egress_shim_port];
 
         let mut runner_argv = vec![
@@ -351,7 +352,7 @@ impl ConnectionServiceImpl {
                         "semantic index requested but no embedder is available: {e}"
                     ))
                 })?;
-            crate::semantic_index::run_semantic_index_blocking(
+            tddy_semantic_index::semantic_index::run_semantic_index_blocking(
                 &worktree_path,
                 &session_dir,
                 embedder,
@@ -360,10 +361,12 @@ impl ConnectionServiceImpl {
             )
             .await
             .map_err(|e| Status::internal(format!("semantic index failed: {e}")))?;
-            semantic_index_env_pair = Some(crate::semantic_index::semantic_index_env(&session_dir));
+            semantic_index_env_pair = Some(
+                tddy_semantic_index::semantic_index::semantic_index_env(&session_dir),
+            );
         }
 
-        let mut env = crate::sandbox_session::build_sandboxed_cursor_runner_env(
+        let mut env = tddy_daemon_sandbox::sandbox_session::build_sandboxed_cursor_runner_env(
             &scratch_home,
             &scratch_tmp,
             session_id,
@@ -377,8 +380,8 @@ impl ConnectionServiceImpl {
         env.extend(self.lsp_tools_env(&worktree_path));
         env.extend(semantic_index_env_pair);
 
-        let mut handle = crate::sandbox_session::spawn_sandbox_runner(
-            crate::sandbox_session::SandboxRunnerSpawn {
+        let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(
+            tddy_daemon_sandbox::sandbox_session::SandboxRunnerSpawn {
                 project_root: sandbox_root.clone(),
                 scratch_dir: scratch_dir.clone(),
                 egress_dir: egress_dir.clone(),
@@ -394,12 +397,12 @@ impl ConnectionServiceImpl {
         )
         .map_err(|e| {
             let logs = tddy_sandbox::format_egress_logs(&egress_dir);
-            let mut status = crate::sandbox_session::sandbox_error_to_status(e);
+            let mut status = tddy_daemon_sandbox::sandbox_session::sandbox_error_to_status(e);
             status.message = format!("{}\n{logs}", status.message);
             status
         })?;
 
-        crate::sandbox_session::wait_for_sandbox_ready(
+        tddy_daemon_sandbox::sandbox_session::wait_for_sandbox_ready(
             &mut handle,
             &ready_marker,
             std::time::Duration::from_secs(120),
@@ -412,7 +415,7 @@ impl ConnectionServiceImpl {
         let capture = Arc::new(StdMutex::new(TerminalCapture::new()));
         let (stdin_tx, stdin_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        crate::sandbox_session::dial_and_bridge(
+        tddy_daemon_sandbox::sandbox_session::dial_and_bridge(
             session_id,
             worktree_path.clone(),
             &mut handle,
@@ -431,18 +434,23 @@ impl ConnectionServiceImpl {
         .map_err(Status::internal)?;
 
         let pid = handle.pid();
-        let state = Arc::new(crate::sandbox_session::SandboxSessionState::new(
-            crate::sandbox_session::SandboxSessionStateInit {
-                pid,
-                worktree_path: worktree_path.clone(),
-                stdout_tx,
-                capture,
-                stdin_tx,
-                ready_marker: ready_marker.clone(),
-                handle,
-                managed_workflow: managed,
-            },
-        ));
+        let state = Arc::new(
+            tddy_daemon_sandbox::sandbox_session::SandboxSessionState::new(
+                tddy_daemon_sandbox::sandbox_session::SandboxSessionStateInit {
+                    pid,
+                    worktree_path: worktree_path.clone(),
+                    stdout_tx,
+                    capture,
+                    stdin_tx,
+                    ready_marker: ready_marker.clone(),
+                    handle,
+                    managed_workflow: managed.map(|w| {
+                        Box::new(w)
+                            as Box<dyn tddy_daemon_sandbox::sandbox_session::SessionScopedResource>
+                    }),
+                },
+            ),
+        );
         self.sandbox_manager
             .insert(session_id.to_string(), state)
             .await;
