@@ -1,5 +1,12 @@
 # Model registry (`model_registry`)
 
+> **Crate:** `tddy-model-registry` (`packages/tddy-model-registry`), extracted whole from
+> `tddy-daemon` by `#unbundle` node 2. Every module path below is `tddy_model_registry::…`; the
+> wire coordinates `models.ModelRegistryService` and `tddy.acp.v1.AcpService` did not change, and
+> `runtime.rs` now registers both through `build_model_registry_entry` and `build_model_acp_entry`.
+> The four `log::` targets in the moved code still read `tddy_daemon::model_registry` on purpose —
+> an operator-facing log filter is an observable interface, not a path.
+
 Per-daemon store of model **providers**, the **models** they serve, and **assistants** composed from
 them — plus the ACP surface that lets one be chatted with. Served as `models.ModelRegistryService`.
 
@@ -108,14 +115,20 @@ rows return `AlreadyExists`.
 
 ## Tests
 
+Five suites moved with the code and run under `cargo test -p tddy-model-registry`:
 `model_registry_store_unit` (55), `ollama_provider_client_integration` (22),
-`model_registry_service_acceptance` (21), `model_acp_service_acceptance` (17),
-`model_registry_reserved_names_unit` (8), `registry_assistant_as_agent_acceptance` (6),
-`agent_def_spawn_argv_unit` (4). Provider HTTP is exercised against
+`model_registry_service_acceptance` (21), `model_acp_service_acceptance` (17) and
+`model_registry_reserved_names_unit` (8). Two stay in `tddy-daemon`, because their subject is the
+daemon rather than the registry: `registry_assistant_as_agent_acceptance` (6) — `ConnectionServiceImpl`
+resolving an assistant as an `--agent` — and `agent_def_spawn_argv_unit` (4). Provider HTTP is exercised against
 `tddy_testing_commons::stub_http_routed`, which routes by path, records request headers and bodies,
 replies in sequence, and `500`s past the end of a script so an unexpected extra round trip fails
 loudly.
 
 Known gaps are listed in [docs/dev/TODO.md](../../../docs/dev/TODO.md) under *Models & Agents — open
-items at wrap*; the most notable is that the `rpc_entries` registration itself is untested — deleting
-either push leaves the suite green while the screen goes dead.
+items at wrap*.
+
+The registration gap that used to head that list is closed: `packages/tddy-daemon/tests/service_registration_acceptance.rs`
+builds the daemon runtime and asserts `models.ModelRegistryService` and `tddy.acp.v1.AcpService` are
+among `DaemonRuntime::service_names()`, so deleting either `rpc_entries` push now fails a test
+instead of leaving the suite green while the screen goes dead.

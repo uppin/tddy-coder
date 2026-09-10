@@ -1,7 +1,7 @@
 # Changeset: model registry, telegram and screen sharing in their own crates
 
 **Date**: 2026-09-09
-**Status**: 🚧 In Progress
+**Status**: ✅ Complete (wrapped 2026-09-10) — with two milestones explicitly partial, see below
 **Type**: Refactor
 **Stack**: `#unbundle` node **2 of 8**. PR [#471](https://github.com/uppin/tddy-coder/pull/471).
 Base: `feature/unbundle/host-worktree-services` (node 1, PR #470)
@@ -111,10 +111,13 @@ Real dependency edges, as opposed to the branch line — the telegram edge is th
 - **tddy-telegram** *(new)* — 4 of the 9 telegram and elicitation modules, plus the transport
   seam of a 5th; the other 5 are deferred to nodes 4 and 6-8
 - **tddy-screen-sharing** *(new)* — `screen_sharing_service.rs`, `screen_sharing_vault.rs`
-- **tddy-daemon**: [README.md](../../packages/tddy-daemon/README.md) — 27 modules leave, 2 are deleted
-  - [model-registry.md](../../packages/tddy-daemon/docs/model-registry.md) → `tddy-model-registry/docs/`
-  - [telegram-notifier.md](../../packages/tddy-daemon/docs/telegram-notifier.md), [telegram-github-link.md](../../packages/tddy-daemon/docs/telegram-github-link.md) → `tddy-telegram/docs/`
-  - [agent-session-status.md](../../packages/tddy-daemon/docs/agent-session-status.md) — its model-registry half moves
+- **tddy-daemon**: **19 modules leave and 2 are deleted** — 152 → 131 source files, 160 → 151 test
+  files. (The plan said 27 modules; that counted all nine telegram modules, five of which stayed.)
+  There is **no `packages/tddy-daemon/README.md`** in the tree — the plan named a file that does not
+  exist. Docs, as moved at wrap:
+  - [model-registry.md](../../packages/tddy-model-registry/docs/model-registry.md) — moved to `tddy-model-registry/docs/` ✅
+  - [telegram-notifier.md](../../packages/tddy-telegram/docs/telegram-notifier.md), [telegram-github-link.md](../../packages/tddy-telegram/docs/telegram-github-link.md) — moved to `tddy-telegram/docs/` ✅
+  - [agent-session-status.md](../../packages/tddy-daemon/docs/agent-session-status.md) — **stays.** It has no model-registry half; see `## Final Checklist`
 - **tddy-service**: no proto change. `vnc.proto` is left in place with no server
 - **tddy-desktop**: no change expected — it consumes `{config, runtime, supervisor_client, spawn_worker, cli_session_manager}`, none of which moves here. **Outside the CI gate**, so verified locally and stated
 
@@ -219,13 +222,19 @@ LiveKit call is added, and the existing ones move verbatim. Recorded, not fixed 
       `tddy-daemon` never depended on it — `packages/tddy-vnc` and `packages/tddy-rdp`, the bridge
       binaries the service *spawns*, are its only consumers. There was nothing to move ✅
 - [x] **Delete unreachable VNC**: `vnc_service.rs`, `vnc_vault.rs`, both acceptance suites, the two `lib.rs` entries ✅
-- [~] **Wiring**: `models.ModelRegistryService`, `tddy.acp.v1.AcpService` and
-      `screen_sharing.ScreenSharingService` now register through `build_*_entry`; telegram's
-      inbound task is M4's
-- [~] **File budget**: `screen_sharing_service.rs` stayed whole at 2,171 lines — see below
-- [ ] **Baseline**: `./test -p tddy-daemon -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing` back to the recorded numbers
-- [ ] **Code Quality**: `cargo clippy -p <each> -- -D warnings` clean, `cargo fmt` clean
-- [ ] **Documentation**: doc triage executed at wrap
+- [x] **Wiring**: `models.ModelRegistryService`, `tddy.acp.v1.AcpService` and
+      `screen_sharing.ScreenSharingService` register through `build_*_entry`, and
+      `packages/tddy-daemon/tests/service_registration_acceptance.rs` pins all three against the
+      live roster ✅ **Deferred:** telegram's inbound task stays in `runtime.rs` — there is no
+      constructor to move it behind while `TelegramSessionControlHarness` is a daemon type. Goes
+      with the five blocked modules to nodes 4 and 6-8
+- [x] **File budget**: recorded, not forced. `screen_sharing_service.rs` stayed whole at 2,171 lines (962 production, 1,209 inline host-scope suite) — the reasoning is in `### File budget` below ✅
+- [x] **Baseline**: green on CI, which is the authority for whole-workspace health —
+      **6463/6463 Rust, 2630/2630 Web**, plus Rust build, arm64 build, workspace clippy, the
+      generated-code drift gate and VM checks, all passing on `73ff7d2f`. Local runs were scoped to
+      the touched packages, per `AGENTS.md` § Verification ✅
+- [x] **Code Quality**: the workspace clippy check and `cargo fmt --check` are both green on CI ✅
+- [x] **Documentation**: doc triage executed at wrap — see `## Final Checklist` ✅
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -421,8 +430,10 @@ asserts on. Recorded, not forced.
       (**20 tests pass** in `tddy-telegram`: 3 crate-level surface + 17 inline moved with the
       modules, up from 3). The remaining 5 modules and `teloxide` are blocked on a production
       cycle and deferred to nodes 4 and 6-8 ⚠
-- [ ] M5 — `runtime.rs` registers all three through their constructors; baselines restored
-- [ ] M6 — file-budget outcome recorded
+- [x] M5 — `runtime.rs` registers all three through their constructors and CI is green
+      (6463/6463 Rust, 2630/2630 Web) ✅ The telegram inbound task is the one piece not behind a
+      constructor, deferred with the five blocked modules
+- [x] M6 — file-budget outcome recorded: one file over, unsplit, with its reason ✅
 
 ## Testing Plan
 
@@ -445,21 +456,21 @@ daemon's registered service names, so the removal cannot silently regress into a
 ## Acceptance Tests
 
 ### tddy-model-registry
-- [ ] **Integration**: all 12 `models.ModelRegistryService` methods answer from the new crate (`model_registry_service_acceptance.rs`)
-- [ ] **Integration**: `acp.AcpService` answers from the new crate (`model_acp_service_acceptance.rs`)
-- [ ] **Unit**: the store opens, migrates and round-trips without `tddy-daemon` on the dependency path (`model_registry_store_unit.rs`)
+- [x] **Integration**: all 12 `models.ModelRegistryService` methods answer from the new crate (`packages/tddy-model-registry/tests/model_registry_service_acceptance.rs`) ✅
+- [x] **Integration**: the model-addressed ACP service answers from the new crate (`packages/tddy-model-registry/tests/model_acp_service_acceptance.rs`). Registered as **`tddy.acp.v1.AcpService`** — `acp.AcpService` elsewhere in this document is prose shorthand for the same coordinate ✅
+- [x] **Unit**: the store opens, migrates and round-trips without `tddy-daemon` on the dependency path (`packages/tddy-model-registry/tests/model_registry_store_unit.rs`) ✅
 
 ### tddy-telegram
-- [ ] **Integration**: a session started from telegram reaches the daemon and reports back (`telegram_start_claude_acceptance.rs`)
-- [ ] **Integration**: concurrent elicitations resolve independently (`telegram_concurrent_elicitation_integration.rs`)
-- [ ] **Unit**: the notifier composes a lifecycle message without `tddy-daemon` on the dependency path (`telegram_notifier.rs`)
+- [~] **Integration**: a session started from telegram reaches the daemon and reports back (`telegram_start_claude_acceptance.rs`). **The suite passes, unchanged, but it did not move** — its subject is `telegram_session_control` / `telegram_bot`, both blocked on the daemon's session machinery. It exercises `tddy-daemon`, not `tddy-telegram`. **Deferred to nodes 4 and 6-8**, with the modules
+- [~] **Integration**: concurrent elicitations resolve independently (`telegram_concurrent_elicitation_integration.rs`). Same: passes unchanged in `tddy-daemon`, reaches `tddy_telegram::active_elicitation` only through the daemon's facade. **Deferred to nodes 4 and 6-8**
+- [x] **Unit**: the notifier composes a lifecycle message without `tddy-daemon` on the dependency path ✅ — asserted in `packages/tddy-telegram/src/lib.rs`'s test module against `send_daemon_lifecycle_message`, over three states (configured, unconfigured, configured-but-disabled). Not in a file called `telegram_notifier.rs`: only the transport half moved, and it landed as `sender.rs`
 
 ### tddy-screen-sharing
-- [ ] **Integration**: all 10 `screen_sharing.ScreenSharingService` methods answer from the new crate (`screen_sharing_service_acceptance.rs`)
-- [ ] **Integration**: the vault seals and unseals a key from the new crate (`screen_sharing_vault_acceptance.rs`)
+- [x] **Integration**: all 10 `screen_sharing.ScreenSharingService` methods answer from the new crate (`packages/tddy-screen-sharing/tests/screen_sharing_service_acceptance.rs`) ✅
+- [x] **Integration**: the vault seals and unseals a key from the new crate (`packages/tddy-screen-sharing/tests/screen_sharing_vault_acceptance.rs`) ✅
 
 ### tddy-daemon
-- [ ] **Integration**: the daemon's registered service names include the three moved services and **not** `vnc.VncService` (`service_registration_acceptance.rs`)
+- [x] **Integration**: the daemon's registered service names include the three moved services and **not** `vnc.VncService` (`packages/tddy-daemon/tests/service_registration_acceptance.rs`) ✅ Written at wrap — it was the one planned criterion with no test. It builds a real runtime through `runtime::build(config, RuntimeOptions::for_embedded())` and asserts on `DaemonRuntime::service_names()`. The config carries `github.stub: true`, because every one of these services is registered inside `runtime::build`'s `if let Some(user_resolver)` block and a config without GitHub auth would make all four assertions vacuous; the VNC test guards against exactly that by first asserting the auth-gated roster is present
 
 ## Decisions & Trade-offs
 
@@ -500,15 +511,37 @@ daemon's registered service names, so the removal cannot silently regress into a
 
 ## Technical Debt & Production Readiness
 
-- [ ] `tddy-service` depends on `tddy-tui`, so any subsystem crate that needs `tddy-service`'s protos
+Every box below is **deliberately unticked at wrap** — each is a known, deferred item with an owner,
+not an unfinished part of this node.
+
+- [ ] **Deferred, no owner yet — not this stack's.** `tddy-service` depends on `tddy-tui`, so any subsystem crate that needs `tddy-service`'s protos
       pulls the TUI into its build. Not introduced here, but each new crate inherits it
-- [ ] `vnc.proto` is left with no server; the decision to retire it is deferred to `docs/dev/todo/`
-- [ ] Four `log::` calls in the moved registry still name `target: "tddy_daemon::model_registry"`
+- [ ] **Deferred to a product call in its own PR.** `vnc.proto` is left with no server, and the wrap
+      triage found that `tddy-web`'s session inspector still has a user-reachable "vnc" tab dialling
+      it. Retiring the proto therefore means removing a UI tab, which is product-visible and cannot
+      ride a relocation node. Recorded in
+      [`docs/dev/todo/2026-09-10-vnc-proto-has-no-server-and-a-live-web-client.md`](../todo/2026-09-10-vnc-proto-has-no-server-and-a-live-web-client.md)
+- [ ] **Deferred to a deliberate rename step with a migration note; no node owns it yet.** Four
+      `log::` calls in the moved registry still name `target: "tddy_daemon::model_registry"`
       (`error.rs:103`, `service.rs:197`, `acp_service.rs:265,628`). Left verbatim on purpose: a log
       target is an operator-facing filter, and renaming it is an observable change, not a
       relocation. Re-point them to `tddy_model_registry` as a deliberate step, with the same done
       for telegram and screen sharing
-- [ ] Same call in `tddy-telegram`: **40** `log::` calls across the five moved files still name
+- [ ] **Deferred — a one-line test strengthening, written and then withdrawn unverified.**
+      `tddy-screen-sharing`'s `does_not_return_one_sessions_key_to_another` proves cross-session
+      isolation only through `vault_b.list_targets().is_empty()`. Its name promises more than that:
+      the property is that session B's *key* cannot open session A's sealed password, and the empty
+      listing is evidence for it rather than the thing itself. One extra assertion says it directly:
+
+          assert!(vault_b.decrypt_password(&as_target.id, &key_b).is_err(),
+                  "one session's key must not open another session's sealed password");
+
+      Not applied at wrap because it could not be verified locally — the worktree was under a
+      concurrent full `cargo test -p tddy-daemon` from another session and free disk was at the
+      15Gi stop line, so an unverifiable edit to a CI-green test was the worse trade. The existing
+      assertion is real, not vacuous; this is a sharpening, not a fix
+
+- [ ] **Deferred with the item above, and for the same reason.** In `tddy-telegram`: **40** `log::` calls across the five moved files still name
       `tddy_daemon::…` — `tddy_daemon::active_elicitation` (6), `tddy_daemon::elicitation` (9),
       `tddy_daemon::telegram` (8), `tddy_daemon::telegram_github_link` (13) and 4 in `sender.rs`.
       One is not a call at all but a **public constant**,
@@ -527,12 +560,24 @@ Recorded before any change.
 | `./test -p tddy-daemon` | **1027 passed / 1 failed**, 25 suites (inherited from node 1) | not re-run locally — a whole-package daemon run is CI's; `cargo build -p tddy-daemon` is clean |
 | `cargo test -p tddy-telegram` | 2 failing / 0 passing (the published stubs) | **20 passed / 0 failed** — 3 crate-level surface + 17 inline, moved with the four modules |
 | `cargo clippy -p tddy-model-registry -p tddy-telegram -p tddy-screen-sharing --all-targets -- -D warnings` | ✅ exit 0 | `-p tddy-telegram --all-targets` ✅ exit 0; `cargo fmt --check` ✅ exit 0 |
+| `cargo test -p tddy-daemon --test service_registration_acceptance` | ⛔ the suite did not exist | **4 passed / 0 failed** (written at wrap; `cargo check --tests -p tddy-daemon` also exit 0) |
+| **CI on `73ff7d2f`** — the authority for whole-workspace health | n/a | ✅ **6463/6463 Rust, 2630/2630 Web**, Rust build, arm64 build, workspace clippy, generated-code drift gate, VM checks |
 
-**12 failing tests** define this node: 3 in `tddy-model-registry`, 2 in `tddy-telegram`, 4 in
+**Whole-workspace green is CI's claim, not a local one.** Local runs here were scoped to the
+packages this node touches, per `AGENTS.md` § Verification.
+
+**12 failing tests** defined this node: 3 in `tddy-model-registry`, 2 in `tddy-telegram`, 4 in
 `tddy-screen-sharing`, and 3 asserting the unreachable VNC service's four files are gone. That last
 set is asserted against the daemon's **source** rather than its service registry, because
 `vnc.VncService` is already absent from the registry — which is precisely the problem: the module is
 declared, compiled, tested, and reachable by nothing.
+
+A **13th** was added at wrap and now passes with them:
+`packages/tddy-daemon/tests/service_registration_acceptance.rs` (4 tests) asserts the *live* roster —
+the two model-registry entries and the screen-sharing entry are registered, `vnc.VncService` is not.
+The source assertion and the registry assertion are complementary rather than redundant: the source
+one catches a resurrected file, the registry one catches a resurrected `rpc_entries.push`, and only
+the registry one would have caught a moved service failing to re-register at all.
 
 The one known pre-existing failure
 (`cursor_cli_session_acceptance::cursor_cli_sandbox_start_succeeds_when_sandbox_backend_available`,
@@ -541,12 +586,32 @@ at exactly one. Verification is scoped to the packages this node touches.
 
 ## Final Checklist
 
-- [ ] `docs/dev/changesets/2026-09-09-unbundle-model-telegram-screen.md` — the release-note file,
-      carrying the deleted-VNC decision and the before/after module counts
-- [ ] Move `model-registry.md`, `telegram-notifier.md` and `telegram-github-link.md` to the new
-      packages' `docs/`
-- [ ] `packages/tddy-daemon/docs/agent-session-status.md` — split its model-registry half out
-- [ ] New `docs/dev/todo/` entry: whether to retire `vnc.proto` now that it has no server
-- [ ] Re-read `docs/dev/todo/2026-09-06-stubeligibledaemonsource-is-no-longer-reachable-from-production.md`
-      against what is left
-- [ ] Doc triage: `grep -rn -e 'model_registry' -e 'telegram' -e 'screen_sharing' -e 'vnc' packages/tddy-daemon/README.md packages/tddy-daemon/docs docs/ft/daemon`
+- [x] `docs/dev/changesets/2026-09-09-unbundle-model-telegram-screen.md` — written: the deleted-VNC
+      decision (including the live web client it revealed), the 152 → 131 / 160 → 151 before-and-after
+      counts, and the telegram partial delivery with the measured cycle behind it ✅
+- [x] Moved with `git mv`: `model-registry.md` → `packages/tddy-model-registry/docs/`,
+      `telegram-notifier.md` and `telegram-github-link.md` → `packages/tddy-telegram/docs/`.
+      Their relative links were re-pointed, and `telegram-notifier.md` gained a "where this code
+      lives" header table, because only its transport half moved ✅
+- [~] `packages/tddy-daemon/docs/agent-session-status.md` — **not applicable, verified.** The
+      document has **no model-registry half**: it is entirely about
+      `session_agent_inference`, the agent that *is* a claude-cli/cursor session, and its only
+      registry-adjacent line is one sentence distinguishing it from the agent roster. Nothing to
+      split, and the document stays in `tddy-daemon` where its subject does. The plan's
+      `## Affected Packages` line was wrong about it
+- [x] New `docs/dev/todo/` entry:
+      [`2026-09-10-vnc-proto-has-no-server-and-a-live-web-client.md`](../todo/2026-09-10-vnc-proto-has-no-server-and-a-live-web-client.md).
+      It records more than the plan expected: the schema has no server **and** `tddy-web`'s session
+      inspector still has a user-reachable "vnc" tab dialling it ✅
+- [x] Re-read `2026-09-06-stubeligibledaemonsource-is-no-longer-reachable-from-production.md` —
+      **still open, unchanged.** Same three test callers; the type moved to `tddy-host-service` on
+      node 1, so the fix is now cross-crate. A dated re-read section was appended to that entry ✅
+- [x] Doc triage executed. `packages/tddy-daemon/README.md` **does not exist** — the plan's
+      `## Affected Packages` names a file that is not in the tree. Re-pointed: two links in
+      `packages/tddy-daemon/docs/connection-service.md`, one in `session-notifications.md`, three in
+      `docs/ft/daemon/telegram-notifications.md`, one in `docs/ft/daemon/telegram-session-control.md`,
+      plus three module names now naming their new crate (`tddy_telegram::elicitation`,
+      `tddy_telegram::telegram_github_link`, `tddy_telegram::sender`), each noting the daemon
+      re-export that keeps the old path resolving. Historical entries under `docs/dev/changesets/`,
+      `docs/ft/daemon/changelog/` and `packages/tddy-daemon/docs/changesets/` were **left alone**:
+      they record the state at the time they were written ✅
