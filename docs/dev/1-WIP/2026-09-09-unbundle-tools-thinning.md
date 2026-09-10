@@ -28,7 +28,7 @@ its domain.
 
 | Destination | What moves | prod LoC |
 |---|---|---:|
-| `tddy-workflow-recipes` | `server.rs` seam B (14 `pr_*` + 2 `github_*` tools), `github_pr.rs`, `schema.rs`, `schema_manifest.rs`, `review_persist.rs` | ~1,840 |
+| `tddy-workflow-recipes` | `github_pr.rs`, `schema.rs`, `schema_manifest.rs`, `review_persist.rs` | ~940 |
 | `tddy-service` | `session_tool_client.rs`, `session_agents/{stream,conversation,link,seed}` | ~1,900 |
 | `tddy-discovery` | `server.rs` seam D (the subagent conversation runtime), `session_agents/registry.rs`, `relay.rs` | ~2,180 |
 | `tddy-tool-engine` | `server.rs` seam C (the dynamic tool proxy and `exec_tool_catalog`) | ~190 |
@@ -76,6 +76,16 @@ This PR explicitly does **not**:
   exists. Seam A also carries a bespoke newline-delimited-JSON Unix-socket protocol that
   `toolcall_client` deliberately migrated away from; relocating it would spread that protocol rather
   than retire it.
+- Move seam B (the 14 `pr_*` + 2 `github_*` MCP tools, ~415 LoC with their `Pr*Input` structs) out
+  of `tddy-tools`. **Changed during green — the plan said it moved.** The bodies turned out to be
+  thin adapters that already delegate into `tddy_workflow_recipes::pr_stack`
+  (`pr_merge_action`, `pr_close_action`, `set_internal_status`, `AddPlannedPrInput`, …) and wrap the
+  result in a JSON envelope; the logic was never in `tddy-tools` to move. What is left is MCP
+  advertisement, and moving that would mean adding `rmcp` and `schemars` to `tddy-workflow-recipes`,
+  which has neither — every consumer of that crate, `tddy-coder` included, would then build `rmcp`.
+  The same rule that keeps seams A and E here keeps seam B: the shape of an MCP tool belongs to the
+  crate that speaks MCP. M3 already applied it when `lsp_tool_catalog()` kept returning `LspToolDef`
+  rather than `RemoteToolDef`.
 - Retire that NDJSON protocol. Recorded in `docs/dev/todo/` at wrap.
 - Move any `tddy-daemon` module. Nodes 1–4 did the daemon; nodes 6–8 do the rest.
 - Change the 25 `TDDY_*` environment variables that are `tddy-tools`' real hidden interface
@@ -227,7 +237,7 @@ package boundary — is answered here by moving the boundary instead of the stri
 - [x] **⛔ Resolve the `tddy-testing-commons` ↔ `tddy-tools` cycle** before any surface moves ✅
 - [x] **Step zero — `mcp_primitives`**: the eight shared items; all three `server.rs` cycles broken ✅
 - [ ] **⛔ Action-tool advertisement**: implemented where advertised, or withdrawn
-- [ ] **`tddy-workflow-recipes`**: seam B, `github_pr`, `schema`, `schema_manifest`; `review_persist` deleted
+- [x] **`tddy-workflow-recipes`**: `github_pr`, `schema`, `schema_manifest`; `review_persist` deleted ✅ (seam B stays — see `## Boundaries`)
 - [ ] **`tddy-service`**: `session_tool_client` + 4 `session_agents` modules
 - [ ] **`tddy-discovery`**: seam D, `registry.rs`, `relay.rs`
 - [ ] **`tddy-tool-engine`**: seam C; **the hand-copied catalog collapsed to one**
@@ -299,7 +309,7 @@ them. `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` do not depend 
 - [x] M1 — the `tddy-testing-commons` cycle resolved ✅
 - [x] M2 — `mcp_primitives` extracted; all three `server.rs` cycles broken; `cargo build -p tddy-tools` clean ✅
 - [x] M3 — the four small dispatch movers (`analyze_cli`, `restructure_cli`, `lsp_tools`, `build_cli`); `cli_vector()` and the duplicate `plugin_registry` deleted ✅
-- [ ] M4 — `schema`, `schema_manifest`, `github_pr`, seam B to `tddy-workflow-recipes`; `review_persist` deleted; `build.rs` deleted
+- [x] M4 — `schema`, `schema_manifest`, `github_pr` to `tddy-workflow-recipes`; `review_persist` deleted; `build.rs` deleted ✅ (seam B stays — see `## Boundaries`)
 - [ ] M5 — the six `tddy-core` movers and `cli.rs`'s wire types
 - [ ] M6 — `pty_relay` to `tddy-terminal-rpc`; seam C to `tddy-tool-engine` with one catalog
 - [ ] M7 — `session_tool_client` + `session_agents/*` to `tddy-service`; the three dev-deps dropped and asserted
@@ -370,6 +380,14 @@ afterwards, verified by grep over the destinations rather than by assumption.
   `toolcall_client` deliberately migrated away from — relocating it would spread that protocol into a
   library rather than retire it. The endpoint is a `tddy-tools` of roughly 700 lines that parses
   arguments, decides permissions and assembles a router. That is a coherent crate, not a husk.
+- **Seam B stays too, and that is a change from the plan.** Discovery counted seam B at ~1,000 LoC
+  and read it as PR-stack logic sitting in the wrong crate. It is not: every one of the 16 bodies is
+  an adapter over a `tddy_workflow_recipes::pr_stack` function that already exists, so the only
+  thing available to move is the `#[tool]` advertisement and the `Pr*Input` schemas — ~415 LoC of
+  MCP surface. Moving those would put `rmcp` and `schemars` into `tddy-workflow-recipes`, a crate
+  that today has no MCP dependency at all, and push that build cost onto everything that depends on
+  it. Weighed against a scope line, the dependency edge is the more expensive of the two, and the
+  node's own rule for seams A and E already says which way to resolve it.
 - **Breaking the three cycles is step zero, in the same PR.** It is ~8 items in one new module and it
   gates every other move here. Making it a separate node would produce a PR whose only deliverable is
   a module nobody imports yet — the stubs-only shape the boundary contract forbids.
